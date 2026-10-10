@@ -15,6 +15,95 @@
 
 
 
+## v2.0.0-beta.9 (2026-10-10)
+
+#### :boom: Breaking Change
+
+- [#416](https://github.com/gleanwork/mcp-server-tester/pull/416) feat(cowork)!: headless Cowork disables AskUserQuestion ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#392](https://github.com/gleanwork/mcp-server-tester/pull/392) fix!: the reporter tells repeated cases apart; the last scenario and host names ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#391](https://github.com/gleanwork/mcp-server-tester/pull/391) feat(reporter)!: the MCP reporter reports evals only, as runs ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#389](https://github.com/gleanwork/mcp-server-tester/pull/389) feat(evals)!: runs are directories in the mst.run/v1 format ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#388](https://github.com/gleanwork/mcp-server-tester/pull/388) feat(evals)!: case judges sit beside assertions; pairwise judges in eval configs ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#385](https://github.com/gleanwork/mcp-server-tester/pull/385) refactor!: servers are a map keyed by label; variants pick servers by label ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#384](https://github.com/gleanwork/mcp-server-tester/pull/384) refactor!: plugin extension names say their kind (ADR 0003) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#383](https://github.com/gleanwork/mcp-server-tester/pull/383) refactor!: evals run on clients; tool optimization replaces variant experiments (ADR 0002) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#382](https://github.com/gleanwork/mcp-server-tester/pull/382) refactor!: results record trials and scores (ADR 0002) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#376](https://github.com/gleanwork/mcp-server-tester/pull/376) refactor!: result fields name the client (ADR 0002) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#374](https://github.com/gleanwork/mcp-server-tester/pull/374) refactor!: eval configs compare variants (ADR 0002) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#373](https://github.com/gleanwork/mcp-server-tester/pull/373) refactor!: the simulator and the external-host runtime are internal ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#372](https://github.com/gleanwork/mcp-server-tester/pull/372) refactor(evals)!: direct cases are Playwright tests ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#371](https://github.com/gleanwork/mcp-server-tester/pull/371) refactor(evals)!: client cases name a client and model, not mcpHostConfig ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#369](https://github.com/gleanwork/mcp-server-tester/pull/369) refactor(evals)!: Cowork and ChatGPT take their options directly ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#368](https://github.com/gleanwork/mcp-server-tester/pull/368) refactor(evals)!: name the client, its model and its options as separate keys ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#359](https://github.com/gleanwork/mcp-server-tester/pull/359) feat(evals)!: tool optimization report with clear-evidence recommendations ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#364](https://github.com/gleanwork/mcp-server-tester/pull/364) refactor(evals)!: clients have canonical names ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#361](https://github.com/gleanwork/mcp-server-tester/pull/361) refactor(evals)!: cases and run controls use common eval terms ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#356](https://github.com/gleanwork/mcp-server-tester/pull/356) feat(cowork)!: run the installed Claude Desktop unless the manifest pins a version ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :rocket: Enhancement
+
+- [#421](https://github.com/gleanwork/mcp-server-tester/pull/421) feat: one dataset form, and shared configs that set redaction ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#417](https://github.com/gleanwork/mcp-server-tester/pull/417) feat(evals): plugin datasets by name, mst datasets, mst judges ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#415](https://github.com/gleanwork/mcp-server-tester/pull/415) feat(judge): agentic judges get the trial's client artifacts in their workspace ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#413](https://github.com/gleanwork/mcp-server-tester/pull/413) feat(evals): run-wide limits per provider and per server across shards ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#408](https://github.com/gleanwork/mcp-server-tester/pull/408) feat(proxy): simulated writes — the dry-run proxy answers writes with a success reply (simulateWrites) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#412](https://github.com/gleanwork/mcp-server-tester/pull/412) feat(judge): agentic judges — an agent (Claude Agent SDK or Codex) grades over a workspace of the trial's evidence ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#410](https://github.com/gleanwork/mcp-server-tester/pull/410) feat(evals): client artifacts — an allowlisted, bounded copy of a trial's session folder for judges ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#411](https://github.com/gleanwork/mcp-server-tester/pull/411) feat(evals): mst run --resume collects a run's missing trials ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#409](https://github.com/gleanwork/mcp-server-tester/pull/409) feat(evals): run an eval's trials on shards in an environment ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#397](https://github.com/gleanwork/mcp-server-tester/pull/397) feat(cli): mst grade regrades a stored run; mst run --no-grade only collects ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#407](https://github.com/gleanwork/mcp-server-tester/pull/407) feat(cowork): owned-desktop mode for Linux workers ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#406](https://github.com/gleanwork/mcp-server-tester/pull/406) feat(evals): run a shard in a worker over a channel (mst.shard/v1) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#404](https://github.com/gleanwork/mcp-server-tester/pull/404) feat(evals): the env extension kind, local, --env and --env-option ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#393](https://github.com/gleanwork/mcp-server-tester/pull/393) feat(report): say what graded a run, split the headline, and show answers ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#390](https://github.com/gleanwork/mcp-server-tester/pull/390) feat(reporter): every run writes a report; mst open opens it ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#386](https://github.com/gleanwork/mcp-server-tester/pull/386) feat(cli): narrow a run by tag, case cap and several variants; narrowed runs are partial ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#381](https://github.com/gleanwork/mcp-server-tester/pull/381) feat(cli): mst run --case and --trials ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#380](https://github.com/gleanwork/mcp-server-tester/pull/380) feat(evals): connector servers: mst auth, then runs with fresh tokens ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#379](https://github.com/gleanwork/mcp-server-tester/pull/379) feat(auth): connectors and grants: sign in once, refresh per run ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#378](https://github.com/gleanwork/mcp-server-tester/pull/378) feat(proxy): dry-run proxy blocks writes to an HTTP MCP server ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#375](https://github.com/gleanwork/mcp-server-tester/pull/375) feat: Cowork on macOS resets after a failed case ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#370](https://github.com/gleanwork/mcp-server-tester/pull/370) feat(evals): Cowork takes tool variants through the tool-variant proxy ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#354](https://github.com/gleanwork/mcp-server-tester/pull/354) feat(evals): pairwise judge contract and comparePairwise ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :bug: Bug Fix
+
+- [#422](https://github.com/gleanwork/mcp-server-tester/pull/422) fix(cli): say where --output-dir puts runs, and the judge reference form ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#414](https://github.com/gleanwork/mcp-server-tester/pull/414) fix(evals): classify Codex resource-listing tools correctly ([@nikhil-pitta-glean](https://github.com/nikhil-pitta-glean))
+- [#405](https://github.com/gleanwork/mcp-server-tester/pull/405) fix(cowork): the Computer Use planner retries a request that couldn't reach the API ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- [#402](https://github.com/gleanwork/mcp-server-tester/pull/402) fix(evals): save each trial's trace when it finishes ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#400](https://github.com/gleanwork/mcp-server-tester/pull/400) fix(evals): traces keep the large tool results Claude Code saves to a file ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#401](https://github.com/gleanwork/mcp-server-tester/pull/401) fix(cowork): a reset survives a refused proposal, and restarts Claude when it can't finish ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#399](https://github.com/gleanwork/mcp-server-tester/pull/399) fix(evals): a judge that can't score leaves the trial ungraded, not failed ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#395](https://github.com/gleanwork/mcp-server-tester/pull/395) fix(evals): a failed batch no longer costs the run its results ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#394](https://github.com/gleanwork/mcp-server-tester/pull/394) fix(cowork): act only while Claude is in front; stop after three failures in a row ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#355](https://github.com/gleanwork/mcp-server-tester/pull/355) fix(cowork): run on managed Claude Desktop deployments and behind LLM gateways ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#353](https://github.com/gleanwork/mcp-server-tester/pull/353) fix(evals): Linux Cowork approves built-in tool confirmation cards under approveWriteTools ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :memo: Documentation
+
+- [#420](https://github.com/gleanwork/mcp-server-tester/pull/420) docs: plainer examples in the design walkthrough and use cases ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#419](https://github.com/gleanwork/mcp-server-tester/pull/419) docs: align the design docs, glossary and guides with main ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#403](https://github.com/gleanwork/mcp-server-tester/pull/403) docs: ADR 0004, environments run shards over a channel ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#396](https://github.com/gleanwork/mcp-server-tester/pull/396) docs(cowork): MST does not control Cowork's own connectors ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#387](https://github.com/gleanwork/mcp-server-tester/pull/387) docs(skills): rewrite the agent skills for 2.0 ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#362](https://github.com/gleanwork/mcp-server-tester/pull/362) docs: evals test a client and a model ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#358](https://github.com/gleanwork/mcp-server-tester/pull/358) docs: adopt common eval vocabulary (CONTEXT.md and ADR 0002) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :house: Internal
+
+- [#418](https://github.com/gleanwork/mcp-server-tester/pull/418) chore(deps): Tailwind CSS 4 for the report UI ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#366](https://github.com/gleanwork/mcp-server-tester/pull/366) chore(deps-dev): bump source-map-js from 1.2.1 to 1.2.2 ([@dependabot[bot]](https://github.com/apps/dependabot))
+- [#367](https://github.com/gleanwork/mcp-server-tester/pull/367) chore(deps): bump smol-toml from 1.8.0 to 1.9.0 ([@dependabot[bot]](https://github.com/apps/dependabot))
+
+#### Committers: 3
+
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Nikhil Pitta ([@nikhil-pitta-glean](https://github.com/nikhil-pitta-glean))
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+
+
 ## v2.0.0-beta.8 (2026-10-05)
 
 
