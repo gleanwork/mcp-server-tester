@@ -197,7 +197,7 @@ discoveryOptions(
   judgesCommand
     .command('show')
     .description("A judge's description, what it requires, and its options")
-    .argument('<ref>', 'A built-in name, or namespace/name')
+    .argument('<ref>', 'A built-in name, or namespace/judge/name')
 ).action((ref: string, _options: unknown, command: Command) =>
   showJudge(ref, command.optsWithGlobals<DiscoveryOptions>())
 );
@@ -222,7 +222,10 @@ program
     "Cases per dataset, instead of the config's maxCases"
   )
   .option('--trials <n>', 'Trials per case, instead of the config or case')
-  .option('--output-dir <dir>', 'Directory for run artifacts')
+  .option(
+    '--output-dir <dir>',
+    "The eval's directory: each run goes in <dir>/runs/<run-id>/"
+  )
   .option('--secrets-file <path>', 'JSON or dotenv-style runtime secrets file')
   .option(
     '--root-dir <dir>',
