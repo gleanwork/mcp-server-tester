@@ -58,3 +58,14 @@ The design (`docs/design/README.md`) plans `--env`, shards, gather and `--resume
 - The environment interfaces become public in the `./evals` entry point: `EnvironmentDefinition`, `Environment`, the channel and the `mst.shard/v1` messages. They can change between 2.0 prereleases.
 - `--detach` and `mst runs` come after shards. Both need an environment with a `detach` function, and credential and result stores that aren't local.
 - Fan-out is capped by rate limits, not by machines: every shard shares one LLM gateway and the same vendor servers. Runs need a cap per provider and per server, beside `maxShards`.
+
+## Update (2026-10-10)
+
+The first two questions under "Not decided here" are now decided:
+
+- **MST ships a built-in `docker` environment and a default Linux Cowork image**, for open-source users. The image is a Dockerfile that MST builds locally (`mst env setup docker`), so no published image carries Claude Desktop.
+- **Organizations may supply their own image** instead, with `--env-option image=<ref>`.
+- **A prebuilt public image waits** until Claude Desktop's redistribution terms are confirmed.
+- **Laptop Docker comes first**, and a remote Docker host later. Whether Claude Desktop runs under Docker on Apple Silicon is still being checked.
+
+None of this is built yet. Also not built yet: `run.json`'s per-shard image digest and client version, each trace's shard, and workers writing traces to a `gs://` store themselves. Today a run refuses connector servers and variants with tool metadata in any environment other than `local`.
