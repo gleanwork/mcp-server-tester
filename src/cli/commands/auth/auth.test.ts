@@ -75,7 +75,7 @@ export default {
       extends: ['acme/config/servers'],
       variants: [
         {
-          name: 'native',
+          name: 'candidate',
           servers: ['jira', 'gmail', 'gcal'],
         },
       ],

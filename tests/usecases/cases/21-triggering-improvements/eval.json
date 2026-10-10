@@ -2,26 +2,26 @@
   "name": "triggering-improvements",
   "datasets": ["./dataset.json"],
   "servers": {
-    "agg": "{{server aggregate}}",
+    "docs": "{{server docs}}",
     "github": "{{server github}}",
     "tracker": "{{server tracker}}",
     "chat": "{{server chat}}",
     "mail": "{{server mail}}"
   },
   "toolMap": {
-    "company_search": ["agg.search"]
+    "docs_search": ["docs.search"]
   },
   "client": "usecase/client/model",
   "clientOptions": {
     "policy": [
       {
         "when": {
-          "instruction": "company search first"
+          "instruction": "search documents first"
         },
         "steps": [
           {
             "call": {
-              "description": "company documents"
+              "description": "documents"
             },
             "args": {
               "query": "postmortem"
@@ -31,7 +31,7 @@
       },
       {
         "when": {
-          "plugin": "aggregate-plugin"
+          "plugin": "docs-plugin"
         },
         "steps": [
           {
@@ -44,7 +44,7 @@
           },
           {
             "call": {
-              "description": "company documents"
+              "description": "documents"
             },
             "args": {
               "query": "postmortem"
@@ -65,7 +65,7 @@
           },
           {
             "call": {
-              "description": "company documents"
+              "description": "documents"
             },
             "args": {
               "query": "postmortem"
@@ -86,18 +86,18 @@
   ],
   "variants": [
     {
-      "name": "aggregate-mcp"
+      "name": "docs-mcp"
     },
     {
-      "name": "aggregate-plugin",
+      "name": "docs-plugin",
       "clientOptions": {
-        "plugins": ["aggregate-plugin"]
+        "plugins": ["docs-plugin"]
       }
     },
     {
-      "name": "aggregate-mcp-org-instructions",
+      "name": "docs-mcp-org-instructions",
       "clientOptions": {
-        "systemPrompt": "Use company search first for company knowledge."
+        "systemPrompt": "Search documents first for questions about past incidents."
       }
     }
   ]

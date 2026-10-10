@@ -2,7 +2,7 @@
   "name": "description-variants",
   "datasets": ["./dataset.json"],
   "servers": {
-    "agg": "{{server aggregate}}"
+    "docs": "{{server docs}}"
   },
   "client": "usecase/client/model",
   "clientOptions": {
@@ -11,7 +11,7 @@
         "steps": [
           {
             "call": {
-              "description": "connected sources"
+              "description": "postmortems"
             },
             "args": {
               "query": "checkout outage"
@@ -36,7 +36,7 @@
       "name": "concise",
       "tools": {
         "search": {
-          "description": "Search company knowledge."
+          "description": "Search docs."
         }
       }
     },
@@ -44,7 +44,7 @@
       "name": "verbose",
       "tools": {
         "search": {
-          "description": "Search across all connected sources: documents, tickets, chat and mail."
+          "description": "Search documents by title and body: postmortems, runbooks and planning notes."
         }
       }
     }

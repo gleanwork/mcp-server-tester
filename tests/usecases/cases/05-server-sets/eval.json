@@ -1,8 +1,8 @@
 {
-  "name": "aggregate-vs-native",
+  "name": "server-sets",
   "datasets": ["./dataset.json"],
   "servers": {
-    "agg": "{{server aggregate}}",
+    "docs": "{{server docs}}",
     "github": "{{server github}}",
     "tracker": "{{server tracker}}",
     "chat": "{{server chat}}",
@@ -44,15 +44,15 @@
   ],
   "variants": [
     {
-      "name": "aggregate",
-      "servers": ["agg"],
+      "name": "one-server",
+      "servers": ["docs"],
       "toolMap": {
-        "search": ["agg.search"],
-        "read": ["agg.read_document"]
+        "search": ["docs.search"],
+        "read": ["docs.read_document"]
       }
     },
     {
-      "name": "native",
+      "name": "four-servers",
       "servers": ["github", "tracker", "chat", "mail"],
       "toolMap": {
         "search": [

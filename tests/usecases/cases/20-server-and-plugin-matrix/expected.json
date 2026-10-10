@@ -11,51 +11,51 @@
       "equals": 4
     },
     {
-      "path": "variants[name=native-connectors].metrics.judge_pass_rate",
+      "path": "variants[name=four-servers].metrics.judge_pass_rate",
       "equals": 0
     },
     {
-      "path": "variants[name=aggregate-mcp-gateway].metrics.judge_pass_rate",
+      "path": "variants[name=docs-wiki].metrics.judge_pass_rate",
       "equals": 1
     },
     {
-      "path": "variants[name=aggregate-mcp-native-connectors].metrics.judge_pass_rate",
+      "path": "variants[name=docs-four-servers].metrics.judge_pass_rate",
       "equals": 1
     },
     {
-      "path": "variants[name=aggregate-plugin-gateway].metrics.judge_pass_rate",
+      "path": "variants[name=docs-wiki-plugin].metrics.judge_pass_rate",
       "equals": 0.5
     },
     {
-      "path": "variants[name=aggregate-plugin-native-connectors].metrics.judge_pass_rate",
+      "path": "variants[name=docs-four-servers-plugin].metrics.judge_pass_rate",
       "equals": 0
     },
     {
-      "path": "variants[name=native-connectors].metrics.tool_count_mean",
+      "path": "variants[name=four-servers].metrics.tool_count_mean",
       "equals": 4
     },
     {
-      "path": "variants[name=aggregate-mcp-gateway].metrics.tool_count_mean",
+      "path": "variants[name=docs-wiki].metrics.tool_count_mean",
       "equals": 3
     },
     {
-      "path": "variants[name=aggregate-mcp-native-connectors].metrics.tool_count_mean",
+      "path": "variants[name=docs-four-servers].metrics.tool_count_mean",
       "equals": 6
     },
     {
-      "path": "variants[name=aggregate-plugin-gateway].metrics.tool_count_mean",
+      "path": "variants[name=docs-wiki-plugin].metrics.tool_count_mean",
       "equals": 2
     },
     {
-      "path": "variants[name=aggregate-plugin-native-connectors].metrics.tool_count_mean",
+      "path": "variants[name=docs-four-servers-plugin].metrics.tool_count_mean",
       "equals": 5
     },
     {
-      "path": "variants[name=aggregate-mcp-gateway].metrics.cost_usd_mean",
+      "path": "variants[name=docs-wiki].metrics.cost_usd_mean",
       "exists": true
     },
     {
-      "path": "variants[name=aggregate-mcp-gateway].costSource",
+      "path": "variants[name=docs-wiki].costSource",
       "equals": "pricing"
     }
   ],

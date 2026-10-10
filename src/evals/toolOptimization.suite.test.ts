@@ -2,7 +2,7 @@
  * runToolOptimization on an eval, end to end: the use-case fixture's model
  * client (a plugin client, so variants reach it through MST's tool proxy) and a
  * stdio catalog server. The model calls the tool whose description mentions
- * "connected sources", so only the verbose variant passes.
+ * "postmortems", so only the verbose variant passes.
  */
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -27,7 +27,7 @@ const verbose: ToolOverrideVariant = {
   tools: {
     search: {
       description:
-        'Search across all connected sources: documents, tickets, chat and mail.',
+        'Search documents by title and body: postmortems, runbooks and planning notes.',
     },
   },
 };
@@ -64,12 +64,12 @@ async function evalRun(variants?: unknown[]): Promise<string> {
       datasets: ['./cases.json'],
       plugins: [path.join(FIXTURES, 'plugin.mjs')],
       servers: {
-        agg: {
+        docs: {
           transport: 'stdio',
           command: process.execPath,
           args: [
             path.join(FIXTURES, 'catalogServer.mjs'),
-            path.join(FIXTURES, 'catalogs', 'aggregate.json'),
+            path.join(FIXTURES, 'catalogs', 'docs.json'),
           ],
         },
       },
@@ -79,7 +79,7 @@ async function evalRun(variants?: unknown[]): Promise<string> {
           {
             steps: [
               {
-                call: { description: 'connected sources' },
+                call: { description: 'postmortems' },
                 args: { query: 'checkout outage' },
               },
             ],

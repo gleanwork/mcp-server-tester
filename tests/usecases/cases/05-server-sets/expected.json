@@ -1,85 +1,85 @@
 {
-  "title": "One aggregating server vs several native servers, same host",
+  "title": "One server vs four servers for the same task, same host",
   "exitCode": 0,
   "checks": [
     {
-      "path": "variants[name=aggregate].metrics.passed_rate",
+      "path": "variants[name=one-server].metrics.passed_rate",
       "equals": 1
     },
     {
-      "path": "variants[name=native].metrics.passed_rate",
+      "path": "variants[name=four-servers].metrics.passed_rate",
       "equals": 1
     },
     {
-      "path": "variants[name=aggregate].metrics.tool_count_mean",
+      "path": "variants[name=one-server].metrics.tool_count_mean",
       "equals": 2
     },
     {
-      "path": "variants[name=native].metrics.tool_count_mean",
+      "path": "variants[name=four-servers].metrics.tool_count_mean",
       "equals": 5
     },
     {
-      "path": "variants[name=native].result.caseResults[0].toolCallTrace.calls.length",
+      "path": "variants[name=four-servers].result.caseResults[0].toolCallTrace.calls.length",
       "equals": 5
     },
     {
-      "path": "variants[name=native].result.caseResults[0].toolCallTrace.calls[0].name",
+      "path": "variants[name=four-servers].result.caseResults[0].toolCallTrace.calls[0].name",
       "equals": "github.search_issues"
     },
     {
-      "path": "variants[name=aggregate].result.caseResults[0].trace.events[1].server",
-      "equals": "agg"
+      "path": "variants[name=one-server].result.caseResults[0].trace.events[1].server",
+      "equals": "docs"
     },
     {
-      "path": "variants[name=aggregate].result.caseResults[0].trace.events[1].name",
+      "path": "variants[name=one-server].result.caseResults[0].trace.events[1].name",
       "equals": "read_document"
     },
     {
-      "path": "variants[name=native].result.caseResults[0].trace.events[0].server",
+      "path": "variants[name=four-servers].result.caseResults[0].trace.events[0].server",
       "equals": "github"
     },
     {
-      "path": "variants[name=native].result.caseResults[0].trace.events[0].output",
+      "path": "variants[name=four-servers].result.caseResults[0].trace.events[0].output",
       "exists": false
     },
     {
-      "path": "variants[name=native].result.caseResults[0].trace.finalText",
+      "path": "variants[name=four-servers].result.caseResults[0].trace.finalText",
       "exists": false
     },
     {
-      "path": "variants[name=native].result.caseResults[0].trace.usage.inputTokens",
+      "path": "variants[name=four-servers].result.caseResults[0].trace.usage.inputTokens",
       "exists": true
     },
     {
-      "path": "variants[name=native].metrics.cost_usd_mean",
+      "path": "variants[name=four-servers].metrics.cost_usd_mean",
       "exists": true
     },
     {
       "path": "results[0].variant",
-      "equals": "aggregate"
+      "equals": "one-server"
     },
     {
       "path": "results[1].variant",
-      "equals": "native"
+      "equals": "four-servers"
     },
     {
-      "path": "variants[name=aggregate].metrics.cost_usd_mean",
-      "equals": 0.002256
+      "path": "variants[name=one-server].metrics.cost_usd_mean",
+      "equals": 0.002181
     },
     {
-      "path": "variants[name=native].metrics.cost_usd_mean",
+      "path": "variants[name=four-servers].metrics.cost_usd_mean",
       "equals": 0.008211
     },
     {
-      "path": "variants[name=native].costSource",
+      "path": "variants[name=four-servers].costSource",
       "equals": "pricing"
     },
     {
-      "path": "variantDeltas.native.metricDeltas.mcp_call_count_mean",
+      "path": "variantDeltas.four-servers.metricDeltas.mcp_call_count_mean",
       "equals": 3
     },
     {
-      "path": "variants[name=native].pricing.claude-sonnet-4-5",
+      "path": "variants[name=four-servers].pricing.claude-sonnet-4-5",
       "equals": {
         "input": 3,
         "output": 15

@@ -23,7 +23,7 @@ describe('connector validation', () => {
     expect(() =>
       assertPlugin(
         plugin({
-          glean: {
+          acme: {
             url: 'https://mcp.acme.example/mcp',
             auth: { type: 'oauth' },
           },

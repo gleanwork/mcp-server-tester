@@ -679,7 +679,7 @@ describe('ChatGPT V2 batch client', () => {
       }).success
     ).toBe(false);
   });
-  it('requires native MCP calls when the eval explicitly requests them', async () => {
+  it('requires MCP calls when the eval explicitly requests them', async () => {
     vi.mocked(runExternalClientCase).mockResolvedValueOnce({
       success: true,
       response: 'no tools',

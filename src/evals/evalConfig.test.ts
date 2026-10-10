@@ -460,19 +460,19 @@ describe('connector servers', () => {
         name: 'connectors',
         datasets: [{ type: 'file', path: 'cases.json' }],
         servers: {
-          glean: { connector: 'acme/connector/glean' },
+          acme: { connector: 'acme/connector/acme' },
           slack: { connector: 'acme/connector/slack' },
           jira: {
             connector: '@acme/evals/connector/jira',
             url: 'https://jira.example/mcp',
           },
         },
-        variants: [{ name: 'native', servers: ['slack', 'jira'] }],
+        variants: [{ name: 'candidate', servers: ['slack', 'jira'] }],
       },
       { skipDatasetValidation: true }
     );
     expect(config.servers).toEqual([
-      { connector: 'acme/connector/glean', label: 'glean' },
+      { connector: 'acme/connector/acme', label: 'acme' },
       { connector: 'acme/connector/slack', label: 'slack' },
       {
         connector: '@acme/evals/connector/jira',

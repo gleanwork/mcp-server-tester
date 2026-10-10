@@ -57,7 +57,7 @@ function testPlugin(): Plugin {
   return {
     meta: { name: 'acme-plugin', namespace: 'acme' },
     connectors: {
-      glean: { url: 'https://glean.example/mcp', auth: { type: 'oauth' } },
+      acme: { url: 'https://acme.example/mcp', auth: { type: 'oauth' } },
       slack: {
         url: 'https://slack.example/mcp',
         auth: { type: 'oauth', refreshScope: null },
@@ -140,19 +140,19 @@ describe('connector servers in a run', () => {
   });
 
   it('expands connector servers, delivers fresh tokens, and deletes them after the run', async () => {
-    await store.put('acme.glean', grant({ accessToken: 'glean-token' }));
+    await store.put('acme.acme', grant({ accessToken: 'acme-token' }));
     await store.put('acme.slack', grant({ accessToken: 'slack-token' }));
     await store.put('acme.google', grant({ accessToken: 'google-token' }));
     const configPath = await writeSuite({
       servers: {
-        glean: { connector: 'acme/connector/glean' },
+        acme: { connector: 'acme/connector/acme' },
         slack: { connector: 'acme/connector/slack' },
         gmail: { connector: 'acme/connector/gmail' },
         drive: { connector: 'acme/connector/gdrive' },
       },
       variants: [
-        { name: 'aggregated', servers: ['glean'] },
-        { name: 'native', servers: ['slack', 'gmail', 'drive'] },
+        { name: 'current', servers: ['acme'] },
+        { name: 'candidate', servers: ['slack', 'gmail', 'drive'] },
       ],
     });
     const { summary } = await runEval({
@@ -162,28 +162,28 @@ describe('connector servers in a run', () => {
       credentialStore: store,
     });
 
-    const [aggregated, native] = seen;
+    const [current, candidate] = seen;
     // A direct HTTP connection: the token arrives in a run-private env var.
-    expect(aggregated!.servers).toEqual([
+    expect(current!.servers).toEqual([
       {
         transport: 'http',
-        label: 'glean',
-        serverUrl: 'https://glean.example/mcp',
-        auth: { accessToken: 'glean-token' },
+        label: 'acme',
+        serverUrl: 'https://acme.example/mcp',
+        auth: { accessToken: 'acme-token' },
       },
     ]);
     // Launched connectors: one private token file per grant.
-    const [slack, gmail, drive] = native!.servers as StdioMCPConfig[];
+    const [slack, gmail, drive] = candidate!.servers as StdioMCPConfig[];
     expect(slack!.label).toBe('slack');
     expect(slack!.minTools).toBe(10);
     expect(drive!.label).toBe('drive');
     const slackFile = slack!.args!.at(-1)!;
     expect(gmail!.args!.at(-1)).toBe(drive!.args!.at(-1));
-    expect(JSON.parse(native!.files.slack!)).toEqual({
+    expect(JSON.parse(candidate!.files.slack!)).toEqual({
       version: 1,
       accessToken: 'slack-token',
     });
-    expect(JSON.parse(native!.files.gmail!)).toEqual({
+    expect(JSON.parse(candidate!.files.gmail!)).toEqual({
       version: 1,
       accessToken: 'google-token',
     });
@@ -192,7 +192,7 @@ describe('connector servers in a run', () => {
     ).toBeUndefined();
     // No token in the stored summary.
     expect(JSON.stringify(summary)).not.toMatch(
-      /glean-token|slack-token|google-token/
+      /acme-token|slack-token|google-token/
     );
   });
 
@@ -339,15 +339,15 @@ describe('variant selection', () => {
     await store.put('acme.slack', grant({ accessToken: 'slack-token' }));
     const configPath = await writeSuite({
       servers: {
-        glean: { connector: 'acme/connector/glean' },
+        acme: { connector: 'acme/connector/acme' },
         slack: { connector: 'acme/connector/slack' },
       },
       variants: [
-        { name: 'aggregated', servers: ['glean'] },
-        { name: 'native', servers: ['slack'] },
+        { name: 'current', servers: ['acme'] },
+        { name: 'candidate', servers: ['slack'] },
       ],
     });
-    // Glean is not signed in, but the native variant doesn't use it.
+    // Acme is not signed in, but the candidate variant doesn't use it.
     seen.length = 0;
     const plugin = testPlugin();
     await runEval({
@@ -355,19 +355,19 @@ describe('variant selection', () => {
       rootDir: dir,
       plugins: [plugin],
       credentialStore: store,
-      variant: 'native',
+      variant: 'candidate',
     });
     expect(seen).toHaveLength(1);
-    // The aggregated variant lists Glean, so it needs Glean.
+    // The current variant lists Acme, so it needs Acme.
     await expect(
       runEval({
         configPath,
         rootDir: dir,
         plugins: [plugin],
         credentialStore: store,
-        variant: 'aggregated',
+        variant: 'current',
       })
-    ).rejects.toThrow('acme/glean: not signed in.');
+    ).rejects.toThrow('acme/acme: not signed in.');
   });
 });
 
