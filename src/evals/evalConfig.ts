@@ -4,7 +4,6 @@ import { z } from 'zod';
 import {
   extensionReferenceSchema,
   referenceSchema,
-  taggedReferenceSchema,
 } from './referenceSchemas.js';
 import { checkReferenceKind } from '../plugins/extensions.js';
 import { parseExtensionReference } from '../plugins/plugin.js';
@@ -224,20 +223,45 @@ export function variantToolMetadata(
   };
 }
 
-// A bare dataset string is a path; a tagged dataset names its source.
-/** `{ "ref": "acme/dataset/x", "snapshot"?, "source"? }`: a plugin's dataset. */
-const DatasetReferenceSchema = z
+// A bare dataset string is a path or a plugin's dataset; an object names its
+// source in `type`, with MST's `snapshot` and `source` and the source's own
+// options.
+const DatasetObjectSchema = z
   .object({
-    ref: referenceSchema('dataset'),
+    type: referenceSchema('dataset'),
     snapshot: z.string().min(1).optional(),
     source: z.enum(['snapshot', 'live']).optional(),
+    ...removedKeys({
+      ref: 'name the dataset in `type`: { "type": "acme/dataset/x", "snapshot"?, "source"? }',
+    }),
   })
-  .strict();
-const DatasetConfigSchema = z.union([
-  z.string().min(1),
-  DatasetReferenceSchema,
-  taggedReferenceSchema('dataset'),
-]);
+  .passthrough();
+const DatasetStringSchema = z.string().min(1);
+// One branch per input type rather than a union, so an error names the
+// object's problem (a removed `ref`, a bad `source`), not "Invalid input".
+const DatasetConfigSchema = z
+  .unknown()
+  .transform(
+    (
+      value,
+      context
+    ):
+      | z.output<typeof DatasetStringSchema>
+      | z.output<typeof DatasetObjectSchema> => {
+      const result =
+        typeof value === 'string'
+          ? DatasetStringSchema.safeParse(value)
+          : DatasetObjectSchema.safeParse(value);
+      if (result.success) return result.data;
+      for (const issue of result.error.issues)
+        context.addIssue({
+          code: 'custom',
+          message: issue.message,
+          path: issue.path,
+        });
+      return z.NEVER;
+    }
+  );
 const MetricConfigSchema = extensionReferenceSchema('metric');
 const JudgeConfigSchema = extensionReferenceSchema('judge');
 const PairwiseJudgeConfigSchema = extensionReferenceSchema('pairwise-judge');
@@ -530,6 +554,8 @@ const PluginConfigSchema = EvalConfigSchema.pick({
   passThreshold: true,
   temperature: true,
   maxTokens: true,
+  redactStoredResponses: true,
+  simulateWrites: true,
 }).strict();
 
 /** A plugin's shared config: any eval config setting but its name, datasets, variants, plugins and extends. */
@@ -587,10 +613,6 @@ function normalizeDataset(
     return isDatasetReference(value)
       ? { type: value }
       : { type: 'file', path: value };
-  if ('ref' in value && !('type' in value)) {
-    const { ref, ...rest } = value;
-    return { type: ref, ...rest } as DatasetConfig;
-  }
   return value as DatasetConfig;
 }
 

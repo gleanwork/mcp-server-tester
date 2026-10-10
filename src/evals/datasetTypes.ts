@@ -262,9 +262,11 @@ export interface EvalDataset {
   /** A plugin's dataset: which one and which copy. MST sets this when it loads one. */
   origin?: {
     /** The dataset source, `namespace/dataset/name`. */
-    ref: string;
+    type: string;
+    /** For a source with snapshots: the copy it read. */
+    source?: 'snapshot' | 'live';
+    /** The snapshot it read (none for live data). */
     snapshot?: string;
-    live?: true;
   };
 }
 

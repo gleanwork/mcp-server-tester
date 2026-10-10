@@ -26,14 +26,14 @@
           },
           {
             "type": "object",
-            "required": ["ref"],
-            "additionalProperties": false,
-            "description": "A plugin's dataset.",
+            "required": ["type"],
+            "additionalProperties": true,
+            "description": "A dataset source: a plugin's (namespace/dataset/name) or a built-in such as file, with its options.",
             "properties": {
-              "ref": {
+              "type": {
                 "type": "string",
                 "minLength": 1,
-                "description": "namespace/dataset/name"
+                "description": "namespace/dataset/name, or a built-in source such as file"
               },
               "snapshot": {
                 "type": "string",
@@ -43,17 +43,6 @@
               "source": {
                 "enum": ["snapshot", "live"],
                 "description": "snapshot (the default) or live data. Only for a source with snapshots."
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": ["type"],
-            "additionalProperties": true,
-            "properties": {
-              "type": {
-                "type": "string",
-                "minLength": 1
               },
               "path": {
                 "type": "string"

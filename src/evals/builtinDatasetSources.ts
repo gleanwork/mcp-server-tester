@@ -247,11 +247,11 @@ export async function loadDataset(
   return {
     ...dataset,
     origin: {
-      ref: config.type,
+      type: config.type,
+      ...(request ? { source: request.source } : {}),
       ...(request && dataset.snapshot !== undefined
         ? { snapshot: dataset.snapshot }
         : {}),
-      ...(request?.source === 'live' ? { live: true as const } : {}),
     },
   };
 }

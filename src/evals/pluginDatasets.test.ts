@@ -120,16 +120,16 @@ describe('dataset references', () => {
     expect(isDatasetReference(value)).toBe(expected);
   });
 
-  it('normalizes names and { ref } entries', () => {
+  it('normalizes names and { type } entries', () => {
     const config = loadEvalConfigFromObject(
       {
         name: 'x',
         datasets: [
           'acme/dataset/info-seeking',
           'datasets/cases.json',
-          { ref: 'acme/dataset/info-seeking', snapshot: '2026-10-01' },
-          { ref: 'acme/dataset/info-seeking', source: 'live' },
-          { ref: 'mst/dataset/file', snapshot: '1' },
+          { type: 'acme/dataset/info-seeking', snapshot: '2026-10-01' },
+          { type: 'acme/dataset/info-seeking', source: 'live' },
+          { type: 'mst/dataset/file', path: 'cases.json', snapshot: '1' },
         ],
       },
       { skipDatasetValidation: true }
@@ -139,21 +139,23 @@ describe('dataset references', () => {
       { type: 'file', path: 'datasets/cases.json' },
       { type: 'acme/dataset/info-seeking', snapshot: '2026-10-01' },
       { type: 'acme/dataset/info-seeking', source: 'live' },
-      { type: 'file', snapshot: '1' },
+      { type: 'file', path: 'cases.json', snapshot: '1' },
     ]);
   });
 
-  it('rejects unknown keys and sources in { ref }', () => {
-    for (const entry of [
-      { ref: 'acme/dataset/x', snapshots: '1' },
-      { ref: 'acme/dataset/x', source: 'nightly' },
-    ])
-      expect(() =>
-        loadEvalConfigFromObject(
-          { name: 'x', datasets: [entry] },
-          { skipDatasetValidation: true }
-        )
-      ).toThrow();
+  it('rejects a bad source, and names what replaced ref', () => {
+    const load = (entry: unknown) => () =>
+      loadEvalConfigFromObject(
+        { name: 'x', datasets: [entry] },
+        { skipDatasetValidation: true }
+      );
+    expect(load({ type: 'acme/dataset/x', source: 'nightly' })).toThrow(
+      /Invalid option: expected one of/
+    );
+    expect(load({ type: 'acme/dataset/x', snapshot: '' })).toThrow();
+    expect(load({ ref: 'acme/dataset/x', snapshot: '1' })).toThrow(
+      /`ref` is gone: name the dataset in `type`/
+    );
   });
 
   it('asks for a snapshot id only with snapshots', () => {
@@ -203,7 +205,8 @@ describe('runs with a plugin dataset', () => {
         name: 'info-seeking',
         caseCount: 2,
         contentHash: expect.stringMatching(/^[0-9a-f]{64}$/),
-        ref: 'acme/dataset/info-seeking',
+        type: 'acme/dataset/info-seeking',
+        source: 'snapshot',
         snapshot: '2026-10-06',
       },
     ]);
@@ -211,11 +214,11 @@ describe('runs with a plugin dataset', () => {
 
   it('pins a snapshot, or reads live data', async () => {
     const pinned = await suite([
-      { ref: 'acme/dataset/info-seeking', snapshot: '2026-10-01' },
+      { type: 'acme/dataset/info-seeking', snapshot: '2026-10-01' },
     ]);
     expect(requests).toEqual([{ source: 'snapshot', snapshot: '2026-10-01' }]);
     const live = await suite([
-      { ref: 'acme/dataset/info-seeking', source: 'live' },
+      { type: 'acme/dataset/info-seeking', source: 'live' },
     ]);
     const [pinnedSet] = (await storedDatasets(pinned.outputDir)) as Array<
       Record<string, unknown>
@@ -225,19 +228,19 @@ describe('runs with a plugin dataset', () => {
     >;
     expect(pinnedSet).toMatchObject({ snapshot: '2026-10-01' });
     expect(liveSet).toMatchObject({
-      ref: 'acme/dataset/info-seeking',
-      live: true,
+      type: 'acme/dataset/info-seeking',
+      source: 'live',
     });
     expect(liveSet).not.toHaveProperty('snapshot');
     // Same cases, same hash, whichever copy they came from.
     expect(liveSet!.contentHash).toBe(pinnedSet!.contentHash);
   });
 
-  it('records a plugin dataset without snapshots by its ref only', async () => {
+  it('records a plugin dataset without snapshots by its type only', async () => {
     const { outputDir } = await suite(['acme/dataset/fixed']);
     expect(requests).toEqual([undefined]);
     expect(await storedDatasets(outputDir)).toEqual([
-      expect.objectContaining({ name: 'fixed', ref: 'acme/dataset/fixed' }),
+      expect.objectContaining({ name: 'fixed', type: 'acme/dataset/fixed' }),
     ]);
   });
 
@@ -259,7 +262,7 @@ describe('runs with a plugin dataset', () => {
 
   it('refuses a snapshot other than the one asked for', async () => {
     await expect(
-      suite([{ ref: 'acme/dataset/drifting', snapshot: '2026-10-01' }], {
+      suite([{ type: 'acme/dataset/drifting', snapshot: '2026-10-01' }], {
         dryRun: true,
       })
     ).rejects.toThrow(/asked for snapshot 2026-10-01, got 2026-01-01/);
@@ -267,7 +270,7 @@ describe('runs with a plugin dataset', () => {
 
   it('refuses snapshot options for a source without snapshots', async () => {
     await expect(
-      suite([{ ref: 'acme/dataset/fixed', snapshot: '1' }], { dryRun: true })
+      suite([{ type: 'acme/dataset/fixed', snapshot: '1' }], { dryRun: true })
     ).rejects.toThrow(/"acme\/dataset\/fixed" has no snapshots/);
     await fs.writeFile(
       path.join(dir, 'cases.json'),

@@ -194,7 +194,7 @@ export async function showDataset(
     ...(dataset.origin?.snapshot !== undefined
       ? { snapshot: dataset.origin.snapshot }
       : {}),
-    ...(dataset.origin?.live ? { live: true } : {}),
+    ...(dataset.origin?.source ? { source: dataset.origin.source } : {}),
     caseCount: ids.length,
     contentHash: datasetContentHash(dataset),
     tags: Object.fromEntries(tags),
@@ -207,11 +207,12 @@ export async function showDataset(
   }
   const counted = (items: Array<[string, number]>) =>
     items.length ? items.map(([name, n]) => `${name} (${n})`).join(', ') : '-';
-  const copy = dataset.origin?.live
-    ? 'live'
-    : dataset.origin?.snapshot !== undefined
-      ? `snapshot ${dataset.origin.snapshot}`
-      : '-';
+  const copy =
+    dataset.origin?.source === 'live'
+      ? 'live'
+      : dataset.origin?.snapshot !== undefined
+        ? `snapshot ${dataset.origin.snapshot}`
+        : '-';
   const lines = [
     ref,
     ...(description !== undefined ? [`  ${description}`] : []),
@@ -236,11 +237,12 @@ export async function pullDataset(
   // A canonical dataset file: what a file dataset reads back.
   const { origin, snapshot: _snapshot, ...file } = dataset;
   const json = `${JSON.stringify(file, null, 2)}\n`;
-  const copy = origin?.live
-    ? 'live'
-    : origin?.snapshot !== undefined
-      ? `snapshot ${origin.snapshot}`
-      : 'no snapshot';
+  const copy =
+    origin?.source === 'live'
+      ? 'live'
+      : origin?.snapshot !== undefined
+        ? `snapshot ${origin.snapshot}`
+        : 'no snapshot';
   const summary = `${ref}: ${dataset.cases.length} cases (${copy}, hash ${datasetContentHash(dataset)})`;
   if (!options.out) {
     print(json);

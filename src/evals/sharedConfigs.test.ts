@@ -208,6 +208,46 @@ describe('shared configs', () => {
     ).toEqual([{ pass: true, judge: true }]);
   });
 
+  it('sets redaction and simulated writes for every eval that extends it', async () => {
+    const stored = async (own: Record<string, unknown>) => {
+      resetPluginsForTests();
+      const dir = await evalDir({
+        name: 'redaction',
+        extends: ['acme/config/full-traces'],
+        datasets: ['./cases.json'],
+        ...own,
+      });
+      const result = await runEval({
+        configPath: path.join(dir, 'eval.json'),
+        rootDir: dir,
+        plugins: [
+          acme({
+            'full-traces': {
+              client: 'acme/client/echo',
+              redactStoredResponses: false,
+              simulateWrites: true,
+            },
+          }),
+        ],
+      });
+      const run = JSON.parse(
+        await fs.readFile(path.join(result.outputDir, 'run.json'), 'utf8')
+      ) as { redactStoredResponses: boolean };
+      return {
+        simulateWrites: result.evalConfig.simulateWrites,
+        redactStoredResponses: run.redactStoredResponses,
+      };
+    };
+    expect(await stored({})).toEqual({
+      simulateWrites: true,
+      redactStoredResponses: false,
+    });
+    // The eval config's own setting still wins.
+    expect(await stored({ redactStoredResponses: true })).toMatchObject({
+      redactStoredResponses: true,
+    });
+  });
+
   it.each([
     [
       'a bare config name',
