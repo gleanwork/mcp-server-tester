@@ -1,6 +1,6 @@
 # Use-case eval
 
-Each directory in `cases/` is one comparison MST is built to run: tool triggering over time, tool-description variants, one aggregating server against several native servers, a client with and without a plugin, and so on. The runs every case through the `mst` CLI, as a user would, and checks the run it writes (`summary.json`, with the case results from `results.json`).
+Each directory in `cases/` is one comparison MST is built to run: tool triggering over time, tool-description variants, one aggregating server against several vendor MCP servers, a client with and without a plugin, and so on. The runs every case through the `mst` CLI, as a user would, and checks the run it writes (`summary.json`, with the case results from `results.json`).
 
 ```bash
 npm run build

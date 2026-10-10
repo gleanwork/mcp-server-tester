@@ -68,7 +68,7 @@ test('search returns results', async ({ mcp }) => {
 
 A real LLM receives your tools and a natural-language input, then decides which tools to call. You assert that it made the right choices.
 
-A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; an eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
 
 ```json snippet=snippets/evals-tools-triggered.json
 {

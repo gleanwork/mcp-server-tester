@@ -18,6 +18,10 @@ _Avoid_: manifest, suite file, config (unqualified)
 A named list of cases. An eval names datasets by source: a file, a directory, a GCS object, or a plugin's dataset source.
 _Avoid_: eval set, test file
 
+**Snapshot**:
+A frozen copy of a plugin's dataset, named by an id such as a date. A run uses the source's latest snapshot unless the declaration sets `snapshot`, or `source: "live"` for **live** data fetched when the run starts. Today a plugin dataset with either is declared as `{ "ref": "acme/dataset/x", ... }`; one `{ "type": ... }` form is planned.
+_Avoid_: version, release, frozen set
+
 **Case**:
 One input for a client to act on, with what is expected of the result.
 _Avoid_: example, sample, task, test, scenario
@@ -42,6 +46,14 @@ _Avoid_: provider, engine
 MST's own connection to an MCP server, through which tests call tools directly.
 _Avoid_: client (that is the application under test)
 
+**Vendor MCP server**:
+A vendor's own MCP server (Slack's, Jira's, GitHub's) that an eval config defines, usually through a connector, so MST hands it tokens and can put a proxy in front of it. A variant that uses only these is named for them, as in `vendor-mcp`.
+_Avoid_: native server, native MCP, native connectors
+
+**Cowork's own connectors**:
+The connectors a user adds from Cowork's connector directory and signs in to in the Claude account. Anthropic's cloud calls the vendor, so MST can't configure, intercept or sign in to them.
+_Avoid_: native connectors, client connectors
+
 **Variant**:
 One setup an eval tests: the client, its model and options (such as a system prompt), the MCP servers, and the tool metadata the client sees. Every variant runs the same cases.
 _Avoid_: arm, treatment, experiment, configuration
@@ -62,9 +74,17 @@ _Avoid_: iteration, attempt, epoch, repetition, sample
 What a client did in one trial, in order: tool calls (MCP or the client's own), skill loads, commands, subagents and tool searches, with usage and the final answer.
 _Avoid_: transcript, trajectory, log, response
 
+**Client artifacts**:
+A bounded copy of the files a client kept for one trial (such as Cowork's session folder), taken from the paths the client names as evidence, for judges to read. A run that keeps full traces stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
+_Avoid_: attachments, session dump
+
 **Evidence**:
 How far a client's trace can be trusted for tool assertions: `structured` (protocol or the client's own records), `observed` (best effort) or `none`. Only `structured` evidence can pass tool-call assertions; a client that declares nothing counts as unverified.
 _Avoid_: confidence, fidelity
+
+**Client-native**:
+Kept by the client itself rather than observed by MST: its session records, transcripts and token counts. Used only for evidence.
+_Avoid_: native (unqualified)
 
 ### Grading
 
@@ -83,6 +103,10 @@ _Avoid_: LLM grader, evaluator, rater
 **Pairwise judge**:
 A judge that compares two variants' trials of the same case and says which is better, instead of scoring one alone.
 _Avoid_: comparator, preference model
+
+**Agentic judge**:
+A judge that runs an agent (on the `claude-agent` or `codex` runtime) over a workspace of the trial's evidence, which it can read and search before it scores, instead of getting the trial in one prompt. It can be pointwise or pairwise.
+_Avoid_: agent grader, tool-using judge
 
 **Preference**:
 A pairwise judge's result comparing two variants on one case: which side's trials it prefers (or a tie), how strongly, and why. Several reps, and the swapped order, reconcile into one preference per case.
@@ -104,11 +128,27 @@ _Avoid_: verdict, success
 An aggregate over a run's trials or cases, such as pass rate, pass^k, tool recall, tokens, cost or latency.
 _Avoid_: KPI, stat
 
+**Regrade**:
+Grading a stored run's traces again with the eval config's graders as they are now (`mst grade`), without running the client. It is saved as a new run, `<run-id>.g2` and so on, whose `run.json` names the original in `gradedFrom`. Needs traces stored with `"redactStoredResponses": false`.
+_Avoid_: rescore, re-run
+
 ### Runs and comparisons
 
 **Run**:
 One execution of an eval: every variant on every case, for the case's number of trials.
 _Avoid_: experiment, suite run, execution
+
+**Run ID**:
+A run's name, from its start time and a random suffix (`20261006T091500Z-7f3c2a`), which is also its directory under the eval's `runs/`. The suffix alone (`7f3c2a`) is its short form; a regrade adds `.gN`.
+_Avoid_: execution id, run number
+
+**Phase**:
+One of a run's two stages, collect and grade, each recorded in `run.json` as `complete`, `partial`, `skipped` or `failed`.
+_Avoid_: stage, step
+
+**Infrastructure failure**:
+An attempt that ended because something around the client broke (the desktop crashed or was leased, a machine couldn't be reached), not because of what the client did. It is recorded with why, and left out of pass rates.
+_Avoid_: error trial, flake
 
 **Partial run**:
 A run narrowed at run time (`--variant`, `--case`, `--filter-tag`, `--max-cases`, `--trials`). It's compared only with partial runs narrowed the same way, and never becomes a result store's latest run.
@@ -117,6 +157,10 @@ _Avoid_: subset run, filtered run
 **Comparison**:
 How a variant differs from the baseline, or a run from an earlier run: metric changes with confidence intervals, an assessment of each change (better, worse or unclear, from a paired test), and the cases that improved or regressed.
 _Avoid_: diff, A/B result, verdict
+
+**Result store**:
+Where an eval's results go besides its run directories: today a `file` directory or a `gcs` bucket (`results.store`), which gets each run's results and summary. Stores that hold whole runs, with `mst run --results` and `mst open --results`, are planned (DEVPLAT-1461).
+_Avoid_: results backend, sink
 
 **Regression case**:
 A case that works today, which a variant must keep passing. Declared with the `regression` tag; when no case has the tag, the cases that pass a separate grouping run of the baseline. Never chosen from the baseline run variants are compared with, which would build in regression to the mean.
@@ -141,7 +185,7 @@ The machine where `mst run` was typed (your machine or a CI job). It loads, reso
 _Avoid_: controller, host, driver
 
 **Environment**:
-Where a run's trials are collected, chosen with `--env`: `local` (in the `mst run` process, the default), or an environment extension that creates machines, such as containers or VMs (`acme/env/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)).
+Where a run's trials are collected, chosen with `--env`: `local` (in the `mst run` process, the default and today's only built-in), or an environment extension that creates machines, such as containers or VMs (`acme/env/cloud-vm`). A built-in `docker` environment is planned. Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)).
 _Avoid_: sandbox, backend, runner, target
 
 **Shard**:
@@ -155,6 +199,10 @@ _Avoid_: agent, guest, runner
 **Channel**:
 How the coordinator reaches a worker's machine: run a command with its input and output attached, and copy files in and out (`docker exec` and `docker cp`, or SSH and `scp`).
 _Avoid_: transport (MCP's word), connection
+
+**Limits**:
+The eval config's run-wide caps on trials running at once, per LLM provider and per server label, across every shard (`limits`). A worker waits for room before each trial.
+_Avoid_: rate limit (that is the provider's), quota, concurrency
 
 **Missing trial**:
 A trial with no trace after collect, because its shard failed. It isn't a failed trial: its case is incomplete, left out of the pass rate, and `--resume` collects it.
@@ -181,15 +229,31 @@ One named thing a plugin contributes, of one kind: a dataset source (`dataset`),
 _Avoid_: contribution, registration, capability
 
 **Built-in**:
-An extension that ships with MST and is referenced by a bare name (for example `file` or `correctness`).
+An extension that ships with MST and is referenced by a bare name (for example `file` or `rubric`).
 _Avoid_: core plugin, default
+
+**Connector**:
+An extension that describes one vendor MCP server as an organization uses it: its URL, how to sign in, and optionally how the client reaches it (such as through a dry-run proxy). An eval config names one in a server entry (`{ "connector": "acme/connector/slack" }`).
+_Avoid_: integration, server definition
+
+**Refresh grant**:
+The long-lived sign-in `mst auth` saves for a connector, which a run exchanges for short-lived access tokens. Connectors with the same `grant` share one.
+_Avoid_: credential, login, refresh token (that is part of it)
+
+**Credential store**:
+Where refresh grants are kept. MST ships `mst/credential-store/local`, files in `~/.mcp-server-tester/grants`; stores from plugins are planned.
+_Avoid_: keychain, vault, secret store
+
+**Dry-run proxy**:
+A local proxy in front of a vendor MCP server that lets read tools through and answers writes without sending them: by default with a planned-write result, or with a success reply when the eval config sets `simulateWrites` (a **simulated write**).
+_Avoid_: mock server, write blocker, sandbox
 
 **Shared config**:
 A named, reusable fragment of an eval config that a plugin offers (for example `recommended`), which an eval opts into; a plugin cannot impose it.
 _Avoid_: preset, profile
 
 **Endpoint source**:
-(Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in `env` source reads environment variables.
+(Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in source reads environment variables. Its name must not be `env`, which is the environment kind.
 _Avoid_: gateway config, LLM provider
 
 **Marketplace plugin**:
