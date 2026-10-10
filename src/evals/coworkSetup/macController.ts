@@ -11,7 +11,7 @@ const StateSchema = z.object({
   runningAppPath: z.string().optional(),
 });
 
-/** Application lifecycle only: no native MCP inventory or query interface. */
+/** Application lifecycle only: no MCP inventory or query interface. */
 export interface MacCoworkController {
   state(): Promise<{ running: boolean; runningAppPath?: string }>;
   stop(): Promise<void>;

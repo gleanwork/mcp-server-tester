@@ -47,12 +47,7 @@ MST's own connection to an MCP server, through which tests call tools directly.
 _Avoid_: client (that is the application under test)
 
 **Vendor MCP server**:
-A vendor's own MCP server (Slack's, Jira's, GitHub's) that an eval config defines, usually through a connector, so MST hands it tokens and can put a proxy in front of it. A variant that uses only these is named for them, as in `vendor-mcp`.
-_Avoid_: native server, native MCP, native connectors
-
-**Cowork's own connectors**:
-The connectors a user adds from Cowork's connector directory and signs in to in the Claude account. Anthropic's cloud calls the vendor, so MST can't configure, intercept or sign in to them.
-_Avoid_: native connectors, client connectors
+A third-party service's MCP server (Slack's, Jira's, GitHub's) that an eval config defines, usually through a connector, so MST hands it tokens and can put a proxy in front of it.
 
 **Variant**:
 One setup an eval tests: the client, its model and options (such as a system prompt), the MCP servers, and the tool metadata the client sees. Every variant runs the same cases.
@@ -159,7 +154,7 @@ How a variant differs from the baseline, or a run from an earlier run: metric ch
 _Avoid_: diff, A/B result, verdict
 
 **Result store**:
-Where an eval's results go besides its run directories: today a `file` directory or a `gcs` bucket (`results.store`), which gets each run's results and summary. Stores that hold whole runs, with `mst run --results` and `mst open --results`, are planned (DEVPLAT-1461).
+Where an eval's results go besides its run directories: today a `file` directory or a `gcs` bucket (`results.store`), which gets each run's results and summary. Stores that hold whole runs, with `mst run --results` and `mst open --results`, are planned.
 _Avoid_: results backend, sink
 
 **Regression case**:

@@ -742,17 +742,17 @@ A connector server names a plugin's connector instead of a transport:
   "plugins": ["@acme/mst-plugin"],
   "variants": [
     {
-      "name": "aggregated",
-      "servers": ["acme"]
+      "name": "sonnet",
+      "model": "claude-sonnet-4-5"
     },
     {
-      "name": "vendor-mcp",
-      "servers": ["slack", "gmail"]
+      "name": "opus",
+      "model": "claude-opus-4-6"
     }
   ],
   "servers": {
     "acme": {
-      "connector": "acme/connector/search"
+      "connector": "acme/connector/acme"
     },
     "slack": {
       "connector": "acme/connector/slack"
