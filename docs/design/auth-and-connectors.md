@@ -1,27 +1,27 @@
-# M1 contract: connectors and `mst auth`
+# Connector contract: connectors and `mst auth`
 
-> **Milestone 1.** It specifies step 4 of the [walkthrough](./README.md) ("Authenticate once"), the `connectors` extension kind and the credential store. It extends the [explainer](./explainer.md). Terms follow [`CONTEXT.md`](../../CONTEXT.md).
+> **The connector contract.** It specifies step 4 of the [walkthrough](./README.md) ("Authenticate once"), the `connectors` extension kind and the credential store. It extends the [explainer](./explainer.md). Terms follow [`CONTEXT.md`](../../CONTEXT.md).
 >
-> **Built:** connectors, `mst auth` / `status` / `revoke`, `mst/credential-store/local`, run preflight, delivery, renewal and cleanup, and the [dry-run proxy](../cowork.md#dry-run-proxy). **Not yet:** plugin credential stores (`--store` takes a directory; remote stores are M8).
+> **Built:** connectors, `mst auth` / `status` / `revoke`, `mst/credential-store/local`, run preflight, delivery, renewal and cleanup, the [dry-run proxy](../cowork.md#dry-run-proxy) and its [simulated writes](../cowork.md#simulated-writes). **Not yet:** plugin credential stores (`--store` takes a directory; remote stores are planned), and connector servers in an environment other than `local`.
 
 ## Goal
 
 An author runs `mst auth` once. After that, every local `mst run` on any client reaches every server in every variant with a fresh token. The author doesn't edit `.env` or copy tokens, and no secret ever goes into a config or a result.
 
-M1 is done when the walkthrough's three variants (`aggregated`, `native`, `aggregated-plus-native`) authenticate and run one case each in local Cowork on macOS.
+The connector contract is done when the walkthrough's three variants (`aggregated`, `vendor-mcp`, `aggregated-plus-vendor-mcp`) authenticate and run one case each in local Cowork on macOS.
 
 ## Who owns what
 
-| Concern                                                              | Owner                                        |
-| -------------------------------------------------------------------- | -------------------------------------------- |
-| OAuth engine: discovery, PKCE, DCR, device flow, refresh, revocation | MST                                          |
-| `mst auth`, `mst auth status`, `mst auth revoke`                     | MST                                          |
-| Run lifecycle: preflight, staging, renewal, teardown                 | MST                                          |
-| Local credential store                                               | MST (`mst/credential-store/local`)           |
-| Vendor facts: URL, client ID and secret, scopes, flow, quirks        | Plugin `connector` extension                 |
-| How the client reaches the server (direct, or through a proxy)       | Plugin `connector` extension                 |
-| Tool policy (read-only allowlist, writes blocked)                    | Plugin `connector` extension (its proxy)     |
-| Remote credential stores (cloud secret managers)                     | Plugin `credential-store` extension (not M1) |
+| Concern                                                              | Owner                                         |
+| -------------------------------------------------------------------- | --------------------------------------------- |
+| OAuth engine: discovery, PKCE, DCR, device flow, refresh, revocation | MST                                           |
+| `mst auth`, `mst auth status`, `mst auth revoke`                     | MST                                           |
+| Run lifecycle: preflight, staging, renewal, teardown                 | MST                                           |
+| Local credential store                                               | MST (`mst/credential-store/local`)            |
+| Vendor facts: URL, client ID and secret, scopes, flow, quirks        | Plugin `connector` extension                  |
+| How the client reaches the server (direct, or through a proxy)       | Plugin `connector` extension                  |
+| Tool policy (read-only allowlist, writes blocked)                    | Plugin `connector` extension (its proxy)      |
+| Remote credential stores (cloud secret managers)                     | Plugin `credential-store` extension (planned) |
 
 MST has no vendor names in its code. Without a plugin, a server with a plain `serverUrl` uses generic MCP OAuth (discovery and DCR), as `mst login` does today.
 
@@ -92,7 +92,7 @@ The rules:
 
 ## Referencing connectors in an eval config
 
-A server entry names a connector instead of a transport. Today `servers` is a list; the connector form works in both today's list and M2's labelled map.
+A server entry names a connector instead of a transport. `servers` is a map keyed by label, and the key is the connector server's label.
 
 ```json
 "servers": {
@@ -169,7 +169,7 @@ interface StoredGrant {
 }
 ```
 
-MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester/grants/<namespace>.<grant>.json` (or `$MST_CREDENTIALS_DIR`, or `--store <dir>`), with a 0700 directory, 0600 files and a lock file. The key is per user, not per eval config, so one sign-in serves every config that uses the connector. Plugin stores, such as a cloud secret manager with per-user scoping, implement the same interface; they aren't needed for M1, so M1 has no `credentialStores` plugin kind yet.
+MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester/grants/<namespace>.<grant>.json` (or `$MST_CREDENTIALS_DIR`, or `--store <dir>`), with a 0700 directory, 0600 files and a lock file. The key is per user, not per eval config, so one sign-in serves every config that uses the connector. Plugin stores, such as a cloud secret manager with per-user scoping, implement the same interface; they aren't built yet, so there is no `credentialStores` plugin kind yet.
 
 ## Security rules
 
@@ -188,9 +188,11 @@ MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester
 | Plugin (acme)  | Connectors for 7 vendor servers and one direct HTTP server. `launch` returns the dry-run proxy. Writes are blocked: zero write calls reach a fake vendor.                                                                                                                                                                                                    |
 | Live (manual)  | `mst auth` against all 8 servers. Then 1 case × 3 variants in local Cowork. Then one run longer than an hour, to show Google renewal.                                                                                                                                                                                                                        |
 
-## Out of M1
+## Out of scope
 
-The `servers` map (kind checks landed with ADR 0003: a connector is `<namespace>/connector/<name>`). Remote credential stores and delivering tokens into VMs and containers (M5–M7: the environment contract must carry `tokenFile` renewal across the boundary). An MST-owned interceptor kind.
+- Remote credential stores.
+- Token staging in environments: delivering connector tokens into VMs and containers. The environment contract must carry `tokenFile` renewal across the boundary. The `mst.shard/v1` protocol carries tokens ([ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md)), but today a run refuses connector servers in any environment other than `local`.
+- An MST-owned interceptor kind.
 
 ## Decisions
 

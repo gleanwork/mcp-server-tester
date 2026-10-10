@@ -117,7 +117,7 @@ Judges go in the case's `judges` list, beside `assertions`: each scores the answ
 
 In LLM client mode, a real LLM receives your server's tool list and a natural language prompt, then decides which tools to call. This tests whether your tool names, descriptions, and input schemas are clear enough for autonomous use — a different question from whether the tools return correct output.
 
-A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; a suite eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; an eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
 
 ```json snippet=snippets/mst-client-dataset.json
 {
@@ -207,7 +207,11 @@ for client-specific fields, environment rules, and setup ownership.
 - [Transports](./docs/transports.md) — stdio and HTTP configuration, OAuth
 - [Protocol Versions](./docs/protocol-versions.md) — legacy and 2026-07-28, protocol matrices, era-aware conformance
 - [Agent Skills](./docs/skills.md) — testing and evaluating skills served over MCP (SEP-2640)
-- [CLI Commands](./docs/cli.md) — init, generate, login, token
+- [CLI Commands](./docs/cli.md) — init, generate, login, token, auth, datasets, judges, run, grade, batch, open, cowork
+- [Evaluation Framework](./docs/evaluation-framework.md) — eval configs, plugins and their extension kinds, the run format
+- [Cowork](./docs/cowork.md) and [ChatGPT Desktop](./docs/chatgpt-desktop.md) — running evals on desktop clients
+- [Design walkthrough](./docs/design/README.md) and [explainer](./docs/design/explainer.md) — how evals are meant to run end to end, and what is built so far
+- [Glossary](./CONTEXT.md) — the terms MST uses
 - [The run report](./docs/ui-reporter.md): the report every eval run writes
 - [Development](./docs/development.md) — contributing and building
 - [Migration Guide (v1.x → v2.0)](./docs/migrations/migration-2.0.md) — MCP SDK v2 and protocol versions
@@ -296,7 +300,7 @@ servers, client, model, client options, tool maps, input templates, metrics, and
 The canonical execution primitives remain `EvalDataset`, `EvalCase`,
 `MCPConfig`, and `runEvalDataset`.
 
-Plugins add dataset sources, clients, judges, metrics and result stores. A plugin
+Plugins add dataset sources, clients, judges, pairwise judges, metrics, result stores, connectors, environments and shared configs. A plugin
 is a plain default-exported object in ESLint's shape, and its extensions are
 referenced as `<namespace>/<kind>/<name>`. See
 [Plugins](docs/evaluation-framework.md#plugins).
@@ -307,7 +311,6 @@ belong in committed eval configs.
 
 These MCP protocol features are not currently supported. These are deliberate scope decisions, not bugs:
 
-- MCP resources (`listResources`, `readResource`)
 - MCP prompts (`listPrompts`, `getPrompt`)
 - Server-to-client notifications
 - Streaming tool responses (`callTool` waits for the complete response)

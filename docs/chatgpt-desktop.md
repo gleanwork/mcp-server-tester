@@ -5,11 +5,11 @@ Codex CLI, Codex APIs, or an inference API to run the evaluated query.
 
 ## Surface and platform
 
-Use `type: 'chatgpt'` for macOS or `type: 'chatgpt'` for Linux.
-(The earlier names `openai.chatgpt.agent.desktop-app.macos`,
-`openai.chatgpt.agent.desktop-app.linux` and the platform-dependent `chatgpt`
-still work, with a deprecation warning.) Both accept `options.surface: 'chatgpt-work' | 'codex'`,
-with `chatgpt-work` as the default. Surface selection controls UI setup and the
+Use `"client": "chatgpt"` on macOS and on Linux; the desktop driver follows the
+platform. The earlier names (`openai.chatgpt.agent.desktop-app.macos`,
+`openai.chatgpt.agent.desktop-app.linux`, `chatgpt-mac` and `chatgpt-linux`)
+fail validation, naming `chatgpt`. Both platforms accept
+`clientOptions.surface: 'chatgpt-work' | 'codex'`, with `chatgpt-work` as the default. Surface selection controls UI setup and the
 expected native originator; MST does not add surface instructions to the evaluated
 prompt.
 
@@ -47,7 +47,7 @@ Example Linux client settings (in an eval config):
 
 Model and effort are installed in the native configuration. MST verifies both
 against the completed native turn. Linux does not guess mappings from model IDs
-to display labels such as `5.6 Terra Medium`. Linux rejects `options.configPath`
+to display labels such as `5.6 Terra Medium`. Linux rejects `clientOptions.configPath`
 (unless it equals `$HOME/.codex/config.toml`) and `chatgptSessionRoot`.
 
 ## Linux runtime contract
@@ -373,9 +373,9 @@ Explicit `prompt_marker` correlation remains opt-in.
 
 Native originator acceptance is surface-specific and case-sensitive:
 
-- Default or explicit `options.surface: 'chatgpt-work'` requires exactly
+- Default or explicit `clientOptions.surface: 'chatgpt-work'` requires exactly
   `session_meta.payload.originator: 'codex_work_desktop'`.
-- Explicit `options.surface: 'codex'` requires exactly `'Codex Desktop'`, as
+- Explicit `clientOptions.surface: 'codex'` requires exactly `'Codex Desktop'`, as
   observed in preserved Linux run `35881948713` (`source: 'vscode'`).
 - Neither surface accepts the other surface's originator, CLI identities such as
   `codex_cli_rs` or `codex_cli`, case changes, whitespace changes, or name variants.

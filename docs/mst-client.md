@@ -291,7 +291,7 @@ A renamed tool's calls reach the original tool and are recorded under its origin
 }
 ```
 
-In an eval, a variant's tool metadata (`tools`) reach every client, including plugin clients and `claude-code`, through a local MCP proxy; see [Tool variants on every client](./evaluation-framework.md#tool-variants-on-every-client). Mocked responses and dataset rewriting are out of scope.
+In an eval, a variant's tool metadata (`tools`) reach every client, including plugin clients and `claude-code`, through a local MCP proxy; see [Tool metadata on every client](./evaluation-framework.md#tool-metadata-on-every-client). Mocked responses and dataset rewriting are out of scope.
 
 For a complete runnable harness — including building a structured next-variant proposal from the comparison — see [`snippets/tool-optimization-loop.ts`](../snippets/tool-optimization-loop.ts).
 

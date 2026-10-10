@@ -1,9 +1,11 @@
-# Cowork through the normal MST batch runner
+# Cowork in MST
 
-Cowork runs through MST's normal `batch` command with a platform-specific desktop
-driver and shared native Claude trace collection. macOS uses managed application
-setup and Anthropic Computer Use. Linux attaches to an externally prepared desktop
-and uses bounded AT-SPI actions; it does not provision or authenticate that runtime.
+Cowork is the `cowork` client. `mst run --config <eval.json>` runs an eval config
+on it, as for any client, and `mst batch` runs several configs. A platform-specific
+desktop driver submits each case, and MST builds each trace from Claude's own
+session records. macOS uses managed application setup and Anthropic Computer Use.
+Linux attaches to an externally prepared desktop and uses bounded AT-SPI actions;
+it does not provision or authenticate that runtime.
 
 ## First-time macOS setup
 
@@ -139,7 +141,7 @@ COWORK_ENV_FILE=/absolute/path/to/existing.env ./scripts/run-cowork.sh --configs
 ```
 
 This prepares a local Python environment, builds MST, and runs the supplied
-evaluation through `batch`. It submits real Claude tasks. The invoking terminal
+eval configs through `batch`. It submits real Claude tasks. The invoking terminal
 must have Accessibility and Screen Recording permission. Credentials remain in
 the existing dotenv file or exported environment; the runner never rewrites or
 shell-sources that file. Node loads dotenv before plugins/custom judges start.
@@ -149,7 +151,7 @@ bundled. Use the normal file/GCS dataset sources and plugins. Configure custom
 judges according to their plugin's requirements.
 `--dry-run` checks configuration, not GUI execution or model behavior.
 
-Use client `cowork` (`cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` still work, with a deprecation warning). `model` selects the Cowork
+Use client `cowork`. The earlier names `cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` fail validation, naming `cowork`. `model` selects the Cowork
 inference model; `clientOptions.computerUseModel` independently selects the planner.
 The inference provider is `anthropic`. On macOS the desktop driver selector is
 `clientOptions.computerUseProvider: "anthropic-computer-use"`.
@@ -207,8 +209,10 @@ options being considered.
 ## Run an installed release
 
 ```bash
-node --env-file=/absolute/path/to/existing.env node_modules/@gleanwork/mcp-server-tester/dist/cli/index.js batch --configs /absolute/path/to/eval.json --workers 1
+node --env-file=/absolute/path/to/existing.env node_modules/@gleanwork/mcp-server-tester/dist/cli/index.js run --config /absolute/path/to/eval.json
 ```
+
+For several eval configs, use `batch --configs <files...> --workers 1`.
 
 The release bundles the CU script and pinned Python requirements. Resolution does
 not depend on the caller's working directory or the location of its Python binary.
@@ -217,7 +221,7 @@ installs the bundled requirements, reuses it within the process, and removes it
 at process exit. This requires Python 3.10+, pip access, and macOS desktop permissions.
 Set `MST_COWORK_PYTHON` to reuse a worker-prepared interpreter instead; MST never
 modifies it. `MST_COWORK_DRIVER_ROOT` remains an explicit development override.
-The source-checkout wrapper is a convenience, not required by `batch`.
+The source-checkout wrapper is a convenience, not required by `run` or `batch`.
 
 ## Install an unreleased source pin
 
@@ -230,7 +234,7 @@ when installing the normal published package.
 ## Attach to a prepared Linux desktop
 
 Use `client: "cowork"` and `clientOptions.computerUseProvider: "linux-desktop"`
-with the normal `batch` command. `computerUseModel` is rejected for this backend:
+with `mst run` (or `batch`). `computerUseModel` is rejected for this backend:
 there is no LLM desktop planner. If omitted, the driver defaults to the native
 backend for the current OS. Cross-platform provider combinations fail before UI
 activity rather than silently selecting another driver.
@@ -267,6 +271,13 @@ and URL (MST writes no secrets there). It adds `AskUserQuestion` to the image's
 file as above, and probes. When the variant ends, or if the desktop isn't ready,
 the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
 stays read-only.
+
+**In an environment.** A plugin environment (`mst run --env <namespace>/env/<name>`)
+can run Cowork shards on Linux workers in owned-desktop mode. Two limits apply
+today: connector servers and variants with tool metadata can't run in an
+environment yet, because their tokens and proxies stay on the coordinator. MST
+ships no `docker` environment or desktop image yet; both are planned
+(DEVPLAT-1451).
 
 Submission opens the native deep link through the prepared environment's `xdg-open`
 handler, then attempts one semantic `Start task` action. Alternatively, set

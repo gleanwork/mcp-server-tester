@@ -526,8 +526,9 @@ const plugin: Plugin = {
 }
 ```
 
+- **Today's form is `ref`.** A plugin dataset that takes `snapshot` or `source` is declared as `{ "ref": … }`. `{ "type": … }` names a dataset source with options of its own (as in [Dataset sources](#dataset-sources)), and is accepted here too. One object form, `{ "type", "snapshot"?, "source"? }`, is planned to replace `ref` before 2.0.
 - **`snapshot` and `source` are MST's.** MST takes them off the declaration before the source's schema sees it, passes them as `context.request` (`source` defaults to `snapshot`; no `snapshot` means the source's latest), and rejects them for a source without `snapshots`. A dataset back with a snapshot other than the one asked for, or live data with a snapshot, fails the run.
-- **`run.json` records which copy.** Each plugin dataset in `datasets` has its `ref`, plus `snapshot` or `live: true`, next to its `caseCount` and `contentHash`. `mst run --dry-run` prints the same. Unchanged cases hash the same whichever copy they came from.
+- **`run.json` records which copy.** Each plugin dataset in `datasets` has its `ref`, plus `snapshot` or `live: true`, next to its `caseCount` and `contentHash`. Recording `source: "snapshot" | "live"` in place of `live: true` is planned with the one dataset form. `mst run --dry-run` prints the same. Unchanged cases hash the same whichever copy they came from.
 
 ### Clients
 
@@ -565,12 +566,12 @@ export default {
 
 An eval config that loads the plugin selects the client with `"client": "my/client/assistant"`, and passes its options in `clientOptions`.
 
-- **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `builtin`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the host did; don't reconstruct tool calls from the final text. A `tool_search` event (the host searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type client-native actions as their kind rather than as calls to a host tool, so skill assertions and search metrics can read them.
+- **The trace.** `run` returns a `ClientRunResult`: `finalText`, `events`, and optional `usage`, `error` and timing fields. Each event has a `kind` (`tool_call`, `skill`, `command`, `subagent` or `tool_search`), a `source` (`mcp` or `builtin`), a `name`, and optionally the MCP server label, arguments, output and ID. Record what the client did; don't reconstruct tool calls from the final text. A `tool_search` event (the client searching its tool catalog) lists the tools the search returned in `results`, each `{ name, server? }`. Type client-native actions as their kind rather than as calls to a client tool, so skill assertions and search metrics can read them.
 - **Evidence.** Declare `evidence: 'structured'` only for authoritative protocol or client-native traces. With `observed`, `none` or no declaration, tool-call and argument assertions can't pass; text and judge assertions still run.
 - **Servers.** Events keep their MCP server labels. With more than one server, tool assertions use label-qualified names, or the eval config's `toolMap` from canonical to native names.
 - **In results.** Each client case result keeps the trace as `trace`, a `Trace`: the `ClientRunResult` your client returned, without telemetry and diagnostics, plus its evidence. On a one-server variant, MCP events that name no server get that server's label. A case with several trials has no `trace` of its own; each entry in `trialResults` has the trace of that trial. In an eval, every case result also names its `variant`. Stored results drop `finalText` and each event's `output`, the same way they drop `response`; events, servers, arguments and usage stay.
 - **Batches.** A client with `runBatch` gets one request per trial of each client case in the dataset, and returns one trace per request, in order. A batch client can't mix client types, and its cases need unique IDs. To have each trial saved as it finishes rather than when the batch returns, a batch client calls `context.reportResult(index, result)` after each request, with the request's index; it never throws. The Cowork and ChatGPT clients do.
-- **Tool variants.** A client that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the run gives it `http` server configs for a local MCP proxy that applies the variant, so the host must speak Streamable HTTP (see [Tool variants on every host](#tool-variants-on-every-client)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's hosts do. A batch host that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the host's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A host that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
+- **Tool metadata.** A client that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the run gives it `http` server configs for a local MCP proxy that applies the variant, so the client must speak Streamable HTTP (see [Tool metadata on every client](#tool-metadata-on-every-client)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's clients do. A batch client that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the client's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A client that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
 - **What it honours.** `maxConcurrency` caps the eval config's `concurrency`.
 
 ### Claude Code client-native events
@@ -603,7 +604,7 @@ A search's `results` come from `tool_reference` blocks in its result, or, withou
 
 A plugin client that can apply one declares `systemPrompt` in its schema. A case's own `clientOptions.systemPrompt` replaces the one it inherits, and is a validation error for a client that can't apply one.
 
-### Tool variants on every client
+### Tool metadata on every client
 
 A variant's tool metadata (`tools`: descriptions, input schemas, renames) reaches every client:
 
@@ -797,7 +798,7 @@ npx mst batch \
 ```
 
 `--dry-run` validates the eval configs and loads their plugins without running
-anything; `run --dry-run` prints the eval config name, datasets and variants as JSON.
+anything; `run --dry-run` prints the eval config's name, output directory, datasets, variants and environment as JSON (see [`run`](cli.md#run---run-an-eval-config)).
 Without it, `run` runs the eval config's variants and `batch` runs each listed
 eval config.
 

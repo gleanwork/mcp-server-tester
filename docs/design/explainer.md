@@ -25,13 +25,13 @@ These terms are used throughout this page and the walkthrough. The full glossary
 
 **What you're testing**
 
-| Term         | Meaning                                                                                                | In the walkthrough                               |
-| ------------ | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
-| **Client**   | The AI application under test. MST drives it the way a user would.                                     | `cowork`                                         |
-| **Model**    | The LLM the client uses.                                                                               | `claude-opus-4-8`                                |
-| **Server**   | An MCP server the client can call tools on.                                                            | `acme`, `slack`, `jira`, …                       |
-| **Variant**  | One setup being tested: a client, a model and a set of servers. Every variant gets the same questions. | `aggregated`, `native`, `aggregated-plus-native` |
-| **Baseline** | The variant the others are compared against. The first one, unless you say otherwise.                  | `aggregated`                                     |
+| Term         | Meaning                                                                                                | In the walkthrough                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| **Client**   | The AI application under test. MST drives it the way a user would.                                     | `cowork`                                                 |
+| **Model**    | The LLM the client uses.                                                                               | `claude-opus-4-8`                                        |
+| **Server**   | An MCP server the client can call tools on.                                                            | `acme`, `slack`, `jira`, …                               |
+| **Variant**  | One setup being tested: a client, a model and a set of servers. Every variant gets the same questions. | `aggregated`, `vendor-mcp`, `aggregated-plus-vendor-mcp` |
+| **Baseline** | The variant the others are compared against. The first one, unless you say otherwise.                  | `aggregated`                                             |
 
 **What you're testing with**
 
@@ -40,14 +40,14 @@ These terms are used throughout this page and the walkthrough. The full glossary
 | **Case**        | One question for the client (the **input**) and what a good result looks like (the **expected** answer). | `e2e-0011`: "What is the process for reporting…" |
 | **Dataset**     | A named list of cases.                                                                                   | `acme/dataset/info-seeking` (50 cases)           |
 | **Eval**        | Everything about one comparison: datasets, variants, how to grade, what to measure.                      | —                                                |
-| **Eval config** | The JSON file that defines one eval.                                                                     | `evals/cowork-aggregated-vs-native.json`         |
+| **Eval config** | The JSON file that defines one eval.                                                                     | `evals/cowork-aggregated-vs-vendor-mcp.json`     |
 
 **What happens during a run**
 
 | Term      | Meaning                                                                                                              | In the walkthrough                                      |
 | --------- | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | **Trial** | One attempt at one case by one variant. Each case runs several trials, because answers vary.                         | `"trials": 3`                                           |
-| **Trace** | The record of one trial: every tool call (server, tool, arguments, result), the final answer, tokens, cost and time. | `traces/native/e2e-0011/2.json`                         |
+| **Trace** | The record of one trial: every tool call (server, tool, arguments, result), the final answer, tokens, cost and time. | `traces/vendor-mcp/e2e-0011/2.json`                     |
 | **Run**   | One execution of an eval: every variant on every case, for every trial. It has a **run ID**.                         | `7f3c2a`: 50 cases × 3 variants × 3 trials = 450 trials |
 
 **How answers are graded**
@@ -68,8 +68,8 @@ These terms are used throughout this page and the walkthrough. The full glossary
 | **Extension**        | One thing a plugin adds, of a given **kind**: a dataset, a judge, a connector, an environment, a result store, …                        | `acme/judge/correctness` is an extension of kind `judge` |
 | **Connector**        | An extension that describes one vendor's MCP server: its URL, how to sign in, and optionally a proxy in front of it.                    | `acme/connector/slack`                                   |
 | **Credential store** | Where long-lived sign-ins (refresh grants) are kept, so runs can get fresh tokens without a browser.                                    | `acme/credential-store/secret-manager`                   |
-| **Environment**      | Where the client runs: your machine, containers on it, or VMs. Each machine runs one **shard** of the trials.                           | `local`, `docker`, `acme/env/cloud-vm`                   |
-| **Result store**     | Where a run's files are written.                                                                                                        | a local directory, `acme/result-store/eval-results`      |
+| **Environment**      | Where the client runs: your machine, containers on it, or VMs. Each machine runs one **shard** of the trials.                           | `local`, `docker` (planned), `acme/env/cloud-vm`         |
+| **Result store**     | Where a run's results go besides its local run directory. Stores that hold whole runs are planned.                                      | a GCS bucket, `acme/result-store/eval-results`           |
 | **Snapshot**         | A frozen copy of a plugin's datasets and judge settings, published nightly. The alternative is **live**: fetched at the start of a run. | `snapshot 2026-10-06`                                    |
 
 ## Three parts, three owners
@@ -97,7 +97,7 @@ flowchart LR
 
 - **MST stays open source.** Nothing company-specific goes in it: no tenant URLs, no internal datasets, no cloud accounts. Anything a company needs, its plugin adds.
 - **Each part changes at its own pace.** Eval configs change daily, the plugin changes when data or infrastructure changes, and MST changes when it releases. Keeping them apart means a new comparison never needs a plugin release, and a new dataset never needs an MST release.
-- **Anyone can do without a plugin.** MST has built-ins for everything a plugin adds: datasets from files, a generic rubric judge, your machine as the environment, local sign-ins, and results in a local directory or a GCS bucket.
+- **Anyone can do without a plugin.** MST has built-ins for most of what a plugin adds: datasets from files, a generic rubric judge, your machine as the environment, local sign-ins, and results in a local directory or a GCS bucket. Pairwise judges and connectors come only from plugins.
 
 ### Extension names say what they are
 
@@ -107,7 +107,7 @@ Every extension is named `<namespace>/<kind>/<name>`. `acme/judge/correctness` i
 
 ## A run, from top to bottom
 
-This follows `mst run --config evals/cowork-aggregated-vs-native.json` through every step, using the walkthrough's example: 50 cases × 3 variants × 3 trials = 450 trials.
+This follows `mst run --config evals/cowork-aggregated-vs-vendor-mcp.json` through every step, using the walkthrough's example: 50 cases × 3 variants × 3 trials = 450 trials.
 
 ```mermaid
 flowchart TD
@@ -129,7 +129,7 @@ Steps 4 and 5 happen wherever the client runs. Every other step happens where yo
 
 MST reads the eval config, loads every plugin it lists, and checks the config: every name exists, every name is the right kind, and every variant's servers are defined.
 
-_Why first:_ a typo should cost you a second, not an hour of Cowork time. `--dry-run` stops after step 3 and prints the plan.
+_Why first:_ a typo should cost you a second, not an hour of Cowork time. `--dry-run` stops after step 2 and prints the plan as JSON. A dry run that also checks sign-ins (step 3) is planned.
 
 ### 2. Resolve
 
@@ -141,13 +141,13 @@ _Why snapshots by default:_ a snapshot doesn't change under you, so rerunning la
 
 ### 3. Prepare
 
-Every server in every variant needs a valid sign-in before Cowork starts.
+Every connector server in every variant needs a valid sign-in before Cowork starts. (A plain `http` or `stdio` server takes a literal or environment-backed token instead, and `mst auth` doesn't touch it.)
 
-- **Earlier, once:** you ran `mst auth`. For each server it found how that vendor signs in (browser consent, client credentials, or a fixed token) and saved the long-lived sign-in, called a **refresh grant**, in a credential store.
+- **Earlier, once:** you ran `mst auth`. For each connector server it found how that vendor signs in (browser consent, client credentials, or a fixed token) and saved the long-lived sign-in, called a **refresh grant**, in a credential store.
 - **Now, every run:** MST checks that every grant the run needs is in the store. If one is missing or revoked, the run stops here and prints the `mst auth` command that fixes it. Otherwise, MST exchanges each grant for a short-lived access token and hands it to the client: in a private file for servers behind a local proxy, or in a private environment variable for direct connections.
 - **During the run:** tokens in private files are refreshed before they expire, so an hour-long run doesn't fail at minute 61. A token passed in an environment variable can't be refreshed mid-run, so servers with short-lived tokens go through a local proxy that reads the file.
 
-A **connector** is what tells MST how a vendor's server signs in and how the client should reach it. A connector can put a proxy in front of the server. A **dry-run proxy** lets read tools through and returns a "planned write" for anything that would send a message or change data.
+A **connector** is what tells MST how a vendor's server signs in and how the client should reach it. A connector can put a proxy in front of the server. A **dry-run proxy** lets read tools through and returns a "planned write" for anything that would send a message or change data. With `"simulateWrites": true` in the eval config, it answers writes with a success reply instead (a **simulated write**), so the client carries on as it would after a real write; the write never reaches the server, and MST records it.
 
 _Why this way:_ you sign in once, not once per run, and no token ever goes into an eval config, a trace, a log or a report. Short-lived tokens are the only thing handed out, and only for as long as the run lasts.
 
@@ -164,7 +164,9 @@ The client runs every trial. For each one, MST:
 
 Nothing is graded here. The progress output only shows which trials finished (`●`) and which hit an infrastructure problem (`!`), such as the client crashing. An infrastructure problem isn't a failed trial, because the client never got to answer.
 
-**Where it runs:** wherever `--env` says. With `local` (the default), MST drives Cowork on your Mac. With `docker`, MST drives Cowork in Linux containers on your machine. With `acme/env/cloud-vm`, the plugin starts VMs and MST drives Cowork on each of them. You can split the trials across several containers or VMs, called **shards**, with `--env-option shards=5`. A case's variants and trials all go to one shard.
+**Where it runs:** wherever `--env` says. With `local` (the default), MST drives Cowork on your Mac. With `docker` (planned), MST drives Cowork in Linux containers on your machine. With `acme/env/cloud-vm`, the plugin starts VMs and MST drives Cowork on each of them. You can split the trials across several containers or VMs, called **shards**, with `--env-option shards=5`. A case's variants and trials all go to one shard. The eval config's `limits` cap how many trials run at once across all shards, per LLM provider and per server, so shards don't trip rate limits.
+
+Today, connector servers and variants with tool metadata run only in `local`: their tokens and proxies stay on the coordinator. Every server in the walkthrough is a connector, so the walkthrough's eval can't run in another environment yet.
 
 ```mermaid
 flowchart TD
@@ -175,7 +177,7 @@ flowchart TD
     vm2["VM 2<br/>90 trials"]
     vm5["… VM 5<br/>90 trials"]
   end
-  store[("Result store<br/>traces from every VM")]
+  store[("Run directory<br/>traces from every VM")]
   post["<b>Coordinator</b><br/>gather, grade, compare, report"]
   prep --> env
   env -- traces --> store
@@ -200,7 +202,9 @@ _Why straight after collect:_ tokens and VMs are only needed while the client is
 
 The coordinator waits until every shard has uploaded its traces, then puts them all into one run directory. If a shard failed, its trials are marked **missing**, not failed. `mst run --resume <run-id>` collects only the missing trials.
 
-_Why:_ the next step compares variants case by case. If case `e2e-0011` ran for `aggregated` on VM 1 and for `native` on VM 4, both traces have to be in one place first.
+_Why:_ the next step compares variants case by case. If case `e2e-0011` ran for `aggregated` on VM 1 and for `vendor-mcp` on VM 4, both traces have to be in one place first.
+
+Resuming reads the stored traces of the trials that weren't missing, so it needs the run stored with `"redactStoredResponses": false` (see [What's in a run](#whats-in-a-run)).
 
 ### 7. Grade
 
@@ -220,10 +224,10 @@ _Why grading is a separate step and not done during collect:_
 
 - **The pairwise judge needs both sides.** It can't run until both variants' trials of a case exist, and they may come from different VMs.
 - **Every trial is graded the same way.** One grading pass, with one resolved set of judge settings, grades all 450 trials. No trial is graded by an older rubric because its VM started earlier.
-- **You can regrade without re-running.** Collect is slow and expensive, and grading is cheap. Because grading only reads stored traces, `mst grade <run-id>` can regrade with a new rubric, an extra judge or today's live judge settings, without starting Cowork again. A regrade is saved as a new run (`7f3c2a.g2`) that points at the original traces, so the first grading isn't overwritten.
+- **You can regrade without re-running.** Collect is slow and expensive, and grading is cheap. Because grading only reads stored traces, `mst grade <run-id> --config <file>` can regrade with a new rubric, an extra judge or today's live judge settings, without starting Cowork again. A regrade is saved as a new run (`7f3c2a.g2`) that names the original in `gradedFrom` and carries a copy of its traces, so the first grading isn't overwritten. The traces must be stored unredacted (`"redactStoredResponses": false`).
 - **Judge credentials stay on the coordinator.** The VMs never need them.
 
-`--no-grade` stops after step 6, which is useful for collecting overnight and grading in the morning.
+`--no-grade` stops after step 6, which is useful for collecting overnight and grading in the morning. It also needs `"redactStoredResponses": false`, and refuses to start without it.
 
 ### 8. Compare
 
@@ -239,27 +243,32 @@ _Why "unclear" exists:_ with 50 cases, a two-point change in pass rate is usuall
 
 MST writes `results.json` (every trial with its trace and scores) and `summary.json` (every variant's metrics and comparisons), prints the summary table, and builds the report that `mst open` shows.
 
-Everything goes to the **result store**: a local directory by default, or wherever `--results` points. As with `--env`, that's a flag and not part of the config, for the same reason.
+Today the run directory is written locally, under `.mcp-test-results/<eval-name>/` or `--output-dir`. A **result store** set in the eval config (a `gcs` bucket, say) also gets the run's results and summary. Planned (DEVPLAT-1461): a result store holds whole runs, and `--results` chooses it at run time. As with `--env`, that will be a flag and not part of the config, for the same reason.
 
 ## What's in a run
 
-Every result store holds the same layout. Each part was written by one of the steps above:
+Every run directory has the same layout. Each part was written by one of the steps above:
 
 ```text
-<eval-name>/runs/<run-id>/
-├── run.json        # step 2: the config, exact datasets and judge settings (with hashes),
-│                   #   the environment (its options, shards, and each shard's image
-│                   #   and client version), and how far each step got
-├── traces/         # step 4: one file per trial, with its shard
-├── scores/         # step 7: one score per grader per trial; one preference per case per variant
-├── results.json    # step 9: traces and scores joined
-├── summary.json    # step 9: per-variant metrics and comparisons
-└── report/         # step 9: what `mst open` shows
+<eval-name>/
+├── latest.json         # step 9: the newest complete, full run
+└── runs/<run-id>/
+    ├── run.json        # step 2: the config's identity and each variant's setup, exact datasets
+    │                   #   and judge settings (with hashes), the environment (its name,
+    │                   #   options and shards), and how far each step got
+    ├── traces/         # step 4: one file per trial
+    ├── artifacts/      # step 4: each trial's client artifacts, for judges
+    ├── scores/         # step 7: one score per grader per trial; one preference per case per variant
+    ├── results.json    # step 9: traces and scores joined
+    ├── summary.json    # step 9: per-variant metrics and comparisons
+    └── report/         # step 9: what `mst open` shows
 ```
+
+Planned for 2.0: `run.json` records each shard's image digest and client version, and each trace records its shard.
 
 This layout is a contract, versioned as `mst.run/v1`, and MST keeps it stable within a major version. That stability is why other tools can rely on it. A company dashboard can read `summary.json` straight from the bucket without depending on MST's code. It's also what makes resume and regrade possible: both read what the earlier steps left behind.
 
-Stored traces leave out raw tool results by default, because they can hold real company data. Judges see the full traces, because grading happens before the results are stored.
+Stored traces leave out raw tool results by default, because they can hold real company data. Judges see the full traces, because grading happens before the results are stored. A redacted run can't be collected with `--no-grade`, regraded or resumed, so an eval that needs those sets `"redactStoredResponses": false`, as the walkthrough's does. Letting a plugin's shared config set it is planned.
 
 ## Reading the report
 
@@ -307,7 +316,7 @@ flowchart LR
 
 That matters because "Cowork with its own connectors" is the setup most users actually have. The options:
 
-1. **Use servers we configure for every variant** (top path). This is fair and fully controlled, but it isn't quite the native experience.
+1. **Use servers we configure for every variant** (top path). This is fair and fully controlled, but it isn't the setup most Cowork users have.
 2. **Wrap connectors** so one definition serves both Cowork's registration and our proxy. This needs a design for each client.
 3. **Treat Cowork's own connectors as observe-only.** We run them against test accounts, rely on Cowork's own trace, and mark the variant "not intercepted" in the report.
 
@@ -315,24 +324,24 @@ There's a related unknown: it's not yet confirmed whether Cowork reaches the pla
 
 ## What's built and what's planned
 
-| Area                                                    | Built                                                                                                                                                                                                                                                          | Planned                                                                                            |
-| ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Eval configs, variants, baseline, client, model, trials | `--config`, `--variant` (one or more), `--case`, `--filter-tag`, `--max-cases`, `--trials`; narrowed runs marked partial                                                                                                                                       | —                                                                                                  |
-| Extension names                                         | `namespace/kind/name`, checked by kind (ADR 0003); `mst/` built-ins; a top-level `servers` map keyed by label                                                                                                                                                  | —                                                                                                  |
-| Datasets and judges from plugins                        | `plugins`, `extends`; case `judges` beside `assertions`; judge merge rules (case plus eval config, the case's settings win); datasets by name with `snapshot` / `source`, recorded in `run.json`; `mst datasets` (list, show, pull), `mst judges` (list, show) | `mst plugins`, `--plugin-option`                                                                   |
-| Sign-ins (step 3)                                       | Connectors, `mst auth` / `status` / `revoke`, local credential store, token hand-out and renewal, dry-run proxy                                                                                                                                                | Plugin credential stores; handing tokens to VMs                                                    |
-| Environments (steps 4–5)                                | Local Cowork on macOS and Linux; each trial's trace written when it finishes; the `env` kind, `--env`, `--env-option` (`shards`, `keep`), shards over a channel (`mst collect`), gather with missing trials, `--resume`, the environment in `run.json`         | `docker`, `--detach`, `mst runs`                                                                   |
-| Grading as its own step (6–7)                           | Grading during collect, or skipped (`mst run --no-grade`); `mst grade <run> --config` regrades stored traces as a new run (`.g2`, `gradedFrom`); `comparePairwise` as an API; pairwise judges in eval configs (`pairwiseJudges`, after every variant runs)     | `mst grade` without `--config`; `--judge`; regrades reading the traces in place rather than a copy |
-| Results (8–9)                                           | Run summaries; result stores set in the config; the `mst.run/v1` layout and its JSON Schemas; the report written with each run; `mst open` for local runs; the MCP Playwright reporter writing the same runs, evals only                                       | `--results`, `mst open --results`                                                                  |
-| Report                                                  | Tool optimization report                                                                                                                                                                                                                                       | The same layout for every eval                                                                     |
-| Cowork's own connectors                                 | —                                                                                                                                                                                                                                                              | An approach; see [Known gap](#known-gap-coworks-own-connectors)                                    |
+| Area                                                    | Built                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Planned                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Eval configs, variants, baseline, client, model, trials | `--config`, `--variant` (one or more), `--case`, `--filter-tag`, `--max-cases`, `--trials`; narrowed runs marked partial                                                                                                                                                                                                                                                                                                                                  | —                                                                                                                                                                                                                                                                                                                                                                                      |
+| Extension names                                         | `namespace/kind/name`, checked by kind (ADR 0003); `mst/` built-ins; a top-level `servers` map keyed by label                                                                                                                                                                                                                                                                                                                                             | —                                                                                                                                                                                                                                                                                                                                                                                      |
+| Datasets and judges from plugins                        | `plugins`, `extends`; case `judges` beside `assertions`; judge merge rules (case plus eval config, the case's settings win); plugin datasets by name, with `snapshot` / `source` (declared with `ref`), recorded in `run.json`; `mst datasets` (list, show, pull), `mst judges` (list, show)                                                                                                                                                              | `mst plugins`, `--plugin-option`; one dataset form, `{ "type", "snapshot"?, "source"? }`, replacing `ref`, with `source` in `run.json` in place of `live: true`                                                                                                                                                                                                                        |
+| Sign-ins (step 3)                                       | Connectors, `mst auth` / `status` / `revoke`, local credential store, token hand-out and renewal, dry-run proxy, simulated writes (`simulateWrites`)                                                                                                                                                                                                                                                                                                      | Plugin credential stores (the `credential-store` kind); a dry run that checks sign-ins and prints a text plan                                                                                                                                                                                                                                                                          |
+| Environments (steps 4–5)                                | Local Cowork on macOS and Linux, headless (Claude's `AskUserQuestion` disabled); each trial's trace written when it finishes; the `env` kind, `--env`, `--env-option` (`shards`, `keep`), shards over a channel (`mst collect`), owned-desktop mode for Linux workers, run-wide `limits` per provider and per server across shards, gather with missing trials, `--resume`; `run.json` records the environment's name, shards, `keep` and options         | A built-in `docker` environment and a default Linux Cowork image built locally, `mst env setup docker` (DEVPLAT-1451); connector servers and tool-metadata variants in environments (refused outside `local` today); each shard's image digest and client version in `run.json`, and each trace's shard (2.0); `--detach`, `mst runs`; plugin `setup` steps (the `setup` kind and key) |
+| Grading as its own step (6–7)                           | Grading during collect, or skipped (`mst run --no-grade`); `mst grade <run> --config` regrades stored traces as a new run (`.g2`, `gradedFrom`); both need `"redactStoredResponses": false`; `comparePairwise` as an API; pairwise judges in eval configs (`pairwiseJudges`, after every variant runs); agentic judges (`agenticJudge`, `agenticPairwiseJudge`, on the Claude Agent SDK or Codex); client artifacts copied for judges and kept in the run | `mst grade` without `--config`; `--judge`; regrades reading the traces in place rather than a copy; shared configs that set `redactStoredResponses`                                                                                                                                                                                                                                    |
+| Results (8–9)                                           | Run directories in the `mst.run/v1` layout, with `latest.json` and JSON Schemas; result stores set in the config, which get each run's results and summary; the report written with each run; `mst open` for local runs; the MCP Playwright reporter writing the same runs, evals only                                                                                                                                                                    | Result stores that hold whole runs, `--results`, `mst open --results` and `--latest` (DEVPLAT-1461); `mst stores`                                                                                                                                                                                                                                                                      |
+| Report                                                  | The same layout for every eval: Result, Variants compared (with _Show statistics_), What differs, Case by case, Why trials failed; a recommendation only for tool optimization                                                                                                                                                                                                                                                                            | —                                                                                                                                                                                                                                                                                                                                                                                      |
+| Cowork's own connectors                                 | —                                                                                                                                                                                                                                                                                                                                                                                                                                                         | An approach; see [Known gap](#known-gap-coworks-own-connectors)                                                                                                                                                                                                                                                                                                                        |
 
 ## Open questions
 
 1. **Cowork's own connectors.** Which of the three options above, and does Cowork reach configured `http` servers from the desktop or from the cloud?
-2. **Cases only one variant can answer.** "What can the Acme connector do for Gmail?" isn't fair to the native variant. Should such cases be tagged and reported separately?
+2. **Cases only one variant can answer.** "What can the Acme connector do for Gmail?" isn't fair to the `vendor-mcp` variant. Should such cases be tagged and reported separately?
 3. **Skipping consent.** Which vendors offer client credentials or service accounts for test accounts, so `mst auth` needs no browser?
 4. **Who can read stored sign-ins.** A shared credential store must keep each person's grants separate.
-5. **Judge cost.** Grading should report its own cost, separate from the client's.
+5. **Judge cost.** Settled: each trial has `judge_cost_usd`, `judge_input_tokens` and `judge_output_tokens`, separate from the client's usage, and pairwise judges' usage is in `telemetry.pairwiseJudgeUsage`. Still open: showing judge cost in the report's headline.
 6. **Judges in datasets.** Settled: a case's judges sit beside its assertions, in `judges`.
-7. **What an environment must do.** Settled ([ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md)): create machines and open a channel to each (run a command, copy files in and out). MST does the rest over that channel, the same way for containers and VMs: it hands each worker its trials and tokens, reads its progress, and gathers its traces. Still open: whether MST ships the desktop image or each organization supplies its own.
+7. **What an environment must do.** Settled ([ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md)): create machines and open a channel to each (run a command, copy files in and out). MST does the rest over that channel, the same way for containers and VMs: it hands each worker its trials and tokens, reads its progress, and gathers its traces. The image source is settled too ([ADR 0004, update of 2026-10-10](../adr/0004-environments-run-shards-over-a-channel.md#update-2026-10-10)): MST ships a built-in `docker` environment and a default Linux Cowork image as a Dockerfile it builds locally (`mst env setup docker`), and an organization can supply its own image (`--env-option image=<ref>`). Both are planned. Still open: whether Claude Desktop runs under Docker on Apple Silicon, which decides whether laptop Docker is enough or a remote Docker host is needed.

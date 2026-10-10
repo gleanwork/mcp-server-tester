@@ -4,6 +4,8 @@ status: accepted
 
 # Extension names say their kind
 
+> **Since then.** The `env` kind has joined the scheme ([ADR 0004](./0004-environments-run-shards-over-a-channel.md)). `setup` and `credential-store` are still planned.
+
 ADR 0001 named plugin extensions `namespace/name`. A name alone did not say what it was, so `acme/correctness` could be a judge, a metric or a dataset, and using it in the wrong place failed with "not available" instead of saying why. The 2.0 design (`docs/design/README.md`) names every extension `<namespace>/<kind>/<name>`, so `acme/judge/correctness` is a judge wherever it appears.
 
 ## Decision

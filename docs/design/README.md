@@ -1,10 +1,10 @@
 # Comparing MCP server setups in Cowork
 
-> **Design proposal.** This is how we intend evals to be run. Many of these commands and config keys don't exist yet. The [explainer](./explainer.md) covers the design, the run lifecycle, and what exists today versus what's planned.
+> **Design proposal.** This is how we intend evals to be run. Some of these commands and config keys don't exist yet; each is marked planned where it appears. The [explainer](./explainer.md) covers the design, the run lifecycle, and what exists today versus what's planned.
 
 This walkthrough runs one eval end to end. It uses a fictional company, Acme, whose private plugin `@acme/mst-plugin` provides datasets, judges, a VM environment and a result store.
 
-**Goal:** find out whether Cowork answers Acme's info-seeking questions better with Acme's aggregated MCP server, with the native vendor MCP servers (Slack, Jira, Linear, GitHub, Gmail, Drive, Calendar), or with both, using the same model.
+**Goal:** find out whether Cowork answers Acme's info-seeking questions better with Acme's aggregated MCP server, with the vendors' own MCP servers (Slack, Jira, Linear, GitHub, Gmail, Drive, Calendar), or with both, using the same model.
 
 ## Prerequisites
 
@@ -26,12 +26,12 @@ npm i -D @gleanwork/mcp-server-tester@beta @acme/mst-plugin
 # Once, on a Mac that will run Cowork locally
 npx mst cowork setup
 
-# Once, to run Cowork in containers (section 6)
+# Once, to run Cowork in containers (section 6; planned)
 npx mst env setup docker --app ./claude-desktop-linux.deb
 # → built mst-desktop@sha256:9c1e…
 ```
 
-See what the plugin provides:
+See what the plugin provides (`mst plugins` is planned):
 
 ```bash
 npx mst plugins --plugins @acme/mst-plugin
@@ -42,9 +42,9 @@ npx mst plugins --plugins @acme/mst-plugin
   dataset            acme/dataset/info-seeking, acme/dataset/action-taking, acme/dataset/tool-selection
   judge              acme/judge/correctness, acme/judge/completeness, acme/judge/groundedness
   pairwise-judge     acme/pairwise-judge/preference
-  connector          acme/connector/slack, acme/connector/jira
-  credential-store   acme/credential-store/secret-manager
-  setup              acme/setup/reset-test-tenant
+  connector          acme/connector/search, acme/connector/slack, acme/connector/jira, …
+  credential-store   acme/credential-store/secret-manager   (planned kind)
+  setup              acme/setup/reset-test-tenant           (planned kind)
   env                acme/env/cloud-vm
   result-store       acme/result-store/eval-results
   config             acme/config/cowork
@@ -92,12 +92,12 @@ Each case has an `input`, an `expected` answer, tags, and optional default judge
 
 ## 3. Write the eval config
 
-`evals/cowork-aggregated-vs-native.json`:
+`evals/cowork-aggregated-vs-vendor-mcp.json`:
 
 ```json
 {
   "$schema": "https://unpkg.com/@gleanwork/mcp-server-tester@beta/schema/eval-config.schema.json",
-  "name": "cowork-aggregated-vs-native",
+  "name": "cowork-aggregated-vs-vendor-mcp",
   "plugins": ["@acme/mst-plugin"],
   "extends": ["acme/config/cowork"],
 
@@ -109,26 +109,24 @@ Each case has an `input`, an `expected` answer, tags, and optional default judge
 
   "judges": ["acme/judge/correctness"],
   "pairwiseJudges": ["acme/pairwise-judge/preference"],
-  "metrics": ["passed", "judge_score", "cost_usd", "duration_ms", "tool_count"],
+  "metrics": ["passed", "judge_score", "cost_usd", "duration_s", "tool_count"],
+  "redactStoredResponses": false,
 
   "servers": {
-    "acme": {
-      "transport": "http",
-      "serverUrl": "https://mcp.acme.example/mcp"
-    },
-    "slack": { "transport": "http", "serverUrl": "https://<slack-mcp-url>" },
-    "jira": { "transport": "http", "serverUrl": "https://<jira-mcp-url>" },
-    "linear": { "transport": "http", "serverUrl": "https://<linear-mcp-url>" },
-    "github": { "transport": "http", "serverUrl": "https://<github-mcp-url>" },
-    "gmail": { "transport": "http", "serverUrl": "https://<gmail-mcp-url>" },
-    "gdrive": { "transport": "http", "serverUrl": "https://<drive-mcp-url>" },
-    "gcal": { "transport": "http", "serverUrl": "https://<calendar-mcp-url>" }
+    "acme": { "connector": "acme/connector/search" },
+    "slack": { "connector": "acme/connector/slack" },
+    "jira": { "connector": "acme/connector/jira" },
+    "linear": { "connector": "acme/connector/linear" },
+    "github": { "connector": "acme/connector/github" },
+    "gmail": { "connector": "acme/connector/gmail" },
+    "gdrive": { "connector": "acme/connector/gdrive" },
+    "gcal": { "connector": "acme/connector/gcal" }
   },
 
   "variants": [
     { "name": "aggregated", "servers": ["acme"] },
     {
-      "name": "native",
+      "name": "vendor-mcp",
       "servers": [
         "slack",
         "jira",
@@ -140,7 +138,7 @@ Each case has an `input`, an `expected` answer, tags, and optional default judge
       ]
     },
     {
-      "name": "aggregated-plus-native",
+      "name": "aggregated-plus-vendor-mcp",
       "servers": [
         "acme",
         "slack",
@@ -156,31 +154,32 @@ Each case has an `input`, an `expected` answer, tags, and optional default judge
 }
 ```
 
-- **`servers`** defines each server once. The key is its label in traces and the report.
+- **`servers`** defines each server once. The key is its label in traces and the report. Each one names a plugin connector, which says where the server is, how to sign in, and how Cowork reaches it (here, through a dry-run proxy). A server can also be a plain `http` or `stdio` entry with a literal or environment-backed token; `mst auth` signs in only to connector servers.
 - **`variants`** run the same cases with the same client and model, and only their servers differ. The first variant is the baseline; set `"baseline"` to choose another.
-- **`datasets`** use the snapshot by default. To pin a snapshot: `{ "ref": "acme/dataset/info-seeking", "snapshot": "2026-10-01" }`. For live data: `{ "ref": "…", "source": "live" }`.
+- **`datasets`** use the snapshot by default. To pin a snapshot: `{ "ref": "acme/dataset/info-seeking", "snapshot": "2026-10-01" }`. For live data: `{ "ref": "…", "source": "live" }`. (One `{ "type": … }` form is planned to replace `ref`.)
+- **`redactStoredResponses: false`** keeps full traces in the run. Stored traces are redacted by default, and a redacted run can't be collected with `--no-grade`, regraded (section 8) or resumed (section 7). Letting a plugin's shared config set this is planned.
 - **`judges`** apply to every case, on top of each case's own judges. Pointwise judges score each trial. Pairwise judges compare each variant with the baseline on each case.
-- **`setup`** (optional) lists plugin steps that run before collection and tear down afterwards, e.g. `acme/setup/reset-test-tenant`.
+- **`setup`** (planned, optional) lists plugin steps that run before collection and tear down afterwards, e.g. `acme/setup/reset-test-tenant`.
 
-Point write-capable servers at test tenants or test accounts. MST can't yet block write tools for Cowork's connectors.
+Point write-capable servers at test tenants or test accounts. A connector's dry-run proxy blocks writes, or answers them with a success reply when the eval config sets `"simulateWrites": true`. MST can't block writes for Cowork's own connectors, the ones added in the Claude account, so disconnect any that could write to real accounts.
 
-Check the plan without running anything:
+Check the plan without running anything. Today `--dry-run` prints the plan as JSON and doesn't check sign-ins; the text plan below, with its `credentials` line, is planned:
 
 ```bash
-npx mst run --config evals/cowork-aggregated-vs-native.json --dry-run
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json --dry-run
 ```
 
 ```text
-cowork-aggregated-vs-native
+cowork-aggregated-vs-vendor-mcp
   datasets    acme/dataset/info-seeking (snapshot 2026-10-06, 50 cases, sha256 3f9a…)
   client      cowork · model claude-opus-4-8 · 3 trials per case
   variants    aggregated (baseline) · 1 server
-              native · 7 servers
-              aggregated-plus-native · 8 servers
+              vendor-mcp · 7 servers
+              aggregated-plus-vendor-mcp · 8 servers
   graders     acme/judge/correctness, acme/judge/completeness (12 cases)
               acme/pairwise-judge/preference (each variant vs aggregated)
   env         local (macOS) · 1 shard
-  results     .mcp-test-results/cowork-aggregated-vs-native/
+  results     .mcp-test-results/cowork-aggregated-vs-vendor-mcp/
   total       450 trials · 100 pairwise preferences
   credentials 2 of 8 servers need `mst auth` (gmail, gcal)
 ```
@@ -190,7 +189,7 @@ The `env` line says where the trials would run. With `--env docker --env-option 
 ## 4. Authenticate once
 
 ```bash
-npx mst auth --config evals/cowork-aggregated-vs-native.json --store acme/credential-store/secret-manager
+npx mst auth --config evals/cowork-aggregated-vs-vendor-mcp.json --store acme/credential-store/secret-manager
 ```
 
 ```text
@@ -204,11 +203,11 @@ gdrive   google-oauth    ✓ valid (shares gmail grant)
 gcal     google-oauth    ✓ valid (shares gmail grant)
 ```
 
-Each run refreshes these grants and hands short-lived tokens to the client, then removes them when it finishes. Leave out `--store` to keep grants on your machine only. Remote runs and CI need a shared credential store.
+Each run refreshes these grants and hands short-lived tokens to the client, then removes them when it finishes. Leave out `--store` to keep grants on your machine only. Remote runs and CI need a shared credential store. Today `--store` takes a directory; plugin credential stores such as `acme/credential-store/secret-manager` are planned.
 
 ```bash
-npx mst auth status --config evals/cowork-aggregated-vs-native.json
-npx mst auth revoke --config evals/cowork-aggregated-vs-native.json --server slack
+npx mst auth status --config evals/cowork-aggregated-vs-vendor-mcp.json
+npx mst auth revoke --config evals/cowork-aggregated-vs-vendor-mcp.json --server slack
 ```
 
 ## 5. Run locally
@@ -216,20 +215,20 @@ npx mst auth revoke --config evals/cowork-aggregated-vs-native.json --server sla
 Use small local runs to iterate:
 
 ```bash
-npx mst run --config evals/cowork-aggregated-vs-native.json --variant native --case e2e-0011 --trials 1
-npx mst run --config evals/cowork-aggregated-vs-native.json --max-cases 5
-npx mst run --config evals/cowork-aggregated-vs-native.json --filter-tag source:correctness
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json --variant vendor-mcp --case e2e-0011 --trials 1
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json --max-cases 5
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json --filter-tag source:correctness
 ```
 
 ```text
 setup     auth staged for 8 servers · desktop lease acquired
-collect   aggregated              e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●●
-          native                  e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●!
-          aggregated-plus-native  e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●●
+collect   aggregated                  e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●●
+          vendor-mcp                  e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●!
+          aggregated-plus-vendor-mcp  e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●●
 teardown  tokens removed · Claude Desktop profile restored
-grade     aggregated              e2e-0000 ✓✓✓  e2e-0001 ✓✓✓  e2e-0002 ✓✓✗
-          native                  e2e-0000 ✓✗✓  e2e-0001 ✓✓✓  e2e-0002 ✗✗–
-          aggregated-plus-native  e2e-0000 ✓✓✓  e2e-0001 ✓✓✓  e2e-0002 ✓✓✓
+grade     aggregated                  e2e-0000 ✓✓✓  e2e-0001 ✓✓✓  e2e-0002 ✓✓✗
+          vendor-mcp                  e2e-0000 ✓✗✓  e2e-0001 ✓✓✓  e2e-0002 ✗✗–
+          aggregated-plus-vendor-mcp  e2e-0000 ✓✓✓  e2e-0001 ✓✓✓  e2e-0002 ✓✓✓
 ● collected  ! infrastructure error  ✓ passed  ✗ failed  – missing
 ```
 
@@ -237,10 +236,12 @@ The client runs the trials first. Judges then grade the collected traces.
 
 ## 6. Run in containers
 
+> **Planned.** MST has no `docker` environment yet (DEVPLAT-1451), and today no environment other than `local` can run connector servers or variants with tool metadata, so this config can't run in one yet.
+
 Run the same config in 4 Linux containers on your machine:
 
 ```bash
-npx mst run --config evals/cowork-aggregated-vs-native.json --env docker --env-option shards=4
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json --env docker --env-option shards=4
 ```
 
 ```text
@@ -257,29 +258,29 @@ Cowork runs in the containers, so you can keep using your Mac. Each container is
 
 To use an image your organization publishes instead of building one, add `--env-option image=registry.acme.example/mst-desktop@sha256:…`.
 
-Watch a container's desktop while it runs, or keep a container that failed so you can look at it:
+Watch a container's desktop while it runs (`mst runs` is planned), or keep a container that failed so you can look at it:
 
 ```bash
 npx mst runs view <run-id> --shard 2
-npx mst run --config evals/cowork-aggregated-vs-native.json --env docker --env-option shards=4 --env-option keep=failed
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json --env docker --env-option shards=4 --env-option keep=failed
 ```
 
 ## 7. Run remotely
 
-Use the same config, on 5 fresh VMs. They run the same image as the containers in section 6:
+Use the same config, on 5 fresh VMs. They run the same image as the containers in section 6. The limits in section 6 apply here too, and `--results` is planned (DEVPLAT-1461):
 
 ```bash
-npx mst run --config evals/cowork-aggregated-vs-native.json \
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json \
   --env acme/env/cloud-vm --env-option shards=5 \
   --results acme/result-store/eval-results
 ```
 
 The VMs run the trials. Your machine gathers their traces, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the traces collected so far. Rerun with `--resume <run-id>` to collect only what's missing. `--env-option keep=failed` keeps a VM whose shard failed, as it does for containers.
 
-To walk away from a long run, detach it:
+To walk away from a long run, detach it (`--detach` and `mst runs` are planned):
 
 ```bash
-npx mst run --config evals/cowork-aggregated-vs-native.json \
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json \
   --env acme/env/cloud-vm --env-option shards=5 \
   --results acme/result-store/eval-results --detach
 # → run 7f3c2a started on acme/env/cloud-vm
@@ -292,7 +293,7 @@ npx mst runs cancel 7f3c2a
 ### On a schedule
 
 ```yaml
-# .github/workflows/cowork-aggregated-vs-native.yml
+# .github/workflows/cowork-aggregated-vs-vendor-mcp.yml
 on:
   schedule: [{ cron: '0 9 * * 3,5' }]
   workflow_dispatch: {}
@@ -307,21 +308,26 @@ jobs:
       # authenticate to your cloud for the credential store and result store
       - run: npm ci
       - run: >
-          npx mst run --config evals/cowork-aggregated-vs-native.json
+          npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json
           --env acme/env/cloud-vm --env-option shards=5
           --results acme/result-store/eval-results
 ```
 
 ## 8. Regrade without re-running
 
-Judges read stored traces, so you can change or add judges and regrade without running Cowork again:
+Judges read stored traces, so you can change or add judges and regrade without running Cowork again. This needs the run stored with `"redactStoredResponses": false`, as the config in section 3 sets:
 
 ```bash
-npx mst run --config evals/cowork-aggregated-vs-native.json --env acme/env/cloud-vm --no-grade
-npx mst grade 7f3c2a
+npx mst run --config evals/cowork-aggregated-vs-vendor-mcp.json --env acme/env/cloud-vm --no-grade
+npx mst grade 7f3c2a --config evals/cowork-aggregated-vs-vendor-mcp.json
+# → run 7f3c2a.g2 (traces from 7f3c2a)
+```
+
+Planned: `mst grade` without `--config`, and the `--plugin-option` and `--judge` flags:
+
+```bash
 npx mst grade 7f3c2a --plugin-option acme.source=live
 npx mst grade 7f3c2a --judge acme/judge/groundedness
-# → run 7f3c2a.g2 (traces from 7f3c2a)
 ```
 
 ## 9. Find your results
@@ -329,16 +335,20 @@ npx mst grade 7f3c2a --judge acme/judge/groundedness
 Runs are written locally by default:
 
 ```text
-.mcp-test-results/cowork-aggregated-vs-native/runs/<run-id>/
-├── run.json        # config, resolved datasets and judges, environment, phase status
-├── traces/         # one trace per trial, with the shard it ran on
-├── scores/         # one score per grader per trial; pairwise preferences per case
-├── results.json    # traces and scores joined
-├── summary.json    # per-variant metrics and comparisons
-└── report/
+.mcp-test-results/cowork-aggregated-vs-vendor-mcp/
+├── latest.json         # the newest complete, full run
+└── runs/<run-id>/
+    ├── run.json        # the config's identity, each variant's setup, resolved datasets and judges,
+    │                   #   environment, phase status
+    ├── traces/         # one trace per trial
+    ├── artifacts/      # each trial's client artifacts, for judges
+    ├── scores/         # one score per grader per trial; pairwise preferences per case
+    ├── results.json    # traces and scores joined
+    ├── summary.json    # per-variant metrics and comparisons
+    └── report/
 ```
 
-`--results` sends the run somewhere else instead:
+Planned (DEVPLAT-1461): `--results` sends the run somewhere else instead. Today a result store set in the eval config gets each run's results and summary, and the run directory stays local.
 
 ```bash
 --results acme/result-store/eval-results     # a store your plugin provides
@@ -347,34 +357,36 @@ Runs are written locally by default:
 ```
 
 ```bash
-npx mst stores --plugins @acme/mst-plugin
+npx mst stores --plugins @acme/mst-plugin   # planned
 ```
 
-`run.json` records where the run ran: the environment, its options, the number of shards, and each shard's image digest and Claude Desktop version.
+`run.json` records where the run ran: the environment, its options and the number of shards. Recording each shard's image digest and Claude Desktop version, and each trace's shard, is planned for 2.0.
 
 ## 10. Read your results
 
 Every graded run ends with a comparison against the baseline:
 
 ```text
-cowork-aggregated-vs-native · run 7f3c2a · 50 cases × 3 trials · baseline: aggregated
+cowork-aggregated-vs-vendor-mcp · run 7f3c2a · 50 cases × 3 trials · baseline: aggregated
 
-variant                  pass    judge   vs baseline (pairwise)   $/case   median   tools used
-aggregated               0.94    0.91    —                        0.68     58 s     acme 100%
-native                   0.71 ▼  0.74 ▼  32% win · 61% loss       0.77     52 s     slack 41% · jira 37% · …
-aggregated-plus-native   0.95    0.92    48% win · 40% loss       0.81 ▲   52 s     acme 92% · native 4%
+variant                      pass    judge   vs baseline (pairwise)   $/case   median   tools used
+aggregated                   0.94    0.91    —                        0.68     58 s     acme 100%
+vendor-mcp                   0.71 ▼  0.74 ▼  32% win · 61% loss       0.77     52 s     slack 41% · jira 37% · …
+aggregated-plus-vendor-mcp   0.95    0.92    48% win · 40% loss       0.81 ▲   52 s     acme 92% · slack 3% · …
 
 ▼ ▲ clearly worse / clearly better than baseline
-native: 11 cases regressed · 2 improved      aggregated-plus-native: 1 regressed · 2 improved
+vendor-mcp: 11 cases regressed · 2 improved      aggregated-plus-vendor-mcp: 1 regressed · 2 improved
 ```
 
 Open the report:
 
 ```bash
 npx mst open                                                          # newest local run
-npx mst open .mcp-test-results/cowork-aggregated-vs-native/runs/<run-id>
+npx mst open .mcp-test-results/cowork-aggregated-vs-vendor-mcp/runs/<run-id>
+
+# planned (DEVPLAT-1461)
 npx mst open --results acme/result-store/eval-results 7f3c2a
-npx mst open --results acme/result-store/eval-results --latest cowork-aggregated-vs-native
+npx mst open --results acme/result-store/eval-results --latest cowork-aggregated-vs-vendor-mcp
 ```
 
 The report has the same sections for every eval:

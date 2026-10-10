@@ -4,6 +4,8 @@ This document describes the internal structure of `@gleanwork/mcp-server-tester`
 
 ## Module Map
 
+This map covers the core modules. [AGENTS.md](../AGENTS.md#architecture) is the full list, including `plugins/`, `proxy/`, `llm/`, `skills/`, `entries/`, `evals/environments/` and `auth/grants/`.
+
 ### `src/config/`
 
 Defines and validates the `MCPConfig` discriminated union (`stdio` | `http`) using Zod. All transport configuration is typed and validated at the boundary via `validateMCPConfig()`. Nothing else in the codebase reaches into transport details directly; they go through this module first.
@@ -38,7 +40,7 @@ The dataset-driven evaluation engine. Key files:
 
 ### `src/judge/`
 
-LLM-as-a-judge evaluation. `judgeTypes.ts` defines the `Judge` interface and `JUDGE_PROVIDER_KINDS`, from which `ProviderKind` and the dataset schema derive. `llmJudge.ts` is the one judge core: the prompts, the verdict parser, the `maxToolOutputSize` guard and usage defaults. Each provider file (`anthropicJudge.ts`, `vertexAnthropicJudge.ts`, `claudeAgentJudge.ts`, `openaiJudge.ts`, `googleJudge.ts`) is only a completion adapter: a prompt goes in, text and tokens come out. `judgeClient.ts` maps each provider kind to its adapter in `createJudge()`. `rubrics.ts` provides built-in rubric definitions and the `resolveRubric()` helper. Custom named judges come from plugins (`judges` in a plugin object, referenced as `<namespace>/judge/<name>`); they return a score and don't use the LLM core.
+LLM-as-a-judge evaluation. `judgeTypes.ts` defines the `Judge` interface and `JUDGE_PROVIDER_KINDS`, from which `ProviderKind` and the dataset schema derive. `llmJudge.ts` is the one judge core: the prompts, the verdict parser, the `maxToolOutputSize` guard and usage defaults. Each provider file (`anthropicJudge.ts`, `vertexAnthropicJudge.ts`, `claudeAgentJudge.ts`, `openaiJudge.ts`, `googleJudge.ts`) is only a completion adapter: a prompt goes in, text and tokens come out. `judgeClient.ts` maps each provider kind to its adapter in `createJudge()`. `rubrics.ts` provides built-in rubric definitions and the `resolveRubric()` helper. Custom named judges come from plugins (`judges` in a plugin object, referenced as `<namespace>/judge/<name>`); they return a score and don't use the LLM core. `agentic/` holds agentic judges, which run an agent (the Claude Agent SDK or Codex) over a workspace of the trial's evidence.
 
 ### `src/auth/`
 
@@ -61,7 +63,7 @@ Custom Playwright reporter. `channel.ts` is the contract between the code that r
 
 ### `src/cli/`
 
-The CLI, installed as `mst` and as `mcp-server-tester` (the same binary). `index.ts` is the entry point; the `commands/` directory contains one subdirectory per command (`init`, `generate`, `login`, `token`, `run`, `batch`, `cowork`, `open`). `components/` holds Ink-based React components for the interactive prompts. `templates/` stores scaffold files emitted by `init`.
+The CLI, installed as `mst` and as `mcp-server-tester` (the same binary). `index.ts` is the entry point; the `commands/` directory contains one subdirectory per command (`init`, `generate`, `login`, `token`, `auth`, `datasets`, `judges`, `run`, `grade`, `batch`, `cowork`, `open`, and the hidden `collect` a worker runs). `components/` holds Ink-based React components for the interactive prompts. `templates/` stores scaffold files emitted by `init`.
 
 ### `src/types/`
 
@@ -88,8 +90,8 @@ CallToolResult (raw SDK response)
    ↓  matchers/: expect(result).toContainToolText(), toMatchToolSchema(), ...
    ↓  validators/: validateText(), validateSchema(), validatePattern(), etc.
 ValidationResult (pass: boolean, message: string)
-   ↓  mcpReporter.ts: the fixture records the call for the MCP reporter
-HTML report (ui-dist/)
+   ↓  Playwright's own reporter
+Playwright report (the MCP reporter reports evals only)
 ```
 
 ### Client Eval Case (the mst client in a Playwright test)
