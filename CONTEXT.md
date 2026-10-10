@@ -19,7 +19,7 @@ A named list of cases. An eval names datasets by source: a file, a directory, a 
 _Avoid_: eval set, test file
 
 **Snapshot**:
-A frozen copy of a plugin's dataset, named by an id such as a date. A run uses the source's latest snapshot unless the declaration sets `snapshot`, or `source: "live"` for **live** data fetched when the run starts. Today a plugin dataset with either is declared as `{ "ref": "acme/dataset/x", ... }`; one `{ "type": ... }` form is planned.
+A frozen copy of a plugin's dataset, named by an id such as a date. A run uses the source's latest snapshot unless the declaration sets `snapshot`, or `source: "live"` for **live** data fetched when the run starts. A declaration that sets either is `{ "type": "acme/dataset/x", "snapshot"?, "source"? }`, and `run.json` records which copy the run read.
 _Avoid_: version, release, frozen set
 
 **Case**:

@@ -196,7 +196,7 @@ describe('mst datasets show', () => {
       live.print
     );
     const shown = JSON.parse(live.text()) as Record<string, unknown>;
-    expect(shown).toMatchObject({ live: true, caseCount: 2 });
+    expect(shown).toMatchObject({ source: 'live', caseCount: 2 });
     expect(shown).not.toHaveProperty('snapshot');
   });
 

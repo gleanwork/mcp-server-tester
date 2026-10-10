@@ -67,9 +67,9 @@
             "maximum": 9007199254740991
           },
           "contentHash": { "type": "string" },
-          "ref": { "type": "string" },
-          "snapshot": { "type": "string" },
-          "live": { "type": "boolean", "const": true }
+          "type": { "type": "string" },
+          "source": { "type": "string", "enum": ["snapshot", "live"] },
+          "snapshot": { "type": "string" }
         },
         "required": ["name", "caseCount", "contentHash"],
         "additionalProperties": {}

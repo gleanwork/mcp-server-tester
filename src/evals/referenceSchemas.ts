@@ -38,7 +38,7 @@ export function kindCheckedReferenceSchema(kind: KindSegment) {
 }
 
 /** `{ "type": <reference>, ...options }` for an extension of `kind`. */
-export function taggedReferenceSchema(kind: KindSegment) {
+function taggedReferenceSchema(kind: KindSegment) {
   return z.object({ type: referenceSchema(kind) }).passthrough();
 }
 

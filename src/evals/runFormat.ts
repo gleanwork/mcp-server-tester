@@ -102,11 +102,11 @@ const RunRecordSchema = z.looseObject({
       caseCount: z.number().int().nonnegative(),
       contentHash: z.string(),
       /** A plugin's dataset: its source, `namespace/dataset/name`. */
-      ref: z.string().optional(),
+      type: z.string().optional(),
+      /** For a source with snapshots: a snapshot, or its live data. */
+      source: z.enum(['snapshot', 'live']).optional(),
       /** The snapshot the source read. */
       snapshot: z.string().optional(),
-      /** The source's live data, not a snapshot. */
-      live: z.literal(true).optional(),
     })
   ),
   judges: z.array(z.unknown()).optional(),
@@ -281,9 +281,9 @@ export interface RunFacts {
     name: string;
     caseCount: number;
     contentHash: string;
-    ref?: string;
+    type?: string;
+    source?: 'snapshot' | 'live';
     snapshot?: string;
-    live?: true;
   }>;
   judges?: Array<{ type: string; level: string; optionsHash: string }>;
   redactStoredResponses: boolean;

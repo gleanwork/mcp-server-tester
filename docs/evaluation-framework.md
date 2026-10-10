@@ -135,7 +135,7 @@ export default plugin;
   }
   ```
 
-  A config is typed `PluginConfig` and can set any documented eval config key except `name`, `datasets`, `variants`, `plugins` and `extends`. Other keys, including `run`, are rejected when an eval config extends the config; until then MST only checks that it's an object. Configs apply in order, then the eval config's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the eval config's `trials` replaces the config's, and an eval config `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. An eval's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates an eval config itself applies `extends` first with `resolveConfigExtends` (from `./evals`).
+  A config is typed `PluginConfig` and can set any documented eval config key except `name`, `datasets`, `variants`, `baseline`, `plugins`, `extends`, `run` and `filterTags`. That includes `redactStoredResponses` and `simulateWrites`, so one config can keep full traces (for `--no-grade`, `mst grade` and `--resume`) for every eval that extends it. Other keys are rejected when an eval config extends the config; until then MST only checks that it's an object. Configs apply in order, then the eval config's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the eval config's `trials` replaces the config's, and an eval config `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. An eval's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates an eval config itself applies `extends` first with `resolveConfigExtends` (from `./evals`).
 
 - **Judges.** A judge's `evaluate({ case, trial }, options)` returns a score: `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the judge entry's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or an eval config entry's `type` and `name`. The built-in `rubric` judge has the same contract, and an eval config can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`. An optional `description` (on judges and pairwise judges) is what [`mst judges`](cli.md#judges---find-judges) shows, with `requires` and the options schema.
 
@@ -520,15 +520,15 @@ const plugin: Plugin = {
 {
   "datasets": [
     "acme/dataset/info-seeking",
-    { "ref": "acme/dataset/info-seeking", "snapshot": "2026-10-01" },
-    { "ref": "acme/dataset/info-seeking", "source": "live" }
+    { "type": "acme/dataset/info-seeking", "snapshot": "2026-10-01" },
+    { "type": "acme/dataset/info-seeking", "source": "live" }
   ]
 }
 ```
 
-- **Today's form is `ref`.** A plugin dataset that takes `snapshot` or `source` is declared as `{ "ref": … }`. `{ "type": … }` names a dataset source with options of its own (as in [Dataset sources](#dataset-sources)), and is accepted here too. One object form, `{ "type", "snapshot"?, "source"? }`, is planned to replace `ref` before 2.0.
+- **One object form.** A dataset declaration is `{ "type", "snapshot"?, "source"? }`, plus any options the source takes of its own (as in [Dataset sources](#dataset-sources)). The bare string is shorthand for `{ "type" }`. A declaration with `ref` fails with a message naming `type`.
 - **`snapshot` and `source` are MST's.** MST takes them off the declaration before the source's schema sees it, passes them as `context.request` (`source` defaults to `snapshot`; no `snapshot` means the source's latest), and rejects them for a source without `snapshots`. A dataset back with a snapshot other than the one asked for, or live data with a snapshot, fails the run.
-- **`run.json` records which copy.** Each plugin dataset in `datasets` has its `ref`, plus `snapshot` or `live: true`, next to its `caseCount` and `contentHash`. Recording `source: "snapshot" | "live"` in place of `live: true` is planned with the one dataset form. `mst run --dry-run` prints the same. Unchanged cases hash the same whichever copy they came from.
+- **`run.json` records which copy.** Each plugin dataset in `datasets` has its `type`, next to its `caseCount` and `contentHash`. A source with snapshots also records `source` (`snapshot` or `live`) and, for a snapshot, its id in `snapshot`. `mst run --dry-run` prints the same. Unchanged cases hash the same whichever copy they came from.
 
 ### Clients
 
