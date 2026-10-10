@@ -265,9 +265,11 @@ the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
 stays read-only.
 
 **In an environment.** A plugin environment (`mst run --env <namespace>/env/<name>`)
-can run Cowork shards on Linux workers in owned-desktop mode. Two limits apply
-today: connector servers and variants with tool metadata can't run in an
-environment yet, because their tokens and proxies stay on the coordinator. MST
+can run Cowork shards on Linux workers in owned-desktop mode. Connector servers
+and variants with tool metadata work there as they do locally: the worker
+launches each connector with its own paths and gets its access token from the
+coordinator, and runs the tool-variant proxy itself. The worker image must
+install the plugins the eval loads, at the paths the eval config names. MST
 ships no `docker` environment or desktop image yet; both are planned.
 
 Submission opens the native deep link through the prepared environment's `xdg-open`

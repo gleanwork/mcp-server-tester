@@ -11,7 +11,10 @@ import { localCredentialStore } from '../auth/grants/localStore.js';
 import type { CredentialStore, StoredGrant } from '../auth/grants/types.js';
 import {
   ConnectorSignInRequiredError,
+  connectorDeclarations,
+  connectorTokenSource,
   expandConnectorServers,
+  expandWorkerConnectors,
   startConnectorCredentials,
 } from './connectorServers.js';
 import { installPlugins } from '../plugins/extensions.js';
@@ -329,6 +332,122 @@ describe('startConnectorCredentials', () => {
     const credentials = await startConnectorCredentials(expansion, store);
     expect(credentials.env).toEqual({});
     await credentials.stop();
+  });
+});
+
+describe('connector servers on a shard (ADR 0004)', () => {
+  async function expansionOf(servers: Record<string, unknown>) {
+    installPlugins([testPlugin()]);
+    const config = loadEvalConfigFromObject(
+      { name: 'x', datasets: [{ type: 'file', path: 'unused' }], servers },
+      { skipDatasetValidation: true }
+    );
+    return expandConnectorServers(config, {
+      tokenDirectory: path.join(dir, 'tokens'),
+    });
+  }
+
+  it('gives a worker the declarations and fresh tokens by label', async () => {
+    await store.put('acme.acme', grant({ accessToken: 'acme-token' }));
+    await store.put('acme.google', grant({ accessToken: 'google-token' }));
+    const expansion = await expansionOf({
+      acme: { connector: 'acme/connector/acme' },
+      gmail: { connector: 'acme/connector/gmail' },
+      drive: { connector: 'acme/connector/gdrive' },
+    });
+    expect([...connectorDeclarations(expansion).values()]).toEqual([
+      {
+        connector: 'acme/connector/acme',
+        label: 'acme',
+        url: 'https://acme.example/mcp',
+      },
+      {
+        connector: 'acme/connector/gmail',
+        label: 'gmail',
+        url: 'https://gmail.example/mcp',
+      },
+      {
+        connector: 'acme/connector/gdrive',
+        label: 'drive',
+        url: 'https://drive.example/mcp',
+      },
+    ]);
+    const source = connectorTokenSource(expansion, store);
+    expect(source.labels.sort()).toEqual(['acme', 'drive', 'gmail']);
+    const tokens = await source.tokens(['gmail', 'drive', 'unknown']);
+    // One grant, one token, for both of its servers; an unknown label gets none.
+    expect(Object.keys(tokens).sort()).toEqual(['drive', 'gmail']);
+    expect(tokens.gmail!.accessToken).toBe('google-token');
+    expect(tokens.drive!.accessToken).toBe('google-token');
+    expect(tokens.gmail!.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it('refreshes a grant once when several shards ask at the same time', async () => {
+    const auth = fakeAuthServer({ expiresIn: 3600 });
+    const { signIn } = await import('../auth/grants/grants.js');
+    await signIn(
+      {
+        key: 'acme.slack',
+        name: 'acme/slack',
+        urls: [`${auth.origin}/mcp`],
+        auth: { type: 'oauth', refreshScope: null },
+      },
+      store,
+      { print: () => {}, openUrl: async (url) => auth.approve(url) },
+      { fetch: auth.fetch }
+    );
+    const expansion = await expansionOf({
+      slack: { connector: 'acme/connector/slack' },
+    });
+    let refreshes = 0;
+    const source = connectorTokenSource(expansion, store, {
+      fetch: async (url, init) => {
+        const href =
+          typeof url === 'string'
+            ? url
+            : url instanceof URL
+              ? url.href
+              : url.url;
+        if (href.endsWith('/token')) refreshes++;
+        return auth.fetch(url, init);
+      },
+      // Every stored token is due for renewal.
+      renewBeforeMs: 3600_000,
+    });
+    const [first, second] = await Promise.all([
+      source.tokens(['slack']),
+      source.tokens(['slack']),
+    ]);
+    expect(refreshes).toBe(1);
+    expect(first.slack!.accessToken).toBe(second.slack!.accessToken);
+  });
+
+  it("expands a worker's declarations with the worker's paths", async () => {
+    installPlugins([testPlugin()]);
+    const workerTokens = path.join(dir, 'worker', 'connectors');
+    const worker = await expandWorkerConnectors(
+      [
+        { connector: 'acme/connector/slack', label: 'slack' },
+        { connector: 'acme/connector/acme', label: 'acme' },
+      ],
+      { tokenDirectory: workerTokens }
+    );
+    const slack = worker.servers.get('slack') as StdioMCPConfig;
+    expect(slack.args!.at(-1)).toBe(path.join(workerTokens, 'acme.slack.json'));
+    expect(worker.deliveries.get('slack')).toEqual({
+      file: path.join(workerTokens, 'acme.slack.json'),
+      envNames: [],
+    });
+    // A direct HTTP connector gets its token in an env var.
+    expect(worker.servers.get('acme')).toMatchObject({
+      transport: 'http',
+      auth: { accessTokenEnv: 'MST_CONNECTOR_TOKEN_ACME' },
+    });
+    expect(worker.deliveries.get('acme')).toEqual({
+      envNames: ['MST_CONNECTOR_TOKEN_ACME'],
+    });
+    // Expanding writes nothing.
+    await expect(fs.stat(workerTokens)).rejects.toThrow();
   });
 });
 

@@ -222,7 +222,7 @@ The client runs the trials first. Judges then grade the collected traces.
 
 ## 6. Run in containers
 
-> **Planned.** MST has no `docker` environment yet. Today no environment other than `local` can run connector servers, or variants with tool metadata such as `rewritten`, so this config can't run in one yet.
+> **Planned.** MST has no `docker` environment yet. A plugin environment runs this config today, connector servers and tool metadata included.
 
 Run the same config in 4 Linux containers on your machine:
 

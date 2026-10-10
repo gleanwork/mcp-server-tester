@@ -104,7 +104,6 @@ import {
 } from './builtinClients.js';
 import {
   startToolSurfaceProxy,
-  usesToolSurfaceProxy,
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 import {
@@ -138,6 +137,8 @@ import {
 } from './resultStore.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import {
+  connectorDeclarations,
+  connectorTokenSource,
   expandConnectorServers,
   startConnectorCredentials,
   type ConnectorCredentials,
@@ -1160,9 +1161,14 @@ async function evaluate(
      * and keeps what came back; a second Ctrl-C quits.
      */
     const collectEnvironmentTrials = async (): Promise<GatheredResults> => {
-      if (connectors.uses.length > 0)
-        throw new Error(
-          `Connector servers can't run in "${environment.name}" yet: their tokens are kept on this machine.`
+      // A connector server goes to a worker as its declaration: the worker
+      // expands it with its own paths, and asks for its tokens.
+      const declarations = connectorDeclarations(connectors);
+      const workerServers = (servers: MCPConfig[]): MCPConfig[] =>
+        servers.map(
+          (server) =>
+            (declarations.get(server.label ?? '') as MCPConfig | undefined) ??
+            server
         );
       const groups: RequestGroup[] = [];
       const trialCases = new Map<
@@ -1171,13 +1177,6 @@ async function evaluate(
       >();
       for (const variant of variants) {
         const setup = setupVariant(variant);
-        if (
-          variantToolMetadata(evalConfig, variant) &&
-          usesToolSurfaceProxy(setup.clientConfig.definition)
-        )
-          throw new Error(
-            `Variant "${variant.name}" sets tool metadata, which MST serves through a proxy on this machine, so it can't run in "${environment.name}" yet.`
-          );
         for (const { dataset } of canonicalDatasets) {
           const prepared = variantDataset(variant, setup, dataset);
           if (!prepared) continue;
@@ -1199,7 +1198,7 @@ async function evaluate(
           const requests = batchRequests(
             prepared.effectiveDataset.cases,
             setup.clientConfig.declaration,
-            setup.servers,
+            workerServers(setup.servers),
             { evalConfig: setup.effectiveConfig }
           ).filter(
             (request) =>
@@ -1248,6 +1247,14 @@ async function evaluate(
           plugins: workerPlugins,
           groups,
           secrets: fileSecrets,
+          ...(connectors.slots.length
+            ? {
+                connectorTokens: connectorTokenSource(
+                  connectors,
+                  options.credentialStore ?? localCredentialStore()
+                ),
+              }
+            : {}),
           workDir,
           ...(evalConfig.limits ? { limits: evalConfig.limits } : {}),
           signal: controller.signal,

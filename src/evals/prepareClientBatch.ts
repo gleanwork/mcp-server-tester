@@ -69,6 +69,65 @@ export function batchRequests(
   return requests;
 }
 
+/** A batch's requests pointed at a tool-variant proxy, and how to settle their traces. */
+export interface ProxiedBatch {
+  /** The requests, each connecting to the proxy. */
+  requests: ClientBatchRequest[];
+  /**
+   * A request's trace, with tool calls under their original names. Before
+   * the request is over (`final: false`) it is settled with the traffic so
+   * far; `final` ends the request's scope.
+   */
+  settle(
+    index: number,
+    trace: ClientRunResult,
+    final: boolean
+  ): ClientRunResult;
+  /** Ends the scope of the client's own checks, once the batch has run. */
+  endChecks(): void;
+}
+
+/**
+ * Points `requests` at `proxy`: one scope per request, or one for the batch
+ * when the client connects to one server set per batch (`serversPerBatch`).
+ * A local run and a shard's worker both settle traces this way.
+ */
+export function proxiedBatch(
+  definition: ClientDefinition,
+  requests: readonly ClientBatchRequest[],
+  proxy: ToolSurfaceProxy,
+  servers: readonly MCPConfig[],
+  variantId: string
+): ProxiedBatch {
+  const shared = definition.serversPerBatch === true;
+  const scopes = requests.map(() => randomUUID());
+  if (shared) scopes.fill(scopes[0]!);
+  const checkScope = randomUUID();
+  let batchListed: boolean | undefined;
+  return {
+    requests: requests.map((request, index) => ({
+      ...request,
+      input: {
+        ...request.input,
+        servers: proxy.serversFor(scopes[index]!),
+        checkServers: proxy.serversFor(checkScope),
+      },
+    })),
+    settle(index, trace, final) {
+      const scope = scopes[index]!;
+      const listedTools = !final
+        ? proxy.activity(scope).listedTools
+        : shared
+          ? (batchListed ??= proxy.endScope(scope).listedTools)
+          : proxy.endScope(scope).listedTools;
+      return settleProxiedTrace(trace, proxy, listedTools, servers, variantId);
+    },
+    endChecks() {
+      proxy.endScope(checkScope);
+    },
+  };
+}
+
 /** What else a batch does while it runs. */
 export interface ClientBatchOptions {
   /**
@@ -108,30 +167,23 @@ export async function prepareClientBatch(
         'A batch client dataset cannot mix client types. Use separate eval configs.'
       );
   }
-  const requests = batchRequests(cases, config, servers, context);
-  const scopes = requests.map(() => randomUUID());
   const queues = new Map<string, ClientRunResult[]>(
     cases.map((c) => [c.id, []])
   );
-  if (!requests.length) return queues;
-  // Proxied clients connect to the variant's servers, one scope per request.
-  const proxy =
+  const declared = batchRequests(cases, config, servers, context);
+  if (!declared.length) return queues;
+  // Proxied clients connect to the variant's servers through the proxy.
+  const proxied =
     toolVariant && usesToolSurfaceProxy(definition)
-      ? await toolVariant.proxy()
+      ? proxiedBatch(
+          definition,
+          declared,
+          await toolVariant.proxy(),
+          servers,
+          toolVariant.id
+        )
       : undefined;
-  // A client that connects to one server set for the batch shares one scope.
-  const shared = proxy && definition.serversPerBatch;
-  if (shared) scopes.fill(scopes[0]!);
-  const checkScope = randomUUID();
-  if (proxy) {
-    requests.forEach((request, index) => {
-      request.input = {
-        ...request.input,
-        servers: proxy.serversFor(scopes[index]!),
-        checkServers: proxy.serversFor(checkScope),
-      };
-    });
-  }
+  const requests = proxied?.requests ?? declared;
   const { onTrace } = options;
   // A trace reported early is settled with the proxy's traffic so far; the
   // batch's returned traces are settled again when it ends.
@@ -142,15 +194,7 @@ export async function prepareClientBatch(
         try {
           await onTrace(
             request,
-            proxy
-              ? settleProxiedTrace(
-                  trace,
-                  proxy,
-                  proxy.activity(scopes[index]!).listedTools,
-                  servers,
-                  toolVariant!.id
-                )
-              : trace
+            proxied ? proxied.settle(index, trace, false) : trace
           );
         } catch (error) {
           console.warn(
@@ -159,7 +203,7 @@ export async function prepareClientBatch(
         }
       }
     : undefined;
-  const batchContext = proxy ? withoutToolVariant(context) : context;
+  const batchContext = proxied ? withoutToolVariant(context) : context;
   let traces: ClientRunResult[];
   try {
     traces = await definition.runBatch(
@@ -181,27 +225,16 @@ export async function prepareClientBatch(
       queues.get(request.caseId)!.push(batchFailure(config.type, reason));
     return queues;
   }
-  if (proxy) proxy.endScope(checkScope);
+  proxied?.endChecks();
   if (traces.length !== requests.length)
     throw new Error(
       'Batch client returned an incomplete trace set; refusing to resubmit.'
     );
-  const batchListed = shared
-    ? proxy.endScope(scopes[0]!).listedTools
-    : undefined;
   requests.forEach((request, index) =>
     queues
       .get(request.caseId)!
       .push(
-        proxy
-          ? settleProxiedTrace(
-              traces[index]!,
-              proxy,
-              batchListed ?? proxy.endScope(scopes[index]!).listedTools,
-              servers,
-              toolVariant!.id
-            )
-          : traces[index]!
+        proxied ? proxied.settle(index, traces[index]!, true) : traces[index]!
       )
   );
   return queues;

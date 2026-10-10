@@ -2,7 +2,7 @@
 
 > **The connector contract.** It specifies step 4 of the [walkthrough](./README.md) ("Authenticate once"), the `connectors` extension kind and the credential store. It extends the [explainer](./explainer.md). Terms follow [`CONTEXT.md`](../../CONTEXT.md).
 >
-> **Built:** connectors, `mst auth` / `status` / `revoke`, `mst/credential-store/local`, run preflight, delivery, renewal and cleanup, the [dry-run proxy](../cowork.md#dry-run-proxy) and its [simulated writes](../cowork.md#simulated-writes). **Not yet:** plugin credential stores (`--store` takes a directory; remote stores are planned), and connector servers in an environment other than `local`.
+> **Built:** connectors, `mst auth` / `status` / `revoke`, `mst/credential-store/local`, run preflight, delivery, renewal and cleanup (on this machine, and to a shard's worker over `mst.shard/v1`), the [dry-run proxy](../cowork.md#dry-run-proxy) and its [simulated writes](../cowork.md#simulated-writes). **Not yet:** plugin credential stores (`--store` takes a directory; remote stores are planned).
 
 ## Goal
 

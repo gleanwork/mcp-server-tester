@@ -60,6 +60,8 @@ function envName(label: string): string {
 /** One credential a run must deliver. */
 interface CredentialSlot {
   target: GrantTarget;
+  /** The labels of the servers that use this grant. */
+  labels: string[];
   /** Private file for a launched connector (one per grant). */
   file?: string;
   /** Run-private env var for a direct HTTP connection. */
@@ -149,9 +151,10 @@ export async function expandConnectorServers(
     const { key } = grantIdentity(use);
     let slot = slots.get(key);
     if (!slot) {
-      slot = { target: targets.get(key)!, envNames: [] };
+      slot = { target: targets.get(key)!, labels: [], envNames: [] };
       slots.set(key, slot);
     }
+    if (!slot.labels.includes(use.label)) slot.labels.push(use.label);
     return slot;
   };
 
@@ -270,7 +273,11 @@ export interface ConnectorCredentials {
   stop(): Promise<void>;
 }
 
-async function writeTokenFile(file: string, token: string): Promise<void> {
+/** Writes a token where a launched connector reads it: `{ version, accessToken }`, mode 0600. */
+export async function writeTokenFile(
+  file: string,
+  token: string
+): Promise<void> {
   const temporary = `${file}.${randomUUID()}.tmp`;
   const handle = await open(temporary, 'wx', 0o600);
   try {
@@ -449,4 +456,129 @@ export async function startConnectorCredentials(
     throw error;
   }
   return { env, secrets: () => [...delivered], stop };
+}
+
+/**
+ * Connector servers as a shard's worker gets them (ADR 0004), by label: the
+ * declaration, not the entry it expands to on this machine, whose paths only
+ * this machine has. The worker expands them itself
+ * ({@link expandWorkerConnectors}).
+ */
+export function connectorDeclarations(
+  expansion: ConnectorExpansion
+): Map<string, ConnectorServerConfig> {
+  return new Map(
+    expansion.uses.map((use) => [
+      use.label,
+      { connector: use.reference, label: use.label, url: use.url },
+    ])
+  );
+}
+
+/** A worker's access token for one server. */
+export interface WorkerToken {
+  accessToken: string;
+  /** Epoch milliseconds. */
+  expiresAt?: number;
+}
+
+/**
+ * Fresh access tokens by server label, for the workers that ask for them
+ * (`need-tokens`). Refresh grants stay on this machine. A grant that several
+ * shards ask for at once is refreshed once.
+ */
+export function connectorTokenSource(
+  expansion: ConnectorExpansion,
+  store: CredentialStore,
+  options: {
+    fetch?: FetchFn;
+    now?: () => number;
+    renewBeforeMs?: number;
+    minRenewDelayMs?: number;
+  } = {}
+): {
+  /** The labels whose servers need a token. */
+  labels: string[];
+  tokens(labels: readonly string[]): Promise<Record<string, WorkerToken>>;
+} {
+  const byLabel = new Map<string, CredentialSlot>();
+  for (const slot of expansion.slots)
+    for (const label of slot.labels) byLabel.set(label, slot);
+  const minValidityMs =
+    (options.renewBeforeMs ?? RENEW_BEFORE_MS) +
+    (options.minRenewDelayMs ?? MIN_RENEW_DELAY_MS);
+  const pending = new Map<string, Promise<WorkerToken>>();
+  const tokenFor = (slot: CredentialSlot): Promise<WorkerToken> => {
+    const key = slot.target.key;
+    let token = pending.get(key);
+    if (!token) {
+      token = accessToken(slot.target, store, {
+        fetch: options.fetch,
+        now: options.now,
+        minValidityMs,
+      }).finally(() => pending.delete(key));
+      pending.set(key, token);
+    }
+    return token;
+  };
+  return {
+    labels: [...byLabel.keys()],
+    async tokens(labels) {
+      const tokens: Record<string, WorkerToken> = {};
+      for (const label of labels) {
+        const slot = byLabel.get(label);
+        if (!slot) continue;
+        const { accessToken: token, expiresAt } = await tokenFor(slot);
+        tokens[label] = {
+          accessToken: token,
+          ...(expiresAt !== undefined ? { expiresAt } : {}),
+        };
+      }
+      return tokens;
+    },
+  };
+}
+
+/** A worker's connector servers, expanded on its own machine. */
+export interface WorkerConnectors {
+  /** The entry each connector server launches, by label. */
+  servers: Map<string, MCPConfig>;
+  /** Where each label's token goes: a launched connector's file, or env vars. */
+  deliveries: Map<string, { file?: string; envNames: string[] }>;
+  /** Where the dry-run proxies record simulated writes. */
+  simulatedWriteFiles: string[];
+}
+
+/**
+ * Expands the connector servers a shard was given, with this machine's
+ * paths: token files in `tokenDirectory`, simulated writes in
+ * `simulatedWritesDirectory`. Writes nothing; the tokens arrive later.
+ */
+export async function expandWorkerConnectors(
+  declarations: readonly ConnectorServerConfig[],
+  options: { tokenDirectory: string; simulatedWritesDirectory?: string }
+): Promise<WorkerConnectors> {
+  const expansion = await expandConnectorServers(
+    {
+      name: 'shard',
+      datasets: [],
+      servers: [...declarations],
+    } as EvalConfig,
+    options
+  );
+  const servers = new Map<string, MCPConfig>();
+  for (const server of (expansion.evalConfig.servers ?? []) as MCPConfig[])
+    servers.set(server.label!, server);
+  const deliveries = new Map<string, { file?: string; envNames: string[] }>();
+  for (const slot of expansion.slots)
+    for (const label of slot.labels)
+      deliveries.set(label, {
+        ...(slot.file ? { file: slot.file } : {}),
+        envNames: slot.envNames,
+      });
+  return {
+    servers,
+    deliveries,
+    simulatedWriteFiles: expansion.simulatedWriteFiles,
+  };
 }

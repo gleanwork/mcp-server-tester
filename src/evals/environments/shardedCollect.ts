@@ -41,6 +41,17 @@ export interface CollectInEnvironmentOptions {
   groups: RequestGroup[];
   /** The run's secrets, sent to each worker over its channel, never in a bundle. */
   secrets: Record<string, string>;
+  /**
+   * Connector servers' access tokens: the labels a worker asks for at its
+   * start, and where fresh ones come from when it asks (start, or a token
+   * about to expire). Refresh grants stay on this machine.
+   */
+  connectorTokens?: {
+    labels: string[];
+    tokens(
+      labels: readonly string[]
+    ): Promise<Record<string, { accessToken: string; expiresAt?: number }>>;
+  };
   /** A private local directory for bundles and copied results. */
   workDir: string;
   /** The most trials at once across every shard, per provider and server. */
@@ -121,7 +132,7 @@ export async function collectInEnvironment(
           mst: packageJson.version,
           plugins: options.plugins,
           evalConfig: options.evalConfig,
-          tokenServers: [],
+          tokenServers: options.connectorTokens?.labels ?? [],
           batches,
         });
         // Room this shard's trials hold under the limits, until they're done.
@@ -171,8 +182,12 @@ export async function collectInEnvironment(
                 read(event.path).catch(() => {});
               }
             },
-            async requestTokens() {
-              return { byServer: {}, env: options.secrets };
+            async requestTokens({ servers }) {
+              return {
+                byServer:
+                  (await options.connectorTokens?.tokens(servers)) ?? {},
+                env: options.secrets,
+              };
             },
             async acquire(key) {
               const id = keyString(key);

@@ -68,4 +68,4 @@ The first two questions under "Not decided here" are now decided:
 - **A prebuilt public image waits** until Claude Desktop's redistribution terms are confirmed.
 - **Laptop Docker comes first**, and a remote Docker host later. Whether Claude Desktop runs under Docker on Apple Silicon is still being checked.
 
-None of this is built yet. Also not built yet: `run.json`'s per-shard image digest and client version, each trace's shard, and workers writing traces to a `gs://` store themselves. Today a run refuses connector servers and variants with tool metadata in any environment other than `local`.
+None of this is built yet. Also not built yet: `run.json`'s per-shard image digest and client version, each trace's shard, and workers writing traces to a `gs://` store themselves. Connector servers and variants with tool metadata run in any environment: a worker gets each connector server as its declaration, expands it with its own paths, and asks the coordinator for its access token (`need-tokens`), so refresh grants never leave the coordinator. The worker runs the tool-variant proxy beside the client, and marks the writes its dry-run proxies simulated.
