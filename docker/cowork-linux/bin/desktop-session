@@ -28,6 +28,25 @@ if [[ "$(id -u)" == 0 ]]; then
   fi
   chown mst:mst "${staging}"
   chmod 0600 "${staging}"
+  # The VM bundle the image seeded (bin/seed-vm-bundle), where Claude Desktop
+  # keeps its download cache: each file, and its origin (the bundle id), so
+  # Claude decompresses it rather than downloading it. A failed first VM
+  # start then lets the guest finish booting instead of reinstalling it:
+  # the files' checksums were checked when the image was built.
+  if [[ -s /opt/cowork-vm/bundle ]]; then
+    bundle=/home/mst/.config/Claude-3p/vm_bundles/claudevm.bundle
+    sha="$(cat /opt/cowork-vm/bundle)"
+    install -d -o mst -g mst -m 0700 /home/mst/.config \
+      /home/mst/.config/Claude-3p /home/mst/.config/Claude-3p/vm_bundles "${bundle}"
+    for file in /opt/cowork-vm/*.zst; do
+      name="$(basename "${file}")"
+      ln -sf "${file}" "${bundle}/${name}"
+      printf '%s' "${sha}" > "${bundle}/.${name}.origin"
+    done
+    touch "${bundle}/.auto_reinstall_attempted"
+    chown -h mst:mst "${bundle}"/* "${bundle}"/.[!.]*
+    chmod 0600 "${bundle}"/.[!.]*
+  fi
   exec setpriv --reuid=mst --regid=mst --init-groups --reset-env \
     env PATH="${PATH}" HOME=/home/mst USER=mst LANG="${LANG}" \
     DISPLAY="${DISPLAY}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS}" \
@@ -55,8 +74,10 @@ gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus \
   > /dev/null 2>&1 || true
 
 # A desktop that doesn't come up stays running, so its logs can be read.
-# The first launch also downloads Cowork's VM, so it gets longer.
-if MST_COWORK_WARM_VM_TIMEOUT_S=900 /opt/mst/bin/restart-desktop \
+# This launch only gets past the first-run screen. It doesn't start Cowork's
+# VM: MST restarts Claude Desktop with a variant's settings first, and a
+# restart stops the VM, so the restart MST makes is the one that boots it.
+if MST_COWORK_WARM_VM=0 /opt/mst/bin/restart-desktop \
   2> "${log}/restart.log"; then
   touch "${log}/ready"
 else

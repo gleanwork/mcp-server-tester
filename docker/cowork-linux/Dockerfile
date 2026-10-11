@@ -38,6 +38,12 @@ RUN arch="$(dpkg --print-architecture)" \
   && rm -rf /var/lib/apt/lists/* \
   && test -x /usr/bin/claude-desktop
 
+# Cowork's VM bundle, which Claude Desktop would otherwise download (1.2 GB)
+# in every new container. MST_SEED_VM_BUNDLE=0 skips it.
+ARG MST_SEED_VM_BUNDLE=1
+COPY --chmod=755 bin/vm-bundle-manifest.mjs bin/seed-vm-bundle /opt/mst/bin/
+RUN if [ "${MST_SEED_VM_BUNDLE}" = 1 ]; then /opt/mst/bin/seed-vm-bundle; fi
+
 # virtiofsd's seccomp filter needs syscalls a container's default profile
 # denies; the container's own profile still applies.
 RUN real="$(command -v virtiofsd || echo /usr/libexec/virtiofsd)" \
