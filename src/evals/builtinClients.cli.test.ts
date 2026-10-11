@@ -237,3 +237,91 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
     }
   });
 });
+
+describe('claude-code model', () => {
+  async function modelArg(client: Record<string, unknown>) {
+    fs.writeFileSync(
+      path.join(directory, 'claude'),
+      `#!${process.execPath}
+const at = process.argv.indexOf('--model');
+console.log(JSON.stringify({ type: 'result', result: at < 0 ? 'none' : process.argv[at + 1] }));
+`,
+      { mode: 0o700 }
+    );
+    const result = await getClient('claude-code').run!(
+      { prompt: 'hello', servers: [], env: { PATH: directory } },
+      { type: 'claude-code', ...client },
+      { evalConfig: { name: 'offline', datasets: [] } }
+    );
+    expect(result.error).toBeUndefined();
+    return result.finalText;
+  }
+
+  it("uses Claude Code's own default when no model is set", async () => {
+    expect(await modelArg({})).toBe('none');
+  });
+
+  it('passes the model it is given', async () => {
+    expect(await modelArg({ model: 'claude-haiku-4-5' })).toBe(
+      'claude-haiku-4-5'
+    );
+  });
+});
+
+describe('claude-code working directory', () => {
+  function fakeClaude(): void {
+    fs.writeFileSync(
+      path.join(directory, 'claude'),
+      `#!${process.execPath}
+const fs = require('node:fs');
+const seen = { cwd: fs.realpathSync(process.cwd()), entries: fs.readdirSync(process.cwd()).length };
+console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
+`,
+      { mode: 0o700 }
+    );
+  }
+  async function run(client: Record<string, unknown>) {
+    fakeClaude();
+    return getClient('claude-code').run!(
+      { prompt: 'hello', servers: [], env: { PATH: directory } },
+      { type: 'claude-code', ...client },
+      { evalConfig: { name: 'offline', datasets: [] } }
+    );
+  }
+
+  it('runs Claude Code in an empty directory, removed afterwards', async () => {
+    const result = await run({});
+    expect(result.error).toBeUndefined();
+    const seen = JSON.parse(result.finalText) as {
+      cwd: string;
+      entries: number;
+    };
+    expect(seen.entries).toBe(0);
+    expect(path.basename(seen.cwd)).toMatch(/^mst-workdir-/);
+    expect(seen.cwd).not.toBe(fs.realpathSync(process.cwd()));
+    expect(fs.existsSync(seen.cwd)).toBe(false);
+  });
+
+  it('runs in the cwd it is given, relative to the working directory, and leaves it', async () => {
+    const own = fs.mkdtempSync(path.join(os.tmpdir(), 'own-workdir-'));
+    try {
+      fs.writeFileSync(path.join(own, 'README.md'), 'project');
+      const result = await run({ cwd: path.relative(process.cwd(), own) });
+      expect(result.error).toBeUndefined();
+      expect(JSON.parse(result.finalText)).toEqual({
+        cwd: fs.realpathSync(own),
+        entries: 1,
+      });
+      expect(fs.existsSync(path.join(own, 'README.md'))).toBe(true);
+    } finally {
+      fs.rmSync(own, { recursive: true, force: true });
+    }
+  });
+
+  it('says so when the cwd is not a directory', async () => {
+    const missing = path.join(directory, 'missing');
+    await expect(run({ cwd: missing })).rejects.toThrow(
+      `claude-code: cwd ${missing} is not a directory.`
+    );
+  });
+});

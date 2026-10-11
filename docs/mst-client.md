@@ -164,6 +164,14 @@ Claude Code loads skills, plugins and settings from its config directory (`~/.cl
 
 That also leaves out your `settings.json`: its `env` block (a region, a base URL, a gateway) and `apiKeyHelper` don't apply. Authentication comes from the environment instead: `provider: 'vertex'` (Google Application Default Credentials) or an Anthropic API key. To run with your own configuration, for example to sign in with a claude.ai account, set `isolate: false` on the client; a `CLAUDE_CONFIG_DIR` in the client's or case's `env` is used as given.
 
+Claude Code also reads the files in its working directory, and the client runs it with `bypassPermissions`, so it can change them too. By default it runs in an empty temporary directory, removed afterwards, not in the directory you started the eval from: the model learns only what the servers under test tell it, and can't edit your repository. To give it files to work on, set `cwd` on the client, relative to the working directory of the process running the eval. Claude Code has every permission there, so name only a directory it may change:
+
+```json
+{ "client": "claude-code", "clientOptions": { "cwd": "./fixtures/site" } }
+```
+
+Without a `model`, Claude Code runs on its own default model, the one its users get. Each trial records the model it ran in its diagnostics (`claudeStartup.model`).
+
 Claude Code saves a large tool result to a file in its config directory and leaves a `<persisted-output>` placeholder in the transcript. With the empty config directory MST makes (`mst-claude-*`), MST reads the file back so the trace has the full result, up to 1 MB. With `isolate: false` or your own `CLAUDE_CONFIG_DIR`, it doesn't: the trace keeps the placeholder and its 2 KB preview.
 
 ## Claude Code startup and failure evidence

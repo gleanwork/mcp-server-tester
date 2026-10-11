@@ -73,6 +73,7 @@ async function runBuiltinClient(
     [];
   let configDir: string | undefined;
   let claudeConfigDir: string | undefined;
+  let workDir: string | undefined;
   const controller = new AbortController();
   const timeout =
     config.timeout ??
@@ -220,6 +221,24 @@ async function runBuiltinClient(
             env: { ...config.cli.env, CLAUDE_CONFIG_DIR: claudeConfigDir },
           };
         }
+        // Claude Code runs with bypassPermissions in its working directory,
+        // and reads the files there. Without a `cwd`, it gets an empty one,
+        // so it learns only what the servers under test tell it, and can't
+        // change the directory the eval was started from.
+        if (clientConfig.type === 'claude-code') {
+          if (config.cli.cwd === undefined) {
+            workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mst-workdir-'));
+            config.cli = { ...config.cli, cwd: workDir };
+          } else if (
+            !fs
+              .statSync(config.cli.cwd, { throwIfNoEntry: false })
+              ?.isDirectory()
+          ) {
+            throw new Error(
+              `claude-code: cwd ${config.cli.cwd} is not a directory.`
+            );
+          }
+        }
       }
       if (overrides && config.clientType === 'cli')
         throw new Error(
@@ -270,6 +289,8 @@ async function runBuiltinClient(
         force: true,
         maxRetries: 3,
       });
+    if (workDir)
+      fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 3 });
   }
 }
 
@@ -290,6 +311,8 @@ export interface BuiltinClientOptions {
   apiToken?: string;
   pluginDir?: string;
   pluginMcpUrl?: string;
+  /** claude-code: the directory Claude Code runs in. */
+  cwd?: string;
   mcpServers?: Record<string, Record<string, unknown>>;
 }
 
@@ -327,6 +350,14 @@ const CliClientSchema = z
      * to use your own, for example to sign in with a claude.ai account.
      */
     isolate: z.boolean().optional(),
+    /**
+     * The directory Claude Code runs in, relative to the working directory
+     * of the process running the eval. By default it runs in an empty
+     * temporary directory, removed afterwards. Claude Code has every
+     * permission there (bypassPermissions), so name only a directory it may
+     * read and change.
+     */
+    cwd: z.string().min(1).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
     server: MCPConfigSchema.optional(),
     servers: z.array(MCPConfigSchema).optional(),
@@ -645,12 +676,13 @@ function claudeCliClient(options: BuiltinClientOptions): MstClientConfig {
   }
   const mcpConfigFile = JSON.stringify({ mcpServers });
 
-  const model = options.model ?? 'claude-sonnet-4-20250514';
+  // Without a model, Claude Code uses its own default: what its users get.
+  // The model it ran is in each trial's diagnostics (claudeStartup.model).
+  const model = options.model;
   const baseArgs = [
     '-p',
     '{{prompt}}',
-    '--model',
-    model,
+    ...(model !== undefined ? ['--model', model] : []),
     '--output-format',
     'stream-json',
     '--verbose',
@@ -672,7 +704,7 @@ function claudeCliClient(options: BuiltinClientOptions): MstClientConfig {
       ? 'vertex-anthropic'
       : provider) as MstClientConfig['provider'],
     mcpServers: mcpServers as Record<string, Record<string, unknown>>,
-    model,
+    ...(model !== undefined ? { model } : {}),
     ...(options.systemPrompt !== undefined
       ? { systemPrompt: options.systemPrompt }
       : {}),
@@ -680,6 +712,7 @@ function claudeCliClient(options: BuiltinClientOptions): MstClientConfig {
       command: 'claude',
       claudeMcpServers: Object.keys(mcpServers),
       args: baseArgs,
+      ...(options.cwd !== undefined ? { cwd: path.resolve(options.cwd) } : {}),
       outputFormat: 'stream-json',
       timeout: options.timeout ?? 180_000,
       env: {

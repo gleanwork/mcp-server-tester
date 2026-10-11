@@ -107,6 +107,9 @@ export interface CLIConfig {
    */
   args: string[];
 
+  /** The directory to run the CLI in. Defaults to the process's working directory. */
+  cwd?: string;
+
   /**
    * How to parse stdout.
    * @default 'stream-json'
