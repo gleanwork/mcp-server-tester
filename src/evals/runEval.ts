@@ -15,6 +15,7 @@ import {
   nextRegradeId,
   readRunDirectory,
   readRunTrials,
+  trialArtifactsPath,
 } from './runFormat.js';
 import {
   withCopiedArtifacts,
@@ -1256,6 +1257,12 @@ async function evaluate(
               }
             : {}),
           workDir,
+          // Where grading reads a trial's artifacts: workDir goes before then.
+          artifactsDir: async (key) =>
+            path.join(
+              await artifactsRoot(),
+              trialArtifactsPath(key.variant, key.caseId, key.trial)
+            ),
           ...(evalConfig.limits ? { limits: evalConfig.limits } : {}),
           signal: controller.signal,
           log: (line) => console.error(`[mst] ${line}`),

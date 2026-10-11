@@ -1,0 +1,4 @@
+#!/bin/sh
+# MST_COWORK_URL_OPENER: hands a claude:// link to the running Claude
+# Desktop, which takes it as a second instance's argument.
+exec timeout 20 /opt/mst/bin/claude "$1"

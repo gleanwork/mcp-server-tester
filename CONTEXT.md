@@ -180,7 +180,7 @@ The machine where `mst run` was typed (your machine or a CI job). It loads, reso
 _Avoid_: controller, host, driver
 
 **Environment**:
-Where a run's trials are collected, chosen with `--env`: `local` (in the `mst run` process, the default and today's only built-in), or an environment extension that creates machines, such as containers or VMs (`acme/env/cloud-vm`). A built-in `docker` environment is planned. Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)).
+Where a run's trials are collected, chosen with `--env`: `local` (in the `mst run` process, the default), `docker` (containers from MST's Linux Cowork image), or an environment extension that creates machines, such as containers or VMs (`acme/env/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)).
 _Avoid_: sandbox, backend, runner, target
 
 **Shard**:

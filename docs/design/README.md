@@ -26,9 +26,9 @@ npm i -D @gleanwork/mcp-server-tester@beta @acme/mst-plugin
 # Once, on a Mac that will run Cowork locally
 npx mst cowork setup
 
-# Once, to run Cowork in containers (section 6; planned)
-npx mst env setup docker --app ./claude-desktop-linux.deb
-# → built mst-desktop@sha256:9c1e…
+# Once, to run Cowork in containers (section 6)
+npx mst env setup docker
+# → built mst-cowork-linux:2.0.0-beta.9
 ```
 
 See what the plugin provides (`mst plugins` is planned):
@@ -222,7 +222,7 @@ The client runs the trials first. Judges then grade the collected traces.
 
 ## 6. Run in containers
 
-> **Planned.** MST has no `docker` environment yet. A plugin environment runs this config today, connector servers and tool metadata included.
+> **Built, with limits.** See [Cowork in Docker](../cowork-docker.md). Each Docker host runs one Cowork container at a time, so 4 shards need 4 Docker contexts (`--env-option contexts=a,b,c,d`); on one host they run one after another. The progress display below, and `mst runs view`, are planned.
 
 Run the same config in 4 Linux containers on your machine:
 

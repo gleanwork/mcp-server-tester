@@ -1,0 +1,14 @@
+#!/bin/sh
+# Claude Desktop with the flags a container desktop needs: no Chromium
+# sandbox (the container is the sandbox), accessibility on for AT-SPI,
+# software rendering, and no keyring (gnome-keyring prompts for a password
+# headlessly; the inference token comes from the credential helper).
+export ACCESSIBILITY_ENABLED=1
+exec /usr/lib/claude-desktop/claude-desktop \
+  --no-sandbox \
+  --force-renderer-accessibility \
+  --password-store=basic \
+  --disable-gpu \
+  --disable-gpu-compositing \
+  --disable-dev-shm-usage \
+  "$@"

@@ -26,6 +26,10 @@ import {
   type DatasetPullOptions,
 } from './commands/datasets/index.js';
 import { listJudgeCommand, showJudge } from './commands/judges/index.js';
+import {
+  setupEnvironment,
+  type EnvSetupOptions,
+} from './commands/env/index.js';
 import type { DiscoveryOptions } from './commands/discoveryPlugins.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { inspect } from 'node:util';
@@ -251,7 +255,7 @@ program
   )
   .option(
     '--env <name>',
-    'Where to collect trials: local (the default), or a plugin environment (<namespace>/env/<name>)'
+    'Where to collect trials: local (the default), docker, or a plugin environment (<namespace>/env/<name>)'
   )
   .option(
     '--env-option <key=value>',
@@ -355,6 +359,30 @@ program
   )
   .option('--print', "Print the report's path instead of opening it")
   .action(open);
+
+// Env command: prepare an environment once (ADR 0004)
+program
+  .command('env')
+  .description('Prepare environments that runs collect trials in')
+  .command('setup')
+  .description(
+    "Prepare what runs in an environment need, once: docker builds MST's Linux Cowork image"
+  )
+  .argument('<environment>', 'docker, or <namespace>/env/<name>')
+  .option(
+    '--env-option <key=value>',
+    "An environment option; repeat for more: the environment's own (docker: image, contexts, claudeDesktopVersion)",
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[]
+  )
+  .option(
+    '--plugins <modules...>',
+    "Plugin modules, for a plugin's environment"
+  )
+  .option('--root-dir <dir>', 'Where relative plugin paths resolve', '.')
+  .action((reference: string, options: EnvSetupOptions) =>
+    setupEnvironment(reference, options)
+  );
 
 // Collect command: a shard's worker, started by environments (ADR 0004)
 program

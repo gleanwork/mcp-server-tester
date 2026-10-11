@@ -255,7 +255,8 @@ change its launch policy, or manage its lifecycle.
 ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)) sets
 `MST_DESKTOP_OWNED=1`, makes the settings file writable by the desktop user, and
 sets `MST_DESKTOP_RESTART` to the absolute path of a command that restarts Claude
-Desktop and returns once it's back, within 5 minutes. Claude Desktop reads
+Desktop and returns once it's back, within 5 minutes
+(`MST_DESKTOP_RESTART_TIMEOUT_S` sets another limit, up to 3600 seconds). Claude Desktop reads
 `/etc/claude-desktop/managed-settings.json` only when root owns it and no one
 else can write it, so an image points `MST_COWORK_SETTINGS_FILE` at a staging
 file the desktop user owns, and its restart command installs a root-owned copy
@@ -273,8 +274,9 @@ can run Cowork shards on Linux workers in owned-desktop mode. Connector servers
 and variants with tool metadata work there as they do locally: the worker
 launches each connector with its own paths and gets its access token from the
 coordinator, and runs the tool-variant proxy itself. The worker image must
-install the plugins the eval loads, at the paths the eval config names. MST
-ships no `docker` environment or desktop image yet; both are planned.
+install the plugins the eval loads, at the paths the eval config names. The
+built-in `docker` environment runs shards in containers from MST's own image:
+see [Cowork in Docker](./cowork-docker.md).
 
 Submission opens the native deep link through the prepared environment's `xdg-open`
 handler, then attempts one semantic `Start task` action. Alternatively, set
