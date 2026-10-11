@@ -100,6 +100,7 @@ export async function runCLIClient(
         : cliConfig.env,
       signal,
       isClaude,
+      cwd: cliConfig.cwd,
       onStdout: startup ? (chunk) => startup.push(chunk) : undefined,
     });
     stdout = result.stdout;
@@ -256,6 +257,7 @@ function spawnProcess(
     env?: Record<string, string | undefined>;
     signal?: AbortSignal;
     isClaude?: boolean;
+    cwd?: string;
     onStdout?: (chunk: Buffer) => string | undefined;
   }
 ): Promise<{ stdout: string; stderr: string }> {
@@ -265,6 +267,7 @@ function spawnProcess(
     const child = spawn(command, args, {
       detached: ownedGroup,
       stdio: ['pipe', 'pipe', 'pipe'],
+      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       ...(options.env ? { env: { ...process.env, ...options.env } } : {}),
     });
 
