@@ -18,6 +18,7 @@ import type { MCPConfig } from '../config/mcpConfig.js';
 import {
   coworkManagedPluginSettings,
   coworkMcpSettingsMatch,
+  COWORK_MANAGED_ONLY,
 } from './cowork/managedSettings.js';
 
 const SHA = 'a'.repeat(40);
@@ -231,7 +232,7 @@ describe('client-resolved stdio eval servers', () => {
       coworkMcpSettingsMatch(
         {
           ...settings,
-          allowManagedMcpServersOnly: true,
+          ...COWORK_MANAGED_ONLY,
         },
         { servers: configs }
       )
@@ -240,7 +241,7 @@ describe('client-resolved stdio eval servers', () => {
       coworkMcpSettingsMatch(
         {
           ...settings,
-          allowManagedMcpServersOnly: true,
+          ...COWORK_MANAGED_ONLY,
           managedMcpServers: [
             { ...settings.managedMcpServers[0], cwd: '/ignored' },
           ],
@@ -366,7 +367,7 @@ describe('blocked plugin MCP servers', () => {
       );
       expect(
         coworkMcpSettingsMatch(
-          { allowManagedMcpServersOnly: true, managedMcpServers: [] },
+          { ...COWORK_MANAGED_ONLY, managedMcpServers: [] },
           options
         )
       ).toBe(false);

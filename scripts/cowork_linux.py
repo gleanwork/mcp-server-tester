@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -49,7 +50,7 @@ class Desktop:
                 raise DriverFailure("accessibility_tree_budget")
             try:
                 states = node.get_state_set()
-                if (node.get_role_name() in roles and node.get_name() in names
+                if (node.get_role_name() in roles and self.label(node) in names
                         and states.contains(self.api.StateType.VISIBLE)
                         and states.contains(self.api.StateType.SHOWING)
                         and (not require_enabled or (
@@ -62,6 +63,12 @@ class Desktop:
             except Exception:
                 continue
         return found
+
+    @staticmethod
+    def label(node) -> str:
+        # Newer desktops append a control's keyboard shortcut to its
+        # accessible name ("Allow once 3", "Deny 1").
+        return SHORTCUT_SUFFIX.sub("", node.get_name() or "")
 
     def selected(self, node) -> bool:
         states = node.get_state_set()
@@ -81,6 +88,8 @@ class Desktop:
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(timeout, 15),
         )
 
+
+SHORTCUT_SUFFIX = re.compile(r" [0-9]$")
 
 # Primary actions of Cowork's built-in tool confirmation cards (always shown with Cancel).
 CARD_ACTIONS = {"Create", "Update", "Schedule", "Run", "Delete"}
@@ -189,7 +198,7 @@ class Driver:
         if not controls:
             return self.receipt("hitl_checked")
         # Do not choose among unrelated prompts or continue arbitrary onboarding.
-        once = [node for node in controls if node.get_name() == "Allow once"]
+        once = [node for node in controls if self.desktop.label(node) == "Allow once"]
         selected = once if len(once) == 1 else controls
         if len(selected) != 1:
             raise DriverFailure("approval_control_ambiguous")

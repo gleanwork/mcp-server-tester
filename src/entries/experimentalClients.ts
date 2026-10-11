@@ -21,6 +21,7 @@ export type {
 export { COWORK_STDIO_PLATFORMS } from '../evals/coworkClient.js';
 export {
   COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS,
+  COWORK_MANAGED_ONLY,
   coworkHeadlessSettings,
   coworkHeadlessSettingsMatch,
   coworkManagedPluginSettings,

@@ -20,6 +20,7 @@ import {
 } from '../clientPlugins.js';
 import {
   COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS as HEADLESS_DISABLED,
+  COWORK_MANAGED_ONLY,
   coworkHeadlessSettingsMatch,
   coworkJsonEqual,
   coworkManagedPluginSettings,
@@ -29,6 +30,7 @@ import {
 
 export {
   COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS,
+  COWORK_MANAGED_ONLY,
   coworkHeadlessSettings,
   coworkHeadlessSettingsMatch,
   coworkManagedPluginSettings,
@@ -162,7 +164,14 @@ function coworkLinuxOwnedSettings(
   const models = Array.isArray(base.inferenceModels)
     ? (base.inferenceModels as Array<{ name?: unknown } | null>)
     : [];
-  const { allowedPluginMarketplaces: _previous, ...rest } = base;
+  // Keys MST used to write that Claude Desktop doesn't know (it would
+  // ignore the whole file) are dropped from an older image's settings too.
+  const {
+    allowedPluginMarketplaces: _previous,
+    allowedMcpServers: _allowed,
+    allowManagedMcpServersOnly: _only,
+    ...rest
+  } = base;
   const disabled = Array.isArray(base.disabledBuiltinTools)
     ? base.disabledBuiltinTools.filter(
         (tool): tool is string => typeof tool === 'string'
@@ -174,11 +183,7 @@ function coworkLinuxOwnedSettings(
     // disabled tools stay disabled.
     disabledBuiltinTools: [...new Set([...disabled, ...HEADLESS_DISABLED])],
     managedMcpServers: [...http, ...managed.managedMcpServers],
-    allowedMcpServers: [
-      ...http.map((entry) => ({ serverName: entry.name })),
-      ...managed.allowedMcpServers,
-    ],
-    allowManagedMcpServersOnly: true,
+    ...COWORK_MANAGED_ONLY,
     ...(managed.allowedPluginMarketplaces
       ? { allowedPluginMarketplaces: managed.allowedPluginMarketplaces }
       : {}),
@@ -204,7 +209,8 @@ async function restartDesktop(
       command,
       [],
       {
-        timeout: 120_000,
+        // Room for an image to boot Cowork's VM before it reports back.
+        timeout: 300_000,
         killSignal: 'SIGKILL',
         maxBuffer: 64 * 1024,
         env: Object.fromEntries(
