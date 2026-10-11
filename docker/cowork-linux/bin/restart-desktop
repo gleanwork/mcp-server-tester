@@ -1,0 +1,20 @@
+#!/bin/bash
+# MST_DESKTOP_RESTART: installs the staged managed settings, (re)starts
+# Claude Desktop so it reads them, and returns once Cowork's prompt is on
+# the accessibility bus.
+set -euo pipefail
+
+log=/run/mst/session
+sudo -n /opt/mst/bin/install-settings
+
+if pkill -u mst -f '^/usr/lib/claude-desktop/' 2>/dev/null; then
+  for _ in $(seq 100); do
+    pgrep -u mst -f '^/usr/lib/claude-desktop/' > /dev/null || break
+    sleep 0.1
+  done
+  pkill -9 -u mst -f '^/usr/lib/claude-desktop/' 2>/dev/null || true
+fi
+rm -f "${HOME}"/.config/Claude-3p/Singleton* "${HOME}"/.config/Claude/Singleton*
+
+setsid /opt/mst/bin/claude >> "${log}/claude.log" 2>&1 < /dev/null &
+exec /opt/mst/bin/desktop-ready

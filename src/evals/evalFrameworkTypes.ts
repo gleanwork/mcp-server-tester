@@ -453,6 +453,14 @@ export interface EnvironmentDefinition {
     options: Record<string, unknown>,
     context: EnvironmentContext
   ): Promise<Environment>;
+  /**
+   * Prepares what runs need, once (`mst env setup <environment>`): for
+   * example, builds an image. Takes the same `--env-option`s.
+   */
+  setup?(
+    options: Record<string, unknown>,
+    context: { log: (line: string) => void }
+  ): Promise<void>;
 }
 
 /** Options shared by an eval config runner implementation. */

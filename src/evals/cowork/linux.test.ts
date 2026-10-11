@@ -18,6 +18,7 @@ import {
   coworkPluginSettingsMatch,
   linuxCoworkPlatform,
   COWORK_MANAGED_ONLY,
+  desktopRestartTimeoutMs,
 } from './linux.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
@@ -816,5 +817,18 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
       'settings do not match'
     );
     expect(child.exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('desktopRestartTimeoutMs', () => {
+  it('gives the restart command 5 minutes, or what the image sets', () => {
+    expect(desktopRestartTimeoutMs({})).toBe(300_000);
+    expect(
+      desktopRestartTimeoutMs({ MST_DESKTOP_RESTART_TIMEOUT_S: '900' })
+    ).toBe(900_000);
+    for (const value of ['0', '3601', '1.5', 'soon'])
+      expect(() =>
+        desktopRestartTimeoutMs({ MST_DESKTOP_RESTART_TIMEOUT_S: value })
+      ).toThrow('MST_DESKTOP_RESTART_TIMEOUT_S');
   });
 });

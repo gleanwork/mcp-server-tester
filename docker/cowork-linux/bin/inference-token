@@ -1,0 +1,4 @@
+#!/bin/sh
+# Claude Desktop's inference credential helper: prints the token MST keeps
+# fresh in the container's tmpfs.
+exec cat /run/mst/inference-token

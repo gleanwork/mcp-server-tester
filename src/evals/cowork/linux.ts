@@ -199,32 +199,58 @@ function coworkLinuxOwnedSettings(
   };
 }
 
+/**
+ * How long the restart command may take: `MST_DESKTOP_RESTART_TIMEOUT_S`, or
+ * 5 minutes. An image that boots Cowork's VM before it reports back, under
+ * nested virtualization, needs longer.
+ */
+export function desktopRestartTimeoutMs(
+  env: Record<string, string | undefined>
+): number {
+  const raw = env.MST_DESKTOP_RESTART_TIMEOUT_S;
+  if (raw === undefined || raw === '') return 300_000;
+  const seconds = Number(raw);
+  if (!/^\d+$/.test(raw) || seconds < 1 || seconds > 3600)
+    throw new CoworkDriverError(
+      'MST_DESKTOP_RESTART_TIMEOUT_S must be a whole number of seconds from 1 to 3600.'
+    );
+  return seconds * 1000;
+}
+
 /** Runs the image's desktop restart command; it returns once Claude is back. */
 async function restartDesktop(
   command: string,
   env: Record<string, string | undefined>
 ): Promise<void> {
-  const failed = await new Promise<boolean>((resolve) => {
+  const timeout = desktopRestartTimeoutMs(env);
+  const failure = await new Promise<string | undefined>((resolve) => {
     const child = execFile(
       command,
       [],
       {
-        // Room for an image to boot Cowork's VM before it reports back.
-        timeout: 300_000,
+        timeout,
         killSignal: 'SIGKILL',
         maxBuffer: 64 * 1024,
         env: Object.fromEntries(
           SESSION_ENV.flatMap((k) => (env[k] ? [[k, env[k]]] : []))
         ),
       },
-      (error) => resolve(error !== null)
+      (error, _stdout, stderr) =>
+        resolve(
+          error === null
+            ? undefined
+            : error.killed
+              ? `it didn't return within ${timeout / 1000} s`
+              : String(stderr).trim().split('\n').at(-1)?.slice(0, 300) ||
+                `it exited with ${error.code ?? 'an error'}`
+        )
     );
     child.stdin?.on('error', () => {});
     child.stdin?.end();
   });
-  if (failed)
+  if (failure !== undefined)
     throw new Error(
-      'The desktop restart command (MST_DESKTOP_RESTART) failed after MST wrote the variant settings.'
+      `The desktop restart command (MST_DESKTOP_RESTART) failed after MST wrote the variant settings: ${failure}`
     );
 }
 

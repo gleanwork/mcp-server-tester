@@ -61,7 +61,8 @@
       "types": "./dist/reporters/mcpReporter.d.ts",
       "import": "./dist/reporters/mcpReporter.js",
       "require": "./dist/reporters/mcpReporter.cjs"
-    }
+    },
+    "./cowork-linux-image": "./docker/cowork-linux/Dockerfile"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -77,7 +78,8 @@
     "scripts/chatgpt_linux.py",
     "scripts/chatgpt_linux_contract.json",
     "scripts/cowork-requirements.txt",
-    "schema"
+    "schema",
+    "docker"
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",

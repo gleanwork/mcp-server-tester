@@ -20,6 +20,37 @@ import {
   writeShardBundle,
   type TrialKey,
 } from './protocol.js';
+import { ALL_ARTIFACTS, copyArtifacts } from '../trialArtifacts.js';
+
+/**
+ * A trial's artifacts, where grading reads them: a worker names its copy
+ * relative to the shard's results; that copy moves to `target` (when given),
+ * or is read where it is.
+ */
+async function placeArtifacts(
+  result: ClientRunResult,
+  resultsDir: string,
+  target: (() => Promise<string>) | undefined
+): Promise<ClientRunResult> {
+  if (!result.artifacts || path.isAbsolute(result.artifacts.dir)) return result;
+  const copy = {
+    ...result.artifacts,
+    dir: path.join(resultsDir, result.artifacts.dir),
+  };
+  if (!target) return { ...result, artifacts: copy };
+  const { artifacts: _copy, ...rest } = result;
+  const dir = await target();
+  try {
+    await copyArtifacts({ dir: copy.dir, include: ALL_ARTIFACTS }, dir);
+    return { ...rest, artifacts: { dir, include: ALL_ARTIFACTS } };
+  } catch (error) {
+    return {
+      ...rest,
+      diagnostics: { ...rest.diagnostics, failureKind: 'artifacts' },
+      error: `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
 
 /** The shard a case runs on: every variant and trial of a case share one. */
 export function shardOf(caseId: string, count: number): number {
@@ -39,6 +70,12 @@ export interface CollectInEnvironmentOptions {
   /** Plugin specifiers the workers load. */
   plugins: string[];
   groups: RequestGroup[];
+  /**
+   * Where a trial's client artifacts go. A worker copies them beside its
+   * result; they're moved here as the result is read, since the shards'
+   * directories don't outlive the collection.
+   */
+  artifactsDir?: (key: TrialKey) => Promise<string>;
   /** The run's secrets, sent to each worker over its channel, never in a bundle. */
   secrets: Record<string, string>;
   /**
@@ -156,7 +193,13 @@ export async function collectInEnvironment(
                 path.join(resultsDir, relative)
               );
               seen.add(relative);
-              const result = file.result as unknown as ClientRunResult;
+              const result = await placeArtifacts(
+                file.result as unknown as ClientRunResult,
+                resultsDir,
+                options.artifactsDir
+                  ? () => options.artifactsDir!(file.key)
+                  : undefined
+              );
               results.set(keyString(file.key), result);
               await options.onResult?.(file.key, result);
             }));

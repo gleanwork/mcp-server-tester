@@ -1,0 +1,167 @@
+#!/usr/bin/python3
+"""Waits until Claude Desktop shows Cowork's prompt, over AT-SPI, with
+Cowork's VM running.
+
+On a profile's first launch in gateway mode, Claude shows one screen,
+"Your organization has set up Claude to run through a custom inference
+gateway", with a Continue button. This is the image's own first-run step,
+not part of a case: MST's driver never clicks through onboarding.
+
+Cowork starts its VM for the first task after a launch, and gives the guest
+60 s to connect. Under nested virtualization (a Mac's Docker VM) the guest
+takes longer, so that task fails. After a profile's first failure Claude
+stops the VM and reinstalls it; after a later one it lets the VM finish
+booting. Unless MST_COWORK_WARM_VM=0, this starts one-line warm-up tasks
+until the guest is ready, then goes back to a new task, so a case's task
+finds the VM running.
+"""
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from urllib.parse import quote
+
+import gi
+
+gi.require_version("Atspi", "2.0")
+from gi.repository import Atspi  # noqa: E402
+
+DEADLINE_S = 120
+# Inside MST's limit for the restart command (MST_DESKTOP_RESTART_TIMEOUT_S,
+# 900 s in this image): a nested guest can take minutes to boot.
+WARM_DEADLINE_S = int(os.environ.get("MST_COWORK_WARM_VM_TIMEOUT_S", "840"))
+GATEWAY_NOTICE = "custom inference gateway"
+PROMPT = "write your prompt"
+VM_LOG = Path.home() / ".config/Claude-3p/logs/cowork_vm_node.log"
+OPEN_URL = "/opt/mst/bin/open-url"
+
+
+def claude():
+    try:
+        desktop = Atspi.get_desktop(0)
+        for index in range(desktop.get_child_count()):
+            app = desktop.get_child_at_index(index)
+            if app is not None and "claude" in (app.get_name() or "").lower():
+                return app
+    except Exception:
+        pass
+    return None
+
+
+def nodes(node, limit=5000):
+    stack, seen = [node], 0
+    while stack and seen < limit:
+        current = stack.pop()
+        if current is None:
+            continue
+        seen += 1
+        yield current
+        # The tree changes under us while Claude loads: a node can vanish.
+        try:
+            count = current.get_child_count()
+            stack.extend(current.get_child_at_index(i) for i in range(count))
+        except Exception:
+            continue
+
+
+def text(node):
+    try:
+        return (node.get_name() or "").strip()
+    except Exception:
+        return ""
+
+
+def role(node):
+    try:
+        return node.get_role_name()
+    except Exception:
+        return ""
+
+
+def button(everything, name):
+    return next(
+        (n for n in everything if role(n) in ("button", "push button") and text(n) == name),
+        None,
+    )
+
+
+def press(node):
+    action = node.get_action_iface() if node is not None else None
+    return bool(action is not None and action.do_action(0))
+
+
+def wait_for_prompt(deadline_s):
+    """Cowork's prompt is showing, after the gateway notice if there is one."""
+    deadline = time.monotonic() + deadline_s
+    clicked = False
+    while time.monotonic() < deadline:
+        app = claude()
+        if app is not None:
+            everything = list(nodes(app))
+            if any(role(n) == "entry" and PROMPT in text(n).lower() for n in everything):
+                return everything
+            notice = any(GATEWAY_NOTICE in text(n).lower() for n in everything)
+            if notice and not clicked:
+                clicked = press(button(everything, "Continue"))
+        time.sleep(1)
+    return None
+
+
+def open_url(url):
+    subprocess.run([OPEN_URL, url], timeout=30, check=False,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def start_task(prompt):
+    open_url("claude://claude.ai/new?q=" + quote(prompt, safe=""))
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        app = claude()
+        if app is not None and press(button(list(nodes(app)), "Start task")):
+            return True
+        time.sleep(1)
+    return False
+
+
+def vm_log_since(offset):
+    if not VM_LOG.exists():
+        return b""
+    with VM_LOG.open("rb") as log:
+        log.seek(offset)
+        return log.read()
+
+
+def warm_vm():
+    """Starts warm-up tasks until Cowork's guest is ready."""
+    deadline = time.monotonic() + WARM_DEADLINE_S
+    while time.monotonic() < deadline:
+        offset = VM_LOG.stat().st_size if VM_LOG.exists() else 0
+        if not start_task("Reply with OK."):
+            return "the warm-up task couldn't be started"
+        while time.monotonic() < deadline:
+            seen = vm_log_since(offset)
+            if b"guest ready" in seen:
+                open_url("claude://claude.ai/new")
+                return None if wait_for_prompt(30) is not None else "no new task after the warm-up"
+            # Claude gave up on this start; once it's done, start another
+            # task, which boots the VM again (or finds it still booting).
+            if b"Startup failed" in seen and (
+                b"All files ready" in seen.split(b"Startup failed")[-1]
+                or b"Skipping auto-reinstall" in seen
+            ):
+                time.sleep(3)
+                break
+            time.sleep(2)
+    return f"Cowork's VM wasn't ready within {WARM_DEADLINE_S} s"
+
+
+if wait_for_prompt(DEADLINE_S) is None:
+    print(f"Cowork's prompt didn't appear within {DEADLINE_S} s", file=sys.stderr)
+    sys.exit(1)
+if os.environ.get("MST_COWORK_WARM_VM", "1") != "0":
+    problem = warm_vm()
+    if problem:
+        print(problem, file=sys.stderr)
+        sys.exit(1)
+sys.exit(0)

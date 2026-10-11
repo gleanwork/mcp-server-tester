@@ -53,7 +53,9 @@ const NOT_WITH_RESUME = [
 ] as const;
 
 /** `--env-option key=value` flags as an object; a key may be given once. */
-function parseEnvOptions(flags: readonly string[]): Record<string, string> {
+export function parseEnvOptions(
+  flags: readonly string[]
+): Record<string, string> {
   const options: Record<string, string> = {};
   for (const flag of flags) {
     const separator = flag.indexOf('=');

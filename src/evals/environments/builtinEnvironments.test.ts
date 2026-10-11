@@ -95,8 +95,8 @@ describe('resolveEnvironment', () => {
     expect(() => resolveEnvironment('acme/env/vm', {})).toThrow(
       'Environment "acme/env/vm" needs the "acme" plugin, which is not loaded.'
     );
-    expect(() => resolveEnvironment('docker', {})).toThrow(
-      'Environment "docker" is not available. Available: local.'
+    expect(() => resolveEnvironment('podman', {})).toThrow(
+      'Environment "podman" is not available. Available: docker, local.'
     );
   });
 });

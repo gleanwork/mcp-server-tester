@@ -25,6 +25,7 @@ import { isInfrastructureError } from '../infrastructureFailure.js';
 import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
+import { ALL_ARTIFACTS, copyArtifacts } from '../trialArtifacts.js';
 import {
   startToolSurfaceProxy,
   usesToolSurfaceProxy,
@@ -244,9 +245,27 @@ export async function collectShard(
           usedWrites
         )
       : trace;
-    const stored: ClientRunResult = result.error
+    const redacted: ClientRunResult = result.error
       ? { ...result, error: redactClientSecrets(result.error, [...secrets]) }
       : result;
+    // The client's artifacts (a Cowork session folder) are on this machine:
+    // copy them beside the result, which the coordinator copies back, and
+    // name them relative to the results directory.
+    let stored = redacted;
+    if (redacted.artifacts) {
+      const dir = `${batch}/${index}.artifacts`;
+      const { artifacts, ...rest } = redacted;
+      try {
+        await copyArtifacts(artifacts, path.join(options.resultsDir, dir));
+        stored = { ...rest, artifacts: { dir, include: ALL_ARTIFACTS } };
+      } catch (error) {
+        stored = {
+          ...rest,
+          diagnostics: { ...rest.diagnostics, failureKind: 'artifacts' },
+          error: `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+    }
     const relative = `${batch}/${index}.json`;
     await writeFileAtomically(
       path.join(options.resultsDir, relative),

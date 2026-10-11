@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { builtinShortName, extensionLookup } from '../../plugins/extensions.js';
 import { parseExtensionOptions } from '../../plugins/plugin.js';
+import { dockerEnvironment } from './docker.js';
 import type {
   EnvironmentDefinition,
   EnvironmentKeep,
@@ -11,7 +12,10 @@ export const LOCAL_ENVIRONMENT = 'local';
 
 const KEEP: readonly EnvironmentKeep[] = ['never', 'failed', 'always'];
 
-/** `local` has no machines, and no options of its own. */
+/**
+ * `local` has no machines, and no options of its own. `docker` runs shards
+ * in containers from MST's Linux Cowork image.
+ */
 function builtinEnvironments(): Readonly<
   Record<string, EnvironmentDefinition>
 > {
@@ -31,6 +35,7 @@ function builtinEnvironments(): Readonly<
         };
       },
     },
+    docker: dockerEnvironment,
   };
 }
 
