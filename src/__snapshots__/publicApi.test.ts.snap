@@ -63,6 +63,7 @@ exports[`public API > ./evals 1`] = `
 exports[`public API > ./experimental/clients 1`] = `
 [
   "COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS",
+  "COWORK_MANAGED_ONLY",
   "COWORK_STDIO_PLATFORMS",
   "auditCoworkNativeRun",
   "clientStdioServers",

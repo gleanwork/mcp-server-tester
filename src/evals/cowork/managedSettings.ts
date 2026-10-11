@@ -56,14 +56,23 @@ export interface CoworkManagedStdioServer {
   env: Record<string, string>;
   toolPolicy?: { '*': 'allow' };
 }
+/**
+ * The keys that keep a Linux desktop to its managed MCP servers: no servers
+ * from the user's own `claude_desktop_config.json`, and no desktop
+ * extensions. Claude Desktop rejects the whole settings file when it has a
+ * key it doesn't know, so these are its own keys, not Claude Code's.
+ */
+export const COWORK_MANAGED_ONLY = {
+  isLocalDevMcpEnabled: false,
+  isDesktopExtensionEnabled: false,
+} as const;
+
 export interface CoworkManagedPluginSettings {
   /** Stdio eval servers, then blocked plugin servers. Append HTTP entries. */
   managedMcpServers: Array<
     | CoworkManagedStdioServer
     | { name: string; transport: 'policy-only'; toolPolicy: { '*': 'blocked' } }
   >;
-  /** One entry per stdio eval server. Append HTTP server names. */
-  allowedMcpServers: Array<{ serverName: string }>;
   /** Present only with plugins. */
   allowedPluginMarketplaces?: ReturnType<typeof coworkPluginMarketplace>[];
 }
@@ -105,7 +114,6 @@ export function coworkManagedPluginSettings(options: {
   if (clash) throw new MarketplacePluginError('mcp_server_invalid', clash.name);
   return {
     managedMcpServers: [...stdio, ...blocked],
-    allowedMcpServers: stdio.map((server) => ({ serverName: server.name })),
     ...(plugins.length
       ? { allowedPluginMarketplaces: plugins.map(coworkPluginMarketplace) }
       : {}),
@@ -192,13 +200,12 @@ type Managed = {
 } & Record<string, unknown>;
 
 /**
- * Check `managedMcpServers`, `allowedMcpServers`, and
- * `allowManagedMcpServersOnly` against the eval config servers and plugins:
+ * Check `managedMcpServers`, and the managed-only keys
+ * (`COWORK_MANAGED_ONLY`), against the eval config servers and plugins:
  *
  * - HTTP servers: `{name: label, transport: "http", url}` as before.
  * - Stdio eval servers: exactly `coworkManagedPluginSettings(...)` entries
- *   (resolved command/args/env; only `toolPolicy` may be added) and listed
- *   in `allowedMcpServers`.
+ *   (resolved command/args/env; only `toolPolicy` may be added).
  * - Every `blockMcpServers` name as a `policy-only` `{"*": "blocked"}` entry.
  *   Other `policy-only` entries must also block everything.
  * - `toolPolicy: {"*": "allow"}` only with `approveWriteTools`.
@@ -225,7 +232,9 @@ export function coworkMcpSettingsMatch(
   const managed = settings.managedMcpServers as Managed[] | undefined;
   if (
     !Array.isArray(managed) ||
-    settings.allowManagedMcpServersOnly !== true ||
+    Object.entries(COWORK_MANAGED_ONLY).some(
+      ([key, value]) => settings[key] !== value
+    ) ||
     managed.some((entry) => !entry || typeof entry !== 'object')
   )
     return false;
@@ -277,7 +286,6 @@ export function coworkMcpSettingsMatch(
     )
       return false;
   }
-  const allowed = settings.allowedMcpServers;
   for (const entry of stdio) {
     const observed = actual.find((s) => s.name === entry.name);
     if (
@@ -299,14 +307,7 @@ export function coworkMcpSettingsMatch(
       !equal(observed.env ?? {}, entry.env) ||
       (observed.toolPolicy !== undefined &&
         !equal(observed.toolPolicy, { '*': 'allow' })) ||
-      !allowPolicy(observed) ||
-      !Array.isArray(allowed) ||
-      !allowed.some(
-        (item) =>
-          !!item &&
-          typeof item === 'object' &&
-          (item as { serverName?: unknown }).serverName === entry.name
-      )
+      !allowPolicy(observed)
     )
       return false;
   }

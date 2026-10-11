@@ -255,7 +255,11 @@ change its launch policy, or manage its lifecycle.
 ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)) sets
 `MST_DESKTOP_OWNED=1`, makes the settings file writable by the desktop user, and
 sets `MST_DESKTOP_RESTART` to the absolute path of a command that restarts Claude
-Desktop and returns once it's back. For each variant, MST then writes the
+Desktop and returns once it's back, within 5 minutes. Claude Desktop reads
+`/etc/claude-desktop/managed-settings.json` only when root owns it and no one
+else can write it, so an image points `MST_COWORK_SETTINGS_FILE` at a staging
+file the desktop user owns, and its restart command installs a root-owned copy
+first. For each variant, MST then writes the
 variant's servers, plugins and model over the image's own settings, keeping the
 image's other keys and the `headersHelper` of an HTTP server with the same name
 and URL (MST writes no secrets there). It adds `AskUserQuestion` to the image's
@@ -758,8 +762,8 @@ Desktop. MST only reads and checks them. For the example above:
       "toolPolicy": { "*": "blocked" }
     }
   ],
-  "allowedMcpServers": [{ "serverName": "acme-eval" }],
-  "allowManagedMcpServersOnly": true,
+  "isLocalDevMcpEnabled": false,
+  "isDesktopExtensionEnabled": false,
   "disabledBuiltinTools": ["AskUserQuestion"],
   "allowedPluginMarketplaces": [
     {
@@ -789,13 +793,16 @@ Claude Desktop:
   other keys, except `toolPolicy: {"*": "allow"}` with
   `coworkSetup.approveWriteTools`. Its `env` has exactly the declared keys, so
   the substituted URL equals `url`, and plugin env such as `ENABLE_HITL: "true"`
-  is replaced. Its `label` is in `allowedMcpServers`.
+  is replaced.
 - Each `blockMcpServers` name is a `policy-only` entry with exactly
   `toolPolicy: {"*": "blocked"}`. Claude Desktop names plugin tools
   `mcp__plugin_<plugin>_<server>__<tool>`; the managed entry uses the plugin's
   own server name from its `.mcp.json` (for example, `acme_plugin`).
-- HTTP servers match as before, `allowManagedMcpServersOnly` is `true`, and the
-  pinned marketplace entries match.
+- HTTP servers match as before, and the pinned marketplace entries match.
+- `isLocalDevMcpEnabled` and `isDesktopExtensionEnabled` are `false`
+  (`COWORK_MANAGED_ONLY`), so Claude Desktop runs only the managed servers: no
+  servers from the user's `claude_desktop_config.json`, and no desktop
+  extensions.
 - `disabledBuiltinTools` contains `AskUserQuestion`
   (`coworkHeadlessSettings()` builds it). A headless run has nobody to answer a
   clarifying question, so Claude proceeds on its best assumption instead. Other

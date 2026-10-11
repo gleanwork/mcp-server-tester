@@ -17,6 +17,7 @@ import {
   coworkManagedPluginSettings,
   coworkPluginSettingsMatch,
   linuxCoworkPlatform,
+  COWORK_MANAGED_ONLY,
 } from './linux.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
@@ -62,7 +63,7 @@ const settings = {
   managedMcpServers: [
     { name: 'primary', transport: 'http', url: 'https://example.com/eval' },
   ],
-  allowManagedMcpServersOnly: true,
+  ...COWORK_MANAGED_ONLY,
   disabledBuiltinTools: ['AskUserQuestion'],
 };
 beforeEach(async () => {
@@ -466,6 +467,8 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
       },
       { name: 'stale', transport: 'http', url: 'https://example.com/old' },
     ],
+    // Keys an older MST wrote, which Claude Desktop rejects: dropped.
+    allowedMcpServers: [{ serverName: 'stale' }],
     allowManagedMcpServersOnly: true,
   };
 
@@ -505,8 +508,8 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
           headersHelper: '/opt/mst/primary-headers.sh',
         },
       ],
-      allowedMcpServers: [{ serverName: 'primary' }],
-      allowManagedMcpServersOnly: true,
+      isLocalDevMcpEnabled: false,
+      isDesktopExtensionEnabled: false,
       disabledBuiltinTools: ['AskUserQuestion'],
     });
     // The restart, then the usual probe.
@@ -604,7 +607,7 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
   const valid = () => ({
     inferenceModels: [{ name: 'test-model' }],
     ...expected(),
-    allowManagedMcpServersOnly: true,
+    ...COWORK_MANAGED_ONLY,
     ...coworkHeadlessSettings(),
   });
   async function prepareStdio(
@@ -642,7 +645,6 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
           toolPolicy: { '*': 'blocked' },
         },
       ],
-      allowedMcpServers: [{ serverName: 'fake-eval' }],
       allowedPluginMarketplaces: [
         {
           source: 'github',
@@ -707,12 +709,6 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
       }),
     ],
     [
-      'the stdio server is not allowed',
-      mutate((v) => {
-        v.allowedMcpServers = [];
-      }),
-    ],
-    [
       'write tools are pre-approved',
       mutate((v) => {
         stdioEntry(v).toolPolicy = { '*': 'allow' };
@@ -741,9 +737,15 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
       }),
     ],
     [
-      'managed-only is off',
+      "the user's own MCP servers are on",
       mutate((v) => {
-        (v as Record<string, unknown>).allowManagedMcpServersOnly = false;
+        (v as Record<string, unknown>).isLocalDevMcpEnabled = true;
+      }),
+    ],
+    [
+      'desktop extensions are on',
+      mutate((v) => {
+        delete (v as Record<string, unknown>).isDesktopExtensionEnabled;
       }),
     ],
     [
