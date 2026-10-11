@@ -4,11 +4,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   minimalValue,
-  readSimulatedWrites,
   recordSimulatedWrite,
   renderReplyTemplate,
   simulatedReply,
 } from './simulatedWrites.js';
+import { readSimulatedWrites } from './simulatedWriteRecords.js';
 
 const now = new Date('2026-10-08T12:00:00.123Z');
 const context = { id: 'abc123', now, arguments: { channel: 'C1', n: 3 } };

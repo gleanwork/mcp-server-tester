@@ -103,10 +103,8 @@ import {
   builtinClientDefaults,
   getClient,
 } from './builtinClients.js';
-import {
-  startToolSurfaceProxy,
-  type ToolSurfaceProxy,
-} from './toolSurfaceProxy.js';
+import type { ToolSurfaceProxy } from './toolSurfaceProxy.js';
+import { startToolSurfaceProxy } from './toolSurfaceProxyServer.js';
 import {
   collectInEnvironment,
   gatheredQueues,

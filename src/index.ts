@@ -130,12 +130,12 @@ export {
 export {
   DEFAULT_PROTOCOL_SETTING,
   FIRST_MODERN_PROTOCOL_VERSION,
-  LEGACY_PROTOCOL_VERSIONS,
   MODERN_PROTOCOL_VERSIONS,
   eraOfRevision,
   getProtocolInfo,
   isProtocolRevision,
 } from './mcp/protocol.js';
+export { LEGACY_PROTOCOL_VERSIONS } from './mcp/legacyProtocolVersions.js';
 export { protocolMatrix } from './config/protocolMatrix.js';
 export type {
   ProtocolMatrixEntry,

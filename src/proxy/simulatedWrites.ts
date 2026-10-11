@@ -3,7 +3,7 @@
  * planned-write result, which tells the client the write didn't happen, the
  * client gets a success reply, so it carries on as it would after a real
  * write. The write never reaches the server; the proxy records it in a JSONL
- * file MST reads after each trial.
+ * file MST reads after each trial (simulatedWriteRecords.ts).
  *
  * The reply, in order of preference:
  *
@@ -14,9 +14,9 @@
  * 3. `{ "ok": true, "id": "<id>", "result": <the call's arguments> }`.
  */
 import { randomBytes } from 'node:crypto';
-import { appendFile, readFile } from 'node:fs/promises';
+import { appendFile } from 'node:fs/promises';
 import type { Tool } from '@modelcontextprotocol/client';
-import { z } from 'zod';
+import type { SimulatedWriteRecord } from './simulatedWriteRecords.js';
 
 /** Where to record simulated writes, and the replies to give. */
 export interface SimulatedWritesOptions {
@@ -34,19 +34,6 @@ export interface SimulatedWritesOptions {
    */
   replies?: Readonly<Record<string, unknown>>;
 }
-
-/** One line of the simulated-writes file. */
-const SimulatedWriteRecordSchema = z.object({
-  format: z.literal('mst.simulated-write/v1'),
-  time: z.string(),
-  /** The server's label. */
-  server: z.string(),
-  tool: z.string(),
-  arguments: z.unknown(),
-  /** What the client was told. */
-  reply: z.unknown(),
-});
-export type SimulatedWriteRecord = z.infer<typeof SimulatedWriteRecordSchema>;
 
 /** A tool call result, as the proxy returns it. */
 export interface SimulatedReply {
@@ -221,29 +208,4 @@ export async function recordSimulatedWrite(
     mode: 0o600,
     flag: 'a',
   });
-}
-
-/** The simulated writes in `file`, in order; none when it doesn't exist yet. */
-export async function readSimulatedWrites(
-  file: string
-): Promise<SimulatedWriteRecord[]> {
-  let text: string;
-  try {
-    text = await readFile(file, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
-  }
-  return text
-    .split('\n')
-    .filter((line) => line.trim())
-    .flatMap((line) => {
-      try {
-        const parsed = SimulatedWriteRecordSchema.safeParse(JSON.parse(line));
-        return parsed.success ? [parsed.data] : [];
-      } catch {
-        // A line cut short by a proxy that was killed mid-write.
-        return [];
-      }
-    });
 }

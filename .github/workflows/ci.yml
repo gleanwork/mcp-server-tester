@@ -18,8 +18,10 @@ jobs:
 
       - run: npm run format:check
 
-      # Legacy examples resolve package self-imports through dist.
-      - run: npm run build
+      # Legacy examples resolve package self-imports through dist. The check
+      # fails when a bundle carries an unused import from an external package.
+      - name: Build
+        run: npm run build:check
 
       - run: npm run typecheck
 

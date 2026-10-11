@@ -270,7 +270,7 @@ Before pushing commits or creating a PR, run all CI checks locally and fix any f
 
 ```bash
 npm run format:check        # Prettier (run `npm run format` to auto-fix)
-npm run build               # Full build including UI reporter
+npm run build:check         # Full build including UI reporter; fails on unused bundle imports
 npm run typecheck           # TypeScript validation
 npm run lint                # ESLint (run `npm run lint:fix` to auto-fix)
 npm run knip                # Unused files, exports and dependencies
@@ -283,7 +283,7 @@ npx playwright install --with-deps
 npm run test:playwright     # Integration tests (Playwright)
 ```
 
-If `format:check` or `lint` fails, run `npm run format` or `npm run lint:fix` to auto-fix, then re-check. If `docs:check` fails with "content-mismatch", update the snippet line range in the markdown file to match the current source.
+If `format:check` or `lint` fails, run `npm run format` or `npm run lint:fix` to auto-fix, then re-check. If `docs:check` fails with "content-mismatch", update the snippet line range in the markdown file to match the current source. If `build:check` fails with `... is imported from external module ... but never used in "dist/..."`, a bundle uses part of a module whose other code needs that import: move that code into its own module (as `toolSurfaceProxyServer.ts` and `simulatedWriteRecords.ts` are) rather than silencing the warning.
 
 **Keep in sync:** If `.github/workflows/ci.yml` changes, update this checklist to match.
 

@@ -14,7 +14,7 @@ import type { ClientRunResult, TraceEvent } from './evalFrameworkTypes.js';
 import {
   readSimulatedWrites,
   type SimulatedWriteRecord,
-} from '../proxy/simulatedWrites.js';
+} from '../proxy/simulatedWriteRecords.js';
 
 type Executor = (evalCase: EvalCase) => Promise<CaseExecution>;
 

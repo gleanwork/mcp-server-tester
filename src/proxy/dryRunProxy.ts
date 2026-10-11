@@ -30,9 +30,7 @@ import {
   simulatedWriteId,
   type SimulatedWritesOptions,
 } from './simulatedWrites.js';
-
-/** The key of a planned-write result: what the client asked to do, not done. */
-export const PLANNED_WRITE_KEY = '_mst_planned_write';
+import { plannedWriteResult } from './plannedWrite.js';
 
 /** Seconds a request that got a 401 waits for MST to deliver a new token. */
 const AUTH_RETRY_WAIT_MS = 90_000;
@@ -151,25 +149,6 @@ export function isReadOnlyTool(tool: Tool | undefined): boolean {
   return (
     annotations.readOnlyHint === true && annotations.destructiveHint !== true
   );
-}
-
-/** The result a client gets for a write the proxy did not send. */
-function plannedWriteResult(
-  server: string,
-  toolName: string,
-  args: unknown,
-  aliases: readonly string[] = []
-): {
-  content: Array<{ type: 'text'; text: string }>;
-  structuredContent: Record<string, unknown>;
-} {
-  const planned = { server, tool_name: toolName, arguments: args ?? {} };
-  const envelope: Record<string, unknown> = { [PLANNED_WRITE_KEY]: planned };
-  for (const alias of aliases) envelope[alias] = planned;
-  return {
-    content: [{ type: 'text', text: JSON.stringify(envelope) }],
-    structuredContent: envelope,
-  };
 }
 
 /** A fetch that sends the current token, and retries once with a new one after a 401. */

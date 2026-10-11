@@ -1,9 +1,15 @@
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { ClientMetadata } from './externalClient/types.js';
-import {
-  CLAUDE_NO_MATCHING_SESSION_MESSAGE,
-  CLAUDE_SESSION_TIMEOUT_MESSAGE,
-} from './externalClient/builtins/claudeSessions.js';
+
+/**
+ * Message prefixes the eval runner counts as infrastructure failures. Cowork
+ * reports a Claude binding failure as text, so the runner matches these exact
+ * prefixes; the Claude session watcher (`claudeSessions.ts`) throws them.
+ * Keep the wording here and nowhere else.
+ */
+export const CLAUDE_SESSION_TIMEOUT_MESSAGE =
+  'Timed out waiting for Claude session';
+export const CLAUDE_NO_MATCHING_SESSION_MESSAGE = 'No matching Claude session';
 
 /**
  * Returns true when the error message appears to be caused by network or

@@ -4,15 +4,10 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { ExternalClientConfig, ClientRunContext } from '../types.js';
 import { POLL_INTERVAL_MS, delay } from './claudeCommon.js';
 import { NativeTraceError } from '../nativeTraceError.js';
-
-/**
- * Message prefixes the eval runner counts as infrastructure failures. Cowork
- * reports a binding failure as text, so the runner matches these exact
- * prefixes; keep the wording here and nowhere else.
- */
-export const CLAUDE_SESSION_TIMEOUT_MESSAGE =
-  'Timed out waiting for Claude session';
-export const CLAUDE_NO_MATCHING_SESSION_MESSAGE = 'No matching Claude session';
+import {
+  CLAUDE_NO_MATCHING_SESSION_MESSAGE,
+  CLAUDE_SESSION_TIMEOUT_MESSAGE,
+} from '../../infrastructureFailure.js';
 import {
   type ClaudeSessionMetadata,
   type ClaudeTrace,

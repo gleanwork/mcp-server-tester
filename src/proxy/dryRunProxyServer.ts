@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { StdioMCPConfig } from '../config/mcpConfig.js';
 
-export { PLANNED_WRITE_KEY } from './dryRunProxy.js';
+export { PLANNED_WRITE_KEY } from './plannedWrite.js';
 
 const PACKAGE_NAME = '@gleanwork/mcp-server-tester';
 
