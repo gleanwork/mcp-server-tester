@@ -9,7 +9,6 @@ import {
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server';
 import {
-  PLANNED_WRITE_KEY,
   createDryRunProxy,
   fileToken,
   isReadOnlyTool,
@@ -17,8 +16,9 @@ import {
   type DryRunProxy,
   type DryRunProxyOptions,
 } from './dryRunProxy.js';
+import { PLANNED_WRITE_KEY } from './plannedWrite.js';
 import { parseDryRunProxyArgs } from './dryRunProxyArgs.js';
-import type { SimulatedWriteRecord } from './simulatedWrites.js';
+import type { SimulatedWriteRecord } from './simulatedWriteRecords.js';
 
 const TOOLS = [
   {

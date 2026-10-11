@@ -11,9 +11,9 @@ import type { ClientRunResult } from './evalFrameworkTypes.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import {
   settleProxiedTrace,
-  startToolSurfaceProxy,
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
+import { startToolSurfaceProxy } from './toolSurfaceProxyServer.js';
 
 const FIXTURES = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

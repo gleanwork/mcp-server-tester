@@ -1,7 +1,4 @@
-import {
-  InMemoryResponseCacheStore,
-  SUPPORTED_PROTOCOL_VERSIONS,
-} from '@modelcontextprotocol/client';
+import { InMemoryResponseCacheStore } from '@modelcontextprotocol/client';
 import type {
   Client,
   ClientOptions,
@@ -17,10 +14,6 @@ import { connectionOf } from './connection.js';
 
 /** The first protocol revision of the modern (stateless) era. */
 export const FIRST_MODERN_PROTOCOL_VERSION = '2026-07-28';
-
-/** Legacy-era revisions the SDK can negotiate, newest first. */
-export const LEGACY_PROTOCOL_VERSIONS: readonly string[] =
-  SUPPORTED_PROTOCOL_VERSIONS;
 
 /** Modern-era revisions MST can pin. */
 export const MODERN_PROTOCOL_VERSIONS: readonly string[] = [

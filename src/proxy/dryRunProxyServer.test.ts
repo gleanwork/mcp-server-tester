@@ -13,7 +13,7 @@ import {
   closeMCPClient,
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
-import { PLANNED_WRITE_KEY } from './dryRunProxy.js';
+import { PLANNED_WRITE_KEY } from './plannedWrite.js';
 import { dryRunProxyEntry, dryRunProxyServer } from './dryRunProxyServer.js';
 
 function built(): boolean {

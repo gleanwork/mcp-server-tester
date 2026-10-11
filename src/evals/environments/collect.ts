@@ -27,11 +27,11 @@ import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
 import { ALL_ARTIFACTS, copyArtifacts } from '../trialArtifacts.js';
 import {
-  startToolSurfaceProxy,
   usesToolSurfaceProxy,
   withoutToolVariant,
   type ToolSurfaceProxy,
 } from '../toolSurfaceProxy.js';
+import { startToolSurfaceProxy } from '../toolSurfaceProxyServer.js';
 import { installPlugins } from '../../plugins/extensions.js';
 import { loadPlugins } from '../../plugins/loadPlugins.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';

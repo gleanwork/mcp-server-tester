@@ -83,6 +83,7 @@
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",
+    "build:check": "node scripts/check-build.mjs",
     "prepare": "npm run build",
     "build:copy-ui": "cp -r src/reporters/ui-dist dist/reporters/",
     "build:ui": "node --import tsx src/reporters/build-ui.ts",
@@ -100,7 +101,7 @@
     "test:eval-foundation": "node scripts/test-eval-foundation.mjs",
     "test:eval-review": "node scripts/test-eval-review.mjs",
     "test:usecases": "vitest run --config vitest.usecases.config.mts",
-    "test:all": "npm run build && npm run format:check && npm run lint && npm run typecheck && npm test",
+    "test:all": "npm run build:check && npm run format:check && npm run lint && npm run typecheck && npm test",
     "test:external-host": "vitest run --config vitest.external-host.config.mts",
     "test:external-host:chat": "vitest run --config vitest.external-host.config.mts -t \"Claude Chat\"",
     "test:external-host:cowork": "vitest run --config vitest.external-host.config.mts -t \"Claude Cowork\"",

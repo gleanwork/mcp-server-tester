@@ -7,7 +7,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { homedir } from 'node:os';
+import * as os from 'node:os';
 import type { StoredTokens, StoredClientInfo } from './types.js';
 import type { AuthServerMetadata } from './oauthFlow.js';
 import type { ProtectedResourceMetadata } from './discovery.js';
@@ -169,7 +169,7 @@ export function getStateDir(serverUrl: string, customDir?: string): string {
       return path.join(localAppData, 'mcp-tests', serverKey);
     }
     // Fallback for Windows
-    return path.join(homedir(), 'AppData', 'Local', 'mcp-tests', serverKey);
+    return path.join(os.homedir(), 'AppData', 'Local', 'mcp-tests', serverKey);
   }
 
   // Linux: Honor XDG_STATE_HOME
@@ -178,7 +178,7 @@ export function getStateDir(serverUrl: string, customDir?: string): string {
   }
 
   // Default for macOS and Linux
-  return path.join(homedir(), '.local', 'state', 'mcp-tests', serverKey);
+  return path.join(os.homedir(), '.local', 'state', 'mcp-tests', serverKey);
 }
 
 /**
@@ -190,14 +190,14 @@ function getBaseStateDir(): string {
     if (localAppData) {
       return path.join(localAppData, 'mcp-tests');
     }
-    return path.join(homedir(), 'AppData', 'Local', 'mcp-tests');
+    return path.join(os.homedir(), 'AppData', 'Local', 'mcp-tests');
   }
 
   if (process.platform === 'linux' && process.env.XDG_STATE_HOME) {
     return path.join(process.env.XDG_STATE_HOME, 'mcp-tests');
   }
 
-  return path.join(homedir(), '.local', 'state', 'mcp-tests');
+  return path.join(os.homedir(), '.local', 'state', 'mcp-tests');
 }
 
 /**
