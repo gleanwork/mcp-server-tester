@@ -24,6 +24,8 @@ npx mst env setup docker --env-option contexts=colima-mst-kvm
 
 This builds `mst-cowork-linux:<MST version>` on each Docker context you name (default: the current one). The image installs the same MST version you run, because a worker must run the same MST as `mst run`. From a source checkout, it packs and installs the checkout. Pin Claude Desktop with `--env-option claudeDesktopVersion=<version>`. Rebuild after upgrading MST.
 
+The build also downloads Cowork's VM bundle (1.2 GB), which Claude Desktop would otherwise download in every new container. It reads the bundle's files and SHA-256 checksums from the Claude Desktop package, downloads them from the same place Claude Desktop does, and checks them. If the package's manifest can't be read, the build goes on without the bundle and Claude Desktop downloads it on first use.
+
 ## Run
 
 ```bash
@@ -51,13 +53,15 @@ For each shard, MST:
 
 1. Starts a container with the VM devices, MST's seccomp profile, and a tmpfs at `/run/mst`. It isn't privileged.
 2. Writes the inference token into the tmpfs, over `docker exec`'s stdin, and refreshes it every 4 minutes. The token is never in the image, on a command line, or on disk.
-3. Waits for the desktop: Claude Desktop starts in gateway mode (no Claude.ai account), the image clicks through the one first-run screen, and boots Cowork's VM.
-4. Copies the shard's bundle in, and runs `mst collect` as the desktop user. MST writes each variant's servers and model into Claude Desktop's managed settings and restarts it ([owned-desktop mode](./cowork.md#attach-to-a-prepared-linux-desktop)).
+3. Waits for the desktop: Claude Desktop starts in gateway mode (no Claude.ai account), and the image clicks through the one first-run screen. This takes a few seconds; Cowork's VM isn't started yet.
+4. Copies the shard's bundle in, and runs `mst collect` as the desktop user. For each variant, MST writes its servers and model into Claude Desktop's managed settings and restarts it ([owned-desktop mode](./cowork.md#attach-to-a-prepared-linux-desktop)). The restart boots Cowork's VM, and returns once the VM is ready.
 5. Copies results and each trial's Cowork session folder back as trials finish, then removes the container.
 
-## On a Mac, the VM is slow to boot
+## Each variant costs a VM boot
 
-Under nested virtualization, Cowork's VM takes 1 to 5 minutes to boot. Claude Desktop gives it 60 seconds and fails that task. After each restart, the image starts one-line warm-up tasks ("Reply with OK.") until the VM is up, so a case finds it running. You'll see those tasks in the container's Cowork history. A container's first start also downloads the VM, so it can take 5 to 15 minutes. A Linux host with KVM, without nesting, should boot it much faster; that hasn't been measured yet.
+Claude Desktop reads its managed settings, and lists each MCP server's tools, only when it starts. It keeps the tool list for its whole run: a server's `notifications/tools/list_changed` doesn't refresh it. So each variant on a shard is a restart, and a restart stops Cowork's VM and boots a new one. A shard runs all of one variant's cases before the next variant's, so it restarts once per variant. A variant's datasets share that restart: MST skips a restart when the settings are the ones the desktop already runs with. Variants with tool metadata are the exception: their servers are a proxy with a URL of its own for each batch, so each of their datasets restarts too.
+
+On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest takes 1.5 to 2.5 minutes to start, while Claude Desktop gives it 60 seconds and fails that task. After each restart, the image starts one-line warm-up tasks ("Reply with OK.") until the VM is up, so a case finds it running. You'll see those tasks in the container's Cowork history. Measured on an M5 Pro: a fresh container to a finished one-case run took 2 min 39 s. A Linux host with KVM, without nesting, should boot the VM much faster; that hasn't been measured yet.
 
 ## When something fails
 

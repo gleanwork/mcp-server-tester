@@ -551,6 +551,38 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await expect(lifecycle).rejects.toThrow('Linux desktop probe failed');
     expect(await readFile(file, 'utf8')).toBe(original);
   });
+
+  it('restarts the desktop only when the settings change, or after it was not ready', async () => {
+    const restarts = () =>
+      child.exec.mock.calls.filter((call) => call[0] === RESTART).length;
+    // Another dataset of the same variant: the desktop already runs with it.
+    await (await prepareOwned()).lifecycle.then((p) => p.dispose());
+    await (await prepareOwned()).lifecycle.then((p) => p.dispose());
+    expect(restarts()).toBe(1);
+    // Another variant's model.
+    const file = join(directory, 'settings.json');
+    const other = linuxCoworkPlatform.prepare({
+      evalConfig,
+      model: 'other-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+      },
+    });
+    await (await other).dispose();
+    expect(restarts()).toBe(2);
+    // Back to the first: a restart. Then a probe that fails: the next
+    // prepare restarts even with the same settings.
+    child.responses.push({}, { failed: true });
+    await expect((await prepareOwned()).lifecycle).rejects.toThrow(
+      'Linux desktop probe failed'
+    );
+    expect(restarts()).toBe(3);
+    await (await prepareOwned()).lifecycle.then((p) => p.dispose());
+    expect(restarts()).toBe(4);
+  });
 });
 
 describe('Linux Cowork plugins with a stdio eval server', () => {

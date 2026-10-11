@@ -114,6 +114,61 @@ describe('the docker environment', () => {
   });
 });
 
+describe("the image's Cowork VM bundle manifest (bin/vm-bundle-manifest.mjs)", () => {
+  const script = path.join(
+    coworkImageDirectory(),
+    'bin/vm-bundle-manifest.mjs'
+  );
+  const sha = '882518393ed4ce89020bd48d99d5daf114999773';
+  // As Claude Desktop's app.asar holds it: minified JavaScript, unquoted keys.
+  const app = `var a=1;const M={_note:"Written by the publish step, do not hand-edit.",versions:[{sha:"${sha}",publishedAt:"2026-09-11",files:{unix:{arm64:[{name:"rootfs.img",checksum:"c1",size:12,progressStart:0,deltas:[{from:"old",checksum:"d1"}]},{name:"vmlinuz",checksum:"c2",size:3}],x64:[{name:"rootfs.img",checksum:"c3",size:14}]}}},{sha:"${'0'.repeat(40)}",files:{unix:{arm64:[]}}}]};f(M);`;
+
+  async function manifest(arch: string, content = app) {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-asar-'));
+    dirs.push(dir);
+    await fs.writeFile(path.join(dir, 'app.asar'), content, 'latin1');
+    const { execFile } = await import('node:child_process');
+    return new Promise<{ code: number; stdout: string; stderr: string }>(
+      (resolve) =>
+        execFile(
+          process.execPath,
+          [script, path.join(dir, 'app.asar'), arch],
+          (error, stdout, stderr) =>
+            resolve({ code: error ? Number(error.code) : 0, stdout, stderr })
+        )
+    );
+  }
+
+  it("reads the current bundle's files for an architecture", async () => {
+    const result = await manifest('arm64');
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      sha,
+      arch: 'arm64',
+      files: [
+        { name: 'rootfs.img', checksum: 'c1', size: 12 },
+        { name: 'vmlinuz', checksum: 'c2', size: 3 },
+      ],
+    });
+    expect(JSON.parse((await manifest('x64')).stdout).files).toEqual([
+      { name: 'rootfs.img', checksum: 'c3', size: 14 },
+    ]);
+  });
+
+  it('fails, so the build goes on without seeding, when it has nothing to seed', async () => {
+    expect(await manifest('riscv64')).toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining(
+        'no riscv64 files in the manifest (has: arm64, x64)'
+      ),
+    });
+    expect(await manifest('arm64', 'var a=1;')).toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining('no Cowork VM manifest'),
+    });
+  });
+});
+
 describe('a run in docker (a fake Docker CLI)', () => {
   async function fixture(env: Record<string, string> = {}) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-docker-'));

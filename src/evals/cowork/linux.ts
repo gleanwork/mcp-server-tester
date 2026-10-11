@@ -217,6 +217,15 @@ export function desktopRestartTimeoutMs(
   return seconds * 1000;
 }
 
+/**
+ * The settings each owned desktop was last restarted with, by settings file.
+ * Claude Desktop reads them only when it starts, and a restart reboots
+ * Cowork's VM (minutes under nested virtualization), so a batch whose
+ * settings are the ones the desktop already runs with (another dataset of
+ * the same variant) doesn't restart it.
+ */
+const ownedDesktopSettings = new Map<string, string>();
+
 /** Runs the image's desktop restart command; it returns once Claude is back. */
 async function restartDesktop(
   command: string,
@@ -468,6 +477,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     // variant's settings, restart the desktop, and restore the file after.
     const owned = env.MST_DESKTOP_OWNED === '1';
     let original: string | undefined;
+    let ownedText: string | undefined;
     if (owned) {
       const restart = env.MST_DESKTOP_RESTART;
       if (!restart || !isAbsolute(restart))
@@ -478,34 +488,36 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       const base = original
         ? (JSON.parse(original) as Record<string, unknown>)
         : {};
-      await writeSettingsText(
-        settingsFile,
-        `${JSON.stringify(
-          coworkLinuxOwnedSettings(base, {
-            servers: transportServers(evalConfig.servers, 'Cowork'),
-            plugins,
-            paths: stdioPaths,
-            approveWriteTools:
-              evalConfig.coworkSetup?.approveWriteTools === true,
-            ...(model ? { model } : {}),
-          }),
-          null,
-          2
-        )}\n`
-      );
+      ownedText = `${JSON.stringify(
+        coworkLinuxOwnedSettings(base, {
+          servers: transportServers(evalConfig.servers, 'Cowork'),
+          plugins,
+          paths: stdioPaths,
+          approveWriteTools: evalConfig.coworkSetup?.approveWriteTools === true,
+          ...(model ? { model } : {}),
+        }),
+        null,
+        2
+      )}\n`;
+      await writeSettingsText(settingsFile, ownedText);
     }
     // In owned mode the settings go back, whether or not the desktop is ready.
     const restore = async () => {
       if (owned) await writeSettingsText(settingsFile, original ?? '{}\n');
     };
     try {
-      if (owned)
+      if (owned && ownedDesktopSettings.get(settingsFile) !== ownedText) {
+        ownedDesktopSettings.delete(settingsFile);
         await restartDesktop(env.MST_DESKTOP_RESTART!, {
           ...process.env,
           ...env,
         });
+        ownedDesktopSettings.set(settingsFile, ownedText!);
+      }
       await checkAndProbe();
     } catch (error) {
+      // A desktop that isn't ready gets a restart next time.
+      ownedDesktopSettings.delete(settingsFile);
       await restore().catch(() => {});
       throw error;
     }

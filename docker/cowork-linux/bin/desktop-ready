@@ -10,8 +10,10 @@ not part of a case: MST's driver never clicks through onboarding.
 Cowork starts its VM for the first task after a launch, and gives the guest
 60 s to connect. Under nested virtualization (a Mac's Docker VM) the guest
 takes longer, so that task fails. After a profile's first failure Claude
-stops the VM and reinstalls it; after a later one it lets the VM finish
-booting. Unless MST_COWORK_WARM_VM=0, this starts one-line warm-up tasks
+stops the VM and reinstalls it, unless the profile is marked as having
+reinstalled already (desktop-session marks it when the image seeded the
+bundle); after a later one it lets the VM finish booting. Unless
+MST_COWORK_WARM_VM=0, this starts one-line warm-up tasks
 until the guest is ready, then goes back to a new task, so a case's task
 finds the VM running.
 """
@@ -135,13 +137,16 @@ def vm_log_since(offset):
 def warm_vm():
     """Starts warm-up tasks until Cowork's guest is ready."""
     deadline = time.monotonic() + WARM_DEADLINE_S
+    # The guest can become ready between two warm-up tasks, so readiness is
+    # read from everything logged since the warm-up began.
+    began = VM_LOG.stat().st_size if VM_LOG.exists() else 0
     while time.monotonic() < deadline:
         offset = VM_LOG.stat().st_size if VM_LOG.exists() else 0
         if not start_task("Reply with OK."):
             return "the warm-up task couldn't be started"
         while time.monotonic() < deadline:
             seen = vm_log_since(offset)
-            if b"guest ready" in seen:
+            if b"guest ready" in vm_log_since(began):
                 open_url("claude://claude.ai/new")
                 return None if wait_for_prompt(30) is not None else "no new task after the warm-up"
             # Claude gave up on this start; once it's done, start another

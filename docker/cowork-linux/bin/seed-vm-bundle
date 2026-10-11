@@ -1,0 +1,44 @@
+#!/bin/bash
+# Image build step: downloads the Cowork VM bundle this Claude Desktop package
+# expects into /opt/cowork-vm, from the same place Claude Desktop downloads it
+# on first use, and checks each file's SHA-256 against the app's manifest.
+# desktop-session links it into the profile, so a container doesn't spend a
+# minute or more downloading 1.2 GB.
+#
+# Anything unexpected only skips the seeding: Claude Desktop then downloads
+# the bundle itself.
+set -uo pipefail
+
+out=/opt/cowork-vm
+asar=/usr/lib/claude-desktop/resources/app.asar
+case "$(dpkg --print-architecture)" in
+  amd64) arch=x64 ;;
+  arm64) arch=arm64 ;;
+  *) echo "seed-vm-bundle: no Cowork VM for this architecture" >&2; exit 0 ;;
+esac
+
+skip() {
+  echo "seed-vm-bundle: not seeding the Cowork VM bundle ($1); Claude Desktop will download it on first use" >&2
+  rm -rf "${out}"
+  exit 0
+}
+
+manifest="$(node /opt/mst/bin/vm-bundle-manifest.mjs "${asar}" "${arch}")" \
+  || skip "no manifest"
+sha="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).sha)' "${manifest}")"
+[[ "${sha}" =~ ^[0-9a-f]{40}$ ]] || skip "unexpected bundle id"
+
+install -d -m 0755 "${out}"
+while read -r name checksum; do
+  [[ "${name}" =~ ^[A-Za-z0-9._-]+$ ]] || skip "unexpected file name"
+  url="https://downloads.claude.ai/vms/linux/${arch}/${sha}/${name}.zst"
+  curl -fsSL --retry 3 -o "${out}/${name}.zst" "${url}" || skip "download failed: ${url}"
+  echo "${checksum}  ${out}/${name}.zst" | sha256sum --check --quiet \
+    || skip "checksum mismatch: ${name}"
+done < <(node -e '
+  for (const f of JSON.parse(process.argv[1]).files)
+    console.log(`${f.name} ${f.checksum}`);
+' "${manifest}")
+chmod 0644 "${out}"/*.zst
+printf '%s\n' "${sha}" > "${out}/bundle"
+echo "seed-vm-bundle: seeded Cowork VM bundle ${sha} (${arch})"
