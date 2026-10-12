@@ -1197,6 +1197,163 @@ describe('ChatGPT native response_item tool calls', () => {
     ]);
   });
 
+  it.each(['list_mcp_resources', 'list_mcp_resource_templates'])(
+    'attributes a targeted %s helper to the client and retains its failure',
+    (tool) => {
+      // Observed native shape: the helper's requested server, including a typo,
+      // becomes item.server even though exec called tools.list_mcp_resources.
+      const native = {
+        type: 'McpToolCall',
+        id: 'resource-item',
+        server: 'acme_eval',
+        tool,
+        arguments: { server: 'acme_eval' },
+        status: 'failed',
+        error: {
+          message: "resources/list failed: unknown MCP server 'acme_eval'",
+        },
+      };
+      const body = [
+        ...exec(
+          'resource',
+          `const r = await tools.${tool}({server:"acme_eval"}); text(r);`,
+          1,
+          2
+        ),
+        item(native, 1.2, 1.3),
+      ];
+      const trace = parse(
+        [...body, item({ ...mcp, id: 'real-mcp', arguments: {} }, 3, 4)],
+        { surface: 'codex' }
+      );
+      expect(trace.toolCalls).toMatchObject([
+        { source: 'host', name: 'exec' },
+        {
+          source: 'host',
+          name: tool,
+          server: 'acme_eval',
+          arguments: { server: 'acme_eval' },
+          isError: true,
+          output: JSON.stringify(native.error),
+          durationMs: 100,
+        },
+        { source: 'mcp', server: 'glean-eval', name: 'search' },
+      ]);
+      expect(trace.telemetry).toMatchObject({
+        mcpToolCallCount: 1,
+        mcpToolErrorCount: 0,
+        hostToolCallCount: 2,
+        hostToolErrorCount: 1,
+        mcpWallDurationMs: 1000,
+      });
+      expect(parse(body).telemetry.mcpToolCallCount).toBe(0);
+      // The shape also occurs for an existing target and a successful lookup.
+      const existing = parse([
+        ...exec(
+          'resource',
+          `await tools.${tool}({"server":"acme-eval"});`,
+          1,
+          2
+        ),
+        item(
+          {
+            ...native,
+            server: 'acme-eval',
+            arguments: { server: 'acme-eval' },
+            status: 'completed',
+            error: undefined,
+            result: { resources: [] },
+          },
+          1.2,
+          1.3
+        ),
+      ]);
+      expect(existing.toolCalls[1]).toMatchObject({
+        source: 'host',
+        isError: false,
+      });
+      expect(existing.telemetry.mcpToolCallCount).toBe(0);
+    }
+  );
+
+  it.each([
+    '// await tools.list_mcp_resources({server:"acme_eval"});',
+    `text('await tools.list_mcp_resources({server:"acme_eval"});');`,
+    'if (false) { await tools.list_mcp_resources({server:"acme_eval"}); }',
+    'await tools.mcp__acme_eval__list_mcp_resources({server:"acme_eval"});',
+    'await tools.list_mcp_resources({server:"acme_eval"}); await tools.mcp__other__search({});',
+    'const r = await tools.list_mcp_resources({server:"other"}); text(r);',
+    'await tools.list_mcp_resources({server:target});',
+    'await tools.list_mcp_resources({server:"acme_eval", extra:true});',
+  ])(
+    'does not use ambiguous or unrelated exec code as helper provenance: %s',
+    (input) => {
+      const trace = parse([
+        ...exec('resource', input, 1, 2),
+        item(
+          {
+            type: 'McpToolCall',
+            id: 'native',
+            server: 'acme_eval',
+            tool: 'list_mcp_resources',
+            arguments: { server: 'acme_eval' },
+          },
+          1.2,
+          1.3
+        ),
+      ]);
+      expect(trace.toolCalls.find((c) => c.id === 'native')).toMatchObject({
+        source: 'mcp',
+      });
+    }
+  );
+
+  it.each([
+    'no-output',
+    'outside-span',
+    'multiple-children',
+    'overlap',
+    'pending-overlap',
+    'wrong-arguments',
+  ])('requires unambiguous completed native correlation: %s', (condition) => {
+    const body = exec(
+      'resource',
+      'await tools.list_mcp_resources({server:"acme_eval"});',
+      1,
+      condition === 'no-output' ? undefined : 2
+    );
+    const native = {
+      type: 'McpToolCall',
+      id: 'native',
+      server: 'acme_eval',
+      tool: 'list_mcp_resources',
+      arguments: {
+        server: condition === 'wrong-arguments' ? 'other' : 'acme_eval',
+      },
+    };
+    body.push(
+      item(
+        native,
+        condition === 'outside-span' ? 3 : 1.2,
+        condition === 'outside-span' ? 4 : 1.3
+      )
+    );
+    if (condition === 'multiple-children')
+      body.push(item({ ...mcp, id: 'other', arguments: {} }, 1.4, 1.5));
+    if (condition === 'overlap' || condition === 'pending-overlap')
+      body.push(
+        ...exec(
+          'other',
+          'await tools.mcp__other__search({});',
+          1,
+          condition === 'pending-overlap' ? undefined : 2
+        )
+      );
+    expect(parse(body).toolCalls.find((c) => c.id === 'native')).toMatchObject({
+      source: 'mcp',
+    });
+  });
+
   it('counts each MCP call once when a native McpToolCall also exists', () => {
     // Observed on Linux ChatGPT Work 26.915.31945: exec references the tool and
     // the host also records a timed McpToolCall item for the same call.
