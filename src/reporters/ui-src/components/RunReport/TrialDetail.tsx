@@ -52,7 +52,7 @@ function Block({ label, text }: { label: string; text: string }) {
 function EventRow({ event }: { event: RunReportEvent }) {
   const name = [event.server, event.name].filter(Boolean).join(' · ');
   return (
-    <li className="grid gap-1">
+    <li className="grid grid-cols-[minmax(0,1fr)] gap-1">
       <div className="flex flex-wrap items-baseline gap-2 text-xs">
         <span className="font-mono text-muted-foreground">{event.kind}</span>
         {name && <span className="font-mono font-semibold">{name}</span>}
@@ -108,7 +108,7 @@ const EXCERPT = 280;
 function Answer({ text }: { text: string }) {
   const long = text.length > EXCERPT;
   return (
-    <div className="grid gap-1">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-1">
       <blockquote className="whitespace-pre-wrap wrap-break-word border-l-2 pl-2 text-xs text-foreground/90">
         {long ? `${text.slice(0, EXCERPT).trimEnd()}…` : text}
       </blockquote>
@@ -126,7 +126,7 @@ export function TrialView({
   index: number;
 }) {
   return (
-    <li className="grid gap-2 rounded-md border p-2 text-sm">
+    <li className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-md border p-2 text-sm">
       <div className="flex items-center justify-between gap-2">
         <span className="font-semibold">
           Trial {index + 1}
@@ -154,9 +154,15 @@ export function TrialView({
         </p>
       )}
       {trial.scores.length > 0 && (
-        <ul className="grid gap-1" aria-label="Scores">
+        <ul
+          className="grid grid-cols-[minmax(0,1fr)] gap-1"
+          aria-label="Scores"
+        >
           {trial.scores.map((score, i) => (
-            <li key={i} className="grid gap-0.5 text-xs">
+            <li
+              key={i}
+              className="grid grid-cols-[minmax(0,1fr)] gap-0.5 text-xs"
+            >
               <span className="flex flex-wrap items-baseline gap-2">
                 <Badge pass={score.pass} />
                 <span className="font-mono font-semibold">
@@ -213,10 +219,10 @@ export function Preferences({
 }) {
   if (preferences.length === 0) return null;
   return (
-    <div className="grid gap-1 rounded-md border p-2 text-xs">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-1 rounded-md border p-2 text-xs">
       <span className="font-semibold">Pairwise, against the baseline</span>
       {preferences.map((p, i) => (
-        <div key={i} className="grid gap-0.5">
+        <div key={i} className="grid grid-cols-[minmax(0,1fr)] gap-0.5">
           <span>
             <span className="font-mono font-semibold">{p.judge}</span>:{' '}
             {p.error ? (
