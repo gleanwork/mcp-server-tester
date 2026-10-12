@@ -131,7 +131,7 @@ servers through Claude's supported local Developer MCP surface instead:
   made concurrently. `cowork recover` also restores the developer configuration.
 
 Use actual tool-call assertions: successful endpoint preflight alone is not proof
-that the native session received a connector. A live pinned run has passed with
+that the Cowork session received the server. A live pinned run has passed with
 an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 
 ## Run on macOS from a source checkout
@@ -195,7 +195,7 @@ never resubmitted. Follow-up usage is recorded under
 `clientTelemetry.computerUse.hitlFollowups`.
 
 MST does not configure or observe connectors added from Cowork's own connector
-directory, so disconnect any that could write to real accounts before a run, or
+directory (the client's own connectors), so disconnect any that could write to real accounts before a run, or
 use test accounts.
 
 ## Run an installed release

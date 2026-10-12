@@ -47,7 +47,16 @@ MST's own connection to an MCP server, through which tests call tools directly.
 _Avoid_: client (that is the application under test)
 
 **Vendor MCP server**:
-A third-party service's MCP server (Slack's, Jira's, GitHub's) that an eval config defines, usually through a connector, so MST hands it tokens and can put a proxy in front of it.
+A third-party service's MCP server (Slack's, Jira's, GitHub's) that an eval config defines, usually through a connector, so MST hands it tokens and can put a proxy in front of it. The service may publish it, or someone else may.
+_Avoid_: native server, external server
+
+**Official MCP server**:
+A vendor MCP server the service publishes itself, such as the one Slack runs for Slack, rather than a community server for the same service.
+_Avoid_: native server, first-party server
+
+**Client's own connector**:
+A connector a user adds inside the client, such as one from Cowork's connector directory, hosted by the client's maker. MST doesn't configure or observe it. Unrelated to an MST connector.
+_Avoid_: native connector, built-in connector
 
 **Variant**:
 One setup an eval tests: the client, its model and options (such as a system prompt), the MCP servers, and the tool metadata the client sees. Every variant runs the same cases.
