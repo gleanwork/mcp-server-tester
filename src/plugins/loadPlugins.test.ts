@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadPlugins } from './loadPlugins.js';
+import { loadPlugins, resolvePluginPackage } from './loadPlugins.js';
 
 const tempDirs: string[] = [];
 
@@ -357,5 +357,64 @@ describe('loadPlugins', () => {
     await expect(
       loadPlugins(['./missing.mjs'], { baseDir: dir })
     ).rejects.toThrow(`Plugin "./missing.mjs" not found (looked in ${dir}`);
+  });
+});
+
+describe('resolvePluginPackage', () => {
+  function installPackage(dir: string, name: string, version: string) {
+    const root = path.join(dir, 'node_modules', name);
+    write(
+      root,
+      'package.json',
+      JSON.stringify({
+        name,
+        version,
+        type: 'module',
+        exports: './dist/index.mjs',
+      })
+    );
+    write(root, 'dist/index.mjs', pluginSource('acme'));
+    return root;
+  }
+
+  it('finds the package a specifier loads, where loading would', () => {
+    const configDir = tempDir();
+    const fallback = tempDir();
+    const root = installPackage(fallback, '@acme/mst-plugin', '1.2.3');
+    expect(
+      resolvePluginPackage('@acme/mst-plugin', {
+        baseDir: configDir,
+        fallbackDir: fallback,
+      })
+    ).toEqual({
+      specifier: '@acme/mst-plugin',
+      name: '@acme/mst-plugin',
+      version: '1.2.3',
+      dir: root,
+    });
+    // The eval config's directory comes first.
+    installPackage(configDir, '@acme/mst-plugin', '2.0.0');
+    expect(
+      resolvePluginPackage('@acme/mst-plugin', {
+        baseDir: configDir,
+        fallbackDir: fallback,
+      })?.version
+    ).toBe('2.0.0');
+  });
+
+  it('is undefined for a path, a file of that name, or nothing installed', () => {
+    const dir = tempDir();
+    write(dir, 'local.mjs', pluginSource('acme'));
+    expect(
+      resolvePluginPackage('./local.mjs', { baseDir: dir })
+    ).toBeUndefined();
+    expect(
+      resolvePluginPackage(path.join(dir, 'local.mjs'), { baseDir: dir })
+    ).toBeUndefined();
+    write(dir, 'acme/index.mjs', pluginSource('acme'));
+    expect(resolvePluginPackage('acme', { baseDir: dir })).toBeUndefined();
+    expect(
+      resolvePluginPackage('@acme/missing', { baseDir: dir })
+    ).toBeUndefined();
   });
 });

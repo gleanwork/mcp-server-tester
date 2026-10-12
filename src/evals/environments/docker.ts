@@ -444,9 +444,27 @@ function openDocker(
 }
 
 /** Builds the image on each context (`mst env setup docker`). */
+/**
+ * `npm pack`s the package in `dir` into `destination`, running its `prepare`
+ * script, so a checkout is packed as built. `MST_NPM` names another npm CLI.
+ */
+async function npmPack(dir: string, destination: string): Promise<void> {
+  const packed = await new Promise<number>((resolve) => {
+    const child = spawn(
+      process.env.MST_NPM || 'npm',
+      ['pack', '--silent', '--pack-destination', destination],
+      { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] }
+    );
+    child.on('error', () => resolve(-1));
+    child.on('close', (code) => resolve(code ?? -1));
+  });
+  if (packed !== 0) throw new Error(`npm pack failed in ${dir}.`);
+}
+
 async function setupDocker(
   options: DockerOptions,
-  log: (line: string) => void
+  log: (line: string) => void,
+  plugins: ReadonlyArray<{ name: string; version: string; dir: string }>
 ): Promise<void> {
   const image = options.image ?? DEFAULT_COWORK_IMAGE;
   const source = coworkImageDirectory();
@@ -460,16 +478,16 @@ async function setupDocker(
     const checkout = existsSync(path.join(root, 'src', 'cli', 'index.ts'));
     if (checkout) {
       log(`Packing MST from ${root}…`);
-      const packed = await new Promise<number>((resolve) => {
-        const child = spawn(
-          'npm',
-          ['pack', '--silent', '--pack-destination', packages],
-          { cwd: root, stdio: ['ignore', 'ignore', 'inherit'] }
-        );
-        child.on('error', () => resolve(-1));
-        child.on('close', (code) => resolve(code ?? -1));
-      });
-      if (packed !== 0) throw new Error('npm pack failed.');
+      await npmPack(root, packages);
+    }
+    // The eval's plugins, packed from where this machine has them, so a
+    // private or linked package needs no registry: the image installs them
+    // (and their dependencies) in MST_PLUGIN_DIR.
+    const pluginPackages = path.join(build, 'plugins');
+    await fs.mkdir(pluginPackages, { recursive: true });
+    for (const plugin of plugins) {
+      log(`Packing plugin ${plugin.name}@${plugin.version}…`);
+      await npmPack(plugin.dir, pluginPackages);
     }
     for (const dockerContext of contextsOf(options)) {
       log(`Building ${image}${dockerContext ? ` on ${dockerContext}` : ''}…`);
@@ -513,7 +531,7 @@ export const dockerEnvironment: EnvironmentDefinition = {
   async open(options, context) {
     return openDocker(options as DockerOptions, context);
   },
-  async setup(options, { log }) {
-    await setupDocker(options as DockerOptions, log);
+  async setup(options, { log, plugins = [] }) {
+    await setupDocker(options as DockerOptions, log, plugins);
   },
 };

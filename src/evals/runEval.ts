@@ -96,6 +96,7 @@ import {
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import type { Plugin } from '../plugins/plugin.js';
+import { resolvePluginPackage } from '../plugins/loadPlugins.js';
 import { assertDatasetNamespaces, loadEvalPlugins } from './evalPlugins.js';
 import { loadDataset } from './builtinDatasetSources.js';
 import {
@@ -1227,6 +1228,29 @@ async function evaluate(
             : specifier
         ),
       ];
+      // The plugin packages among them, as this machine loads them: a
+      // worker must run the same versions.
+      const pluginPackages = [
+        ...(loadedConfig.plugins ?? []).map((specifier) =>
+          resolvePluginPackage(specifier, {
+            baseDir: configDir,
+            fallbackDir: rootDir,
+          })
+        ),
+        ...(options.pluginPaths ?? []).map((specifier) =>
+          resolvePluginPackage(specifier, { baseDir: rootDir })
+        ),
+      ].flatMap((found) =>
+        found
+          ? [
+              {
+                specifier: found.specifier,
+                name: found.name,
+                version: found.version,
+              },
+            ]
+          : []
+      );
       const controller = new AbortController();
       let interrupts = 0;
       const onInterrupt = () => {
@@ -1244,6 +1268,7 @@ async function evaluate(
           runId: executionId,
           evalConfig,
           plugins: workerPlugins,
+          pluginPackages,
           groups,
           secrets: fileSecrets,
           ...(connectors.slots.length

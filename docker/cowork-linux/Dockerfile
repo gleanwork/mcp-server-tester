@@ -73,6 +73,22 @@ RUN usermod -l mst -d /home/mst -m node && groupmod -n mst node \
 
 COPY --chmod=755 bin/ /opt/mst/bin/
 
+# The eval's plugin packages (`mst env setup docker --config`), packed from
+# the machine that runs MST, with their dependencies. A plugin's own
+# @gleanwork/mcp-server-tester is the MST above, so both share one instance.
+COPY plugins/ /tmp/mst-plugins/
+RUN set -e; \
+  install -d -m 0755 /opt/mst/plugins; \
+  if ls /tmp/mst-plugins/*.tgz >/dev/null 2>&1; then \
+    cd /opt/mst/plugins; \
+    echo '{"private":true}' > package.json; \
+    npm install --omit=dev --legacy-peer-deps --no-audit --no-fund /tmp/mst-plugins/*.tgz; \
+    rm -rf node_modules/@gleanwork/mcp-server-tester; \
+    install -d node_modules/@gleanwork; \
+    ln -s "$(npm root -g)/@gleanwork/mcp-server-tester" node_modules/@gleanwork/mcp-server-tester; \
+  fi; \
+  rm -rf /tmp/mst-plugins /root/.npm
+
 # What `docker exec` inherits: the session MST's Linux driver attaches to,
 # and owned-desktop mode (MST writes each variant's settings and restarts
 # Claude Desktop with MST_DESKTOP_RESTART).
@@ -86,6 +102,7 @@ ENV DISPLAY=:99 \
   MST_COWORK_URL_OPENER=/opt/mst/bin/open-url \
   MST_COWORK_PYTHON=/usr/bin/python3 \
   MST_TOKENS_DIR=/run/mst/tokens \
+  MST_PLUGIN_DIR=/opt/mst/plugins \
   LANG=C.UTF-8
 
 LABEL org.opencontainers.image.title="MST Cowork Linux desktop" \

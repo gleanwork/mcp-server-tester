@@ -24,6 +24,8 @@ npx mst env setup docker --env-option contexts=colima-mst-kvm
 
 This builds `mst-cowork-linux:<MST version>` on each Docker context you name (default: the current one). The image installs the same MST version you run, because a worker must run the same MST as `mst run`. From a source checkout, it packs and installs the checkout. Pin Claude Desktop with `--env-option claudeDesktopVersion=<version>`. Rebuild after upgrading MST.
 
+If the eval loads plugins, add `--config eval.json`: the image then installs them (see [Plugins](#plugins)).
+
 The build also downloads Cowork's VM bundle (1.2 GB), which Claude Desktop would otherwise download in every new container. It reads the bundle's files and SHA-256 checksums from the Claude Desktop package, downloads them from the same place Claude Desktop does, and checks them. If the package's manifest can't be read, the build goes on without the bundle and Claude Desktop downloads it on first use.
 
 ## Run
@@ -46,6 +48,17 @@ Options (`--env-option key=value`):
 | `claudeDesktopVersion` | `mst env setup` only: the Claude Desktop package to install.                                               |
 
 **One container per Docker host at a time.** Claude Desktop's VM service listens on a fixed vsock port for the whole host, and containers don't separate vsock. So two Cowork containers can't run on one Docker host. To run shards side by side, give each its own host: several Colima VMs on a Mac, or remote Docker hosts, listed in `contexts`. With more shards than contexts, the extra shards wait for a free context.
+
+## Plugins
+
+Each container's worker loads the eval's plugins, so the image must have them. `mst env setup docker --config eval.json` installs each plugin the eval config names in the image, at `/opt/mst/plugins`:
+
+- **A plugin must be a package:** a directory with a `package.json`, installed where the eval config finds it (`node_modules` beside it). A plugin named by a file path can't be installed, and setup says so.
+- **Packed here, not downloaded:** setup runs `npm pack` on each plugin as this machine has it installed, so a private or linked package needs no registry access. The image build then installs each package's dependencies from the npm registry.
+- **The image's MST:** a plugin's own `@gleanwork/mcp-server-tester` is the one the image runs.
+- **Same version, or no run:** a run sends each plugin package's version to its workers, and a worker whose image has another version stops with "This worker has plugin …; the run uses …". After you change or upgrade a plugin, run `mst env setup docker --config eval.json` again.
+
+The image holds one set of plugins: setting it up for another eval replaces them.
 
 ## What happens
 

@@ -81,14 +81,64 @@ function isPathSpecifier(specifier: string): boolean {
   return /^\.\.?(?:[/\\]|$)/.test(specifier);
 }
 
-/** Eval config directory, then working directory, then package (ADR-0001). */
-function resolveEntry(specifier: string, options: LoadPluginsOptions): string {
-  const dirs = [
+/** A plugin package, as it's installed where a plugin specifier resolves. */
+export interface PluginPackage {
+  /** The plugin specifier, as the eval config names it. */
+  specifier: string;
+  name: string;
+  version: string;
+  /** The package's directory. */
+  dir: string;
+}
+
+/**
+ * The package a package specifier loads, where `loadPlugins` would find it
+ * with the same options. Undefined for a path specifier, or when no package
+ * is installed there.
+ */
+export function resolvePluginPackage(
+  specifier: string,
+  options: LoadPluginsOptions = {}
+): PluginPackage | undefined {
+  if (path.isAbsolute(specifier) || isPathSpecifier(specifier))
+    return undefined;
+  const name = packageName(specifier);
+  const dirs = resolutionDirs(options);
+  // As loading does: a file or directory of that name is a path, not a package.
+  if (dirs.some((dir) => fileOrIndex(path.resolve(dir, specifier))))
+    return undefined;
+  for (const dir of dirs) {
+    const entry = resolvePackage(specifier, dir);
+    if (!entry) continue;
+    for (let at = path.dirname(entry); ; at = path.dirname(at)) {
+      const manifest = path.join(at, 'package.json');
+      if (fs.existsSync(manifest)) {
+        const json = JSON.parse(fs.readFileSync(manifest, 'utf8')) as {
+          name?: unknown;
+          version?: unknown;
+        };
+        if (json.name === name && typeof json.version === 'string')
+          return { specifier, name, version: json.version, dir: at };
+      }
+      if (path.dirname(at) === at) break;
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+function resolutionDirs(options: LoadPluginsOptions): string[] {
+  return [
     ...new Set([
       options.baseDir ?? process.cwd(),
       options.fallbackDir ?? process.cwd(),
     ]),
   ];
+}
+
+/** Eval config directory, then working directory, then package (ADR-0001). */
+function resolveEntry(specifier: string, options: LoadPluginsOptions): string {
+  const dirs = resolutionDirs(options);
   if (path.isAbsolute(specifier)) {
     const entry = fileOrIndex(specifier);
     if (entry) return entry;

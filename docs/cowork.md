@@ -274,9 +274,11 @@ can run Cowork shards on Linux workers in owned-desktop mode. Connector servers
 and variants with tool metadata work there as they do locally: the worker
 launches each connector with its own paths and gets its access token from the
 coordinator, and runs the tool-variant proxy itself. The worker image must
-install the plugins the eval loads, at the paths the eval config names. The
-built-in `docker` environment runs shards in containers from MST's own image:
-see [Cowork in Docker](./cowork-docker.md).
+install the plugin packages the eval loads, at the versions the coordinator
+runs, where the worker resolves them (`MST_PLUGIN_DIR`); a worker with another
+version refuses to run. The built-in `docker` environment runs shards in
+containers from MST's own image, and installs the eval's plugins in it: see
+[Cowork in Docker](./cowork-docker.md).
 
 Submission opens the native deep link through the prepared environment's `xdg-open`
 handler, then attempts one semantic `Start task` action. Alternatively, set

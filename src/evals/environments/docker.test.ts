@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   containerName,
   contextPool,
@@ -12,6 +12,7 @@ import {
 } from './docker.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
 import { runEval } from '../runEval.js';
+import { setupEnvironment } from '../../cli/commands/env/index.js';
 import { resetPluginsForTests } from '../../plugins/extensions.js';
 
 const mock = (name: string) =>
@@ -170,11 +171,18 @@ describe("the image's Cowork VM bundle manifest (bin/vm-bundle-manifest.mjs)", (
 });
 
 describe('a run in docker (a fake Docker CLI)', () => {
-  async function fixture(env: Record<string, string> = {}) {
+  async function fixture(
+    env: Record<string, string> = {},
+    plugins: string[] = [mock('dockerTestPlugin.ts')]
+  ) {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-docker-'));
     dirs.push(dir);
     const root = path.join(dir, 'docker');
     await fs.mkdir(root, { recursive: true });
+    // The eval's own directory, apart from the containers: a worker resolving
+    // a package can't find the eval's node_modules by walking up.
+    const project = path.join(dir, 'project');
+    await fs.mkdir(project, { recursive: true });
     vi.stubEnv('MST_DOCKER', mock('fakeDocker.mjs'));
     vi.stubEnv('FAKE_DOCKER_ROOT', root);
     vi.stubEnv('ANTHROPIC_BASE_URL', '');
@@ -182,7 +190,7 @@ describe('a run in docker (a fake Docker CLI)', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'test-api-key');
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
     await fs.writeFile(
-      path.join(dir, 'cases.json'),
+      path.join(project, 'cases.json'),
       JSON.stringify({
         name: 'cases',
         cases: ['alpha', 'bravo', 'charlie'].map((id) => ({
@@ -192,12 +200,12 @@ describe('a run in docker (a fake Docker CLI)', () => {
         })),
       })
     );
-    const configPath = path.join(dir, 'eval.json');
+    const configPath = path.join(project, 'eval.json');
     await fs.writeFile(
       configPath,
       JSON.stringify({
         name: 'docker',
-        plugins: [mock('dockerTestPlugin.ts')],
+        plugins,
         client: 'dt/client/notes',
         datasets: ['./cases.json'],
         servers: {},
@@ -211,8 +219,100 @@ describe('a run in docker (a fake Docker CLI)', () => {
         .map(
           (line) => JSON.parse(line) as { context?: string; args: string[] }
         );
-    return { dir, root, configPath, calls };
+    return { dir, root, project, configPath, calls };
   }
+
+  /** The test plugin as a package, `@acme/mst-dt`, installed in `dir`. */
+  async function installPluginPackage(dir: string, version: string) {
+    const packageDir = path.join(dir, 'node_modules', '@acme', 'mst-dt');
+    await fs.mkdir(packageDir, { recursive: true });
+    await fs.writeFile(
+      path.join(packageDir, 'package.json'),
+      JSON.stringify({
+        name: '@acme/mst-dt',
+        version,
+        type: 'module',
+        exports: './index.mjs',
+      })
+    );
+    await fs.writeFile(
+      path.join(packageDir, 'index.mjs'),
+      `export { default } from ${JSON.stringify(pathToFileURL(mock('dockerTestPlugin.ts')).href)};\n`
+    );
+    return packageDir;
+  }
+
+  it("builds the image with the eval's plugin packages, on every context", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { root, project, configPath } = await fixture(
+      { MST_NPM: mock('fakeNpm.mjs') },
+      ['@acme/mst-dt']
+    );
+    await installPluginPackage(project, '1.2.3');
+    await setupEnvironment('docker', {
+      config: configPath,
+      envOption: ['contexts=ctx-a,ctx-b', 'image=mst-test:1'],
+      rootDir: project,
+    });
+    const builds = (await fs.readFile(path.join(root, 'builds.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(builds).toEqual([
+      {
+        context: 'ctx-a',
+        tag: 'mst-test:1',
+        plugins: ['acme-mst-dt-1.2.3.tgz'],
+      },
+      {
+        context: 'ctx-b',
+        tag: 'mst-test:1',
+        plugins: ['acme-mst-dt-1.2.3.tgz'],
+      },
+    ]);
+  }, 120_000);
+
+  it('refuses to build with a plugin that is a file, not a package', async () => {
+    const { project, configPath } = await fixture();
+    await expect(
+      setupEnvironment('docker', { config: configPath, rootDir: project })
+    ).rejects.toThrow('is a file, not a package');
+  });
+
+  it('runs a worker only with the plugin version the run uses', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const image = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'mst-image-plugins-')
+    );
+    dirs.push(image);
+    const { dir, project, configPath } = await fixture(
+      { FAKE_DOCKER_PLUGIN_DIR: image },
+      ['@acme/mst-dt']
+    );
+    await installPluginPackage(project, '1.2.3');
+    // The image was built with another version.
+    const installed = await installPluginPackage(image, '1.2.4');
+    const run = () =>
+      runEval({
+        configPath,
+        rootDir: project,
+        outputDir: path.join(dir, 'out'),
+        env: 'docker',
+        envOptions: { image: 'mst-test:1' },
+        report: false,
+      });
+    expect((await run()).summary.metrics).toMatchObject({ passed: 0 });
+    expect(log.mock.calls.map((call) => String(call[0])).join('\n')).toContain(
+      'This worker has plugin @acme/mst-dt@1.2.4; the run uses @acme/mst-dt@1.2.3.'
+    );
+    // Rebuilt with the run's version: the run passes.
+    await fs.rm(installed, { recursive: true });
+    await installPluginPackage(image, '1.2.3');
+    expect((await run()).summary.metrics).toMatchObject({
+      passed: 3,
+      total: 3,
+    });
+  }, 120_000);
 
   it('collects every case over docker exec, brings artifacts back, and removes the containers', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});

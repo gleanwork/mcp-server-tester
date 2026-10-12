@@ -40,6 +40,17 @@ function fail(message) {
 const [command, ...rest] = args;
 if (command === 'image') {
   process.stdout.write('sha256:fake-image\n');
+} else if (command === 'build') {
+  // What the image would install: the plugin packages in the context.
+  const plugins = path.join(rest.at(-1), 'plugins');
+  fs.appendFileSync(
+    path.join(ROOT, 'builds.jsonl'),
+    `${JSON.stringify({
+      context,
+      tag: rest[rest.indexOf('--tag') + 1],
+      plugins: fs.existsSync(plugins) ? fs.readdirSync(plugins).sort() : null,
+    })}\n`
+  );
 } else if (command === 'run') {
   const name = rest[rest.indexOf('--name') + 1];
   const root = containerRoot(name);
@@ -97,6 +108,10 @@ if (command === 'image') {
           MST_TOKENS_DIR: path.join(containerRoot(name), 'run/mst/tokens'),
           // What the worker leaves in the container goes with it.
           HOME: path.join(containerRoot(name), 'home/mst'),
+          // The image's plugin packages (MST_PLUGIN_DIR in the image).
+          ...(process.env.FAKE_DOCKER_PLUGIN_DIR
+            ? { MST_PLUGIN_DIR: process.env.FAKE_DOCKER_PLUGIN_DIR }
+            : {}),
         },
       }
     );
