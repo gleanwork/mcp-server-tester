@@ -99,6 +99,7 @@ ENV DISPLAY=:99 \
   MST_DESKTOP_RESTART=/opt/mst/bin/restart-desktop \
   MST_DESKTOP_RESTART_TIMEOUT_S=900 \
   MST_COWORK_SETTINGS_FILE=/run/mst/settings/managed-settings.json \
+  MST_COWORK_HELPER_DIR=/home/mst/.mst/cowork-helpers \
   MST_COWORK_URL_OPENER=/opt/mst/bin/open-url \
   MST_COWORK_PYTHON=/usr/bin/python3 \
   MST_TOKENS_DIR=/run/mst/tokens \
