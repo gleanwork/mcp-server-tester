@@ -28,8 +28,11 @@ function isComparable(
   const summary = value as EvaluationSummary;
   // A run in an older result format isn't a baseline.
   if (summary.format !== RUN_FORMAT) return false;
-  // An ungraded run's passes aren't results.
+  // An ungraded run's passes aren't results, and a run with missing trials
+  // (a shard that ended early) isn't one either: it never becomes the latest.
   if (summary.graded === false) return false;
+  const incomplete: unknown = summary.metrics?.incomplete;
+  if (typeof incomplete === 'number' && incomplete > 0) return false;
   if (summary.configId !== configId || !Array.isArray(summary.variants))
     return false;
   // A full run compares with full runs; a partial run with partial runs

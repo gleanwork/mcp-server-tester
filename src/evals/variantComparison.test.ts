@@ -25,6 +25,8 @@ interface CaseSpec {
   error?: Array<string | undefined>;
   infra?: boolean[];
   tokens?: number;
+  /** Of the trial's input, how much came from the prompt cache. */
+  cacheRead?: number;
 }
 
 function caseResult(spec: CaseSpec): EvalCaseResult {
@@ -40,6 +42,9 @@ function caseResult(spec: CaseSpec): EvalCaseResult {
             inputTokens: spec.tokens,
             outputTokens: 0,
             durationMs: 0,
+            ...(spec.cacheRead !== undefined
+              ? { cacheReadInputTokens: spec.cacheRead }
+              : {}),
           },
         }
       : {}),
@@ -462,7 +467,9 @@ describe('compareVariants', () => {
       id: 'find-doc',
       trials: [true, true, false],
       traces: [searchCall, searchCall, searchCall],
-      tokens: 300,
+      // 300 tokens a trial, 200 of them from the cache.
+      tokens: 100,
+      cacheRead: 200,
     },
     {
       id: 'live-status',
@@ -470,7 +477,8 @@ describe('compareVariants', () => {
       tags: ['regression'],
       traces: [searchCall, wrongCall, searchCall],
       error: [undefined, undefined, undefined],
-      tokens: 300,
+      tokens: 100,
+      cacheRead: 200,
     },
   ]);
 

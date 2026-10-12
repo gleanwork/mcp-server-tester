@@ -40,6 +40,7 @@ import type {
 } from '../types/reporter.js';
 import type { EvalRunnerResult, ToolMetadataOverride } from './evalRunner.js';
 import { isInfrastructureFailure } from './infrastructureFailure.js';
+import { totalTokens } from '../utils/usageUtils.js';
 
 /** The tag that marks a case as held out, unless the optimization sets another. */
 export const DEFAULT_HELD_OUT_TAG = 'held-out';
@@ -332,7 +333,7 @@ function toAttempt(
           missed: trace.missed.map((tool) => tool.name),
         }
       : {}),
-    ...(usage ? { tokens: usage.inputTokens + usage.outputTokens } : {}),
+    ...(usage ? { tokens: totalTokens(usage) } : {}),
     // As the runner and the run report classify it: the flag when a trial
     // has one, else the error itself (a single-trial case result has none).
     infrastructure:

@@ -69,9 +69,16 @@ function EventRow({ event }: { event: RunReportEvent }) {
   );
 }
 
-/** `find_skills(query: "create a ticket")`: a tool call and its arguments, shortened. */
+/**
+ * `linear.list_issues(assignee: "me")`: a tool call, under its server when it
+ * has one (two servers can have a tool of the same name), and its arguments,
+ * shortened.
+ */
 function callText(event: RunReportEvent, max = 90): string {
-  const name = event.name ?? event.kind;
+  const name =
+    event.server && event.name
+      ? `${event.server}.${event.name}`
+      : (event.name ?? event.kind);
   if (!event.input) return name;
   let args = event.input;
   try {

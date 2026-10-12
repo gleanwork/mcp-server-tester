@@ -39,7 +39,8 @@ import {
   CoworkDriverError,
   type CoworkDriverTelemetry,
 } from './cowork/driver.js';
-import { mcpServerLabel } from '../config/mcpConfig.js';
+import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
+import type { LLMToolCall } from './mstClient/types.js';
 
 const CoworkSchema = z
   .object({
@@ -581,7 +582,7 @@ async function runBatch(
             {
               success: !trace.isError && trace.finalAnswer !== undefined,
               response: trace.finalAnswer,
-              toolCalls: trace.toolCalls,
+              toolCalls: coworkOwnToolCalls(trace.toolCalls, servers),
               usage: trace.usage,
               error: trace.isError
                 ? 'Native Claude task failed.'
@@ -626,6 +627,27 @@ async function runBatch(
     requests,
     context.reportResult,
     context.acquire
+  );
+}
+
+/**
+ * Cowork's own MCP servers (its sandbox's `workspace`, a plugin's bundled
+ * server) are the client's tools, not the eval's: a call to a server the
+ * batch didn't configure is a client-native event. Its raw name stays.
+ */
+export function coworkOwnToolCalls(
+  calls: readonly LLMToolCall[],
+  servers: readonly MCPConfig[]
+): LLMToolCall[] {
+  const labels = new Set(
+    servers.map((server, index) => mcpServerLabel(server, index))
+  );
+  return calls.map((call) =>
+    call.source === 'mcp' &&
+    call.server !== undefined &&
+    !labels.has(call.server)
+      ? { ...call, source: 'builtin' }
+      : call
   );
 }
 
