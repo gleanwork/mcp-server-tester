@@ -49,8 +49,12 @@ function selectSetup(
   };
 }
 
-/** The generated executable contains metadata only, never credential values. */
-function headersHelper(
+/**
+ * A `headersHelper` for Claude Desktop: prints the headers in the JSON file
+ * at `filePath`, which must be a private regular file with exactly `names`.
+ * The generated executable contains metadata only, never credential values.
+ */
+export function headersHelper(
   filePath: string,
   names: string[],
   bearer: boolean

@@ -262,8 +262,15 @@ else can write it, so an image points `MST_COWORK_SETTINGS_FILE` at a staging
 file the desktop user owns, and its restart command installs a root-owned copy
 first. For each variant, MST then writes the
 variant's servers, plugins and model over the image's own settings, keeping the
-image's other keys and the `headersHelper` of an HTTP server with the same name
-and URL (MST writes no secrets there). It adds `AskUserQuestion` to the image's
+image's other keys. An HTTP server with headers or an access token (such as a
+connector server's) gets a `headersHelper` that prints its headers from a
+private file beside the staging file (`mcp-headers/`), so the settings hold no
+secrets. The helper holds none either; it's written to `MST_COWORK_HELPER_DIR`
+when the staging file's directory doesn't allow executing files (Docker mounts
+a tmpfs `noexec`), else beside the headers. Both are removed when the variant
+ends. Another HTTP
+server keeps the image's `headersHelper` for the same name and URL. It adds
+`AskUserQuestion` to the image's
 `disabledBuiltinTools`, so the image needn't. It runs the restart command, checks the
 file as above, and probes. When the variant ends, or if the desktop isn't ready,
 the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation

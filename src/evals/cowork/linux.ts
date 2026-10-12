@@ -1,15 +1,25 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  open,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import { mcpServerLabel } from '../../config/mcpConfig.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
 import { transportServers } from '../evalConfig.js';
+import { headersHelper } from '../coworkSetup/bundle.js';
+import { resolveCoworkMcpHeaders } from '../coworkSetup/config.js';
 import {
   clientStdioFileContents,
   clientStdioServers,
@@ -122,9 +132,11 @@ async function writeSettingsText(file: string, text: string): Promise<void> {
 /**
  * Managed settings for owned-desktop mode (ADR 0004): the image's own
  * settings, with the variant's servers, plugins and model in place of
- * whatever was there. An HTTP server keeps the image's `headersHelper` for
- * the same name and URL, since MST writes no secrets here. Exactly what
- * `prepare` then checks.
+ * whatever was there. An HTTP server with credentials gets MST's
+ * `headersHelper` (`helpers`, by name), which reads them from a private file;
+ * the settings hold no secrets. Another HTTP server keeps the image's
+ * `headersHelper` for the same name and URL. Exactly what `prepare` then
+ * checks.
  */
 function coworkLinuxOwnedSettings(
   base: Record<string, unknown>,
@@ -134,6 +146,7 @@ function coworkLinuxOwnedSettings(
     paths?: ClientStdioPaths;
     approveWriteTools?: boolean;
     model?: string;
+    helpers?: ReadonlyMap<string, string>;
   }
 ): Record<string, unknown> {
   const managed = coworkManagedPluginSettings(options);
@@ -143,12 +156,14 @@ function coworkLinuxOwnedSettings(
   const http = options.servers.flatMap((server, index) => {
     if (server.transport !== 'http') return [];
     const name = mcpServerLabel(server, index);
-    const helper = prior.find(
-      (entry) =>
-        entry?.name === name &&
-        entry.transport === 'http' &&
-        entry.url === server.serverUrl
-    )?.headersHelper;
+    const helper =
+      options.helpers?.get(name) ??
+      prior.find(
+        (entry) =>
+          entry?.name === name &&
+          entry.transport === 'http' &&
+          entry.url === server.serverUrl
+      )?.headersHelper;
     return [
       {
         name,
@@ -225,6 +240,66 @@ export function desktopRestartTimeoutMs(
  * the same variant) doesn't restart it.
  */
 const ownedDesktopSettings = new Map<string, string>();
+
+interface ServerHeaderFiles {
+  /** Each server's helper, by server name. */
+  helpers: Map<string, string>;
+  remove(): Promise<void>;
+}
+
+/**
+ * For each HTTP server with headers or an access token (a connector server's
+ * comes in `env`), a private file of its headers in `directories.headers`,
+ * and a `headersHelper` that prints them in `directories.helpers`. Claude
+ * Desktop runs the helper when it connects, so the managed settings never
+ * hold a credential. The helper holds none either, so it can be on a disk
+ * that allows executing it while the headers stay in a tmpfs that doesn't.
+ */
+async function writeServerHeaders(
+  servers: readonly MCPConfig[],
+  env: Record<string, string | undefined>,
+  directories: { headers: string; helpers: string }
+): Promise<ServerHeaderFiles> {
+  const helpers = new Map<string, string>();
+  const files: string[] = [];
+  for (const [index, server] of servers.entries()) {
+    if (server.transport !== 'http') continue;
+    const name = mcpServerLabel(server, index);
+    const headers = Object.values(
+      resolveCoworkMcpHeaders([{ ...server, label: name }], env)
+    )[0]!;
+    if (Object.keys(headers).length === 0) continue;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name))
+      throw new Error(
+        `Linux Cowork can't name a credentials file for server "${name}": use a label of letters, digits, ".", "_" and "-".`
+      );
+    for (const directory of new Set(Object.values(directories)))
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+    const file = join(directories.headers, `${name}.json`);
+    const helper = join(directories.helpers, `${name}-headers`);
+    // Replaced whole, so the helper never reads a file being written.
+    const temporary = `${file}.${process.pid}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(headers)}\n`, { mode: 0o600 });
+    await rename(temporary, file);
+    await writeFile(
+      helper,
+      headersHelper(
+        file,
+        Object.keys(headers),
+        Object.keys(server.auth ?? {}).length > 0
+      ),
+      { mode: 0o700 }
+    );
+    helpers.set(name, helper);
+    files.push(file, helper);
+  }
+  return {
+    helpers,
+    async remove() {
+      await Promise.all(files.map((file) => rm(file, { force: true })));
+    },
+  };
+}
 
 /** Runs the image's desktop restart command; it returns once Claude is back. */
 async function restartDesktop(
@@ -478,6 +553,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     const owned = env.MST_DESKTOP_OWNED === '1';
     let original: string | undefined;
     let ownedText: string | undefined;
+    let headerFiles: ServerHeaderFiles | undefined;
     if (owned) {
       const restart = env.MST_DESKTOP_RESTART;
       if (!restart || !isAbsolute(restart))
@@ -488,22 +564,37 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       const base = original
         ? (JSON.parse(original) as Record<string, unknown>)
         : {};
+      const servers = transportServers(evalConfig.servers, 'Cowork');
+      // MST_COWORK_HELPER_DIR: where the helpers can be executed, when the
+      // staging file's directory is a noexec tmpfs (as Docker mounts one).
+      const headers = join(dirname(settingsFile), 'mcp-headers');
+      const helperDir = env.MST_COWORK_HELPER_DIR ?? headers;
+      if (!isAbsolute(helperDir))
+        throw new Error('MST_COWORK_HELPER_DIR must be an absolute path.');
+      headerFiles = await writeServerHeaders(servers, env, {
+        headers,
+        helpers: helperDir,
+      });
       ownedText = `${JSON.stringify(
         coworkLinuxOwnedSettings(base, {
-          servers: transportServers(evalConfig.servers, 'Cowork'),
+          servers,
           plugins,
           paths: stdioPaths,
           approveWriteTools: evalConfig.coworkSetup?.approveWriteTools === true,
           ...(model ? { model } : {}),
+          helpers: headerFiles.helpers,
         }),
         null,
         2
       )}\n`;
       await writeSettingsText(settingsFile, ownedText);
     }
-    // In owned mode the settings go back, whether or not the desktop is ready.
+    // In owned mode the settings go back, whether or not the desktop is ready,
+    // and the servers' credentials are removed.
     const restore = async () => {
-      if (owned) await writeSettingsText(settingsFile, original ?? '{}\n');
+      if (!owned) return;
+      await writeSettingsText(settingsFile, original ?? '{}\n');
+      await headerFiles?.remove();
     };
     try {
       if (owned && ownedDesktopSettings.get(settingsFile) !== ownedText) {

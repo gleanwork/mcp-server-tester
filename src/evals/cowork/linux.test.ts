@@ -5,6 +5,7 @@ import {
   readFile,
   realpath,
   rm,
+  stat,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -26,6 +27,7 @@ import {
   CoworkHitlBudgetError,
   CoworkUserQuestionError,
 } from './driver.js';
+import type * as ChildProcess from 'node:child_process';
 import type { EvalConfig } from '../evalConfig.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 
@@ -543,6 +545,68 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await expect(lifecycle).rejects.toThrow('needs MST_DESKTOP_RESTART');
     expect(await readFile(file, 'utf8')).toBe(original);
     expect(child.exec).not.toHaveBeenCalled();
+  });
+
+  it("gives a server with credentials MST's headers helper, never the secret in the settings", async () => {
+    const file = join(directory, 'settings.json');
+    await writeFile(file, `${JSON.stringify(image, null, 2)}\n`);
+    const token = 'connector-token-123';
+    const prepared = await linuxCoworkPlatform.prepare({
+      evalConfig: {
+        ...evalConfig,
+        servers: [
+          ...evalConfig.servers!,
+          {
+            transport: 'http',
+            label: 'glean',
+            serverUrl: 'https://glean.example/mcp',
+            auth: { accessTokenEnv: 'MST_CONNECTOR_TOKEN_GLEAN' },
+          },
+        ],
+      },
+      model: 'test-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+        MST_CONNECTOR_TOKEN_GLEAN: token,
+        // Where the helper can run: the headers stay beside the settings.
+        MST_COWORK_HELPER_DIR: join(directory, 'helpers'),
+      },
+    });
+    const text = await readFile(file, 'utf8');
+    expect(text).not.toContain(token);
+    const helper = join(directory, 'helpers', 'glean-headers');
+    const servers = JSON.parse(text).managedMcpServers;
+    expect(servers).toEqual([
+      // The image's helper, for a server with no credentials of MST's.
+      expect.objectContaining({
+        name: 'primary',
+        headersHelper: '/opt/mst/primary-headers.sh',
+      }),
+      {
+        name: 'glean',
+        transport: 'http',
+        url: 'https://glean.example/mcp',
+        headersHelper: helper,
+      },
+    ]);
+    const headers = join(directory, 'mcp-headers', 'glean.json');
+    expect((await stat(headers)).mode & 0o777).toBe(0o600);
+    expect((await stat(helper)).mode & 0o777).toBe(0o700);
+    // What Claude Desktop runs when it connects.
+    const { spawnSync } =
+      await vi.importActual<typeof ChildProcess>('node:child_process');
+    const run = spawnSync(helper, { encoding: 'utf8' });
+    expect(run.status).toBe(0);
+    expect(JSON.parse(run.stdout)).toEqual({
+      Authorization: `Bearer ${token}`,
+    });
+
+    await prepared.dispose();
+    await expect(stat(headers)).rejects.toThrow();
+    await expect(stat(helper)).rejects.toThrow();
   });
 
   it('restores the settings when the desktop is not ready after them', async () => {
