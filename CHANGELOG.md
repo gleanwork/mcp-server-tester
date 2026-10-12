@@ -15,6 +15,30 @@
 
 
 
+## v2.0.0-beta.10 (2026-10-12)
+
+#### :boom: Breaking Change
+
+- [#430](https://github.com/gleanwork/mcp-server-tester/pull/430) fix(claude-code): run in an empty directory, on Claude Code's own model ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#427](https://github.com/gleanwork/mcp-server-tester/pull/427) fix(cowork): Linux settings and HITL for the current Claude Desktop ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :rocket: Enhancement
+
+- [#432](https://github.com/gleanwork/mcp-server-tester/pull/432) perf(evals): seed Cowork's VM bundle and boot its VM once in the docker image ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#428](https://github.com/gleanwork/mcp-server-tester/pull/428) feat(evals): built-in docker environment and Linux Cowork image ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#423](https://github.com/gleanwork/mcp-server-tester/pull/423) feat(evals): connector servers and tool-metadata variants on shards ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :bug: Bug Fix
+
+- [#430](https://github.com/gleanwork/mcp-server-tester/pull/430) fix(claude-code): run in an empty directory, on Claude Code's own model ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#429](https://github.com/gleanwork/mcp-server-tester/pull/429) fix(cli): bundle Ink and React so the CLI runs in React 19 projects ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### Committers: 1
+
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+
+
 ## v2.0.0-beta.9 (2026-10-10)
 
 #### :boom: Breaking Change
