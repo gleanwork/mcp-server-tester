@@ -558,9 +558,9 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
           ...evalConfig.servers!,
           {
             transport: 'http',
-            label: 'glean',
-            serverUrl: 'https://glean.example/mcp',
-            auth: { accessTokenEnv: 'MST_CONNECTOR_TOKEN_GLEAN' },
+            label: 'docs',
+            serverUrl: 'https://docs.example/mcp',
+            auth: { accessTokenEnv: 'MST_CONNECTOR_TOKEN_DOCS' },
           },
         ],
       },
@@ -570,14 +570,14 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
         MST_COWORK_SETTINGS_FILE: file,
         MST_DESKTOP_OWNED: '1',
         MST_DESKTOP_RESTART: RESTART,
-        MST_CONNECTOR_TOKEN_GLEAN: token,
+        MST_CONNECTOR_TOKEN_DOCS: token,
         // Where the helper can run: the headers stay beside the settings.
         MST_COWORK_HELPER_DIR: join(directory, 'helpers'),
       },
     });
     const text = await readFile(file, 'utf8');
     expect(text).not.toContain(token);
-    const helper = join(directory, 'helpers', 'glean-headers');
+    const helper = join(directory, 'helpers', 'docs-headers');
     const servers = JSON.parse(text).managedMcpServers;
     expect(servers).toEqual([
       // The image's helper, for a server with no credentials of MST's.
@@ -586,13 +586,13 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
         headersHelper: '/opt/mst/primary-headers.sh',
       }),
       {
-        name: 'glean',
+        name: 'docs',
         transport: 'http',
-        url: 'https://glean.example/mcp',
+        url: 'https://docs.example/mcp',
         headersHelper: helper,
       },
     ]);
-    const headers = join(directory, 'mcp-headers', 'glean.json');
+    const headers = join(directory, 'mcp-headers', 'docs.json');
     expect((await stat(headers)).mode & 0o777).toBe(0o600);
     expect((await stat(helper)).mode & 0o777).toBe(0o700);
     // What Claude Desktop runs when it connects.

@@ -1360,15 +1360,15 @@ describe("Cowork's own MCP servers", () => {
     const servers: MCPConfig[] = [
       {
         transport: 'http',
-        label: 'glean',
-        serverUrl: 'https://glean.example/mcp',
+        label: 'docs',
+        serverUrl: 'https://docs.example/mcp',
       },
       // Unlabeled: Cowork knows it by the label MST gave it.
       { transport: 'http', serverUrl: 'https://other.example/mcp' },
     ];
     const calls = coworkOwnToolCalls(
       [
-        { name: 'search', source: 'mcp', server: 'glean', arguments: {} },
+        { name: 'search', source: 'mcp', server: 'docs', arguments: {} },
         { name: 'read', source: 'mcp', server: 'server-2', arguments: {} },
         // The Cowork sandbox's shell, reached as an MCP tool.
         {
