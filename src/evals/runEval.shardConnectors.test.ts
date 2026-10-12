@@ -151,5 +151,17 @@ describe('connector servers and tool metadata in an environment', () => {
       expect(
         await fs.readFile(path.join(result.outputDir, file), 'utf8')
       ).not.toContain('notes-token');
+    // run.json records the connector as declared: each worker launched its
+    // own, so this machine's launch command isn't what ran.
+    const run = JSON.parse(
+      await fs.readFile(path.join(result.outputDir, 'run.json'), 'utf8')
+    ) as { variants: Array<{ servers: unknown[] }> };
+    for (const variant of run.variants)
+      expect(variant.servers).toEqual([
+        expect.objectContaining({
+          connector: 'sc/connector/notes',
+          label: 'notes',
+        }),
+      ]);
   }, 120_000);
 });

@@ -111,6 +111,7 @@ import {
   gatheredQueues,
   type GatheredResults,
   type RequestGroup,
+  type ShardRecord,
 } from './environments/shardedCollect.js';
 import { getResultStore, resolveStorePaths } from './builtinResultStores.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
@@ -891,6 +892,9 @@ async function evaluate(
   );
   const { definition: _definition, ...environment } = resolvedEnvironment;
   const inEnvironment = environment.name !== LOCAL_ENVIRONMENT;
+  const recordedDeclarations = connectorDeclarations(connectors);
+  // What each shard ran on, for run.json.
+  let shardRecords: ShardRecord[] | undefined;
 
   const executionId = replay?.runId ?? newRunId();
   // The eval's directory holds its runs (runs/<run-id>/) and latest.json.
@@ -1317,6 +1321,7 @@ async function evaluate(
           console.error(
             `[mst] ${result.missing.length} trials are missing: the run is partial.`
           );
+        shardRecords = result.shards;
         return result;
       } finally {
         process.off('SIGINT', onInterrupt);
@@ -1798,7 +1803,16 @@ async function evaluate(
         );
         return {
           name: variant.name,
-          servers: variant.servers,
+          // In an environment, a connector server ran as each worker
+          // expanded it: record its declaration, not this machine's launch.
+          servers: inEnvironment
+            ? variant.servers.map(
+                (server) =>
+                  (recordedDeclarations.get(server.label ?? '') as
+                    | MCPConfig
+                    | undefined) ?? server
+              )
+            : variant.servers,
           ...variantSetup(evalConfig, declared, runKey),
         };
       }),
@@ -1822,6 +1836,7 @@ async function evaluate(
       judges: judgeRecords(evalConfig),
       redactStoredResponses: redact,
       environment,
+      ...(shardRecords?.length ? { machines: shardRecords } : {}),
       // A collect-only run is never graded; the run's grading says so.
       phases:
         options.grade === false ? { ...phases, grade: 'skipped' } : phases,

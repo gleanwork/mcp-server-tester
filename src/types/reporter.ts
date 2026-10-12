@@ -916,9 +916,17 @@ export interface MCPRunReportData {
     baseline: string;
     /** False when a narrowed run left the baseline out. */
     baselineRan: boolean;
-    datasets: Array<{ name: string; caseCount: number }>;
+    datasets: Array<{ name: string; caseCount: number; contentHash?: string }>;
     cases: number;
     trialsPerCase: { min: number; max: number };
+    /** Where the trials were collected (`--env`), and each shard's machine. */
+    environment?: {
+      name: string;
+      shards: number;
+      machines?: Array<{ shard: number; image?: string; mst?: string }>;
+    };
+    /** The client apps the trials ran, as each recorded it: `Claude 2.31226.1`. */
+    clientApps?: string[];
   };
   comparison: MCPComparisonData;
   variants: RunReportVariant[];
