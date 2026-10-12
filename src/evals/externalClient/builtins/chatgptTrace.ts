@@ -96,7 +96,14 @@ function standaloneResourceLookup(
     );
   if (!match) return undefined;
   const tail = match[5]!.trim().replace(/;$/, '').trim();
-  if (tail && (!match[1] || tail !== `text(${match[1]})`)) return undefined;
+  if (tail) {
+    const output =
+      /^text\s*\(\s*(?:JSON\s*\.\s*stringify\s*\(\s*([A-Za-z_$][\w$]*)\s*\)|([A-Za-z_$][\w$]*))\s*\)$/.exec(
+        tail
+      );
+    if (!output || !match[1] || (output[1] ?? output[2]) !== match[1])
+      return undefined;
+  }
   return { tool: match[2]!, server: match[3] ?? match[4]! };
 }
 

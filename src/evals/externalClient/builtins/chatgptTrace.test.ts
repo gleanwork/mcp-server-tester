@@ -1197,9 +1197,18 @@ describe('ChatGPT native response_item tool calls', () => {
     ]);
   });
 
-  it.each(['list_mcp_resources', 'list_mcp_resource_templates'])(
-    'attributes a targeted %s helper to the client and retains its failure',
-    (tool) => {
+  it.each(
+    ['list_mcp_resources', 'list_mcp_resource_templates'].flatMap((tool) =>
+      [
+        'text(r)',
+        'text(JSON.stringify(r))',
+        'text ( r )',
+        'text ( JSON . stringify ( r ) )',
+      ].map((output) => [tool, output])
+    )
+  )(
+    'attributes a targeted %s helper with %s output to the client and retains its failure',
+    (tool, output) => {
       // Observed native shape: the helper's requested server, including a typo,
       // becomes item.server even though exec called tools.list_mcp_resources.
       const native = {
@@ -1216,7 +1225,7 @@ describe('ChatGPT native response_item tool calls', () => {
       const body = [
         ...exec(
           'resource',
-          `const r = await tools.${tool}({server:"acme_eval"}); text(r);`,
+          `const r = await tools.${tool}({server:"acme_eval"}); ${output};`,
           1,
           2
         ),
@@ -1283,6 +1292,11 @@ describe('ChatGPT native response_item tool calls', () => {
     'await tools.mcp__acme_eval__list_mcp_resources({server:"acme_eval"});',
     'await tools.list_mcp_resources({server:"acme_eval"}); await tools.mcp__other__search({});',
     'const r = await tools.list_mcp_resources({server:"other"}); text(r);',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(other));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(r, transform));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(await tools.mcp__other__search({})));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(r)); await tools.mcp__other__search({});',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(r.toJSON());',
     'await tools.list_mcp_resources({server:target});',
     'await tools.list_mcp_resources({server:"acme_eval", extra:true});',
   ])(

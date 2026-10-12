@@ -423,7 +423,8 @@ The parser reads only native structure in the matched turn, never tool-result te
   MST recognizes this shape only when a completed `exec` contains a standalone
   `await tools.list_mcp_resources({server: "..."})` (or
   `list_mcp_resource_templates`) with a literal server, optionally assigned and
-  printed with `text(result)`. Exactly one matching native item must fall inside
+  printed with `text(result)` or `text(JSON.stringify(result))`, allowing whitespace
+  between tokens. Exactly one matching native item must fall inside
   that call's timing, with no overlapping enclosing call. The lookup's server,
   arguments, error and duration remain intact. Mixed/dynamic code, unmatched
   items and real MCP tools with the same name retain their MCP classification;
