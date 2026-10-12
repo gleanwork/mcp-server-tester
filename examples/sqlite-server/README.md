@@ -4,7 +4,7 @@ This example demonstrates testing the [SQLite MCP Server](https://github.com/joh
 
 ## What This Example Demonstrates
 
-- ✅ Testing a real, official MCP server (not a mock)
+- ✅ Testing a real, published MCP server (not a mock)
 - ✅ Using `fixturify-project` + `better-sqlite3` for database fixtures
 - ✅ Tool tests (specific SQL queries), written by hand and data-driven from `tool-checks.json`
 - ✅ Database operations: queries, schema inspection, joins
