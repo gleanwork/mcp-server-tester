@@ -29,6 +29,21 @@ const plugin: Plugin = {
             events: [],
             error: 'connect ETIMEDOUT 10.0.0.1:443',
           };
+        // The `long` variant's call and answer have lines nothing can break.
+        if (context.variant?.name === 'long')
+          return {
+            finalText: `See https://example.com/${'x'.repeat(240)}`,
+            events: [
+              {
+                kind: 'tool_call' as const,
+                source: 'mcp' as const,
+                name: 'grep',
+                server: 'acme',
+                arguments: { pattern: '(^##\\d+\\.|^\\*\\*Source|'.repeat(12) },
+                isError: false,
+              },
+            ],
+          };
         const calls =
           context.variant?.name === 'searching' ||
           context.variant?.name === 'flaky';
@@ -167,6 +182,29 @@ test.describe('run report', () => {
     );
     await expect(result).toContainText('Pass rates leave them out');
     await expect(result).toContainText('ETIMEDOUT');
+  });
+
+  test("keeps each variant's trials in its own column, however long their lines", async ({
+    page,
+  }) => {
+    const report = await reportFor([{ name: 'quiet' }, { name: 'long' }]);
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await page.goto(`file://${report}`);
+    await page.getByRole('button', { name: /^long, find-refunds: / }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('acme.grep(pattern:');
+    // Side by side, neither column is wider than its share of the dialog.
+    const overflow = await dialog.locator('h3').evaluateAll((headings) =>
+      headings.map((heading) => {
+        const column = (
+          heading as unknown as {
+            parentElement: { scrollWidth: number; clientWidth: number };
+          }
+        ).parentElement;
+        return column.scrollWidth - column.clientWidth;
+      })
+    );
+    expect(overflow).toEqual([0, 0]);
   });
 
   test('a single variant opens on the cases that need attention', async ({

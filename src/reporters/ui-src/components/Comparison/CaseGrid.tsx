@@ -303,7 +303,12 @@ function AttemptDialog({
         className={`grid gap-4 p-4 ${sides.length > 1 ? 'md:grid-cols-2' : ''}`}
       >
         {sides.map((id) => (
-          <div key={id} className="grid content-start gap-2">
+          // min-w-0: a long line (a call chain, a URL) wraps in its column
+          // instead of widening it over the other variant's.
+          <div
+            key={id}
+            className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2"
+          >
             <h3 className="font-mono text-sm font-semibold">
               {variantName(data, { id })}{' '}
               <span className="font-sans font-normal text-muted-foreground">
@@ -322,7 +327,7 @@ function AttemptDialog({
                     {sameNote(lookup.trials[id]![row.id]!)}
                   </p>
                 )}
-                <ol className="grid gap-2">
+                <ol className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
                   {lookup.trials[id]![row.id]!.map((trial, i) => (
                     <TrialView key={i} trial={trial} index={i} />
                   ))}
