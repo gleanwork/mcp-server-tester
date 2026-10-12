@@ -12,6 +12,9 @@ import {
 } from './docker.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
 import { runEval } from '../runEval.js';
+import { readRunDirectory } from '../runFormat.js';
+import { buildRunReport } from '../runReport.js';
+import packageJson from '../../../package.json' with { type: 'json' };
 import { setupEnvironment } from '../../cli/commands/env/index.js';
 import { resetPluginsForTests } from '../../plugins/extensions.js';
 
@@ -359,6 +362,26 @@ describe('a run in docker (a fake Docker CLI)', () => {
       ).toBe(`${id}\n`);
     // Both containers are gone.
     expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
+    // run.json says what each shard's machine ran, and so does the report.
+    const stored = await readRunDirectory(result.outputDir);
+    const machines = [1, 2].map((shard) => ({
+      shard,
+      mst: packageJson.version,
+      image: 'mst-test:1@sha256:fake-image',
+      client: 'dt/client/notes',
+      ok: true,
+      collected: expect.any(Number),
+    }));
+    expect(stored.run.environment.machines).toEqual(machines);
+    expect(buildRunReport(stored).run.environment).toEqual({
+      name: 'docker',
+      shards: 2,
+      machines: machines.map(({ shard, mst, image }) => ({
+        shard,
+        mst,
+        image,
+      })),
+    });
   }, 120_000);
 
   it("fails a shard whose desktop doesn't come up, with the image's reason", async () => {

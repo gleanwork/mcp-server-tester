@@ -599,8 +599,38 @@ function RunDetails({ data }: { data: MCPRunReportData }) {
         <dd>{seconds >= 0 ? `${seconds.toFixed(0)} s` : '—'}</dd>
         <dt className="text-muted-foreground">Datasets</dt>
         <dd>
-          {run.datasets.map((d) => `${d.name} (${d.caseCount})`).join(', ')}
+          {run.datasets
+            .map(
+              (d) =>
+                `${d.name} (${d.caseCount})${d.contentHash ? ` · ${d.contentHash.slice(0, 12)}` : ''}`
+            )
+            .join(', ')}
         </dd>
+        {run.environment && (
+          <>
+            <dt className="text-muted-foreground">Environment</dt>
+            <dd className="font-mono">
+              {run.environment.name}
+              {run.environment.shards > 1
+                ? ` · ${run.environment.shards} shards`
+                : ''}
+              {run.environment.machines?.map((machine) => (
+                <div key={machine.shard} className="text-muted-foreground">
+                  shard {machine.shard}:{' '}
+                  {[machine.image, machine.mst && `MST ${machine.mst}`]
+                    .filter(Boolean)
+                    .join(' · ') || '—'}
+                </div>
+              ))}
+            </dd>
+          </>
+        )}
+        {run.clientApps && (
+          <>
+            <dt className="text-muted-foreground">Client app</dt>
+            <dd className="font-mono">{run.clientApps.join(', ')}</dd>
+          </>
+        )}
         {run.selection && (
           <>
             <dt className="text-muted-foreground">Narrowed by</dt>

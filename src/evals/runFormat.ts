@@ -9,6 +9,7 @@ import type { GraderScore } from '../types/index.js';
 import type { EvalDataset } from './datasetTypes.js';
 import { isInfrastructureFailure } from './infrastructureFailure.js';
 import type { RunEnvironment } from './environments/builtinEnvironments.js';
+import type { ShardRecord } from './environments/shardedCollect.js';
 
 /**
  * The run format, `mst.run/v1`: what a run leaves behind, one directory per
@@ -127,6 +128,24 @@ const RunRecordSchema = z.looseObject({
     node: z.string().optional(),
     platform: z.string().optional(),
     ci: z.boolean().optional(),
+    /**
+     * Each shard's machine, for the shards that had work: what its worker
+     * ran (MST, the machine's image) and how it ended. `node` and
+     * `platform` are `mst run`'s.
+     */
+    machines: z
+      .array(
+        z.looseObject({
+          shard: z.number().int().positive(),
+          mst: z.string().optional(),
+          image: z.string().optional(),
+          client: z.string().optional(),
+          ok: z.boolean(),
+          collected: z.number().int().nonnegative(),
+          reason: z.string().optional(),
+        })
+      )
+      .optional(),
   }),
   phases: z.looseObject({
     collect: z.enum(['complete', 'partial', 'skipped', 'failed']),
@@ -289,6 +308,8 @@ export interface RunFacts {
   redactStoredResponses: boolean;
   /** Where the trials were collected (`--env`). Default: `local`. */
   environment?: RunEnvironment;
+  /** What each shard ran on, in an environment with machines. */
+  machines?: ShardRecord[];
   /**
    * How far the run got. Default: both complete. A run saved while variants
    * remain is `partial`; one that stopped on an error is `collect: failed`.
@@ -500,6 +521,7 @@ export async function writeRun(
       node: process.version,
       platform: process.platform,
       ci: Boolean(process.env.CI),
+      ...(facts.machines?.length ? { machines: facts.machines } : {}),
     },
     phases: facts.phases ?? { collect: 'complete', grade: 'complete' },
   });

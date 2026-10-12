@@ -21,7 +21,10 @@ import type {
 } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
 import { totalTokens } from '../utils/usageUtils.js';
-import type { EvaluationVariantResult } from './evalFrameworkTypes.js';
+import type {
+  EvaluationSummary,
+  EvaluationVariantResult,
+} from './evalFrameworkTypes.js';
 import { RUN_FORMAT } from './resultFormat.js';
 import {
   isInfraTrial,
@@ -278,6 +281,29 @@ function emptyResult(): EvalRunnerResult {
  * narrowed run left the baseline out, the first variant that ran is the
  * reference.
  */
+/**
+ * The client apps a run's trials recorded (`clientTelemetry.clientApp`), each
+ * once: a run whose app changed partway shows both.
+ */
+function clientApps(variants: EvaluationSummary['variants']): string[] {
+  const apps = new Set<string>();
+  for (const variant of variants)
+    for (const result of variant.result?.caseResults ?? [])
+      for (const telemetry of [
+        result.clientTelemetry,
+        ...(result.trialResults ?? []).map((trial) => trial.clientTelemetry),
+      ]) {
+        const app = telemetry?.clientApp as
+          | { name?: unknown; version?: unknown; source?: unknown }
+          | undefined;
+        if (typeof app?.name === 'string' && typeof app.version === 'string')
+          apps.add(
+            `${app.name} ${app.version}${app.source === 'pinned' ? ' (pinned)' : ''}`
+          );
+      }
+  return [...apps].sort();
+}
+
 export function buildRunReport(stored: StoredRun): MCPRunReportData {
   const { run, summary } = stored;
   const ran = summary.variants;
@@ -444,10 +470,31 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
       ...(run.selection ? { selection: run.selection } : {}),
       baseline: baselineName,
       baselineRan: baseline?.name === baselineName,
-      datasets: run.datasets.map(({ name, caseCount }) => ({
+      datasets: run.datasets.map(({ name, caseCount, contentHash }) => ({
         name,
         caseCount,
+        contentHash,
       })),
+      ...(run.environment.name
+        ? {
+            environment: {
+              name: run.environment.name,
+              shards: run.environment.shards ?? 1,
+              ...(run.environment.machines?.length
+                ? {
+                    machines: run.environment.machines.map(
+                      ({ shard, image, mst }) => ({
+                        shard,
+                        ...(image ? { image } : {}),
+                        ...(mst ? { mst } : {}),
+                      })
+                    ),
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      ...(clientApps(ran).length ? { clientApps: clientApps(ran) } : {}),
       // Cases any variant ran; the grid shows the ones the baseline ran.
       cases: new Set(
         ran.flatMap((v) => (v.result?.caseResults ?? []).map((r) => r.id))

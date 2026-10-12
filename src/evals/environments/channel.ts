@@ -262,10 +262,26 @@ export function machineEnvironment(
       live.add(machine);
       let outcome: ShardOutcome | undefined;
       try {
+        // The machine's image, for a worker that doesn't say (MST_IMAGE).
+        const image = machine.image
+          ? machine.image.digest
+            ? `${machine.image.ref}@${machine.image.digest}`
+            : machine.image.ref
+          : undefined;
         outcome = await runShardOverChannel(
           machine.channel,
           shard,
-          events,
+          image
+            ? {
+                ...events,
+                progress: (event) =>
+                  events.progress(
+                    event.type === 'hello' && !event.image
+                      ? { ...event, image }
+                      : event
+                  ),
+              }
+            : events,
           signal,
           {
             ...options,

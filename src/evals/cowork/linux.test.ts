@@ -20,6 +20,7 @@ import {
   linuxCoworkPlatform,
   COWORK_MANAGED_ONLY,
   desktopRestartTimeoutMs,
+  installedDebVersion,
 } from './linux.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
@@ -913,6 +914,32 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
       'settings do not match'
     );
     expect(child.exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('installedDebVersion', () => {
+  const status = [
+    'Package: claude-desktop-beta',
+    'Status: install ok installed',
+    'Version: 9.9.9',
+    '',
+    'Package: claude-desktop',
+    'Status: install ok installed',
+    'Architecture: arm64',
+    'Version: 2.31226.1',
+    'Depends: libgtk-3-0',
+    '',
+    'Package: removed-app',
+    'Status: deinstall ok config-files',
+    'Version: 1.0',
+    '',
+  ].join('\n');
+
+  it("reads an installed package's version from dpkg's status file", () => {
+    expect(installedDebVersion(status, 'claude-desktop')).toBe('2.31226.1');
+    // Removed, with only its config files left: not installed.
+    expect(installedDebVersion(status, 'removed-app')).toBeUndefined();
+    expect(installedDebVersion(status, 'missing')).toBeUndefined();
   });
 });
 

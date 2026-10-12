@@ -22,6 +22,14 @@ const plugin: Plugin = {
       evidence: 'structured',
       run: async (input, _config, context) => ({
         finalText: `${context.variant?.name ?? 'default'}: ${input.prompt}`,
+        // What the client ran, as Cowork records it.
+        telemetry: {
+          clientApp: {
+            name: 'Claude',
+            version: '2.31226.1',
+            source: 'installed',
+          },
+        },
         // Most of an agent's input comes from the prompt cache.
         usage: {
           inputTokens: 10,
@@ -227,6 +235,10 @@ describe('the run report', () => {
     expect(trials[0]!.traced).toBe(true);
     // Everything the model read, cached or not, and wrote.
     expect(trials[0]!.tokens).toBe(135);
+    // Provenance: the client app the trials ran, and the dataset's hash.
+    expect(report.run.clientApps).toEqual(['Claude 2.31226.1']);
+    expect(report.run.datasets[0]!.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.run.environment).toEqual({ name: 'local', shards: 1 });
   });
 
   it('says what graded the trials, and which graders read the answer', async () => {
