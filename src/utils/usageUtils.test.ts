@@ -1,6 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { sumUsage } from './usageUtils.js';
+import { sumUsage, totalTokens } from './usageUtils.js';
 import type { UsageMetrics } from '../types/index.js';
+
+describe('totalTokens', () => {
+  it('counts what the model read, cached or not, and wrote', () => {
+    expect(
+      totalTokens({
+        inputTokens: 4006,
+        cacheReadInputTokens: 252_258,
+        cacheCreationInputTokens: 100_826,
+        outputTokens: 3623,
+      })
+    ).toBe(360_713);
+    expect(totalTokens({ inputTokens: 10, outputTokens: 5 })).toBe(15);
+    expect(totalTokens({})).toBe(0);
+  });
+});
 
 describe('sumUsage', () => {
   const base: UsageMetrics = {

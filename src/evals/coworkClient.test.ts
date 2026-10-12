@@ -3,7 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runEvalBatch } from './runEvalBatch.js';
-import { COWORK_CLIENT, createCoworkClient } from './coworkClient.js';
+import {
+  COWORK_CLIENT,
+  coworkOwnToolCalls,
+  createCoworkClient,
+} from './coworkClient.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
@@ -1348,5 +1352,43 @@ describe('V2 Cowork client', () => {
         { transport: 'http', serverUrl: 'https://example.com/mcp' },
       ])[0]!.label
     ).toBe('server-1');
+  });
+});
+
+describe("Cowork's own MCP servers", () => {
+  it("counts a call to a server the batch didn't configure as client-native", () => {
+    const servers: MCPConfig[] = [
+      {
+        transport: 'http',
+        label: 'glean',
+        serverUrl: 'https://glean.example/mcp',
+      },
+      // Unlabeled: Cowork knows it by the label MST gave it.
+      { transport: 'http', serverUrl: 'https://other.example/mcp' },
+    ];
+    const calls = coworkOwnToolCalls(
+      [
+        { name: 'search', source: 'mcp', server: 'glean', arguments: {} },
+        { name: 'read', source: 'mcp', server: 'server-2', arguments: {} },
+        // The Cowork sandbox's shell, reached as an MCP tool.
+        {
+          name: 'bash',
+          rawName: 'mcp__workspace__bash',
+          source: 'mcp',
+          server: 'workspace',
+          arguments: {},
+        },
+        { name: 'TaskCreate', source: 'builtin', arguments: {} },
+      ],
+      servers
+    );
+    expect(calls.map((call) => [call.name, call.source])).toEqual([
+      ['search', 'mcp'],
+      ['read', 'mcp'],
+      ['bash', 'builtin'],
+      ['TaskCreate', 'builtin'],
+    ]);
+    // Its raw name stays, as evidence of what Cowork called.
+    expect(calls[2]!.rawName).toBe('mcp__workspace__bash');
   });
 });

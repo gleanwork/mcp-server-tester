@@ -22,6 +22,14 @@ const plugin: Plugin = {
       evidence: 'structured',
       run: async (input, _config, context) => ({
         finalText: `${context.variant?.name ?? 'default'}: ${input.prompt}`,
+        // Most of an agent's input comes from the prompt cache.
+        usage: {
+          inputTokens: 10,
+          cacheReadInputTokens: 100,
+          cacheCreationInputTokens: 20,
+          outputTokens: 5,
+          durationMs: 1,
+        },
         events: [
           {
             kind: 'tool_call',
@@ -217,6 +225,8 @@ describe('the run report', () => {
       },
     ]);
     expect(trials[0]!.traced).toBe(true);
+    // Everything the model read, cached or not, and wrote.
+    expect(trials[0]!.tokens).toBe(135);
   });
 
   it('says what graded the trials, and which graders read the answer', async () => {

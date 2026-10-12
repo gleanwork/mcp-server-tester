@@ -211,6 +211,43 @@ describe('findPreviousRun', () => {
       runId: 'current',
     });
   });
+
+  it('skips a run with missing trials (a shard that ended early)', async () => {
+    const { findPreviousRun } = await import('./runBaseline.js');
+    const outputRoot = await tempDir();
+    const write = async (
+      runId: string,
+      timestamp: string,
+      metrics: Record<string, unknown>
+    ) => {
+      await fs.mkdir(path.join(outputRoot, runId));
+      await fs.writeFile(
+        path.join(outputRoot, runId, 'summary.json'),
+        JSON.stringify({
+          format: 'mst.run/v1',
+          configId: 'cfg',
+          runId,
+          timestamp,
+          variants: [{ name: 'a' }],
+          metrics,
+        })
+      );
+    };
+    await write('complete', '2026-10-01T00:00:00.000Z', { passRate: 1 });
+    // Newer, but 5 of its trials never came back.
+    await write('incomplete', '2026-10-02T00:00:00.000Z', {
+      passRate: 0,
+      incomplete: 5,
+    });
+    await expect(
+      findPreviousRun({
+        configId: 'cfg',
+        runId: 'now',
+        variants: ['a'],
+        outputRoot,
+      })
+    ).resolves.toMatchObject({ runId: 'complete' });
+  });
 });
 
 describe('partial runs and the previous run', () => {

@@ -420,6 +420,9 @@ export function VariantTable({
           ? `, allowing for ${data.variantsTried} variants compared`
           : ''}
         .
+        {report
+          ? ' Tokens are everything the model read, cached or not, and wrote.'
+          : ''}
       </p>
       {showStats && <StatsTable data={data} />}
     </section>

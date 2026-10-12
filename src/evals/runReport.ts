@@ -20,6 +20,7 @@ import type {
   TrialResult,
 } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
+import { totalTokens } from '../utils/usageUtils.js';
 import type { EvaluationVariantResult } from './evalFrameworkTypes.js';
 import { RUN_FORMAT } from './resultFormat.js';
 import {
@@ -131,7 +132,7 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
     ...(usage &&
     (usage.inputTokens !== undefined || usage.outputTokens !== undefined)
       ? {
-          tokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+          tokens: totalTokens(usage),
         }
       : {}),
   };

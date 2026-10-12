@@ -1,5 +1,25 @@
 import type { UsageMetrics } from '../types/index.js';
 
+/**
+ * Every token a trial's model read, cached or not, and wrote. Cache reads and
+ * writes are most of an agent's input (its tools' definitions among them),
+ * so a count without them understates what one variant costs against
+ * another.
+ */
+export function totalTokens(
+  usage: Pick<
+    UsageMetrics,
+    'cacheReadInputTokens' | 'cacheCreationInputTokens'
+  > & { inputTokens?: number; outputTokens?: number }
+): number {
+  return (
+    (usage.inputTokens ?? 0) +
+    (usage.cacheReadInputTokens ?? 0) +
+    (usage.cacheCreationInputTokens ?? 0) +
+    (usage.outputTokens ?? 0)
+  );
+}
+
 function optionalSum(a?: number, b?: number): number | undefined {
   if (a === undefined && b === undefined) return undefined;
   return (a ?? 0) + (b ?? 0);
