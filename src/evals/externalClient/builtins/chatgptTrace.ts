@@ -82,6 +82,96 @@ interface Event {
   payload: ObjectValue;
   turnId?: string;
 }
+/**
+ * Some native builds label a targeted resource helper with its requested server,
+ * not `codex`. Recognize only a standalone literal lookup, optionally assigning
+ * and printing its result. References in arbitrary code are not execution proof.
+ */
+function standaloneResourceLookup(
+  input: string
+): { tool: string; server: string } | undefined {
+  const match =
+    /^\s*(?:(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*)?await\s+tools\.(list_mcp_resources|list_mcp_resource_templates)\(\s*\{\s*(?:server|"server"|'server')\s*:\s*(?:"([^"\\\r\n]*)"|'([^'\\\r\n]*)')\s*\}\s*\)\s*;?\s*([\s\S]*)$/.exec(
+      input
+    );
+  if (!match) return undefined;
+  const tail = match[5]!.trim().replace(/;$/, '').trim();
+  if (tail && (!match[1] || tail !== `text(${match[1]})`)) return undefined;
+  return { tool: match[2]!, server: match[3] ?? match[4]! };
+}
+
+/** Bind the literal helper to its sole native child, inside a completed call. */
+function targetedResourceHelpers(
+  turn: Event[],
+  outputs: Map<string, Event>
+): Set<string> {
+  const wrappers = turn.flatMap((event) => {
+    const p = event.payload;
+    if (
+      event.type !== 'response_item' ||
+      (p.type !== 'function_call' && p.type !== 'custom_tool_call')
+    )
+      return [];
+    const output = outputs.get(string(p.call_id) ?? '');
+    const start = time(event.timestamp);
+    const end = output ? time(output.timestamp) : Infinity;
+    return start > 0 && end >= start ? [{ event, start, end }] : [];
+  });
+  const native = turn.filter(
+    (event) =>
+      event.type === 'event_msg' &&
+      event.payload.type === 'item_completed' &&
+      object(event.payload.item)?.type === 'McpToolCall'
+  );
+  const helpers = new Set<string>();
+  for (const wrapper of wrappers) {
+    const p = wrapper.event.payload;
+    if (
+      p.type !== 'custom_tool_call' ||
+      p.name !== 'exec' ||
+      !Number.isFinite(wrapper.end)
+    )
+      continue;
+    const lookup = standaloneResourceLookup(string(p.input) ?? '');
+    if (!lookup) continue;
+    const children = native.filter((event) => {
+      const start = number(event.payload.started_at_ms);
+      const end = number(event.payload.completed_at_ms);
+      return (
+        start !== undefined &&
+        end !== undefined &&
+        end >= start &&
+        start >= wrapper.start &&
+        end <= wrapper.end
+      );
+    });
+    if (children.length !== 1) continue;
+    const child = children[0]!;
+    const item = object(child.payload.item)!;
+    const args = object(item.arguments);
+    const id = string(item.id);
+    if (
+      !id ||
+      item.tool !== lookup.tool ||
+      item.server !== lookup.server ||
+      args?.server !== lookup.server ||
+      Object.keys(args).length !== 1
+    )
+      continue;
+    // Concurrent enclosing calls cannot establish which wrapper owns the item.
+    if (
+      wrappers.filter(
+        (other) =>
+          other.start <= number(child.payload.started_at_ms)! &&
+          other.end >= number(child.payload.completed_at_ms)!
+      ).length !== 1
+    )
+      continue;
+    helpers.add(id);
+  }
+  return helpers;
+}
+
 export interface ChatgptTrace {
   promptMatch?: ChatgptPromptMatch;
   nativePromptSha256?: string;
@@ -383,6 +473,7 @@ export function parseChatgptTrace(
       string(event.payload.call_id)
     )
       outputs.set(string(event.payload.call_id)!, event);
+  const targetedHelpers = targetedResourceHelpers(turn, outputs);
   const pendingIds = new Set<string>();
   const nestedIds = new Set<string>();
   let response: string | undefined;
@@ -468,10 +559,14 @@ export function parseChatgptTrace(
                 error: item.error,
               }
             : { results: item.results, status: item.status, error: item.error };
-        // Native event types, and the confirmed app-owned server/tool pair, define
-        // client provenance. Generic names or untrusted tool-result metadata do not.
+        // Native types, app-owned pairs, or a correlated standalone resource lookup
+        // establish provenance. Generic names and tool-result text do not.
         const source =
-          !isMcp || isChatgptBuiltinTool(server!, name) ? 'builtin' : 'mcp';
+          !isMcp ||
+          isChatgptBuiltinTool(server!, name) ||
+          targetedHelpers.has(id)
+            ? 'builtin'
+            : 'mcp';
         calls.set(id, {
           source,
           id,

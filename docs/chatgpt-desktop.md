@@ -419,7 +419,15 @@ The parser reads only native structure in the matched turn, never tool-result te
   tools, including when recorded as native `McpToolCall` items. Resource listing
   does not satisfy `requireMcpCalls`. The `cua_repl` and `codex` server labels are
   reserved for the app; rename configured MCP servers using either label.
-  Other server/tool pairs remain external MCP calls.
+  A targeted lookup can instead record the requested server as `item.server`.
+  MST recognizes this shape only when a completed `exec` contains a standalone
+  `await tools.list_mcp_resources({server: "..."})` (or
+  `list_mcp_resource_templates`) with a literal server, optionally assigned and
+  printed with `text(result)`. Exactly one matching native item must fall inside
+  that call's timing, with no overlapping enclosing call. The lookup's server,
+  arguments, error and duration remain intact. Mixed/dynamic code, unmatched
+  items and real MCP tools with the same name retain their MCP classification;
+  a failed lookup does not become a successful call or satisfy `requireMcpCalls`.
 - Work code mode: a `custom_tool_call` `exec` is one built-in call. MST keeps only the
   nested built-in tool names (for example `web__run`, `exec_command`), input length,
   and sha256, never the code. Each nested `tools.mcp__<label>__<tool>` reference
