@@ -4,6 +4,7 @@
  * result as soon as it finishes, and talks `mst.shard/v1` to the coordinator.
  */
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,7 +34,10 @@ import {
 } from '../toolSurfaceProxy.js';
 import { startToolSurfaceProxy } from '../toolSurfaceProxyServer.js';
 import { installPlugins } from '../../plugins/extensions.js';
-import { loadPlugins } from '../../plugins/loadPlugins.js';
+import {
+  loadPlugins,
+  resolvePluginPackage,
+} from '../../plugins/loadPlugins.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import type {
   ClientBatchRequest,
@@ -45,6 +49,7 @@ import {
   encodeMessage,
   parseCoordinatorMessage,
   readShardBundle,
+  type ShardBundle,
   type ShardTokens,
   type TrialKey,
   type WorkerMessage,
@@ -62,8 +67,9 @@ export interface CollectShardOptions {
   write: (line: string) => void;
   /**
    * `MST_TOKENS_DIR` (default `/run/mst/tokens`), `MST_IMAGE` (the image's
-   * digest), `MST_HEARTBEAT_MS` (default 15000) and `MST_TOKEN_RENEW_MS`
-   * (how long before expiry to ask again; default 120000).
+   * digest), `MST_PLUGIN_DIR` (where plugin packages are installed; default
+   * the working directory), `MST_HEARTBEAT_MS` (default 15000) and
+   * `MST_TOKEN_RENEW_MS` (how long before expiry to ask again; default 120000).
    */
   env?: Readonly<Record<string, string | undefined>>;
 }
@@ -84,6 +90,39 @@ async function writeFileAtomically(
   const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
   await fs.writeFile(temporary, content, { mode });
   await fs.rename(temporary, file);
+}
+
+/**
+ * Loads the bundle's plugins: packages from the bundle's directory, then
+ * `MST_PLUGIN_DIR` (where a worker image installs them; default: the working
+ * directory). Each plugin package must be the version the coordinator runs.
+ */
+async function loadWorkerPlugins(
+  bundle: ShardBundle,
+  bundleDir: string,
+  pluginDir: string | undefined
+) {
+  const options = {
+    baseDir: bundleDir,
+    fallbackDir: pluginDir ?? process.cwd(),
+  };
+  for (const specifier of bundle.plugins)
+    if (path.isAbsolute(specifier) && !existsSync(specifier))
+      throw new Error(
+        `Plugin "${specifier}" is a file on the coordinator's machine, not on this worker. Install the plugin as a package in the worker's image.`
+      );
+  for (const expected of bundle.pluginPackages ?? []) {
+    const found = resolvePluginPackage(expected.specifier, options);
+    if (!found)
+      throw new Error(
+        `Plugin package ${expected.name} isn't installed on this worker (looked in ${bundleDir} and ${options.fallbackDir}). Install ${expected.name}@${expected.version} in the worker's image.`
+      );
+    if (found.name !== expected.name || found.version !== expected.version)
+      throw new Error(
+        `This worker has plugin ${found.name}@${found.version}; the run uses ${expected.name}@${expected.version}. Install the run's version in the worker's image.`
+      );
+  }
+  return loadPlugins(bundle.plugins, options);
 }
 
 /**
@@ -288,7 +327,7 @@ export async function collectShard(
   try {
     // Plugins first: their connectors expand before any token arrives.
     installPlugins(
-      await loadPlugins(bundle.plugins, { baseDir: options.bundleDir })
+      await loadWorkerPlugins(bundle, options.bundleDir, env.MST_PLUGIN_DIR)
     );
     if (declarations.size) {
       if (bundle.evalConfig.simulateWrites === true)

@@ -459,7 +459,20 @@ export interface EnvironmentDefinition {
    */
   setup?(
     options: Record<string, unknown>,
-    context: { log: (line: string) => void }
+    context: {
+      log: (line: string) => void;
+      /**
+       * The plugin packages an eval loads (`mst env setup --config`), as this
+       * machine has them installed (`dir`): an environment that builds
+       * images installs them there, since workers must run the same versions.
+       */
+      plugins?: ReadonlyArray<{
+        specifier: string;
+        name: string;
+        version: string;
+        dir: string;
+      }>;
+    }
   ): Promise<void>;
 }
 

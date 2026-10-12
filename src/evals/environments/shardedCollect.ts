@@ -69,6 +69,8 @@ export interface CollectInEnvironmentOptions {
   evalConfig: EvalConfig;
   /** Plugin specifiers the workers load. */
   plugins: string[];
+  /** The coordinator's plugin packages among them, which workers must match. */
+  pluginPackages?: Array<{ specifier: string; name: string; version: string }>;
   groups: RequestGroup[];
   /**
    * Where a trial's client artifacts go. A worker copies them beside its
@@ -168,6 +170,9 @@ export async function collectInEnvironment(
           shard: { index, count },
           mst: packageJson.version,
           plugins: options.plugins,
+          ...(options.pluginPackages?.length
+            ? { pluginPackages: options.pluginPackages }
+            : {}),
           evalConfig: options.evalConfig,
           tokenServers: options.connectorTokens?.labels ?? [],
           batches,

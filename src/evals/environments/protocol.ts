@@ -144,6 +144,19 @@ const ShardBundleSchema = z.object({
   mst: z.string(),
   /** Plugin specifiers the worker loads (for its client). */
   plugins: z.array(z.string()),
+  /**
+   * The coordinator's version of each plugin package among `plugins`: a
+   * worker with another version installed refuses to run.
+   */
+  pluginPackages: z
+    .array(
+      z.object({
+        specifier: z.string(),
+        name: z.string(),
+        version: z.string(),
+      })
+    )
+    .optional(),
   evalConfig: z.looseObject({ name: z.string() }),
   /** Servers whose access tokens the worker asks for before it starts. */
   tokenServers: z.array(z.string()),
@@ -171,6 +184,7 @@ export interface ShardBundle {
   shard: { index: number; count: number };
   mst: string;
   plugins: string[];
+  pluginPackages?: Array<{ specifier: string; name: string; version: string }>;
   evalConfig: EvalConfig;
   tokenServers: string[];
   batches: ShardBatch[];

@@ -20,6 +20,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open a Run's Report](#open---open-a-runs-report)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
+- [env setup - Prepare an Environment](#env-setup---prepare-an-environment)
 
 ## `init` - Initialize Project
 
@@ -904,6 +905,23 @@ npx mst cowork setup
 ```
 
 Initialises or validates the empty Claude third-party profile that the Cowork client runs in, on macOS. See [Cowork](./cowork.md).
+
+## `env setup` - Prepare an Environment
+
+```bash
+npx mst env setup docker --config eval.json --env-option contexts=colima-mst-kvm
+```
+
+Prepares what runs in an environment need, once. For `docker`, it builds MST's Linux Cowork image on each Docker context (see [Cowork in Docker](./cowork-docker.md)).
+
+| Option                     | Meaning                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `--env-option <key=value>` | The environment's options; repeat for more. `docker`: `image`, `contexts`, `claudeDesktopVersion`.                                        |
+| `--config <file>`          | An eval config whose plugins the environment's machines need. `docker` installs them in its image. Each plugin must be a package (below). |
+| `--plugins <modules...>`   | Plugin modules, for an environment a plugin provides.                                                                                     |
+| `--root-dir <dir>`         | Where relative plugin paths resolve. Default: the working directory.                                                                      |
+
+A run's workers load the eval's plugins themselves, so a plugin must be installed on each worker machine, at the version this machine runs: a worker with another version of a plugin package refuses to run. With `--config`, each of the eval's plugins must be a package (a directory with a `package.json`, installed where the eval config resolves it), not a file.
 
 ## Next Steps
 

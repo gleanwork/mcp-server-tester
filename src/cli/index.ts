@@ -376,6 +376,10 @@ program
     [] as string[]
   )
   .option(
+    '--config <file>',
+    "An eval config whose plugins the environment's machines need (docker installs them in its image)"
+  )
+  .option(
     '--plugins <modules...>',
     "Plugin modules, for a plugin's environment"
   )
