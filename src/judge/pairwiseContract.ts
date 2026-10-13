@@ -82,6 +82,11 @@ export interface PairwiseJudgeDefinition {
    * randomizes or debiases order itself sets false.
    */
   readonly swapPositions?: boolean;
+  /**
+   * Fails, naming what to install or set, when the judge can't run (a missing
+   * SDK or credential). Called once before a run collects anything.
+   */
+  preflight?: (options: Record<string, unknown>) => Promise<void>;
   compare: (
     input: PairwiseJudgeInput,
     options: Record<string, unknown>

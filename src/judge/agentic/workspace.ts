@@ -55,7 +55,7 @@ export interface JudgeWorkspace {
  * `path` joined under `root`, or an error when it would leave `root`
  * (absolute paths, `..` segments, empty paths).
  */
-function confinedPath(root: string, path: string): string {
+export function confinedPath(root: string, path: string): string {
   if (path === '' || path.includes('\0'))
     throw new Error(`Invalid workspace path: ${JSON.stringify(path)}`);
   const full = resolve(root, path);
@@ -67,7 +67,7 @@ function confinedPath(root: string, path: string): string {
   return full;
 }
 
-async function put(root: string, file: WorkspaceFile): Promise<void> {
+export async function put(root: string, file: WorkspaceFile): Promise<void> {
   const full = confinedPath(root, file.path);
   await mkdir(dirname(full), { recursive: true, mode: 0o700 });
   await writeFile(full, file.content, { mode: 0o600, flag: 'wx' });

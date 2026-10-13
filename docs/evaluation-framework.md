@@ -404,8 +404,78 @@ Claude uses `ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL` with
 `OPENAI_API_KEY`, or `OPENAI_BASE_URL` with `MST_LLM_AUTH_COMMAND`. The agent
 gets only the credential MST resolved. Claude needs
 `@anthropic-ai/claude-agent-sdk` and Codex `@openai/codex-sdk`, optional peer
-dependencies loaded only when the judge runs. A pointwise agentic judge's
-preflight checks the SDK and the credential before a run starts any client.
+dependencies loaded only when the judge runs. An agentic judge's preflight
+(pointwise or pairwise) checks the SDK and the credential before a run starts
+any client.
+
+#### Staged pairwise judges
+
+An agentic pairwise judge can also be data: a bundle of the files it needs
+and a graph of agent stages, which `stagedPairwiseJudge(bundle)` runs. A
+judge maintained elsewhere as prompt files, such as a team's production
+judge, runs in MST without being reimplemented: the plugin builds the bundle
+from those files and registers the result.
+
+```js
+import { stagedPairwiseJudge } from '@gleanwork/mcp-server-tester/evals';
+
+export default {
+  meta: { name: 'acme-judges', version: '1.0.0', namespace: 'acme' },
+  pairwiseJudges: {
+    'two-step': stagedPairwiseJudge({
+      schemaVersion: 1,
+      name: 'two-step',
+      files: [{ path: 'prompts/gather.md', content: gatherPrompt }],
+      stages: [
+        {
+          id: 'gather',
+          prompt: [{ file: 'prompts/gather.md' }],
+          forbidKeys: ['preferred'],
+        },
+        {
+          id: 'verdict',
+          after: ['gather'],
+          prompt: [
+            { text: 'Notes:\n{{stages.gather.text}}\nCompare a/ and b/.' },
+          ],
+          output: 'verdict',
+        },
+      ],
+      result: { overall: 'verdict' },
+    }),
+  },
+};
+```
+
+| Field      | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`    | Prompts and helper scripts, written into the workspace (`content`, or `base64`).                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `prepare`  | Trusted programs (`argv`) run in the workspace, in order, before any stage: to turn both trials into the layout the prompts expect. They run unsandboxed, as the plugin's own code.                                                                                                                                                                                                                                                                                                                           |
+| `workdir`  | Where agents start and are confined to, under the workspace (default the root).                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `stages`   | Agent runs. A stage runs when every stage in `after` is done; independent stages run at once. `prompt` (and `system`) is a list of parts: `{ file }`, `{ text }`, or `{ json, format }` (`pretty`, or `python` for `json.dumps(..., sort_keys=True)`). `writes` writes files before the stage runs. `output` is `text`, `json` (the first JSON object in the answer) or `verdict`. `forbidKeys` fails the judgment when a JSON answer has one. `maxTurns`, `model` and `effort` override the judge's options. |
+| `result`   | `overall`: the verdict stage that decides; `dimensions`: named verdict stages, reported as the preference's dimensions.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `order`    | `randomized` (default): which run is slot A is picked per case from a SHA-256 of `seed` (default the case ID), so the judge can't tell the baseline, and MST doesn't also swap positions. `baseline-first`: A is the baseline, and MST swaps.                                                                                                                                                                                                                                                                 |
+| `requires` | Input paths, such as `candidate.artifactsDir`, whose absence skips the comparison.                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `defaults` | Agentic judge options (runtime, model, effort, turns, timeout).                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+Text and JSON strings take placeholders: `{{workspace}}` (the workspace root),
+`{{case.id}}`, `{{case.input}}` (the prompt), `{{stages.<id>.text}}` and
+`{{stages.<id>.json}}` (an earlier stage's answer; a stage can quote only
+stages it is after), and `{{file.text:<path>}}` / `{{file.json:<path>}}` (a
+workspace file). A JSON string that is a single placeholder takes its value,
+not its text.
+
+A verdict stage answers `{ "preferred": "A" | "B" | "tie", "gap_score": 0-5 }`
+about slots A and B (or both `absolute_score_a`/`_b`, 0-10), plus an optional
+`explanation`. MST maps slots back to baseline and candidate: the preference
+from `overall`, its strength `gap_score / 5`. A stage that fails, or a verdict
+that isn't one, fails the comparison. The preference's `version` is the
+bundle's SHA-256 unless the bundle sets one; `metadata` records which slot held
+the candidate, each verdict by slot, and each stage's tool calls.
+
+The workspace is `agenticPairwiseJudge`'s, with the trials in slot order:
+`a/` and `b/` (`response.md`, `trace/`, `artifacts/`), `case.json`, and the
+bundle's files.
 
 ### Client artifacts
 
