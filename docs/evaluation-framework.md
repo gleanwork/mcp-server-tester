@@ -666,6 +666,14 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 
 A result store set in the eval config also gets the run summary, as before.
 
+Run JSON and file/GCS result-store artifacts are written and read in chunks,
+so large batches of tool traces do not require one V8 string for the whole
+summary. Local JSON files are replaced only after serialization completes; a
+failed write leaves the previous file intact. This preserves every result and
+trace field without truncating tool output or relaxing evidence checks. The
+result objects still need to fit in memory, and a single string value remains
+subject to the JavaScript string limit.
+
 ## Variants
 
 A variant is a patch over the eval config defaults. Variants replace separate A/B and

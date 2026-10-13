@@ -15,6 +15,21 @@ const MAX_FILES = 10_000;
 const MAX_BYTES = 32 * 1024 * 1024;
 type ObjectValue = Record<string, unknown>;
 
+/** A native rewrite has started, but its replacement record is not complete yet. */
+export class PendingChatgptRecordError extends Error {
+  constructor() {
+    super('Waiting for an incomplete native ChatGPT record rewrite.');
+  }
+}
+
+function unfinishedOrdinal(line: string | undefined): number | undefined {
+  // Only the native envelope prefix, never a tool's nested text or arguments.
+  const match = line?.match(
+    /^\{"timestamp":"[^"\n]+","ordinal":(\d+),"type":"[^"\n]+","payload":/
+  );
+  return match ? Number(match[1]) : undefined;
+}
+
 /** Fixed observed native identities. The caller selects the surface, never the transcript. */
 export function expectedChatgptOriginator(
   surface: ChatgptSurface = 'chatgpt-work'
@@ -332,11 +347,11 @@ export function parseChatgptTrace(
   const userTexts = new Map<string, Set<string>>();
   const lines = content.split('\n');
   // The writer may be in the middle of its last JSONL record.
-  if (!content.endsWith('\n')) lines.pop();
+  const unfinished = !content.endsWith('\n') ? lines.pop() : undefined;
   // The native writer can leave a truncated record and then rewrite it whole
   // under the same ordinal. Skip a malformed line only when that happens.
   let lastOrdinal: number | undefined;
-  let pendingMalformed = false;
+  let pendingMalformed: string | undefined;
   let supersededRecords = 0;
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -348,7 +363,7 @@ export function parseChatgptTrace(
         throw new Error(
           'Malformed complete JSONL record in ChatGPT transcript.'
         );
-      pendingMalformed = true;
+      pendingMalformed = line;
       continue;
     }
     const ordinal = number(raw.ordinal);
@@ -357,7 +372,7 @@ export function parseChatgptTrace(
         throw new Error(
           'Malformed complete JSONL record in ChatGPT transcript.'
         );
-      pendingMalformed = false;
+      pendingMalformed = undefined;
       supersededRecords += 1;
     }
     if (ordinal !== undefined) lastOrdinal = ordinal;
@@ -420,8 +435,16 @@ export function parseChatgptTrace(
     )
       matches.add(turnId);
   }
-  if (pendingMalformed)
+  if (pendingMalformed) {
+    const ordinal = unfinishedOrdinal(pendingMalformed);
+    if (
+      ordinal !== undefined &&
+      ordinal === lastOrdinal! + 1 &&
+      unfinishedOrdinal(unfinished) === ordinal
+    )
+      throw new PendingChatgptRecordError();
     throw new Error('Malformed complete JSONL record in ChatGPT transcript.');
+  }
   if (!sessionId || originator !== expectedOriginator || matches.size === 0)
     return undefined;
   if (matches.size > 1)

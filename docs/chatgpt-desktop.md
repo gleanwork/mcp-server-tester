@@ -356,6 +356,12 @@ UTF-8 bytes. Resolved object markers are not counted. Unreadable text omits thes
 measurements. Readback failures return `composer_text_unavailable`, never raw RPC
 errors. The successful receipt schema is unchanged.
 
+During draft transitions, the controller polls temporary composer/Send overlap
+and unreadable text within the existing deadline. It acts only after a fresh
+snapshot confirms the exact prompt, configured surface and unique enabled Send.
+Persistent ambiguity or unreadable text still fails without sending; the draft
+is opened once and Send is never retried.
+
 Offline tests cover these controller contracts. Verify the app flags and hand-off
 against the caller's pinned image. A native fresh-session binding remains mandatory even
 after a successful UI receipt.
@@ -370,6 +376,14 @@ punctuation backslash-escaped by the app, reported as
 query, and complete native final-answer/model/effort evidence. UI text is never
 treated as an answer.
 Explicit `prompt_marker` correlation remains opt-in.
+
+If a truncated JSONL record is followed by an unfinished native replacement with
+the same next ordinal, collection waits read-only for the replacement. It never
+accepts that fragment as evidence. A completed replacement must pass the normal
+parser; corruption, mismatched ordinals, or a rewrite that never finishes still
+fails within the binding/run/stall deadlines. A Linux binding timeout also saves
+a diagnostic screenshot; it is not native answer or tool evidence and does not
+trigger a resubmission.
 
 Native originator acceptance is surface-specific and case-sensitive:
 

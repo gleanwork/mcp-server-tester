@@ -7,7 +7,7 @@ import type {
   ExternalClientFailureKind,
 } from '../types.js';
 import { normalizeClientDriver } from '../driverIdentity.js';
-import { findChatgptTrace } from './chatgptTrace.js';
+import { findChatgptTrace, PendingChatgptRecordError } from './chatgptTrace.js';
 import type * as TraceModule from './chatgptTrace.js';
 import {
   chatgptBindingDeadline,
@@ -198,6 +198,30 @@ describe('bounded native binding wait and failure classification', () => {
       }
     }
   );
+
+  it('preserves a binding-timeout screenshot without promoting it to native evidence', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-binding-display-'));
+    try {
+      const ctx = context(home, true, 1000);
+      screenshots.saveStallScreenshot.mockResolvedValue({
+        path: join(home, 'timeout.png'),
+      });
+      const result = await capture(ctx);
+      expect(result).toMatchObject({
+        success: false,
+        clientMetadata: {
+          failureKind: 'no_matching_session',
+          traceSource: 'none',
+          traceConfidence: 'unknown',
+          artifacts: [expect.objectContaining({ kind: 'screenshot' })],
+        },
+      });
+      expect(runLinuxChatgptDesktop).not.toHaveBeenCalled();
+      expect(submitChatgptQuery).not.toHaveBeenCalled();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
 
   it.each([
     [true, undefined, 'codex_work_desktop'],
@@ -472,6 +496,60 @@ describe('bounded native binding wait and failure classification', () => {
         error: 'Timed out waiting for the native ChatGPT turn to complete.',
       });
       expect(screenshots.saveStallScreenshot).not.toHaveBeenCalled();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('polls an unfinished native rewrite without resubmitting and stays bounded', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-rewrite-'));
+    try {
+      const ctx = context(home, true, 3000);
+      vi.mocked(findChatgptTrace).mockRejectedValue(
+        new PendingChatgptRecordError()
+      );
+      const result = await capture(ctx);
+      expect(result).toMatchObject({
+        success: false,
+        clientMetadata: { traceConfidence: 'unknown' },
+      });
+      expect(clock.now).toBe(4000);
+      expect(runLinuxChatgptDesktop).not.toHaveBeenCalled();
+      expect(submitChatgptQuery).not.toHaveBeenCalled();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts only the complete validated rewrite after a transient partial read', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-rewritten-'));
+    try {
+      const ctx = context(home, true, 3000);
+      const root = chatgptRunState(ctx.state).sessionsRoot as string;
+      await mkdir(root, { recursive: true });
+      await mkdir(join(home, 'evidence'));
+      const path = join(root, 'rollout.jsonl');
+      await writeFile(path, 'fixture native transcript');
+      vi.mocked(findChatgptTrace)
+        .mockRejectedValueOnce(new PendingChatgptRecordError())
+        .mockResolvedValue({
+          path,
+          trace: {
+            sessionId: 'session',
+            turnId: 'turn',
+            complete: true,
+            response: 'fixture answer',
+            toolCalls: [],
+            conversationHistory: [],
+            telemetry: {},
+            limitations: [],
+          },
+        });
+      const result = await capture(ctx);
+      expect(result).toMatchObject({ success: true });
+      expect(findChatgptTrace).toHaveBeenCalledTimes(2);
+      expect(runLinuxChatgptDesktop).not.toHaveBeenCalled();
+      expect(submitChatgptQuery).not.toHaveBeenCalled();
     } finally {
       await rm(home, { recursive: true, force: true });
     }

@@ -7,6 +7,7 @@ import {
   expectedChatgptOriginator,
   findChatgptTrace,
   parseChatgptTrace,
+  PendingChatgptRecordError,
   snapshotChatgptSessions,
 } from './chatgptTrace.js';
 import { NativeTraceError } from '../nativeTraceError.js';
@@ -833,6 +834,42 @@ describe('ChatGPT native telemetry', () => {
       expect(trace?.limitations).toContain(
         '1 truncated native record(s) were rewritten by the client under the same ordinal; the rewritten record was used.'
       );
+    });
+
+    it('waits for an unfinished replacement without accepting missing evidence', () => {
+      const records = numbered().map((line) => {
+        const { timestamp, ordinal, type, payload } = JSON.parse(line);
+        return JSON.stringify({ timestamp, ordinal, type, payload });
+      });
+      const prefix = records.slice(0, 4);
+      const truncated = records[4]!.slice(0, -30);
+      const replacement = records[4]!.slice(0, -5);
+      const growing = [...prefix, truncated, replacement].join('\n');
+      expect(() => parseChatgptTrace(growing, marker)).toThrow(
+        PendingChatgptRecordError
+      );
+      const finished =
+        [...prefix, truncated, ...records.slice(4)].join('\n') + '\n';
+      const trace = parseChatgptTrace(finished, marker)!;
+      expect(trace.complete).toBe(true);
+      expect(trace.toolCalls).toHaveLength(2);
+      expect(trace.limitations).toContain(
+        '1 truncated native record(s) were rewritten by the client under the same ordinal; the rewritten record was used.'
+      );
+      // A complete malformed replacement or a different ordinal remains a failure.
+      expect(() => parseChatgptTrace(growing + '\n', marker)).toThrow(
+        'Malformed complete'
+      );
+      expect(() =>
+        parseChatgptTrace(
+          [
+            ...prefix,
+            truncated,
+            replacement.replace('"ordinal":4', '"ordinal":5'),
+          ].join('\n'),
+          marker
+        )
+      ).toThrow('Malformed complete');
     });
 
     it.each([
