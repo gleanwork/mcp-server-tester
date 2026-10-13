@@ -147,6 +147,20 @@ const ShardBundleSchema = z.object({
   evalConfig: z.looseObject({ name: z.string() }),
   /** Servers whose access tokens the worker asks for before it starts. */
   tokenServers: z.array(z.string()),
+  /**
+   * The run's connector servers as declared: the worker expands them itself,
+   * so each launches from the worker's install with its token in the
+   * worker's tokens directory.
+   */
+  connectorServers: z
+    .array(
+      z.object({
+        connector: z.string(),
+        label: z.string(),
+        url: z.string(),
+      })
+    )
+    .optional(),
   batches: z.array(
     z.object({
       variant: z.looseObject({ name: z.string() }),
@@ -173,6 +187,7 @@ export interface ShardBundle {
   plugins: string[];
   evalConfig: EvalConfig;
   tokenServers: string[];
+  connectorServers?: Array<{ connector: string; label: string; url: string }>;
   batches: ShardBatch[];
 }
 

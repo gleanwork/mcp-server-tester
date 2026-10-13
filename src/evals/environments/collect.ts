@@ -11,6 +11,9 @@ import { getClient } from '../builtinClients.js';
 import { redactClientSecrets } from '../clientSecrets.js';
 import { isInfrastructureError } from '../infrastructureFailure.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
+import { expandConnectorServers } from '../connectorServers.js';
+import type { EvalConfig } from '../evalConfig.js';
+import type { MCPConfig } from '../../config/mcpConfig.js';
 import { installPlugins } from '../../plugins/extensions.js';
 import { loadPlugins } from '../../plugins/loadPlugins.js';
 import type {
@@ -151,9 +154,11 @@ export async function collectShard(
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(server))
         throw new Error(`"${server}" can't name a token file.`);
       secrets.add(token.accessToken);
+      // The format a connector's proxy reads, at the path the worker's
+      // expansion gives it (`<tokens dir>/<grant key>.json`).
       await writeFileAtomically(
-        path.join(tokensDir, server),
-        token.accessToken,
+        path.join(tokensDir, `${server}.json`),
+        JSON.stringify({ version: 1, accessToken: token.accessToken }),
         0o600
       );
     }
@@ -214,6 +219,21 @@ export async function collectShard(
     installPlugins(
       await loadPlugins(bundle.plugins, { baseDir: options.bundleDir })
     );
+    // Connector servers, launched from this machine's install: the
+    // coordinator's expansion named its own paths.
+    const connectorEntries = new Map<string, MCPConfig>();
+    if (bundle.connectorServers?.length) {
+      const expansion = await expandConnectorServers(
+        {
+          name: bundle.evalConfig.name,
+          servers: bundle.connectorServers,
+        } as EvalConfig,
+        { tokenDirectory: tokensDir }
+      );
+      for (const server of expansion.evalConfig.servers ?? [])
+        if (server.label)
+          connectorEntries.set(server.label, server as MCPConfig);
+    }
     // Servers arrive as declared; their secrets come from this machine's
     // environment and the coordinator's `tokens`.
     const serverEnv = { ...process.env, ...runtimeEnv };
@@ -231,7 +251,10 @@ export async function collectShard(
         input: {
           ...request.input,
           servers: request.input.servers.map((server) =>
-            resolveServerSecrets(server, serverEnv)
+            resolveServerSecrets(
+              (server.label && connectorEntries.get(server.label)) || server,
+              serverEnv
+            )
           ),
           env: runtimeEnv,
         },

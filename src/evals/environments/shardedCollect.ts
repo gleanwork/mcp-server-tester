@@ -39,6 +39,18 @@ export interface CollectInEnvironmentOptions {
   /** Plugin specifiers the workers load. */
   plugins: string[];
   groups: RequestGroup[];
+  /**
+   * The run's connector servers: declared for the worker to expand, and
+   * their access tokens, fetched fresh each time a worker asks.
+   */
+  connectors?: {
+    servers: Array<{ connector: string; label: string; url: string }>;
+    tokenServers: string[];
+    tokens(): Promise<{
+      byServer: Record<string, { accessToken: string; expiresAt?: number }>;
+      env: Record<string, string>;
+    }>;
+  };
   /** The run's secrets, sent to each worker over its channel, never in a bundle. */
   secrets: Record<string, string>;
   /** A private local directory for bundles and copied results. */
@@ -121,7 +133,10 @@ export async function collectInEnvironment(
           mst: packageJson.version,
           plugins: options.plugins,
           evalConfig: options.evalConfig,
-          tokenServers: [],
+          tokenServers: options.connectors?.tokenServers ?? [],
+          ...(options.connectors?.servers.length
+            ? { connectorServers: options.connectors.servers }
+            : {}),
           batches,
         });
         // Room this shard's trials hold under the limits, until they're done.
@@ -172,7 +187,11 @@ export async function collectInEnvironment(
               }
             },
             async requestTokens() {
-              return { byServer: {}, env: options.secrets };
+              const connector = await options.connectors?.tokens();
+              return {
+                byServer: connector?.byServer ?? {},
+                env: { ...options.secrets, ...connector?.env },
+              };
             },
             async acquire(key) {
               const id = keyString(key);

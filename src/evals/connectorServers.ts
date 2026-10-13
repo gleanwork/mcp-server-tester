@@ -450,3 +450,80 @@ export async function startConnectorCredentials(
   }
   return { env, secrets: () => [...delivered], stop };
 }
+
+/** A connector server as an eval config declares it, for a shard's worker to expand. */
+export function declaredConnectorServers(
+  expansion: ConnectorExpansion
+): Array<{ connector: string; label: string; url: string }> {
+  return expansion.uses.map((use) => ({
+    connector: use.reference,
+    label: use.label,
+    url: use.url,
+  }));
+}
+
+/** What a shard's worker gets for its connector servers. */
+export interface ConnectorShardTokens {
+  /** Access tokens by grant key: the worker writes each as `<key>.json`. */
+  byServer: Record<string, { accessToken: string; expiresAt?: number }>;
+  /** Run-private env vars for direct HTTP connectors. */
+  env: Record<string, string>;
+}
+
+/**
+ * Fresh connector tokens for shard workers (ADR 0004): the grants the named
+ * variants use, valid for at least the renewal window. Refresh grants stay
+ * here; a worker asks again before its tokens expire.
+ */
+export function connectorShardTokens(
+  expansion: ConnectorExpansion,
+  store: CredentialStore,
+  options: {
+    variants?: readonly string[];
+    fetch?: FetchFn;
+    now?: () => number;
+  } = {}
+): { servers: string[]; tokens(): Promise<ConnectorShardTokens> } {
+  const ownServers = new Set(
+    (expansion.evalConfig.variants ?? [])
+      .filter(
+        (variant) =>
+          variant.servers !== undefined || variant.serverLabels !== undefined
+      )
+      .map((variant) => variant.name)
+  );
+  const needed = options.variants
+    ? new Set(
+        options.variants.flatMap((name) => [
+          ...(expansion.grantsByVariant.get(ownServers.has(name) ? name : '') ??
+            []),
+        ])
+      )
+    : undefined;
+  const slots = needed
+    ? expansion.slots.filter((slot) => needed.has(slot.target.key))
+    : expansion.slots;
+  return {
+    servers: slots.filter((slot) => slot.file).map((slot) => slot.target.key),
+    async tokens() {
+      const byServer: ConnectorShardTokens['byServer'] = {};
+      const env: Record<string, string> = {};
+      for (const slot of slots) {
+        const token = await accessToken(slot.target, store, {
+          fetch: options.fetch,
+          now: options.now,
+          minValidityMs: RENEW_BEFORE_MS + MIN_RENEW_DELAY_MS,
+        });
+        if (slot.file)
+          byServer[slot.target.key] = {
+            accessToken: token.accessToken,
+            ...(token.expiresAt !== undefined && {
+              expiresAt: token.expiresAt,
+            }),
+          };
+        for (const name of slot.envNames) env[name] = token.accessToken;
+      }
+      return { byServer, env };
+    },
+  };
+}

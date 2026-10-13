@@ -138,6 +138,8 @@ import {
 } from './resultStore.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import {
+  connectorShardTokens,
+  declaredConnectorServers,
   expandConnectorServers,
   startConnectorCredentials,
   type ConnectorCredentials,
@@ -1160,9 +1162,11 @@ async function evaluate(
      * and keeps what came back; a second Ctrl-C quits.
      */
     const collectEnvironmentTrials = async (): Promise<GatheredResults> => {
-      if (connectors.uses.length > 0)
+      // The proxies record simulated writes on the worker, where this
+      // machine can't mark them in the traces.
+      if (simulatedWritesDirectory)
         throw new Error(
-          `Connector servers can't run in "${environment.name}" yet: their tokens are kept on this machine.`
+          `simulateWrites can't run in "${environment.name}" yet: the writes are recorded on its machines.`
         );
       const groups: RequestGroup[] = [];
       const trialCases = new Map<
@@ -1248,6 +1252,22 @@ async function evaluate(
           plugins: workerPlugins,
           groups,
           secrets: fileSecrets,
+          ...(connectors.uses.length
+            ? (() => {
+                const shardTokens = connectorShardTokens(
+                  connectors,
+                  options.credentialStore ?? localCredentialStore(),
+                  { variants: groups.map((group) => group.variant.name) }
+                );
+                return {
+                  connectors: {
+                    servers: declaredConnectorServers(connectors),
+                    tokenServers: shardTokens.servers,
+                    tokens: () => shardTokens.tokens(),
+                  },
+                };
+              })()
+            : {}),
           workDir,
           ...(evalConfig.limits ? { limits: evalConfig.limits } : {}),
           signal: controller.signal,

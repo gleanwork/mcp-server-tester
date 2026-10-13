@@ -108,6 +108,80 @@ const context = (
 ): EnvironmentContext => ({ runId: 'run-1', shards: 1, keep });
 
 describe('a shard in a child-process environment', () => {
+  it("launches connector servers from the worker's install, with the tokens it was sent", async () => {
+    const root = await tempDir();
+    const tokensDir = path.join(root, 'tokens');
+    const bundleDir = path.join(root, 'bundle');
+    await writeShardBundle(bundleDir, {
+      runId: 'run-1',
+      shard: { index: 0, count: 1 },
+      mst: packageJson.version,
+      plugins: [PLUGIN],
+      evalConfig: { name: 'shard-test' } as EvalConfig,
+      tokenServers: ['shard-test.acme'],
+      connectorServers: [
+        {
+          connector: 'shard-test/connector/acme',
+          label: 'acme',
+          url: 'https://acme.example/mcp',
+        },
+      ],
+      batches: [
+        {
+          variant: { name: 'baseline' },
+          requests: [
+            {
+              caseId: 'a',
+              trial: 0,
+              config: { type: 'shard-test/client/servers' },
+              input: {
+                prompt: 'a',
+                // As the coordinator expanded it: its own paths.
+                servers: [
+                  {
+                    transport: 'stdio',
+                    label: 'acme',
+                    command: '/coordinator/node',
+                    args: ['--token-file', '/coordinator/tmp/acme.json'],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    const { events } = recorder([
+      () => ({
+        byServer: { 'shard-test.acme': { accessToken: 'tok-1' } },
+        env: {},
+      }),
+    ]);
+    const environment = forkEnvironment(context(), root, {
+      MST_TOKENS_DIR: tokensDir,
+    });
+    const outcome = await environment.runShard(
+      {
+        runId: 'run-1',
+        index: 0,
+        count: 1,
+        bundleDir,
+        resultsDir: path.join(root, 'results'),
+      },
+      events,
+      new AbortController().signal
+    );
+    expect(outcome.ok).toBe(true);
+    const a = await readClientResult(path.join(root, 'results', '0/0.json'));
+    // The worker's own entry, and its token file holds what it was sent.
+    expect(JSON.parse(a.result.finalText)).toMatchObject({
+      label: 'acme',
+      command: '/worker/node',
+      file: path.join(tokensDir, 'shard-test.acme.json'),
+      token: 'tok-1',
+    });
+  });
+
   it('runs end to end, renewing a token mid-trial', async () => {
     const root = await tempDir();
     const tokensDir = path.join(root, 'tokens');

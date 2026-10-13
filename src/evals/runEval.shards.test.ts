@@ -86,6 +86,29 @@ interface StoredCase {
 }
 
 describe('a run in an environment with shards', () => {
+  it('runs connector servers on the workers, with tokens the coordinator sends', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture({
+      redact: false,
+      extra: {
+        client: 'shard-test/client/servers',
+        servers: { acme: { connector: 'shard-test/connector/acme' } },
+      },
+    });
+    const result = await f.run({ shards: '2' });
+    const stored = await f.readJson<{
+      cases: Array<{ id: string; response: { response?: string } }>;
+    }>(path.join(result.outputDir, 'results.json'));
+    expect(stored.cases).toHaveLength(8);
+    for (const c of stored.cases)
+      // The worker's own proxy entry, reading the static connector's token.
+      expect(JSON.parse(c.response.response!)).toMatchObject({
+        label: 'acme',
+        command: '/worker/node',
+        token: 'unused',
+      });
+  });
+
   it('collects every variant on shards and gathers one run', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture();

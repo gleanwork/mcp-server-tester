@@ -19,7 +19,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function token(input: ClientRunInput): Promise<string> {
   const dir = input.env?.MST_TOKENS_DIR;
   if (!dir) return 'none';
-  return readFile(path.join(dir, 'acme'), 'utf8').catch(() => 'none');
+  // The connector token file format: { version: 1, accessToken }.
+  return readFile(path.join(dir, 'acme.json'), 'utf8')
+    .then((text) => (JSON.parse(text) as { accessToken: string }).accessToken)
+    .catch(() => 'none');
 }
 
 /** With SHARD_TEST_LOG set, each trial's start and end (ms), for overlap checks. */
@@ -56,9 +59,50 @@ async function probe(
 
 const schema = z.object({ type: z.string() }).passthrough();
 
+/** Reports the server entry it got, and the token its token file holds. */
+async function servers(input: ClientRunInput): Promise<ClientRunResult> {
+  const server = input.servers[0] as {
+    label?: string;
+    command?: string;
+    args?: string[];
+  };
+  const args = server.args ?? [];
+  const file = args[args.indexOf('--token-file') + 1];
+  const token = file
+    ? await readFile(file, 'utf8')
+        .then(
+          (text) => (JSON.parse(text) as { accessToken: string }).accessToken
+        )
+        .catch(() => 'unreadable')
+    : 'none';
+  return {
+    finalText: JSON.stringify({
+      label: server.label,
+      command: server.command,
+      file,
+      token,
+    }),
+    events: [],
+  };
+}
+
 export default {
   meta: { name: 'shard-test-plugin', namespace: 'shard-test' },
+  connectors: {
+    acme: {
+      url: 'https://acme.example/mcp',
+      auth: { type: 'static', token: async () => 'unused' },
+      // Like a dry-run proxy: launched from this machine's install.
+      launch: ({ label, tokenFile }) => ({
+        transport: 'stdio',
+        label,
+        command: '/worker/node',
+        args: ['/worker/proxy.js', '--token-file', tokenFile ?? ''],
+      }),
+    },
+  },
   clients: {
+    servers: { schema, evidence: 'structured', run: servers },
     probe: { schema, evidence: 'structured', run: probe },
     batch: {
       schema,
