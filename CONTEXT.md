@@ -112,6 +112,10 @@ _Avoid_: comparator, preference model
 A judge that runs an agent (on the `claude-agent` or `codex` runtime) over a workspace of the trial's evidence, which it can read and search before it scores, instead of getting the trial in one prompt. It can be pointwise or pairwise.
 _Avoid_: agent grader, tool-using judge
 
+**Staged judge**:
+An agentic pairwise judge described as data, a bundle: the files it needs (prompts, helper scripts), programs that prepare the workspace, and a graph of agent stages whose answers later stages quote, ending in verdict stages. `stagedPairwiseJudge` runs one, so a judge maintained elsewhere as prompt files runs in MST without being reimplemented.
+_Avoid_: composite judge, judge pipeline
+
 **Preference**:
 A pairwise judge's result comparing two variants on one case: which side's trials it prefers (or a tie), how strongly, and why. Several reps, and the swapped order, reconcile into one preference per case.
 _Avoid_: verdict, vote

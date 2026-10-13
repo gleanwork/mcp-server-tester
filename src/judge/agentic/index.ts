@@ -18,3 +18,9 @@ export type {
   WorkspaceCommand,
 } from './runtime.js';
 export type { WorkspaceFile } from './workspace.js';
+export { stagedPairwiseJudge, StagedJudgeBundleSchema } from './stagedJudge.js';
+export type {
+  StagedJudgeBundle,
+  StagedJudgePart,
+  StagedJudgeStage,
+} from './stagedJudge.js';

@@ -122,7 +122,10 @@ import {
   validateEvalConfig,
   inheritClient,
 } from './configValidation.js';
-import { comparePairwise } from './pairwiseComparison.js';
+import {
+  comparePairwise,
+  preflightPairwiseJudges,
+} from './pairwiseComparison.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import {
   CORE_METRICS,
@@ -985,6 +988,12 @@ async function evaluate(
   const variantResults: EvaluationVariantResult[] = [];
   // Judge settings whose preflight passed, across variants.
   const checkedJudges = new Set<string>();
+  // Before any client starts: a pairwise judge that can't run (no SDK, no
+  // credential) fails the run now, not after every trial is collected.
+  if (!options.skipPairwise && options.grade !== false)
+    await preflightPairwiseJudges(
+      (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec)
+    );
   const allDatasets: RunEvalResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
   // Saved with the first trial: from then on, run.json says how far the run got.

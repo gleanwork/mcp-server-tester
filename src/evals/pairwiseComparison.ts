@@ -38,6 +38,30 @@ export function listPairwiseJudges(): Array<[string, PairwiseJudgeDefinition]> {
   return pairwiseJudges.list();
 }
 
+/**
+ * Checks that each pairwise judge can run (`PairwiseJudgeDefinition.preflight`),
+ * once per judge and options, before anything is collected.
+ */
+export async function preflightPairwiseJudges(
+  specs: readonly PairwiseJudgeSpec[]
+): Promise<void> {
+  const checked = new Set<string>();
+  for (const spec of specs) {
+    const key = JSON.stringify([spec.type, spec.options ?? {}]);
+    if (checked.has(key)) continue;
+    const judge = getPairwiseJudge(spec.type);
+    if (judge.preflight)
+      await judge.preflight(
+        parseExtensionOptions(
+          judge.schema,
+          spec.options ?? {},
+          `pairwise judge options "${spec.type}"`
+        )
+      );
+    checked.add(key);
+  }
+}
+
 /** One pairwise judge to run, as an eval config lists it. */
 export interface PairwiseJudgeSpec {
   type: string;
