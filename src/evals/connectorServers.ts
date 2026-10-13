@@ -464,7 +464,10 @@ export function declaredConnectorServers(
 
 /** What a shard's worker gets for its connector servers. */
 export interface ConnectorShardTokens {
-  /** Access tokens by grant key: the worker writes each as `<key>.json`. */
+  /**
+   * Access tokens by grant key, for every grant: the worker writes each as
+   * `<key>.json`, whichever way its own expansion connects.
+   */
   byServer: Record<string, { accessToken: string; expiresAt?: number }>;
   /** Run-private env vars for direct HTTP connectors. */
   env: Record<string, string>;
@@ -503,8 +506,10 @@ export function connectorShardTokens(
   const slots = needed
     ? expansion.slots.filter((slot) => needed.has(slot.target.key))
     : expansion.slots;
+  // Every grant, as a file: a worker's expansion can launch a connector that
+  // this machine connects to directly (a proxy on Linux, say).
   return {
-    servers: slots.filter((slot) => slot.file).map((slot) => slot.target.key),
+    servers: slots.map((slot) => slot.target.key),
     async tokens() {
       const byServer: ConnectorShardTokens['byServer'] = {};
       const env: Record<string, string> = {};
@@ -514,13 +519,12 @@ export function connectorShardTokens(
           now: options.now,
           minValidityMs: RENEW_BEFORE_MS + MIN_RENEW_DELAY_MS,
         });
-        if (slot.file)
-          byServer[slot.target.key] = {
-            accessToken: token.accessToken,
-            ...(token.expiresAt !== undefined && {
-              expiresAt: token.expiresAt,
-            }),
-          };
+        byServer[slot.target.key] = {
+          accessToken: token.accessToken,
+          ...(token.expiresAt !== undefined && {
+            expiresAt: token.expiresAt,
+          }),
+        };
         for (const name of slot.envNames) env[name] = token.accessToken;
       }
       return { byServer, env };
