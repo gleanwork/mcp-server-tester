@@ -1,0 +1,18 @@
+# Generated from .claude/settings.json. Do not edit; regenerate instead.
+# Rules that Codex prefix rules cannot express need a PreToolUse hook.
+
+prefix_rule(pattern=["gh","pr","comment"], decision="prompt", justification="repo rule ask: Bash(gh pr comment *)")
+prefix_rule(pattern=["gh","pr","review"], decision="prompt", justification="repo rule ask: Bash(gh pr review *)")
+prefix_rule(pattern=["gh","pr","close"], decision="prompt", justification="repo rule ask: Bash(gh pr close *)")
+prefix_rule(pattern=["gh","issue","create"], decision="prompt", justification="repo rule ask: Bash(gh issue create *)")
+prefix_rule(pattern=["gh","issue","comment"], decision="prompt", justification="repo rule ask: Bash(gh issue comment *)")
+prefix_rule(pattern=["gh","issue","close"], decision="prompt", justification="repo rule ask: Bash(gh issue close *)")
+prefix_rule(pattern=["gh","release"], decision="prompt", justification="repo rule ask: Bash(gh release *)")
+prefix_rule(pattern=["npm","publish"], decision="prompt", justification="repo rule ask: Bash(npm publish *)")
+prefix_rule(pattern=["pnpm","publish"], decision="prompt", justification="repo rule ask: Bash(pnpm publish *)")
+prefix_rule(pattern=["yarn","npm","publish"], decision="prompt", justification="repo rule ask: Bash(yarn npm publish *)")
+prefix_rule(pattern=["git","push","-f"], decision="prompt", justification="repo rule ask: Bash(git push -f *)")
+prefix_rule(pattern=["git","push"], decision="allow", justification="repo rule allow: Bash(git push *)")
+prefix_rule(pattern=["gh","pr","create","--draft"], decision="allow", justification="repo rule allow: Bash(gh pr create --draft *)")
+prefix_rule(pattern=["gh","pr","merge"], decision="allow", justification="repo rule allow: Bash(gh pr merge *)")
+prefix_rule(pattern=["gh","pr","ready"], decision="allow", justification="repo rule allow: Bash(gh pr ready *)")
