@@ -14,8 +14,17 @@ stops the VM and reinstalls it, unless the profile is marked as having
 reinstalled already (desktop-session marks it when the image seeded the
 bundle); after a later one it lets the VM finish booting. Unless
 MST_COWORK_WARM_VM=0, this starts one-line warm-up tasks
-until the guest is ready, then goes back to a new task, so a case's task
+until a VM startup completes, then goes back to a new task, so a case's task
 finds the VM running.
+
+The guest connecting ("guest ready") isn't enough: Cowork then installs its
+SDK in the guest, with 30 s to do it, and under nested virtualization that
+can take longer. The startup then fails ("installSdk timed out") with the VM
+still connected, and a task started then has no shell. So a startup counts
+only once it completes (Cowork starts its keepalive), after the last
+failure; another warm-up task retries the install on the connected VM. A
+task that finds the VM connected installs the SDK too, and its failure
+("Post-connect setup failed") is retried the same way.
 """
 import os
 import subprocess
@@ -134,8 +143,26 @@ def vm_log_since(offset):
         return log.read()
 
 
+# What Cowork logs once a VM startup has completed: the SDK installed and
+# the keepalive started.
+STARTUP_COMPLETE = (b"[Keepalive] Starting", b"sdk_install completed")
+# A startup that failed, and a task that found the VM connected but
+# couldn't install the SDK in it ("already-connected fast path").
+STARTUP_FAILED = (b"Startup failed", b"Post-connect setup failed")
+
+
+def last_failure(log):
+    return max(log.rfind(marker) for marker in STARTUP_FAILED)
+
+
+def vm_ready(log):
+    """A startup completed after the last one that failed."""
+    failed = last_failure(log)
+    return any(log.rfind(marker) > failed for marker in STARTUP_COMPLETE)
+
+
 def warm_vm():
-    """Starts warm-up tasks until Cowork's guest is ready."""
+    """Starts warm-up tasks until a Cowork VM startup completes."""
     deadline = time.monotonic() + WARM_DEADLINE_S
     # The guest can become ready between two warm-up tasks, so readiness is
     # read from everything logged since the warm-up began.
@@ -146,14 +173,17 @@ def warm_vm():
             return "the warm-up task couldn't be started"
         while time.monotonic() < deadline:
             seen = vm_log_since(offset)
-            if b"guest ready" in vm_log_since(began):
+            if vm_ready(vm_log_since(began)):
                 open_url("claude://claude.ai/new")
                 return None if wait_for_prompt(30) is not None else "no new task after the warm-up"
             # Claude gave up on this start; once it's done, start another
             # task, which boots the VM again (or finds it still booting).
-            if b"Startup failed" in seen and (
-                b"All files ready" in seen.split(b"Startup failed")[-1]
-                or b"Skipping auto-reinstall" in seen
+            if b"Post-connect setup failed" in seen or (
+                b"Startup failed" in seen
+                and (
+                    b"All files ready" in seen.split(b"Startup failed")[-1]
+                    or b"Skipping auto-reinstall" in seen
+                )
             ):
                 time.sleep(3)
                 break

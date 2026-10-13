@@ -74,7 +74,7 @@ For each shard, MST:
 
 Claude Desktop reads its managed settings, and lists each MCP server's tools, only when it starts. It keeps the tool list for its whole run: a server's `notifications/tools/list_changed` doesn't refresh it. So each variant on a shard is a restart, and a restart stops Cowork's VM and boots a new one. A shard runs all of one variant's cases before the next variant's, so it restarts once per variant. A variant's datasets share that restart: MST skips a restart when the settings are the ones the desktop already runs with. Variants with tool metadata are the exception: their servers are a proxy with a URL of its own for each batch, so each of their datasets restarts too.
 
-On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest takes 1.5 to 2.5 minutes to start, while Claude Desktop gives it 60 seconds and fails that task. After each restart, the image starts one-line warm-up tasks ("Reply with OK.") until the VM is up, so a case finds it running. You'll see those tasks in the container's Cowork history. Measured on an M5 Pro: a fresh container to a finished one-case run took 2 min 39 s. A Linux host with KVM, without nesting, should boot the VM much faster; that hasn't been measured yet.
+On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest takes 1.5 to 2.5 minutes to start, while Claude Desktop gives it 60 seconds and fails that task. After each restart, the image starts one-line warm-up tasks ("Reply with OK.") until a VM startup completes, so a case finds it running. The guest connecting isn't enough: Cowork then installs its SDK in the guest within 30 seconds, and when that times out, the startup fails with the VM still connected. Another warm-up task retries the install. Claude Desktop reinstalls the VM after a failed start unless the bundle is marked as reinstalled already, and clears that mark once a start succeeds. The image marks the seeded bundle again before each restart, so a variant's restart doesn't reinstall it. You'll see those tasks in the container's Cowork history. Measured on an M5 Pro: a fresh container to a finished one-case run took 2 min 39 s. A Linux host with KVM, without nesting, should boot the VM much faster; that hasn't been measured yet.
 
 ## When something fails
 
@@ -88,5 +88,7 @@ docker exec -it -u mst <container> bash
 - `/run/mst/session/`: the session's logs (`claude.log`, `restart.log`), and `ready` or `failed`
 - `~/.config/Claude-3p/logs/`: Claude Desktop's logs. `main.log` says whether it took the managed settings, and `cowork_vm_node.log` covers the VM
 - `/etc/claude-desktop/managed-settings.json`: the settings Claude Desktop reads
+
+A trial whose task found Cowork's VM down (its shell answers "Workspace unavailable") is an infrastructure failure, `Cowork's workspace was unavailable: …`, left out of pass rates. Its session is kept as evidence, and `cowork_vm_node.log` says why the VM startup failed.
 
 The image is in `docker/cowork-linux/` of the package. Its `seccomp.json` is Docker's default profile ([moby/profiles](https://github.com/moby/profiles), Apache-2.0) with one rule added: sockets of the `AF_VSOCK` family, which Claude Desktop uses to reach Cowork's VM.
