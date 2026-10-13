@@ -1,5 +1,9 @@
 import type { ProtocolEra } from '../types/index.js';
-import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
+import { readdir } from 'fs/promises';
+import { Readable, type Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { parseChunked } from '@discoveryjs/json-ext';
+import { jsonChunks, readJsonFile, writeJsonFile } from '../utils/jsonFile.js';
 import { join } from 'path';
 
 export type StoredArtifactKind =
@@ -151,14 +155,14 @@ function stripResponses(value: unknown): void {
 }
 
 /**
- * The one redaction policy for stored results: returns a JSON copy in which
+ * The one redaction policy for stored results: returns a deep copy in which
  * every eval case result, wherever it is nested (runs, suite arms, reports,
  * comparisons), has no raw `response` and no echoed exact-match
  * `expect.response`. Both may hold data from the server under test. Other
  * fields, such as a tool argument named `response`, are kept.
  */
 export function redactStoredResponses<T>(value: T): T {
-  const copy = JSON.parse(JSON.stringify(value)) as T;
+  const copy = structuredClone(value);
   stripResponses(copy);
   return copy;
 }
@@ -218,36 +222,28 @@ export class FileEvalResultStore implements EvalResultStore {
 
   async saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void> {
     const artifactDir = join(this.dir, KIND_DIRS[artifact.kind]);
-    await mkdir(artifactDir, { recursive: true });
-    const serialized = JSON.stringify(artifact, null, 2);
-    await writeFile(
-      join(artifactDir, `${artifact.id}.json`),
-      serialized,
-      'utf8'
-    );
-    await writeFile(join(artifactDir, 'latest.json'), serialized, 'utf8');
+    await writeJsonFile(join(artifactDir, `${artifact.id}.json`), artifact);
+    await writeJsonFile(join(artifactDir, 'latest.json'), artifact);
   }
 
   async loadArtifact<T>(
     kind: StoredArtifactKind,
     id: string
   ): Promise<StoredEvalArtifact<T>> {
-    const raw = await readFile(
-      join(this.dir, KIND_DIRS[kind], `${id}.json`),
-      'utf8'
+    const raw = await readJsonFile(
+      join(this.dir, KIND_DIRS[kind], `${id}.json`)
     );
-    return JSON.parse(raw) as StoredEvalArtifact<T>;
+    return raw as StoredEvalArtifact<T>;
   }
 
   async loadLatestArtifact<T>(
     kind: StoredArtifactKind
   ): Promise<StoredEvalArtifact<T> | null> {
     try {
-      const raw = await readFile(
-        join(this.dir, KIND_DIRS[kind], 'latest.json'),
-        'utf8'
+      const raw = await readJsonFile(
+        join(this.dir, KIND_DIRS[kind], 'latest.json')
       );
-      return JSON.parse(raw) as StoredEvalArtifact<T>;
+      return raw as StoredEvalArtifact<T>;
     } catch (error) {
       if (isMissingFileError(error)) {
         return null;
@@ -274,11 +270,8 @@ export class FileEvalResultStore implements EvalResultStore {
       files
         .filter((f) => f.endsWith('.json') && f !== 'latest.json')
         .map(async (file) => {
-          const raw = await readFile(
-            join(this.dir, KIND_DIRS[kind], file),
-            'utf8'
-          );
-          return toSummary(JSON.parse(raw) as StoredEvalArtifact<unknown>);
+          const raw = await readJsonFile(join(this.dir, KIND_DIRS[kind], file));
+          return toSummary(raw as StoredEvalArtifact<unknown>);
         })
     );
 
@@ -299,11 +292,12 @@ interface GCSBucket {
 
 interface GCSFile {
   name: string;
-  save(
-    data: string,
-    options?: { contentType?: string; resumable?: boolean; validation?: false }
-  ): Promise<unknown>;
-  download(): Promise<[Buffer]>;
+  createWriteStream(options: {
+    contentType: string;
+    resumable: boolean;
+    validation: false;
+  }): Writable;
+  createReadStream(): Readable;
   exists(): Promise<[boolean]>;
 }
 
@@ -319,26 +313,18 @@ export class GCSEvalResultStore implements EvalResultStore {
 
   async saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void> {
     const bucket = await this.getBucket();
-    const serialized = JSON.stringify(artifact, null, 2);
-    await bucket
-      .file(
-        this.objectPath(
-          artifact.kind,
-          `${encodeURIComponent(artifact.id)}.json`
-        )
-      )
-      .save(serialized, {
-        contentType: 'application/json',
-        resumable: false,
-        validation: false,
-      });
-    await bucket
-      .file(this.objectPath(artifact.kind, 'latest.json'))
-      .save(serialized, {
-        contentType: 'application/json',
-        resumable: false,
-        validation: false,
-      });
+    const upload = async (name: string): Promise<void> => {
+      await pipeline(
+        Readable.from(jsonChunks(artifact)),
+        bucket.file(this.objectPath(artifact.kind, name)).createWriteStream({
+          contentType: 'application/json',
+          resumable: false,
+          validation: false,
+        })
+      );
+    };
+    await upload(`${encodeURIComponent(artifact.id)}.json`);
+    await upload('latest.json');
   }
 
   async loadArtifact<T>(
@@ -349,8 +335,8 @@ export class GCSEvalResultStore implements EvalResultStore {
     const file = bucket.file(
       this.objectPath(kind, `${encodeURIComponent(id)}.json`)
     );
-    const [buffer] = await file.download();
-    return JSON.parse(buffer.toString('utf8')) as StoredEvalArtifact<T>;
+    const value: unknown = await parseChunked(file.createReadStream());
+    return value as StoredEvalArtifact<T>;
   }
 
   async loadLatestArtifact<T>(
@@ -361,8 +347,8 @@ export class GCSEvalResultStore implements EvalResultStore {
     const [exists] = await file.exists();
     if (!exists) return null;
 
-    const [buffer] = await file.download();
-    return JSON.parse(buffer.toString('utf8')) as StoredEvalArtifact<T>;
+    const value: unknown = await parseChunked(file.createReadStream());
+    return value as StoredEvalArtifact<T>;
   }
 
   async listArtifacts(
@@ -380,10 +366,8 @@ export class GCSEvalResultStore implements EvalResultStore {
           (f) => f.name.endsWith('.json') && !f.name.endsWith('/latest.json')
         )
         .map(async (file) => {
-          const [buffer] = await file.download();
-          return toSummary(
-            JSON.parse(buffer.toString('utf8')) as StoredEvalArtifact<unknown>
-          );
+          const value: unknown = await parseChunked(file.createReadStream());
+          return toSummary(value as StoredEvalArtifact<unknown>);
         })
     );
 

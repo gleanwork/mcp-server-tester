@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   findChatgptTrace,
+  PendingChatgptRecordError,
   snapshotChatgptSessions,
   type ChatgptSessionSnapshot,
   type ChatgptTrace,
@@ -494,6 +495,7 @@ async function captureChatgptComputerUseResult({
   const runState = chatgptRunState(state);
   const platform = chatgptPlatform(config);
   // Transcript growth is the only progress signal; a silent turn is stalled.
+  let pendingRecordSince: number | undefined;
   let progressKey: string | undefined;
   let progressAtMs = Date.now();
   const selector: ChatgptTraceSelector =
@@ -534,23 +536,47 @@ async function captureChatgptComputerUseResult({
       Date.now() < run.startedAtMs + run.timeoutMs &&
       (matched || Date.now() < bindingDeadline)
     ) {
-      const found = await findChatgptTrace(
-        runState.sessionsRoot as string,
-        baseline,
-        selector,
-        run.startedAtMs,
-        {
-          surface: chatgptSurface(config),
-          mcpServers,
-          nativeMarkdownEscapes: platform.nativeMarkdownEscapes,
-          requireFreshSession: true,
-          observedBeforeMs: Math.min(
-            Date.now(),
-            run.startedAtMs + run.timeoutMs
-          ),
-          bound,
-        }
-      );
+      let found: Awaited<ReturnType<typeof findChatgptTrace>>;
+      try {
+        found = await findChatgptTrace(
+          runState.sessionsRoot as string,
+          baseline,
+          selector,
+          run.startedAtMs,
+          {
+            surface: chatgptSurface(config),
+            mcpServers,
+            nativeMarkdownEscapes: platform.nativeMarkdownEscapes,
+            requireFreshSession: true,
+            observedBeforeMs: Math.min(
+              Date.now(),
+              run.startedAtMs + run.timeoutMs
+            ),
+            bound,
+          }
+        );
+        pendingRecordSince = undefined;
+      } catch (error) {
+        if (!(error instanceof PendingChatgptRecordError)) throw error;
+        pendingRecordSince ??= Date.now();
+        if (Date.now() - pendingRecordSince >= CHATGPT_STALL_MS)
+          throw new Error(
+            'Native ChatGPT record rewrite did not complete within the stall deadline.'
+          );
+        // Read-only polling: no record is accepted or discarded, and no prompt
+        // is resubmitted. A completed replacement must pass the usual parser.
+        await delay(
+          Math.min(
+            POLL_INTERVAL_MS,
+            Math.max(
+              1,
+              (matched ? run.startedAtMs + run.timeoutMs : bindingDeadline) -
+                Date.now()
+            )
+          )
+        );
+        continue;
+      }
       if (found) {
         matched = true;
         const { trace, path } = found;
@@ -687,7 +713,7 @@ async function captureChatgptComputerUseResult({
     }
     const timeoutError =
       'Timed out waiting for the native ChatGPT turn to complete.';
-    return withEvidence(
+    const result = await withEvidence(
       latest
         ? partialFailure(metadataOptions, latest, 'timeout', timeoutError)
         : failureResult({
@@ -702,6 +728,21 @@ async function captureChatgptComputerUseResult({
       runState,
       boundEvidence(bound)
     );
+    // An acknowledged Send is not proof of a fresh native session. Keep the
+    // failure, but preserve the display to diagnose a lost/blocked submission.
+    if (!latest && isLinuxChatgpt(config) && runState.evidenceDir) {
+      attachScreenshot(
+        result,
+        await saveStallScreenshot({
+          evidenceDir: runState.evidenceDir,
+          caseId: run.caseId,
+          display: process.env.DISPLAY,
+          xauthority: process.env.XAUTHORITY,
+        }),
+        'ChatGPT display at native binding timeout'
+      );
+    }
+    return result;
   } catch (error) {
     const message = formatError(error);
     return withEvidence(

@@ -7,6 +7,7 @@ import {
   expectedChatgptOriginator,
   findChatgptTrace,
   parseChatgptTrace,
+  PendingChatgptRecordError,
   snapshotChatgptSessions,
 } from './chatgptTrace.js';
 import { NativeTraceError } from '../nativeTraceError.js';
@@ -835,6 +836,42 @@ describe('ChatGPT native telemetry', () => {
       );
     });
 
+    it('waits for an unfinished replacement without accepting missing evidence', () => {
+      const records = numbered().map((line) => {
+        const { timestamp, ordinal, type, payload } = JSON.parse(line);
+        return JSON.stringify({ timestamp, ordinal, type, payload });
+      });
+      const prefix = records.slice(0, 4);
+      const truncated = records[4]!.slice(0, -30);
+      const replacement = records[4]!.slice(0, -5);
+      const growing = [...prefix, truncated, replacement].join('\n');
+      expect(() => parseChatgptTrace(growing, marker)).toThrow(
+        PendingChatgptRecordError
+      );
+      const finished =
+        [...prefix, truncated, ...records.slice(4)].join('\n') + '\n';
+      const trace = parseChatgptTrace(finished, marker)!;
+      expect(trace.complete).toBe(true);
+      expect(trace.toolCalls).toHaveLength(2);
+      expect(trace.limitations).toContain(
+        '1 truncated native record(s) were rewritten by the host under the same ordinal; the rewritten record was used.'
+      );
+      // A complete malformed replacement or a different ordinal remains a failure.
+      expect(() => parseChatgptTrace(growing + '\n', marker)).toThrow(
+        'Malformed complete'
+      );
+      expect(() =>
+        parseChatgptTrace(
+          [
+            ...prefix,
+            truncated,
+            replacement.replace('"ordinal":4', '"ordinal":5'),
+          ].join('\n'),
+          marker
+        )
+      ).toThrow('Malformed complete');
+    });
+
     it.each([
       [
         'the next record skips an ordinal',
@@ -1197,9 +1234,18 @@ describe('ChatGPT native response_item tool calls', () => {
     ]);
   });
 
-  it.each(['list_mcp_resources', 'list_mcp_resource_templates'])(
-    'attributes a targeted %s helper to the client and retains its failure',
-    (tool) => {
+  it.each(
+    ['list_mcp_resources', 'list_mcp_resource_templates'].flatMap((tool) =>
+      [
+        'text(r)',
+        'text(JSON.stringify(r))',
+        'text ( r )',
+        'text ( JSON . stringify ( r ) )',
+      ].map((output) => [tool, output])
+    )
+  )(
+    'attributes a targeted %s helper with %s output to the client and retains its failure',
+    (tool, output) => {
       // Observed native shape: the helper's requested server, including a typo,
       // becomes item.server even though exec called tools.list_mcp_resources.
       const native = {
@@ -1216,7 +1262,7 @@ describe('ChatGPT native response_item tool calls', () => {
       const body = [
         ...exec(
           'resource',
-          `const r = await tools.${tool}({server:"acme_eval"}); text(r);`,
+          `const r = await tools.${tool}({server:"acme_eval"}); ${output};`,
           1,
           2
         ),
@@ -1283,6 +1329,11 @@ describe('ChatGPT native response_item tool calls', () => {
     'await tools.mcp__acme_eval__list_mcp_resources({server:"acme_eval"});',
     'await tools.list_mcp_resources({server:"acme_eval"}); await tools.mcp__other__search({});',
     'const r = await tools.list_mcp_resources({server:"other"}); text(r);',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(other));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(r, transform));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(await tools.mcp__other__search({})));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(r)); await tools.mcp__other__search({});',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(r.toJSON());',
     'await tools.list_mcp_resources({server:target});',
     'await tools.list_mcp_resources({server:"acme_eval", extra:true});',
   ])(

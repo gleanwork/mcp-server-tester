@@ -1,3 +1,4 @@
+import { writeJsonFile } from '../utils/jsonFile.js';
 import { manifestIdentity } from './manifestIdentity.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
@@ -604,9 +605,6 @@ export async function runEvalSuite(
       })
     );
   }
-  await fs.writeFile(
-    path.join(outputDir, 'results.json'),
-    `${JSON.stringify(storedSummary, null, 2)}\n`
-  );
+  await writeJsonFile(path.join(outputDir, 'results.json'), storedSummary);
   return { manifest, outputDir, datasets: allDatasets, summary };
 }
