@@ -26,6 +26,7 @@ import {
   waitForClaudeSession,
 } from './externalClient/builtins/claudeSessions.js';
 import { awaitingUserAnswer } from './externalClient/builtins/claudeTrace.js';
+import { COWORK_WORKSPACE_UNAVAILABLE_MESSAGE } from './infrastructureFailure.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
   MarketplacePluginError,
@@ -614,6 +615,18 @@ async function runBatch(
             },
             llmDurationMs: trace.llmDurationMs,
           };
+          const unavailable = coworkWorkspaceUnavailable(trace.toolCalls);
+          if (unavailable !== undefined) {
+            // Cowork's VM didn't start, so the task ran without its shell:
+            // an infrastructure failure, kept with its evidence. Cowork
+            // starts the VM again for the next task.
+            result = {
+              ...result,
+              error: `${COWORK_WORKSPACE_UNAVAILABLE_MESSAGE}: ${unavailable}`,
+              diagnostics: { ...result.diagnostics, failureKind: 'startup' },
+            };
+            if (platform.reset) continuation = 'reset';
+          }
         } catch (error) {
           // Trace collection or attribution failed: the app state is unknown.
           result = failure(safeError(error));
@@ -649,6 +662,25 @@ export function coworkOwnToolCalls(
       ? { ...call, source: 'builtin' }
       : call
   );
+}
+
+/**
+ * Why Cowork's sandbox was unavailable to a task, if it was: a call to its
+ * own `workspace` server that failed because the VM didn't start ("Workspace
+ * unavailable. The isolated Linux environment failed to start (...)").
+ */
+export function coworkWorkspaceUnavailable(
+  calls: readonly LLMToolCall[]
+): string | undefined {
+  const failed = calls.find(
+    (call) =>
+      call.isError === true &&
+      (call.rawName ?? '').startsWith('mcp__workspace__') &&
+      (call.output ?? '').trimStart().startsWith('Workspace unavailable')
+  );
+  if (!failed) return undefined;
+  const reason = /failed to start \((.*)\)/.exec(failed.output ?? '')?.[1];
+  return (reason ?? (failed.output ?? '').trim().split('\n')[0]!).slice(0, 300);
 }
 
 export function createCoworkClient(

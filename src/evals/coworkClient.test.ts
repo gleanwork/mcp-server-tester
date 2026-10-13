@@ -6,8 +6,13 @@ import { runEvalBatch } from './runEvalBatch.js';
 import {
   COWORK_CLIENT,
   coworkOwnToolCalls,
+  coworkWorkspaceUnavailable,
   createCoworkClient,
 } from './coworkClient.js';
+import {
+  isInfrastructureError,
+  isInfrastructureFailure,
+} from './infrastructureFailure.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
@@ -1167,6 +1172,56 @@ describe('V2 Cowork client', () => {
     );
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
+  it("records a task that found Cowork's VM down as an infrastructure failure, then resets", async () => {
+    const reset = vi.fn().mockResolvedValue(undefined);
+    const client = createCoworkClient({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      reset,
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const original = mocks.trace.getMockImplementation()!;
+    mocks.trace.mockImplementationOnce(
+      async (options: { sessionPath: string }) => {
+        const trace = (await original(options)) as ClaudeTrace;
+        return {
+          ...trace,
+          toolCalls: [
+            ...trace.toolCalls,
+            // Cowork's own sandbox shell, while its VM's startup had failed.
+            {
+              name: 'bash',
+              rawName: 'mcp__workspace__bash',
+              source: 'mcp',
+              server: 'workspace',
+              arguments: { command: 'ls' },
+              output:
+                'Workspace unavailable. The isolated Linux environment failed to start (request req-2 (installSdk) timed out after 30s). You can still use file tools directly.',
+              isError: true,
+            },
+          ],
+        } as ClaudeTrace;
+      }
+    );
+    const result = await client.runBatch!(requests(), context);
+    expect(result[0]!.error).toBe(
+      "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s"
+    );
+    expect(result[0]!.diagnostics?.failureKind).toBe('startup');
+    expect(isInfrastructureFailure(result[0]!)).toBe(true);
+    // The evidence stays: the answer and every call, the failed one included.
+    expect(result[0]!.finalText).toBe('answer');
+    expect(result[0]!.events.map((event) => event.name)).toEqual([
+      'search',
+      'bash',
+    ]);
+    // A fresh task before the next case, which is unaffected.
+    expect(reset).toHaveBeenCalledOnce();
+    expect(result[1]!.error).toBeUndefined();
+    expect(result[1]!.diagnostics?.failureKind).toBeUndefined();
+  });
   it('sends nothing more when the app cannot be reset after a failed case', async () => {
     const reset = vi.fn().mockRejectedValue(new Error('cowork_not_ready'));
     const client = createCoworkClient({
@@ -1352,6 +1407,51 @@ describe('V2 Cowork client', () => {
         { transport: 'http', serverUrl: 'https://example.com/mcp' },
       ])[0]!.label
     ).toBe('server-1');
+  });
+});
+
+describe("Cowork's workspace unavailable", () => {
+  const down = (output: string, rawName = 'mcp__workspace__bash') => ({
+    name: 'bash',
+    rawName,
+    source: 'builtin' as const,
+    arguments: {},
+    output,
+    isError: true,
+  });
+  it("says why, from the sandbox shell's failure", () => {
+    expect(
+      coworkWorkspaceUnavailable([
+        { name: 'search', source: 'mcp', arguments: {}, output: 'found' },
+        down(
+          'Workspace unavailable. The isolated Linux environment failed to start (VM connection timeout after 60 seconds). '
+        ),
+      ])
+    ).toBe('VM connection timeout after 60 seconds');
+    // Another wording keeps its first line.
+    expect(
+      coworkWorkspaceUnavailable([
+        down('Workspace unavailable.\nTry again later.'),
+      ])
+    ).toBe('Workspace unavailable.');
+  });
+  it('ignores failures that are the task’s own', () => {
+    expect(
+      coworkWorkspaceUnavailable([
+        // A command that failed in a running sandbox.
+        down('ls: cannot access missing: No such file or directory'),
+        // The same words from a server under test.
+        down('Workspace unavailable.', 'mcp__docs__search'),
+        { ...down('Workspace unavailable.'), isError: false },
+      ])
+    ).toBeUndefined();
+  });
+  it('is an infrastructure error', () => {
+    expect(
+      isInfrastructureError(
+        "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s"
+      )
+    ).toBe(true);
   });
 });
 
