@@ -40,6 +40,11 @@ import type {
 } from '../types/reporter.js';
 import type { EvalRunnerResult, ToolMetadataOverride } from './evalRunner.js';
 import { isInfrastructureFailure } from './infrastructureFailure.js';
+import {
+  clopperPearson,
+  passRateInterval,
+  type CaseTally,
+} from './passRateInterval.js';
 import { totalTokens } from '../utils/usageUtils.js';
 
 /** The tag that marks a case as held out, unless the optimization sets another. */
@@ -411,6 +416,8 @@ interface CaseRates {
   heldOut: boolean;
   baseline: number;
   candidate: number;
+  baselineTally: CaseTally;
+  candidateTally: CaseTally;
   candidateAllPassed: boolean;
   /** One-sided Fisher's exact p-value that the candidate is worse on this case. */
   worseP: number;
@@ -446,6 +453,8 @@ function pairCases(
       heldOut: isHeldOut(base, heldOutTag),
       baseline: baseRate,
       candidate: otherRate,
+      baselineTally: { passes: basePasses, trials: baseCount },
+      candidateTally: { passes: otherPasses, trials: otherCount },
       candidateAllPassed: otherAttempts.every((a) => a.pass),
       worseP:
         otherRate < baseRate
@@ -469,9 +478,15 @@ function groupStats(
   const rate = (p: CaseRates) => p[side];
   const seen = inGroup.filter((p) => !p.heldOut);
   const heldOut = inGroup.filter((p) => p.heldOut);
+  const interval = passRateInterval(
+    inGroup.map((p) =>
+      side === 'candidate' ? p.candidateTally : p.baselineTally
+    )
+  );
   return {
     cases: inGroup.length,
     passRate: mean(inGroup.map(rate)),
+    ...(interval ? { interval } : {}),
     ...(heldOut.length > 0 && seen.length > 0
       ? { seenPassRate: mean(seen.map(rate)) }
       : {}),
@@ -545,6 +560,50 @@ export function measureAgainstBaseline(
     regression: groupStats(pairs, 'regression', 'candidate', true, tried),
     brokenCaseIds: brokenIn(pairs),
   };
+}
+
+/**
+ * The group a variant's headline pass rate covers: its capability cases, or
+ * its regression cases when every case is tagged regression.
+ */
+export function headlineGroup(measurement: {
+  capability: VariantGroupStats;
+  regression: VariantGroupStats;
+}): VariantGroupStats {
+  return measurement.capability.cases > 0
+    ? measurement.capability
+    : measurement.regression;
+}
+
+/**
+ * A run's headline pass rate and its 95% interval, as the run report shows
+ * it for a baseline: capability cases, or regression cases when every case
+ * is tagged regression.
+ */
+export function headlinePassRate(result: EvalRunnerResult): VariantGroupStats {
+  const pairs = selfPairs(result);
+  return headlineGroup({
+    capability: groupStats(pairs, 'capability', 'baseline', false, 1),
+    regression: groupStats(pairs, 'regression', 'baseline', false, 1),
+  });
+}
+
+/** Each case's passing and counted trials behind {@link headlinePassRate}. */
+export function headlineTallies(result: EvalRunnerResult): CaseTally[] {
+  const pairs = selfPairs(result);
+  const group = pairs.some((p) => p.group === 'capability')
+    ? 'capability'
+    : 'regression';
+  return pairs.filter((p) => p.group === group).map((p) => p.baselineTally);
+}
+
+function selfPairs(result: EvalRunnerResult): CaseRates[] {
+  return pairCases(
+    result,
+    result,
+    grouper({ source: 'declared', tag: DEFAULT_REGRESSION_TAG }),
+    DEFAULT_HELD_OUT_TAG
+  );
 }
 
 /**
@@ -746,12 +805,15 @@ export function compareVariants(
   const rows: VariantComparisonCase[] = options.baseline.caseResults.map(
     (base) => {
       const trials: Record<string, VariantTrial[]> = {};
+      const intervals: Record<string, { lower: number; upper: number }> = {};
       for (const run of resultsById) {
         const result = run.cases.get(base.id);
         if (!result) continue;
         const recorded = attemptsOf(result);
         attemptCounts.push(recorded.length);
         trials[run.id] = recorded.map(stripAttempt);
+        const [passes, counted] = passCount(recorded);
+        if (counted > 0) intervals[run.id] = clopperPearson(passes, counted);
       }
       const input = base.request?.input ?? base.request?.description;
       const expectedTools = expectedToolsOf(base);
@@ -762,6 +824,7 @@ export function compareVariants(
         heldOut: isHeldOut(base, heldOutTag),
         ...(expectedTools ? { expectedTools } : {}),
         trials,
+        intervals,
       };
     }
   );

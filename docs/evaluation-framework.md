@@ -826,7 +826,8 @@ MST ships no prices; they change too often to bake in.
 Every run has a `runId`. Its summary's `previousRun` compares it with the previous run of the same eval config that ran the same variants, when there is one:
 
 - **Which run.** The eval config's `name` identifies it, so two eval configs with the same name share a history. With a result store, the previous run is the store's newest summary for that eval config. Without one, it's the newest earlier run in the eval's `runs/` directory (under `--output-dir`, by default `.mcp-test-results/<name>/`), read from its `summary.json` and `results.json`.
-- **Output.** `mst run` prints the change and the regressed, improved, added and removed cases.
+- **The test.** Each variant's `change` is the paired test the report's variant comparisons use, on the variant's headline cases (capability cases, or regression cases when every case is tagged `regression`): the mean per-case change, its 95% range and `assessment` (`better`, `worse` or `unclear`). The report and `mst run` show a change only through it, and show none when `sameConfig` is false.
+- **Output.** `mst run` prints each variant's tested change and the regressed, improved, added and removed cases.
 - **Best effort.** A previous run that can't be read is skipped with a warning; it never fails the run.
 
 ```json
@@ -840,6 +841,15 @@ Every run has a `runId`. Its summary's `previousRun` compares it with the previo
     "default": {
       "passRateDelta": -0.5,
       "trialPassRateDelta": -0.1,
+      "change": {
+        "mean": -0.1,
+        "lower": -0.32,
+        "upper": 0.12,
+        "cases": 10,
+        "pBetter": 0.94,
+        "pWorse": 0.25,
+        "assessment": "unclear"
+      },
       "regressed": ["billing-owner"],
       "improved": [],
       "added": [],
@@ -849,7 +859,7 @@ Every run has a `runId`. Its summary's `previousRun` compares it with the previo
 }
 ```
 
-`sameConfig` is false when the eval config changed between the runs, so a difference may come from the configuration rather than the server. Datasets aren't part of that hash.
+`sameConfig` is false when the eval config changed between the runs, so a difference may come from the configuration rather than the server: the report and `mst run` then show no change. Datasets aren't part of that hash.
 
 ## CLI
 

@@ -12,19 +12,18 @@ import {
 } from '../Comparison/VariantTable';
 import { CaseGrid, type CaseFilter } from '../Comparison/CaseGrid';
 import { TrialFailures } from '../Comparison/TrialFailures';
-import { TONE, graderName, pct, pts, rangeText } from '../Comparison/format';
+import {
+  TONE,
+  direction,
+  graderName,
+  intervalText,
+  pct,
+  pts,
+  rangeText,
+} from '../Comparison/format';
 import { SetupDiff } from './SetupDiff';
 import { ComparisonView } from '../Comparison/ComparisonView';
 import { TrialLookupContext } from './TrialDetail';
-
-/** The headline rate for a variant: its share of passing trials. */
-function rateOf(
-  data: MCPRunReportData,
-  variant: RunReportVariant
-): number | undefined {
-  const entry = data.comparison.variants.find((v) => v.id === variant.id);
-  return variant.trialPassRate ?? entry?.capability.passRate;
-}
 
 /** A rate's colour comes from its own change, not the variant's overall verdict. */
 function assessmentTone(
@@ -111,11 +110,216 @@ function groupPhrase(
   // The change pairs the cases both sides scored, so the baseline's rate on
   // those cases is the variant's minus the change: the two always agree.
   if (change) baseRate = rate - change.mean;
-  const range =
-    change && change.upper - change.lower >= 0.0005
-      ? `, 95% range ${rangeText(change)}`
-      : '';
-  return `${label} ${pct(baseRate)} → ${pct(rate)} (${change ? pts(change.mean) : pts(rate - baseRate)} pts${range})`;
+  const moved = `${label} ${pct(baseRate)} → ${pct(rate)} (${change ? pts(change.mean) : pts(rate - baseRate)} pts)`;
+  if (!change || change.upper - change.lower < 0.0005) return moved;
+  // "No clear change" means this run can't tell, not that the two are the same.
+  return change.assessment === 'unclear'
+    ? `${moved}: no clear change, as anything from ${rangeText(change)} fits this run`
+    : `${moved}, 95% range ${rangeText(change)}`;
+}
+
+/** "5 of 8 cases passed every trial; 4 of 24 trials failed." */
+function CasesSentence({
+  data,
+  variant,
+}: {
+  data: MCPRunReportData;
+  variant: RunReportVariant;
+}) {
+  const entry = data.comparison.variants.find((v) => v.id === variant.id);
+  const cases = data.comparison.cases.filter((row) => row.trials[variant.id]);
+  const fullyPassing = cases.filter((row) =>
+    row.trials[variant.id]!.every((t) => t.pass)
+  ).length;
+  const infra = infraCount(data, variant.id);
+  const failed = (entry?.failedTrials ?? 0) - infra;
+  const graded = (entry?.trials ?? 0) - infra;
+  return (
+    <li>
+      <span className="font-mono font-semibold">{variant.name}</span>:{' '}
+      {fullyPassing} of {cases.length} {cases.length === 1 ? 'case' : 'cases'}{' '}
+      passed every trial
+      {failed > 0 ? `; ${failed} of ${graded} graded trials failed` : ''}.
+    </li>
+  );
+}
+
+/**
+ * A variant's change since the previous run, from the same paired test as
+ * the variant comparisons. Nothing when the eval config changed since.
+ */
+function SincePrevious({
+  data,
+  variant,
+}: {
+  data: MCPRunReportData;
+  variant: RunReportVariant;
+}) {
+  const since = variant.previous;
+  if (!data.previousRun?.sameConfig || !since) return null;
+  const pill = 'rounded-full px-2 py-px text-xs font-semibold';
+  const change = since.change;
+  // A run from before the test was recorded: the delta, untested and grey.
+  if (!change)
+    return (
+      <span className={`${pill} ${TONE.neutral}`}>
+        {pts(since.passRateDelta)} pts since the previous run
+      </span>
+    );
+  const dir = direction(change);
+  const tone =
+    dir === 'up' ? TONE.good : dir === 'down' ? TONE.bad : TONE.neutral;
+  // Every case scored as before: no change, not an unclear one.
+  const same =
+    change.upper - change.lower < 0.0005 && Math.abs(change.mean) < 0.0005;
+  return (
+    <span
+      className={`${pill} ${tone}`}
+      title={
+        same
+          ? 'Every case passed as many trials as in the previous run.'
+          : `Change since the previous run, paired over ${change.cases} ${change.cases === 1 ? 'case' : 'cases'}: 95% range ${rangeText(change)}.`
+      }
+    >
+      {dir === 'up'
+        ? `▲ ${pts(change.mean)} pts since the previous run`
+        : dir === 'down'
+          ? `▼ ${pts(change.mean)} pts since the previous run`
+          : same
+            ? 'no change since the previous run'
+            : 'no clear change since the previous run'}
+    </span>
+  );
+}
+
+/** The first run of an eval, or one whose eval config changed: nothing to compare against. */
+function PreviousRunNote({ data }: { data: MCPRunReportData }) {
+  const previous = data.previousRun;
+  if (previous?.sameConfig) return null;
+  return (
+    <p className="text-sm text-muted-foreground">
+      {previous ? (
+        <>
+          The eval config changed since the previous run (
+          <span className="font-mono">{previous.runId}</span>), so there's no
+          earlier run to compare with.
+        </>
+      ) : (
+        'The first run of this eval: no earlier run to compare with.'
+      )}
+    </p>
+  );
+}
+
+/** "about 60 min", "about 2.5 h". */
+function minutesText(minutes: number): string {
+  if (minutes < 1) return 'under a minute';
+  if (minutes < 90) return `about ${Math.round(minutes)} min`;
+  return `about ${(minutes / 60).toFixed(1)} h`;
+}
+
+/**
+ * A run too thin to pin down its pass rates: says so, and what to run
+ * next, with this run's numbers.
+ */
+function EvidenceNote({ data }: { data: MCPRunReportData }) {
+  const evidence = data.evidence;
+  if (!evidence?.tooWide) return null;
+  let widest: { name: string; lower: number; upper: number } | undefined;
+  for (const variant of data.variants) {
+    const entry = data.comparison.variants.find((v) => v.id === variant.id);
+    const interval = headlineGroup(entry)?.interval;
+    if (
+      interval?.tooWide &&
+      (!widest || interval.upper - interval.lower > widest.upper - widest.lower)
+    )
+      widest = { name: variant.name, ...interval };
+  }
+  const k = evidence.trialsPerCase;
+  const perCase = `${k} ${k === 1 ? 'trial' : 'trials'} per case`;
+  const total = data.comparison.variants.reduce((sum, v) => sum + v.trials, 0);
+  const where =
+    widest && data.variants.length > 1 ? (
+      <>
+        {' '}
+        on <span className="font-mono">{widest.name}</span>
+      </>
+    ) : null;
+  const range = widest ? (
+    <>
+      : the 95% range{where} is {intervalText(widest)}
+    </>
+  ) : null;
+  const next = evidence.suggestedTrialsPerCase;
+  const estimate = [
+    evidence.estimatedMinutes !== undefined
+      ? minutesText(evidence.estimatedMinutes)
+      : null,
+    evidence.estimatedCostUsd !== undefined
+      ? `$${evidence.estimatedCostUsd < 10 ? evidence.estimatedCostUsd.toFixed(2) : Math.round(evidence.estimatedCostUsd)}`
+      : null,
+  ].filter(Boolean);
+  const [t90, t95] = evidence.trialsToShow;
+  return (
+    <div className={`grid gap-1 rounded px-3 py-2 text-sm ${TONE.warn}`}>
+      <p>
+        <span className="font-semibold">Too few trials to tell.</span>{' '}
+        {evidence.allPassed ? (
+          <>
+            All {total} trials passed, but {perCase} can't pin down a pass rate
+            {range}.
+          </>
+        ) : (
+          <>
+            {perCase.charAt(0).toUpperCase() + perCase.slice(1)} can't pin down
+            these pass rates{range}.
+          </>
+        )}
+      </p>
+      <p>
+        {next !== undefined ? (
+          <>
+            {data.run.selection?.trials !== undefined ? (
+              // The run was narrowed with --trials: the same flag again.
+              <>
+                Run it again with{' '}
+                <code className="font-mono">--trials {next}</code>
+              </>
+            ) : (
+              <>
+                Set{' '}
+                <code className="font-mono">
+                  "run": {'{'} "trials": {next} {'}'}
+                </code>{' '}
+                in the eval config (cases that set their own{' '}
+                <code className="font-mono">trials</code> keep them) and run it
+                again
+              </>
+            )}
+            : {evidence.suggestedTrials} trials
+            {estimate.length > 0
+              ? `, ${estimate.join(' and ')} at this run's pace`
+              : ''}
+            . The evals guide advises 10 trials per case while developing an
+            eval, and 20 before a release decision.
+          </>
+        ) : (
+          // Too few cases, or cases too unlike each other: trials fix neither.
+          <>
+            More trials per case won't narrow it enough with {data.run.cases}{' '}
+            {data.run.cases === 1 ? 'case' : 'cases'}: add cases.
+          </>
+        )}
+      </p>
+      {evidence.allPassed && t90 && t95 && (
+        <p>
+          Showing that a case passes at least {pct(t90.rate)} of the time takes{' '}
+          {t90.trials} passing trials in a row; {pct(t95.rate)} takes{' '}
+          {t95.trials}.
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** One sentence per variant: how it compares with the baseline, and what it costs. */
@@ -297,82 +501,9 @@ function Result({ data }: { data: MCPRunReportData }) {
         <InfraNote data={data} />
       </div>
     );
+  // A one-variant run is a comparison with one column: the same table, with
+  // no verdicts because there is nothing to compare it with.
   const single = data.variants.length === 1;
-  const only = data.variants[0];
-  if (single && only) {
-    const entry = data.comparison.variants[0];
-    // The comparison's rate, as every other number on the page. Trials that
-    // ended in an infrastructure failure are left out (InfraNote says so).
-    const rate = headlineGroup(entry)?.passRate ?? rateOf(data, only);
-    const cases = data.comparison.cases;
-    const fullyPassing = cases.filter((row) =>
-      (row.trials[only.id] ?? []).every((t) => t.pass)
-    ).length;
-    const previous = data.previousRun;
-    return (
-      <div className="grid grid-cols-[auto_1fr] items-center gap-6 rounded-lg border bg-card p-6">
-        <div
-          className={`font-mono text-6xl font-bold tabular-nums ${
-            rate === undefined
-              ? ''
-              : rate >= 0.9
-                ? RATE_TONE.better
-                : rate < 0.5
-                  ? RATE_TONE.worse
-                  : 'text-amber-700 dark:text-amber-400'
-          }`}
-        >
-          {rate !== undefined ? pct(rate) : '—'}
-        </div>
-        <div className="grid gap-1">
-          {previous ? (
-            <span
-              className={`w-fit rounded-full px-2 py-px text-xs font-semibold ${
-                previous.passRateDelta > 0.0005
-                  ? TONE.good
-                  : previous.passRateDelta < -0.0005
-                    ? TONE.bad
-                    : TONE.neutral
-              }`}
-            >
-              {previous.passRateDelta > 0.0005
-                ? '▲'
-                : previous.passRateDelta < -0.0005
-                  ? '▼'
-                  : '='}{' '}
-              {pts(previous.passRateDelta)} pts since the previous run
-              {previous.sameConfig ? '' : ' (eval config changed)'}
-            </span>
-          ) : (
-            <span
-              className={`w-fit rounded-full px-2 py-px text-xs ${TONE.neutral}`}
-            >
-              first run of this eval
-            </span>
-          )}
-          <p className="text-lg">
-            of trials passed. {fullyPassing} of {cases.length}{' '}
-            {cases.length === 1 ? 'case' : 'cases'} passed every trial.
-          </p>
-          <p className="text-sm text-muted-foreground">
-            {cases.length - fullyPassing}{' '}
-            {cases.length - fullyPassing === 1 ? 'case needs' : 'cases need'}{' '}
-            attention
-            {only.previous && only.previous.regressed.length
-              ? `; ${only.previous.regressed.length} regressed since the previous run`
-              : ''}
-            {entry && entry.failedTrials - infraCount(data, only.id) > 0
-              ? `. ${entry.failedTrials - infraCount(data, only.id)} of ${entry.trials - infraCount(data, only.id)} graded trials failed.`
-              : '.'}
-          </p>
-        </div>
-        <div className="col-span-2 grid gap-2">
-          <InfraNote data={data} />
-          <GradedOn data={data} />
-        </div>
-      </div>
-    );
-  }
   const candidates = data.variants.filter((v) => !v.baseline);
   const baseline = data.variants.find((v) => v.baseline);
   const split = hasRegressionCases(data);
@@ -382,8 +513,14 @@ function Result({ data }: { data: MCPRunReportData }) {
     <div className="grid gap-5 rounded-lg border bg-card p-6">
       <table className="w-full text-sm">
         <caption className="mb-3 text-left font-semibold">
-          {split ? 'Each variant' : 'Pass rate, each variant'} against{' '}
-          <span className="font-mono">{baseline?.name}</span>
+          {single ? (
+            'Pass rate, with its 95% range'
+          ) : (
+            <>
+              {split ? 'Each variant' : 'Pass rate, each variant'} against{' '}
+              <span className="font-mono">{baseline?.name}</span>
+            </>
+          )}
         </caption>
         {split && (
           <thead className="text-xs text-muted-foreground">
@@ -399,7 +536,8 @@ function Result({ data }: { data: MCPRunReportData }) {
               <th scope="col" className="pb-1 pr-4 text-right font-normal">
                 Regression cases
               </th>
-              <td />
+              {!single && <td />}
+              {data.previousRun && <td />}
             </tr>
           </thead>
         )}
@@ -408,6 +546,7 @@ function Result({ data }: { data: MCPRunReportData }) {
             const group = headlineGroup(entryOf(variant));
             const rate = group?.passRate;
             const regression = entryOf(variant)?.regression;
+            const interval = group?.interval;
             const tone = assessmentTone(group?.change);
             const bar =
               tone === 'better'
@@ -424,17 +563,40 @@ function Result({ data }: { data: MCPRunReportData }) {
                   {variant.name}
                 </th>
                 <td className="py-1 pr-4">
-                  <div className="h-3 rounded-full bg-muted" aria-hidden="true">
+                  <div
+                    className="relative h-3 rounded-full bg-muted"
+                    aria-hidden="true"
+                  >
                     <div
                       className={`h-3 rounded-full ${bar}`}
                       style={{ width: `${(rate ?? 0) * 100}%` }}
                     />
+                    {interval && (
+                      // The 95% range, drawn over the bar.
+                      <div
+                        className="absolute -inset-y-0.5 rounded-full border-2 border-foreground/40"
+                        style={{
+                          left: `${interval.lower * 100}%`,
+                          width: `${Math.max(0.5, (interval.upper - interval.lower) * 100)}%`,
+                        }}
+                      />
+                    )}
                   </div>
                 </td>
-                <td
-                  className={`w-[1%] whitespace-nowrap py-1 pr-4 text-right font-mono text-2xl font-bold tabular-nums ${RATE_TONE[assessmentTone(group?.change)]}`}
-                >
-                  {rate !== undefined ? pct(rate) : '—'}
+                <td className="w-[1%] whitespace-nowrap py-1 pr-4 text-right">
+                  <span
+                    className={`block font-mono text-2xl font-bold tabular-nums ${RATE_TONE[tone]}`}
+                  >
+                    {rate !== undefined ? pct(rate) : '—'}
+                  </span>
+                  {interval && (
+                    <span
+                      className="block font-mono text-xs text-muted-foreground"
+                      title="95% range of the pass rate, counting cases rather than trials as the sample"
+                    >
+                      95%: {intervalText(interval)}
+                    </span>
+                  )}
                 </td>
                 {split && (
                   <td
@@ -454,23 +616,33 @@ function Result({ data }: { data: MCPRunReportData }) {
                     )}
                   </td>
                 )}
-                <td className="w-[1%] whitespace-nowrap py-1">
-                  <span
-                    className={`rounded-full px-2 py-px text-xs font-semibold ${TONE[VERDICT_TONE[variant.verdict]]}`}
-                  >
-                    {VERDICT_LABEL[variant.verdict]}
-                  </span>
-                </td>
+                {!single && (
+                  <td className="w-[1%] whitespace-nowrap py-1 pr-4">
+                    <span
+                      className={`rounded-full px-2 py-px text-xs font-semibold ${TONE[VERDICT_TONE[variant.verdict]]}`}
+                    >
+                      {VERDICT_LABEL[variant.verdict]}
+                    </span>
+                  </td>
+                )}
+                {data.previousRun && (
+                  <td className="w-[1%] whitespace-nowrap py-1">
+                    <SincePrevious data={data} variant={variant} />
+                  </td>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
+      <EvidenceNote data={data} />
       <ul className="grid gap-2 text-sm">
+        {baseline && <CasesSentence data={data} variant={baseline} />}
         {candidates.map((variant) => (
           <VariantSentence key={variant.id} data={data} variant={variant} />
         ))}
       </ul>
+      <PreviousRunNote data={data} />
       <InfraNote data={data} />
       <GradedOn data={data} />
       {!data.run.baselineRan && (
@@ -688,7 +860,13 @@ function EvalRunReport({ data }: { data: MCPRunReportData }) {
   const [selectedId, setSelectedId] = useState(
     candidates[0]?.id ?? comparison.baselineId
   );
-  const [filter, setFilter] = useState<CaseFilter>(single ? 'unsteady' : 'all');
+  // A one-variant run opens on the cases that need attention, if any do.
+  const needsAttention = comparison.cases.some((row) =>
+    (row.trials[comparison.baselineId] ?? []).some((t) => !t.pass)
+  );
+  const [filter, setFilter] = useState<CaseFilter>(
+    single && needsAttention ? 'unsteady' : 'all'
+  );
   const selected = data.variants.find((v) => v.id === selectedId);
   const baseline = data.variants.find((v) => v.baseline);
 
@@ -732,14 +910,12 @@ function EvalRunReport({ data }: { data: MCPRunReportData }) {
           <Result data={data} />
         </section>
 
-        {!single && (
-          <VariantTable
-            data={comparison}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            report={data}
-          />
-        )}
+        <VariantTable
+          data={comparison}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          report={data}
+        />
 
         {!single && baseline && (
           <SetupDiff

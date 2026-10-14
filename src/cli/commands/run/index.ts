@@ -1,6 +1,11 @@
 import { existsSync } from 'node:fs';
 import { datasetContentHash } from '../../../evals/runFormat.js';
 import { runReportPath } from '../../../evals/runReport.js';
+import {
+  headlinePassRate,
+  headlineTallies,
+} from '../../../evals/variantComparison.js';
+import { suggestedTrialsPerCase } from '../../../evals/passRateInterval.js';
 import path from 'node:path';
 import { z } from 'zod';
 import { localCredentialStore } from '../../../auth/grants/localStore.js';
@@ -278,12 +283,32 @@ export function printRunResult(
       );
   }
   const previous = result.summary.previousRun;
-  if (previous) {
-    const pct = (value: number) => `${(value * 100).toFixed(1)}%`;
+  if (previous && !previous.sameConfig)
     console.log(
-      `Previous run ${previous.runId} (${previous.timestamp}): pass rate ${pct(previous.passRate)} -> ${pct(metrics.passRate ?? 0)}` +
-        (previous.sameConfig ? '' : ' (the eval config changed since)')
+      `Previous run ${previous.runId}: the eval config changed since, so there is nothing to compare with.`
     );
+  else if (previous) {
+    const points = (value: number) =>
+      `${value >= 0 ? '+' : '-'}${Math.abs(value * 100).toFixed(1)}`;
+    console.log(`Previous run ${previous.runId} (${previous.timestamp}):`);
+    // The same paired test as the report's variant comparisons.
+    for (const [variant, change] of Object.entries(previous.variants)) {
+      const test = change.change;
+      if (!test) continue;
+      const range = `95% range ${points(test.lower)} to ${points(test.upper)} pts`;
+      // Every case scored as before: no change, not an unclear one.
+      const same =
+        test.upper - test.lower < 0.0005 && Math.abs(test.mean) < 0.0005;
+      console.log(
+        `  ${variant}: ${
+          same
+            ? 'no change: every case passed as many trials as before'
+            : test.assessment === 'unclear'
+              ? `no clear change (${points(test.mean)} pts, ${range})`
+              : `clearly ${test.assessment} (${points(test.mean)} pts, ${range})`
+        }`
+      );
+    }
     const list = (label: string, items: string[]) =>
       items.length === 0
         ? ''
@@ -336,8 +361,14 @@ function printVariantTable(variants: VariantSummary[], graded = true): void {
   const judged = variants.some(
     (variant) => value(variant, 'judge_pass_rate') !== undefined
   );
+  // The report's headline rate and its 95% range, so the two agree.
+  const headlines = variants.map((variant) =>
+    variant.result ? headlinePassRate(variant.result) : undefined
+  );
   let estimated = false;
-  const rows = variants.map((variant) => {
+  const rows = variants.map((variant, index) => {
+    const headline = headlines[index];
+    const interval = headline?.interval;
     const cost = value(variant, 'cost_usd_mean');
     if (cost !== undefined && variant.costSource !== 'client') estimated = true;
     const mcp = value(variant, 'mcp_call_count_mean');
@@ -348,7 +379,10 @@ function printVariantTable(variants: VariantSummary[], graded = true): void {
       ...(graded
         ? [
             `${variant.result?.passed ?? 0}/${variant.result?.total ?? 0}`,
-            pct(value(variant, 'trial_pass_rate')),
+            pct(headline?.passRate),
+            interval
+              ? `${rangeText(interval)}${interval.tooWide ? ' !' : ''}`
+              : '-',
           ]
         : []),
       ...(judged ? [pct(value(variant, 'judge_pass_rate'))] : []),
@@ -367,7 +401,7 @@ function printVariantTable(variants: VariantSummary[], graded = true): void {
   });
   const header = [
     'Variant',
-    ...(graded ? ['Passed', 'Trial pass'] : []),
+    ...(graded ? ['Passed', 'Pass rate', '95% range'] : []),
     ...(judged ? ['Judge pass'] : []),
     'MCP calls / client events',
     'Input tokens',
@@ -387,9 +421,71 @@ function printVariantTable(variants: VariantSummary[], graded = true): void {
   console.log(line(header));
   for (const row of rows) console.log(line(row));
   console.log(
+    'Pass rate is the mean over cases of the share of trials that passed; its 95% range counts cases, not trials, as the sample.'
+  );
+  console.log(
     'Calls, tokens, cost and time are means per trial.' +
       (estimated ? ' * Includes estimates from `pricing`.' : '')
   );
+  if (graded) printTooFewTrials(variants, headlines);
+}
+
+/**
+ * The report's "too few trials" note: which variant's range is too wide
+ * (marked `!` in the table), and the trials per case to run next.
+ */
+function printTooFewTrials(
+  variants: VariantSummary[],
+  headlines: Array<ReturnType<typeof headlinePassRate> | undefined>
+): void {
+  let widest: { name: string; lower: number; upper: number } | undefined;
+  for (const [index, variant] of variants.entries()) {
+    const interval = headlines[index]?.interval;
+    if (
+      interval?.tooWide &&
+      (!widest || interval.upper - interval.lower > widest.upper - widest.lower)
+    )
+      widest = { name: variant.name, ...interval };
+  }
+  if (!widest) return;
+  const counts = variants.flatMap((variant) =>
+    (variant.result?.caseResults ?? []).map(
+      (result) => result.trialResults?.length || 1
+    )
+  );
+  const perCase = counts.length ? Math.min(...counts) : 0;
+  const caseCount = Math.max(
+    0,
+    ...variants.map((variant) => variant.result?.caseResults.length ?? 0)
+  );
+  // The most any too-wide variant needs, as the report suggests it.
+  let next: number | undefined;
+  for (const [index, variant] of variants.entries()) {
+    if (!headlines[index]?.interval?.tooWide || !variant.result) continue;
+    const needed = suggestedTrialsPerCase(
+      headlineTallies(variant.result),
+      perCase
+    );
+    if (needed === undefined) {
+      next = undefined;
+      break;
+    }
+    next = Math.max(next ?? 0, needed);
+  }
+  console.log(
+    `! Too few trials to tell: ${perCase} ${perCase === 1 ? 'trial' : 'trials'} per case leaves ${widest.name} a 95% range of ${rangeText(widest)}.` +
+      (next !== undefined
+        ? ` Set "run": { "trials": ${next} } in the eval config and run it again.`
+        : ` More trials per case won't narrow it enough with ${caseCount} ${caseCount === 1 ? 'case' : 'cases'}: add cases.`)
+  );
+}
+
+/** A 95% range in whole percents, rounded outward so it never looks narrower: "39%-100%". */
+function rangeText(interval: { lower: number; upper: number }): string {
+  // A hair of slack, so 0.4 (40.000...04%) isn't floored to 39%.
+  const lower = Math.floor(interval.lower * 100 + 1e-9);
+  const upper = Math.ceil(interval.upper * 100 - 1e-9);
+  return `${lower}%-${upper}%`;
 }
 
 /** Each pairwise judge's verdict on each variant against the baseline. */

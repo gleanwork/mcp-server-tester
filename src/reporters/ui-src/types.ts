@@ -18,6 +18,7 @@ export type {
   VariantStatus,
   TrialFailureKind,
   PairedChange,
+  PassRateInterval,
   MCPRunReportData,
   RunReportDifference,
   RunReportEvent,

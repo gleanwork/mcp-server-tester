@@ -81,6 +81,14 @@ export function rangeText(change: PairedChange): string {
   return `${pts(change.lower)} to ${pts(change.upper)} pts`;
 }
 
+/** A pass rate's 95% interval: "63–100%". */
+export function intervalText(interval: {
+  lower: number;
+  upper: number;
+}): string {
+  return `${points(interval.lower)}–${points(interval.upper)}%`;
+}
+
 /** Display name: the baseline's name, or "current" in a tool optimization. */
 export function variantName(
   data: MCPComparisonData,

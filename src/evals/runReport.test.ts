@@ -10,6 +10,7 @@ import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { MCPRunReportData } from '../types/reporter.js';
 import { open } from '../cli/commands/open/index.js';
+import { printRunResult } from '../cli/commands/run/index.js';
 
 let dir: string;
 
@@ -184,6 +185,84 @@ describe('the run report', () => {
     ]);
   });
 
+  it('gives every pass rate a 95% range, and says when there are too few trials to tell', async () => {
+    // Two cases say almost nothing, however many trials each ran: base
+    // passes one and fails the other, with 1 degree of freedom.
+    const pair = await readReport((await run()).outputDir);
+    const [base, longer] = pair.comparison.variants;
+    expect(base!.capability.interval!.tooWide).toBe(true);
+    expect(base!.capability.interval!.lower).toBeLessThan(0.01);
+    expect(base!.capability.interval!.upper).toBeGreaterThan(0.99);
+    // longer passes every trial, and is still far from pinned down.
+    expect(longer!.capability.interval!.tooWide).toBe(true);
+    // A case's own range is over its trials: 2 of 2.
+    expect(pair.comparison.cases[0]!.intervals!.base!.lower).toBeCloseTo(
+      0.1581,
+      4
+    );
+    // More trials can't fix cases that differ this much.
+    expect(pair.evidence).toMatchObject({ tooWide: true, allPassed: false });
+    expect(pair.evidence!.suggestedTrialsPerCase).toBeUndefined();
+
+    // Eight cases, one trial each, all passing: 8 of 8.
+    await fs.writeFile(
+      path.join(dir, 'eight.json'),
+      JSON.stringify({
+        name: 'eight',
+        cases: Array.from({ length: 8 }, (_, i) => ({
+          id: `case-${i}`,
+          input: `hello ${i}`,
+          assertions: { containsText: 'hello' },
+        })),
+      })
+    );
+    await fs.writeFile(
+      path.join(dir, 'eight-eval.json'),
+      JSON.stringify({
+        name: 'eight',
+        datasets: ['./eight.json'],
+        client: 'rr/client/echo',
+        model: 'model-a',
+        servers: {},
+      })
+    );
+    const eight = await runEval({
+      configPath: path.join(dir, 'eight-eval.json'),
+      rootDir: dir,
+      plugins: [plugin],
+    });
+    const report = await readReport(eight.outputDir);
+    const interval = report.comparison.variants[0]!.capability.interval!;
+    expect(interval.effectiveTrials).toBe(8);
+    expect(interval.lower).toBeCloseTo(0.6306, 4);
+    expect(report.evidence).toEqual({
+      tooWide: true,
+      allPassed: true,
+      trialsPerCase: 1,
+      // 80 passing trials would be expected to pin it down.
+      suggestedTrialsPerCase: 10,
+      suggestedTrials: 80,
+      ...(report.evidence!.estimatedMinutes !== undefined
+        ? { estimatedMinutes: report.evidence!.estimatedMinutes }
+        : {}),
+      trialsToShow: [
+        { rate: 0.9, trials: 36 },
+        { rate: 0.95, trials: 72 },
+      ],
+    });
+
+    // The suggestion's time and cost come from this run's pace: 8 trials in
+    // 2 minutes, at $0.01 a trial.
+    const stored = await readRunDirectory(eight.outputDir);
+    stored.run.createdAt = '2026-01-01T00:00:00.000Z';
+    stored.run.finishedAt = '2026-01-01T00:02:00.000Z';
+    for (const variant of stored.summary.variants)
+      variant.metrics = { ...variant.metrics, cost_usd_mean: 0.01 };
+    const evidence = buildRunReport(stored).evidence!;
+    expect(evidence.estimatedMinutes).toBeCloseTo(20, 6);
+    expect(evidence.estimatedCostUsd).toBeCloseTo(0.8, 6);
+  });
+
   it('shows what differs from the baseline, and every trial in full', async () => {
     const result = await run();
     const report = await readReport(result.outputDir);
@@ -268,6 +347,41 @@ describe('the run report', () => {
     trial.trace = { ...trial.trace, evidence: 'none', events: [] };
     const report = buildRunReport(stored);
     expect(report.trials.longer![result.id]![0]!.traced).toBe(false);
+  });
+});
+
+describe("mst run's output", () => {
+  it('prints the report’s pass rates with their ranges, and the same flag', async () => {
+    const first = await run();
+    const second = await run();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const exitCode = process.exitCode;
+    try {
+      printRunResult(second, 'eval.json');
+      const lines = log.mock.calls.map((call) => String(call[0]));
+      const header = lines.find((line) => line.startsWith('Variant'));
+      expect(header).toMatch(/Passed\s+Pass rate\s+95% range/);
+      // Two cases can't pin down anything, even when every trial passes.
+      expect(lines.find((line) => line.startsWith('base '))).toMatch(
+        /1\/2\s+50%\s+0%-100% !/
+      );
+      expect(lines.find((line) => line.startsWith('longer '))).toMatch(
+        /2\/2\s+100%\s+0%-100% !/
+      );
+      expect(lines).toContain(
+        "! Too few trials to tell: 2 trials per case leaves base a 95% range of 0%-100%. More trials per case won't narrow it enough with 2 cases: add cases."
+      );
+      // The previous run, through the same paired test.
+      expect(lines).toContain(
+        `Previous run ${first.summary.runId} (${first.summary.timestamp}):`
+      );
+      expect(lines).toContain(
+        '  base: no change: every case passed as many trials as before'
+      );
+    } finally {
+      log.mockRestore();
+      process.exitCode = exitCode;
+    }
   });
 });
 

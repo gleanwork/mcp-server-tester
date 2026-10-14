@@ -3,6 +3,7 @@ import type {
   MCPComparisonData,
   MCPRunReportData,
   PairedChange,
+  PassRateInterval,
   RunReportVariant,
   VariantComparisonEntry,
 } from '../../types';
@@ -13,6 +14,7 @@ import {
   betterThreshold,
   direction,
   heldOutUnconfirmed,
+  intervalText,
   pValue,
   pct,
   pts,
@@ -153,32 +155,33 @@ function domainOf(
   return [lo - pad, hi + pad];
 }
 
-/** A group's pass rate, its change from the baseline, and that change's 95% range. */
+/**
+ * A group's pass rate with its 95% range, and its change from the baseline
+ * (the change's own range is in the pill's title and the statistics).
+ */
 function Rate({
   rate,
+  interval,
   change,
 }: {
   rate: number | undefined;
+  interval: PassRateInterval | undefined;
   change: PairedChange | undefined;
 }) {
   if (rate === undefined)
     return <span className="text-muted-foreground">—</span>;
-  const range =
-    change && Math.abs(change.upper - change.lower) >= 0.0005
-      ? `${pts(change.lower)} to ${pts(change.upper)}`
-      : null;
   return (
     <span className="grid justify-items-end gap-0.5">
       <span className="inline-flex items-baseline justify-end gap-2">
         {change ? <ChangePill change={change} /> : null}
         <b className="font-mono tabular-nums">{pct(rate)}</b>
       </span>
-      {range && (
+      {interval && (
         <span
-          className="whitespace-nowrap font-mono text-[11px] text-muted-foreground"
-          title="95% range of the change, over cases"
+          className={`whitespace-nowrap font-mono text-[11px] ${interval.tooWide ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}
+          title={`95% range of the pass rate, counting cases rather than trials as the sample${interval.tooWide ? ': wider than ±10 points, too few trials to pin it down' : ''}`}
         >
-          95%: {range}
+          95%: {intervalText(interval)}
         </span>
       )}
     </span>
@@ -193,6 +196,7 @@ export function VariantTable({
 }: VariantTableProps) {
   const [showStats, setShowStats] = useState(false);
   const isEval = data.purpose === 'eval';
+  const single = data.variants.length === 1;
   const rowOf = (id: string) => report?.variants.find((v) => v.id === id);
   const rows = report?.variants ?? [];
   const showRegression =
@@ -213,7 +217,11 @@ export function VariantTable({
     <section aria-labelledby="exp-variants-h" className="grid gap-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="exp-variants-h" className="text-lg font-semibold">
-          {isEval ? 'Variants compared' : 'All variants compared'}
+          {isEval
+            ? single
+              ? 'Variant'
+              : 'Variants compared'
+            : 'All variants compared'}
         </h2>
         <button
           type="button"
@@ -224,10 +232,12 @@ export function VariantTable({
           {showStats ? 'Hide statistics' : 'Show statistics'}
         </button>
       </div>
-      <p className="text-sm text-muted-foreground">
-        Select a row to compare that variant with the baseline in the case grid
-        below.
-      </p>
+      {!single && (
+        <p className="text-sm text-muted-foreground">
+          Select a row to compare that variant with the baseline in the case
+          grid below.
+        </p>
+      )}
       <div className="overflow-x-auto rounded-lg border bg-card">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-muted-foreground">
@@ -283,7 +293,7 @@ export function VariantTable({
                   <span className="whitespace-nowrap font-mono font-semibold">
                     {variantName(data, v)}
                   </span>
-                  {row ? (
+                  {single && isEval ? null : row ? (
                     <span
                       className={`w-fit whitespace-nowrap rounded-full px-2 py-px text-xs font-semibold ${TONE[VERDICT_TONE[row.verdict]]}`}
                     >
@@ -323,12 +333,17 @@ export function VariantTable({
                     )}
                   </th>
                   <td className={tdNum}>
-                    <Rate rate={sw.passRate} change={sw.change} />
+                    <Rate
+                      rate={sw.passRate}
+                      interval={sw.interval}
+                      change={sw.change}
+                    />
                   </td>
                   {showRegression && (
                     <td className={tdNum}>
                       <Rate
                         rate={v.regression.passRate}
+                        interval={v.regression.interval}
                         change={v.regression.change}
                       />
                     </td>
@@ -409,17 +424,24 @@ export function VariantTable({
       </div>
       <p className="max-w-[100ch] text-xs text-muted-foreground">
         Each rate is the mean, over cases, of the share of trials that passed.
-        Each change is against the baseline, with its 95% range:{' '}
-        <span className={`rounded-full px-1.5 ${TONE.good}`}>green</span> is
-        clearly better,{' '}
-        <span className={`rounded-full px-1.5 ${TONE.bad}`}>red</span> is
-        clearly worse, and{' '}
-        <span className={`rounded-full px-1.5 ${TONE.neutral}`}>grey</span> is
-        too small to tell from chance
-        {data.variantsTried > 1
-          ? `, allowing for ${data.variantsTried} variants compared`
-          : ''}
-        .
+        Its 95% range counts cases, not trials, as the sample, because a case's
+        trials are correlated; amber marks a range wider than ±10 points.
+        {single ? null : (
+          <>
+            {' '}
+            Each change is against the baseline:{' '}
+            <span className={`rounded-full px-1.5 ${TONE.good}`}>green</span> is
+            clearly better,{' '}
+            <span className={`rounded-full px-1.5 ${TONE.bad}`}>red</span> is
+            clearly worse, and{' '}
+            <span className={`rounded-full px-1.5 ${TONE.neutral}`}>grey</span>{' '}
+            is too small to tell from chance
+            {data.variantsTried > 1
+              ? `, allowing for ${data.variantsTried} variants compared`
+              : ''}
+            .
+          </>
+        )}
         {report
           ? ' Tokens are everything the model read, cached or not, and wrote.'
           : ''}
