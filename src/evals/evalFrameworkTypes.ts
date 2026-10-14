@@ -188,6 +188,11 @@ export interface ClientArtifacts {
    * includes everything. Symbolic links and other non-regular files are never copied.
    */
   include: readonly string[];
+  /**
+   * `dir` was made for this trial alone (a failure diagnosis): copying the
+   * artifacts removes it, whether the copy succeeds or not.
+   */
+  temporary?: boolean;
 }
 
 /**

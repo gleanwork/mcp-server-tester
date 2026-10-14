@@ -91,6 +91,7 @@ function parseInclude(include: readonly string[]): Array<RegExp[] | 'all'> {
  * regular files and the directories that hold them, never a symbolic link
  * or another kind of file, within `ARTIFACT_LIMITS`. Fails, leaving no
  * `target`, when the root isn't a directory or the copy exceeds a limit.
+ * Removes a `temporary` directory either way.
  */
 export async function copyArtifacts(
   artifacts: ClientArtifacts,
@@ -98,6 +99,22 @@ export async function copyArtifacts(
   limits: {
     readonly [K in keyof typeof ARTIFACT_LIMITS]: number;
   } = ARTIFACT_LIMITS
+): Promise<void> {
+  try {
+    await copyArtifactsTo(artifacts, target, limits);
+  } finally {
+    // A directory made for this trial alone: the copy is all that's kept.
+    if (artifacts.temporary)
+      await fs.rm(artifacts.dir, { recursive: true, force: true });
+  }
+}
+
+async function copyArtifactsTo(
+  artifacts: ClientArtifacts,
+  target: string,
+  limits: {
+    readonly [K in keyof typeof ARTIFACT_LIMITS]: number;
+  }
 ): Promise<void> {
   const include = parseInclude(artifacts.include);
   const root = await fs.lstat(artifacts.dir);

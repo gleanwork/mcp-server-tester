@@ -1201,7 +1201,10 @@ describe('V2 Cowork client', () => {
     // The failed case: the diagnosis, taken before the reset, is its artifacts.
     expect(order).toEqual(['diagnose', 'reset']);
     expect(diagnose.mock.calls[0]![0].dataDir).toBe('/prepared/session');
-    expect(result[0]!.artifacts?.include).toEqual(['**']);
+    expect(result[0]!.artifacts).toMatchObject({
+      include: ['**'],
+      temporary: true,
+    });
     expect(
       await fs.readFile(
         path.join(result[0]!.artifacts!.dir, 'accessibility.txt'),
@@ -1211,6 +1214,7 @@ describe('V2 Cowork client', () => {
     // The case that passed keeps its session, not a diagnosis.
     expect(diagnose).toHaveBeenCalledOnce();
     expect(result[1]!.artifacts?.dir).not.toBe(result[0]!.artifacts!.dir);
+    await fs.rm(result[0]!.artifacts!.dir, { recursive: true });
   });
 
   it('records a failed case without a diagnosis when the diagnosis fails', async () => {

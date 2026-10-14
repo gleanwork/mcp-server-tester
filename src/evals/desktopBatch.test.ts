@@ -154,6 +154,151 @@ describe('runDesktopBatch', () => {
     expect(results[1]?.finalText).toBe('case-2');
   });
 
+  describe('failure diagnosis', () => {
+    const failing = (
+      client: ReturnType<typeof fakeClient>,
+      outcome: Partial<DesktopCaseOutcome['result']> = {},
+      continuation: DesktopCaseOutcome['continuation'] = 'reset'
+    ) =>
+      async function runCase(
+        _session: { id: string },
+        request: ClientBatchRequest,
+        index: number
+      ): Promise<DesktopCaseOutcome> {
+        client.events.push(`case ${index + 1}`);
+        return index === 0
+          ? {
+              result: { finalText: '', events: [], error: 'boom', ...outcome },
+              continuation,
+            }
+          : ok(request.caseId);
+      };
+
+    it("keeps it as the failed case's temporary artifacts, taken before the reset", async () => {
+      const client = fakeClient({
+        async diagnose(session, dir) {
+          client.events.push(`diagnose ${session.id}`);
+          await fs.writeFile(path.join(dir, 'accessibility.txt'), 'Stop\n');
+        },
+      });
+      client.runCase = failing(client);
+      const reported: ClientRunResult[] = [];
+      const results = await runDesktopBatch(
+        client,
+        requests(2),
+        async (_index, result) => {
+          reported.push(result);
+        }
+      );
+      expect(client.events).toEqual([
+        'prepare',
+        'case 1',
+        'diagnose session',
+        'reset before 2',
+        'case 2',
+        'dispose session',
+      ]);
+      const artifacts = results[0]!.artifacts!;
+      expect(artifacts).toMatchObject({ include: ['**'], temporary: true });
+      expect(
+        await fs.readFile(path.join(artifacts.dir, 'accessibility.txt'), 'utf8')
+      ).toBe('Stop\n');
+      // Reported as it finished, with its diagnosis.
+      expect(reported[0]!.artifacts).toEqual(artifacts);
+      expect(results[1]).not.toHaveProperty('artifacts');
+      await fs.rm(artifacts.dir, { recursive: true });
+    });
+
+    it('takes none for a case that passed, one that left the app known, or one with artifacts of its own', async () => {
+      const diagnose = vi.fn(async () => undefined);
+      const known = fakeClient({ diagnose });
+      known.runCase = failing(known, {}, 'allowed');
+      await runDesktopBatch(known, requests(2));
+      const ownArtifacts = fakeClient({ diagnose });
+      ownArtifacts.runCase = failing(ownArtifacts, {
+        artifacts: { dir: '/session', include: ['audit.jsonl'] },
+      });
+      const results = await runDesktopBatch(ownArtifacts, requests(2));
+      expect(diagnose).not.toHaveBeenCalled();
+      expect(results[0]!.artifacts).toEqual({
+        dir: '/session',
+        include: ['audit.jsonl'],
+      });
+    });
+
+    it('keeps only the error, and no directory, when the diagnosis fails', async () => {
+      let dir = '';
+      const client = fakeClient({
+        async diagnose(_session, into) {
+          dir = into;
+          await fs.writeFile(path.join(into, 'partial.txt'), 'x');
+          throw new Error('no display');
+        },
+      });
+      client.runCase = failing(client);
+      const results = await runDesktopBatch(client, requests(2));
+      expect(results[0]).toMatchObject({ error: 'boom' });
+      expect(results[0]).not.toHaveProperty('artifacts');
+      expect(await exists(dir)).toBe(false);
+      // The batch goes on.
+      expect(results[1]?.finalText).toBe('case-2');
+    });
+
+    it('stops waiting for a diagnosis that hangs', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const client = fakeClient({
+          diagnose: () => new Promise<void>(() => {}),
+        });
+        client.runCase = failing(client);
+        let settled = false;
+        const run = runDesktopBatch(client, requests(2)).finally(() => {
+          settled = true;
+        });
+        // The batch does real I/O (its lease, the directory) before it waits.
+        while (!settled) {
+          await new Promise((resolve) => setImmediate(resolve));
+          await vi.advanceTimersByTimeAsync(5_000);
+        }
+        const results = await run;
+        expect(results[0]).not.toHaveProperty('artifacts');
+        expect(results[1]?.finalText).toBe('case-2');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps one for a case that threw, before cleanup', async () => {
+      const client = fakeClient({
+        async runCase(_session, request, index) {
+          client.events.push(`case ${index + 1}`);
+          if (index === 1) throw new Error('collector crashed');
+          return ok(request.caseId);
+        },
+        async diagnose(_session, dir) {
+          client.events.push('diagnose');
+          await fs.writeFile(path.join(dir, 'screen.png'), 'png');
+        },
+      });
+      const results = await runDesktopBatch(client, requests(3));
+      expect(client.events).toEqual([
+        'prepare',
+        'case 1',
+        'case 2',
+        'diagnose',
+        'dispose session',
+      ]);
+      expect(results[0]).not.toHaveProperty('artifacts');
+      expect(results[1]).toMatchObject({
+        diagnostics: { failureKind: 'process' },
+        artifacts: { temporary: true },
+      });
+      // Not submitted: nothing to diagnose.
+      expect(results[2]).not.toHaveProperty('artifacts');
+      await fs.rm(results[1]!.artifacts!.dir, { recursive: true });
+    });
+  });
+
   it('submits nothing more when the app cannot be reset', async () => {
     const client = fakeClient({
       async runCase(_session, _request, index) {

@@ -80,14 +80,14 @@ On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest t
 
 ## When something fails
 
-A case that fails to submit, or whose session MST can't read, keeps what the desktop showed at that moment, before MST resets it for the next case. It's in the trial's artifacts, `.mcp-test-results/<eval>/runs/<run>/artifacts/<variant>/<case>/<trial>/`:
+A case that fails and leaves the desktop in an unknown state (a task that didn't submit, a session MST can't read) keeps a failure diagnosis: what the desktop showed at that moment, before MST resets it for the next case. A run that keeps full traces (`"redactStoredResponses": false` in the eval config) stores it as the trial's artifacts, `.mcp-test-results/<eval>/runs/<run>/artifacts/<variant>/<case>/<trial>/`; a run with redacted traces (the default) doesn't keep it, since it holds what the screen and logs showed:
 
 - `screen.png`: the screen
 - `accessibility.txt`: every control the app showed, with its role, name and whether it was enabled
 - `logs/`: the last 256 KiB of each of Claude Desktop's logs (`main.log`, `cowork_vm_node.log`, `mcp.log`, …)
 - `system.json`: free memory, load, and the free space on the disk Cowork's sessions are on
 
-They can hold what the case's session would have: keep them like any run's results. Capturing them takes no action on the app.
+They can hold what the case's session would have: keep them like any run's results. Capturing them takes no action on the app. A case that kept a session of its own (a task that found Cowork's VM down) keeps that instead.
 
 To look further, keep the container and look inside:
 

@@ -5,6 +5,9 @@
  * - cases run one at a time, each self-contained: a case that leaves the app
  *   in an unknown state resets it before the next case, and if it can't be
  *   reset, the remaining cases are not submitted (never retried or resent);
+ * - a failed case that leaves the app in an unknown state keeps a failure
+ *   diagnosis (what the desktop showed, its logs) as its artifacts, taken
+ *   before the reset changes it;
  * - after {@link MAX_CONSECUTIVE_FAILURES} failed cases in a row, the rest are
  *   not submitted: the desktop is no longer doing what the run expects;
  * - one native session per case (duplicate attribution fails the case);
@@ -14,11 +17,13 @@
  * - cleanup always runs; if it fails, the lease is kept for inspection and
  *   every result says so.
  *
- * A client supplies only how to prepare its desktop, run one case, reset, and
- * clean up.
+ * A client supplies only how to prepare its desktop, run one case, reset,
+ * diagnose, and clean up.
  */
-import { mkdir, open, unlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, rm, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ALL_ARTIFACTS } from './allArtifacts.js';
 import type {
   ClientBatchRequest,
   ClientRunContext,
@@ -37,6 +42,12 @@ import { ClientUnavailableError } from './clientUnavailable.js';
  * dialog the driver can't see), and then every case fails the same way.
  */
 const MAX_CONSECUTIVE_FAILURES = 3;
+
+/**
+ * How long a failure diagnosis may take. A client bounds its own; this only
+ * keeps a stuck one from holding the batch.
+ */
+const DIAGNOSE_TIMEOUT_MS = 30_000;
 
 /** How a case left the app. */
 export type DesktopContinuation =
@@ -90,6 +101,13 @@ export interface DesktopClientAdapter<Session> {
    * needs a reset stops the batch.
    */
   reset?(session: Session, index: number): Promise<void>;
+  /**
+   * After a failed case that leaves the app in an unknown state, before the
+   * reset: writes a failure diagnosis into `dir`, an empty directory made for
+   * the case (what the desktop shows, its own logs). Read-only: it never acts
+   * on the app. Optional; when it fails, the case keeps only its error.
+   */
+  diagnose?(session: Session, dir: string): Promise<void>;
   /** Tears the desktop down. Receives nothing when `prepare` failed. */
   dispose(session: Session | undefined): Promise<void>;
   /** Telemetry added to every result, e.g. setup timings. */
@@ -145,6 +163,44 @@ function surfaceable(
   )
     return error;
   return redactedClientError(error, secrets, fallback);
+}
+
+/**
+ * `result` with the adapter's failure diagnosis as its artifacts, in a
+ * temporary directory that copying the artifacts removes. Unchanged when the
+ * adapter has none, the case keeps artifacts of its own (a session folder),
+ * or the diagnosis fails or times out. Never throws.
+ */
+async function withDiagnosis<Session>(
+  adapter: DesktopClientAdapter<Session>,
+  session: Session,
+  result: ClientRunResult
+): Promise<ClientRunResult> {
+  if (!adapter.diagnose || result.artifacts) return result;
+  let dir: string | undefined;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    dir = await mkdtemp(join(tmpdir(), 'mst-failure-'));
+    await Promise.race([
+      adapter.diagnose(session, dir),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('the failure diagnosis timed out')),
+          DIAGNOSE_TIMEOUT_MS
+        );
+      }),
+    ]);
+    return {
+      ...result,
+      artifacts: { dir, include: ALL_ARTIFACTS, temporary: true },
+    };
+  } catch {
+    // Never fails the batch: the case keeps only its error.
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function notSubmitted(message: string): ClientRunResult {
@@ -220,32 +276,44 @@ export async function runDesktopBatch<Session>(
       }
       await acquire?.(index);
       const outcome = await adapter.runCase(session, request, index, ledger);
-      results.push(outcome.result);
+      resetBeforeCase = outcome.continuation === 'reset';
+      // Before the reset changes what the desktop shows.
+      const result =
+        resetBeforeCase && outcome.result.error
+          ? await withDiagnosis(adapter, session, outcome.result)
+          : outcome.result;
+      results.push(result);
       // A copy: the batch adds to its results when it ends.
       await reportResult?.(index, {
-        ...outcome.result,
-        ...(outcome.result.error
-          ? { error: redactClientSecrets(outcome.result.error, secrets) }
+        ...result,
+        ...(result.error
+          ? { error: redactClientSecrets(result.error, secrets) }
           : {}),
       });
-      resetBeforeCase = outcome.continuation === 'reset';
-      consecutiveFailures = outcome.result.error ? consecutiveFailures + 1 : 0;
+      consecutiveFailures = result.error ? consecutiveFailures + 1 : 0;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
-        blocked = `Not submitted because the last ${MAX_CONSECUTIVE_FAILURES} ${adapter.name} cases failed in a row (latest: ${redactClientSecrets(outcome.result.error ?? '', secrets)}). Check the desktop before running again.`;
+        blocked = `Not submitted because the last ${MAX_CONSECUTIVE_FAILURES} ${adapter.name} cases failed in a row (latest: ${redactClientSecrets(result.error ?? '', secrets)}). Check the desktop before running again.`;
     }
   } catch (error) {
     if (results.length > 0) {
       // Cases already ran: keep their traces, and say why the rest didn't.
       const reason = redact(error, `${adapter.name} batch execution failed.`);
       // The case that threw may have been submitted: its outcome is unknown.
-      if (results.length < requests.length)
-        results.push({
+      if (results.length < requests.length) {
+        const failed: ClientRunResult = {
           ...notSubmitted(`The ${adapter.name} case failed: ${reason}`),
           diagnostics: { failureKind: 'process' },
           telemetry: {
             caseExecution: { status: 'failed', continuation: 'blocked' },
           },
-        });
+        };
+        // The desktop is still up: keep what it showed.
+        results.push(
+          session === undefined
+            ? failed
+            : await withDiagnosis(adapter, session, failed)
+        );
+      }
       while (results.length < requests.length)
         results.push(
           notSubmitted(

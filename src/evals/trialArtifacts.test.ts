@@ -166,6 +166,37 @@ describe('copyArtifacts', () => {
     expect(await listed(target)).toEqual(['outputs/d/d/d/f']);
   });
 
+  it('removes a temporary directory once it is copied, and when the copy fails', async () => {
+    const copied = await tree({ 'screen.png': 'png' });
+    const target = path.join(await tree({}), 'copy');
+    await copyArtifacts(
+      { dir: copied, include: ['**'], temporary: true },
+      target
+    );
+    expect(await fs.readFile(path.join(target, 'screen.png'), 'utf8')).toBe(
+      'png'
+    );
+    await expect(fs.stat(copied)).rejects.toThrow();
+
+    const tooBig = await tree({ 'big.log': 'x'.repeat(10) });
+    await expect(
+      copyArtifacts(
+        { dir: tooBig, include: ['**'], temporary: true },
+        path.join(await tree({}), 'copy'),
+        { ...ARTIFACT_LIMITS, fileBytes: 5 }
+      )
+    ).rejects.toThrow();
+    await expect(fs.stat(tooBig)).rejects.toThrow();
+
+    // A client's own directory (a session folder) stays.
+    const own = await tree({ 'audit.jsonl': '{}' });
+    await copyArtifacts(
+      { dir: own, include: ['**'] },
+      path.join(await tree({}), 'copy')
+    );
+    expect((await fs.stat(own)).isDirectory()).toBe(true);
+  });
+
   it('defaults to the limits of the native audit', () => {
     expect(ARTIFACT_LIMITS).toEqual({
       fileBytes: 16 * 1024 * 1024,
