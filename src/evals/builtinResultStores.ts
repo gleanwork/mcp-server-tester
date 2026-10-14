@@ -100,7 +100,7 @@ export function parseResultsFlag(value: string): ExtensionConfig {
 
 /**
  * Create a store from its definition, and check it holds runs. A store
- * written for MST before 2.0.0-beta.12 (`saveArtifact`) fails with what to
+ * written for MST before 2.0.0-beta.13 (`saveArtifact`) fails with what to
  * change.
  */
 export function createRunStore(
