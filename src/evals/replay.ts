@@ -23,7 +23,7 @@ import {
   type RunRecord,
   type TrialRecord,
 } from './runFormat.js';
-import { ALL_ARTIFACTS } from './trialArtifacts.js';
+import { ALL_ARTIFACTS } from './allArtifacts.js';
 import fs from 'node:fs/promises';
 
 /** A stored run to grade, and the ID of the run that grades it. */

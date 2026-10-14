@@ -132,6 +132,55 @@ const marketplace = {
   expectedName: 'acme-marketplace',
 };
 
+describe('a failed Linux Cowork case (diagnose)', () => {
+  it("keeps the driver's read-only capture, the end of Cowork's logs, and the machine's state", async () => {
+    const claude = join(directory, 'Claude-3p');
+    const dataDir = join(claude, 'local-agent-mode-sessions');
+    await mkdir(dataDir, { recursive: true });
+    await mkdir(join(claude, 'logs'));
+    await writeFile(
+      join(claude, 'logs', 'main.log'),
+      `${'x'.repeat(300 * 1024)}END\n`
+    );
+    await writeFile(join(claude, 'logs', 'cowork_vm_node.log'), 'vm ok\n');
+    await writeFile(join(claude, 'logs', 'notes.txt'), 'not a log');
+    const out = join(directory, 'diagnosis');
+    await mkdir(out);
+    child.responses.push({
+      value: { status: 'diagnosed', action_count: 0, duration_ms: 5 },
+    });
+    await linuxCoworkPlatform.diagnose!({ dir: out, dataDir, env: session });
+
+    // The driver ran in diagnose mode, told only where to write.
+    const args = child.exec.mock.calls[0]![1] as string[];
+    expect(args[args.indexOf('--mode') + 1]).toBe('diagnose');
+    expect(JSON.parse(child.payloads[0]!)).toEqual({ dir: out });
+    // The end of each log, at most 256 KiB; nothing that isn't a log.
+    const main = await readFile(join(out, 'logs', 'main.log'), 'utf8');
+    expect(main.length).toBe(256 * 1024);
+    expect(main.endsWith('END\n')).toBe(true);
+    expect(
+      await readFile(join(out, 'logs', 'cowork_vm_node.log'), 'utf8')
+    ).toBe('vm ok\n');
+    await expect(stat(join(out, 'logs', 'notes.txt'))).rejects.toThrow();
+    const system = JSON.parse(await readFile(join(out, 'system.json'), 'utf8'));
+    expect(system.memory.totalBytes).toBeGreaterThan(0);
+    expect(system.dataDisk.freeBytes).toBeGreaterThan(0);
+  });
+
+  it("still keeps the logs and the machine's state when the driver can't capture", async () => {
+    const dataDir = join(directory, 'Claude-3p', 'local-agent-mode-sessions');
+    await mkdir(dataDir, { recursive: true });
+    const out = join(directory, 'diagnosis');
+    await mkdir(out);
+    child.responses.push({ failed: true });
+    await linuxCoworkPlatform.diagnose!({ dir: out, dataDir, env: session });
+    expect(
+      JSON.parse(await readFile(join(out, 'system.json'), 'utf8'))
+    ).toHaveProperty('memory');
+  });
+});
+
 describe('caller-owned Linux Cowork desktop', () => {
   it('only probes prepared settings and never changes or tears down the runtime', async () => {
     const lifecycle = await prepare();

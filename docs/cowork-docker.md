@@ -70,6 +70,8 @@ For each shard, MST:
 4. Copies the shard's bundle in, and runs `mst collect` as the desktop user. For each variant, MST writes its servers and model into Claude Desktop's managed settings and restarts it ([owned-desktop mode](./cowork.md#attach-to-a-prepared-linux-desktop)). The restart boots Cowork's VM, and returns once the VM is ready.
 5. Copies results and each trial's Cowork session folder back as trials finish, then removes the container.
 
+**Containers don't outlive their run.** A Cowork container holds its unpacked VM, about 10 GB, so a leftover one can leave the next run's container without the disk Cowork's VM install needs. When MST exits, or gets SIGTERM or SIGHUP, it removes its containers before it goes; Ctrl-C stops the shards first and removes them as usual. If it's killed outright (SIGKILL, a crash), the next `--env docker` run on the same machine removes them: each container is labeled with the machine and process that started it (`mst.owner.host`, `mst.owner.pid`), and a container whose process is gone is removed before a new one starts. Containers another machine started are left alone, and so are kept ones (`keep`), which MST renames `<name>-kept`; remove those yourself with `docker rm -f <name>-kept`.
+
 ## Each variant costs a VM boot
 
 Claude Desktop reads its managed settings, and lists each MCP server's tools, only when it starts. It keeps the tool list for its whole run: a server's `notifications/tools/list_changed` doesn't refresh it. So each variant on a shard is a restart, and a restart stops Cowork's VM and boots a new one. A shard runs all of one variant's cases before the next variant's, so it restarts once per variant. A variant's datasets share that restart: MST skips a restart when the settings are the ones the desktop already runs with. Variants with tool metadata are the exception: their servers are a proxy with a URL of its own for each batch, so each of their datasets restarts too.
@@ -78,7 +80,16 @@ On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest t
 
 ## When something fails
 
-Keep the container and look inside:
+A case that fails and leaves the desktop in an unknown state (a task that didn't submit, a session MST can't read) keeps a failure diagnosis: what the desktop showed at that moment, before MST resets it for the next case. A run that keeps full traces (`"redactStoredResponses": false` in the eval config) stores it as the trial's artifacts, `.mcp-test-results/<eval>/runs/<run>/artifacts/<variant>/<case>/<trial>/`; a run with redacted traces (the default) doesn't keep it, since it holds what the screen and logs showed:
+
+- `screen.png`: the screen
+- `accessibility.txt`: every control the app showed, with its role, name and whether it was enabled
+- `logs/`: the last 256 KiB of each of Claude Desktop's logs (`main.log`, `cowork_vm_node.log`, `mcp.log`, …)
+- `system.json`: free memory, load, and the free space on the disk Cowork's sessions are on
+
+They can hold what the case's session would have: keep them like any run's results. Capturing them takes no action on the app. A case that kept a session of its own (a task that found Cowork's VM down) keeps that instead.
+
+To look further, keep the container and look inside:
 
 ```bash
 npx mst run --config eval.json --env docker --env-option keep=failed

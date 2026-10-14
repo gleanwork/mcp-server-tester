@@ -11,6 +11,7 @@ import type { EvalCase } from './datasetTypes.js';
 import type { CaseExecution } from './caseExecution.js';
 import type { ClientArtifacts } from './evalFrameworkTypes.js';
 import { trialArtifactsPath } from './runFormat.js';
+import { ALL_ARTIFACTS } from './allArtifacts.js';
 
 /** The most a trial's copy may hold. A copy over a limit fails. */
 export const ARTIFACT_LIMITS = {
@@ -23,12 +24,6 @@ export const ARTIFACT_LIMITS = {
   /** Directories below the root. */
   depth: 16,
 } as const;
-
-/**
- * Copies everything, hidden names too: for a stored copy, which only holds
- * what its client included.
- */
-export const ALL_ARTIFACTS: readonly string[] = ['**'];
 
 type Match = 'included' | 'ancestor' | 'none';
 
@@ -96,6 +91,7 @@ function parseInclude(include: readonly string[]): Array<RegExp[] | 'all'> {
  * regular files and the directories that hold them, never a symbolic link
  * or another kind of file, within `ARTIFACT_LIMITS`. Fails, leaving no
  * `target`, when the root isn't a directory or the copy exceeds a limit.
+ * Removes a `temporary` directory either way.
  */
 export async function copyArtifacts(
   artifacts: ClientArtifacts,
@@ -103,6 +99,22 @@ export async function copyArtifacts(
   limits: {
     readonly [K in keyof typeof ARTIFACT_LIMITS]: number;
   } = ARTIFACT_LIMITS
+): Promise<void> {
+  try {
+    await copyArtifactsTo(artifacts, target, limits);
+  } finally {
+    // A directory made for this trial alone: the copy is all that's kept.
+    if (artifacts.temporary)
+      await fs.rm(artifacts.dir, { recursive: true, force: true });
+  }
+}
+
+async function copyArtifactsTo(
+  artifacts: ClientArtifacts,
+  target: string,
+  limits: {
+    readonly [K in keyof typeof ARTIFACT_LIMITS]: number;
+  }
 ): Promise<void> {
   const include = parseInclude(artifacts.include);
   const root = await fs.lstat(artifacts.dir);

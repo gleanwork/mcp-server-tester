@@ -53,6 +53,16 @@ export interface CoworkPlatform {
   reset?(
     options: CoworkDriverOptions & { restartApp?: () => Promise<void> }
   ): Promise<void>;
+  /**
+   * After a failed case, before any reset: write what the app shows and its
+   * own logs into `dir`, a directory the case's result keeps as artifacts.
+   * Read-only and bounded; never acts on the app. Optional.
+   */
+  diagnose?(options: {
+    dir: string;
+    dataDir: string;
+    env: Record<string, string | undefined>;
+  }): Promise<void>;
   submit(
     query: string,
     options: CoworkDriverOptions

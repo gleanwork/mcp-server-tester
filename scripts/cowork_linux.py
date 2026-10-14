@@ -4,6 +4,10 @@
 This module does not provision, authenticate, launch a desktop session, or collect
 answers. The MST client binds and reads native sessions. JSON input arrives on stdin;
 stdout contains only an allowlisted receipt, never prompt or accessibility text.
+
+`--mode diagnose` takes no action: after a failed case it writes what the desktop
+shows into the payload's `dir` (a trial artifact, as private as the session it
+failed to produce): `screen.png` and `accessibility.txt`.
 """
 from __future__ import annotations
 
@@ -13,7 +17,9 @@ import os
 import re
 import subprocess
 import sys
+import struct
 import time
+import zlib
 from urllib.parse import quote
 
 
@@ -87,6 +93,79 @@ class Desktop:
             [configured_opener or "xdg-open", "claude://claude.ai/new?q=" + quote(prompt, safe="")],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(timeout, 15),
         )
+
+
+def accessibility_text(desktop, budget: int = 5000) -> str:
+    """Every showing, named node of the app: role, name, and whether it is enabled."""
+    lines = []
+    pending = [(desktop.application(), 0)]
+    while pending and len(lines) < budget:
+        node, depth = pending.pop()
+        try:
+            states = node.get_state_set()
+            name = (node.get_name() or "").replace("\n", " ")[:200]
+            if name and states.contains(desktop.api.StateType.SHOWING):
+                enabled = states.contains(desktop.api.StateType.ENABLED)
+                lines.append(f"{'  ' * min(depth, 16)}{node.get_role_name()}: {name}{'' if enabled else ' [disabled]'}")
+            pending.extend((node.get_child_at_index(i), depth + 1)
+                           for i in reversed(range(node.get_child_count())))
+        except Exception:
+            continue
+    return "\n".join(lines) + "\n"
+
+
+def xwd_to_png(data: bytes) -> bytes:
+    """A TrueColor X window dump (`xwd`, ZPixmap, 24/32 bits per pixel) as a PNG."""
+    header = struct.unpack(">25I", data[:100])
+    header_size, _, pixmap_format, _, width, height = header[:6]
+    byte_order, bits_per_pixel, bytes_per_line = header[7], header[11], header[12]
+    red_mask, green_mask, blue_mask, ncolors = header[14], header[15], header[16], header[19]
+    if pixmap_format != 2 or bits_per_pixel not in (24, 32):
+        raise ValueError("unsupported_xwd")
+    pixels = data[header_size + ncolors * 12:]
+    step = bits_per_pixel // 8
+    order = "little" if byte_order == 0 else "big"
+    shift = lambda mask: (mask & -mask).bit_length() - 1
+    shifts = [(mask, shift(mask)) for mask in (red_mask, green_mask, blue_mask)]
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)
+        line = pixels[y * bytes_per_line:y * bytes_per_line + width * step]
+        for x in range(0, len(line), step):
+            value = int.from_bytes(line[x:x + step], order)
+            rows.extend(((value & mask) >> offset) & 0xFF for mask, offset in shifts)
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 6)) + chunk(b"IEND", b""))
+
+
+def diagnose(directory, timeout: float) -> dict:
+    """Read-only: what the desktop shows, as files in `directory`. Never acts."""
+    if not isinstance(directory, str) or not os.path.isabs(directory) or not os.path.isdir(directory):
+        raise DriverFailure("invalid_directory")
+    started = time.monotonic()
+    written = []
+    try:
+        dump = subprocess.run(["xwd", "-root", "-silent"], check=True, capture_output=True,
+                              timeout=max(1.0, min(timeout / 2, 15)))
+        with open(os.path.join(directory, "screen.png"), "wb") as file:
+            file.write(xwd_to_png(dump.stdout))
+        written.append("screen.png")
+    except Exception as error:
+        with open(os.path.join(directory, "screen.error"), "w") as file:
+            file.write(f"{type(error).__name__}\n")
+    try:
+        with open(os.path.join(directory, "accessibility.txt"), "w") as file:
+            file.write(accessibility_text(Desktop()))
+        written.append("accessibility.txt")
+    except Exception as error:
+        with open(os.path.join(directory, "accessibility.error"), "w") as file:
+            file.write(f"{error if isinstance(error, DriverFailure) else type(error).__name__}\n")
+    return {"status": "diagnosed", "action_count": 0,
+            "duration_ms": (time.monotonic() - started) * 1000, "files": written}
 
 
 SHORTCUT_SUFFIX = re.compile(r" [0-9]$")
@@ -211,7 +290,7 @@ class Driver:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["probe", "reset", "submit", "hitl"], required=True)
+    parser.add_argument("--mode", choices=["probe", "reset", "submit", "hitl", "diagnose"], required=True)
     parser.add_argument("--timeout-ms", type=int, required=True)
     parser.add_argument("--max-actions", type=int, default=24)
     args = parser.parse_args()
@@ -222,6 +301,9 @@ def main() -> int:
         payload = json.loads(sys.stdin.read(2 * 1024 * 1024))
         if not isinstance(payload, dict):
             raise DriverFailure("invalid_input")
+        if args.mode == "diagnose":
+            print(json.dumps(diagnose(payload.get("dir"), args.timeout_ms / 1000)))
+            return 0
         driver = Driver(Desktop(), args.timeout_ms, args.max_actions)
         if args.mode == "submit":
             result = driver.submit(payload.get("prompt"))

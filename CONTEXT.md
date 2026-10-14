@@ -82,6 +82,10 @@ _Avoid_: transcript, trajectory, log, response
 A bounded copy of the files a client kept for one trial (such as Cowork's session folder), taken from the paths the client names as evidence, for judges to read. A run that keeps full traces stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
 _Avoid_: attachments, session dump
 
+**Failure diagnosis**:
+What a desktop client captured when a case failed and left the app in an unknown state, before the reset changed it: the screen, the controls it showed, the app's logs. For whoever runs the eval, not for judges; it is the failed trial's client artifacts, and kept only where those are.
+_Avoid_: crash dump, debug bundle
+
 **Evidence**:
 How far a client's trace can be trusted for tool assertions: `structured` (protocol or the client's own records), `observed` (best effort) or `none`. Only `structured` evidence can pass tool-call assertions; a client that declares nothing counts as unverified.
 _Avoid_: confidence, fidelity

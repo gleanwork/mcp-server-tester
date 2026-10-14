@@ -21,7 +21,8 @@ import {
   writeShardBundle,
   type TrialKey,
 } from './protocol.js';
-import { ALL_ARTIFACTS, copyArtifacts } from '../trialArtifacts.js';
+import { ALL_ARTIFACTS } from '../allArtifacts.js';
+import { copyArtifacts } from '../trialArtifacts.js';
 
 /**
  * A trial's artifacts, where grading reads them: a worker names its copy

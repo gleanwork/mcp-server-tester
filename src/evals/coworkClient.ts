@@ -294,6 +294,13 @@ async function runBatch(
             },
           }
         : {}),
+      ...(platform.diagnose
+        ? {
+            async diagnose(_session: Session, dir: string) {
+              await platform.diagnose!({ dir, dataDir, env });
+            },
+          }
+        : {}),
       async dispose(session) {
         await session?.dispose();
       },
