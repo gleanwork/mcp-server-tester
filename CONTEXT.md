@@ -140,6 +140,10 @@ _Avoid_: verdict, success
 An aggregate over a run's trials or cases, such as pass rate, pass^k, tool recall, tokens, cost or latency.
 _Avoid_: KPI, stat
 
+**Likely range**:
+Where a pass rate's true value, the rate over unlimited trials, lies with 95% confidence. It shows how much a run measured, not how flaky the client is: 8 of 8 cases passing is likely 63.1–100%. A rate over several cases counts cases, not trials, as the sample. A range wider than ±10 points means too few trials to tell.
+_Avoid_: margin of error, error bars
+
 **Regrade**:
 Grading a stored run's traces again with the eval config's graders as they are now (`mst grade`), without running the client. It is saved as a new run, `<run-id>.g2` and so on, whose `run.json` names the original in `gradedFrom`. Needs traces stored with `"redactStoredResponses": false`.
 _Avoid_: rescore, re-run
