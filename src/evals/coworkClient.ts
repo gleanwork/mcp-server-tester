@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ALL_ARTIFACTS } from './trialArtifacts.js';
+import { ALL_ARTIFACTS } from './allArtifacts.js';
 import { validateMacLocalServers } from './coworkSetup/macLocalMcp.js';
 import {
   findMatchingClaudeSessions,

@@ -11,6 +11,7 @@ import type { EvalCase } from './datasetTypes.js';
 import type { CaseExecution } from './caseExecution.js';
 import type { ClientArtifacts } from './evalFrameworkTypes.js';
 import { trialArtifactsPath } from './runFormat.js';
+import { ALL_ARTIFACTS } from './allArtifacts.js';
 
 /** The most a trial's copy may hold. A copy over a limit fails. */
 export const ARTIFACT_LIMITS = {
@@ -23,12 +24,6 @@ export const ARTIFACT_LIMITS = {
   /** Directories below the root. */
   depth: 16,
 } as const;
-
-/**
- * Copies everything, hidden names too: for a stored copy, which only holds
- * what its client included.
- */
-export const ALL_ARTIFACTS: readonly string[] = ['**'];
 
 type Match = 'included' | 'ancestor' | 'none';
 
