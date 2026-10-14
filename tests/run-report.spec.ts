@@ -207,17 +207,44 @@ test.describe('run report', () => {
     expect(overflow).toEqual([0, 0]);
   });
 
-  test('a single variant opens on the cases that need attention', async ({
+  test('a single variant has the same sections, and opens on the cases that need attention', async ({
     page,
   }) => {
+    // quiet calls no tools, so every case fails.
     const report = await reportFor([{ name: 'quiet' }]);
     await page.goto(`file://${report}`);
-    await expect(page.getByText('of trials passed.')).toBeVisible();
+    const result = page.getByRole('heading', { name: 'Result' }).locator('..');
+    await expect(result).toContainText('Pass rate, and where it likely lies');
+    await expect(result).toContainText('likely 0–');
+    await expect(result).toContainText('Too few trials to tell.');
+    await expect(page.getByRole('heading', { name: 'Variant' })).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /Needs attention/, pressed: true })
+      page.getByRole('button', { name: /Not fully passing/, pressed: true })
     ).toBeVisible();
+  });
+
+  test('a run with too few trials never headlines a green 100%', async ({
+    page,
+  }) => {
+    // searching passes every trial of its 3 cases.
+    const report = await reportFor([{ name: 'searching' }]);
+    await page.goto(`file://${report}`);
+    const result = page.getByRole('heading', { name: 'Result' }).locator('..');
+    const rate = result.getByText('100%', { exact: true });
+    await expect(rate).toBeVisible();
+    await expect(rate).not.toHaveClass(/green/);
+    await expect(result).toContainText(
+      // The low end, said as the weakest rate the run can't rule out.
+      "All 6 trials passed, but 2 trials per case can't tell a server that always passes from one that passes 17.9% of the time."
+    );
+    // Three cases: no number of trials pins the rate down.
+    await expect(result).toContainText(
+      "More trials per case won't narrow it enough with 3 cases: add cases."
+    );
+    await expect(result).toContainText('36 passing trials in a row');
+    // Nothing needs attention, so the grid shows every case.
     await expect(
-      page.getByRole('heading', { name: 'Variants compared' })
-    ).toHaveCount(0);
+      page.getByRole('button', { name: /^All/, pressed: true })
+    ).toBeVisible();
   });
 });

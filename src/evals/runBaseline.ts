@@ -9,6 +9,11 @@ import type {
 import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalResultStore } from './resultStore.js';
 import { joinCaseResults } from './runFormat.js';
+import {
+  DEFAULT_REGRESSION_TAG,
+  headlineGroup,
+  measureAgainstBaseline,
+} from './variantComparison.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 
 /** A previous run's summary and ID. */
@@ -227,8 +232,16 @@ export function compareWithPrevious(
     });
     const now = metric(variant, 'trial_pass_rate');
     const then = metric(prior, 'trial_pass_rate');
+    // The same paired test, on the same cases, as the report's variant
+    // comparisons, so one page never judges a change two ways.
+    const change = headlineGroup(
+      measureAgainstBaseline(prior.result, variant.result, {
+        grouping: { source: 'declared', tag: DEFAULT_REGRESSION_TAG },
+      })
+    ).change;
     variants[variant.name] = {
       passRateDelta: comparison.deltaPassRate,
+      ...(change ? { change } : {}),
       ...(now !== undefined && then !== undefined
         ? { trialPassRateDelta: now - then }
         : {}),

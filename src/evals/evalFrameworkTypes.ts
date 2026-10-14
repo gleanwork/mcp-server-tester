@@ -3,7 +3,7 @@ import type { Plugin } from '../plugins/plugin.js';
 import type { RUN_FORMAT } from './resultFormat.js';
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
-import type { EvalCaseResult } from '../types/reporter.js';
+import type { EvalCaseResult, PairedChange } from '../types/reporter.js';
 import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
@@ -543,6 +543,13 @@ export interface RunTelemetry {
 export interface PreviousRunVariant {
   passRateDelta: number;
   trialPassRateDelta?: number;
+  /**
+   * The change in the variant's headline pass rate (capability cases, or
+   * regression cases when every case is tagged regression), paired over the
+   * cases both runs scored and tested as variant comparisons are. Absent in
+   * older runs.
+   */
+  change?: PairedChange;
   /** Case IDs that passed before and fail now. */
   regressed: string[];
   /** Case IDs that failed before and pass now. */

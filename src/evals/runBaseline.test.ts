@@ -118,6 +118,16 @@ describe('a run is compared with the previous run of the same eval config', () =
         default: {
           passRateDelta: -0.5,
           trialPassRateDelta: -0.5,
+          // One of two cases failing is the paired test's "can't tell".
+          change: {
+            mean: -0.5,
+            lower: -1,
+            upper: 1,
+            cases: 2,
+            pBetter: 1,
+            pWorse: 0.5,
+            assessment: 'unclear',
+          },
           regressed: ['b'],
           improved: [],
           added: [],
