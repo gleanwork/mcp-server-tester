@@ -143,9 +143,7 @@ describe('a run is compared with the previous run of the same eval config', () =
     const evalRun = path.join(root, 'suite');
     await fs.mkdir(evalRun);
     // A store directory of the same name where the run starts.
-    await fs.mkdir(path.join(root, 'store', 'eval-summaries'), {
-      recursive: true,
-    });
+    await fs.mkdir(path.join(root, 'store'), { recursive: true });
     await fs.writeFile(
       path.join(evalRun, 'cases.json'),
       JSON.stringify({
@@ -176,17 +174,21 @@ describe('a run is compared with the previous run of the same eval config', () =
         outputDir: path.join(root, 'out'),
         plugins: [clientPlugin],
       });
-    await run();
-    expect(
-      await fs.readdir(path.join(root, 'store', 'eval-summaries'))
-    ).toEqual([]);
+    const first = await run();
+    expect(await fs.readdir(path.join(root, 'store'))).toEqual([]);
     // A summary that can't be read isn't a baseline, and doesn't fail the run.
-    await fs.writeFile(
-      path.join(evalRun, 'store', 'eval-summaries', 'broken.json'),
-      '{'
+    const broken = path.join(
+      evalRun,
+      'store',
+      'm',
+      'runs',
+      '20990101T000000Z-b40e40'
     );
+    await fs.mkdir(broken, { recursive: true });
+    await fs.writeFile(path.join(broken, 'summary.json'), '{');
     const second = await run();
     expect(second.summary.metrics.passRate).toBe(1);
+    expect(second.summary.previousRun?.runId).toBe(first.summary.runId);
   });
 });
 

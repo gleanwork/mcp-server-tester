@@ -76,7 +76,7 @@ Each Playwright run's eval results (from `runEvalDataset()` and `runEvalCase()`)
 
 ### Result stores
 
-The reporter saves each run's summary to a result store, as `mst run` does:
+The reporter saves each run's summary to an artifact store. (`mst run`'s [result stores](./evaluation-framework.md#result-stores) hold whole run directories instead.)
 
 ```typescript snippet=snippets/result-store-reporter-config.ts
 import { defineConfig } from '@playwright/test';

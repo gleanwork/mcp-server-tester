@@ -113,12 +113,19 @@ import {
   type RequestGroup,
   type ShardRecord,
 } from './environments/shardedCollect.js';
-import { getResultStore, resolveStorePaths } from './builtinResultStores.js';
+import {
+  createRunStore,
+  getResultStore,
+  parseResultsFlag,
+  resolveStorePaths,
+} from './builtinResultStores.js';
+import { storeRunHistory, uploadRun } from './runStore.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
 import { costSource, estimateCosts } from './pricing.js';
 import {
   pairwiseJudgeSpec,
   parseClientConfig,
+  resolveResultStoreConfig,
   validateEvalConfig,
   inheritClient,
 } from './configValidation.js';
@@ -135,7 +142,6 @@ import {
   resolveMetric,
 } from './metrics.js';
 import {
-  createStoredEvalArtifact,
   REDACT_STORED_RESPONSES_BY_DEFAULT,
   redactStoredResponses,
 } from './resultStore.js';
@@ -212,11 +218,19 @@ export interface RunEvalOptions {
   env?: string;
   /** The environment's options (`--env-option key=value`), as strings. */
   envOptions?: Readonly<Record<string, string>>;
+  /**
+   * The result store that keeps the run (`--results`), instead of the eval
+   * config's `results.store`: `gs://<bucket>/<prefix>`, `file:<dir>`, or a
+   * store extension, `<namespace>/result-store/<name>`.
+   */
+  results?: string;
 }
 
 export interface RunEvalResult {
   evalConfig: EvalConfig;
   outputDir: string;
+  /** The result store the run was saved to, when it has one. */
+  storedIn?: string;
   /** Where the trials were (or, in a dry run, would be) collected. */
   environment: RunEnvironment;
   datasets: Array<{
@@ -624,6 +638,7 @@ export interface GradeRunOptions extends Pick<
   | 'outputDir'
   | 'secretsFile'
   | 'report'
+  | 'results'
 > {
   /**
    * The run to grade: its directory, its run ID, or the ID's short form (the
@@ -895,6 +910,24 @@ async function evaluate(
   );
   const { definition: _definition, ...environment } = resolvedEnvironment;
   const inEnvironment = environment.name !== LOCAL_ENVIRONMENT;
+  // Where the run is kept besides its directory: --results, else the eval
+  // config's store. Resolved before any trial runs, so a bad store fails first.
+  const resultStore =
+    options.results !== undefined
+      ? (() => {
+          const { config, definition } = resolveResultStoreConfig(
+            parseResultsFlag(options.results),
+            { namespaces }
+          );
+          return createRunStore(config.type, definition, config);
+        })()
+      : evalConfig.results?.store
+        ? createRunStore(
+            evalConfig.results.store.type,
+            getResultStore(evalConfig.results.store.type),
+            resolveStorePaths(evalConfig.results.store, { configDir, rootDir })
+          )
+        : undefined;
   const recordedDeclarations = connectorDeclarations(connectors);
   // What each shard ran on, for run.json.
   let shardRecords: ShardRecord[] | undefined;
@@ -1852,11 +1885,6 @@ async function evaluate(
       ...(regrade ? { gradedFrom: regrade.gradedFrom } : {}),
     };
   }
-  const store = evalConfig.results?.store
-    ? getResultStore(evalConfig.results.store.type).create(
-        resolveStorePaths(evalConfig.results.store, { configDir, rootDir })
-      )
-    : undefined;
   // The comparison is a convenience: it must never cost the run its results.
   // An ungraded run has no results to compare.
   if (options.grade !== false)
@@ -1876,7 +1904,11 @@ async function evaluate(
         variants: summary.variants.map((variant) => variant.name),
         partial: summary.partial,
         selectionHash: summary.selectionHash,
-        store,
+        // With a store, the store's runs are the history (a CI machine has
+        // no earlier local runs).
+        ...(resultStore
+          ? { history: storeRunHistory(resultStore, evalConfig.name) }
+          : {}),
         outputRoot: runsDirectory(evalDirectory),
       });
       if (previous)
@@ -1889,49 +1921,6 @@ async function evaluate(
 
   const storedSummary = storedSummaryOf(summary);
   await fs.mkdir(outputDir, { recursive: true });
-  if (store) {
-    // Eval config validation already parsed defaults and transforms once.
-    const metadata = {
-      datasetName: evalConfig.name,
-      // The MST that produced the results, next to the eval's content hash.
-      packageVersion: packageJson.version,
-      labels: {
-        configId: summary.configId,
-        contentHash: summary.contentHash,
-        ...(summary.partial
-          ? { partial: 'true', selectionHash: summary.selectionHash! }
-          : {}),
-      },
-    };
-    summary.caseArtifactPointers = {};
-    for (const [index, variant] of storedSummary.variants.entries()) {
-      const id = `${executionId}-variant-${index}`;
-      await store.saveArtifact(
-        createStoredEvalArtifact({
-          kind: 'eval-runner-result',
-          id,
-          data: variant.result,
-          metadata: {
-            ...metadata,
-            labels: { ...metadata.labels, variant: variant.name },
-          },
-          createdAt: summary.timestamp,
-        })
-      );
-      summary.caseArtifactPointers[variant.name] = [id];
-    }
-    // Pointers are populated after redaction/cloning; retain them in both copies.
-    storedSummary.caseArtifactPointers = summary.caseArtifactPointers;
-    await store.saveArtifact(
-      createStoredEvalArtifact({
-        kind: 'eval-run-summary',
-        id: executionId,
-        data: storedSummary,
-        metadata,
-        createdAt: summary.timestamp,
-      })
-    );
-  }
   await writeRun(
     outputDir,
     executionId,
@@ -1964,16 +1953,33 @@ async function evaluate(
   // Last, so a crash leaves latest.json at the previous run; a partial or
   // ungraded run never becomes the latest, nor does a regrade of an older
   // run, nor a run with missing trials.
-  if (
+  const takesLatest =
     !summary.partial &&
     missingTrials === 0 &&
     options.grade !== false &&
-    (!regrade || (await regradeTakesLatest(evalDirectory, regrade)))
-  )
+    (!regrade || (await regradeTakesLatest(evalDirectory, regrade)));
+  if (takesLatest)
     await writeLatest(evalDirectory, executionId, summary.timestamp);
+  // The store gets the run as it is on disk, report included. It becomes the
+  // store's latest run when it became the local one.
+  if (resultStore)
+    try {
+      await uploadRun(resultStore, {
+        evalName: evalConfig.name,
+        runId: executionId,
+        runDirectory: outputDir,
+        ...(takesLatest ? { latest: { createdAt: summary.timestamp } } : {}),
+      });
+    } catch (error) {
+      throw new Error(
+        `Run ${executionId} wasn't saved to the result store ${resultStore.location}: ${error instanceof Error ? error.message : String(error)}. The run is in ${outputDir}.`,
+        { cause: error }
+      );
+    }
   return {
     evalConfig,
     outputDir,
+    ...(resultStore ? { storedIn: resultStore.location } : {}),
     environment,
     datasets: allDatasets,
     summary,

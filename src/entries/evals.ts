@@ -93,6 +93,7 @@ export type {
   RunTelemetry,
   EvalSummaryGenerator,
 } from '../evals/evalFrameworkTypes.js';
+export type { RunStore } from '../evals/runStore.js';
 export {
   resolveResultStoreConfig,
   validateEvalConfig,

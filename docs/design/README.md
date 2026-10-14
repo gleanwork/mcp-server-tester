@@ -253,7 +253,7 @@ npx mst run --config evals/cowork-tool-descriptions.json --env docker --env-opti
 
 ## 7. Run remotely
 
-Use the same config, on 5 fresh VMs. They run the same image as the containers in section 6. The limits in section 6 apply here too, and `--results` is planned:
+Use the same config, on 5 fresh VMs. They run the same image as the containers in section 6. The limits in section 6 apply here too, and `--results` keeps the run in your store:
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json \
@@ -334,7 +334,7 @@ Runs are written locally by default:
     └── report/
 ```
 
-Planned: `--results` sends the run somewhere else instead. Today a result store set in the eval config gets each run's results and summary, and the run directory stays local.
+`--results` also keeps the run in a result store, in this layout under `<eval name>/`. Without it, the eval config's `results.store` applies, if it has one. The run directory stays local either way.
 
 ```bash
 --results acme/result-store/eval-results     # a store your plugin provides

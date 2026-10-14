@@ -703,6 +703,10 @@ Stored comparisons omit raw responses unless you pass
 
 ### GCS Layout
 
+This is the layout of the artifact stores `runEvalDataset` and the reporter take.
+An eval config's result store (`mst run --results`) holds whole run directories
+instead; see [Result stores](./evaluation-framework.md#result-stores).
+
 Given `bucket: "my-mcp-eval-results"` and `prefix: "my-server/main"`, artifacts are
 stored as JSON:
 
