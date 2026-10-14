@@ -36,6 +36,7 @@ exports[`public API > ./evals 1`] = `
   "createEvalResultStore",
   "createStoredEvalArtifact",
   "defaultEnvironmentMetadata",
+  "dockerEnvironment",
   "dryRunProxyServer",
   "getMissingDependencyMessage",
   "getPairwiseJudge",

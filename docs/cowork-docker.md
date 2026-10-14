@@ -47,7 +47,7 @@ Options (`--env-option key=value`):
 | `keep`                 | `never` (default), `failed` or `always`: keep containers to look at afterwards.                            |
 | `claudeDesktopVersion` | `mst env setup` only: the Claude Desktop package to install.                                               |
 
-**One container per Docker host at a time.** Claude Desktop's VM service listens on a fixed vsock port for the whole host, and containers don't separate vsock. So two Cowork containers can't run on one Docker host. To run shards side by side, give each its own host: several Colima VMs on a Mac, or remote Docker hosts, listed in `contexts`. With more shards than contexts, the extra shards wait for a free context.
+**One container per Docker host at a time.** Claude Desktop's VM service listens on a fixed vsock port for the whole host, and containers don't separate vsock. So two Cowork containers can't run on one Docker host. To run shards side by side, give each its own host: several Colima VMs on a Mac, or remote Docker hosts, listed in `contexts`. With more shards than contexts, the extra shards wait for a free context. A plugin environment that creates its own hosts (VMs, say) can hand their contexts to this one: see `dockerEnvironment` in [the evaluation framework](./evaluation-framework.md#plugins).
 
 ## Plugins
 

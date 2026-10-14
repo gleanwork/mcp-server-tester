@@ -121,6 +121,8 @@ export default plugin;
   };
   ```
 
+  An environment whose machines are Docker hosts, such as cloud VMs, can leave the containers to the built-in `docker` environment: create the hosts and a Docker context for each, then return `dockerEnvironment.open({ contexts: names.join(','), image }, context)` (from `./evals`) with a `close` that also deletes the hosts. Its `setup` builds the image on the contexts it's given.
+
   A worker machine needs the same MST version as the coordinator (a mismatch fails the shard at `hello`), on `PATH` as `mst`, and the client's plugin. Access tokens reach it only over stdin; the worker writes them to `MST_TOKENS_DIR` (default `/run/mst/tokens`, which a worker image should mount as tmpfs), one file per server label, renews them before they expire, and removes them at the end. `MST_IMAGE` names the image in the worker's `hello`. A shard's failures (no machine, a silent or cancelled worker) are its outcome; `runShard` doesn't throw for them.
 
 - **Shared configs.** `configs` holds named eval config settings an eval can opt into. An eval that loads the plugin applies one with `"extends": ["acme/config/recommended"]`:

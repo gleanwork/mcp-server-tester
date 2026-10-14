@@ -17,7 +17,7 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 
 The `./evals`, `./auth` and `./experimental/clients` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-client fields on root result types (such as `EvalCaseResult.clientMetadata`) are typed from `./experimental/clients` and share its stability.
 
-The environment interfaces in `./evals` (`EnvironmentDefinition`, `Environment`, `EnvironmentContext`, `EnvironmentKeep`, `Machine`, `WorkerChannel`, the `Shard*` types, `ShardTokens`, `TrialKey` and `machineEnvironment`) can change between 2.0 prereleases, until the `mst.shard/v1` contract is frozen ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)).
+The environment interfaces in `./evals` (`EnvironmentDefinition`, `Environment`, `EnvironmentContext`, `EnvironmentKeep`, `Machine`, `WorkerChannel`, the `Shard*` types, `ShardTokens`, `TrialKey`, `machineEnvironment` and `dockerEnvironment`) can change between 2.0 prereleases, until the `mst.shard/v1` contract is frozen ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)).
 
 ## Table of Contents
 
