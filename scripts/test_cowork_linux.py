@@ -27,9 +27,20 @@ class Desktop:
         self.actions = []
         self.prompt = None
         self.fail = False
+        # Below the window until revealed (a composer grown by a long prompt).
+        self.hidden = set()
+        # The composer keeps its draft when an empty new-task link opens.
+        self.keeps_draft = False
 
-    def controls(self, names, roles, *, require_enabled=True):
-        return [node for node in self.starts + self.radios + self.approvals if node.name in names]
+    def controls(self, names, roles, *, require_enabled=True, require_showing=True):
+        return [node for node in self.starts + self.radios + self.approvals if node.name in names
+                # The empty composer disables Start task.
+                and not (node.name == "Start task" and require_enabled and not self.prompt)
+                and not (require_showing and node.name in self.hidden)]
+
+    def reveal(self, node):
+        self.actions.append(f"reveal {node.name}")
+        self.hidden.discard(node.name)
 
     def selected(self, node):
         return True
@@ -43,7 +54,8 @@ class Desktop:
             raise module.DriverFailure("action_acknowledgement_uncertain")
 
     def open_prompt(self, prompt, timeout):
-        self.prompt = prompt
+        if not (self.keeps_draft and self.prompt and not prompt):
+            self.prompt = prompt
 
 
 class LinuxDriverTests(unittest.TestCase):
@@ -90,8 +102,8 @@ class LinuxDriverTests(unittest.TestCase):
 
     def test_disabled_start_button_proves_mode_before_prefill(self):
         class EmptyComposer(Desktop):
-            def controls(self, names, roles, *, require_enabled=True):
-                controls = super().controls(names, roles, require_enabled=require_enabled)
+            def controls(self, names, roles, *, require_enabled=True, require_showing=True):
+                controls = super().controls(names, roles, require_enabled=require_enabled, require_showing=require_showing)
                 return [node for node in controls if node.name != 'Start task' or not require_enabled or self.prompt is not None]
 
             def selected(self, node):
@@ -104,7 +116,7 @@ class LinuxDriverTests(unittest.TestCase):
 
     def test_disabled_submit_is_never_activated(self):
         class DisabledSubmit(Desktop):
-            def controls(self, names, roles, *, require_enabled=True):
+            def controls(self, names, roles, *, require_enabled=True, require_showing=True):
                 return [] if require_enabled else self.starts
         desktop = DisabledSubmit()
         with self.assertRaisesRegex(module.DriverFailure, 'deadline'):
@@ -129,6 +141,39 @@ class LinuxDriverTests(unittest.TestCase):
         with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
             module.Driver(desktop, 200, 4).reset()
         self.assertEqual((desktop.prompt, desktop.actions), ("", []))
+
+    def test_long_prompt_scrolls_start_task_into_view_once_then_submits(self):
+        class LongPrompt(Desktop):
+            def open_prompt(self, prompt, timeout):
+                super().open_prompt(prompt, timeout)
+                self.hidden.add("Start task")
+        desktop = LongPrompt()
+        receipt = module.Driver(desktop, 1000, 4).submit("is my email OK?\n\n" + "line\n" * 25)
+        self.assertEqual(desktop.actions, ["reveal Start task", "Start task"])
+        self.assertEqual((receipt["status"], receipt["action_count"]), ("submitted", 3))
+        # One that stays below the window is revealed once, never pressed.
+        class StaysHidden(LongPrompt):
+            def reveal(self, node):
+                self.actions.append(f"reveal {node.name}")
+        desktop = StaysHidden()
+        with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
+            module.Driver(desktop, 200, 4).submit("long")
+        self.assertEqual(desktop.actions, ["reveal Start task"])
+
+    def test_reset_fails_on_a_draft_the_empty_link_left(self):
+        desktop = Desktop()
+        desktop.prompt, desktop.keeps_draft = "is my email OK?", True
+        desktop.hidden.add("Start task")
+        with self.assertRaisesRegex(module.DriverFailure, "draft_not_cleared"):
+            module.Driver(desktop, 200, 4).reset()
+        # One link, then read-only: never reveals, types or sends.
+        self.assertEqual(desktop.actions, [])
+        # An empty composer below the window is ready.
+        desktop = Desktop()
+        desktop.prompt = "earlier"
+        desktop.hidden.add("Start task")
+        self.assertEqual(module.Driver(desktop, 1000, 4).reset()["status"], "ready")
+        self.assertEqual(desktop.actions, [])
 
     def test_uncertain_submit_never_retries(self):
         desktop = Desktop()

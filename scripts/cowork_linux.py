@@ -45,7 +45,8 @@ class Desktop:
             raise DriverFailure("desktop_missing_or_ambiguous")
         return matches[0]
 
-    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True):
+    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True,
+                 require_showing: bool = True):
         pending = [self.application()]
         found = []
         seen = 0
@@ -58,7 +59,7 @@ class Desktop:
                 states = node.get_state_set()
                 if (node.get_role_name() in roles and self.label(node) in names
                         and states.contains(self.api.StateType.VISIBLE)
-                        and states.contains(self.api.StateType.SHOWING)
+                        and (not require_showing or states.contains(self.api.StateType.SHOWING))
                         and (not require_enabled or (
                             states.contains(self.api.StateType.ENABLED)
                             and states.contains(self.api.StateType.SENSITIVE)))):
@@ -75,6 +76,11 @@ class Desktop:
         # Newer desktops append a control's keyboard shortcut to its
         # accessible name ("Allow once 3", "Deny 1").
         return SHORTCUT_SUFFIX.sub("", node.get_name() or "")
+
+    def reveal(self, node) -> None:
+        """Scrolls a control into view. Never presses it."""
+        if not node.scroll_to(self.api.ScrollType.ANYWHERE):
+            raise DriverFailure("reveal_failed")
 
     def selected(self, node) -> bool:
         states = node.get_state_set()
@@ -207,22 +213,40 @@ class Driver:
 
     def reset(self) -> dict:
         # After a failed case: leave its view with one empty new-task deep link,
-        # then wait read-only for the Cowork start surface. Never types or sends.
+        # then wait read-only for an empty Cowork start surface. Never types or
+        # sends. An empty composer disables Start task; one still enabled holds
+        # a draft the link didn't clear, which the next case's link would not
+        # replace either (a long prompt's draft did, on Linux).
         self.action(lambda: self.desktop.open_prompt("", self.remaining()))
+        draft = False
         while True:
-            self.remaining()
-            if self.desktop.controls({"Cowork", "Start task"}, {"button", "radio button"},
-                                     require_enabled=False):
+            try:
+                left = self.remaining()
+            except DriverFailure:
+                if draft:
+                    raise DriverFailure("draft_not_cleared") from None
+                raise
+            starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False,
+                                           require_showing=False)
+            if len(starts) == 1:
+                if not self.desktop.controls({"Start task"}, {"button"}, require_showing=False):
+                    return self.receipt("ready")
+                draft = True
+            elif not starts and self.desktop.controls({"Cowork"}, {"button", "radio button"},
+                                                      require_enabled=False):
+                # Not in Cowork mode: the next submit selects it.
                 return self.receipt("ready")
-            time.sleep(min(0.1, self.remaining()))
+            time.sleep(min(0.1, left))
 
     def select_cowork(self) -> None:
         requested = set()
         while True:
             self.remaining()
             # The empty Cowork composer disables Start task until text is inserted.
-            # Its visible presence proves the mode, not permission to submit.
-            starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False)
+            # Its presence proves the mode, not permission to submit; below the
+            # window (a long draft) still counts.
+            starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False,
+                                           require_showing=False)
             if len(starts) > 1:
                 raise DriverFailure("submission_control_ambiguous")
             if starts:
@@ -250,6 +274,7 @@ class Driver:
             raise DriverFailure("invalid_prompt")
         self.select_cowork()
         self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
+        revealed = False
         while True:
             self.remaining()
             starts = self.desktop.controls({"Start task"}, {"button"})
@@ -259,6 +284,13 @@ class Driver:
                 # Exactly one submit attempt. No key fallback or action retry.
                 self.action(lambda: self.desktop.activate(starts[0]))
                 return self.receipt("submitted")
+            # A long prompt grows the composer until Start task is below the
+            # window: scroll the one there is into view, once.
+            hidden = self.desktop.controls({"Start task"}, {"button"}, require_showing=False)
+            if len(hidden) == 1 and not revealed:
+                revealed = True
+                self.action(lambda: self.desktop.reveal(hidden[0]))
+                continue
             time.sleep(min(0.1, self.remaining()))
 
     def hitl(self, approve_writes: bool) -> dict:
