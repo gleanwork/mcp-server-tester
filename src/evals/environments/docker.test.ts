@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -56,6 +57,10 @@ describe('the docker environment', () => {
     );
     expect(args).toContain('MST_INFERENCE_AUTH_SCHEME=bearer');
     expect(args).not.toContain('--privileged');
+    // Whose it is: a later run removes it if this process dies.
+    expect(args).toContain('mst.run=run');
+    expect(args).toContain(`mst.owner.host=${os.hostname()}`);
+    expect(args).toContain(`mst.owner.pid=${process.pid}`);
     expect(args.at(-1)).toBe('mst-cowork-linux:test');
   });
 
@@ -382,6 +387,51 @@ describe('a run in docker (a fake Docker CLI)', () => {
         image,
       })),
     });
+  }, 120_000);
+
+  it('removes the containers a dead run on this machine left, and only those', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, root, configPath } = await fixture();
+    // A process that has exited: the owner of the orphan.
+    const dead = spawnSync(process.execPath, ['-e', '']).pid;
+    const container = async (name: string, labels: string[]) => {
+      await fs.mkdir(path.join(root, 'containers', name), { recursive: true });
+      await fs.writeFile(
+        path.join(root, 'containers', name, 'run-args.json'),
+        JSON.stringify(labels.flatMap((label) => ['--label', label]))
+      );
+    };
+    await container('mst-orphan-1', [
+      'mst.run=orphan',
+      `mst.owner.host=${os.hostname()}`,
+      `mst.owner.pid=${dead}`,
+    ]);
+    await container('mst-elsewhere-1', [
+      'mst.run=elsewhere',
+      'mst.owner.host=another-machine',
+      `mst.owner.pid=${dead}`,
+    ]);
+    await container('mst-debug-1-kept', [
+      'mst.run=debug',
+      `mst.owner.host=${os.hostname()}`,
+      `mst.owner.pid=${dead}`,
+    ]);
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { shards: '1', image: 'mst-test:1' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    expect((await fs.readdir(path.join(root, 'containers'))).sort()).toEqual([
+      'mst-debug-1-kept',
+      'mst-elsewhere-1',
+    ]);
+    expect(log.mock.calls.map((call) => String(call[0]))).toContain(
+      '[mst] removed container mst-orphan-1: the run that started it is gone'
+    );
   }, 120_000);
 
   it("fails a shard whose desktop doesn't come up, with the image's reason", async () => {

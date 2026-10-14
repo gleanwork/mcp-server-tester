@@ -8,13 +8,15 @@ import {
   realpath,
   rename,
   rm,
+  readdir,
+  statfs,
   writeFile,
 } from 'node:fs/promises';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import { mcpServerLabel } from '../../config/mcpConfig.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
+import { freemem, homedir, loadavg, totalmem, uptime } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
@@ -70,7 +72,7 @@ const SESSION_ENV = [
   'LC_ALL',
 ];
 interface Receipt {
-  status: 'ready' | 'submitted' | 'hitl_checked' | 'failed';
+  status: 'ready' | 'submitted' | 'hitl_checked' | 'diagnosed' | 'failed';
   action_count: number;
   duration_ms: number;
   errorCode?: string;
@@ -397,7 +399,7 @@ function receipt(stdout: string): Receipt | undefined {
     if (!parsed || typeof parsed !== 'object') return undefined;
     const r = parsed as Record<string, unknown>;
     if (
-      !['ready', 'submitted', 'hitl_checked', 'failed'].includes(
+      !['ready', 'submitted', 'hitl_checked', 'diagnosed', 'failed'].includes(
         String(r.status)
       ) ||
       typeof r.action_count !== 'number' ||
@@ -423,7 +425,7 @@ function receipt(stdout: string): Receipt | undefined {
 }
 
 async function execute(
-  mode: 'probe' | 'reset' | 'submit' | 'hitl',
+  mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'diagnose',
   payload: object,
   options: CoworkDriverOptions
 ): Promise<Receipt> {
@@ -448,7 +450,10 @@ async function execute(
   const script = createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url
   ).resolve('@gleanwork/mcp-server-tester/cowork-linux-runtime');
-  const timeout = Math.min(remaining, mode === 'submit' ? 60_000 : 10_000);
+  const timeout = Math.min(
+    remaining,
+    mode === 'submit' ? 60_000 : mode === 'diagnose' ? 20_000 : 10_000
+  );
   // Reserve time for the bounded driver to return its final receipt.
   const driverTimeout = Math.max(
     1,
@@ -493,7 +498,9 @@ async function execute(
       ? 'ready'
       : mode === 'submit'
         ? 'submitted'
-        : 'hitl_checked';
+        : mode === 'diagnose'
+          ? 'diagnosed'
+          : 'hitl_checked';
   if (
     result.failed ||
     record?.status !== expected ||
@@ -569,6 +576,58 @@ async function verifyStdioPaths(
       }
     }
   }
+}
+
+/** How much of the end of each of Cowork's logs a failed case keeps. */
+const LOG_TAIL_BYTES = 256 * 1024;
+
+/** The last LOG_TAIL_BYTES of each of Cowork's logs in `from`, into `to`. */
+async function copyLogTails(from: string, to: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(from);
+  } catch {
+    return;
+  }
+  await mkdir(to, { recursive: true });
+  for (const name of names) {
+    if (!/^[\w.-]+\.(log|jsonl)$/.test(name)) continue;
+    let file;
+    try {
+      file = await open(
+        join(from, name),
+        constants.O_RDONLY | constants.O_NOFOLLOW
+      );
+      const info = await file.stat();
+      if (!info.isFile()) continue;
+      const length = Math.min(info.size, LOG_TAIL_BYTES);
+      const buffer = Buffer.alloc(length);
+      await file.read(buffer, 0, length, info.size - length);
+      await writeFile(join(to, name), buffer, { mode: 0o600 });
+    } catch {
+      // Best effort: the rest still says what happened.
+    } finally {
+      await file?.close();
+    }
+  }
+}
+
+/** The machine's state when a case failed: memory, load and the data disk. */
+async function systemState(dataDir: string): Promise<object> {
+  const disk = await statfs(dataDir).catch(() => undefined);
+  return {
+    memory: { freeBytes: freemem(), totalBytes: totalmem() },
+    loadAverage: loadavg(),
+    uptimeSeconds: uptime(),
+    ...(disk
+      ? {
+          dataDisk: {
+            freeBytes: disk.bavail * disk.bsize,
+            totalBytes: disk.blocks * disk.bsize,
+          },
+        }
+      : {}),
+  };
 }
 
 /** Attach to caller-owned resources. Never create, authenticate, or stop a desktop. */
@@ -696,6 +755,24 @@ export const linuxCoworkPlatform: CoworkPlatform = {
   async recover() {
     throw new Error(
       'Linux desktop recovery belongs to the runtime owner, not the MST driver.'
+    );
+  },
+  async diagnose({ dir, dataDir, env }) {
+    // Read-only: the screen and the app's accessible controls (the driver's
+    // diagnose mode), Cowork's own logs, and the machine's state.
+    await execute(
+      'diagnose',
+      { dir },
+      { deadlineAt: Date.now() + 20_000, maxActions: 1, env }
+    ).catch(() => {
+      // Partial is still useful: the driver records what it couldn't capture.
+    });
+    // Cowork keeps its logs beside its session data (Claude-3p/logs).
+    await copyLogTails(join(dirname(dataDir), 'logs'), join(dir, 'logs'));
+    await writeFile(
+      join(dir, 'system.json'),
+      `${JSON.stringify(await systemState(dataDir), null, 2)}\n`,
+      { mode: 0o600 }
     );
   },
   async reset(options) {

@@ -26,7 +26,8 @@ import { isInfrastructureError } from '../infrastructureFailure.js';
 import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
-import { ALL_ARTIFACTS, copyArtifacts } from '../trialArtifacts.js';
+import { ALL_ARTIFACTS } from '../allArtifacts.js';
+import { copyArtifacts } from '../trialArtifacts.js';
 import {
   usesToolSurfaceProxy,
   withoutToolVariant,
