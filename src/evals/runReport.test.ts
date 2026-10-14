@@ -360,7 +360,7 @@ describe("mst run's output", () => {
       printRunResult(second, 'eval.json');
       const lines = log.mock.calls.map((call) => String(call[0]));
       const header = lines.find((line) => line.startsWith('Variant'));
-      expect(header).toMatch(/Passed\s+Pass rate\s+95% range/);
+      expect(header).toMatch(/Passed\s+Pass rate\s+Likely range/);
       // Two cases can't pin down anything, even when every trial passes.
       expect(lines.find((line) => line.startsWith('base '))).toMatch(
         /1\/2\s+50%\s+0%-100% !/
@@ -369,7 +369,7 @@ describe("mst run's output", () => {
         /2\/2\s+100%\s+0%-100% !/
       );
       expect(lines).toContain(
-        "! Too few trials to tell: 2 trials per case leaves base a 95% range of 0%-100%. More trials per case won't narrow it enough with 2 cases: add cases."
+        "! Too few trials to tell: with 2 trials per case, base's true pass rate is likely anywhere from 0% to 100%. More trials per case won't narrow it enough with 2 cases: add cases."
       );
       // The previous run, through the same paired test.
       expect(lines).toContain(

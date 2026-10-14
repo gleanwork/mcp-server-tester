@@ -16,7 +16,8 @@ import {
   TONE,
   direction,
   graderName,
-  intervalText,
+  likelyText,
+  likelyTitle,
   pct,
   pts,
   rangeText,
@@ -238,16 +239,20 @@ function EvidenceNote({ data }: { data: MCPRunReportData }) {
   const k = evidence.trialsPerCase;
   const perCase = `${k} ${k === 1 ? 'trial' : 'trials'} per case`;
   const total = data.comparison.variants.reduce((sum, v) => sum + v.trials, 0);
-  const where =
-    widest && data.variants.length > 1 ? (
-      <>
-        {' '}
-        on <span className="font-mono">{widest.name}</span>
-      </>
-    ) : null;
+  const several = data.variants.length > 1;
+  // Where the true rate likely lies, in words: "anywhere from 13.2% to 99.8%".
   const range = widest ? (
     <>
-      : the 95% range{where} is {intervalText(widest)}
+      :{' '}
+      {several ? (
+        <>
+          on <span className="font-mono">{widest.name}</span>, the true rate
+        </>
+      ) : (
+        'it'
+      )}
+      {several ? ' is' : "'s"} likely anywhere from {pct(widest.lower)} to{' '}
+      {pct(widest.upper)}
     </>
   ) : null;
   const next = evidence.suggestedTrialsPerCase;
@@ -266,13 +271,23 @@ function EvidenceNote({ data }: { data: MCPRunReportData }) {
         <span className="font-semibold">Too few trials to tell.</span>{' '}
         {evidence.allPassed ? (
           <>
-            All {total} trials passed, but {perCase} can't pin down a pass rate
-            {range}.
+            All {total} trials passed, but {perCase}{' '}
+            {widest ? (
+              // The low end is the weakest rate this run can't rule out.
+              <>
+                can't tell a server that always passes from one that passes{' '}
+                {pct(widest.lower)} of the time
+              </>
+            ) : (
+              "can't pin down a pass rate"
+            )}
+            .
           </>
         ) : (
           <>
-            {perCase.charAt(0).toUpperCase() + perCase.slice(1)} can't pin down
-            these pass rates{range}.
+            {perCase.charAt(0).toUpperCase() + perCase.slice(1)} can't pin down{' '}
+            {several ? 'these pass rates' : 'the pass rate'}
+            {range}.
           </>
         )}
       </p>
@@ -514,7 +529,7 @@ function Result({ data }: { data: MCPRunReportData }) {
       <table className="w-full text-sm">
         <caption className="mb-3 text-left font-semibold">
           {single ? (
-            'Pass rate, with its 95% range'
+            'Pass rate, and where it likely lies'
           ) : (
             <>
               {split ? 'Each variant' : 'Pass rate, each variant'} against{' '}
@@ -592,9 +607,9 @@ function Result({ data }: { data: MCPRunReportData }) {
                   {interval && (
                     <span
                       className="block font-mono text-xs text-muted-foreground"
-                      title="95% range of the pass rate, counting cases rather than trials as the sample"
+                      title={likelyTitle(interval, true)}
                     >
-                      95%: {intervalText(interval)}
+                      {likelyText(interval)}
                     </span>
                   )}
                 </td>

@@ -401,7 +401,7 @@ function printVariantTable(variants: VariantSummary[], graded = true): void {
   });
   const header = [
     'Variant',
-    ...(graded ? ['Passed', 'Pass rate', '95% range'] : []),
+    ...(graded ? ['Passed', 'Pass rate', 'Likely range'] : []),
     ...(judged ? ['Judge pass'] : []),
     'MCP calls / client events',
     'Input tokens',
@@ -421,7 +421,7 @@ function printVariantTable(variants: VariantSummary[], graded = true): void {
   console.log(line(header));
   for (const row of rows) console.log(line(row));
   console.log(
-    'Pass rate is the mean over cases of the share of trials that passed; its 95% range counts cases, not trials, as the sample.'
+    'Pass rate is the mean over cases of the share of trials that passed. Likely range is where the true pass rate likely lies (95% confidence), counting cases, not trials, as the sample.'
   );
   console.log(
     'Calls, tokens, cost and time are means per trial.' +
@@ -438,14 +438,21 @@ function printTooFewTrials(
   variants: VariantSummary[],
   headlines: Array<ReturnType<typeof headlinePassRate> | undefined>
 ): void {
-  let widest: { name: string; lower: number; upper: number } | undefined;
+  let widest:
+    | { name: string; passRate: number; lower: number; upper: number }
+    | undefined;
   for (const [index, variant] of variants.entries()) {
-    const interval = headlines[index]?.interval;
+    const headline = headlines[index];
+    const interval = headline?.interval;
     if (
       interval?.tooWide &&
       (!widest || interval.upper - interval.lower > widest.upper - widest.lower)
     )
-      widest = { name: variant.name, ...interval };
+      widest = {
+        name: variant.name,
+        passRate: headline?.passRate ?? 0,
+        ...interval,
+      };
   }
   if (!widest) return;
   const counts = variants.flatMap((variant) =>
@@ -472,20 +479,34 @@ function printTooFewTrials(
     }
     next = Math.max(next ?? 0, needed);
   }
+  const trials = `${perCase} ${perCase === 1 ? 'trial' : 'trials'} per case`;
+  const [lower, upper] = rangeEnds(widest);
   console.log(
-    `! Too few trials to tell: ${perCase} ${perCase === 1 ? 'trial' : 'trials'} per case leaves ${widest.name} a 95% range of ${rangeText(widest)}.` +
+    '! Too few trials to tell: ' +
+      // Every trial passed: the low end is the weakest rate it can't rule out.
+      (widest.passRate === 1
+        ? `${widest.name} passed every trial, but ${trials} can't tell a server that always passes from one that passes ${lower} of the time.`
+        : `with ${trials}, ${widest.name}'s true pass rate is likely anywhere from ${lower} to ${upper}.`) +
       (next !== undefined
         ? ` Set "run": { "trials": ${next} } in the eval config and run it again.`
         : ` More trials per case won't narrow it enough with ${caseCount} ${caseCount === 1 ? 'case' : 'cases'}: add cases.`)
   );
 }
 
-/** A 95% range in whole percents, rounded outward so it never looks narrower: "39%-100%". */
-function rangeText(interval: { lower: number; upper: number }): string {
+/** A 95% range's ends in whole percents, rounded outward so it never looks narrower: ["39%", "100%"]. */
+function rangeEnds(interval: {
+  lower: number;
+  upper: number;
+}): [string, string] {
   // A hair of slack, so 0.4 (40.000...04%) isn't floored to 39%.
   const lower = Math.floor(interval.lower * 100 + 1e-9);
   const upper = Math.ceil(interval.upper * 100 - 1e-9);
-  return `${lower}%-${upper}%`;
+  return [`${lower}%`, `${upper}%`];
+}
+
+/** A 95% range in whole percents: "39%-100%". */
+function rangeText(interval: { lower: number; upper: number }): string {
+  return rangeEnds(interval).join('-');
 }
 
 /** Each pairwise judge's verdict on each variant against the baseline. */

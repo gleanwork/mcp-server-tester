@@ -8,7 +8,13 @@ import type {
   VariantComparisonEntry,
 } from '../../types';
 import { CaseCounts } from './VariantTable';
-import { FAILURE_LABEL, intervalText, pct, variantName } from './format';
+import {
+  FAILURE_LABEL,
+  likelyText,
+  likelyTitle,
+  pct,
+  variantName,
+} from './format';
 import {
   Preferences,
   TrialView,
@@ -156,7 +162,7 @@ function Cell({
           ? 'bg-green-500/10'
           : 'bg-amber-500/10';
   const interval = row.intervals?.[variant.id];
-  const range = interval ? `, 95% range ${intervalText(interval)}` : '';
+  const range = interval ? `, ${likelyText(interval)}` : '';
   const label = `${variantName(data, variant)}, ${row.id}: ${p} of ${k} trials passed${range}${
     change
       ? `, ${change === 'up' ? 'better' : 'worse'} than ${variantName(data, { id: data.baselineId })}`
@@ -167,7 +173,7 @@ function Cell({
       <button
         type="button"
         aria-label={label}
-        title={`${p} of ${k} passed${interval ? ` · 95%: ${intervalText(interval)}` : ''}`}
+        title={`${p} of ${k} passed${interval ? `. ${likelyTitle(interval, false)}` : ''}`}
         onClick={(e) => onOpen(e.currentTarget)}
         className={`relative grid min-h-[44px] w-full justify-items-center gap-0.5 rounded-md border border-transparent p-1 hover:border-border ${tone}`}
       >
@@ -321,9 +327,11 @@ function AttemptDialog({
               {variantName(data, { id })}{' '}
               <span className="font-sans font-normal text-muted-foreground">
                 {passes(row, id)}/{(row.trials[id] ?? []).length} passed
-                {row.intervals?.[id]
-                  ? ` · 95%: ${intervalText(row.intervals[id]!)}`
-                  : ''}
+                {row.intervals?.[id] ? (
+                  <span title={likelyTitle(row.intervals[id]!, false)}>
+                    {` · ${likelyText(row.intervals[id]!)}`}
+                  </span>
+                ) : null}
               </span>
             </h3>
             {lookup?.trials[id]?.[row.id] ? (
@@ -552,8 +560,11 @@ export function CaseGrid({
                         >
                           {rate !== undefined ? pct(rate) : '—'}
                           {interval && (
-                            <span className="block text-[11px]">
-                              95%: {intervalText(interval)}
+                            <span
+                              className="block text-[11px]"
+                              title={likelyTitle(interval, true)}
+                            >
+                              {likelyText(interval)}
                             </span>
                           )}
                         </td>

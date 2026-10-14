@@ -142,7 +142,7 @@ await runEvalDataset({ dataset, defaultTrials: 10 }, { mcp, testInfo });
 
 Individual cases can override this with their own `trials` field.
 
-The run report shows every pass rate with its 95% range, counting cases rather than trials as the sample. When a range is wider than ±10 points, the report says the run has too few trials to tell, and suggests how many to run next.
+The run report shows every pass rate with its likely range: where the true pass rate lies, with 95% confidence, counting cases rather than trials as the sample. With few trials it's wide, however reliable the server: 8 of 8 cases passing is likely 63.1–100%. When a range is wider than ±10 points, the report says the run has too few trials to tell, and suggests how many to run next.
 
 To show that a case passes at least 90% of the time, at 95% confidence, it takes 36 passing trials in a row; 95% takes 72.
 

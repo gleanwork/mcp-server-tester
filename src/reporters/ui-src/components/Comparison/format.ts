@@ -82,11 +82,35 @@ export function rangeText(change: PairedChange): string {
 }
 
 /** A pass rate's 95% interval: "63–100%". */
-export function intervalText(interval: {
-  lower: number;
-  upper: number;
-}): string {
+function intervalText(interval: { lower: number; upper: number }): string {
   return `${points(interval.lower)}–${points(interval.upper)}%`;
+}
+
+/** A pass rate's 95% interval as its label: "likely 63–100%". */
+export function likelyText(interval: { lower: number; upper: number }): string {
+  return `likely ${intervalText(interval)}`;
+}
+
+/**
+ * What a pass rate's likely range means, for its tooltip. `overCases` is
+ * true for a rate over several cases, whose interval counts cases, not
+ * trials.
+ */
+export function likelyTitle(
+  interval: { lower: number; upper: number; tooWide?: boolean },
+  overCases: boolean
+): string {
+  return [
+    `The true pass rate is likely between ${pct(interval.lower)} and ${pct(interval.upper)} (95% confidence). More trials narrow it.`,
+    overCases
+      ? "The range counts cases, not trials, as the sample, because a case's trials are correlated."
+      : null,
+    interval.tooWide
+      ? 'Wider than ±10 points: too few trials to pin the rate down.'
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 /** Display name: the baseline's name, or "current" in a tool optimization. */

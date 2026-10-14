@@ -214,8 +214,8 @@ test.describe('run report', () => {
     const report = await reportFor([{ name: 'quiet' }]);
     await page.goto(`file://${report}`);
     const result = page.getByRole('heading', { name: 'Result' }).locator('..');
-    await expect(result).toContainText('Pass rate, with its 95% range');
-    await expect(result).toContainText('95%: 0–');
+    await expect(result).toContainText('Pass rate, and where it likely lies');
+    await expect(result).toContainText('likely 0–');
     await expect(result).toContainText('Too few trials to tell.');
     await expect(page.getByRole('heading', { name: 'Variant' })).toBeVisible();
     await expect(
@@ -234,7 +234,8 @@ test.describe('run report', () => {
     await expect(rate).toBeVisible();
     await expect(rate).not.toHaveClass(/green/);
     await expect(result).toContainText(
-      "All 6 trials passed, but 2 trials per case can't pin down a pass rate"
+      // The low end, said as the weakest rate the run can't rule out.
+      "All 6 trials passed, but 2 trials per case can't tell a server that always passes from one that passes 17.9% of the time."
     );
     // Three cases: no number of trials pins the rate down.
     await expect(result).toContainText(

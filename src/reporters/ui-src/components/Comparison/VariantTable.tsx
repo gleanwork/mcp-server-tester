@@ -14,7 +14,8 @@ import {
   betterThreshold,
   direction,
   heldOutUnconfirmed,
-  intervalText,
+  likelyText,
+  likelyTitle,
   pValue,
   pct,
   pts,
@@ -179,9 +180,9 @@ function Rate({
       {interval && (
         <span
           className={`whitespace-nowrap font-mono text-[11px] ${interval.tooWide ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}
-          title={`95% range of the pass rate, counting cases rather than trials as the sample${interval.tooWide ? ': wider than ±10 points, too few trials to pin it down' : ''}`}
+          title={likelyTitle(interval, true)}
         >
-          95%: {intervalText(interval)}
+          {likelyText(interval)}
         </span>
       )}
     </span>
@@ -424,8 +425,9 @@ export function VariantTable({
       </div>
       <p className="max-w-[100ch] text-xs text-muted-foreground">
         Each rate is the mean, over cases, of the share of trials that passed.
-        Its 95% range counts cases, not trials, as the sample, because a case's
-        trials are correlated; amber marks a range wider than ±10 points.
+        Under it is where the true pass rate likely lies (95% confidence),
+        counting cases, not trials, as the sample, because a case's trials are
+        correlated; amber marks a range wider than ±10 points.
         {single ? null : (
           <>
             {' '}
