@@ -14,7 +14,7 @@ import type {
   ClientConfig,
   ModelPricing,
 } from './evalConfig.js';
-import type { EvalResultStore } from './resultStore.js';
+import type { RunStore } from './runStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
 import type { PairwiseComparisonResult } from './pairwiseComparison.js';
@@ -324,10 +324,15 @@ export interface JudgeDefinition {
   preflight?: (options: Record<string, unknown>) => Promise<void>;
 }
 
-/** Public result-store extension point. */
+/**
+ * A result store extension: where an eval config's runs are kept besides the
+ * local run directory. `create` gets the options `schema` parsed and returns
+ * the store, which only moves bytes; MST owns the layout in it.
+ */
 export interface ResultStoreDefinition {
   readonly schema: ZodType;
-  create(config: ExtensionConfig): EvalResultStore;
+  readonly description?: string;
+  create(config: ExtensionConfig): RunStore;
 }
 
 /**
@@ -609,7 +614,6 @@ export interface RunSummary {
   metrics: Record<string, unknown>;
   telemetry?: RunTelemetry;
   variantDeltas: Record<string, Record<string, unknown>>;
-  caseArtifactPointers?: Record<string, string[]>;
   results: EvalCaseResult[];
   /** A tool optimization the run reported (the Playwright reporter's runs). */
   toolOptimization?: MCPToolOptimizationData;

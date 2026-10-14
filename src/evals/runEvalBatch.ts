@@ -2,7 +2,9 @@ import { RUN_FORMAT } from './resultFormat.js';
 import { rejectRenamedOptions } from './renamedKeys.js';
 import crypto from 'node:crypto';
 import { describeError } from '../utils/describeError.js';
-import { resolveStorePaths } from './builtinResultStores.js';
+import { createRunStore, resolveStorePaths } from './builtinResultStores.js';
+import { storeRunHistory } from './runStore.js';
+import { joinCaseResults } from './runFormat.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
@@ -14,6 +16,7 @@ import type { Plugin } from '../plugins/plugin.js';
 import { loadEvalPlugins } from './evalPlugins.js';
 import { runEval, type RunEvalOptions } from './runEval.js';
 import type {
+  EvaluationSummary,
   EvaluationBatchItem,
   EvaluationBatchOptions,
   EvaluationBatchResult,
@@ -67,37 +70,22 @@ const CompletedSummarySchema = z.object({
     failed: z.number().int().nonnegative(),
   }),
   results: z.array(CompletedCaseSchema),
-});
-const StoredSummarySchema = z.object({
-  format: z.literal(RUN_FORMAT),
-  kind: z.literal('eval-run-summary'),
-  id: z.string().min(1),
-  createdAt: z.iso.datetime(),
-  metadata: z.object({
-    labels: z.object({
-      configId: z.string(),
-      contentHash: z.string(),
-      partial: z.string().optional(),
-    }),
-  }),
-  data: CompletedSummarySchema,
+  partial: z.boolean().optional(),
+  graded: z.boolean().optional(),
 });
 
+/** Whether a stored run's summary, with its case results, is a complete result of the eval config. */
 function isMatchingCompletedSummary(
-  artifact: unknown,
-  artifactId: string,
+  value: unknown,
   evalConfig: EvalConfig
 ): boolean {
-  const parsed = StoredSummarySchema.safeParse(artifact);
+  const parsed = CompletedSummarySchema.safeParse(value);
   if (!parsed.success) return false;
-  const { data: summary, metadata } = parsed.data;
-  // A narrowed run is not the eval's result.
-  if (metadata.labels.partial === 'true') return false;
+  const summary = parsed.data;
+  // A narrowed or ungraded run is not the eval's result.
+  if (summary.partial === true || summary.graded === false) return false;
   const identity = configIdentity(evalConfig);
   if (
-    parsed.data.id !== artifactId ||
-    metadata.labels.configId !== identity.configId ||
-    metadata.labels.contentHash !== identity.contentHash ||
     summary.configId !== identity.configId ||
     summary.contentHash !== identity.contentHash ||
     summary.configName !== evalConfig.name
@@ -162,24 +150,31 @@ async function hasMatchingSavedResult(
       { namespaces }
     );
     // Relative store paths resolve like the eval's: eval config directory, then rootDir.
-    const store = definition.create(
+    const store = createRunStore(
+      config.type,
+      definition,
       resolveStorePaths(config, {
         configDir: path.dirname(path.resolve(configPath)),
         rootDir,
       })
     );
     const identity = configIdentity(evalConfig);
-    for (const candidate of await store.listArtifacts('eval-run-summary')) {
-      if (
-        candidate.metadata?.labels?.configId !== identity.configId ||
-        candidate.metadata?.labels?.contentHash !== identity.contentHash
-      )
-        continue;
+    const history = storeRunHistory(store, evalConfig.name);
+    // Newest first: run IDs sort by start time.
+    for (const runId of (await history.runIds()).sort().reverse()) {
       try {
+        const summary = (await history.summary(runId)) as
+          | EvaluationSummary
+          | undefined;
+        if (
+          !summary ||
+          summary.configId !== identity.configId ||
+          summary.contentHash !== identity.contentHash
+        )
+          continue;
         if (
           isMatchingCompletedSummary(
-            await store.loadArtifact('eval-run-summary', candidate.id),
-            candidate.id,
+            joinCaseResults(summary, await history.cases(runId)),
             evalConfig
           )
         )

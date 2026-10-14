@@ -45,9 +45,48 @@ function isComparable(
 }
 
 /**
- * The newest earlier run of the eval config: from the result store when the
- * eval config has one, else from the other runs in this eval's `runs/`
- * directory (their `summary.json` and `results.json`). Never another eval config's run.
+ * An eval's runs, wherever they're kept: a local `runs/` directory, or a
+ * result store (`storeRunHistory`).
+ */
+export interface RunHistory {
+  /** The IDs of the eval's runs, in any order. */
+  runIds(): Promise<string[]>;
+  /** A run's `summary.json`, or undefined when it has none. */
+  summary(runId: string): Promise<unknown>;
+  /** A run's case results, from its `results.json`. */
+  cases(runId: string): Promise<EvalCaseResult[]>;
+}
+
+/** The runs in a local `runs/` directory. */
+function localRunHistory(runsDirectory: string): RunHistory {
+  return {
+    runIds: () => fs.readdir(runsDirectory),
+    async summary(runId) {
+      const value: unknown = JSON.parse(
+        await fs.readFile(
+          path.join(runsDirectory, runId, 'summary.json'),
+          'utf8'
+        )
+      );
+      return value;
+    },
+    async cases(runId) {
+      const results = JSON.parse(
+        await fs.readFile(
+          path.join(runsDirectory, runId, 'results.json'),
+          'utf8'
+        )
+      ) as { cases?: EvalCaseResult[] };
+      return results.cases ?? [];
+    },
+  };
+}
+
+/**
+ * The newest earlier run of the eval config: from `history` (a result store
+ * that holds runs) when given, else from an artifact `store` (the Playwright
+ * reporter's), else from the other runs in this eval's `runs/` directory
+ * (their `summary.json` and `results.json`). Never another eval config's run.
  */
 export async function findPreviousRun(options: {
   configId: string;
@@ -57,6 +96,7 @@ export async function findPreviousRun(options: {
   /** Whether this run is partial, and how it was narrowed. */
   partial?: boolean;
   selectionHash?: string;
+  history?: RunHistory;
   store?: EvalResultStore;
   outputRoot: string;
   /**
@@ -77,7 +117,7 @@ export async function findPreviousRun(options: {
     sameTraces(summary.runId) ||
     (summary.collectedAt ?? summary.timestamp) <= regradeOf.collectedAt;
   const rank = (runId: string) => (sameTraces(runId) ? 0 : 1);
-  if (options.store) {
+  if (!options.history && options.store) {
     const candidates = (await options.store.listArtifacts('eval-run-summary'))
       .filter(
         (artifact) =>
@@ -110,59 +150,50 @@ export async function findPreviousRun(options: {
     }
     return undefined;
   }
+  const history = options.history ?? localRunHistory(options.outputRoot);
   let entries: string[];
   try {
-    entries = await fs.readdir(options.outputRoot);
+    entries = await history.runIds();
   } catch {
     return undefined;
   }
-  const runs: PreviousRun[] = [];
-  for (const entry of entries) {
-    if (entry === options.runId) continue;
-    try {
-      const value: unknown = JSON.parse(
-        await fs.readFile(
-          path.join(options.outputRoot, entry, 'summary.json'),
-          'utf8'
-        )
-      );
-      if (
-        isComparable(value, options.configId, options.variants, options) &&
-        eligible(value)
-      )
-        runs.push({
-          runId: value.runId ?? entry,
-          summary: await withCaseResults(
-            value,
-            path.join(options.outputRoot, entry, 'results.json')
-          ),
-        });
-    } catch {
-      // Not a run directory, or an unreadable one: not a baseline.
-    }
-  }
-  return runs.sort(
-    (a, b) =>
-      rank(a.runId) - rank(b.runId) ||
-      b.summary.timestamp.localeCompare(a.summary.timestamp)
-  )[0];
-}
-
-/** A run directory's summary, with its case results from results.json. */
-async function withCaseResults(
-  summary: EvaluationSummary,
-  resultsPath: string
-): Promise<EvaluationSummary> {
-  let cases: EvalCaseResult[] = [];
-  try {
-    const results = JSON.parse(await fs.readFile(resultsPath, 'utf8')) as {
-      cases?: EvalCaseResult[];
-    };
-    cases = results.cases ?? [];
-  } catch {
-    // A run without results.json compares as having no cases.
-  }
-  return joinCaseResults(summary, cases);
+  // Summaries pick the run; only that run's case results are read.
+  const runs = (
+    await Promise.all(
+      entries
+        .filter((entry) => entry !== options.runId)
+        .map(async (entry) => {
+          try {
+            const value = await history.summary(entry);
+            return isComparable(
+              value,
+              options.configId,
+              options.variants,
+              options
+            ) && eligible(value)
+              ? [{ entry, runId: value.runId ?? entry, summary: value }]
+              : [];
+          } catch {
+            // Not a run directory, or an unreadable one: not a baseline.
+            return [];
+          }
+        })
+    )
+  )
+    .flat()
+    .sort(
+      (a, b) =>
+        rank(a.runId) - rank(b.runId) ||
+        b.summary.timestamp.localeCompare(a.summary.timestamp)
+    );
+  const newest = runs[0];
+  if (!newest) return undefined;
+  // A run without results.json compares as having no cases.
+  const cases = await history.cases(newest.entry).catch(() => []);
+  return {
+    runId: newest.runId,
+    summary: joinCaseResults(newest.summary, cases),
+  };
 }
 
 function metric(

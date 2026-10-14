@@ -38,7 +38,7 @@ runtime validation is provided by `EvalConfigSchema`.
   "results": {
     "store": {
       "type": "file",
-      "dir": ".mcp-test-results"
+      "dir": "./shared-results"
     }
   },
   "variants": [
@@ -95,7 +95,7 @@ export default plugin;
 - **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
 - **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEval` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** An eval config may only reference namespaces of plugins it loads, even if another eval in the same process (a batch) loaded more. The same check applies to the clients and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
-- **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), `create` (result stores), and `open` (environments, with an optional positive `maxShards`). MST validates the plugin when it loads, and names the plugin and extension in any error.
+- **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), `create` (result stores, returning a [`RunStore`](#result-stores)), and `open` (environments, with an optional positive `maxShards`). MST validates the plugin when it loads, and names the plugin and extension in any error.
 - **Environments.** `environments` declares where a run's trials can be collected, used as `mst run --env acme/env/cloud-vm` ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)). An environment's `schema` checks its `--env-option`s, which arrive as strings, except `shards` and `keep`, which MST owns. In a plugin environment, MST first collects every variant's trials on `shards` machines, splitting cases by `hash(caseId) mod shards` so that a case's variants and trials share one machine. It saves each trial as it comes back, then grades them all on this machine as it grades a batch's. A trial whose shard ended without it is **missing** (`failureKind: 'missing'`): its case is incomplete, so it is left out of `total`, `passed`, `failed` and the pass rate, and counted in `incomplete`. The run is `collect: partial` and doesn't become `latest.json`. Ctrl-C stops the shards and keeps what came back; a second Ctrl-C quits. Workers get the `--secrets-file` values (not this machine's environment) and resolve their servers' secrets themselves. A connector server goes to a worker as its declaration: the worker's plugin launches it with the worker's paths, and the worker asks this machine for the server's access token when it starts and again before the token expires, so refresh grants stay here. A variant's tool metadata is served by a proxy on the worker. `mst run --resume <run-id>` (`resumeRun`) completes such a run: it collects only the missing trials in the same environment, grades every trial again (the others from their stored traces, so the run must store them with `"redactStoredResponses": false`), and writes the run into its own directory, which becomes `latest.json` once nothing is missing. Connector servers and variants with tool metadata can't run in an environment yet. `run.json`'s `environment` records the environment's name, shards, and any `keep` or options, so options must not hold secrets.
 
   Most environments only create machines. `machineEnvironment` (from `./evals`) builds the rest: it copies the shard's bundle to the machine, starts the hidden `mst collect` there, answers the worker's `mst.shard/v1` messages (tokens, progress, heartbeats, cancel), copies the results back after each trial, and deletes the machine when the shard ends, or keeps it as `keep` says:
@@ -734,7 +734,38 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 - **`--output-dir`** names the eval's directory (`<output-dir>/runs/<run-id>/`).
 - **`report/`** is built from the run's own files, so `mst open <run>` can rebuild it for a run copied without it. `run.json` records each variant's setup (client, model, servers, tool metadata, input template, judges, and client options, with any whose name suggests a credential replaced by a hash) for the report's _What differs_. See [`mst open`](./cli.md#open---open-a-runs-report).
 
-A result store set in the eval config also gets the run summary, as before.
+### Result stores
+
+A result store keeps each run's directory besides the local one, so runs from CI or other machines are in one place. Choose it per run with `mst run --results <store>`, or set `results.store` in the eval config; the flag wins.
+
+```bash
+npx mst run --config eval.json --results gs://my-bucket/evals   # a GCS bucket and prefix
+npx mst run --config eval.json --results file:./shared-results  # a local directory
+npx mst run --config eval.json --results acme/result-store/eval-results  # a plugin's store
+```
+
+The store holds the same layout as a local results directory: `<eval name>/runs/<run-id>/` (every file, the report included) and `<eval name>/latest.json`. The run is written locally first, then copied; `latest.json` is written last, and only when the run became the local latest run (a full, graded run). If the copy fails, `mst run` fails and names the local run directory, and the store's `latest.json` is unchanged. Redaction applies before the copy, so the store gets what the run directory has.
+
+With a store, the [previous run](#compared-with-the-previous-run) is the store's newest comparable run, so a CI machine with no local runs still compares with the last one. `mst batch --skip-existing` also reads the store.
+
+The `gcs` store needs the optional `@google-cloud/storage` package and Application Default Credentials. A plugin's result store returns a `RunStore` from `create`: it only moves bytes, and MST owns the layout.
+
+```ts
+import type { RunStore } from '@gleanwork/mcp-server-tester/evals';
+
+const store: RunStore = {
+  location: 's3://bucket/prefix', // shown in messages
+  async put(key, body) {}, // write bytes at a `/`-separated key
+  async get(key) {
+    return null; // the bytes, or null when there are none
+  },
+  async list(prefix, { shallow } = {}) {
+    return []; // every key under prefix; with shallow, one level, "directories" ending in /
+  },
+};
+```
+
+Opening a stored run (`mst open --results`) and listing runs (`mst runs list`) are planned.
 
 ## Variants
 
@@ -825,7 +856,7 @@ MST ships no prices; they change too often to bake in.
 
 Every run has a `runId`. Its summary's `previousRun` compares it with the previous run of the same eval config that ran the same variants, when there is one:
 
-- **Which run.** The eval config's `name` identifies it, so two eval configs with the same name share a history. With a result store, the previous run is the store's newest summary for that eval config. Without one, it's the newest earlier run in the eval's `runs/` directory (under `--output-dir`, by default `.mcp-test-results/<name>/`), read from its `summary.json` and `results.json`.
+- **Which run.** The eval config's `name` identifies it, so two eval configs with the same name share a history. With a result store, the previous run is the store's newest comparable run of that eval config. Without one, it's the newest earlier run in the eval's `runs/` directory (under `--output-dir`, by default `.mcp-test-results/<name>/`), read from its `summary.json` and `results.json`.
 - **Output.** `mst run` prints the change and the regressed, improved, added and removed cases.
 - **Best effort.** A previous run that can't be read is skipped with a warning; it never fails the run.
 

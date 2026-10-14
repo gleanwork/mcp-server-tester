@@ -611,13 +611,21 @@ export async function writeLatest(
   runId: string,
   createdAt: string
 ): Promise<void> {
-  await replaceJson(path.join(evalDirectory, 'latest.json'), {
+  await replaceJson(
+    path.join(evalDirectory, 'latest.json'),
+    latestRecord(runId, createdAt)
+  );
+}
+
+/** The `latest.json` that points at a run, locally or in a result store. */
+export function latestRecord(runId: string, createdAt: string) {
+  return {
     format: RUN_FORMAT,
-    kind: 'latest',
+    kind: 'latest' as const,
     runId,
     createdAt,
     path: `runs/${runId}`,
-  });
+  };
 }
 
 /**
