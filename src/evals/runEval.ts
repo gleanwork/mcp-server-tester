@@ -12,6 +12,7 @@ import {
   writeTrial,
   type RunFacts,
   findRunDirectory,
+  RUN_ID_PATTERN,
   nextRegradeId,
   readRunDirectory,
   readRunTrials,
@@ -119,7 +120,13 @@ import {
   parseResultsFlag,
   resolveStorePaths,
 } from './builtinResultStores.js';
-import { storeRunHistory, uploadRun } from './runStore.js';
+import {
+  fetchRun,
+  storedRunIds,
+  storeRunHistory,
+  uploadRun,
+  type RunStore,
+} from './runStore.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
 import { costSource, estimateCosts } from './pricing.js';
 import {
@@ -661,10 +668,13 @@ export async function gradeRun(
   const { name } = loadEvalConfig(options.configPath, { rootDir });
   const evalDirectory =
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
-  const directory = await findRunDirectory(
-    runsDirectory(evalDirectory),
-    options.run,
-    rootDir
+  const store = await gradeResultStore(options, rootDir);
+  const directory = await locateRun(
+    options,
+    name,
+    evalDirectory,
+    rootDir,
+    store
   );
   const { run, summary: stored } = await readRunDirectory(directory);
   if (run.evalName !== name)
@@ -675,7 +685,11 @@ export async function gradeRun(
     run,
     directory,
     await readRunTrials(directory),
-    await nextRegradeId(path.dirname(directory), run.runId),
+    await unusedRegradeId(
+      await nextRegradeId(path.dirname(directory), run.runId),
+      name,
+      store
+    ),
     stored.collectedAt ?? stored.timestamp
   );
   await assertStoredArtifacts(replay);
@@ -690,6 +704,115 @@ export async function gradeRun(
     },
     replay
   );
+}
+
+/**
+ * Where a run is kept besides its directory: `--results`, else the eval
+ * config's `results.store`. Needs the eval's plugins loaded.
+ */
+function openResultStore(
+  results: string | undefined,
+  evalConfig: EvalConfig,
+  namespaces: string[],
+  dirs: { configDir: string; rootDir: string }
+): RunStore | undefined {
+  if (results !== undefined) {
+    const { config, definition } = resolveResultStoreConfig(
+      parseResultsFlag(results),
+      { namespaces }
+    );
+    return createRunStore(config.type, definition, config);
+  }
+  return evalConfig.results?.store
+    ? createRunStore(
+        evalConfig.results.store.type,
+        getResultStore(evalConfig.results.store.type),
+        resolveStorePaths(evalConfig.results.store, dirs)
+      )
+    : undefined;
+}
+
+/** The result store `mst grade` or `--resume` would keep the run in, with the eval's plugins loaded. */
+async function gradeResultStore(
+  options: GradeRunOptions,
+  rootDir: string
+): Promise<RunStore | undefined> {
+  const loaded = loadEvalConfig(options.configPath, { rootDir });
+  const namespaces = await loadEvalPlugins({
+    configPath: options.configPath,
+    evalConfig: loaded,
+    rootDir,
+    pluginPaths: options.pluginPaths,
+    plugins: options.plugins,
+  });
+  return openResultStore(
+    options.results,
+    resolveConfigExtends(loaded, namespaces),
+    namespaces,
+    { configDir: path.dirname(path.resolve(options.configPath)), rootDir }
+  );
+}
+
+/**
+ * The directory of the run `options.run` names: among the eval's local runs,
+ * else fetched from the result store into them, by its run ID or short form.
+ */
+async function locateRun(
+  options: GradeRunOptions,
+  evalName: string,
+  evalDirectory: string,
+  rootDir: string,
+  store: RunStore | undefined
+): Promise<string> {
+  const runs = runsDirectory(evalDirectory);
+  try {
+    return await findRunDirectory(runs, options.run, rootDir);
+  } catch (error) {
+    if (!store) throw error;
+    const stored = await storedRunIds(store, evalName);
+    const matches = RUN_ID_PATTERN.test(options.run)
+      ? stored.filter((id) => id === options.run)
+      : stored.filter((id) => id.endsWith(`-${options.run}`));
+    if (matches.length > 1)
+      throw new Error(
+        `"${options.run}" matches ${matches.length} runs in the result store ${store.location}: ${matches.join(', ')}. Give the full run ID.`
+      );
+    if (matches.length === 0)
+      throw new Error(
+        `${error instanceof Error ? error.message : String(error)} The result store ${store.location} hasn't it either.`,
+        { cause: error }
+      );
+    const runId = matches[0]!;
+    const directory = path.join(runs, runId);
+    const fetched = await fetchRun(store, { evalName, runId, directory });
+    console.log(
+      `[mst] Fetched run ${runId} from the result store ${store.location} (${fetched.files} files, ${formatBytes(fetched.bytes)}).`
+    );
+    return directory;
+  }
+}
+
+/**
+ * `id`, or the next regrade ID after it the result store hasn't: a regrade
+ * on another machine may have stored `<run>.g2` that this one hasn't.
+ */
+async function unusedRegradeId(
+  id: string,
+  evalName: string,
+  store: RunStore | undefined
+): Promise<string> {
+  if (!store) return id;
+  const taken = new Set(await storedRunIds(store, evalName));
+  const [collected, n] = id.split('.g') as [string, string];
+  let next = Number(n);
+  while (taken.has(`${collected}.g${next}`)) next++;
+  return `${collected}.g${next}`;
+}
+
+function formatBytes(bytes: number): string {
+  return bytes < 1024 * 1024
+    ? `${Math.ceil(bytes / 1024)} KiB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 /** What `mst run --resume` completes, and where. */
@@ -714,10 +837,12 @@ export async function resumeRun(
   const { name } = loadEvalConfig(options.configPath, { rootDir });
   const evalDirectory =
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
-  const directory = await findRunDirectory(
-    runsDirectory(evalDirectory),
-    options.run,
-    rootDir
+  const directory = await locateRun(
+    options,
+    name,
+    evalDirectory,
+    rootDir,
+    await gradeResultStore(options, rootDir)
   );
   const { run, summary: stored } = await readRunDirectory(directory);
   if (run.evalName !== name)
@@ -912,22 +1037,10 @@ async function evaluate(
   const inEnvironment = environment.name !== LOCAL_ENVIRONMENT;
   // Where the run is kept besides its directory: --results, else the eval
   // config's store. Resolved before any trial runs, so a bad store fails first.
-  const resultStore =
-    options.results !== undefined
-      ? (() => {
-          const { config, definition } = resolveResultStoreConfig(
-            parseResultsFlag(options.results),
-            { namespaces }
-          );
-          return createRunStore(config.type, definition, config);
-        })()
-      : evalConfig.results?.store
-        ? createRunStore(
-            evalConfig.results.store.type,
-            getResultStore(evalConfig.results.store.type),
-            resolveStorePaths(evalConfig.results.store, { configDir, rootDir })
-          )
-        : undefined;
+  const resultStore = openResultStore(options.results, evalConfig, namespaces, {
+    configDir,
+    rootDir,
+  });
   const recordedDeclarations = connectorDeclarations(connectors);
   // What each shard ran on, for run.json.
   let shardRecords: ShardRecord[] | undefined;

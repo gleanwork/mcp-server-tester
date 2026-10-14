@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { gradeRun, runEval } from './runEval.js';
+import { gradeRun, resumeRun, runEval } from './runEval.js';
 import { printRunResult } from '../cli/commands/run/index.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -622,6 +622,85 @@ describe("trials' client artifacts", () => {
     await expect(
       fs.stat(path.join(collected.outputDir, 'artifacts'))
     ).rejects.toThrow();
+  });
+});
+
+describe('mst grade --results: a run collected on another machine', () => {
+  it('is fetched from the result store and graded, and regrades elsewhere take new IDs', async () => {
+    const t = await setup();
+    const store = path.join(t.dir, 'store');
+    const results = `file:${store}`;
+    const collected = await runEval({ ...t.base, results, grade: false });
+    const runId = path.basename(collected.outputDir);
+    // Another machine: its own results directory, without the run.
+    const elsewhere = path.join(t.dir, 'machine-2');
+    const graded = await gradeRun({
+      ...t.base,
+      results,
+      outputDir: elsewhere,
+      run: runId.slice(-6),
+    });
+    expect(graded.gradedFrom).toBe(runId);
+    expect(t.client).toHaveBeenCalledTimes(4);
+    expect(t.judge).toHaveBeenCalledTimes(4);
+    expect(graded.outputDir).toBe(path.join(elsewhere, 'runs', `${runId}.g2`));
+    await expect(
+      fs.stat(path.join(elsewhere, 'runs', runId, 'manifest.json'))
+    ).resolves.toBeTruthy();
+    // The regrade is stored, complete.
+    await expect(
+      fs.stat(
+        path.join(store, 'grade-test', 'runs', `${runId}.g2`, 'manifest.json')
+      )
+    ).resolves.toBeTruthy();
+    // A third machine takes the next regrade ID, not the stored one's.
+    const third = await gradeRun({
+      ...t.base,
+      results,
+      outputDir: path.join(t.dir, 'machine-3'),
+      run: runId,
+    });
+    expect(path.basename(third.outputDir)).toBe(`${runId}.g3`);
+    // Graded again where it was fetched: the local copy, not a new fetch.
+    const again = await gradeRun({
+      ...t.base,
+      results,
+      outputDir: elsewhere,
+      run: runId,
+    });
+    expect(path.basename(again.outputDir)).toBe(`${runId}.g4`);
+    // --resume fetches it too (here, to find there's nothing to resume).
+    const fourth = path.join(t.dir, 'machine-4');
+    await expect(
+      resumeRun({ ...t.base, results, outputDir: fourth, run: runId })
+    ).rejects.toThrow('there is nothing to resume');
+    await expect(
+      fs.stat(path.join(fourth, 'runs', runId, 'run.json'))
+    ).resolves.toBeTruthy();
+  });
+
+  it('refuses a stored run that is incomplete or tampered with, and says where it looked', async () => {
+    const t = await setup();
+    const store = path.join(t.dir, 'store');
+    const results = `file:${store}`;
+    const collected = await runEval({ ...t.base, results, grade: false });
+    const runId = path.basename(collected.outputDir);
+    const stored = path.join(store, 'grade-test', 'runs', runId);
+    const elsewhere = path.join(t.dir, 'machine-2');
+    await fs.appendFile(path.join(stored, 'run.json'), ' ');
+    await expect(
+      gradeRun({ ...t.base, results, outputDir: elsewhere, run: runId })
+    ).rejects.toThrow("run.json doesn't match its manifest");
+    await fs.rm(path.join(stored, 'manifest.json'));
+    await expect(
+      gradeRun({ ...t.base, results, outputDir: elsewhere, run: runId })
+    ).rejects.toThrow('has no manifest.json');
+    expect(
+      await fs.readdir(path.join(elsewhere, 'runs')).catch(() => [])
+    ).toEqual([]);
+    await expect(
+      gradeRun({ ...t.base, results, outputDir: elsewhere, run: 'ffffff' })
+    ).rejects.toThrow(`The result store ${store} hasn't it either`);
   });
 });
 

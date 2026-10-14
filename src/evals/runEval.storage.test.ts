@@ -243,9 +243,12 @@ describe('eval storage through public APIs', () => {
         const id = path.basename(result.outputDir);
         expect(id).toMatch(RUN_ID_PATTERN);
         const stored = path.join(f.storeDir, 'storage-suite', 'runs', id);
-        // The same files, byte for byte, report included.
+        // The same files, byte for byte, report included, and the
+        // manifest of them that the upload writes last.
         const files = await filesUnder(result.outputDir);
-        expect(files).toEqual(await filesUnder(stored));
+        expect(await filesUnder(stored)).toEqual(
+          [...files, 'manifest.json'].sort()
+        );
         expect(files).toEqual(
           expect.arrayContaining([
             'run.json',
