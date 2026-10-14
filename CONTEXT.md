@@ -167,7 +167,7 @@ How a variant differs from the baseline, or a run from an earlier run: metric ch
 _Avoid_: diff, A/B result, verdict
 
 **Result store**:
-Where an eval's results go besides its run directories: today a `file` directory or a `gcs` bucket (`results.store`), which gets each run's results and summary. Stores that hold whole runs, with `mst run --results` and `mst open --results`, are planned.
+Where an eval's runs are kept besides the local run directories: a `file` directory, a `gcs` bucket, or a plugin's store, chosen with `mst run --results` or the eval config's `results.store`. It gets a copy of each whole run directory, in the same layout, and is where the previous run comes from. A plugin's store only moves bytes (a `RunStore`); MST owns the layout. Opening a stored run (`mst open --results`) is planned.
 _Avoid_: results backend, sink
 
 **Regression case**:

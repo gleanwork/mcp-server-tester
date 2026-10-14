@@ -250,6 +250,10 @@ program
     "Don't write the run's report (mst open writes it when it opens the run)"
   )
   .option(
+    '--results <store>',
+    "Also keep the run in a result store, instead of the eval config's: gs://<bucket>/<prefix>, file:<dir>, or <namespace>/result-store/<name>"
+  )
+  .option(
     '--store <dir>',
     'Credential store for connector servers (default: ~/.mcp-server-tester/grants)'
   )
@@ -294,6 +298,10 @@ program
   .option(
     '--no-report',
     "Don't write the regrade's report (mst open writes it when it opens the run)"
+  )
+  .option(
+    '--results <store>',
+    "Also keep the regrade in a result store, instead of the eval config's: gs://<bucket>/<prefix>, file:<dir>, or <namespace>/result-store/<name>"
   )
   .action((runArg: string, options: Record<string, unknown>) =>
     grade(runArg, options as unknown as Parameters<typeof grade>[1])

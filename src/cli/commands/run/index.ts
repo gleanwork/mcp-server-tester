@@ -40,6 +40,8 @@ export interface RunOptions {
   grade?: boolean;
   /** `--resume <run>`: collect a run's missing trials and grade it again. */
   resume?: string;
+  /** `--results <store>`: the result store that keeps the run. */
+  results?: string;
 }
 
 /** Flags that would change what a resumed run is. */
@@ -119,6 +121,7 @@ export async function run(options: RunOptions): Promise<void> {
     ...(options.envOption?.length
       ? { envOptions: parseEnvOptions(options.envOption) }
       : {}),
+    ...(options.results ? { results: options.results } : {}),
   };
   if (options.resume !== undefined) {
     const given: string[] = NOT_WITH_RESUME.filter(([key]) => {
@@ -157,6 +160,7 @@ export async function run(options: RunOptions): Promise<void> {
             ...(evalOptions.credentialStore
               ? { credentialStore: evalOptions.credentialStore }
               : {}),
+            ...(evalOptions.results ? { results: evalOptions.results } : {}),
           });
   } catch (error) {
     // A validation failure says which config it is in.
@@ -299,6 +303,7 @@ export function printRunResult(
     }
   }
   console.log(`Output: ${result.outputDir}`);
+  if (result.storedIn) console.log(`Stored in: ${result.storedIn}`);
   const report = runReportPath(result.outputDir);
   if (existsSync(report))
     // A partial or ungraded run never becomes the eval's latest, so name it.

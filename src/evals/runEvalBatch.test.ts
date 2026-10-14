@@ -16,11 +16,7 @@ import { loadEvalConfig, type EvalConfig } from './evalConfig.js';
 import { resolveConfigExtends } from './configExtends.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import {
-  createStoredEvalArtifact,
-  FileEvalResultStore,
-  type StoredEvalArtifact,
-} from './resultStore.js';
+import { fileRunStore, type RunStore } from './runStore.js';
 
 vi.mock('./runEval.js', () => ({ runEval: vi.fn() }));
 
@@ -75,21 +71,45 @@ function completedSummary(evalConfig: EvalConfig): EvaluationSummary {
   };
 }
 
-function summaryArtifact(
-  summary: EvaluationSummary
-): StoredEvalArtifact<EvaluationSummary> {
-  return createStoredEvalArtifact({
-    kind: 'eval-run-summary',
-    id: 'saved-run',
-    data: summary,
-    metadata: {
-      labels: {
-        configId: summary.configId,
-        contentHash: summary.contentHash,
-      },
-    },
-    createdAt: summary.timestamp,
-  });
+/** A run as a store keeps it: its summary (with case results) and run ID. */
+interface SavedRun {
+  runId: string;
+  summary: EvaluationSummary;
+}
+
+const SAVED_RUN_ID = '20260910T000000Z-5a7ed0';
+
+/** Write a run's summary.json and results.json to a store, as mst run does. */
+async function saveRun(store: RunStore, saved: SavedRun): Promise<void> {
+  const { results, ...rest } = saved.summary;
+  const base = `${saved.summary.configName}/runs/${saved.runId}/`;
+  await store.put(
+    `${base}summary.json`,
+    JSON.stringify({
+      ...rest,
+      variants: rest.variants.map((variant) =>
+        variant.result
+          ? {
+              ...variant,
+              result: (({ caseResults: _cases, ...totals }) => totals)(
+                variant.result
+              ),
+            }
+          : variant
+      ),
+      kind: 'summary',
+      runId: saved.runId,
+    })
+  );
+  await store.put(
+    `${base}results.json`,
+    JSON.stringify({
+      format: 'mst.run/v1',
+      kind: 'results',
+      runId: saved.runId,
+      cases: results,
+    })
+  );
 }
 
 describe('runEvalBatch skipExisting', () => {
@@ -97,7 +117,7 @@ describe('runEvalBatch skipExisting', () => {
   let configPath: string;
   let storeDir: string;
   let outputRoot: string;
-  let store: FileEvalResultStore;
+  let store: RunStore;
   let configInput: Record<string, unknown>;
 
   beforeEach(async () => {
@@ -106,7 +126,7 @@ describe('runEvalBatch skipExisting', () => {
     configPath = path.join(rootDir, 'eval.json');
     storeDir = path.join(rootDir, 'store');
     outputRoot = path.join(rootDir, 'output');
-    store = new FileEvalResultStore({ provider: 'file', dir: storeDir });
+    store = fileRunStore(storeDir);
     globals[STORE_GLOBAL] = store;
     configInput = {
       name: 'resume-test',
@@ -133,14 +153,13 @@ describe('runEvalBatch skipExisting', () => {
     await fs.rm(rootDir, { recursive: true, force: true });
   });
 
-  async function saveValidSummary(): Promise<
-    StoredEvalArtifact<EvaluationSummary>
-  > {
-    const artifact = summaryArtifact(
-      completedSummary(loadEvalConfig(configPath, { rootDir }))
-    );
-    await store.saveArtifact(artifact);
-    return artifact;
+  async function saveValidSummary(): Promise<SavedRun> {
+    const saved = {
+      runId: SAVED_RUN_ID,
+      summary: completedSummary(loadEvalConfig(configPath, { rootDir })),
+    };
+    await saveRun(store, saved);
+    return saved;
   }
 
   async function run(options: Partial<RunEvalBatchOptions> = {}) {
@@ -181,7 +200,7 @@ describe('runEvalBatch skipExisting', () => {
     expect(new Set(result.items.map((item) => item.outputDir)).size).toBe(2);
   });
 
-  it('resumes a valid stored summary repeatedly without relying on results.json', async () => {
+  it('resumes a valid stored run repeatedly', async () => {
     await saveValidSummary();
     for (let i = 0; i < 3; i++) {
       expect(await run()).toMatchObject({ skipped: 1, failed: 0, passed: 0 });
@@ -190,29 +209,28 @@ describe('runEvalBatch skipExisting', () => {
   });
 
   it('resumes completed failing evaluations, not only passing ones', async () => {
-    const artifact = await saveValidSummary();
-    artifact.data.results[0]!.pass = false;
-    artifact.data.metrics.passed = 0;
-    artifact.data.metrics.failed = 1;
-    artifact.data.variants[0]!.result!.passed = 0;
-    artifact.data.variants[0]!.result!.failed = 1;
-    await store.saveArtifact(artifact);
+    const saved = await saveValidSummary();
+    saved.summary.results[0]!.pass = false;
+    saved.summary.metrics.passed = 0;
+    saved.summary.metrics.failed = 1;
+    saved.summary.variants[0]!.result!.passed = 0;
+    saved.summary.variants[0]!.result!.failed = 1;
+    await saveRun(store, saved);
     expect((await run()).skipped).toBe(1);
     expect(runEval).not.toHaveBeenCalled();
   });
 
-  it('never resumes from a partial run', async () => {
-    const artifact = summaryArtifact(
-      completedSummary(loadEvalConfig(configPath, { rootDir }))
-    );
-    artifact.metadata = {
-      ...artifact.metadata,
-      labels: { ...artifact.metadata?.labels, partial: 'true' },
-    };
-    await store.saveArtifact(artifact);
-    expect((await run()).skipped).toBe(0);
-    expect(runEval).toHaveBeenCalledTimes(1);
-  });
+  it.each(['partial', 'ungraded'])(
+    'never resumes from a %s run',
+    async (kind) => {
+      const saved = await saveValidSummary();
+      if (kind === 'partial') saved.summary.partial = true;
+      else saved.summary.graded = false;
+      await saveRun(store, saved);
+      expect((await run()).skipped).toBe(0);
+      expect(runEval).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('reruns when skipExisting is disabled', async () => {
     await saveValidSummary();
@@ -316,7 +334,7 @@ describe('runEvalBatch skipExisting', () => {
   });
 
   describe('with a shared config', () => {
-    function configPlugin(create: () => FileEvalResultStore): Plugin {
+    function configPlugin(create: () => RunStore): Plugin {
       return {
         meta: { name: 'config-plugin', namespace: 'test' },
         resultStores: {
@@ -344,7 +362,10 @@ describe('runEvalBatch skipExisting', () => {
         loadEvalConfig(configPath, { rootDir }),
         ['test']
       );
-      await store.saveArtifact(summaryArtifact(completedSummary(resolved)));
+      await saveRun(store, {
+        runId: SAVED_RUN_ID,
+        summary: completedSummary(resolved),
+      });
 
       expect((await run({ plugins: [plugin] })).skipped).toBe(1);
       expect(create).toHaveBeenCalledWith({ type: 'test/result-store/custom' });
@@ -426,114 +447,91 @@ describe('runEvalBatch skipExisting', () => {
     }
   );
 
-  it.each(['missing', 'corrupt'])(
-    'reruns with a %s saved artifact',
-    async (state) => {
+  it.each(['summary.json', 'results.json'])(
+    'reruns with a missing or corrupt %s',
+    async (file) => {
       await saveValidSummary();
-      const artifactPath = path.join(
+      const filePath = path.join(
         storeDir,
-        'eval-summaries',
-        'saved-run.json'
+        'resume-test',
+        'runs',
+        SAVED_RUN_ID,
+        file
       );
-      if (state === 'missing') await fs.rm(artifactPath);
-      else await fs.writeFile(artifactPath, '{broken json');
+      await fs.writeFile(filePath, '{broken json');
       expect((await run()).skipped).toBe(0);
-      expect(runEval).toHaveBeenCalledOnce();
+      await fs.rm(filePath);
+      expect((await run()).skipped).toBe(0);
+      expect(runEval).toHaveBeenCalledTimes(2);
     }
   );
 
-  const corruptions: Array<
-    [string, (artifact: StoredEvalArtifact<EvaluationSummary>) => void]
-  > = [
+  const corruptions: Array<[string, (summary: EvaluationSummary) => void]> = [
     [
       'summary eval config ID',
-      (artifact) => {
-        artifact.data.configId = 'wrong';
+      (summary) => {
+        summary.configId = 'wrong';
       },
     ],
     [
       'summary content hash',
-      (artifact) => {
-        artifact.data.contentHash = 'wrong';
-      },
-    ],
-    [
-      'metadata eval config ID',
-      (artifact) => {
-        artifact.metadata.labels!.configId = 'wrong';
-      },
-    ],
-    [
-      'metadata content hash',
-      (artifact) => {
-        artifact.metadata.labels!.contentHash = 'wrong';
-      },
-    ],
-    [
-      'missing metadata',
-      (artifact) => {
-        artifact.metadata = {};
+      (summary) => {
+        summary.contentHash = 'wrong';
       },
     ],
     [
       'dry-run summary',
-      (artifact) => {
-        artifact.data.variants = [];
-        artifact.data.metrics = {};
-        artifact.data.results = [];
+      (summary) => {
+        summary.variants = [];
+        summary.metrics = {};
+        summary.results = [];
       },
     ],
     [
       'incomplete variants',
-      (artifact) => {
-        artifact.data.variants[0]!.result = undefined;
+      (summary) => {
+        summary.variants[0]!.result = undefined;
       },
     ],
     [
       'inconsistent counts',
-      (artifact) => {
-        artifact.data.metrics.total = 2;
+      (summary) => {
+        summary.metrics.total = 2;
       },
     ],
     [
       'inconsistent variant counts',
-      (artifact) => {
-        artifact.data.variants[0]!.result!.passed = 0;
+      (summary) => {
+        summary.variants[0]!.result!.passed = 0;
       },
     ],
     [
       'missing case results',
-      (artifact) => {
-        artifact.data.results = [];
+      (summary) => {
+        summary.results = [];
       },
     ],
     [
       'wrong variant',
-      (artifact) => {
-        artifact.data.variants[0]!.name = 'other';
+      (summary) => {
+        summary.variants[0]!.name = 'other';
       },
     ],
   ];
 
   it.each(corruptions)('reruns for %s', async (_name, corrupt) => {
-    const artifact = await saveValidSummary();
-    corrupt(artifact);
-    await store.saveArtifact(artifact);
+    const saved = await saveValidSummary();
+    corrupt(saved.summary);
+    await saveRun(store, saved);
     expect((await run()).skipped).toBe(0);
     expect(runEval).toHaveBeenCalledOnce();
   });
 
-  it('finds an older matching summary when the latest belongs to another eval config', async () => {
+  it('finds an older matching run when the newest ran another version of the eval config', async () => {
     await saveValidSummary();
-    const other = summaryArtifact(
-      completedSummary({
-        ...loadEvalConfig(configPath, { rootDir }),
-        name: 'another',
-      })
-    );
-    other.id = 'newer-run';
-    other.createdAt = '2026-09-10T01:00:00.000Z';
-    await store.saveArtifact(other);
+    const newer = completedSummary(loadEvalConfig(configPath, { rootDir }));
+    newer.contentHash = 'another-version';
+    await saveRun(store, { runId: '20260911T000000Z-0e3e70', summary: newer });
     expect((await run()).skipped).toBe(1);
     expect(runEval).not.toHaveBeenCalled();
   });
