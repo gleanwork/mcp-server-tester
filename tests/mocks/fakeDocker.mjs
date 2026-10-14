@@ -71,6 +71,29 @@ if (command === 'image') {
     'the desktop failed\n'
   );
   process.stdout.write(`${name}-id\n`);
+} else if (command === 'ps') {
+  // `ps --all --filter label=mst.run --format '{{.Names}}\t<owner host>\t<owner pid>'`
+  const label = (labels, name) =>
+    labels
+      .find((value) => value.startsWith(`${name}=`))
+      ?.slice(name.length + 1) ?? '';
+  const dir = path.join(ROOT, 'containers');
+  for (const name of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+    const runArgs = JSON.parse(
+      fs.readFileSync(path.join(containerRoot(name), 'run-args.json'), 'utf8')
+    );
+    const labels = runArgs.flatMap((value, i) =>
+      runArgs[i - 1] === '--label' ? [value] : []
+    );
+    if (!label(labels, 'mst.run')) continue;
+    process.stdout.write(
+      `${name}\t${label(labels, 'mst.owner.host')}\t${label(labels, 'mst.owner.pid')}\n`
+    );
+  }
+} else if (command === 'rename') {
+  const [from, to] = rest;
+  if (!fs.existsSync(containerRoot(from))) fail(`No such container: ${from}`);
+  fs.renameSync(containerRoot(from), containerRoot(to));
 } else if (command === 'rm') {
   fs.rmSync(containerRoot(rest.at(-1)), { recursive: true, force: true });
 } else if (command === 'logs') {

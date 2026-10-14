@@ -19,6 +19,16 @@ import { z } from 'zod';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
 import { machineEnvironment } from './channel.js';
+import {
+  KEPT_SUFFIX,
+  RUN_LABEL,
+  claimContainer,
+  contextArgs,
+  dockerCommand,
+  ownerLabelArgs,
+  releaseContainer,
+  sweepOrphanedContainers,
+} from './dockerContainers.js';
 import type {
   EnvironmentContext,
   EnvironmentDefinition,
@@ -51,11 +61,6 @@ const DockerOptionsSchema = z
   .strict();
 type DockerOptions = z.infer<typeof DockerOptionsSchema>;
 
-/** The Docker CLI. `MST_DOCKER` names another (for example `podman`). */
-function dockerCommand(): string {
-  return process.env.MST_DOCKER || 'docker';
-}
-
 interface DockerResult {
   code: number;
   stdout: string;
@@ -69,11 +74,10 @@ function docker(
   options: { input?: string; signal?: AbortSignal; echo?: boolean } = {}
 ): Promise<DockerResult> {
   return new Promise((resolve) => {
-    const child = spawn(
-      dockerCommand(),
-      [...(context ? ['--context', context] : []), ...args],
-      { stdio: ['pipe', 'pipe', 'pipe'], signal: options.signal }
-    );
+    const child = spawn(dockerCommand(), [...contextArgs(context), ...args], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      signal: options.signal,
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => {
@@ -130,7 +134,9 @@ export function dockerRunArgs(options: {
     '--name',
     options.name,
     '--label',
-    `mst.run=${options.runId}`,
+    `${RUN_LABEL}=${options.runId}`,
+    // Whose it is, so a later run can remove it if this process dies.
+    ...ownerLabelArgs(),
     // Cowork's VM: KVM, its vsock and network devices, and the vsock socket
     // family Docker's default seccomp profile denies. Nothing privileged.
     '--device',
@@ -372,6 +378,28 @@ function openDocker(
   const readyTimeoutS = Number(options.readyTimeout ?? DEFAULT_READY_TIMEOUT_S);
   const pool = contextPool(contextsOf(options));
   const seccompProfile = path.join(coworkImageDirectory(), 'seccomp.json');
+  // Once per context: containers an earlier run on this machine left behind.
+  const swept = new Map<string, Promise<void>>();
+  const sweep = (dockerContext: string | undefined) => {
+    const id = dockerContext ?? '';
+    if (!swept.has(id))
+      swept.set(
+        id,
+        sweepOrphanedContainers(dockerContext, (args) =>
+          docker(dockerContext, args)
+        ).then(({ removed, unowned }) => {
+          for (const name of removed)
+            console.error(
+              `[mst] removed container ${name}: the run that started it is gone`
+            );
+          if (unowned.length)
+            console.error(
+              `[mst] ${unowned.length} MST container(s) without an owner (an older MST's) on ${dockerContext ?? 'the current context'}: ${unowned.join(', ')}. Remove them with \`docker${dockerContext ? ` --context ${dockerContext}` : ''} rm -f <name>\` if no run uses them.`
+            );
+        })
+      );
+    return swept.get(id)!;
+  };
   return machineEnvironment(
     context,
     async (shard, signal): Promise<Machine> => {
@@ -381,14 +409,18 @@ function openDocker(
       const remove = async () => {
         clearInterval(refresh);
         await docker(dockerContext, ['rm', '--force', name]);
+        releaseContainer(dockerContext, name);
       };
       try {
+        await sweep(dockerContext);
         const credential = await inference();
         const digest = await dockerOk(
           dockerContext,
           ['image', 'inspect', '--format', '{{.Id}}', image],
           `Finding image ${image} (build it with \`mst env setup docker\`)`
         );
+        // Guarded from here: removed at exit even if this run never disposes it.
+        claimContainer(dockerContext, name);
         await dockerOk(
           dockerContext,
           dockerRunArgs({
@@ -425,8 +457,14 @@ function openDocker(
             try {
               if (keep) {
                 clearInterval(refresh);
+                // Renamed so no later run's sweep removes it.
+                const kept = `${name}${KEPT_SUFFIX}`;
+                const renamed =
+                  (await docker(dockerContext, ['rename', name, kept])).code ===
+                  0;
+                releaseContainer(dockerContext, name);
                 console.error(
-                  `[mst] kept container ${name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${name} bash`
+                  `[mst] kept container ${renamed ? kept : name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${renamed ? kept : name} bash`
                 );
               } else await remove();
             } finally {
