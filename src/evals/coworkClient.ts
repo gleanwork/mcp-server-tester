@@ -16,8 +16,10 @@ import {
   type DesktopContinuation,
 } from './desktopBatch.js';
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
+import { mkdtemp } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ALL_ARTIFACTS } from './trialArtifacts.js';
 import { validateMacLocalServers } from './coworkSetup/macLocalMcp.js';
 import {
   findMatchingClaudeSessions,
@@ -228,6 +230,21 @@ async function runBatch(
   const secrets = clientSecretValues(env, servers);
   const safeError = (error: unknown): string =>
     redactClientError(error, secrets, 'Cowork operation failed.');
+  /**
+   * What the app showed when a case failed (the platform's diagnose: screen,
+   * controls, Cowork's logs), kept as the case's artifacts, before a reset
+   * changes it. Without one, or if it can't, the failure stands alone.
+   */
+  const diagnosis = async (): Promise<Pick<ClientRunResult, 'artifacts'>> => {
+    if (!platform.diagnose) return {};
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'mst-cowork-failure-'));
+      await platform.diagnose({ dir, dataDir, env });
+      return { artifacts: { dir, include: ALL_ARTIFACTS } };
+    } catch {
+      return {};
+    }
+  };
   return runDesktopBatch<Session>(
     {
       name: 'Cowork',
@@ -381,7 +398,7 @@ async function runBatch(
                 : {}),
             };
           }
-          result = failure(safeError(error));
+          result = { ...failure(safeError(error)), ...(await diagnosis()) };
           continuation = 'reset';
           return finishCase();
         }
@@ -629,7 +646,7 @@ async function runBatch(
           }
         } catch (error) {
           // Trace collection or attribution failed: the app state is unknown.
-          result = failure(safeError(error));
+          result = { ...failure(safeError(error)), ...(await diagnosis()) };
           if (platform.reset) continuation = 'reset';
         }
         // A HITL failure may leave a prompt open; reset before the next task.

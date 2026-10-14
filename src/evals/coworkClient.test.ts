@@ -1172,6 +1172,63 @@ describe('V2 Cowork client', () => {
     );
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
+  it('keeps what the app showed when a case failed, before resetting, and nothing for cases that pass', async () => {
+    const order: string[] = [];
+    const reset = vi.fn(async () => {
+      order.push('reset');
+    });
+    const diagnose = vi.fn(
+      async (options: { dir: string; dataDir: string }) => {
+        order.push('diagnose');
+        await fs.writeFile(
+          path.join(options.dir, 'accessibility.txt'),
+          'button: Stop\n'
+        );
+      }
+    );
+    const client = createCoworkClient({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      reset,
+      diagnose,
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
+    const result = await client.runBatch!(requests(), context);
+    expect(result.map((r) => r.error)).toEqual(['uncertain submit', undefined]);
+    // The failed case: the diagnosis, taken before the reset, is its artifacts.
+    expect(order).toEqual(['diagnose', 'reset']);
+    expect(diagnose.mock.calls[0]![0].dataDir).toBe('/prepared/session');
+    expect(result[0]!.artifacts?.include).toEqual(['**']);
+    expect(
+      await fs.readFile(
+        path.join(result[0]!.artifacts!.dir, 'accessibility.txt'),
+        'utf8'
+      )
+    ).toBe('button: Stop\n');
+    // The case that passed keeps its session, not a diagnosis.
+    expect(diagnose).toHaveBeenCalledOnce();
+    expect(result[1]!.artifacts?.dir).not.toBe(result[0]!.artifacts!.dir);
+  });
+
+  it('records a failed case without a diagnosis when the diagnosis fails', async () => {
+    const client = createCoworkClient({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      reset: vi.fn().mockResolvedValue(undefined),
+      diagnose: vi.fn().mockRejectedValue(new Error('no display')),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
+    const result = await client.runBatch!(requests(), context);
+    expect(result[0]).toMatchObject({ error: 'uncertain submit' });
+    expect(result[0]).not.toHaveProperty('artifacts');
+  });
+
   it("records a task that found Cowork's VM down as an infrastructure failure, then resets", async () => {
     const reset = vi.fn().mockResolvedValue(undefined);
     const client = createCoworkClient({

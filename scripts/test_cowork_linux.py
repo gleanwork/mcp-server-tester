@@ -34,6 +34,9 @@ class Desktop:
     def selected(self, node):
         return True
 
+    def label(self, node):
+        return module.Desktop.label(node)
+
     def activate(self, node):
         self.actions.append(node.name)
         if self.fail:
@@ -229,6 +232,68 @@ class LinuxDriverTests(unittest.TestCase):
         with patch.object(module.subprocess, 'run') as run:
             desktop.open_prompt('unchanged', 900)
         self.assertEqual(run.call_args.kwargs['timeout'], 15)
+
+
+
+def xwd(width, height, pixels, *, byte_order=0, bits=32):
+    """A minimal TrueColor ZPixmap X window dump, as `xwd -root` writes it."""
+    step = bits // 8
+    bytes_per_line = width * step
+    header = module.struct.pack(">25I", 100 + 4, 7, 2, 24, width, height, 0, byte_order, 32, 0, 32, bits,
+                                bytes_per_line, 4, 0xFF0000, 0x00FF00, 0x0000FF, 8, 256, 0,
+                                width, height, 0, 0, 0)
+    order = "little" if byte_order == 0 else "big"
+    body = b"".join(value.to_bytes(step, order) for value in pixels)
+    return header + b"root" + body
+
+
+def png_pixels(png):
+    """The RGB rows of an 8-bit, colour-type-2, unfiltered PNG."""
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    position, data, width = 8, b"", None
+    while position < len(png):
+        length = module.struct.unpack(">I", png[position:position + 4])[0]
+        kind = png[position + 4:position + 8]
+        body = png[position + 8:position + 8 + length]
+        if kind == b"IHDR":
+            width = module.struct.unpack(">I", body[:4])[0]
+        if kind == b"IDAT":
+            data += body
+        position += 12 + length
+    raw = module.zlib.decompress(data)
+    stride = 1 + width * 3
+    return [list(raw[row + 1:row + stride]) for row in range(0, len(raw), stride)]
+
+
+class LinuxDiagnoseTests(unittest.TestCase):
+    def test_screen_dump_becomes_a_png_with_the_same_pixels(self):
+        for byte_order in (0, 1):
+            png = module.xwd_to_png(xwd(2, 2, [0xFF0000, 0x00FF00, 0x0000FF, 0x102030], byte_order=byte_order))
+            self.assertEqual(png_pixels(png), [[255, 0, 0, 0, 255, 0], [0, 0, 255, 16, 32, 48]])
+
+    def test_screen_dump_in_an_unsupported_format_is_refused(self):
+        dump = bytearray(xwd(1, 1, [0]))
+        dump[8:12] = (1).to_bytes(4, "big")  # XYPixmap
+        with self.assertRaises(ValueError):
+            module.xwd_to_png(bytes(dump))
+
+    def test_diagnose_writes_the_screen_and_what_the_desktop_shows_and_never_acts(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            dump = subprocess.CompletedProcess([], 0, stdout=xwd(1, 1, [0xFFFFFF]))
+            with patch.object(module.subprocess, "run", return_value=dump) as run, \
+                    patch.object(module, "Desktop", side_effect=RuntimeError("no bus")):
+                receipt = module.diagnose(directory, 10)
+            self.assertEqual(run.call_args.args[0], ["xwd", "-root", "-silent"])
+            self.assertEqual((receipt["status"], receipt["action_count"], receipt["files"]), ("diagnosed", 0, ["screen.png"]))
+            self.assertEqual(png_pixels(open(os.path.join(directory, "screen.png"), "rb").read()), [[255, 255, 255]])
+            # Without an accessibility bus it says why, without the error's text.
+            self.assertEqual(open(os.path.join(directory, "accessibility.error")).read(), "RuntimeError\n")
+
+    def test_diagnose_needs_an_existing_absolute_directory(self):
+        for directory in (None, "relative", "/nonexistent/mst-diagnose"):
+            with self.assertRaises(module.DriverFailure):
+                module.diagnose(directory, 10)
 
 
 if __name__ == "__main__":
