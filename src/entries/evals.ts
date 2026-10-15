@@ -102,6 +102,7 @@ export {
 } from '../evals/configValidation.js';
 export { machineEnvironment } from '../evals/environments/channel.js';
 export type { ShardChannelOptions } from '../evals/environments/channel.js';
+export { dockerEnvironment } from '../evals/environments/docker.js';
 export type { ShardTokens, TrialKey } from '../evals/environments/protocol.js';
 export { resolveConfigExtends } from '../evals/configExtends.js';
 export type { ValidateEvalConfigOptions } from '../evals/configValidation.js';
