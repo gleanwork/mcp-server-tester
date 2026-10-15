@@ -197,7 +197,7 @@ _Avoid_: variant experiment, tool experiment
 ### Where a run happens
 
 **Coordinator**:
-The machine where `mst run` was typed (your machine or a CI job). It loads, resolves, prepares, gathers, grades, compares and reports; only collecting can happen elsewhere.
+The machine where `mst run` or `mst grade` was typed (your machine or a CI job). It loads, resolves, prepares, gathers, grades, compares and reports. Collecting can happen elsewhere, and with `mst grade --env` so can running the graders: the coordinator still resolves what they grade with and writes the regrade ([ADR 0005](docs/adr/0005-grading-runs-in-an-environment.md)).
 _Avoid_: controller, host, driver
 
 **Environment**:
@@ -205,11 +205,11 @@ Where a run's trials are collected, chosen with `--env`: `local` (in the `mst ru
 _Avoid_: sandbox, backend, runner, target
 
 **Shard**:
-One machine's part of a run's trials. Trials are split by case, so a case's variants and trials all run on one shard.
+One machine's part of a run's trials, to collect, or to grade (a **grade shard**, `mst grade --env`). Trials are split by case, so a case's variants and trials all run on one shard.
 _Avoid_: partition, worker (for the slice)
 
 **Worker**:
-The process that collects a shard's trials on its machine (`mst collect`), with the same code a local run uses.
+The process that runs a shard on its machine with the same code a local run uses: `mst collect` collects its trials, and `mst grade-shard` grades them.
 _Avoid_: agent, guest, runner
 
 **Channel**:

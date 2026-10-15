@@ -13,6 +13,7 @@ import {
   type RunFacts,
   findRunDirectory,
   RUN_ID_PATTERN,
+  type GradeShardRecord,
   nextRegradeId,
   readRunDirectory,
   readRunTrials,
@@ -114,12 +115,14 @@ import {
   type RequestGroup,
   type ShardRecord,
 } from './environments/shardedCollect.js';
+import { gradeInEnvironment } from './environments/shardedGrade.js';
 import {
   createRunStore,
   getResultStore,
   parseResultsFlag,
   resolveStorePaths,
 } from './builtinResultStores.js';
+import { LOCAL_GRADING, type GradingSource } from './gradingSource.js';
 import {
   fetchRun,
   storedRunIds,
@@ -166,6 +169,7 @@ import type { CredentialStore } from '../auth/grants/types.js';
 import {
   LOCAL_ENVIRONMENT,
   resolveEnvironment,
+  type ResolvedEnvironment,
   type RunEnvironment,
 } from './environments/builtinEnvironments.js';
 
@@ -429,7 +433,8 @@ function variantEvidence(results: EvalCaseResult[]): TraceEvidence | undefined {
 async function comparePairwiseVariants(
   evalConfig: EvalConfig,
   variantResults: EvaluationVariantResult[],
-  cases: readonly EvalCase[]
+  cases: readonly EvalCase[],
+  grading: GradingSource
 ): Promise<Partial<UsageMetrics> | undefined> {
   const judges = (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec);
   if (judges.length === 0) return undefined;
@@ -461,6 +466,16 @@ async function comparePairwiseVariants(
       judges,
       cases: byId,
       concurrency: evalConfig.concurrency,
+      ...(grading !== LOCAL_GRADING
+        ? {
+            judgeCase: (caseId, judges, judge) =>
+              grading.pairwise(
+                { kind: 'pairwise', candidate: candidate.name, caseId },
+                judges,
+                judge
+              ),
+          }
+        : {}),
     });
   return sumJudgeUsage(candidates.map((variant) => variant.pairwise?.usage));
 }
@@ -652,6 +667,13 @@ export interface GradeRunOptions extends Pick<
    * 6 hex characters) among the eval's runs.
    */
   run: string;
+  /**
+   * `--env`: grade in this environment (ADR 0005), its shards holding whole
+   * cases. Default `local`: in this process.
+   */
+  env?: string;
+  /** `--env-option`s: `shards`, `keep`, and the environment's own. */
+  envOptions?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -664,11 +686,44 @@ export interface GradeRunOptions extends Pick<
 export async function gradeRun(
   options: GradeRunOptions
 ): Promise<RunEvalResult> {
+  return gradeStoredRun(options, {});
+}
+
+/**
+ * `gradeRun`, grading where `plan` says (ADR 0005): a grade worker records
+ * what its grading produced; the coordinator of `mst grade --env` grades
+ * elsewhere and assembles the regrade from what came back.
+ */
+export async function gradeStoredRun(
+  options: GradeRunOptions,
+  plan: GradingPlan
+): Promise<RunEvalResult> {
   const rootDir = options.rootDir ?? process.cwd();
-  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  const { name } = loadEvalConfig(options.configPath, {
+    rootDir,
+    ...(plan.datasets ? { skipDatasetValidation: true } : {}),
+  });
   const evalDirectory =
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
-  const store = await gradeResultStore(options, rootDir);
+  const store = await gradeResultStore(
+    options,
+    rootDir,
+    plan.datasets !== undefined
+  );
+  // With the eval's plugins loaded, so a plugin environment resolves, and a
+  // bad --env-option fails before any dataset loads.
+  const environment =
+    options.env !== undefined || options.envOptions !== undefined
+      ? resolveEnvironment(
+          options.env ?? LOCAL_ENVIRONMENT,
+          options.envOptions ?? {}
+        )
+      : undefined;
+  if (environment && environment.name !== LOCAL_ENVIRONMENT && !plan.elsewhere)
+    plan = {
+      ...plan,
+      elsewhere: (prepared) => gradeInShards(environment, prepared),
+    };
   const directory = await locateRun(
     options,
     name,
@@ -701,6 +756,7 @@ export async function gradeRun(
       // The regrade goes next to the run it grades.
       outputDir: path.dirname(path.dirname(directory)),
       redactStoredResponses: run.redactStoredResponses,
+      grading: plan,
     },
     replay
   );
@@ -735,9 +791,13 @@ function openResultStore(
 /** The result store `mst grade` or `--resume` would keep the run in, with the eval's plugins loaded. */
 async function gradeResultStore(
   options: GradeRunOptions,
-  rootDir: string
+  rootDir: string,
+  skipDatasetValidation = false
 ): Promise<RunStore | undefined> {
-  const loaded = loadEvalConfig(options.configPath, { rootDir });
+  const loaded = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation,
+  });
   const namespaces = await loadEvalPlugins({
     configPath: options.configPath,
     evalConfig: loaded,
@@ -813,6 +873,132 @@ function formatBytes(bytes: number): string {
   return bytes < 1024 * 1024
     ? `${Math.ceil(bytes / 1024)} KiB`
     : `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+/**
+ * The plugins a worker loads (ADR 0004): the eval config's, then the CLI's,
+ * as specifiers a worker can load, and the coordinator's versions of the
+ * plugin packages among them, which a worker must run too.
+ */
+function workerPluginsOf(
+  loadedConfig: EvalConfig,
+  pluginPaths: readonly string[] | undefined,
+  dirs: { configDir: string; rootDir: string }
+): {
+  plugins: string[];
+  pluginPackages: Array<{ specifier: string; name: string; version: string }>;
+} {
+  const plugins = [
+    ...(loadedConfig.plugins ?? []).map((specifier) =>
+      specifier.startsWith('.')
+        ? path.resolve(dirs.configDir, specifier)
+        : specifier
+    ),
+    ...(pluginPaths ?? []).map((specifier) =>
+      specifier.startsWith('.')
+        ? path.resolve(dirs.rootDir, specifier)
+        : specifier
+    ),
+  ];
+  const pluginPackages = [
+    ...(loadedConfig.plugins ?? []).map((specifier) =>
+      resolvePluginPackage(specifier, {
+        baseDir: dirs.configDir,
+        fallbackDir: dirs.rootDir,
+      })
+    ),
+    ...(pluginPaths ?? []).map((specifier) =>
+      resolvePluginPackage(specifier, { baseDir: dirs.rootDir })
+    ),
+  ].flatMap((found) =>
+    found
+      ? [
+          {
+            specifier: found.specifier,
+            name: found.name,
+            version: found.version,
+          },
+        ]
+      : []
+  );
+  return { plugins, pluginPackages };
+}
+
+/**
+ * What the coordinator of `mst grade --env` has once the run's datasets are
+ * loaded (ADR 0005): what every grade shard grades with.
+ */
+export interface PreparedGrading {
+  /** The eval config as its file has it, for the workers to load. */
+  configFile: { name: string } & Record<string, unknown>;
+  /** The datasets, as loaded: one per eval config source, in order. */
+  datasets: EvalDataset[];
+  /** The stored run being graded. */
+  replay: RunReplay;
+  /** The plugins workers load, and the versions they must have. */
+  plugins: string[];
+  pluginPackages: Array<{ specifier: string; name: string; version: string }>;
+  /** The run's secrets (`--secrets-file`): what workers are sent. */
+  secrets: Record<string, string>;
+}
+
+/** Where a regrade's grading came from, when not this process. */
+export interface GradedElsewhere {
+  source: GradingSource;
+  environment: RunEnvironment;
+  machines: GradeShardRecord[];
+}
+
+/**
+ * Where `evaluate` grades, beyond a run's options (ADR 0005). Internal: a
+ * worker's and a coordinator's `mst grade --env` set it.
+ */
+export interface GradingPlan {
+  /** Where each trial and case is graded. Default: here. */
+  source?: GradingSource;
+  /**
+   * The datasets as already loaded, one per eval config source, in order:
+   * none is loaded again (a worker's, from its bundle).
+   */
+  datasets?: readonly EvalDataset[];
+  /**
+   * Grades elsewhere once the datasets are loaded, and returns where the
+   * grading came from: the coordinator of `mst grade --env`.
+   */
+  elsewhere?: (prepared: PreparedGrading) => Promise<GradedElsewhere>;
+}
+
+/**
+ * `mst grade --env`: the stored run's cases graded in the environment's
+ * shards (ADR 0005), stopped by Ctrl-C as collecting's shards are.
+ */
+async function gradeInShards(
+  environment: ResolvedEnvironment,
+  prepared: PreparedGrading
+): Promise<GradedElsewhere> {
+  const controller = new AbortController();
+  let interrupts = 0;
+  const onInterrupt = () => {
+    if (++interrupts > 1) process.exit(130);
+    console.error(
+      "[mst] Stopping the grade shards; the grading that came back is kept, and what didn't is graded by the next mst grade (Ctrl-C again to quit now)."
+    );
+    controller.abort();
+  };
+  process.on('SIGINT', onInterrupt);
+  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-shards-'));
+  try {
+    return await gradeInEnvironment({
+      environment,
+      prepared,
+      workDir,
+      signal: controller.signal,
+      log: (line) => console.error(`[mst] ${line}`),
+    });
+  } finally {
+    process.off('SIGINT', onInterrupt);
+    await fs.rm(workDir, { recursive: true, force: true });
+  }
 }
 
 /** What `mst run --resume` completes, and where. */
@@ -938,7 +1124,7 @@ async function regradeTakesLatest(
  * of a client run.
  */
 async function evaluate(
-  options: RunEvalOptions,
+  options: RunEvalOptions & { grading?: GradingPlan },
   replay?: RunReplay
 ): Promise<RunEvalResult> {
   rejectRenamedOptions(
@@ -951,7 +1137,17 @@ async function evaluate(
   const runStartTime = Date.now();
   const rootDir = options.rootDir ?? process.cwd();
   const configDir = path.dirname(path.resolve(options.configPath));
-  const loadedConfig = loadEvalConfig(options.configPath, { rootDir });
+  const loadedConfig = loadEvalConfig(options.configPath, {
+    rootDir,
+    // Datasets given as loaded aren't read from the config's paths.
+    ...(options.grading?.datasets ? { skipDatasetValidation: true } : {}),
+  });
+  // Whether judges run in this process: then their preflight runs here.
+  const judgesRunHere =
+    !options.grading?.elsewhere &&
+    (options.grading?.source?.judgesRunHere ?? true);
+  let grading: GradingSource = options.grading?.source ?? LOCAL_GRADING;
+  let gradedElsewhere: GradedElsewhere | undefined;
   const ambientEnv = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] => typeof entry[1] === 'string'
@@ -1136,7 +1332,7 @@ async function evaluate(
   const checkedJudges = new Set<string>();
   // Before any client starts: a pairwise judge that can't run (no SDK, no
   // credential) fails the run now, not after every trial is collected.
-  if (!options.skipPairwise && options.grade !== false)
+  if (!options.skipPairwise && options.grade !== false && judgesRunHere)
     await preflightPairwiseJudges(
       (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec)
     );
@@ -1147,14 +1343,23 @@ async function evaluate(
   // Trials an environment's shards didn't bring back: the run is partial.
   let missingTrials = 0;
   const sourceVariant = variants[0] ?? { name: 'default' };
+  if (
+    options.grading?.datasets &&
+    options.grading.datasets.length !== datasets.length
+  )
+    throw new Error(
+      `The eval config has ${datasets.length} datasets, but ${options.grading.datasets.length} were given as loaded.`
+    );
   const canonicalDatasets = await Promise.all(
-    datasets.map(async (source) => ({
+    datasets.map(async (source, index) => ({
       source,
-      dataset: await loadDataset(source, {
-        rootDir,
-        configDir,
-        evalConfig: sourceConfig,
-      }),
+      dataset:
+        options.grading?.datasets?.[index] ??
+        (await loadDataset(source, {
+          rootDir,
+          configDir,
+          evalConfig: sourceConfig,
+        })),
     }))
   );
   for (const { dataset } of canonicalDatasets)
@@ -1170,6 +1375,26 @@ async function evaluate(
       replay,
       canonicalDatasets.map(({ dataset }) => dataset)
     );
+  // `mst grade --env`: the shards grade with these datasets, and the regrade
+  // below reads what they brought back (ADR 0005).
+  if (options.grading?.elsewhere) {
+    if (!regrade)
+      throw new Error('Only a regrade of a stored run grades elsewhere.');
+    gradedElsewhere = await options.grading.elsewhere({
+      // As written, not as loaded: a worker loads it as this process did.
+      configFile: JSON.parse(
+        await fs.readFile(path.resolve(options.configPath), 'utf8')
+      ) as PreparedGrading['configFile'],
+      datasets: canonicalDatasets.map(({ dataset }) => dataset),
+      replay: regrade,
+      ...workerPluginsOf(loadedConfig, options.pluginPaths, {
+        configDir,
+        rootDir,
+      }),
+      secrets: fileSecrets,
+    });
+    grading = gradedElsewhere.source;
+  }
   const narrowing: CaseNarrowing = {
     cases: options.cases,
     filterTags: options.filterTags,
@@ -1341,7 +1566,7 @@ async function evaluate(
           if (!prepared) continue;
           // Before any shard starts: a judge that can't run fails the run
           // now, not after the shards have collected every trial.
-          if (options.grade !== false)
+          if (options.grade !== false && judgesRunHere)
             await preflightCaseJudges(
               prepared.effectiveDataset.cases,
               checkedJudges
@@ -1375,40 +1600,10 @@ async function evaluate(
             });
         }
       }
-      const workerPlugins = [
-        ...(loadedConfig.plugins ?? []).map((specifier) =>
-          specifier.startsWith('.')
-            ? path.resolve(configDir, specifier)
-            : specifier
-        ),
-        ...(options.pluginPaths ?? []).map((specifier) =>
-          specifier.startsWith('.')
-            ? path.resolve(rootDir, specifier)
-            : specifier
-        ),
-      ];
-      // The plugin packages among them, as this machine loads them: a
-      // worker must run the same versions.
-      const pluginPackages = [
-        ...(loadedConfig.plugins ?? []).map((specifier) =>
-          resolvePluginPackage(specifier, {
-            baseDir: configDir,
-            fallbackDir: rootDir,
-          })
-        ),
-        ...(options.pluginPaths ?? []).map((specifier) =>
-          resolvePluginPackage(specifier, { baseDir: rootDir })
-        ),
-      ].flatMap((found) =>
-        found
-          ? [
-              {
-                specifier: found.specifier,
-                name: found.name,
-                version: found.version,
-              },
-            ]
-          : []
+      const { plugins: workerPlugins, pluginPackages } = workerPluginsOf(
+        loadedConfig,
+        options.pluginPaths,
+        { configDir, rootDir }
       );
       const controller = new AbortController();
       let interrupts = 0;
@@ -1540,7 +1735,7 @@ async function evaluate(
             const { executionDataset, effectiveDataset } = prepared;
             // Before this variant's client starts: a judge that can't run
             // (no SDK, no credential) fails the run, not every trial.
-            if (options.grade !== false)
+            if (options.grade !== false && judgesRunHere)
               await preflightCaseJudges(effectiveDataset.cases, checkedJudges);
             const sourceConfig = source;
             const runClient =
@@ -1632,6 +1827,20 @@ async function evaluate(
                 toolOverrides: toolMetadata,
                 toolMap: variant.toolMap ?? evalConfig.toolMap,
                 ...(options.grade === false ? { grade: false } : {}),
+                ...(grading !== LOCAL_GRADING
+                  ? {
+                      gradeTrial: (evalCase, trial, grade) =>
+                        grading.trial(
+                          {
+                            kind: 'trial',
+                            variant: variant.name,
+                            caseId: evalCase.id,
+                            trial,
+                          },
+                          grade
+                        ),
+                    }
+                  : {}),
                 ...(replay || runClient
                   ? {
                       // Graders read a copy of the trial's client artifacts.
@@ -1812,7 +2021,8 @@ async function evaluate(
       pairwiseUsage = await comparePairwiseVariants(
         evalConfig,
         variantResults,
-        canonicalDatasets.flatMap(({ dataset }) => dataset.cases)
+        canonicalDatasets.flatMap(({ dataset }) => dataset.cases),
+        grading
       );
     } catch (error) {
       console.warn(
@@ -1992,6 +2202,14 @@ async function evaluate(
       redactStoredResponses: redact,
       environment,
       ...(shardRecords?.length ? { machines: shardRecords } : {}),
+      ...(gradedElsewhere
+        ? {
+            grading: {
+              environment: gradedElsewhere.environment,
+              machines: gradedElsewhere.machines,
+            },
+          }
+        : {}),
       // A collect-only run is never graded; the run's grading says so.
       phases:
         options.grade === false ? { ...phases, grade: 'skipped' } : phases,

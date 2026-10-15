@@ -162,6 +162,36 @@ export function dockerRunArgs(options: {
   ];
 }
 
+/**
+ * `docker run` arguments for a grade shard's container (ADR 0005): the same
+ * image, with no desktop. Grading starts no client, so it needs no VM
+ * devices and no inference, and the entrypoint only keeps the container up
+ * for `mst grade-shard`.
+ */
+function gradeContainerRunArgs(options: {
+  name: string;
+  image: string;
+  runId: string;
+}): string[] {
+  return [
+    'run',
+    '--detach',
+    '--name',
+    options.name,
+    '--label',
+    `${RUN_LABEL}=${options.runId}`,
+    ...ownerLabelArgs(),
+    '--tmpfs',
+    '/run/mst:mode=0755',
+    '--entrypoint',
+    '/usr/bin/tini',
+    options.image,
+    '--',
+    'sleep',
+    'infinity',
+  ];
+}
+
 /** A container name for a shard: Docker allows `[a-zA-Z0-9][a-zA-Z0-9_.-]`. */
 export function containerName(runId: string, index: number): string {
   return `mst-${runId}-${index + 1}`.replace(/[^a-zA-Z0-9_.-]/g, '-');
@@ -400,9 +430,20 @@ function openDocker(
       );
     return swept.get(id)!;
   };
+  const contexts = contextsOf(options);
   return machineEnvironment(
     context,
     async (shard, signal): Promise<Machine> => {
+      if (shard.work === 'grade')
+        return gradeMachine(
+          // No VM, so no host-wide vsock port: grade shards share contexts.
+          contexts[shard.index % contexts.length],
+          containerName(shard.runId, shard.index),
+          image,
+          shard.runId,
+          sweep,
+          signal
+        );
       const dockerContext = await pool.acquire(signal);
       const name = containerName(shard.runId, shard.index);
       let refresh: NodeJS.Timeout | undefined;
@@ -479,6 +520,63 @@ function openDocker(
       }
     }
   );
+}
+
+/**
+ * A grade shard's machine: a container of the image with no desktop, whose
+ * worker runs `mst grade-shard` (ADR 0005).
+ */
+async function gradeMachine(
+  dockerContext: string | undefined,
+  name: string,
+  image: string,
+  runId: string,
+  sweep: (dockerContext: string | undefined) => Promise<void>,
+  signal: AbortSignal
+): Promise<Machine> {
+  const remove = async () => {
+    await docker(dockerContext, ['rm', '--force', name]);
+    releaseContainer(dockerContext, name);
+  };
+  try {
+    await sweep(dockerContext);
+    const digest = await dockerOk(
+      dockerContext,
+      ['image', 'inspect', '--format', '{{.Id}}', image],
+      `Finding image ${image} (build it with \`mst env setup docker\`)`
+    );
+    claimContainer(dockerContext, name);
+    await dockerOk(
+      dockerContext,
+      gradeContainerRunArgs({ name, image, runId }),
+      `Starting container ${name}`,
+      { signal }
+    );
+    await dockerOk(
+      dockerContext,
+      ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
+      'Creating the work directory'
+    );
+    return {
+      id: name,
+      image: { ref: image, digest },
+      workDir: WORK_DIR,
+      channel: containerChannel(dockerContext, name),
+      async dispose({ keep }) {
+        if (!keep) return remove();
+        const kept = `${name}${KEPT_SUFFIX}`;
+        const renamed =
+          (await docker(dockerContext, ['rename', name, kept])).code === 0;
+        releaseContainer(dockerContext, name);
+        console.error(
+          `[mst] kept container ${renamed ? kept : name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${renamed ? kept : name} bash`
+        );
+      },
+    };
+  } catch (error) {
+    await remove();
+    throw error;
+  }
 }
 
 /** Builds the image on each context (`mst env setup docker`). */

@@ -309,6 +309,13 @@ npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json
 # → run 7f3c2a.g2 (traces from 7f3c2a)
 ```
 
+Grading takes hours when an agentic judge reads every trial. Grade on the environment's machines instead, with the judges' keys in the secrets file ([ADR 0005](../adr/0005-grading-runs-in-an-environment.md)):
+
+```bash
+npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json \
+  --env acme/env/cloud-vm --env-option shards=5 --secrets-file judge-keys.env
+```
+
 Planned: `mst grade` without `--config`, and the `--plugin-option` and `--judge` flags:
 
 ```bash

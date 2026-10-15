@@ -19,6 +19,7 @@ import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
 import type { PairwiseComparisonResult } from './pairwiseComparison.js';
 import type { ShardTokens, TrialKey } from './environments/protocol.js';
+import type { GradeKey } from './gradingSource.js';
 
 /** Which copy of a dataset with snapshots to read. */
 export interface DatasetRequest {
@@ -350,10 +351,22 @@ export interface EnvironmentContext {
 }
 
 /** One shard of a run, as the coordinator hands it to an environment. */
+/**
+ * What a shard runs: collecting trials (ADR 0004), or grading a stored run's
+ * (`mst grade --env`, ADR 0005).
+ */
+export type ShardWork = 'collect' | 'grade';
+
 export interface ShardSpec {
   readonly runId: string;
   readonly index: number;
   readonly count: number;
+  /**
+   * What the shard runs. Its worker command follows: `mst collect` or
+   * `mst grade-shard`. An environment built with `machineEnvironment` runs
+   * either.
+   */
+  readonly work: ShardWork;
   /** A local directory holding the shard's bundle (`writeShardBundle`). */
   readonly bundleDir: string;
   /** A local directory the shard's result files are copied into. */
@@ -367,6 +380,12 @@ export type ShardProgress =
       type: 'trial';
       key: TrialKey;
       status: 'collected' | 'infra';
+      path: string;
+    }
+  | {
+      type: 'graded';
+      key: GradeKey;
+      status: 'graded' | 'failed';
       path: string;
     }
   | { type: 'heartbeat'; at: string };
@@ -393,6 +412,10 @@ export interface ShardOutcome {
   reason?: string;
   collected: number;
   infra: number;
+  /** A grade shard's trials and cases whose grading came back. */
+  graded?: number;
+  /** Those of them a grader couldn't give a verdict for. */
+  failed?: number;
   cancelled: boolean;
 }
 
@@ -434,6 +457,11 @@ export interface Machine {
  * `machineEnvironment`, from a function that creates a machine.
  */
 export interface Environment {
+  /**
+   * The work its shards can run. Default `['collect']`. `machineEnvironment`
+   * runs both kinds, over the machine's channel.
+   */
+  readonly work?: readonly ShardWork[];
   /** Runs one shard. Its failures are its outcome, not a throw. */
   runShard(
     shard: ShardSpec,

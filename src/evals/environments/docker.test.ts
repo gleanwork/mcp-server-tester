@@ -12,7 +12,7 @@ import {
   dockerRunArgs,
 } from './docker.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
-import { runEval } from '../runEval.js';
+import { gradeRun, runEval } from '../runEval.js';
 import { readRunDirectory } from '../runFormat.js';
 import { buildRunReport } from '../runReport.js';
 import packageJson from '../../../package.json' with { type: 'json' };
@@ -387,6 +387,67 @@ describe('a run in docker (a fake Docker CLI)', () => {
         image,
       })),
     });
+  }, 120_000);
+
+  it('grades a stored run in containers without a desktop or inference, two to a context (ADR 0005)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, root, configPath, calls } = await fixture();
+    const outputDir = path.join(dir, 'out');
+    const collected = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir,
+      env: 'docker',
+      envOptions: { contexts: 'ctx-a', image: 'mst-test:1' },
+      grade: false,
+      report: false,
+    });
+    const before = (await calls()).length;
+    // Grading starts no client: it needs no inference.
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    const graded = await gradeRun({
+      configPath,
+      rootDir: dir,
+      outputDir,
+      run: path.basename(collected.outputDir),
+      env: 'docker',
+      envOptions: { shards: '2', contexts: 'ctx-a', image: 'mst-test:1' },
+      report: false,
+    });
+    expect(graded.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    const runs = (await calls())
+      .slice(before)
+      .filter((call) => call.args[0] === 'run');
+    // Both on the one context: no VM, so no host-wide port to share.
+    expect(runs.map((call) => call.context)).toEqual(['ctx-a', 'ctx-a']);
+    for (const run of runs) {
+      expect(run.args).not.toContain('/dev/kvm');
+      expect(run.args.join(' ')).not.toContain('MST_INFERENCE');
+      expect(run.args.slice(-4)).toEqual([
+        'mst-test:1',
+        '--',
+        'sleep',
+        'infinity',
+      ]);
+    }
+    // Each container's worker graded; none collected.
+    const workers = (await calls())
+      .slice(before)
+      .filter((call) => call.args[0] === 'exec')
+      .map((call) =>
+        call.args.find((arg) => /^(collect|grade-shard)$/.test(arg))
+      )
+      .filter(Boolean);
+    expect(workers).toEqual(['grade-shard', 'grade-shard']);
+    const stored = await readRunDirectory(graded.outputDir);
+    expect(stored.run.grading?.environment).toMatchObject({
+      name: 'docker',
+      shards: 2,
+    });
+    expect(
+      stored.run.grading?.environment.machines?.map((machine) => machine.ok)
+    ).toEqual([true, true]);
+    expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
   }, 120_000);
 
   it('removes the containers a dead run on this machine left, and only those', async () => {

@@ -852,6 +852,8 @@ npx mst grade 7f3c2a --config ./eval.json     # grade later, as often as the gra
 | `--secrets-file <path>` | A JSON or dotenv-style file of environment values, as for `run` (for example judge API keys).                                                                                                                                                                               |
 | `--no-report`           | Don't write the regrade's report.                                                                                                                                                                                                                                           |
 | `--results <store>`     | Also keep the regrade in this result store, instead of the eval config's, as for `run`. A run that isn't local is fetched from the store (`--results`, else the eval config's), checked against its manifest. See [Result stores](./evaluation-framework.md#result-stores). |
+| `--env <name>`          | Grade in this environment: `local` (the default, in this process), `docker`, or a plugin environment (`<namespace>/env/<name>`). See [Grading in an environment](#grading-in-an-environment).                                                                               |
+| `--env-option <k=v>`    | An environment option; repeat for more: `shards=N`, `keep=never\|failed\|always`, or the environment's own, as for `run`.                                                                                                                                                   |
 
 The datasets are loaded again, so each case's `expected` and judges are the dataset's current ones; `run.json` records their content hashes. Every variant and case the run stored must still be in the eval config and its datasets. A trial that failed when it ran stays failed and isn't judged. A trial a grader couldn't score (`phases.grade: partial`, `gradingError`) is graded again: finishing those is what a regrade is for. No client starts, so grading needs no connector tokens.
 
@@ -860,6 +862,25 @@ The regrade's `run.json` has `gradedFrom`, the run whose traces it graded, and t
 A `--no-grade` run's `run.json` has `phases.grade: skipped`, also in the copy saved while it runs. Its `summary.json` has no pass rate, only `total`, `collected` and `failedToCollect` cases, and its report says it isn't graded.
 
 A run stored with redacted traces (the default, `redactStoredResponses`) can't be graded again: collect with `"redactStoredResponses": false`.
+
+### Grading in an environment
+
+With `--env`, the run is graded on the environment's machines instead of this one ([ADR 0005](./adr/0005-grading-runs-in-an-environment.md)): for an agentic judge that takes minutes a case, or a run too big to grade on a laptop.
+
+```bash
+npx mst run --config ./eval.json --env docker --no-grade --results gs://my-bucket/evals
+npx mst grade 7f3c2a --config ./eval.json --env acme/env/cloud-vm --env-option shards=4 \
+  --secrets-file ./judge-keys.env --results gs://my-bucket/evals
+```
+
+- **Shards hold whole cases**, split as `run --env` splits them, so each case's pairwise comparisons have both sides on one machine.
+- **This machine loads the eval config, its plugins and its datasets, once.** Each shard gets the loaded cases and the stored run's files for its cases (`run.json`, traces, artifacts). A worker loads no dataset, so a dataset plugin's credentials stay here.
+- **Workers grade with the code `mst grade` runs here**, and send back each trial's grading and each case's preferences. This machine then writes the regrade from them, as a local `mst grade` writes it: the run directory, its report, `latest.json` and the result store's copy. `run.json`'s `grading.environment` says where it was graded, with each shard's machine.
+- **Judge keys must be in `--secrets-file`.** Its values go to each worker over its channel, never in a file on the machine. A worker keeps them in its process environment, where judges read them, and replaces them in what it sends back. This machine's own environment isn't sent.
+- **The worker image needs the judges**: the plugins at this machine's versions, and the SDK or runtime each judge runs, which MST's image doesn't install: `openai` for an OpenAI `rubric` judge, `@openai/codex-sdk` or `@anthropic-ai/claude-agent-sdk` for an agentic judge. A worker's judge preflight names one that's missing. A judge that reads prompts or scripts from a checkout here can't run on a worker.
+- **A key must last the shard.** A worker gets the secrets file's values once, when its shard starts. A short-lived gateway token (one `MST_LLM_AUTH_COMMAND` makes, say) can expire during a long shard, and its judge calls then fail.
+- **A shard that stops leaves its cases' grading missing.** Those trials and comparisons get a grading error (`Missing: grade shard 2 ended before …`), the regrade is `phases.grade: partial`, and the next `mst grade` grades them.
+- An environment must be able to run grade shards. One built with `machineEnvironment`, such as `docker`, can; `mst grade --env` refuses one that can't (`Environment.work`) before any shard runs.
 
 ## `batch` - Run Several Eval Configs
 

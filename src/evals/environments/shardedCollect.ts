@@ -232,6 +232,7 @@ export async function collectInEnvironment(
             runId: options.runId,
             index,
             count,
+            work: 'collect',
             bundleDir,
             resultsDir,
           },

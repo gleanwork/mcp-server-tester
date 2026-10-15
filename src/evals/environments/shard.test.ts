@@ -84,6 +84,7 @@ async function shardIn(
     runId: 'run-1',
     index: 0,
     count: 1,
+    work: 'collect',
     bundleDir,
     resultsDir: path.join(root, 'results'),
   };
@@ -267,6 +268,7 @@ const spec: ShardSpec = {
   runId: 'run-1',
   index: 0,
   count: 1,
+  work: 'collect',
   bundleDir: '/nowhere',
   resultsDir: '/nowhere',
 };
@@ -278,6 +280,59 @@ const quiet: ShardEvents = {
 };
 
 describe('runShardOverChannel', () => {
+  it('starts mst grade-shard for a grade shard, copies back after each graded result, and reads its counts', async () => {
+    const argvs: string[][] = [];
+    let copies = 0;
+    const { channel } = scriptedChannel([
+      JSON.stringify({
+        type: 'hello',
+        protocol: 'mst.shard/v1',
+        mst: packageJson.version,
+        client: { name: 'grade' },
+      }),
+      JSON.stringify({
+        type: 'graded',
+        key: { kind: 'trial', variant: 'v', caseId: 'c', trial: 0 },
+        status: 'graded',
+        path: '0.json',
+      }),
+      JSON.stringify({
+        type: 'graded',
+        key: { kind: 'pairwise', candidate: 'v', caseId: 'c' },
+        status: 'failed',
+        path: '1.json',
+      }),
+      JSON.stringify({
+        type: 'done',
+        graded: 1,
+        failed: 1,
+        cancelled: false,
+        cleanup: 'ok',
+      }),
+    ]);
+    const exec = channel.exec.bind(channel);
+    channel.exec = (argv, io) => {
+      argvs.push(argv);
+      return exec(argv, io);
+    };
+    channel.get = async () => {
+      copies++;
+    };
+    const progress: string[] = [];
+    const outcome = await runShardOverChannel(
+      channel,
+      { ...spec, work: 'grade' },
+      { ...quiet, progress: (event) => progress.push(event.type) },
+      new AbortController().signal,
+      { cancelGraceMs: 10 }
+    );
+    expect(argvs[0]?.slice(0, 2)).toEqual(['mst', 'grade-shard']);
+    expect(outcome).toMatchObject({ ok: true, graded: 1, failed: 1 });
+    expect(progress).toEqual(['hello', 'graded', 'graded']);
+    // After each graded result, and once at the end.
+    expect(copies).toBe(3);
+  });
+
   it('fails a worker on another MST version at hello, and cancels it', async () => {
     const { channel, sent } = scriptedChannel([
       JSON.stringify({

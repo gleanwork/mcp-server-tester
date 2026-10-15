@@ -188,6 +188,7 @@ export type {
   JudgeScore,
 } from './evals/evalFrameworkTypes.js';
 export { runEvalDataset, runEvalCase } from './evals/evalRunner.js';
+export type { TrialGrader } from './evals/evalRunner.js';
 export type {
   CaseExecution,
   ClientExecution,

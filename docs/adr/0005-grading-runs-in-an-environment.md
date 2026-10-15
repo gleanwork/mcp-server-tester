@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Grading runs in an environment
@@ -30,13 +30,13 @@ This record decides how `mst grade` runs in an environment. It amends ADR 0004 a
   - This replaces "Judge credentials stay on the coordinator" for grade shards. A grade worker gets the judges' keys; a collect worker gets what it gets today.
 - **The worker image provides what the judges need**: the judge plugins as packages, at the coordinator's versions (checked as for collecting), and any runtime a judge runs, such as the Codex CLI for an agentic judge. `hello` reports the image as for collecting. A version mismatch fails the shard before any judge runs.
 - **`mst.shard/v1` gains a grade worker.** The coordinator starts the hidden command `mst grade-shard --bundle <dir> --results <dir>`, over the same channel. The worker's MST must be the coordinator's, so these additions stay in `mst.shard/v1`:
-  - The worker writes `hello`, `need-tokens`, `heartbeat`, and `done` as a collect worker does, and `graded` (`caseId`, the result file) after each case. Results are copied back after each `graded`, as after each `trial`.
-  - `done` for a grade shard counts `graded` and `failed` cases.
+  - The worker writes `hello`, `need-tokens`, `heartbeat` and `done` as a collect worker does, and `graded` after each trial's grading and each case's comparison: its key (`trial`: variant, case and trial; `pairwise`: candidate and case), whether every grader gave a verdict (`graded` or `failed`), and its result file. Results are copied back after each `graded`, as after each `trial`.
+  - `done` for a grade shard counts the `graded` and `failed` results.
   - The coordinator writes `tokens` and `cancel`. A cancel lets the case under way finish, and grades no more.
 - **What a shard runs is part of the shard.** `ShardSpec` gains `work: 'collect' | 'grade'`. `runShardOverChannel`, and so every environment built with `machineEnvironment`, starts `mst collect` or `mst grade-shard` from it, with no change to the environment.
-  - An environment that implements `runShard` itself declares the work it runs (`EnvironmentDefinition.work`, default `['collect']`). `mst grade --env` refuses an environment that doesn't list `grade`, before any machine starts.
+  - An opened environment says the work its shards can run (`Environment.work`, default `['collect']`), and `machineEnvironment` sets both. An environment that implements `runShard` itself, or wraps one, sets it. `mst grade --env` refuses an environment without `grade` right after it opens, before any shard runs.
   - Later kinds of shard work join the same field.
-- **The grading's machines are recorded apart from collecting's.** The regrade's `run.json` keeps `environment` as the collected run's: it says where the traces came from. A new `grading.environment` says where they were graded, with its name, options, shard count and machines.
+- **The grading's machines are recorded apart from collecting's.** A regrade's `run.json` keeps `environment` as a regrade records it today. A new `grading.environment` says where its grading ran: the environment's name, its options, the shard count, and each shard's machine.
 - **A run in a result store is graded where it is.** With `--results` (or the eval config's `results.store`), `mst grade` fetches a run that isn't local from the store, checked against the manifest the upload writes last. The regrade is stored there too.
 
 ## Considered
@@ -48,6 +48,10 @@ This record decides how `mst grade` runs in an environment. It amends ADR 0004 a
 
 ## Not decided here
 
+- **Judge credentials that expire.** A worker gets the secrets file's values once, when its shard starts. A token that `MST_LLM_AUTH_COMMAND` makes on the coordinator for an LLM gateway lasts minutes, so it can expire during a long grade shard. Refreshing judge credentials over `need-tokens`, as connector tokens are refreshed, comes later. Until then, a grade shard needs a key that lasts as long as it does.
+- **Judge SDKs in MST's image.** `mst env setup docker` installs the eval's plugins, not the SDKs MST's judges load when they run (`openai`, `@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`), which are optional peer dependencies. Until setup installs them, an image of your own adds them (`npm install -g`), and the worker's judge preflight names a missing one.
+- **Judges that read files outside their package.** A judge that loads prompts or scripts from a checkout on the coordinator can't run on a worker. Its plugin must ship them in its package.
+
 - **Judge rate limits across shards.** Each shard grades `concurrency` cases at once, so a run makes up to `shards × concurrency` judge calls at a time. Holding judge calls to a cap per provider across shards, as `acquire` does for trials, comes later.
 - **`mst run --grade-env`**: collecting and grading in one command, each in its environment.
 - **Grading shards by trial** instead of by case, for runs with few cases and many trials.
@@ -56,5 +60,5 @@ This record decides how `mst grade` runs in an environment. It amends ADR 0004 a
 
 - Grade worker images must include the judge plugins and their runtimes. MST's default Linux Cowork image doesn't include any judge runtime.
 - Judge keys must be in the secrets file for `mst grade --env`. One that is only in the coordinator's environment fails the shard's judge preflight, before any case is graded.
-- The public environment types change: `ShardSpec.work`, `EnvironmentDefinition.work`, the grade bundle, and the `graded` message. They can change between 2.0 prereleases.
+- The public environment types change: `ShardSpec.work` (`ShardWork`), `Environment.work`, `ShardOutcome`'s `graded` and `failed`, the `graded` progress event (`GradeKey`), and the grade bundle. They can change between 2.0 prereleases.
 - A local `mst grade` and `mst grade --env` write the same regrade, apart from `grading.environment` and judge timings.
