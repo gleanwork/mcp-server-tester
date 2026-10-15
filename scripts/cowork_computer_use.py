@@ -86,6 +86,25 @@ def screen_point(coordinate: list[int]) -> tuple[int, int]:
     )
 
 
+def paste_query(text: str) -> None:
+    """Paste into the focused composer, then restore the clipboard.
+
+    ChatGPT's desktop composer ignores synthetic Unicode key events, so typing
+    leaves it empty, and pyautogui's Command+V does not reach it either. System
+    Events sends Command+V as one keystroke. A paste keeps line breaks without
+    submitting."""
+    previous = subprocess.run(["pbpaste"], capture_output=True).stdout
+    subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
+    try:
+        time.sleep(0.2)
+        subprocess.run(["osascript", "-e",
+                        'tell application "System Events" to keystroke "v" using command down'],
+                       check=True, capture_output=True)
+        time.sleep(0.5)
+    finally:
+        subprocess.run(["pbcopy"], input=previous, check=False)
+
+
 def type_query(text: str) -> None:
     """Unicode keyboard events; line breaks must not submit the composer."""
     import Quartz
@@ -143,6 +162,9 @@ def execute_action(action: dict[str, Any]) -> tuple[Any, bool]:
         return "drag completed", False
     if name == "type":
         type_query(action["text"])
+        return "text entered", False
+    if name == "paste":
+        paste_query(action["text"])
         return "text entered", False
     if name == "key":
         text = str(action["text"])
@@ -359,6 +381,22 @@ async def run(query: str, max_actions: int, mode: str, application: str = 'cowor
         raise ComputerUseDriverError(str(error), telemetry.snapshot("partial"), code) from error
 
 
+def open_chatgpt_new_chat() -> None:
+    """Choose File > New Chat (Cmd+N) in ChatGPT through the menu bar, so the
+    query never lands in the previous case's conversation."""
+    script = (
+        'tell application "System Events" to tell process "ChatGPT"\n'
+        '  set frontmost to true\n'
+        '  click menu item "New Chat" of menu 1 of menu bar item "File" of menu bar 1\n'
+        'end tell'
+    )
+    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+    if result.returncode != 0:
+        log("could not open a new chat from the File menu; the planner will open one")
+    else:
+        log("opened a new chat from the File menu")
+
+
 async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemetry,
                      application: str = 'cowork', target_model: str | None = None,
                      reasoning_effort: str | None = None,
@@ -406,6 +444,22 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
     subprocess.run(["open", "-a", app_path or app_name], check=bool(app_path), capture_output=True)
     log(f"requested {app_name} Desktop launch/focus")
     time.sleep(float(os.environ.get("MST_COWORK_CUA_START_DELAY", "3")))
+    # A Codex task needs a folder: open the fresh draft in MST's empty, trusted
+    # workspace (the Linux hand-off's route, without a prompt: fill_query still
+    # enters it). ChatGPT Work makes its own folder: open a new chat from the
+    # File menu, since the app stays on the previous case's conversation.
+    workspace = os.environ.get("MST_CHATGPT_WORKSPACE") if application == "chatgpt" else None
+    if workspace:
+        if not os.path.isabs(workspace) or any(c in workspace for c in "\x00\r\n"):
+            raise DesktopBlockedError('app_unavailable')
+        from urllib.parse import quote
+        subprocess.run(["open", f"codex://new?path={quote(workspace, safe='')}"],
+                       check=True, capture_output=True)
+        log("opened a new draft in the MST workspace")
+        time.sleep(3)
+    elif application == "chatgpt" and mode != "reset":
+        open_chatgpt_new_chat()
+        time.sleep(2)
 
     tools = [{
         "type": "computer_20251124",
@@ -532,12 +586,33 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                          'xhigh': 'Extra high', 'max': 'Maximum', 'ultra': 'Ultra'}
         selection = (
             f" Before filling the composer, select the requested model {target_model!r}. "
-            "Model IDs may be displayed with spaces and capitalization in the model picker. "
+            "Model IDs may be displayed with spaces and capitalization in the model picker, "
+            "without the 'gpt-' prefix (for example 'gpt-6-luna' is shown as '6 Luna'). "
             if target_model else ''
         )
         if reasoning_effort:
             selection += (f"Select reasoning effort {reasoning_effort!r}; it may appear as "
-                          f"{effort_labels.get(reasoning_effort, reasoning_effort)!r} under Power. ")
+                          f"{reasoning_effort.capitalize()!r} or "
+                          f"{effort_labels.get(reasoning_effort, reasoning_effort)!r}. ")
+        selection += (
+            "The model button beside the composer shows the selected model and effort together "
+            "(for example '6 Luna Medium'). If it already shows the requested model and effort, "
+            "they are selected: do not open the model or effort menus. "
+            "The composer must be empty before fill_query: if it holds any chip (a plugin, template, "
+            "file or mention), text, or attachment, remove it first (its close control, or click "
+            "into the composer and press BackSpace until it is empty). Close any template or "
+            "suggestion panel with Escape. "
+            "Do not click the icons under the composer (files, projects, plugins, mentions). "
+            + ("The harness already opened a fresh draft in its own folder: do not click New chat, "
+               "open a project or choose a folder, which would replace that draft. "
+               if os.environ.get("MST_CHATGPT_WORKSPACE") else
+               "The harness already opened a new chat: do not click New chat, open a project "
+               "or tab, or use keyboard shortcuts other than Enter and Escape. ")
+            + ""
+            "After fill_query, take a screenshot and check it: the composer must show the query "
+            "and no menu, suggestion list or dialog may be open (press Escape to close one, then "
+            "take another screenshot). Only then press Enter. "
+        )
         messages[0]['content'] += selection + (
             f" Before filling, select {surface} through Switch mode and verify its current-mode label. "
             "Do not substitute another surface. Surface selection is UI setup, never text for the evaluated model. "
@@ -556,12 +631,18 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
     model_confirmed = False
     ui_revision = 0
     screenshot_revision = 0
+    # ChatGPT: Enter may submit only after the planner has seen the filled
+    # composer. A suggestion menu or dialog opened while typing would
+    # otherwise take the Enter instead of the composer.
+    post_fill_shot = False
+    post_fill_observed = False
     for action_number in range(1, max_actions + 1):
         log(f"requesting Computer Use plan {action_number}/{max_actions}")
         if application == 'chatgpt':
             trim_screenshot_history(messages)
         # Only screenshots supplied to this request can ground its confirmations.
         observed_revision = screenshot_revision
+        post_fill_observed = post_fill_shot
         response = request_plan(anthropic, lambda: client.beta.messages.create(
             model=model,
             max_tokens=1024,
@@ -621,8 +702,8 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                     elif block.input != {}:
                         refusal = "fill_query takes no arguments; the harness owns the original text."
                     else:
-                        action = {"action": "type", "text": query}
-                        action_name = "type"
+                        action = {"action": "paste" if application == "chatgpt" else "type", "text": query}
+                        action_name = action["action"]
                 elif tool_name != "computer":
                     refusal = "Unknown tool. Use computer for navigation and fill_query for text entry."
                 elif action_name == "type":
@@ -630,6 +711,13 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
                 elif action_name == "key" and any(k.strip().lower() in {"enter", "return"} for k in str(action.get("text", "")).split("+")):
                     if not typed_query or str(action.get("text", "")).lower() not in {"enter", "return"}:
                         refusal = "Only an unmodified Enter after fill_query succeeds may submit."
+                    elif application == 'chatgpt' and not post_fill_observed:
+                        refusal = ("Before Enter, take a screenshot and check it in your next step: the composer "
+                                   "must show the query with no menu, suggestion list or dialog open. Close "
+                                   "one with Escape first.")
+                elif (application == 'chatgpt' and typed_query and action_name == "key"
+                      and str(action.get("text", "")).strip().lower() in {"escape", "esc"}):
+                    pass
                 elif typed_query and action_name not in {"screenshot", "wait", "cursor_position"}:
                     refusal = "The query is entered. Only screenshots or the single Enter submission are allowed."
             if refusal:
@@ -682,8 +770,15 @@ async def run_driver(query: str, max_actions: int, mode: str, telemetry: Telemet
             telemetry.executed += 1
             if action_name == 'screenshot' and isinstance(result, dict) and result.get('type') == 'image':
                 screenshot_revision = ui_revision
+                if typed_query:
+                    post_fill_shot = True
+            elif typed_query:
+                # Escape, or any other action after the fill: look again first.
+                post_fill_shot = False
+                post_fill_observed = False
             if tool_name == "fill_query":
                 typed_query = True
+                post_fill_shot = False
             if submitted and mode == "submit":
                 log("submission boundary reached; stopping immediately")
                 return {

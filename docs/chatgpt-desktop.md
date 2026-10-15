@@ -50,6 +50,41 @@ against the completed native turn. Linux does not guess mappings from model IDs
 to display labels such as `5.6 Terra Medium`. Linux rejects `clientOptions.configPath`
 (unless it equals `$HOME/.codex/config.toml`) and `chatgptSessionRoot`.
 
+## macOS runs in your own profile
+
+On macOS, ChatGPT runs signed in as you, with your configuration. For the length
+of a run, MST swaps the MCP servers in `~/.codex/config.toml` for the eval's
+servers and turns off everything else that could answer instead of them. It
+restores the original configuration when the run ends:
+
+- ChatGPT's account connectors (the `apps` feature and its `codex_apps` server).
+  Otherwise the model can pick, for example, your account's own connector for a
+  service instead of the eval's server for it.
+- Web search and the in-app browser (the `in_app_browser` feature).
+- The bundled computer-use and browser plugins.
+- Every plugin you installed from a marketplace other than OpenAI's own
+  (`openai-bundled`, `openai-primary-runtime`), with their skills and MCP
+  servers.
+
+Your global `~/.codex/AGENTS.md` still reaches the evaluated prompt. Keep
+personal instructions out of it on a Mac you run evaluations on, or use Linux,
+whose fresh profile has none.
+
+Before each case, MST chooses File > New Chat itself, since the app stays on
+the previous case's conversation, and the planner pastes the query rather than
+typing it. ChatGPT Work makes its own folder for a task. For the `codex`
+surface, MST opens the draft in an empty, trusted folder it creates for the run
+and removes afterwards.
+
+When a case stalls, its chat is still mid-turn, and ChatGPT answers MST's quit
+with "Quit ChatGPT? Active local chats on this machine will be interrupted".
+During recovery and cleanup, MST confirms that prompt only when every chat with
+a turn in progress is one it started in this run with one of its queries, read
+from the session rollouts. Otherwise it leaves the app running and the
+configuration installed, and reports the failure. MST never confirms the prompt
+when it first quits the app before a run. Confirming needs the Accessibility
+permission the driver already uses.
+
 ## Linux runtime contract
 
 The caller (your eval harness) owns the VM/container, display, D-Bus, keyring,

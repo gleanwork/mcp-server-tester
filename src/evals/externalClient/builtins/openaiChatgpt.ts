@@ -374,10 +374,12 @@ async function submitWithComputerUse(
   runState: ChatgptRunState
 ): Promise<ExternalClientRunResult | void> {
   try {
+    runState.activeSession?.noteSubmission(run.submittedInput);
     const receipt = await submitChatgptQuery(
       run.submittedInput,
       config,
-      run.startedAtMs + run.timeoutMs
+      run.startedAtMs + run.timeoutMs,
+      runState.activeSession?.workspace
     );
     runState.promptSubmitted = true;
     runState.computerUse = {

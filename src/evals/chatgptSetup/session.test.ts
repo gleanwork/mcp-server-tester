@@ -1,5 +1,12 @@
 import type * as ReadinessModule from '../mcpReadiness.js';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -58,6 +65,12 @@ import type * as LinuxModule from '../chatgpt/linux.js';
 import { linuxEnvironment } from '../chatgpt/linuxEnvironment.fixture.js';
 import { CodexSetupError } from '../codexSetup/native.js';
 import { checkMcpServers } from '../mcpReadiness.js';
+import { confirmChatgptQuitPrompt } from './quitPrompt.js';
+import type * as QuitPromptModule from './quitPrompt.js';
+vi.mock('./quitPrompt.js', async (original) => ({
+  ...(await original<typeof QuitPromptModule>()),
+  confirmChatgptQuitPrompt: vi.fn(),
+}));
 vi.mock('./linuxProfile.js', async (original) => ({
   ...(await original<typeof LinuxProfileModule>()),
   createLinuxChatgptProfile: vi.fn(),
@@ -653,6 +666,70 @@ describe('ChatGPT Linux native lifecycle', () => {
   });
 });
 
+describe('ChatGPT quit prompt after a stalled case', () => {
+  async function stalled(userText: string) {
+    const root = await mkdtemp(join(tmpdir(), 'mst-quit-test-'));
+    const session = new ChatgptAppSession();
+    await session.prepare(testConfig('gpt-test', { chatgptSessionRoot: root }));
+    session.noteSubmission('Say done');
+    // The stalled case's chat: started, never completed.
+    const day = join(root, '2026', '10', '15');
+    await mkdir(day, { recursive: true });
+    await writeFile(
+      join(day, 'rollout-stalled.jsonl'),
+      [
+        {
+          type: 'session_meta',
+          payload: { timestamp: new Date().toISOString() },
+        },
+        { type: 'event_msg', payload: { type: 'task_started' } },
+        {
+          type: 'response_item',
+          payload: {
+            type: 'message',
+            role: 'user',
+            content: [{ type: 'input_text', text: userText }],
+          },
+        },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n') + '\n'
+    );
+    // ChatGPT shows its prompt instead of quitting; Quit then closes it.
+    let running = true;
+    controller.state.mockImplementation(async () => ({ running }));
+    controller.stop.mockRejectedValue(new Error('ChatGPT did not quit'));
+    vi.mocked(confirmChatgptQuitPrompt).mockImplementation(async () => {
+      running = false;
+      return true;
+    });
+    return { session, root };
+  }
+
+  it('confirms Quit when the only active chat is the one MST started, then restores', async () => {
+    const { session, root } = await stalled('Say done');
+    try {
+      await session.dispose();
+      expect(confirmChatgptQuitPrompt).toHaveBeenCalledTimes(1);
+      expect(restore).toHaveBeenCalledTimes(1);
+      expect(session.telemetry.cleanupStatus).toBe('completed');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("never confirms when another active chat is not MST's, and leaves the app alone", async () => {
+    const { session, root } = await stalled('my own question');
+    try {
+      await expect(session.dispose()).rejects.toThrow('ChatGPT did not quit');
+      expect(confirmChatgptQuitPrompt).not.toHaveBeenCalled();
+      expect(restore).not.toHaveBeenCalled();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('ChatGPT AI-driven macOS lifecycle', () => {
   it('shares the Cowork planner and keeps controller accounting separate from native usage', async () => {
     const result = await run('gpt-test', {
@@ -736,6 +813,20 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       turnId: 'native-turn',
     });
   });
+  it('opens Codex-surface tasks in an empty, trusted workspace it removes after', async () => {
+    // A Codex task needs a folder; ChatGPT Work makes its own.
+    const result = await run('gpt-test', { surface: 'codex' });
+    const { trustedProject } = vi.mocked(installCodexConfig).mock
+      .calls[0]![1] as {
+      trustedProject?: string;
+    };
+    expect(trustedProject).toContain('mst-chatgpt-workspace-');
+    expect(
+      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].env
+    ).toMatchObject({ MST_CHATGPT_WORKSPACE: trustedProject });
+    await expect(stat(trustedProject!)).rejects.toThrow();
+    expect(result.clientMetadata).toBeDefined();
+  });
   it('stops before config install, submits once, and restores before restarting', async () => {
     expect((await run()).success).toBe(true);
     expect(events).toEqual([
@@ -758,9 +849,17 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       configName: 'selected',
       model: 'gpt-test',
       reasoningEffort: 'low',
+      builtinToolPolicy: expect.objectContaining({
+        webSearch: 'disabled',
+        disabledFeatures: ['apps', 'in_app_browser'],
+      }),
     });
     expect(restore).toHaveBeenCalledWith({ archiveChanges: true });
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledTimes(1);
+    // ChatGPT Work makes its own folder: no MST workspace for it.
+    expect(
+      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].env
+    ).not.toHaveProperty('MST_CHATGPT_WORKSPACE');
   });
   it.each(['native-macos', 'linux-desktop'])(
     'rejects %s before any desktop change',

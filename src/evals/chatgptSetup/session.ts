@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { parse as parseToml } from 'smol-toml';
+import { activeChatOwnership, confirmChatgptQuitPrompt } from './quitPrompt.js';
 import { isDeepStrictEqual } from 'node:util';
 import { basename, dirname, join } from 'node:path';
 import { isChatgptBuiltinServer } from '../externalClient/builtins/chatgptTrace.js';
@@ -6,6 +10,7 @@ import { defaultChatgptConfigHome } from './macController.js';
 import {
   installCodexConfig,
   resolveCodexSetup,
+  type CodexBuiltinToolPolicy,
   type CodexConfigInstallation,
   type CodexSetupConfig,
 } from '../codexSetup/config.js';
@@ -94,6 +99,56 @@ function sessionSettings(
 }
 
 /** One app/config transaction. Per-query native baselines and run state never live here. */
+/** OpenAI's own marketplaces; their plugins are the app's built-in tools. */
+const OPENAI_MARKETPLACES = new Set([
+  'openai-bundled',
+  'openai-primary-runtime',
+]);
+/** Built-ins that let the model act outside the servers under test. */
+const MAC_DISABLED_BUILTINS = new Set([
+  'unified-computer-use@openai-bundled',
+  'browser@openai-bundled',
+]);
+const PLUGIN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9._-]+$/;
+
+/**
+ * macOS runs in the user's own profile, so turn off what would answer
+ * instead of the servers under test, for the run only (the config is
+ * restored after): ChatGPT's account connectors (`apps`, the `codex_apps`
+ * server), web search and the in-app browser, computer use, and every plugin the
+ * user installed (their skills and MCP servers).
+ */
+async function macBuiltinToolPolicy(
+  configPath: string
+): Promise<CodexBuiltinToolPolicy> {
+  let plugins: string[] = [];
+  try {
+    const parsed = parseToml(await readFile(configPath, 'utf8')) as {
+      plugins?: unknown;
+    };
+    if (parsed.plugins && typeof parsed.plugins === 'object')
+      plugins = Object.keys(parsed.plugins);
+  } catch {
+    // No readable config: nothing installed to turn off.
+  }
+  return {
+    webSearch: 'disabled',
+    disabledPlugins: [
+      ...new Set([
+        ...MAC_DISABLED_BUILTINS,
+        ...plugins.filter(
+          (id) =>
+            PLUGIN_ID.test(id) &&
+            !OPENAI_MARKETPLACES.has(id.slice(id.indexOf('@') + 1))
+        ),
+      ]),
+    ],
+    // The in-app browser is a second way to the web, and its New tab sits
+    // where the planner looks for New chat.
+    disabledFeatures: ['apps', 'in_app_browser'],
+  };
+}
+
 export class ChatgptAppSession {
   #lifecycle?: ChatgptLifecycleState;
   #profile?: ChatgptPlatformProfile;
@@ -109,6 +164,15 @@ export class ChatgptAppSession {
   sessionsRoot?: string;
   /** Linux: where native evidence is copied before profile teardown. */
   evidenceDir?: string;
+  /**
+   * macOS Codex surface: an empty, trusted folder each task opens in (a Codex
+   * task needs one). ChatGPT Work makes its own. Linux's profile owns its own.
+   */
+  workspace?: string;
+  /** Queries MST submitted, to tell its chats from any others. */
+  readonly #submitted = new Set<string>();
+  /** When MST last launched the app. */
+  #launchedAtMs?: number;
   readonly telemetry = {
     id: randomUUID(),
     scope: 'batch' as 'batch' | 'case',
@@ -195,10 +259,23 @@ export class ChatgptAppSession {
       lifecycle.stopped = true;
       const environment = { ...settings.environment };
       if (settings.codexSetup) {
+        if (!this.#profile && chatgptSurface(config) === 'codex')
+          this.workspace = await realpath(
+            await mkdtemp(join(tmpdir(), 'mst-chatgpt-workspace-'))
+          );
         lifecycle.installation = await installCodexConfig(settings.codexSetup, {
           configName: settings.setup?.configName,
           model: config.model,
           reasoningEffort: config.reasoningEffort,
+          ...(this.workspace ? { trustedProject: this.workspace } : {}),
+          ...(!this.#profile
+            ? {
+                builtinToolPolicy: await macBuiltinToolPolicy(
+                  settings.codexSetup.configPath ??
+                    join(defaultChatgptConfigHome(), 'config.toml')
+                ),
+              }
+            : {}),
           ...this.#profile?.install,
         });
         this.record('setup', 'install_config');
@@ -241,6 +318,11 @@ export class ChatgptAppSession {
       this.telemetry.setupStatus = 'failed';
       if (error instanceof NativeChatgptDriverError)
         this.telemetry.nativeSetup = error.telemetry;
+      // Not yet in the installed config: nothing else will remove it.
+      if (this.workspace && !this.#lifecycle?.installation) {
+        await rm(this.workspace, { recursive: true, force: true });
+        this.workspace = undefined;
+      }
       throw error;
     } finally {
       this.telemetry.setupDurationMs = Date.now() - started;
@@ -249,6 +331,7 @@ export class ChatgptAppSession {
 
   async #start(phase: 'setup' | 'recovery'): Promise<void> {
     const { config, environment, platform } = this.#launch!;
+    this.#launchedAtMs = Date.now();
     await this.#lifecycle!.controller.start(environment);
     this.record(phase, 'start');
     if (platform.verifyReady) {
@@ -288,13 +371,53 @@ export class ChatgptAppSession {
     this.#ready = false;
     const started = Date.now();
     try {
-      await this.#lifecycle!.controller.stop();
+      await this.#stopOwned('recovery');
       this.record('recovery', 'stop');
       await this.#start('recovery');
       this.#ready = true;
     } finally {
       this.telemetry.recoveryCount += 1;
       this.telemetry.recoveryDurationMs += Date.now() - started;
+    }
+  }
+
+  /** Record a query before submitting it, so cleanup can tell MST's chats apart. */
+  noteSubmission(query: string): void {
+    this.#submitted.add(query.trim());
+  }
+
+  /**
+   * Quit the app MST launched. A stalled case leaves its chat mid-turn, and
+   * ChatGPT then asks "Quit ChatGPT? Active local chats on this machine will
+   * be interrupted". Confirm it only when every active chat is one MST started
+   * in this run (macOS, with the user's own profile); otherwise refuse as before.
+   */
+  async #stopOwned(phase: 'recovery' | 'cleanup'): Promise<void> {
+    const { controller } = this.#lifecycle!;
+    try {
+      await controller.stop();
+      return;
+    } catch (error) {
+      if (
+        this.#profile ||
+        this.#launchedAtMs === undefined ||
+        !this.sessionsRoot ||
+        !(await controller.state()).running
+      )
+        throw error;
+      const chats = await activeChatOwnership(
+        this.sessionsRoot,
+        this.#launchedAtMs,
+        this.#submitted
+      );
+      if (chats.active === 0 || chats.unowned > 0) throw error;
+      if (!(await confirmChatgptQuitPrompt())) throw error;
+      this.record(phase, 'confirm_quit');
+      const deadline = Date.now() + 20_000;
+      while ((await controller.state()).running) {
+        if (Date.now() > deadline) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
     }
   }
 
@@ -331,7 +454,7 @@ export class ChatgptAppSession {
       const lifecycle = this.#lifecycle;
       if (lifecycle?.stopped) {
         if (lifecycle.launchAttempted) {
-          await lifecycle.controller.stop();
+          await this.#stopOwned('cleanup');
           this.record('cleanup', 'stop');
         }
         if (lifecycle.installation) {
@@ -346,6 +469,10 @@ export class ChatgptAppSession {
       if (this.#profile && (!lifecycle || lifecycle.stopped)) {
         await this.#profile.dispose();
         this.record('cleanup', 'dispose_profile');
+      }
+      if (this.workspace) {
+        await rm(this.workspace, { recursive: true, force: true });
+        this.record('cleanup', 'remove_workspace');
       }
       this.telemetry.cleanupStatus = 'completed';
     } catch (error) {
