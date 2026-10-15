@@ -607,7 +607,8 @@ describe('submission is chosen by the platform, not the capability id', () => {
       expect(submitChatgptQuery).toHaveBeenCalledWith(
         'private prompt',
         ctx.config,
-        ctx.run.startedAtMs + ctx.run.timeoutMs
+        ctx.run.startedAtMs + ctx.run.timeoutMs,
+        undefined
       );
       expect(runLinuxChatgptDesktop).not.toHaveBeenCalled();
       expect(chatgptRunState(ctx.state)).toMatchObject({

@@ -348,28 +348,28 @@ class DriverTests(unittest.TestCase):
 
     def test_chatgpt_codex_surface_is_consumed_by_planner_not_added_to_query(self):
         query = '  original query\n'
-        result, count = self.run_actions([FILL, ENTER], application='chatgpt',
+        result, count = self.run_actions([FILL, {'action': 'screenshot'}], plans=[[ENTER]], application='chatgpt',
                                         chatgpt_surface='codex', query=query)
         self.assertEqual(result['status'], 'submitted')
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 3)
         instruction = self.planner_request['messages'][0]['content'][0]['text']
         self.assertIn('Open Codex', instruction)
         self.assertIn('verify its current-mode label', instruction)
         self.assertNotIn('ChatGPT Work', instruction)
-        self.assertEqual(self.executed_actions[0], {'action': 'type', 'text': query})
+        self.assertEqual(self.executed_actions[0], {'action': 'paste', 'text': query})
 
     def test_chatgpt_uses_shared_ai_loop_with_app_model_and_power_instructions(self):
-        result, count = self.run_actions([FILL, ENTER, ENTER], application='chatgpt',
+        result, count = self.run_actions([FILL, {'action': 'screenshot'}], plans=[[ENTER, ENTER]], application='chatgpt',
                                         target_model='test-chatgpt-model', reasoning_effort='medium')
         self.assertEqual(result['status'], 'submitted')
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 3)
         self.assertEqual(self.launches[0].args[0], ['open', '-a', 'ChatGPT'])
         instruction = self.planner_request['messages'][0]['content'][0]['text']
         self.assertIn('ChatGPT Work', instruction)
         self.assertIn('test-chatgpt-model', instruction)
         self.assertIn('Standard', instruction)
         self.assertIn('Do not change account settings', instruction)
-        self.assertEqual(self.executed_actions[0], {'action': 'type', 'text': 'query'})
+        self.assertEqual(self.executed_actions[0], {'action': 'paste', 'text': 'query'})
         self.assertEqual(self.planner_request['tools'][0]['type'], 'computer_20251124')
 
     def test_permission_denial_stops_before_planner_launch_or_input(self):
@@ -457,10 +457,21 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(self.launches, [])
 
     def test_chatgpt_no_click_or_retyping_after_fill(self):
-        result, count = self.run_actions([FILL, {'action': 'left_click', 'coordinate': [5, 5]}, FILL, ENTER], application='chatgpt')
+        result, count = self.run_actions([FILL, {'action': 'left_click', 'coordinate': [5, 5]}, FILL, {'action': 'screenshot'}], plans=[[ENTER]], application='chatgpt')
         self.assertEqual(result['status'], 'submitted')
-        self.assertEqual(count, 2)
+        self.assertEqual(count, 3)
         self.assertEqual(result['telemetry']['refused_action_count'], 2)
+
+    def test_chatgpt_enter_waits_until_the_filled_composer_is_seen(self):
+        # Enter in the fill's own plan, and Enter with a screenshot in the same plan, are refused:
+        # a menu opened while typing would take the Enter instead of the composer.
+        escape = {'action': 'key', 'text': 'Escape'}
+        result, count = self.run_actions([FILL, ENTER, {'action': 'screenshot'}, ENTER], plans=[[escape, ENTER, {'action': 'screenshot'}], [ENTER]],
+                                        application='chatgpt')
+        self.assertEqual(result['status'], 'submitted')
+        self.assertEqual([a.get('action') for a in self.executed_actions], ['paste', 'screenshot', 'key', 'screenshot', 'key'])
+        self.assertEqual(self.executed_actions[2], escape)
+        self.assertEqual(result['telemetry']['refused_action_count'], 3)
 
     def test_observed_response_models_and_cached_usage_sum_each_completed_plan(self):
         metadata = {'model': 'claude-sonnet-4-6', 'usage': types.SimpleNamespace(
