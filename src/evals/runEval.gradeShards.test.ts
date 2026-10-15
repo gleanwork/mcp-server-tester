@@ -5,6 +5,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gradeRun, runEval } from './runEval.js';
 import { shardOf } from './environments/shardedCollect.js';
+import { readRunDirectory } from './runFormat.js';
+import { buildRunReport } from './runReport.js';
+import packageJson from '../../package.json' with { type: 'json' };
 import { resetPluginsForTests } from '../plugins/extensions.js';
 
 const mock = (name: string) =>
@@ -146,6 +149,17 @@ describe('mst grade --env (ADR 0005)', () => {
     // Two shards had cases; every trial and comparison came back.
     expect(machines.map((m) => m.ok)).toEqual([true, true]);
     expect(machines.reduce((n, m) => n + Number(m.graded), 0)).toBe(8 + 4);
+    // The report says where the trials were graded; a local regrade's doesn't.
+    const report = buildRunReport(await readRunDirectory(sharded.outputDir));
+    expect(report.run.gradingEnvironment).toEqual({
+      name: 'fork/env/children',
+      shards: 2,
+      machines: [1, 2].map((shard) => ({ shard, mst: packageJson.version })),
+    });
+    expect(
+      buildRunReport(await readRunDirectory(local.outputDir)).run
+        .gradingEnvironment
+    ).toBeUndefined();
   }, 60_000);
 
   it("a shard that never ran leaves its cases' grading missing, and the regrade partial", async () => {

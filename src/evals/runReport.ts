@@ -13,6 +13,7 @@ import type {
   MCPComparisonData,
   MCPRunReportData,
   RunReportDifference,
+  RunReportEnvironment,
   RunReportEvidence,
   RunReportPreference,
   RunReportScore,
@@ -491,22 +492,14 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
       })),
       ...(run.environment.name
         ? {
-            environment: {
+            environment: reportEnvironment({
+              ...run.environment,
               name: run.environment.name,
-              shards: run.environment.shards ?? 1,
-              ...(run.environment.machines?.length
-                ? {
-                    machines: run.environment.machines.map(
-                      ({ shard, image, mst }) => ({
-                        shard,
-                        ...(image ? { image } : {}),
-                        ...(mst ? { mst } : {}),
-                      })
-                    ),
-                  }
-                : {}),
-            },
+            }),
           }
+        : {}),
+      ...(run.grading
+        ? { gradingEnvironment: reportEnvironment(run.grading.environment) }
         : {}),
       ...(clientApps(ran).length ? { clientApps: clientApps(ran) } : {}),
       // Cases any variant ran; the grid shows the ones the baseline ran.
@@ -709,4 +702,25 @@ export async function writeRunReport(
     'utf8'
   );
   return runReportPath(runDirectory);
+}
+
+/** An environment and its shards' machines, as the report shows them. */
+function reportEnvironment(environment: {
+  name: string;
+  shards?: number;
+  machines?: Array<{ shard: number; image?: string; mst?: string }>;
+}): RunReportEnvironment {
+  return {
+    name: environment.name,
+    shards: environment.shards ?? 1,
+    ...(environment.machines?.length
+      ? {
+          machines: environment.machines.map(({ shard, image, mst }) => ({
+            shard,
+            ...(image ? { image } : {}),
+            ...(mst ? { mst } : {}),
+          })),
+        }
+      : {}),
+  };
 }

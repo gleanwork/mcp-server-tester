@@ -264,7 +264,7 @@ Every run directory has the same layout. Each part was written by one of the ste
     └── report/         # step 9: what `mst open` shows
 ```
 
-`run.json` records each shard's machine (`environment.machines`: image, worker MST), and each trial its client app. Planned for 2.0: each trace records its shard.
+`run.json` records each shard's machine (`environment.machines`: image, worker MST), and each trial its client app. A regrade with `mst grade --env` records its grade shards' machines the same way, in `grading.environment`, and the report shows both. Planned for 2.0: each trace records its shard.
 
 This layout is a contract, versioned as `mst.run/v1`, and MST keeps it stable within a major version. That stability is why other tools can rely on it. A company dashboard can read `summary.json` straight from the bucket without depending on MST's code. It's also what makes resume and regrade possible: both read what the earlier steps left behind.
 

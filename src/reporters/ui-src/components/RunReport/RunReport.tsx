@@ -769,6 +769,33 @@ function phaseNote(
   return null;
 }
 
+/** An environment's name, shards and each shard's machine. */
+function EnvironmentDetails({
+  label,
+  environment,
+}: {
+  label: string;
+  environment: NonNullable<MCPRunReportData['run']['environment']>;
+}) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-mono">
+        {environment.name}
+        {environment.shards > 1 ? ` · ${environment.shards} shards` : ''}
+        {environment.machines?.map((machine) => (
+          <div key={machine.shard} className="text-muted-foreground">
+            shard {machine.shard}:{' '}
+            {[machine.image, machine.mst && `MST ${machine.mst}`]
+              .filter(Boolean)
+              .join(' · ') || '—'}
+          </div>
+        ))}
+      </dd>
+    </>
+  );
+}
+
 function RunDetails({ data }: { data: MCPRunReportData }) {
   const { run } = data;
   const seconds =
@@ -794,23 +821,16 @@ function RunDetails({ data }: { data: MCPRunReportData }) {
             .join(', ')}
         </dd>
         {run.environment && (
-          <>
-            <dt className="text-muted-foreground">Environment</dt>
-            <dd className="font-mono">
-              {run.environment.name}
-              {run.environment.shards > 1
-                ? ` · ${run.environment.shards} shards`
-                : ''}
-              {run.environment.machines?.map((machine) => (
-                <div key={machine.shard} className="text-muted-foreground">
-                  shard {machine.shard}:{' '}
-                  {[machine.image, machine.mst && `MST ${machine.mst}`]
-                    .filter(Boolean)
-                    .join(' · ') || '—'}
-                </div>
-              ))}
-            </dd>
-          </>
+          <EnvironmentDetails
+            label="Environment"
+            environment={run.environment}
+          />
+        )}
+        {run.gradingEnvironment && (
+          <EnvironmentDetails
+            label="Grading environment"
+            environment={run.gradingEnvironment}
+          />
         )}
         {run.clientApps && (
           <>

@@ -948,6 +948,13 @@ export interface RunReportEvidence {
   trialsToShow: Array<{ rate: number; trials: number }>;
 }
 
+/** An environment a run's trials were collected or graded on, in the report. */
+export interface RunReportEnvironment {
+  name: string;
+  shards: number;
+  machines?: Array<{ shard: number; image?: string; mst?: string }>;
+}
+
 /** Everything the run report shows: computed by `buildRunReport`, rendered as is. */
 export interface MCPRunReportData {
   format: string;
@@ -978,11 +985,12 @@ export interface MCPRunReportData {
     cases: number;
     trialsPerCase: { min: number; max: number };
     /** Where the trials were collected (`--env`), and each shard's machine. */
-    environment?: {
-      name: string;
-      shards: number;
-      machines?: Array<{ shard: number; image?: string; mst?: string }>;
-    };
+    environment?: RunReportEnvironment;
+    /**
+     * Where a regrade graded the trials (`mst grade --env`, ADR 0005), and
+     * each grade shard's machine. Absent when graded where MST ran.
+     */
+    gradingEnvironment?: RunReportEnvironment;
     /** The client apps the trials ran, as each recorded it: `Claude 2.31226.1`. */
     clientApps?: string[];
   };
