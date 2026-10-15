@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  fetchRun,
   fileRunStore,
   gcsRunStore,
+  hasStoredRun,
   storeRunHistory,
   uploadRun,
   type RunStore,
@@ -152,6 +154,7 @@ describe.each(stores)('the %s run store', (_name, makeStore) => {
       latest: { createdAt: '2026-10-13T00:00:00.000Z' },
     });
     expect((await store.list(`my-eval/runs/${runId}/`)).sort()).toEqual([
+      `my-eval/runs/${runId}/manifest.json`,
       `my-eval/runs/${runId}/results.json`,
       `my-eval/runs/${runId}/summary.json`,
       `my-eval/runs/${runId}/traces/v/case/0.json`,
@@ -186,6 +189,97 @@ describe.each(stores)('the %s run store', (_name, makeStore) => {
         Buffer.from((await store.get('my-eval/latest.json'))!).toString()
       ).runId
     ).toBe(runId);
+  });
+});
+
+describe('fetching a stored run', () => {
+  const runId = '20261014T120000Z-abc123';
+  /** A run uploaded to a file store, and where a fetch would put it. */
+  async function uploaded() {
+    const store = fileRunStore(await tempDir());
+    const runDirectory = await tempDir();
+    await fs.mkdir(path.join(runDirectory, 'traces', 'v', 'case'), {
+      recursive: true,
+    });
+    await fs.writeFile(path.join(runDirectory, 'run.json'), '{"runId":"r"}');
+    await fs.writeFile(
+      path.join(runDirectory, 'traces', 'v', 'case', '0.json'),
+      '{}'
+    );
+    // An atomic write's temporary: never uploaded.
+    await fs.writeFile(path.join(runDirectory, 'summary.json.0a1b.tmp'), 'x');
+    await uploadRun(store, { evalName: 'my-eval', runId, runDirectory });
+    const into = path.join(await tempDir(), 'runs', runId);
+    const manifestKey = `my-eval/runs/${runId}/manifest.json`;
+    const manifest = JSON.parse(
+      Buffer.from((await store.get(manifestKey))!).toString()
+    ) as { files: Array<{ path: string; bytes: number; sha256: string }> };
+    return { store, into, manifestKey, manifest };
+  }
+
+  it('writes the run byte for byte, with nothing beside it', async () => {
+    const u = await uploaded();
+    expect(u.manifest.files.map((file) => file.path)).toEqual([
+      'run.json',
+      'traces/v/case/0.json',
+    ]);
+    expect(await hasStoredRun(u.store, 'my-eval', runId)).toBe(true);
+    expect(
+      await fetchRun(u.store, { evalName: 'my-eval', runId, directory: u.into })
+    ).toEqual({ files: 2, bytes: 15 });
+    expect((await fs.readdir(u.into, { recursive: true })).sort()).toEqual([
+      'manifest.json',
+      'run.json',
+      'traces',
+      'traces/v',
+      'traces/v/case',
+      'traces/v/case/0.json',
+    ]);
+    expect(await fs.readdir(path.dirname(u.into))).toEqual([runId]);
+  });
+
+  it("refuses a run without its manifest, a file that doesn't match it, and a path that leaves the run", async () => {
+    const u = await uploaded();
+    const fetch = () =>
+      fetchRun(u.store, { evalName: 'my-eval', runId, directory: u.into });
+    await u.store.put(`my-eval/runs/${runId}/run.json`, '{"runId":"other"}');
+    await expect(fetch()).rejects.toThrow(
+      "run.json doesn't match its manifest"
+    );
+    for (const bad of ['../../escape', 'a//b', 'a\\b'])
+      await u.store
+        .put(
+          u.manifestKey,
+          JSON.stringify({
+            format: 1,
+            runId,
+            files: [...u.manifest.files, { ...u.manifest.files[0], path: bad }],
+          })
+        )
+        .then(() =>
+          expect(fetch()).rejects.toThrow(/lists|Invalid result store key/)
+        );
+    await u.store.put(
+      u.manifestKey,
+      JSON.stringify({
+        ...u.manifest,
+        format: 1,
+        runId: '20261014T120000Z-ffffff',
+      })
+    );
+    await expect(fetch()).rejects.toThrow("isn't a manifest of this run");
+    expect(
+      await hasStoredRun(u.store, 'my-eval', '20261014T120000Z-000000')
+    ).toBe(false);
+    await expect(
+      fetchRun(u.store, {
+        evalName: 'my-eval',
+        runId: '20261014T120000Z-000000',
+        directory: u.into,
+      })
+    ).rejects.toThrow('has no manifest.json');
+    // Nothing was left where the run would go.
+    expect(await fs.readdir(path.dirname(u.into)).catch(() => [])).toEqual([]);
   });
 });
 

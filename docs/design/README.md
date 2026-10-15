@@ -309,6 +309,24 @@ npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json
 # → run 7f3c2a.g2 (traces from 7f3c2a)
 ```
 
+Grading takes hours when an agentic judge reads every trial. Grade on the environment's machines instead, with the judges' keys in the secrets file ([ADR 0005](../adr/0005-grading-runs-in-an-environment.md)):
+
+```bash
+npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json \
+  --env acme/env/cloud-vm --env-option shards=5 --secrets-file judge-keys.env
+```
+
+A run kept in a result store (section 7) can be graded on another machine, such as your laptop after a scheduled run. `mst grade` fetches a run that isn't local from the store, checks it against the run's manifest, and keeps the regrade there too:
+
+```bash
+npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json \
+  --results acme/result-store/eval-results
+# → [mst] Fetched run 7f3c2a from the result store acme/result-store/eval-results (…)
+# → run 7f3c2a.g2 (traces from 7f3c2a)
+```
+
+`--resume 7f3c2a` fetches the same way, then collects what's missing.
+
 Planned: `mst grade` without `--config`, and the `--plugin-option` and `--judge` flags:
 
 ```bash
@@ -346,7 +364,7 @@ Runs are written locally by default:
 npx mst stores --plugins @acme/mst-plugin   # planned
 ```
 
-`run.json` records where the run ran: the environment, its options and the number of shards. Recording each shard's image digest and Claude Desktop version, and each trace's shard, is planned for 2.0.
+`run.json` records where the run ran: the environment, its options, the number of shards, and each shard's machine (its image digest and worker MST); each trial records its client app. A regrade on an environment's machines (section 8) also records where it graded, in `grading.environment`. The report shows both under _Run details_. Recording each trace's shard is planned for 2.0.
 
 ## 10. Read your results
 

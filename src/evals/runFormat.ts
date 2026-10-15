@@ -147,11 +147,63 @@ const RunRecordSchema = z.looseObject({
       )
       .optional(),
   }),
+  /**
+   * Where the run was graded, when not where `mst run` or `mst grade` ran:
+   * `mst grade --env` (ADR 0005). Its machines are the grade shards'.
+   */
+  grading: z
+    .looseObject({
+      environment: z.looseObject({
+        name: z.string(),
+        shards: z.number().int().positive(),
+        keep: z.enum(['failed', 'always']).optional(),
+        options: z.looseObject({}).optional(),
+        machines: z
+          .array(
+            z.looseObject({
+              shard: z.number().int().positive(),
+              mst: z.string().optional(),
+              image: z.string().optional(),
+              ok: z.boolean(),
+              graded: z.number().int().nonnegative(),
+              failed: z.number().int().nonnegative(),
+              reason: z.string().optional(),
+            })
+          )
+          .optional(),
+      }),
+    })
+    .optional(),
   phases: z.looseObject({
     collect: z.enum(['complete', 'partial', 'skipped', 'failed']),
     grade: z.enum(['complete', 'partial', 'skipped', 'failed']),
   }),
 });
+
+/** A grade shard's machine, as `run.json`'s `grading.environment` records it. */
+export interface GradeShardRecord {
+  /** 1-based. */
+  shard: number;
+  mst?: string;
+  image?: string;
+  ok: boolean;
+  /** Trials and cases whose grading came back. */
+  graded: number;
+  /** Those the worker couldn't grade. */
+  failed: number;
+  reason?: string;
+}
+
+/**
+ * A case's directories in a run, relative to it: its traces and its trials'
+ * client artifacts, for one variant.
+ */
+export function caseRunPaths(variant: string, caseId: string): string[] {
+  return [
+    path.join('traces', segment(variant), segment(caseId)),
+    path.join('artifacts', segment(variant), segment(caseId)),
+  ];
+}
 
 /** A trial's copy of its client artifacts, relative to the run directory. */
 export function trialArtifactsPath(
@@ -310,6 +362,8 @@ export interface RunFacts {
   environment?: RunEnvironment;
   /** What each shard ran on, in an environment with machines. */
   machines?: ShardRecord[];
+  /** Where the run was graded, with `mst grade --env` (ADR 0005). */
+  grading?: { environment: RunEnvironment; machines: GradeShardRecord[] };
   /**
    * How far the run got. Default: both complete. A run saved while variants
    * remain is `partial`; one that stopped on an error is `collect: failed`.
@@ -523,6 +577,25 @@ export async function writeRun(
       ci: Boolean(process.env.CI),
       ...(facts.machines?.length ? { machines: facts.machines } : {}),
     },
+    ...(facts.grading
+      ? {
+          grading: {
+            environment: {
+              name: facts.grading.environment.name,
+              shards: facts.grading.environment.shards,
+              ...(facts.grading.environment.keep !== 'never'
+                ? { keep: facts.grading.environment.keep }
+                : {}),
+              ...(Object.keys(facts.grading.environment.options).length
+                ? { options: facts.grading.environment.options }
+                : {}),
+              ...(facts.grading.machines.length
+                ? { machines: facts.grading.machines }
+                : {}),
+            },
+          },
+        }
+      : {}),
     phases: facts.phases ?? { collect: 'complete', grade: 'complete' },
   });
   for (const result of results) {

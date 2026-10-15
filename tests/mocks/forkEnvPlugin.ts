@@ -28,6 +28,8 @@ export default {
           }
         );
         return {
+          // Whatever work its machines' channel runs: collect and grade.
+          work: environment.work,
           runShard: environment.runShard.bind(environment),
           async close() {
             await environment.close();

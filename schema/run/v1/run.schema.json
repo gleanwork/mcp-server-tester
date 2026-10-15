@@ -133,6 +133,61 @@
       },
       "additionalProperties": {}
     },
+    "grading": {
+      "type": "object",
+      "properties": {
+        "environment": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "shards": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "keep": { "type": "string", "enum": ["failed", "always"] },
+            "options": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": {}
+            },
+            "machines": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "shard": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "mst": { "type": "string" },
+                  "image": { "type": "string" },
+                  "ok": { "type": "boolean" },
+                  "graded": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "failed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "reason": { "type": "string" }
+                },
+                "required": ["shard", "ok", "graded", "failed"],
+                "additionalProperties": {}
+              }
+            }
+          },
+          "required": ["name", "shards"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["environment"],
+      "additionalProperties": {}
+    },
     "phases": {
       "type": "object",
       "properties": {

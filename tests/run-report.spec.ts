@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { runEval } from '../src/evals/runEval.js';
-import { runReportPath } from '../src/evals/runReport.js';
+import { runReportPath, writeRunReport } from '../src/evals/runReport.js';
 import type { Plugin } from '../src/plugins/plugin.js';
 
 const plugin: Plugin = {
@@ -246,5 +246,41 @@ test.describe('run report', () => {
     await expect(
       page.getByRole('button', { name: /^All/, pressed: true })
     ).toBeVisible();
+  });
+
+  test('says where a regrade graded the trials, and on which machines', async ({
+    page,
+  }) => {
+    const report = await reportFor([{ name: 'searching' }]);
+    // A regrade on an environment's machines (mst grade --env) records them.
+    const runDirectory = path.dirname(path.dirname(report));
+    const runJson = path.join(runDirectory, 'run.json');
+    const run = JSON.parse(await fs.readFile(runJson, 'utf8'));
+    run.grading = {
+      environment: {
+        name: 'acme/env/cloud-vm',
+        shards: 2,
+        machines: [1, 2].map((shard) => ({
+          shard,
+          mst: '2.0.0',
+          image: 'acme-grader:1@sha256:feed',
+          ok: true,
+          graded: 3,
+          failed: 0,
+        })),
+      },
+    };
+    await fs.writeFile(runJson, JSON.stringify(run));
+    await writeRunReport(runDirectory);
+    await page.goto(`file://${report}`);
+    await page.getByText('Run details').click();
+    const details = page.getByText('Run details').locator('..');
+    await expect(details).toContainText('Environmentlocal');
+    await expect(details).toContainText(
+      'Grading environmentacme/env/cloud-vm · 2 shards'
+    );
+    await expect(details).toContainText(
+      'shard 2: acme-grader:1@sha256:feed · MST 2.0.0'
+    );
   });
 });

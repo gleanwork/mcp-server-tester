@@ -221,6 +221,16 @@ export interface StoredEvalResultSaveOptions {
 /**
  * Options for running eval dataset
  */
+/**
+ * Grades one trial of a case: `grade` grades it here; a grader elsewhere
+ * returns what grading produced there.
+ */
+export type TrialGrader = (
+  evalCase: EvalCase,
+  trial: number,
+  grade: () => Promise<GradingOutcome>
+) => Promise<GradingOutcome>;
+
 export interface EvalRunnerOptions {
   /**
    * The dataset to run
@@ -265,6 +275,14 @@ export interface EvalRunnerOptions {
    * @default true
    */
   grade?: boolean;
+
+  /**
+   * Where each trial is graded: called with the case, the trial's number from
+   * 0, and `grade`, which grades it here. Without it, every trial is graded
+   * here. `mst grade --env` (ADR 0005) records what workers' grading
+   * produced, and reads those records back on the coordinator.
+   */
+  gradeTrial?: TrialGrader;
 
   /**
    * Whether to stop on first failure
@@ -428,6 +446,13 @@ export interface EvalCaseOptions {
   executeCase?: (evalCase: EvalCase) => Promise<CaseExecution>;
   /** Grade each trial; `false` only collects. @default true */
   grade?: boolean;
+  /**
+   * Where each trial is graded: called with the case, the trial's number from
+   * 0, and `grade`, which grades it here. Without it, every trial is graded
+   * here. `mst grade --env` (ADR 0005) records what workers' grading
+   * produced, and reads those records back on the coordinator.
+   */
+  gradeTrial?: TrialGrader;
   /**
    * Dataset name for the result (defaults to 'single-case')
    */
@@ -752,7 +777,8 @@ export function executedTrialResult(
 async function runTrial(
   evalCase: EvalCase,
   context: EvalContext,
-  options: EvalCaseOptions
+  options: EvalCaseOptions,
+  trial: number
 ): Promise<EvalCaseResult> {
   const startTime = Date.now();
 
@@ -789,12 +815,16 @@ async function runTrial(
       ...(executed.response as ClientResponse),
       ...(executed.artifacts ? { artifactsDir: executed.artifacts.dir } : {}),
     };
-    outcome = await gradeTrial(evalCase, {
-      response: mapToolNames(clientResponse, options.toolMap),
-      clientResponse,
-      evidence: executed.traceEvidence,
-      clientMetadata: executed.clientMetadata,
-    });
+    const grade = () =>
+      gradeTrial(evalCase, {
+        response: mapToolNames(clientResponse, options.toolMap),
+        clientResponse,
+        evidence: executed.traceEvidence,
+        clientMetadata: executed.clientMetadata,
+      });
+    outcome = options.gradeTrial
+      ? await options.gradeTrial(evalCase, trial, grade)
+      : await grade();
   }
   const gradingError = gradingErrorOf(outcome.scores);
   const judgeUsage = caseJudgeUsage(outcome.scores.judge);
@@ -861,7 +891,7 @@ export async function runEvalCase(
   const trials = evalCase.trials ?? 1;
 
   if (trials === 1) {
-    const result = await runTrial(evalCase, context, options);
+    const result = await runTrial(evalCase, context, options, 0);
     await options.onTrialComplete?.(result, 0);
     return result;
   }
@@ -875,7 +905,7 @@ export async function runEvalCase(
     // callback isn't recorded as a failed trial.
     let ran: EvalCaseResult | undefined;
     try {
-      const result = await runTrial(evalCase, context, options);
+      const result = await runTrial(evalCase, context, options, i);
       ran = result;
       lastResult = result;
       // Check whether the tool call itself failed due to infrastructure (the
@@ -1174,6 +1204,7 @@ export async function runEvalDataset(
       clientOptions: options.clientOptions,
       executeCase: options.executeCase,
       ...(options.grade === false ? { grade: false } : {}),
+      ...(options.gradeTrial ? { gradeTrial: options.gradeTrial } : {}),
       toolMap: options.toolMap,
       datasetName: dataset.name,
       toolVariantId: toolOverrides?.id,

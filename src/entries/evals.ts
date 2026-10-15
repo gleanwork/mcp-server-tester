@@ -85,6 +85,7 @@ export type {
   Machine,
   WorkerChannel,
   ShardSpec,
+  ShardWork,
   ShardEvents,
   ShardOutcome,
   ShardProgress,
@@ -94,6 +95,7 @@ export type {
   EvalSummaryGenerator,
 } from '../evals/evalFrameworkTypes.js';
 export type { RunStore } from '../evals/runStore.js';
+export type { GradeKey } from '../evals/gradingSource.js';
 export {
   resolveResultStoreConfig,
   validateEvalConfig,

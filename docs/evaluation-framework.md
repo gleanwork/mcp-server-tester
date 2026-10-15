@@ -744,7 +744,14 @@ npx mst run --config eval.json --results file:./shared-results  # a local direct
 npx mst run --config eval.json --results acme/result-store/eval-results  # a plugin's store
 ```
 
-The store holds the same layout as a local results directory: `<eval name>/runs/<run-id>/` (every file, the report included) and `<eval name>/latest.json`. The run is written locally first, then copied; `latest.json` is written last, and only when the run became the local latest run (a full, graded run). If the copy fails, `mst run` fails and names the local run directory, and the store's `latest.json` is unchanged. Redaction applies before the copy, so the store gets what the run directory has.
+The store holds the same layout as a local results directory: `<eval name>/runs/<run-id>/` (every file, the report included, and `manifest.json`) and `<eval name>/latest.json`. The run is written locally first, then copied: its files, then its `manifest.json` (each file's size and SHA-256); `latest.json` is written last, and only when the run became the local latest run (a full, graded run). If the copy fails, `mst run` fails and names the local run directory, and the store's `latest.json` is unchanged. Redaction applies before the copy, so the store gets what the run directory has.
+
+A run in a store can be graded or resumed on another machine. When `mst grade <run>` or `mst run --resume <run>` doesn't find the run locally, it fetches it from the store (`--results`, else the eval config's): by its run ID or short form among the store's runs. The fetch checks every file against the manifest, and moves the run into the eval's local runs only once it is all there. A run without a manifest is still uploading, its upload failed, or an MST before beta.13 uploaded it, and isn't fetched. A regrade takes the next `.g<n>` that neither the local runs nor the store has, so regrades on two machines don't overwrite each other.
+
+```bash
+npx mst run --config eval.json --no-grade --env docker --results gs://my-bucket/evals  # on a VM
+npx mst grade 7f3c2a --config eval.json --results gs://my-bucket/evals                 # anywhere
+```
 
 With a store, the [previous run](#compared-with-the-previous-run) is the store's newest comparable run, so a CI machine with no local runs still compares with the last one. `mst batch --skip-existing` also reads the store.
 
