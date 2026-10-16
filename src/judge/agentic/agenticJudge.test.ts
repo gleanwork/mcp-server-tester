@@ -113,6 +113,17 @@ describe('agenticJudge', () => {
     expect(ran).toEqual(['claude', 'codex']);
   });
 
+  it('gives a judgment ten minutes by default', async () => {
+    const seen: { task?: AgentJudgeTask } = {};
+    runtimes['claude-agent'] = fakeRuntime(() => ({}), seen);
+    const judge = agenticJudge({
+      buildPrompt: () => ({ prompt: 'p' }),
+      parseScore: () => ({ score: 1 }),
+    });
+    await judge.evaluate(input, {});
+    expect(seen.task?.timeoutMs).toBe(10 * 60_000);
+  });
+
   it("keeps each step's tool, never its input or output, in the score's metadata", async () => {
     runtimes['claude-agent'] = () => ({
       id: 'fake',

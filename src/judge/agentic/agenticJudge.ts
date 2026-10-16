@@ -61,7 +61,7 @@ const DEFAULTS = {
   // Confined to the workspace; Codex's read-only sandbox can read the disk.
   runtime: 'claude-agent',
   maxTurns: 20,
-  timeoutMs: 15 * 60_000,
+  timeoutMs: 10 * 60_000,
 } as const satisfies AgentJudgeOptions;
 
 /** What `buildPrompt` returns. */

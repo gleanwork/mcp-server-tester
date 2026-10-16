@@ -352,14 +352,26 @@ describe('caller-owned Linux Cowork desktop', () => {
     );
     expect(child.exec).not.toHaveBeenCalled();
   });
-  it('bounds UI submission independently of the native execution deadline', async () => {
+  it('allows a UI submission up to ten minutes within the case deadline', async () => {
     await linuxCoworkPlatform.submit('unchanged', {
       deadlineAt: Date.now() + 900_000,
       env: session,
     });
     const [, args, execution] = child.exec.mock.calls[0]!;
-    expect(execution.timeout).toBe(60_000);
-    expect(args[args.indexOf('--timeout-ms') + 1]).toBe('59000');
+    expect(execution.timeout).toBe(10 * 60_000);
+    expect(args[args.indexOf('--timeout-ms') + 1]).toBe('599000');
+  });
+  it('never lets a UI submission outlast a shorter case deadline', async () => {
+    await linuxCoworkPlatform.submit('unchanged', {
+      deadlineAt: Date.now() + 30_000,
+      env: session,
+    });
+    const [, args, execution] = child.exec.mock.calls[0]!;
+    expect(execution.timeout).toBeGreaterThan(0);
+    expect(execution.timeout).toBeLessThanOrEqual(30_000);
+    expect(Number(args[args.indexOf('--timeout-ms') + 1])).toBeLessThan(
+      Number(execution.timeout)
+    );
   });
   it('reports bounded driver error codes without including arbitrary diagnostics', async () => {
     child.responses.push({

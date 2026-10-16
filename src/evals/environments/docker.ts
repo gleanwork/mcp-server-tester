@@ -127,7 +127,10 @@ export function dockerRunArgs(options: {
   runId: string;
   seccompProfile: string;
   inference: { baseURL: string; authScheme: 'bearer' | 'x-api-key' };
+  /** Forwarded to the container's desktop-ready helper when set. */
+  warmVmTimeoutS?: string;
 }): string[] {
+  const warm = options.warmVmTimeoutS;
   return [
     'run',
     '--detach',
@@ -158,6 +161,11 @@ export function dockerRunArgs(options: {
     `MST_INFERENCE_GATEWAY_URL=${options.inference.baseURL}`,
     '--env',
     `MST_INFERENCE_AUTH_SCHEME=${options.inference.authScheme}`,
+    // The coordinator's Cowork VM warm-up budget; without it the container
+    // falls back to its own default.
+    ...(warm !== undefined && /^[1-9][0-9]*$/.test(warm)
+      ? ['--env', `MST_COWORK_WARM_VM_TIMEOUT_S=${warm}`]
+      : []),
     options.image,
   ];
 }
@@ -470,6 +478,7 @@ function openDocker(
             runId: shard.runId,
             seccompProfile,
             inference: credential,
+            warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
           }),
           `Starting container ${name}`,
           { signal }
@@ -579,16 +588,34 @@ async function gradeMachine(
   }
 }
 
-/** Builds the image on each context (`mst env setup docker`). */
 /**
- * `npm pack`s the package in `dir` into `destination`, running its `prepare`
- * script, so a checkout is packed as built. `MST_NPM` names another npm CLI.
+ * `npm pack` arguments. A checkout runs its `prepare` script so it is packed
+ * as built; an installed package is already built (and lacks the dev
+ * dependencies its build needs), so its scripts are skipped.
  */
-async function npmPack(dir: string, destination: string): Promise<void> {
+export function npmPackArgs(
+  destination: string,
+  { ignoreScripts }: { ignoreScripts: boolean }
+): string[] {
+  return [
+    'pack',
+    '--silent',
+    ...(ignoreScripts ? ['--ignore-scripts'] : []),
+    '--pack-destination',
+    destination,
+  ];
+}
+
+/** `npm pack`s the package in `dir` into `destination`. `MST_NPM` names another npm CLI. */
+async function npmPack(
+  dir: string,
+  destination: string,
+  { ignoreScripts = false }: { ignoreScripts?: boolean } = {}
+): Promise<void> {
   const packed = await new Promise<number>((resolve) => {
     const child = spawn(
       process.env.MST_NPM || 'npm',
-      ['pack', '--silent', '--pack-destination', destination],
+      npmPackArgs(destination, { ignoreScripts }),
       { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] }
     );
     child.on('error', () => resolve(-1));
@@ -609,13 +636,13 @@ async function setupDocker(
     await fs.cp(source, build, { recursive: true });
     const packages = path.join(build, 'mst-package');
     await fs.mkdir(packages, { recursive: true });
-    // A source checkout installs itself, so the worker runs this MST.
+    // The worker runs this MST, packed from where it runs: a source checkout
+    // or an installed package. Installing the published version instead
+    // would let the worker drift from the coordinator.
     const root = path.resolve(source, '../..');
     const checkout = existsSync(path.join(root, 'src', 'cli', 'index.ts'));
-    if (checkout) {
-      log(`Packing MST from ${root}…`);
-      await npmPack(root, packages);
-    }
+    log(`Packing MST from ${root}…`);
+    await npmPack(root, packages, { ignoreScripts: !checkout });
     // The eval's plugins, packed from where this machine has them, so a
     // private or linked package needs no registry: the image installs them
     // (and their dependencies) in MST_PLUGIN_DIR.
@@ -633,12 +660,6 @@ async function setupDocker(
           'build',
           '--tag',
           image,
-          ...(checkout
-            ? []
-            : [
-                '--build-arg',
-                `MST_PACKAGE=@gleanwork/mcp-server-tester@${packageJson.version}`,
-              ]),
           ...(options.claudeDesktopVersion
             ? [
                 '--build-arg',
