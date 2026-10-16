@@ -28,7 +28,7 @@ class Desktop:
         self.prompt = None
         self.fail = False
 
-    def controls(self, names, roles, *, require_enabled=True, require_showing=True):
+    def controls(self, names, roles, *, require_enabled=True):
         return [node for node in self.starts + self.radios + self.approvals if node.name in names]
 
     def selected(self, node):
@@ -90,8 +90,8 @@ class LinuxDriverTests(unittest.TestCase):
 
     def test_disabled_start_button_proves_mode_before_prefill(self):
         class EmptyComposer(Desktop):
-            def controls(self, names, roles, *, require_enabled=True, require_showing=True):
-                controls = super().controls(names, roles, require_enabled=require_enabled, require_showing=require_showing)
+            def controls(self, names, roles, *, require_enabled=True):
+                controls = super().controls(names, roles, require_enabled=require_enabled)
                 return [node for node in controls if node.name != 'Start task' or not require_enabled or self.prompt is not None]
 
             def selected(self, node):
@@ -102,21 +102,9 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(desktop.prompt, 'unchanged')
         self.assertEqual(desktop.actions, ['Start task'])
 
-    def test_long_prompt_submits_when_start_task_is_scrolled_off_screen(self):
-        class TallComposer(Desktop):
-            def controls(self, names, roles, *, require_enabled=True, require_showing=True):
-                controls = super().controls(names, roles, require_enabled=require_enabled, require_showing=require_showing)
-                return [node for node in controls if node.name != 'Start task' or not require_showing]
-        desktop = TallComposer()
-        prompt = "\n".join(["remote_operation.py:201 INFO [STREAMED ENTRY] line"] * 45)
-        receipt = module.Driver(desktop, 1000, 4).submit(prompt)
-        self.assertEqual(receipt['status'], 'submitted')
-        self.assertEqual(desktop.prompt, prompt)
-        self.assertEqual(desktop.actions, ['Start task'])
-
     def test_disabled_submit_is_never_activated(self):
         class DisabledSubmit(Desktop):
-            def controls(self, names, roles, *, require_enabled=True, require_showing=True):
+            def controls(self, names, roles, *, require_enabled=True):
                 return [] if require_enabled else self.starts
         desktop = DisabledSubmit()
         with self.assertRaisesRegex(module.DriverFailure, 'deadline'):
