@@ -118,6 +118,7 @@ export function anthropicComputerUsePlanner(
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const sleep = options.sleep ?? abortableSleep;
   const timeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+  const sent = new Set<string>();
 
   async function endpoint() {
     const resolved = await resolveLLMEndpoint('anthropic', {
@@ -141,6 +142,7 @@ export function anthropicComputerUsePlanner(
     signal: AbortSignal
   ): Promise<PlannerResponse> {
     const target = await endpoint();
+    sent.add((target.authToken ?? target.apiKey)!);
     const timeout = AbortSignal.timeout(timeoutMs);
     let response: Response;
     try {
@@ -187,7 +189,11 @@ export function anthropicComputerUsePlanner(
 
   return {
     async prepare() {
-      await endpoint();
+      const target = await endpoint();
+      sent.add((target.authToken ?? target.apiKey)!);
+    },
+    credentials() {
+      return [...sent];
     },
     async create(request, signal) {
       for (let retry = 0; ; retry++) {

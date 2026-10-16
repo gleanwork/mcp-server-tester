@@ -27,6 +27,8 @@ import { MAC_DESKTOP_HELPER_SOURCE } from './macDesktopSource.js';
 const exec = promisify(execFile);
 const HELPER_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 30_000;
+/** The most clipboard text a paste saves and puts back. */
+const CLIPBOARD_LIMIT = 512 * 1024 * 1024;
 /** Each input action is followed by this pause, so the UI can catch up. */
 const INPUT_PAUSE_MS = 100;
 
@@ -117,7 +119,6 @@ const KEY_CODES: Record<string, number> = {
 /** Other names a planner uses (xdotool's, and pyautogui's). */
 const KEY_ALIASES: Record<string, string> = {
   return: 'enter',
-  kp_enter: 'enter',
   super: 'command',
   cmd: 'command',
   meta: 'command',
@@ -302,10 +303,11 @@ export function macComputerUseDesktop(
     }
   }
 
-  async function typeText(text: string): Promise<void> {
+  async function typeText(text: string, signal: AbortSignal): Promise<void> {
     // Line breaks must not submit the composer.
     const lines = text.split('\n');
     for (const [index, line] of lines.entries()) {
+      if (signal.aborted) throw new Error('Computer Use deadline reached');
       if (index)
         await input(['chord', ...keyCodes('shift+enter')!.map(String)]);
       if (line) await input(['type'], line);
@@ -313,13 +315,20 @@ export function macComputerUseDesktop(
   }
 
   async function pasteText(text: string): Promise<void> {
-    const previous = await exec('/usr/bin/pbpaste', [], {
-      encoding: 'buffer',
-      timeout: COMMAND_TIMEOUT_MS,
-    }).then(
-      ({ stdout }) => stdout,
-      () => Buffer.alloc(0)
-    );
+    // The clipboard is put back afterwards. If it can't be saved, nothing is
+    // pasted: overwriting it would lose what the user copied.
+    let previous: Buffer;
+    try {
+      ({ stdout: previous } = await exec('/usr/bin/pbpaste', [], {
+        encoding: 'buffer',
+        timeout: COMMAND_TIMEOUT_MS,
+        maxBuffer: CLIPBOARD_LIMIT,
+      }));
+    } catch {
+      throw new Error(
+        'Computer Use could not save the clipboard, so it did not paste the query.'
+      );
+    }
     await pipe('/usr/bin/pbcopy', Buffer.from(text, 'utf8'));
     try {
       await options.sleep(200);
@@ -389,7 +398,7 @@ export function macComputerUseDesktop(
         return undefined;
       }
     },
-    async execute(action): Promise<DesktopActionResult> {
+    async execute(action, signal): Promise<DesktopActionResult> {
       const name = String(action.action);
       switch (name) {
         case 'screenshot':
@@ -435,7 +444,7 @@ export function macComputerUseDesktop(
           return { result: 'drag completed', submitted: false };
         }
         case 'type':
-          await typeText(actionField(action, 'text'));
+          await typeText(actionField(action, 'text'), signal);
           return { result: 'text entered', submitted: false };
         case 'paste':
           await pasteText(actionField(action, 'text'));

@@ -1,9 +1,55 @@
+import type * as ChildProcess from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** Offline: the Swift helper and system commands are mocked; nothing reaches the display. */
 
 const runs: Array<{ args: string[]; stdin?: string }> = [];
 const replies = new Map<string, unknown>();
+
+/** System commands (pbpaste, pbcopy, osascript): what ran, with its stdin. */
+const commands = vi.hoisted(() => ({
+  calls: [] as Array<{ file: string; args: string[]; stdin?: string }>,
+  /** Per command: its stdout, or an error to fail with. */
+  results: new Map<string, { stdout?: string; error?: Error }>(),
+}));
+
+vi.mock('node:child_process', async (original) => {
+  const actual = await original<typeof ChildProcess>();
+  return {
+    ...actual,
+    execFile: vi.fn(
+      (
+        file: string,
+        args: string[],
+        _options: unknown,
+        callback: (error: Error | null, result?: unknown) => void
+      ) => {
+        const call: { file: string; args: string[]; stdin?: string } = {
+          file,
+          args,
+        };
+        commands.calls.push(call);
+        const result = commands.results.get(file) ?? {};
+        setImmediate(() =>
+          result.error
+            ? callback(result.error)
+            : callback(null, {
+                stdout: Buffer.from(result.stdout ?? ''),
+                stderr: '',
+              })
+        );
+        return {
+          stdin: {
+            on: () => undefined,
+            end: (data: Buffer) => {
+              call.stdin = data.toString('utf8');
+            },
+          },
+        };
+      }
+    ),
+  };
+});
 
 vi.mock('../nativeHelper.js', () => ({
   compileSwiftHelper: vi.fn(async () => ({
@@ -26,14 +72,23 @@ beforeEach(() => {
   Object.defineProperty(process, 'platform', { value: 'darwin' });
   runs.length = 0;
   replies.clear();
+  commands.calls.length = 0;
+  commands.results.clear();
   replies.set('screen', { width: 1440, height: 900 });
 });
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: platform });
 });
 
-function desktop() {
-  return macComputerUseDesktop({ sleep: async () => undefined });
+function desktop(
+  sleep: (ms: number) => Promise<void> = async () => undefined,
+  signal = new AbortController().signal
+) {
+  const mac = macComputerUseDesktop({ sleep });
+  return {
+    ...mac,
+    execute: (action: Record<string, unknown>) => mac.execute(action, signal),
+  };
 }
 
 describe('key names', () => {
@@ -57,6 +112,14 @@ describe('key names', () => {
   it('refuses an unknown name instead of guessing', () => {
     expect(keyCodes('hyper+q')).toBeUndefined();
     expect(keyCodes('')).toBeUndefined();
+  });
+
+  it('presses Return only for the names the loop treats as Enter', () => {
+    // The loop's submission rules recognize only enter and return; another
+    // name for Return would get past them.
+    expect(keyCodes('KP_Enter')).toBeUndefined();
+    expect(keyCodes('enter')).toEqual([0x24]);
+    expect(keyCodes('return')).toEqual([0x24]);
   });
 });
 
@@ -126,24 +189,81 @@ describe('the desktop', () => {
 
   it('caps a wait at five seconds', async () => {
     const sleeps: number[] = [];
-    await macComputerUseDesktop({
-      sleep: async (ms) => void sleeps.push(ms),
-    }).execute({
+    await desktop(async (ms) => void sleeps.push(ms)).execute({
       action: 'wait',
       duration: 30,
     });
     expect(sleeps).toEqual([5000]);
   });
 
-  it('reports a missing permission as its code', async () => {
-    replies.set('permissions', { screenRecording: true, accessibility: false });
+  it('stops typing between lines once the deadline passes', async () => {
+    const deadline = new AbortController();
+    const d = desktop(async () => {
+      if (runs.length === 1) deadline.abort();
+    }, deadline.signal);
+    await expect(
+      d.execute({ action: 'type', text: 'one\ntwo\nthree' })
+    ).rejects.toThrow('deadline reached');
+    expect(runs).toEqual([{ args: ['type'], stdin: 'one' }]);
+  });
+
+  it('pastes over stdin only, and puts the clipboard back even when the paste fails', async () => {
+    commands.results.set('/usr/bin/pbpaste', {
+      stdout: 'what the user copied',
+    });
+    commands.results.set('/usr/bin/osascript', {
+      error: new Error('System Events failed'),
+    });
+    await expect(
+      desktop().execute({ action: 'paste', text: 'private query' })
+    ).rejects.toThrow();
+    expect(commands.calls.map((call) => [call.file, call.stdin])).toEqual([
+      ['/usr/bin/pbpaste', undefined],
+      ['/usr/bin/pbcopy', 'private query'],
+      ['/usr/bin/osascript', undefined],
+      ['/usr/bin/pbcopy', 'what the user copied'],
+    ]);
+    expect(
+      JSON.stringify(commands.calls.map((call) => call.args))
+    ).not.toContain('private');
+  });
+
+  it("doesn't paste when it can't save the clipboard", async () => {
+    commands.results.set('/usr/bin/pbpaste', {
+      error: Object.assign(new Error('stdout maxBuffer length exceeded'), {
+        code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+      }),
+    });
+    await expect(
+      desktop().execute({ action: 'paste', text: 'private query' })
+    ).rejects.toThrow('could not save the clipboard');
+    expect(commands.calls.map((call) => call.file)).toEqual([
+      '/usr/bin/pbpaste',
+    ]);
+  });
+
+  it.each([
+    [
+      { screenRecording: false, accessibility: true },
+      'screen_recording_required',
+    ],
+    [
+      { screenRecording: false, accessibility: false },
+      'screen_recording_required',
+    ],
+    [{ screenRecording: true, accessibility: false }, 'accessibility_required'],
+  ])('reports missing permissions %o as %s', async (state, code) => {
+    replies.set('permissions', state);
     const error = await desktop()
       .checkPermissions()
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DesktopBlockedError);
-    expect((error as InstanceType<typeof DesktopBlockedError>).code).toBe(
-      'accessibility_required'
-    );
+    expect((error as InstanceType<typeof DesktopBlockedError>).code).toBe(code);
+  });
+
+  it('passes with both permissions', async () => {
+    replies.set('permissions', { screenRecording: true, accessibility: true });
+    await expect(desktop().checkPermissions()).resolves.toBeUndefined();
   });
 
   it('reads the frontmost app, or nothing when it cannot', async () => {

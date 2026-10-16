@@ -37,6 +37,8 @@ interface Fake {
   launches: Array<[string, boolean]>;
   executed: DesktopAction[];
   envs: NodeJS.ProcessEnv[];
+  urls: string[];
+  newChats: number;
 }
 
 function useRuntime(
@@ -46,14 +48,26 @@ function useRuntime(
   ) => Promise<PlannerResponse>,
   overrides: Partial<ComputerUseDesktop> = {}
 ): Fake {
-  const fake: Fake = { requests: [], launches: [], executed: [], envs: [] };
+  const fake: Fake = {
+    requests: [],
+    launches: [],
+    executed: [],
+    envs: [],
+    urls: [],
+    newChats: 0,
+  };
   const desktop: ComputerUseDesktop = {
     checkPermissions: async () => undefined,
     async launch(app, required) {
       fake.launches.push([app, required]);
     },
-    openUrl: async () => undefined,
-    newChatgptChat: async () => true,
+    async openUrl(url) {
+      fake.urls.push(url);
+    },
+    async newChatgptChat() {
+      fake.newChats += 1;
+      return true;
+    },
     screenshot: async () => ({ ...IMAGE, source: { ...IMAGE.source } }),
     frontmostApp: async () => 'Claude',
     async execute(action) {
@@ -279,7 +293,59 @@ it('reports an exhausted HITL inspection as its own kind', async () => {
   );
 });
 
-it('resets with a budget of eight and reports reset_done', async () => {
+it('resets with a budget of eight', async () => {
+  // A planner that never concludes the app is idle uses the whole budget.
+  const fake = useRuntime(async () => ({
+    content: [
+      {
+        type: 'tool_use',
+        id: '1',
+        name: 'computer',
+        input: { action: 'left_click', coordinate: [1, 1] },
+      },
+    ],
+  }));
+  const failure = await runAnthropicComputerUseReset(options()).catch(
+    (e: unknown) => e
+  );
+  expect(failure).toBeInstanceOf(ComputerUseDriverError);
+  expect(fake.executed).toHaveLength(8);
+  expect((failure as ComputerUseDriverError).telemetry?.action_count).toBe(8);
+});
+
+it('opens a Codex task in the workspace the caller gives', async () => {
+  const fake = useRuntime(
+    async (request) =>
+      request.messages.length === 1
+        ? {
+            content: [
+              FILL,
+              {
+                type: 'tool_use',
+                id: '3',
+                name: 'computer',
+                input: { action: 'screenshot' },
+              },
+            ],
+          }
+        : { content: [ENTER] },
+    { frontmostApp: async () => 'ChatGPT' }
+  );
+  await runAnthropicComputerUseSubmission(
+    'query',
+    options({
+      application: 'chatgpt',
+      chatgptSurface: 'codex',
+      workspace: '/private/tmp/mst workspace',
+    })
+  );
+  expect(fake.urls).toEqual([
+    'codex://new?path=%2Fprivate%2Ftmp%2Fmst%20workspace',
+  ]);
+  expect(fake.newChats).toBe(0);
+});
+
+it('reports reset_done when nothing is running', async () => {
   const fake = useRuntime(async () => ({ content: [] }));
   const result = await runAnthropicComputerUseReset(options());
   expect(result).toMatchObject({ status: 'reset_done', action_count: 0 });

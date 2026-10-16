@@ -103,7 +103,11 @@ export interface ComputerUseDesktop {
   screenshot(): Promise<ImageBlock>;
   /** The frontmost application's name, or undefined when it can't be read. */
   frontmostApp(): Promise<string | undefined>;
-  execute(action: DesktopAction): Promise<DesktopActionResult>;
+  /** Performs one action. `signal` stops a multi-step action (typing several lines) between steps. */
+  execute(
+    action: DesktopAction,
+    signal: AbortSignal
+  ): Promise<DesktopActionResult>;
 }
 
 /** One block of a planner reply, as the Messages API returns it. */
@@ -140,6 +144,11 @@ export interface PlannerRequest {
 export interface ComputerUsePlanner {
   /** Checks the planner can be reached with a credential; throws otherwise. */
   prepare(): Promise<void>;
+  /**
+   * Every credential the planner has sent, including tokens an auth command
+   * printed, so telemetry can keep them out of what it records.
+   */
+  credentials?(): readonly string[];
   create(
     request: PlannerRequest,
     signal: AbortSignal
@@ -274,7 +283,7 @@ export class ComputerUseTelemetryRecorder {
   executed = 0;
   refused = 0;
 
-  constructor(private readonly secrets: string[]) {}
+  constructor(private readonly secrets: () => readonly string[]) {}
 
   observe(response: PlannerResponse): void {
     this.responses += 1;
@@ -282,7 +291,7 @@ export class ComputerUseTelemetryRecorder {
     if (
       typeof model === 'string' &&
       RESPONSE_MODEL.test(model) &&
-      !this.secrets.some((secret) => secret && model.includes(secret)) &&
+      !this.secrets().some((secret) => secret && model.includes(secret)) &&
       !this.models.includes(model)
     )
       this.models.push(model);
@@ -476,7 +485,10 @@ export async function runComputerUseLoop(
   run: ComputerUseRun,
   deps: ComputerUseDependencies
 ): Promise<ComputerUseOutcome> {
-  const telemetry = new ComputerUseTelemetryRecorder(run.secrets);
+  const telemetry = new ComputerUseTelemetryRecorder(() => [
+    ...run.secrets,
+    ...(deps.planner.credentials?.() ?? []),
+  ]);
   try {
     const result = await loop(run, deps, telemetry);
     return {
@@ -950,8 +962,10 @@ async function loop(
         uiRevision += 1;
         modelConfirmed = false;
       }
+      // The focus check above can outlast the deadline: never act after it.
+      if (deps.signal.aborted) throw new Error('Computer Use deadline reached');
       telemetry.attempted += 1;
-      const { result, submitted } = await desktop.execute(action);
+      const { result, submitted } = await desktop.execute(action, deps.signal);
       telemetry.executed += 1;
       const isImage =
         typeof result === 'object' && (result as ImageBlock).type === 'image';

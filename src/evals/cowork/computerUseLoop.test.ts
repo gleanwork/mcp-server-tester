@@ -896,7 +896,7 @@ describe('telemetry', () => {
   });
 
   it('tracks model changes and partial usage coverage', () => {
-    const telemetry = new ComputerUseTelemetryRecorder([]);
+    const telemetry = new ComputerUseTelemetryRecorder(() => []);
     telemetry.observe({
       model: 'claude-sonnet-4-6',
       usage: { input_tokens: 10 },
@@ -941,9 +941,50 @@ describe('telemetry', () => {
   });
 
   it('keeps a model name out of telemetry when it contains a secret', () => {
-    const telemetry = new ComputerUseTelemetryRecorder(['opus-4']);
+    const telemetry = new ComputerUseTelemetryRecorder(() => ['opus-4']);
     telemetry.observe({ model: 'claude-opus-4-6', content: [] });
     expect(telemetry.snapshot('complete').response_models).toEqual([]);
+  });
+
+  it("keeps the planner's own credential, such as an auth command's token, out of models", async () => {
+    const executed: DesktopAction[] = [];
+    const result = await runComputerUseLoop(
+      {
+        query: 'query',
+        maxActions: 8,
+        mode: 'submit',
+        application: 'cowork',
+        chatgptSurface: 'chatgpt-work',
+        model: 'claude-sonnet-4-6',
+        approveWriteTools: false,
+        startDelayMs: 0,
+        secrets: [],
+      },
+      {
+        desktop: {
+          checkPermissions: async () => undefined,
+          launch: async () => undefined,
+          openUrl: async () => undefined,
+          newChatgptChat: async () => true,
+          screenshot: async () => ({ ...IMAGE, source: { ...IMAGE.source } }),
+          frontmostApp: async () => 'Claude',
+          async execute(action) {
+            executed.push(action);
+            return { result: 'done', submitted: action.action === 'key' };
+          },
+        },
+        planner: {
+          prepare: async () => undefined,
+          credentials: () => ['a1b2c3'],
+          create: async () =>
+            response([FILL, ENTER], { model: 'claude-a1b2c3' }),
+        },
+        sleep: async () => undefined,
+        log: () => undefined,
+        signal: new AbortController().signal,
+      }
+    );
+    expect(result.telemetry.response_models).toEqual([]);
   });
 
   it('keeps only completed responses when a planner call fails', async () => {
@@ -1035,6 +1076,50 @@ describe('submission', () => {
     expect(run.telemetry.attempted_action_count).toBe(1);
     expect(run.telemetry.executed_action_count).toBe(0);
     expect(run.telemetry.planner_response_count).toBe(1);
+  });
+
+  it('never acts once the deadline passes during the focus check', async () => {
+    const deadline = new AbortController();
+    const executed: DesktopAction[] = [];
+    const error = await runComputerUseLoop(
+      {
+        query: 'query',
+        maxActions: 8,
+        mode: 'submit',
+        application: 'cowork',
+        chatgptSurface: 'chatgpt-work',
+        model: 'claude-sonnet-4-6',
+        approveWriteTools: false,
+        startDelayMs: 0,
+        secrets: [],
+      },
+      {
+        desktop: {
+          checkPermissions: async () => undefined,
+          launch: async () => undefined,
+          openUrl: async () => undefined,
+          newChatgptChat: async () => true,
+          screenshot: async () => ({ ...IMAGE, source: { ...IMAGE.source } }),
+          async frontmostApp() {
+            deadline.abort(new Error('deadline'));
+            return 'Claude';
+          },
+          async execute(action) {
+            executed.push(action);
+            return { result: 'done', submitted: false };
+          },
+        },
+        planner: {
+          prepare: async () => undefined,
+          create: async () => response([FILL, ENTER], {}),
+        },
+        sleep: async () => undefined,
+        log: () => undefined,
+        signal: deadline.signal,
+      }
+    ).catch((caught: unknown) => caught);
+    expect((error as ComputerUseLoopError).aborted).toBe(true);
+    expect(executed).toEqual([]);
   });
 
   it('stops before the next action once the deadline passes', async () => {
