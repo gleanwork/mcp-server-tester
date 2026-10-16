@@ -10,6 +10,7 @@ import {
   coworkImageDirectory,
   DEFAULT_COWORK_IMAGE,
   dockerRunArgs,
+  npmPackArgs,
 } from './docker.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
 import { gradeRun, runEval } from '../runEval.js';
@@ -33,6 +34,40 @@ afterEach(async () => {
 });
 
 describe('the docker environment', () => {
+  it("forwards the coordinator's Cowork VM warm-up budget to the container", () => {
+    const base = {
+      name: 'mst-run-1',
+      image: 'mst-cowork-linux:test',
+      runId: 'run',
+      seccompProfile: '/pkg/docker/cowork-linux/seccomp.json',
+      inference: {
+        baseURL: 'https://gateway.example/anthropic',
+        authScheme: 'bearer' as const,
+      },
+    };
+    const args = dockerRunArgs({ ...base, warmVmTimeoutS: '1740' });
+    expect(args[args.indexOf('MST_COWORK_WARM_VM_TIMEOUT_S=1740') - 1]).toBe(
+      '--env'
+    );
+    expect(args.at(-1)).toBe('mst-cowork-linux:test');
+    for (const warmVmTimeoutS of [undefined, '', '0', '12s', '-5'])
+      expect(
+        dockerRunArgs({ ...base, warmVmTimeoutS }).join(' ')
+      ).not.toContain('MST_COWORK_WARM_VM_TIMEOUT_S');
+  });
+
+  it('packs a checkout as built, and an installed package without its scripts', () => {
+    expect(npmPackArgs('/out', { ignoreScripts: false })).toEqual([
+      'pack',
+      '--silent',
+      '--pack-destination',
+      '/out',
+    ]);
+    expect(npmPackArgs('/out', { ignoreScripts: true })).toContain(
+      '--ignore-scripts'
+    );
+  });
+
   it('starts a container with the VM devices and the seccomp profile, and no credential', () => {
     const args = dockerRunArgs({
       name: 'mst-run-1',
