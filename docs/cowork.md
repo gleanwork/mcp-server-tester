@@ -458,7 +458,8 @@ drop) is sent again after 2, 4, 8 and 16 seconds, on top of two quick retries
 for each request, as the Anthropic SDK does: it has no effect on the desktop.
 If the API stays unreachable, the case fails with `provider_unavailable`; the
 driver log names the error's classes and system code, such as
-`TypeError <- Error(ECONNREFUSED)`. Timeouts aren't retried. MST doesn't print
+`TypeError <- Error(ECONNREFUSED)`. A request that times out gets the two quick
+retries, but not the longer ones: it may still be running. MST doesn't print
 the driver's step-by-step log; set `MST_COWORK_CUA_LOG_FILE` to a path to keep
 it. The log holds action and app
 names, never the query.

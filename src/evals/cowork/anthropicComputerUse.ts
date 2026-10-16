@@ -79,6 +79,8 @@ export interface ComputerUseResetResult {
 export interface ComputerUseRuntime {
   desktop(): ComputerUseDesktop;
   planner(env: NodeJS.ProcessEnv): ComputerUsePlanner;
+  /** The loop's waits. Defaults to real, abortable timers. */
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 const macRuntime: ComputerUseRuntime = {
@@ -202,7 +204,7 @@ async function runComputerUseDriver(
       {
         desktop: runtime.desktop(),
         planner: runtime.planner(env),
-        sleep: abortableSleep,
+        sleep: runtime.sleep ?? abortableSleep,
         log,
         signal: deadline.signal,
       }

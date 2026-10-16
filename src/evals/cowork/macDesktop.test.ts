@@ -63,7 +63,7 @@ vi.mock('../nativeHelper.js', () => ({
   })),
 }));
 
-const { keyCodes, macComputerUseDesktop, screenPoint } =
+const { keyCodes, macComputerUseDesktop, pieces, screenPoint } =
   await import('./macDesktop.js');
 const { DesktopBlockedError } = await import('./computerUseLoop.js');
 
@@ -90,6 +90,26 @@ function desktop(
     execute: (action: Record<string, unknown>) => mac.execute(action, signal),
   };
 }
+
+describe('typing pieces', () => {
+  it('splits a long line into pieces of at most 1,000 units', () => {
+    expect(pieces('a'.repeat(2500)).map((piece) => piece.length)).toEqual([
+      1000, 1000, 500,
+    ]);
+    expect(pieces('')).toEqual([]);
+  });
+
+  it('never splits a character', () => {
+    const line = `${'a'.repeat(999)}😀b`;
+    expect(pieces(line)).toEqual(['a'.repeat(999), '😀b']);
+    expect(pieces(line).join('')).toBe(line);
+  });
+
+  it('types a long line in several helper runs', async () => {
+    await desktop().execute({ action: 'type', text: 'x'.repeat(2001) });
+    expect(runs.map((run) => run.stdin?.length)).toEqual([1000, 1000, 1]);
+  });
+});
 
 describe('key names', () => {
   it.each([

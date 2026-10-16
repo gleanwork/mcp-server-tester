@@ -27,6 +27,8 @@ import { MAC_DESKTOP_HELPER_SOURCE } from './macDesktopSource.js';
 const exec = promisify(execFile);
 const HELPER_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 30_000;
+/** About 0.6 s of typing: the helper posts 16 units every 10 ms. */
+const TYPE_PIECE_UNITS = 1000;
 /** The most clipboard text a paste saves and puts back. */
 const CLIPBOARD_LIMIT = 512 * 1024 * 1024;
 /** Each input action is followed by this pause, so the UI can catch up. */
@@ -310,7 +312,10 @@ export function macComputerUseDesktop(
       if (signal.aborted) throw new Error('Computer Use deadline reached');
       if (index)
         await input(['chord', ...keyCodes('shift+enter')!.map(String)]);
-      if (line) await input(['type'], line);
+      for (const piece of pieces(line)) {
+        if (signal.aborted) throw new Error('Computer Use deadline reached');
+        await input(['type'], piece);
+      }
     }
   }
 
@@ -500,6 +505,25 @@ export function macComputerUseDesktop(
       }
     },
   };
+}
+
+/**
+ * A line in pieces of at most `TYPE_PIECE_UNITS` UTF-16 units, never splitting
+ * a character. Each piece is one helper run, well inside its time limit, and
+ * the deadline is checked between pieces.
+ */
+export function pieces(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  for (const character of line) {
+    if (current.length + character.length > TYPE_PIECE_UNITS) {
+      result.push(current);
+      current = '';
+    }
+    current += character;
+  }
+  if (current) result.push(current);
+  return result;
 }
 
 /** Runs `file` with `data` on stdin. */

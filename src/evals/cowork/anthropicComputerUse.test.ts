@@ -87,6 +87,10 @@ function useRuntime(
   onTestFinished(
     setComputerUseRuntime({
       desktop: () => desktop,
+      // The loop's waits (launch delay, new chat) take no real time here.
+      sleep: async (_ms, signal) => {
+        if (signal.aborted) throw signal.reason as Error;
+      },
       planner: (env) => {
         fake.envs.push(env);
         return {

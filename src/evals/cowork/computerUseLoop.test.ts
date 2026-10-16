@@ -19,6 +19,7 @@ import {
   type PlannerRequest,
   type PlannerResponse,
 } from './computerUseLoop.js';
+import { PlannerTimeoutError } from './computerUsePlanner.js';
 import type { ComputerUseTelemetry } from './driver.js';
 
 /** Offline: never opens an app or touches the display. */
@@ -845,7 +846,7 @@ describe('planner retries', () => {
 
   it("doesn't retry other errors", async () => {
     const timedOut = await runActions([FILL, ENTER], {
-      plannerFailures: [new Error('Computer Use planner request timed out')],
+      plannerFailures: [new PlannerTimeoutError()],
     });
     expect(timedOut.plannerCalls).toBe(1);
     expect(timedOut.error!.code).toBeUndefined();

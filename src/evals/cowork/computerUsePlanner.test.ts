@@ -216,19 +216,44 @@ describe('retries', () => {
     expect(sleeps[0]!).toBeLessThanOrEqual(500);
   });
 
-  it("doesn't retry a timeout", async () => {
+  it('retries a timeout twice, as the SDK does, then reports a timeout', async () => {
     const hang = () =>
       new Promise<Response>((_, reject) =>
         setTimeout(() => reject(new Error('aborted')), 200)
       );
-    const { instance, calls } = planner(env, [hang]);
+    const { instance, calls } = planner(env, [hang, hang, hang]);
     // The fake fetch ignores the signal, so the timeout shows as an error after it fires.
     const error = await instance
       .create(REQUEST, signal())
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(PlannerTimeoutError);
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(3);
   });
+
+  it.each([
+    'UND_ERR_CONNECT_TIMEOUT',
+    'UND_ERR_HEADERS_TIMEOUT',
+    'UND_ERR_BODY_TIMEOUT',
+  ])(
+    'treats a fetch that fails with %s as a timeout, not a dropped connection',
+    async (code) => {
+      const timedOut = () =>
+        new TypeError('fetch failed', {
+          cause: Object.assign(new Error('timed out'), { code }),
+        });
+      const { instance, calls } = planner(env, [
+        timedOut(),
+        timedOut(),
+        timedOut(),
+      ]);
+      const error = await instance
+        .create(REQUEST, signal())
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(PlannerTimeoutError);
+      expect(error).not.toBeInstanceOf(PlannerConnectionError);
+      expect(calls).toHaveLength(3);
+    }
+  );
 
   it('stops at once when the caller aborts', async () => {
     const controller = new AbortController();

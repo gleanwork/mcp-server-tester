@@ -26,7 +26,10 @@ const MAX_RETRIES = 2;
 const RETRYABLE_STATUS = (status: number) =>
   status === 408 || status === 409 || status === 429 || status >= 500;
 
-/** A planner request that ran out of time. Not retried: it may still be running. */
+/**
+ * A planner request that ran out of time. It gets the quick retries, as the
+ * SDK gives it, but not the loop's connection retries: it may still be running.
+ */
 export class PlannerTimeoutError extends Error {
   override name = 'PlannerTimeoutError';
   constructor() {
@@ -98,6 +101,37 @@ function shouldRetry(response: Response): boolean {
   return RETRYABLE_STATUS(response.status);
 }
 
+/** undici's timeouts: connecting, waiting for headers, or reading the body. */
+const TRANSPORT_TIMEOUT_CODES = new Set([
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+]);
+
+function isTransportTimeout(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  for (let current = error; current && !seen.has(current); ) {
+    seen.add(current);
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === 'string' && TRANSPORT_TIMEOUT_CODES.has(code))
+      return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** A failed send: the caller's abort, a timeout, or a connection that never answered. */
+function transportFailure(
+  error: unknown,
+  signal: AbortSignal,
+  timeout: AbortSignal
+): unknown {
+  if (signal.aborted) return signal.reason;
+  if (timeout.aborted || isTransportTimeout(error))
+    return new PlannerTimeoutError();
+  return new PlannerConnectionError(errorChain(error));
+}
+
 function isPlannerResponse(value: unknown): value is PlannerResponse {
   return (
     value !== null &&
@@ -161,9 +195,7 @@ export function anthropicComputerUsePlanner(
         signal: AbortSignal.any([signal, timeout]),
       });
     } catch (error) {
-      if (signal.aborted) throw signal.reason;
-      if (timeout.aborted) throw new PlannerTimeoutError();
-      throw new PlannerConnectionError(errorChain(error));
+      throw transportFailure(error, signal, timeout);
     }
     if (!response.ok) {
       // The body can echo request content; it is never read into an error.
@@ -178,9 +210,7 @@ export function anthropicComputerUsePlanner(
     try {
       body = await response.json();
     } catch (error) {
-      if (signal.aborted) throw signal.reason;
-      if (timeout.aborted) throw new PlannerTimeoutError();
-      throw new PlannerConnectionError(errorChain(error));
+      throw transportFailure(error, signal, timeout);
     }
     if (!isPlannerResponse(body))
       throw new Error('Computer Use planner returned an invalid response');
@@ -203,6 +233,7 @@ export function anthropicComputerUsePlanner(
           const status = error instanceof StatusFailure ? error : undefined;
           const retryable =
             error instanceof PlannerConnectionError ||
+            error instanceof PlannerTimeoutError ||
             status?.retryable === true;
           if (!retryable || retry === MAX_RETRIES || signal.aborted)
             throw error;
