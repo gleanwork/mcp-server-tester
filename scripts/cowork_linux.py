@@ -45,7 +45,8 @@ class Desktop:
             raise DriverFailure("desktop_missing_or_ambiguous")
         return matches[0]
 
-    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True):
+    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True,
+                 require_showing: bool = True):
         pending = [self.application()]
         found = []
         seen = 0
@@ -58,7 +59,7 @@ class Desktop:
                 states = node.get_state_set()
                 if (node.get_role_name() in roles and self.label(node) in names
                         and states.contains(self.api.StateType.VISIBLE)
-                        and states.contains(self.api.StateType.SHOWING)
+                        and (not require_showing or states.contains(self.api.StateType.SHOWING))
                         and (not require_enabled or (
                             states.contains(self.api.StateType.ENABLED)
                             and states.contains(self.api.StateType.SENSITIVE)))):
@@ -252,7 +253,10 @@ class Driver:
         self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
         while True:
             self.remaining()
-            starts = self.desktop.controls({"Start task"}, {"button"})
+            # A long prompt grows the composer until Start task scrolls out of
+            # the window: visible and enabled, but not showing. Its accessible
+            # action needs no pointer, so accept it off-screen.
+            starts = self.desktop.controls({"Start task"}, {"button"}, require_showing=False)
             if len(starts) > 1:
                 raise DriverFailure("submission_control_ambiguous")
             if starts:
