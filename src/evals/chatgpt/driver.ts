@@ -39,10 +39,8 @@ export function submitChatgptQuery(
     model: stringOption(config.options, 'computerUseModel'),
     maxActions: Number(config.options?.computerUseMaxActions ?? 32),
     deadlineAt,
-    env: {
-      ...plannerEnvironment(config),
-      ...(workspace ? { MST_CHATGPT_WORKSPACE: workspace } : {}),
-    },
+    env: plannerEnvironment(config),
+    ...(workspace ? { workspace } : {}),
   });
 }
 

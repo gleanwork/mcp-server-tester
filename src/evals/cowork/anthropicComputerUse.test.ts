@@ -1,449 +1,310 @@
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, expect, it, onTestFinished } from 'vitest';
 import {
   ComputerUseDriverError,
   ComputerUseHitlBudgetError,
   runAnthropicComputerUseHitl,
   runAnthropicComputerUseReset,
   runAnthropicComputerUseSubmission,
+  setComputerUseRuntime,
 } from './anthropicComputerUse.js';
+import {
+  DesktopBlockedError,
+  type ComputerUseDesktop,
+  type DesktopAction,
+  type PlannerRequest,
+  type PlannerResponse,
+} from './computerUseLoop.js';
+
+/** Offline: a fake desktop and planner stand in for the Mac and the API. */
+
+const IMAGE = {
+  type: 'image',
+  source: { type: 'base64', media_type: 'image/png', data: 'x' },
+} as const;
+const FILL = { type: 'tool_use', id: '1', name: 'fill_query', input: {} };
+const ENTER = {
+  type: 'tool_use',
+  id: '2',
+  name: 'computer',
+  input: { action: 'key', text: 'Return' },
+};
+
+interface Fake {
+  requests: PlannerRequest[];
+  launches: Array<[string, boolean]>;
+  executed: DesktopAction[];
+  envs: NodeJS.ProcessEnv[];
+}
+
+function useRuntime(
+  reply: (
+    request: PlannerRequest,
+    signal: AbortSignal
+  ) => Promise<PlannerResponse>,
+  overrides: Partial<ComputerUseDesktop> = {}
+): Fake {
+  const fake: Fake = { requests: [], launches: [], executed: [], envs: [] };
+  const desktop: ComputerUseDesktop = {
+    checkPermissions: async () => undefined,
+    async launch(app, required) {
+      fake.launches.push([app, required]);
+    },
+    openUrl: async () => undefined,
+    newChatgptChat: async () => true,
+    screenshot: async () => ({ ...IMAGE, source: { ...IMAGE.source } }),
+    frontmostApp: async () => 'Claude',
+    async execute(action) {
+      fake.executed.push(action);
+      if (action.action === 'screenshot')
+        return {
+          result: { ...IMAGE, source: { ...IMAGE.source } },
+          submitted: false,
+        };
+      return {
+        result: 'done',
+        submitted: action.action === 'key' && action.text === 'Return',
+      };
+    },
+    ...overrides,
+  };
+  onTestFinished(
+    setComputerUseRuntime({
+      desktop: () => desktop,
+      planner: (env) => {
+        fake.envs.push(env);
+        return {
+          prepare: async () => undefined,
+          async create(request, signal) {
+            fake.requests.push(request);
+            return reply(request, signal);
+          },
+        };
+      },
+    })
+  );
+  return fake;
+}
+
+const submits = async (): Promise<PlannerResponse> => ({
+  model: 'claude-sonnet-4-6',
+  usage: { input_tokens: 10 },
+  content: [FILL, ENTER],
+});
+const options = (extra: Record<string, unknown> = {}) => ({
+  deadlineAt: Date.now() + 10_000,
+  env: { MST_COWORK_CUA_START_DELAY: '0' },
+  ...extra,
+});
+
+afterEach(() => {
+  delete process.env.MST_COWORK_CUA_MODEL;
+});
 
 it.each(['chatgpt', 'cowork'] as const)(
-  'passes %s target selection to the shared packaged driver separately from the planner',
+  'gives %s its target selection separately from the planner model',
   async (application) => {
     const targetModel =
       application === 'cowork' ? 'claude-opus-4-6' : 'gpt-test';
-    const directory = await mkdtemp(join(tmpdir(), 'cu-chatgpt-'));
-    onTestFinished(() => rm(directory, { recursive: true, force: true }));
-    await mkdir(join(directory, 'scripts'));
-    await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
-    await writeFile(
-      join(directory, 'scripts/cowork_computer_use.py'),
-      `
-    const args = process.argv;
-    for (const [key,value] of [['--app','${application}'],['--target-model','${targetModel}'],['--reasoning-effort','medium']]) {
-      if (args[args.indexOf(key)+1] !== value) process.exit(1);
-    }
-    console.log(JSON.stringify({status:'submitted',action_count:2,submission_action:{action:'key',text:'enter'},model:process.env.MST_COWORK_CUA_MODEL}));
-  `
+    const appName = application === 'cowork' ? 'Claude' : 'ChatGPT';
+    const fake = useRuntime(
+      async (request) =>
+        application === 'cowork'
+          ? {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: '0',
+                  name: 'confirm_model',
+                  input: { model: targetModel },
+                },
+                FILL,
+                ENTER,
+              ],
+            }
+          : request.messages.length === 1
+            ? {
+                content: [
+                  FILL,
+                  {
+                    type: 'tool_use',
+                    id: '3',
+                    name: 'computer',
+                    input: { action: 'screenshot' },
+                  },
+                ],
+              }
+            : { content: [ENTER] },
+      { frontmostApp: async () => appName }
     );
-    const result = await runAnthropicComputerUseSubmission('query', {
-      deadlineAt: Date.now() + 10000,
-      application,
-      targetModel,
-      reasoningEffort: 'medium',
+    const result = await runAnthropicComputerUseSubmission(
+      'query',
+      options({
+        application,
+        targetModel,
+        reasoningEffort: 'medium',
+        model: 'claude-sonnet-4-6',
+      })
+    );
+    expect(result).toMatchObject({
+      status: 'submitted',
       model: 'claude-sonnet-4-6',
-      env: {
-        MST_COWORK_DRIVER_ROOT: directory,
-        MST_COWORK_PYTHON: process.execPath,
-      },
+      submission_action: { action: 'key', text: 'enter' },
     });
-    expect(result.model).toBe('claude-sonnet-4-6');
+    expect(fake.requests[0]!.model).toBe('claude-sonnet-4-6');
+    const instruction = (
+      fake.requests[0]!.messages[0]!.content as Array<{ text?: string }>
+    )[0]!.text!;
+    expect(instruction).toContain(targetModel);
   }
 );
 
-afterEach(() => vi.unstubAllEnvs());
-
-const GATEWAY = 'https://gateway.example.test/anthropic';
-it.each([
-  {
-    name: 'a gateway auth command',
-    env: {
-      ANTHROPIC_BASE_URL: `${GATEWAY}/v1`,
-      MST_LLM_AUTH_COMMAND: 'printf gateway-token',
-      ANTHROPIC_API_KEY: 'public-key',
-    },
-    seen: { base: GATEWAY, token: 'gateway-token', key: null },
-  },
-  {
-    name: 'a static gateway token',
-    env: { ANTHROPIC_BASE_URL: GATEWAY, ANTHROPIC_AUTH_TOKEN: 'static-token' },
-    seen: { base: GATEWAY, token: 'static-token', key: null },
-  },
-  {
-    name: 'the public API key',
-    env: { ANTHROPIC_API_KEY: 'public-key' },
-    seen: { base: 'https://api.anthropic.com', token: null, key: 'public-key' },
-  },
-  {
-    name: 'a gateway token without a gateway URL',
-    env: {
-      ANTHROPIC_AUTH_TOKEN: 'static-token',
-      ANTHROPIC_API_KEY: 'public-key',
-    },
-    seen: { base: 'https://api.anthropic.com', token: null, key: 'public-key' },
-  },
-])(
-  'gives the planner one credential for its endpoint: $name',
-  async ({ env, seen }) => {
-    for (const name of [
-      'ANTHROPIC_BASE_URL',
-      'ANTHROPIC_AUTH_TOKEN',
-      'ANTHROPIC_API_KEY',
-      'MST_LLM_AUTH_COMMAND',
-      'MST_COWORK_CUA_BASE_URL',
-      'MST_COWORK_CUA_AUTH_TOKEN',
-    ])
-      vi.stubEnv(name, '');
-    const directory = await mkdtemp(join(tmpdir(), 'cu-endpoint-'));
-    onTestFinished(() => rm(directory, { recursive: true, force: true }));
-    await mkdir(join(directory, 'scripts'));
-    await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
-    const snapshot = join(directory, 'env.json');
-    await writeFile(
-      join(directory, 'scripts/cowork_computer_use.py'),
-      `
-    const e = process.env;
-    require('fs').writeFileSync(e.SNAPSHOT, JSON.stringify({
-      base: e.MST_COWORK_CUA_BASE_URL,
-      token: e.MST_COWORK_CUA_AUTH_TOKEN || null,
-      key: e.ANTHROPIC_API_KEY || null,
-      gateway: ['ANTHROPIC_BASE_URL','ANTHROPIC_AUTH_TOKEN','MST_LLM_AUTH_COMMAND'].filter((n) => e[n]),
-    }));
-    console.log(JSON.stringify({status:'submitted',action_count:2,submission_action:{action:'key',text:'enter'},model:'test'}));
-  `
-    );
-    await runAnthropicComputerUseSubmission('query', {
-      deadlineAt: Date.now() + 10000,
-      env: {
-        ...env,
-        SNAPSHOT: snapshot,
-        MST_COWORK_DRIVER_ROOT: directory,
-        MST_COWORK_PYTHON: process.execPath,
-      },
-    });
-    expect(JSON.parse(await readFile(snapshot, 'utf8'))).toEqual({
-      ...seen,
-      gateway: [],
-    });
-  }
-);
-
-it('passes the session bundle path over a caller environment override', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'cu-app-'));
-  onTestFinished(() => rm(directory, { recursive: true, force: true }));
-  await mkdir(join(directory, 'scripts'));
-  await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
-  await writeFile(
-    join(directory, 'scripts/cowork_computer_use.py'),
-    `
-    if (process.env.MST_COWORK_APP_PATH !== '/private/tmp/pinned/Claude.app') process.exit(1);
-    console.log(JSON.stringify({status:'submitted',action_count:2,submission_action:{action:'key',text:'enter'},model:'test'}));
-  `
+it('launches the session bundle path', async () => {
+  const fake = useRuntime(submits);
+  await runAnthropicComputerUseSubmission(
+    'query',
+    options({ appPath: '/private/tmp/mst-test/Claude.app' })
   );
-  await expect(
-    runAnthropicComputerUseSubmission('query', {
-      deadlineAt: Date.now() + 10000,
-      appPath: '/private/tmp/pinned/Claude.app',
+  expect(fake.launches[0]).toEqual(['/private/tmp/mst-test/Claude.app', true]);
+});
+
+it('prefers an explicit planner model to the environment default', async () => {
+  process.env.MST_COWORK_CUA_MODEL = 'environment-planner';
+  const fake = useRuntime(submits);
+  await runAnthropicComputerUseSubmission(
+    'query',
+    options({ model: 'explicit-planner' })
+  );
+  expect(fake.requests[0]!.model).toBe('explicit-planner');
+  await runAnthropicComputerUseSubmission('query', options());
+  expect(fake.requests.at(-1)!.model).toBe('environment-planner');
+});
+
+it('resolves the planner from the caller environment', async () => {
+  const fake = useRuntime(submits);
+  await runAnthropicComputerUseSubmission(
+    'query',
+    options({
       env: {
-        MST_COWORK_DRIVER_ROOT: directory,
-        MST_COWORK_PYTHON: process.execPath,
-        MST_COWORK_APP_PATH: '/wrong/Claude.app',
+        MST_COWORK_CUA_START_DELAY: '0',
+        ANTHROPIC_BASE_URL: 'https://gw.test',
       },
     })
-  ).resolves.toMatchObject({ status: 'submitted' });
-});
-
-it('passes an explicit planner model over the legacy environment default', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'cu-model-'));
-  onTestFinished(() => rm(directory, { recursive: true, force: true }));
-  await mkdir(join(directory, 'scripts'));
-  await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
-  await writeFile(
-    join(directory, 'scripts/cowork_computer_use.py'),
-    `console.log(JSON.stringify({status:'submitted',action_count:2,submission_action:{action:'key',text:'enter'},model:process.env.MST_COWORK_CUA_MODEL}));`
   );
-  const result = await runAnthropicComputerUseSubmission('query', {
-    deadlineAt: Date.now() + 10000,
-    model: 'configured-planner',
-    env: {
-      MST_COWORK_DRIVER_ROOT: directory,
-      MST_COWORK_PYTHON: process.execPath,
-      MST_COWORK_CUA_MODEL: 'legacy-planner',
-    },
-  });
-  expect(result.model).toBe('configured-planner');
+  expect(fake.envs[0]!.ANTHROPIC_BASE_URL).toBe('https://gw.test');
 });
-
-function telemetry() {
-  return {
-    accounting: 'complete',
-    response_models: ['claude-sonnet-4-6', 'claude-opus-4-6'],
-    planner_response_count: 2,
-    usage: {
-      input_tokens: 100,
-      output_tokens: 20,
-      cache_creation_input_tokens: 30,
-      cache_read_input_tokens: 40,
-    },
-    usage_observation_counts: {
-      input_tokens: 2,
-      output_tokens: 2,
-      cache_creation_input_tokens: 1,
-      cache_read_input_tokens: 2,
-    },
-    duration_ms: 12.5,
-    action_count: 3,
-    attempted_action_count: 2,
-    executed_action_count: 2,
-    refused_action_count: 1,
-    cost: { status: 'unavailable' },
-  };
-}
-
-async function driverOptions(record: unknown, exitCode = 0) {
-  const directory = await mkdtemp(join(tmpdir(), 'cu-telemetry-'));
-  onTestFinished(() => rm(directory, { recursive: true, force: true }));
-  await mkdir(join(directory, 'scripts'));
-  await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
-  await writeFile(
-    join(directory, 'scripts/cowork_computer_use.py'),
-    `console.log(${JSON.stringify(JSON.stringify(record))}); process.exit(${exitCode});`
-  );
-  return {
-    deadlineAt: Date.now() + 10000,
-    env: {
-      MST_COWORK_DRIVER_ROOT: directory,
-      MST_COWORK_PYTHON: process.execPath,
-      ANTHROPIC_API_KEY: 'private-api-key',
-    },
-  };
-}
-
-it.each(['model_unavailable', 'provider_rate_limit', 'private-api-key'])(
-  'only exposes allowlisted blocker codes: %s',
-  async (code) => {
-    const options = await driverOptions(
-      {
-        status: 'failed',
-        error_code: code,
-        error: 'private prompt private-api-key',
-        telemetry: telemetry(),
-      },
-      1
-    );
-    try {
-      await runAnthropicComputerUseSubmission('query', options);
-      throw new Error('Expected failure');
-    } catch (error) {
-      expect(error).toBeInstanceOf(ComputerUseDriverError);
-      expect(String(error)).not.toContain('private-api-key');
-      expect(String(error)).not.toContain('private prompt');
-      if (code === 'model_unavailable') expect(String(error)).toContain(code);
-    }
-  }
-);
-
-it.each(['submit', 'hitl'] as const)(
-  'returns allowlisted telemetry for %s',
-  async (mode) => {
-    const options = await driverOptions({
-      status: mode === 'submit' ? 'submitted' : 'hitl_checked',
-      action_count: 3,
-      model: 'configured-planner',
-      submission_action: {
-        action: 'key',
-        text: 'enter',
-        prompt: 'private prompt',
-      },
-      telemetry: {
-        ...telemetry(),
-        prompt: 'private prompt',
-        screenshot: 'private image',
-        usage: { ...telemetry().usage, secret: 'private-api-key' },
-        cost: { status: 'available', dollars: 12345 },
-      },
-      provider_response: { secret: 'private-api-key' },
-    });
-    const result =
-      mode === 'submit'
-        ? await runAnthropicComputerUseSubmission('private prompt', options)
-        : await runAnthropicComputerUseHitl(options);
-    expect(result.telemetry).toEqual(telemetry());
-    expect(JSON.stringify(result)).not.toMatch(
-      /private|provider_response|12345/
-    );
-  }
-);
 
 it.each([
-  { accounting: ['complete'] },
-  { duration_ms: -1 },
-  { duration_ms: '10' },
-  { duration_ms: Infinity },
-  { planner_response_count: NaN },
-  { action_count: true },
-  { executed_action_count: -1 },
-  { attempted_action_count: 1.5 },
-  { refused_action_count: 5 },
-  { usage: { input_tokens: '100' } },
-  { usage: { ...telemetry().usage, cache_read_input_tokens: -1 } },
-  {
-    usage_observation_counts: {
-      ...telemetry().usage_observation_counts,
-      input_tokens: 3,
-    },
-  },
-  { response_models: ['private-api-key'] },
-  { response_models: ['claude-private-api-key'] },
-  { response_models: ['claude-sonnet-4-6\nprivate prompt'] },
-])('omits invalid telemetry without coercion: %j', async (invalid) => {
-  const options = await driverOptions({
-    status: 'hitl_checked',
-    action_count: 3,
-    model: 'configured-planner',
-    telemetry: { ...telemetry(), ...invalid },
+  [
+    'a blocker',
+    () => new DesktopBlockedError('model_unavailable'),
+    '(model_unavailable)',
+  ],
+  [
+    'a provider message',
+    () => new Error('private-api-key in a provider reply'),
+    undefined,
+  ],
+])('reports %s as a code, never as text', async (_name, error, code) => {
+  useRuntime(async () => {
+    throw error();
   });
-  const result = await runAnthropicComputerUseHitl(options);
-  expect(result.telemetry).toBeUndefined();
-});
-
-it.each(['budget', 'provider'] as const)(
-  'attaches safe partial accounting on %s errors',
-  async (kind) => {
-    const options = await driverOptions(
-      {
-        status: 'failed',
-        telemetry: telemetry(),
-        error:
-          kind === 'budget'
-            ? 'Computer Use HITL check exceeded 12 actions after attempting a visible prompt'
-            : 'private prompt private-api-key provider content',
-      },
-      1
-    );
-    try {
-      await runAnthropicComputerUseHitl(options);
-      throw new Error('Expected driver failure');
-    } catch (error) {
-      expect(error).toBeInstanceOf(ComputerUseDriverError);
-      if (kind === 'budget')
-        expect(error).toBeInstanceOf(ComputerUseHitlBudgetError);
-      expect((error as ComputerUseDriverError).telemetry).toEqual({
-        ...telemetry(),
-        accounting: 'partial',
-      });
-      expect(String(error)).not.toMatch(/private|provider content/);
-    }
-  }
-);
-
-it.each([-1, '2', null, 1.5])(
-  'rejects invalid result action count: %j',
-  async (action_count) => {
-    const options = await driverOptions({
-      status: 'hitl_checked',
-      action_count,
-      model: 'configured-planner',
-    });
-    await expect(runAnthropicComputerUseHitl(options)).rejects.toThrow(
-      'invalid result fields'
-    );
-  }
-);
-
-it('does not invent accounting when a failed process has no telemetry', async () => {
-  const options = await driverOptions(
-    { status: 'failed', error: 'private prompt' },
-    1
+  const failure = await runAnthropicComputerUseSubmission(
+    'private query',
+    options()
+  ).catch((e: unknown) => e);
+  expect(failure).toBeInstanceOf(ComputerUseDriverError);
+  const message = (failure as Error).message;
+  expect(message).toMatch(
+    /^Computer Use submission failed: stopped before completion; not retrying/
   );
-  await expect(runAnthropicComputerUseHitl(options)).rejects.toMatchObject({
-    telemetry: undefined,
-  });
+  if (code) expect(message).toContain(code);
+  expect(message).not.toContain('private');
+  expect((failure as ComputerUseDriverError).telemetry?.accounting).toBe(
+    'partial'
+  );
 });
 
-it('keeps the deadline guard before starting the driver', async () => {
+it('checks the deadline before starting', async () => {
+  const fake = useRuntime(submits);
   await expect(
-    runAnthropicComputerUseSubmission('private prompt', {
-      deadlineAt: Date.now() - 1,
-      env: { MST_COWORK_PYTHON: '/nonexistent/python' },
-    })
+    runAnthropicComputerUseSubmission('query', { deadlineAt: Date.now() - 1 })
   ).rejects.toThrow('submission deadline exceeded; not retrying');
+  expect(fake.requests).toEqual([]);
+  expect(fake.launches).toEqual([]);
 });
 
-it('keeps hard process timeout bounded and does not invent partial usage', async () => {
-  const options = await driverOptions({});
-  await writeFile(
-    join(options.env.MST_COWORK_DRIVER_ROOT, 'scripts/cowork_computer_use.py'),
-    'setInterval(() => {}, 1000);'
+it('stops at the deadline with partial telemetry', async () => {
+  useRuntime(
+    (_request, signal) =>
+      new Promise((_, reject) =>
+        signal.addEventListener('abort', () => reject(signal.reason as Error))
+      )
   );
-  options.deadlineAt = Date.now() + 200;
-  try {
-    await runAnthropicComputerUseSubmission('private prompt', options);
-    throw new Error('Expected timeout');
-  } catch (error) {
-    expect(error).toBeInstanceOf(ComputerUseDriverError);
-    expect((error as ComputerUseDriverError).telemetry).toBeUndefined();
-    expect(String(error)).toContain(
-      'terminated before completion; not retrying'
-    );
-    expect(String(error)).not.toContain('private prompt');
-  }
-});
-
-it.each(['budget', 'action-error', 'submit'] as const)(
-  'classifies only an explicit HITL budget result: %s',
-  async (kind) => {
-    const directory = await mkdtemp(join(tmpdir(), 'cu-result-'));
-    onTestFinished(() => rm(directory, { recursive: true, force: true }));
-    await mkdir(join(directory, 'scripts'));
-    await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
-    const error =
-      kind === 'action-error'
-        ? 'HITL key action failed'
-        : 'Computer Use HITL check exceeded 12 actions after attempting a visible prompt';
-    await writeFile(
-      join(directory, 'scripts/cowork_computer_use.py'),
-      `console.log(${JSON.stringify(JSON.stringify({ status: 'failed', error }))}); process.exit(1);`
-    );
-    const options = {
-      deadlineAt: Date.now() + 10000,
-      env: {
-        MST_COWORK_DRIVER_ROOT: directory,
-        MST_COWORK_PYTHON: process.execPath,
-      },
-    };
-    const result =
-      kind === 'submit'
-        ? runAnthropicComputerUseSubmission('query', options)
-        : runAnthropicComputerUseHitl(options);
-    if (kind === 'budget')
-      await expect(result).rejects.toBeInstanceOf(ComputerUseHitlBudgetError);
-    else
-      await expect(result).rejects.not.toBeInstanceOf(
-        ComputerUseHitlBudgetError
-      );
-  }
-);
-
-it('runs a reset in reset mode with a small budget, and requires reset_done', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'cu-reset-'));
-  onTestFinished(() => rm(directory, { recursive: true, force: true }));
-  await mkdir(join(directory, 'scripts'));
-  await writeFile(join(directory, 'package.json'), '{"type":"commonjs"}');
-  await writeFile(
-    join(directory, 'scripts/cowork_computer_use.py'),
-    `
-    const args = process.argv;
-    if (args[args.indexOf('--mode') + 1] !== 'reset') process.exit(3);
-    if (args[args.indexOf('--max-actions') + 1] !== '8') process.exit(4);
-    console.log(JSON.stringify({status: process.env.RESET_STATUS, action_count: 2, model: 'claude-sonnet-4-6'}));
-  `
+  const failure = await runAnthropicComputerUseSubmission(
+    'query',
+    options({ deadlineAt: Date.now() + 100 })
+  ).catch((e: unknown) => e);
+  expect((failure as Error).message).toBe(
+    'Computer Use submission failed: deadline reached before completion; not retrying'
   );
-  const options = (status: string) => ({
-    deadlineAt: Date.now() + 10000,
-    env: {
-      MST_COWORK_DRIVER_ROOT: directory,
-      MST_COWORK_PYTHON: process.execPath,
-      RESET_STATUS: status,
-    },
+  expect((failure as ComputerUseDriverError).telemetry).toMatchObject({
+    accounting: 'partial',
+    planner_response_count: 0,
   });
-  await expect(
-    runAnthropicComputerUseReset(options('reset_done'))
-  ).resolves.toMatchObject({ status: 'reset_done', action_count: 2 });
-  await expect(
-    runAnthropicComputerUseReset(options('submitted'))
-  ).rejects.toThrow('Computer Use reset did not reach reset_done.');
+});
+
+it('reports an exhausted HITL inspection as its own kind', async () => {
+  useRuntime(async () => ({
+    content: [
+      {
+        type: 'tool_use',
+        id: '1',
+        name: 'computer',
+        input: { action: 'left_click', coordinate: [1, 1] },
+      },
+    ],
+  }));
+  const failure = await runAnthropicComputerUseHitl(
+    options({ maxActions: 1 })
+  ).catch((e: unknown) => e);
+  expect(failure).toBeInstanceOf(ComputerUseHitlBudgetError);
+  expect((failure as ComputerUseHitlBudgetError).kind).toBe(
+    'hitl-budget-exhausted'
+  );
+  expect((failure as Error).message).toBe(
+    'HITL inspection reached its 1-action budget.'
+  );
+});
+
+it('resets with a budget of eight and reports reset_done', async () => {
+  const fake = useRuntime(async () => ({ content: [] }));
+  const result = await runAnthropicComputerUseReset(options());
+  expect(result).toMatchObject({ status: 'reset_done', action_count: 0 });
+  expect(fake.requests[0]!.messages[0]!.content).toEqual(
+    expect.arrayContaining([expect.objectContaining({ type: 'text' })])
+  );
+  const text = (
+    fake.requests[0]!.messages[0]!.content as Array<{ text?: string }>
+  )[0]!.text!;
+  expect(text).toContain('Inspect the visible Claude Desktop Cowork window');
+});
+
+it('writes action names to MST_COWORK_CUA_LOG_FILE, never the query', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cu-log-'));
+  onTestFinished(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, 'driver.log');
+  useRuntime(submits);
+  await runAnthropicComputerUseSubmission(
+    'private query',
+    options({
+      env: { MST_COWORK_CUA_START_DELAY: '0', MST_COWORK_CUA_LOG_FILE: file },
+    })
+  );
+  const log = await readFile(file, 'utf8');
+  expect(log).toContain('executing action 1: type');
+  expect(log).toContain('submission boundary reached');
+  expect(log).not.toContain('private query');
 });
