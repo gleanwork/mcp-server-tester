@@ -232,10 +232,15 @@ class Driver:
                 if not self.desktop.controls({"Start task"}, {"button"}, require_showing=False):
                     return self.receipt("ready")
                 draft = True
-            elif not starts and self.desktop.controls({"Cowork"}, {"button", "radio button"},
-                                                      require_enabled=False):
-                # Not in Cowork mode: the next submit selects it.
-                return self.receipt("ready")
+            elif not starts:
+                # Not in Cowork mode only if the composer's mode switch says so:
+                # one Cowork radio, unselected. The sidebar's Cowork button is
+                # always on screen, the old task view included, and the link
+                # returns before the app has navigated, so it proves nothing.
+                radios = self.desktop.controls({"Cowork"}, {"radio button"}, require_enabled=False)
+                if len(radios) == 1 and not self.desktop.selected(radios[0]):
+                    # The next submit selects it.
+                    return self.receipt("ready")
             time.sleep(min(0.1, left))
 
     def select_cowork(self) -> None:
