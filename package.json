@@ -112,6 +112,7 @@
     "schema:generate": "node --import tsx scripts/generate-run-schemas.ts"
   },
   "dependencies": {
+    "@discoveryjs/json-ext": "^1.1.0",
     "@modelcontextprotocol/client": "^2.2.0",
     "@modelcontextprotocol/server": "^2.2.0",
     "commander": "^14.0.2",

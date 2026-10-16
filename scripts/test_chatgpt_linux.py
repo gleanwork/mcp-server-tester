@@ -759,6 +759,38 @@ class DriverTest(unittest.TestCase):
                     self.assertEqual((driver.actions, desktop.actions), (1, []))
                     self.assertEqual(driver.receipt('failed')['step'], 'draft-open')
 
+    @patch('chatgpt_linux.time.sleep')
+    def test_initial_editor_overlap_settles_before_opening_one_draft(self, sleep):
+        desktop = FakeDesktop(ready(CODEX) + [editor()])
+        sleep.side_effect = lambda _: setattr(desktop, 'nodes', ready(CODEX))
+        self.assertEqual(self.driver(desktop).submit(PROMPT, 'codex')['status'], 'submitted')
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+        self.assertEqual(sleep.call_count, 1)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_draft_text_reads_can_settle_without_reopening_or_sending_twice(self, sleep):
+        desktop = FakeDesktop(ready(CODEX))
+        original = desktop.text
+        pending = [True]
+        def text(control, limit=None):
+            if desktop.actions and pending:
+                pending.pop()
+                raise DriverFailure('composer_text_unavailable')
+            return original(control, limit=limit)
+        desktop.text = text
+        self.assertEqual(self.driver(desktop).submit(PROMPT, 'codex')['status'], 'submitted')
+        self.assertEqual(self.actions(desktop), ['open', 'Send'])
+        self.assertEqual(sleep.call_count, 1)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_persistent_unreadable_draft_still_fails_without_sending(self, sleep):
+        desktop = FakeDesktop(ready(CODEX))
+        desktop.text = Mock(side_effect=DriverFailure('composer_text_unavailable'))
+        with self.assertRaisesRegex(DriverFailure, '^composer_text_unavailable$'):
+            self.driver(desktop).submit(PROMPT, 'codex')
+        self.assertEqual(self.actions(desktop), ['open'])
+        self.assertEqual(sleep.call_count, DRAFT_POLLS)
+
     # --- budgets, deadline, waits ---
 
     def test_action_budget_and_deadline_block_before_send(self):

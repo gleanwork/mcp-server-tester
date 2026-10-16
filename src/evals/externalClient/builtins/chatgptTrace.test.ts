@@ -7,6 +7,7 @@ import {
   expectedChatgptOriginator,
   findChatgptTrace,
   parseChatgptTrace,
+  PendingChatgptRecordError,
   snapshotChatgptSessions,
 } from './chatgptTrace.js';
 import { NativeTraceError } from '../nativeTraceError.js';
@@ -835,6 +836,42 @@ describe('ChatGPT native telemetry', () => {
       );
     });
 
+    it('waits for an unfinished replacement without accepting missing evidence', () => {
+      const records = numbered().map((line) => {
+        const { timestamp, ordinal, type, payload } = JSON.parse(line);
+        return JSON.stringify({ timestamp, ordinal, type, payload });
+      });
+      const prefix = records.slice(0, 4);
+      const truncated = records[4]!.slice(0, -30);
+      const replacement = records[4]!.slice(0, -5);
+      const growing = [...prefix, truncated, replacement].join('\n');
+      expect(() => parseChatgptTrace(growing, marker)).toThrow(
+        PendingChatgptRecordError
+      );
+      const finished =
+        [...prefix, truncated, ...records.slice(4)].join('\n') + '\n';
+      const trace = parseChatgptTrace(finished, marker)!;
+      expect(trace.complete).toBe(true);
+      expect(trace.toolCalls).toHaveLength(2);
+      expect(trace.limitations).toContain(
+        '1 truncated native record(s) were rewritten by the client under the same ordinal; the rewritten record was used.'
+      );
+      // A complete malformed replacement or a different ordinal remains a failure.
+      expect(() => parseChatgptTrace(growing + '\n', marker)).toThrow(
+        'Malformed complete'
+      );
+      expect(() =>
+        parseChatgptTrace(
+          [
+            ...prefix,
+            truncated,
+            replacement.replace('"ordinal":4', '"ordinal":5'),
+          ].join('\n'),
+          marker
+        )
+      ).toThrow('Malformed complete');
+    });
+
     it.each([
       [
         'the next record skips an ordinal',
@@ -1195,6 +1232,177 @@ describe('ChatGPT native response_item tool calls', () => {
       { arguments: { query: 'a' } },
       { arguments: { query: 'b' } },
     ]);
+  });
+
+  it.each(
+    ['list_mcp_resources', 'list_mcp_resource_templates'].flatMap((tool) =>
+      [
+        'text(r)',
+        'text(JSON.stringify(r))',
+        'text ( r )',
+        'text ( JSON . stringify ( r ) )',
+      ].map((output) => [tool, output])
+    )
+  )(
+    'attributes a targeted %s helper with %s output to the client and retains its failure',
+    (tool, output) => {
+      // Observed native shape: the helper's requested server, including a typo,
+      // becomes item.server even though exec called tools.list_mcp_resources.
+      const native = {
+        type: 'McpToolCall',
+        id: 'resource-item',
+        server: 'acme_eval',
+        tool,
+        arguments: { server: 'acme_eval' },
+        status: 'failed',
+        error: {
+          message: "resources/list failed: unknown MCP server 'acme_eval'",
+        },
+      };
+      const body = [
+        ...exec(
+          'resource',
+          `const r = await tools.${tool}({server:"acme_eval"}); ${output};`,
+          1,
+          2
+        ),
+        item(native, 1.2, 1.3),
+      ];
+      const trace = parse(
+        [...body, item({ ...mcp, id: 'real-mcp', arguments: {} }, 3, 4)],
+        { surface: 'codex' }
+      );
+      expect(trace.toolCalls).toMatchObject([
+        { source: 'builtin', name: 'exec' },
+        {
+          source: 'builtin',
+          name: tool,
+          server: 'acme_eval',
+          arguments: { server: 'acme_eval' },
+          isError: true,
+          output: JSON.stringify(native.error),
+          durationMs: 100,
+        },
+        { source: 'mcp', server: 'acme-eval', name: 'search' },
+      ]);
+      expect(trace.telemetry).toMatchObject({
+        mcpToolCallCount: 1,
+        mcpToolErrorCount: 0,
+        builtinToolCallCount: 2,
+        builtinToolErrorCount: 1,
+        mcpWallDurationMs: 1000,
+      });
+      expect(parse(body).telemetry.mcpToolCallCount).toBe(0);
+      // The shape also occurs for an existing target and a successful lookup.
+      const existing = parse([
+        ...exec(
+          'resource',
+          `await tools.${tool}({"server":"acme-eval"});`,
+          1,
+          2
+        ),
+        item(
+          {
+            ...native,
+            server: 'acme-eval',
+            arguments: { server: 'acme-eval' },
+            status: 'completed',
+            error: undefined,
+            result: { resources: [] },
+          },
+          1.2,
+          1.3
+        ),
+      ]);
+      expect(existing.toolCalls[1]).toMatchObject({
+        source: 'builtin',
+        isError: false,
+      });
+      expect(existing.telemetry.mcpToolCallCount).toBe(0);
+    }
+  );
+
+  it.each([
+    '// await tools.list_mcp_resources({server:"acme_eval"});',
+    `text('await tools.list_mcp_resources({server:"acme_eval"});');`,
+    'if (false) { await tools.list_mcp_resources({server:"acme_eval"}); }',
+    'await tools.mcp__acme_eval__list_mcp_resources({server:"acme_eval"});',
+    'await tools.list_mcp_resources({server:"acme_eval"}); await tools.mcp__other__search({});',
+    'const r = await tools.list_mcp_resources({server:"other"}); text(r);',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(other));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(r, transform));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(await tools.mcp__other__search({})));',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(JSON.stringify(r)); await tools.mcp__other__search({});',
+    'const r = await tools.list_mcp_resources({server:"acme_eval"}); text(r.toJSON());',
+    'await tools.list_mcp_resources({server:target});',
+    'await tools.list_mcp_resources({server:"acme_eval", extra:true});',
+  ])(
+    'does not use ambiguous or unrelated exec code as helper provenance: %s',
+    (input) => {
+      const trace = parse([
+        ...exec('resource', input, 1, 2),
+        item(
+          {
+            type: 'McpToolCall',
+            id: 'native',
+            server: 'acme_eval',
+            tool: 'list_mcp_resources',
+            arguments: { server: 'acme_eval' },
+          },
+          1.2,
+          1.3
+        ),
+      ]);
+      expect(trace.toolCalls.find((c) => c.id === 'native')).toMatchObject({
+        source: 'mcp',
+      });
+    }
+  );
+
+  it.each([
+    'no-output',
+    'outside-span',
+    'multiple-children',
+    'overlap',
+    'pending-overlap',
+    'wrong-arguments',
+  ])('requires unambiguous completed native correlation: %s', (condition) => {
+    const body = exec(
+      'resource',
+      'await tools.list_mcp_resources({server:"acme_eval"});',
+      1,
+      condition === 'no-output' ? undefined : 2
+    );
+    const native = {
+      type: 'McpToolCall',
+      id: 'native',
+      server: 'acme_eval',
+      tool: 'list_mcp_resources',
+      arguments: {
+        server: condition === 'wrong-arguments' ? 'other' : 'acme_eval',
+      },
+    };
+    body.push(
+      item(
+        native,
+        condition === 'outside-span' ? 3 : 1.2,
+        condition === 'outside-span' ? 4 : 1.3
+      )
+    );
+    if (condition === 'multiple-children')
+      body.push(item({ ...mcp, id: 'other', arguments: {} }, 1.4, 1.5));
+    if (condition === 'overlap' || condition === 'pending-overlap')
+      body.push(
+        ...exec(
+          'other',
+          'await tools.mcp__other__search({});',
+          1,
+          condition === 'pending-overlap' ? undefined : 2
+        )
+      );
+    expect(parse(body).toolCalls.find((c) => c.id === 'native')).toMatchObject({
+      source: 'mcp',
+    });
   });
 
   it('counts each MCP call once when a native McpToolCall also exists', () => {
