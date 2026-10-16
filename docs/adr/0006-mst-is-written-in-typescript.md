@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # MST is written in TypeScript
