@@ -1079,6 +1079,47 @@ describe('submission', () => {
     expect(run.telemetry.planner_response_count).toBe(1);
   });
 
+  it('gives each desktop action the deadline signal, so a long fill can stop', async () => {
+    const deadline = new AbortController();
+    const seen: AbortSignal[] = [];
+    await runComputerUseLoop(
+      {
+        query: 'query',
+        maxActions: 8,
+        mode: 'submit',
+        application: 'cowork',
+        chatgptSurface: 'chatgpt-work',
+        model: 'claude-sonnet-4-6',
+        approveWriteTools: false,
+        startDelayMs: 0,
+        secrets: [],
+      },
+      {
+        desktop: {
+          checkPermissions: async () => undefined,
+          launch: async () => undefined,
+          openUrl: async () => undefined,
+          newChatgptChat: async () => true,
+          screenshot: async () => ({ ...IMAGE, source: { ...IMAGE.source } }),
+          frontmostApp: async () => 'Claude',
+          async execute(action, signal) {
+            seen.push(signal);
+            return { result: 'done', submitted: action.action === 'key' };
+          },
+        },
+        planner: {
+          prepare: async () => undefined,
+          create: async () => response([FILL, ENTER], {}),
+        },
+        sleep: async () => undefined,
+        log: () => undefined,
+        signal: deadline.signal,
+      }
+    );
+    expect(seen).toHaveLength(2);
+    for (const signal of seen) expect(signal).toBe(deadline.signal);
+  });
+
   it('never acts once the deadline passes during the focus check', async () => {
     const deadline = new AbortController();
     const executed: DesktopAction[] = [];

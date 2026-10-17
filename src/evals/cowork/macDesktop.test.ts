@@ -21,7 +21,7 @@ vi.mock('node:child_process', async (original) => {
       (
         file: string,
         args: string[],
-        _options: unknown,
+        options: { maxBuffer?: number },
         callback: (error: Error | null, result?: unknown) => void
       ) => {
         const call: { file: string; args: string[]; stdin?: string } = {
@@ -30,13 +30,18 @@ vi.mock('node:child_process', async (original) => {
         };
         commands.calls.push(call);
         const result = commands.results.get(file) ?? {};
-        setImmediate(() =>
-          result.error
-            ? callback(result.error)
-            : callback(null, {
-                stdout: Buffer.from(result.stdout ?? ''),
-                stderr: '',
+        const stdout = Buffer.from(result.stdout ?? '');
+        // As Node does: more output than maxBuffer (default 1 MiB) fails the command.
+        const overflow =
+          stdout.length > (options.maxBuffer ?? 1024 * 1024)
+            ? Object.assign(new Error('stdout maxBuffer length exceeded'), {
+                code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
               })
+            : undefined;
+        setImmediate(() =>
+          result.error || overflow
+            ? callback((result.error ?? overflow)!)
+            : callback(null, { stdout, stderr: '' })
         );
         return {
           stdin: {
@@ -58,7 +63,13 @@ vi.mock('../nativeHelper.js', () => ({
         args,
         ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
       });
-      return replies.get(args[0]!) ?? { ok: true };
+      const reply = replies.get(args[0]!);
+      // A function reply runs when the command does, for a test to act mid-command.
+      return (
+        (typeof reply === 'function' ? (reply as () => unknown)() : reply) ?? {
+          ok: true,
+        }
+      );
     },
   })),
 }));
@@ -214,6 +225,58 @@ describe('the desktop', () => {
       duration: 30,
     });
     expect(sleeps).toEqual([5000]);
+  });
+
+  it('stops typing between pieces of a long line once the deadline passes', async () => {
+    const deadline = new AbortController();
+    const d = desktop(async () => {
+      if (runs.length === 1) deadline.abort();
+    }, deadline.signal);
+    await expect(
+      d.execute({ action: 'type', text: 'x'.repeat(2500) })
+    ).rejects.toThrow('deadline reached');
+    expect(runs.map((run) => run.stdin?.length)).toEqual([1000]);
+  });
+
+  it("doesn't click when the deadline passes while it looks up the screen", async () => {
+    const deadline = new AbortController();
+    replies.set('screen', () => {
+      deadline.abort();
+      return { width: 1440, height: 900 };
+    });
+    await expect(
+      desktop(undefined, deadline.signal).execute({
+        action: 'left_click',
+        coordinate: [10, 10],
+      })
+    ).rejects.toThrow('deadline reached');
+    expect(runs.map((run) => run.args[0])).toEqual(['screen']);
+  });
+
+  it("doesn't press Command+V when the deadline passes before it, and puts the clipboard back", async () => {
+    const deadline = new AbortController();
+    commands.results.set('/usr/bin/pbpaste', {
+      stdout: 'what the user copied',
+    });
+    await expect(
+      desktop(async (ms) => {
+        if (ms === 200) deadline.abort();
+      }, deadline.signal).execute({ action: 'paste', text: 'private query' })
+    ).rejects.toThrow('deadline reached');
+    expect(commands.calls.map((call) => [call.file, call.stdin])).toEqual([
+      ['/usr/bin/pbpaste', undefined],
+      ['/usr/bin/pbcopy', 'private query'],
+      ['/usr/bin/pbcopy', 'what the user copied'],
+    ]);
+  });
+
+  it('saves and puts back a clipboard larger than 1 MiB', async () => {
+    const large = 'y'.repeat(2 * 1024 * 1024);
+    commands.results.set('/usr/bin/pbpaste', { stdout: large });
+    await desktop().execute({ action: 'paste', text: 'query' });
+    const restored = commands.calls.at(-1)!;
+    expect(restored.file).toBe('/usr/bin/pbcopy');
+    expect(restored.stdin).toHaveLength(large.length);
   });
 
   it('stops typing between lines once the deadline passes', async () => {

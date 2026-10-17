@@ -119,9 +119,27 @@ describe('the endpoint and credential', () => {
       },
       [json(200, REPLY)]
     );
+    expect(instance.credentials?.()).toEqual([]);
     await instance.prepare();
+    expect(instance.credentials?.()).toEqual(['command-token']);
     await instance.create(REQUEST, signal());
     expect(calls[0]!.headers.authorization).toBe('Bearer command-token');
+  });
+
+  it('reports each credential it sends, so telemetry can keep it out', async () => {
+    // Without prepare(): the send itself records the credential.
+    const { instance } = planner(
+      {
+        ANTHROPIC_BASE_URL: 'https://gateway.example.test/anthropic',
+        MST_LLM_AUTH_COMMAND: 'printf sent-token',
+      },
+      [json(200, REPLY)]
+    );
+    await instance.create(REQUEST, signal());
+    expect(instance.credentials?.()).toEqual(['sent-token']);
+    const key = planner({ ANTHROPIC_API_KEY: 'test-key' }, [json(200, REPLY)]);
+    await key.instance.create(REQUEST, signal());
+    expect(key.instance.credentials?.()).toEqual(['test-key']);
   });
 
   it('needs a credential', async () => {

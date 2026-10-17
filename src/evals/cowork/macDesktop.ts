@@ -251,7 +251,17 @@ export function macComputerUseDesktop(
     }
   }
 
-  async function input(args: string[], stdin?: string): Promise<void> {
+  /**
+   * One input primitive. The deadline is checked right before it, after any
+   * wait the action did first (a screen lookup, a pause), so no input reaches
+   * the desktop once the deadline has passed.
+   */
+  async function input(
+    signal: AbortSignal,
+    args: string[],
+    stdin?: string
+  ): Promise<void> {
+    stopAtDeadline(signal);
     OkSchema.parse(await run(args, stdin));
     await options.sleep(INPUT_PAUSE_MS);
   }
@@ -309,17 +319,13 @@ export function macComputerUseDesktop(
     // Line breaks must not submit the composer.
     const lines = text.split('\n');
     for (const [index, line] of lines.entries()) {
-      if (signal.aborted) throw new Error('Computer Use deadline reached');
       if (index)
-        await input(['chord', ...keyCodes('shift+enter')!.map(String)]);
-      for (const piece of pieces(line)) {
-        if (signal.aborted) throw new Error('Computer Use deadline reached');
-        await input(['type'], piece);
-      }
+        await input(signal, ['chord', ...keyCodes('shift+enter')!.map(String)]);
+      for (const piece of pieces(line)) await input(signal, ['type'], piece);
     }
   }
 
-  async function pasteText(text: string): Promise<void> {
+  async function pasteText(text: string, signal: AbortSignal): Promise<void> {
     // The clipboard is put back afterwards. If it can't be saved, nothing is
     // pasted: overwriting it would lose what the user copied.
     let previous: Buffer;
@@ -334,9 +340,11 @@ export function macComputerUseDesktop(
         'Computer Use could not save the clipboard, so it did not paste the query.'
       );
     }
+    stopAtDeadline(signal);
     await pipe('/usr/bin/pbcopy', Buffer.from(text, 'utf8'));
     try {
       await options.sleep(200);
+      stopAtDeadline(signal);
       await exec(
         '/usr/bin/osascript',
         [
@@ -422,7 +430,13 @@ export function macComputerUseDesktop(
                 : 'left';
           const clicks =
             name === 'double_click' ? 2 : name === 'triple_click' ? 3 : 1;
-          await input(['click', String(x), String(y), button, String(clicks)]);
+          await input(signal, [
+            'click',
+            String(x),
+            String(y),
+            button,
+            String(clicks),
+          ]);
           return { result: `${name} completed`, submitted: false };
         }
         case 'cursor_position': {
@@ -433,13 +447,13 @@ export function macComputerUseDesktop(
         }
         case 'mouse_move': {
           const [x, y] = await point(action);
-          await input(['move', String(x), String(y)]);
+          await input(signal, ['move', String(x), String(y)]);
           return { result: 'mouse_move completed', submitted: false };
         }
         case 'left_click_drag': {
           const [startX, startY] = await point(action, 'start_coordinate');
           const [endX, endY] = await point(action);
-          await input([
+          await input(signal, [
             'drag',
             String(startX),
             String(startY),
@@ -452,7 +466,7 @@ export function macComputerUseDesktop(
           await typeText(actionField(action, 'text'), signal);
           return { result: 'text entered', submitted: false };
         case 'paste':
-          await pasteText(actionField(action, 'text'));
+          await pasteText(actionField(action, 'text'), signal);
           return { result: 'text entered', submitted: false };
         case 'key': {
           const text = actionField(action, 'text');
@@ -463,7 +477,7 @@ export function macComputerUseDesktop(
               result: `key not sent: unknown key in ${text}`,
               submitted: false,
             };
-          await input(['chord', ...codes.map(String)]);
+          await input(signal, ['chord', ...codes.map(String)]);
           return {
             result: `key completed: ${text}`,
             submitted: pressesEnter(text),
@@ -484,7 +498,7 @@ export function macComputerUseDesktop(
             direction === 'down' ? -amount : direction === 'up' ? amount : 0;
           const horizontal =
             direction === 'right' ? -amount : direction === 'left' ? amount : 0;
-          await input([
+          await input(signal, [
             'scroll',
             String(x),
             String(y),
@@ -524,6 +538,10 @@ export function pieces(line: string): string[] {
   }
   if (current) result.push(current);
   return result;
+}
+
+function stopAtDeadline(signal: AbortSignal): void {
+  if (signal.aborted) throw new Error('Computer Use deadline reached');
 }
 
 /** Runs `file` with `data` on stdin. */
