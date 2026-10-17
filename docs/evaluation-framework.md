@@ -121,7 +121,10 @@ export default plugin;
   };
   ```
 
-  An environment whose machines are Docker hosts, such as cloud VMs, can leave the containers to the built-in `docker` environment: create the hosts and a Docker context for each, then return `dockerEnvironment.open({ contexts: names.join(','), image }, context)` (from `./evals`) with a `close` that also deletes the hosts. Its `setup` builds the image on the contexts it's given.
+  An environment whose machines are Docker hosts, such as cloud VMs, can leave the containers to the built-in `docker` environment, `dockerEnvironment` (from `./evals`):
+  - **`setup`** creates one host and a Docker context for it, and calls `dockerEnvironment.setup({ contexts: '<context>', image }, { log, plugins })` with the `plugins` its own `setup` was given. It then saves that host as the image new hosts boot from. `dockerEnvironment.open` checks that each context already has the image, and never builds or pulls it, so a host without the image fails every shard.
+  - **`runShard`** creates a host for the shard and a Docker context for it. It opens `dockerEnvironment` with that context only, runs the shard on it, and closes it. Then it deletes the host, unless `context.keep` keeps it: `'always'`, or `'failed'` when the shard's outcome isn't `ok`. The docker environment keeps the container by the same rule, and prints a `docker --context <context> exec` command that works only while the host is up.
+  - **`close`** deletes the hosts of shards that are still running.
 
   A worker machine needs the same MST version as the coordinator (a mismatch fails the shard at `hello`), on `PATH` as `mst`, and the client's plugin. Access tokens reach it only over stdin; the worker writes them to `MST_TOKENS_DIR` (default `/run/mst/tokens`, which a worker image should mount as tmpfs), one file per server label, renews them before they expire, and removes them at the end. `MST_IMAGE` names the image in the worker's `hello`. A shard's failures (no machine, a silent or cancelled worker) are its outcome; `runShard` doesn't throw for them.
 
