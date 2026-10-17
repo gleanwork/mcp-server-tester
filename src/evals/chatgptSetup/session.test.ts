@@ -829,8 +829,8 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     };
     expect(trustedProject).toContain('mst-chatgpt-workspace-');
     expect(
-      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].env
-    ).toMatchObject({ MST_CHATGPT_WORKSPACE: trustedProject });
+      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].workspace
+    ).toBe(trustedProject);
     await expect(stat(trustedProject!)).rejects.toThrow();
     expect(result.clientMetadata).toBeDefined();
   });
@@ -865,8 +865,8 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledTimes(1);
     // ChatGPT Work makes its own folder: no MST workspace for it.
     expect(
-      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].env
-    ).not.toHaveProperty('MST_CHATGPT_WORKSPACE');
+      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1]
+    ).not.toHaveProperty('workspace');
   });
   it.each(['native-macos', 'linux-desktop'])(
     'rejects %s before any desktop change',
