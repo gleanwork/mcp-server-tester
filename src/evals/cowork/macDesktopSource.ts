@@ -36,8 +36,15 @@ func post(_ event: CGEvent?) {
     guard let event = event else { fail("event") }
     event.post(tap: .cghidEventTap)
 }
+// Input runs at a person's pace. An app handles a move, a press and a release
+// that arrive in the same instant as less than a click: a menu item highlights
+// on the move but is never chosen. So the pointer settles before a press, a
+// press is held briefly, and the helper waits before it exits.
+let settle: useconds_t = 50_000
+let hold: useconds_t = 30_000
 func moveMouse(_ to: CGPoint) {
     post(CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: to, mouseButton: .left))
+    usleep(settle)
 }
 let modifierFlags: [CGKeyCode: CGEventFlags] = [
     0x37: .maskCommand, 0x36: .maskCommand, 0x38: .maskShift, 0x3C: .maskShift,
@@ -75,13 +82,16 @@ case "click":
             let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: at, mouseButton: mouseButton)
             event?.setIntegerValueField(.mouseEventClickState, value: Int64(state))
             post(event)
+            usleep(hold)
         }
     }
+    usleep(settle)
     emit(["ok": true])
 case "drag":
     let start = point(2), end = point(4)
     moveMouse(start)
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left))
+    usleep(hold)
     let steps = 20
     for step in 1...steps {
         let t = CGFloat(step) / CGFloat(steps)
@@ -90,6 +100,7 @@ case "drag":
         usleep(20_000)
     }
     post(CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left))
+    usleep(settle)
     emit(["ok": true])
 case "scroll":
     moveMouse(point(2))
