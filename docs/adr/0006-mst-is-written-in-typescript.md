@@ -13,7 +13,7 @@ MST is a TypeScript package, and its checks are TypeScript checks: `typecheck`, 
 
 None of this Python has the checks the TypeScript has. CI doesn't lint, format or type-check it. Its tests run only because `src/evals/cowork/pythonDrivers.test.ts` starts `python3 -m unittest`. The macOS driver also made its own LLM calls, through the Anthropic Python SDK in `run_driver`, rather than MST's `resolveLLMEndpoint()`. That was a second place for MST's LLM calls, which REVIEW.md's "One place per job" rule forbids.
 
-A contributor, or an agent, reading the repo can't tell which language new code should use. MST also asks its users for a Python with pinned packages, on top of Node.
+A contributor, or an agent, reading the repo can't tell which language new code should use. MST also asked its macOS users for a Python with pinned packages, on top of Node, and it still needs Python on Linux and for the credential helpers.
 
 ## Decision
 
@@ -25,7 +25,7 @@ A contributor, or an agent, reading the repo can't tell which language new code 
   - If a spike on MST's Linux image shows that this is impractical, a thin layer may call `libatspi` through Python's GObject bindings, under the same rule as Swift: primitives over JSON, no eval logic, and only the image's system packages, never pip.
   - That exception needs its own ADR, which amends this one with the spike's evidence.
 - **A helper that a client runs is a Node script**, started with the Node that runs MST (`process.execPath`), not `/usr/bin/python3`. It starts isolated, as `python3 -I` does today: nothing in the environment it inherits, such as `NODE_OPTIONS`, can load code into it.
-- **Shell is for an image's entry points and one-line glue only.**
+- **New shell is for an image's entry points and one-line glue only.** `scripts/run-cowork.sh`, the macOS runner for a source checkout, predates this ADR and stays; fixes to it are fine.
 - **Code that belongs to one organization goes in that organization's plugin** (ADR 0001), in whatever language the plugin uses. MST doesn't carry it. The desktop drivers stay in MST because they drive public clients that MST ships as built-ins (`cowork`, `chatgpt`).
 - **A new language, or a new exception, needs an ADR that amends this one.** This includes code inside a TypeScript string, such as an inline script.
 
@@ -54,5 +54,5 @@ After the last port, MST removes `pythonDrivers.test.ts`, the `MST_COWORK_PYTHON
 ## Consequences
 
 - New Python fails review (REVIEW.md, "One language"), and AGENTS.md tells agents to write TypeScript.
-- Linux Cowork and ChatGPT runs need Python until port 4 lands. macOS runs no longer do.
+- Linux Cowork and ChatGPT runs need Python until port 4 lands. On macOS, the Computer Use driver needs none, but the credential helpers still run `/usr/bin/python3` until port 2 lands.
 - The two remaining package exports above go away during the 2.0 prereleases, with a migration note.
