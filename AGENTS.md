@@ -258,7 +258,7 @@ authType?: 'oauth' | 'api-token' | 'none';  // Don't do this!
 
 ## Code Style
 
-- Write TypeScript. Use Swift only for a macOS API that Node can't reach, compiled with `nativeHelper.ts`, and keep it to JSON-in, JSON-out primitives with no eval logic. Don't add Python or any other language, including a script inside a TypeScript string or in an image (ADR 0006, `docs/adr/0006-mst-is-written-in-typescript.md`). Fixing the existing Python that ADR 0006 lists is fine
+- Write TypeScript. Use Swift only for a macOS API that Node can't reach, compiled with `nativeHelper.ts`, and keep it to JSON-in, JSON-out primitives with no eval logic. Shell is only for an image's entry points and one-line glue. Don't add Python or any other language, including a script inside a TypeScript string or in an image (ADR 0006, `docs/adr/0006-mst-is-written-in-typescript.md`). Fixing the existing Python that ADR 0006 lists is fine
 - Use function declarations, not arrow function expressions for exports
 - Use explicit `null` in ternaries instead of short-circuit (`condition ? 'value' : null`)
 - Descriptive type names (e.g., `EvalDataset`, `MCPFixtureApi`, `Judge`, `ValidationResult`)
