@@ -58,6 +58,9 @@ import {
   type SemanticDesktopTelemetry,
 } from './driver.js';
 
+/** The most one UI submission may take, within the case deadline. */
+export const SUBMIT_TIMEOUT_MS = 10 * 60_000;
+
 const SESSION_ENV = [
   'PATH',
   'HOME',
@@ -450,9 +453,15 @@ async function execute(
   const script = createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url
   ).resolve('@gleanwork/mcp-server-tester/cowork-linux-runtime');
+  // A hard query's UI submission can take minutes on a cold desktop; the
+  // case deadline still bounds it.
   const timeout = Math.min(
     remaining,
-    mode === 'submit' ? 60_000 : mode === 'diagnose' ? 20_000 : 10_000
+    mode === 'submit'
+      ? SUBMIT_TIMEOUT_MS
+      : mode === 'diagnose'
+        ? 20_000
+        : 10_000
   );
   // Reserve time for the bounded driver to return its final receipt.
   const driverTimeout = Math.max(

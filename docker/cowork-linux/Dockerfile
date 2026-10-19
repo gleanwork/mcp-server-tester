@@ -51,8 +51,9 @@ RUN real="$(command -v virtiofsd || echo /usr/libexec/virtiofsd)" \
   && printf '#!/bin/sh\nexec %s.real --seccomp none "$@"\n' "${real}" > "${real}" \
   && chmod 755 "${real}"
 
-# MST itself: the published package, or the tarball `mst env setup docker`
-# packs from a source checkout (in ./mst-package).
+# MST itself: the tarball `mst env setup docker` packs from the coordinator's
+# MST, a checkout or an installed package (in ./mst-package), so the worker
+# runs the coordinator's MST; else the published package.
 COPY mst-package/ /tmp/mst-package/
 RUN set -e; \
   if ls /tmp/mst-package/*.tgz >/dev/null 2>&1; then \

@@ -5,6 +5,7 @@ import {
   realpath,
   rm,
   stat,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -675,8 +676,9 @@ describe('ChatGPT quit prompt after a stalled case', () => {
     // The stalled case's chat: started, never completed.
     const day = join(root, '2026', '10', '15');
     await mkdir(day, { recursive: true });
+    const rollout = join(day, 'rollout-stalled.jsonl');
     await writeFile(
-      join(day, 'rollout-stalled.jsonl'),
+      rollout,
       [
         {
           type: 'session_meta',
@@ -695,6 +697,11 @@ describe('ChatGPT quit prompt after a stalled case', () => {
         .map((line) => JSON.stringify(line))
         .join('\n') + '\n'
     );
+    // Linux stamps a file's mtime from a coarse clock that can lag Date.now()
+    // by a few milliseconds, so a file written right after the launch can look
+    // older than it. A real chat is written seconds after the launch.
+    const later = new Date(Date.now() + 1000);
+    await utimes(rollout, later, later);
     // ChatGPT shows its prompt instead of quitting; Quit then closes it.
     let running = true;
     controller.state.mockImplementation(async () => ({ running }));
@@ -822,8 +829,8 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     };
     expect(trustedProject).toContain('mst-chatgpt-workspace-');
     expect(
-      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].env
-    ).toMatchObject({ MST_CHATGPT_WORKSPACE: trustedProject });
+      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].workspace
+    ).toBe(trustedProject);
     await expect(stat(trustedProject!)).rejects.toThrow();
     expect(result.clientMetadata).toBeDefined();
   });
@@ -858,8 +865,8 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledTimes(1);
     // ChatGPT Work makes its own folder: no MST workspace for it.
     expect(
-      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1].env
-    ).not.toHaveProperty('MST_CHATGPT_WORKSPACE');
+      vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1]
+    ).not.toHaveProperty('workspace');
   });
   it.each(['native-macos', 'linux-desktop'])(
     'rejects %s before any desktop change',

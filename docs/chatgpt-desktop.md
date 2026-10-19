@@ -15,7 +15,9 @@ prompt.
 
 macOS keeps the Anthropic Computer Use submission driver. It receives the selected
 surface and must verify the current-mode label before filling the composer. It
-requires `ANTHROPIC_API_KEY`, Accessibility and Screen Recording permission.
+requires an Anthropic credential (`ANTHROPIC_API_KEY`, or an LLM gateway), the
+Xcode Command Line Tools for its Swift input helper, and Accessibility and
+Screen Recording permission.
 Linux uses native draft deep links and deterministic AT-SPI actions. It requires
 no Anthropic key and rejects Computer Use planner configuration. It does not fall
 back to macOS CUA.

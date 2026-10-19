@@ -49,9 +49,6 @@ vi.mock('node:os', async (original) => {
   return { ...actual, homedir: () => lockHome.value || actual.homedir() };
 });
 
-vi.mock('./cowork/pythonRuntime.js', () => ({
-  ensureCoworkPython: vi.fn().mockResolvedValue('/fake/python'),
-}));
 vi.mock('./coworkSetup/recoverSession.js', () => ({
   recoverMacCoworkSession: vi.fn(),
 }));
@@ -1053,7 +1050,7 @@ describe('V2 Cowork client', () => {
     mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
     mocks.reset.mockRejectedValueOnce(
       new Error(
-        'Computer Use reset failed: driver exited unsuccessfully; not retrying'
+        'Computer Use reset failed: stopped before completion; not retrying'
       )
     );
     const result = await COWORK_CLIENT.runBatch!(requests(), context);

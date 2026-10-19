@@ -1,5 +1,4 @@
 import type { CoworkPlatform } from './platform.js';
-import { ensureCoworkPython } from './pythonRuntime.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -22,10 +21,7 @@ export const macCoworkPlatform: CoworkPlatform = {
       'Claude-3p',
       'local-agent-mode-sessions'
     ),
-  async prepare(options) {
-    await ensureCoworkPython(options.env);
-    return prepareMacCoworkSession(options);
-  },
+  prepare: prepareMacCoworkSession,
   recover: recoverMacCoworkSession,
   // After a failed case: stop the task and decline any prompt, so the next
   // case runs alone. The Computer Use planner tries first; if it can't (it

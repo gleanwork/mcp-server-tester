@@ -21,14 +21,6 @@ fi
 if [[ ! -x node_modules/.bin/tsup ]]; then
   npm ci --include=dev --include=optional --include=peer
 fi
-if [[ -z "${MST_COWORK_PYTHON:-}" ]]; then
-  export MST_COWORK_PYTHON="$ROOT/.venv/cowork-cu/bin/python"
-  if [[ ! -x "$MST_COWORK_PYTHON" ]]; then
-    python3 -m venv "$ROOT/.venv/cowork-cu"
-    "$MST_COWORK_PYTHON" -m pip install -r scripts/cowork-requirements.txt
-  fi
-fi
-export MST_COWORK_DRIVER_ROOT="$ROOT"
 npm run build
 # Node parses dotenv as data, not shell code. This also supplies custom judges.
 if [[ -n "${COWORK_ENV_FILE:-}" ]]; then

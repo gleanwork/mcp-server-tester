@@ -114,7 +114,7 @@ The public API is tiered. Each name is exported from exactly one of these entry 
 - `./auth` (`src/entries/auth.ts`) - Low-level OAuth: discovery, token storage, client credentials
 - `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop-run metadata types, Cowork settings and audit, client plugins (may change between minors)
 - `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
-- `./cowork-runtime`, `./cowork-linux-runtime`, `./chatgpt-linux-runtime`, `./cowork-requirements` - The desktop drivers' Python scripts and pinned requirements, exported as files rather than code
+- `./cowork-linux-runtime`, `./chatgpt-linux-runtime` - The Linux desktop drivers' Python scripts, exported as files rather than code
 - `./cowork-linux-image` - The Linux Cowork image's Dockerfile (`docker/cowork-linux/`, with its scripts and seccomp profile), exported as a file so `mst env setup docker` finds the directory
 
 The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (the extension table, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only `Symbol.for` state (the extension table and the plugin-load cache) is shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. `src/publicApi.test.ts` pins each entry point's runtime exports: after a deliberate change, update it with `npx vitest run src/publicApi.test.ts -u` and note any removal in the migration guides. Tests count as users, so an export only a test imports is not flagged.
