@@ -19,6 +19,16 @@ import { z } from 'zod';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
 import { machineEnvironment } from './channel.js';
+import {
+  KEPT_SUFFIX,
+  RUN_LABEL,
+  claimContainer,
+  contextArgs,
+  dockerCommand,
+  ownerLabelArgs,
+  releaseContainer,
+  sweepOrphanedContainers,
+} from './dockerContainers.js';
 import type {
   EnvironmentContext,
   EnvironmentDefinition,
@@ -51,11 +61,6 @@ const DockerOptionsSchema = z
   .strict();
 type DockerOptions = z.infer<typeof DockerOptionsSchema>;
 
-/** The Docker CLI. `MST_DOCKER` names another (for example `podman`). */
-function dockerCommand(): string {
-  return process.env.MST_DOCKER || 'docker';
-}
-
 interface DockerResult {
   code: number;
   stdout: string;
@@ -69,11 +74,10 @@ function docker(
   options: { input?: string; signal?: AbortSignal; echo?: boolean } = {}
 ): Promise<DockerResult> {
   return new Promise((resolve) => {
-    const child = spawn(
-      dockerCommand(),
-      [...(context ? ['--context', context] : []), ...args],
-      { stdio: ['pipe', 'pipe', 'pipe'], signal: options.signal }
-    );
+    const child = spawn(dockerCommand(), [...contextArgs(context), ...args], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      signal: options.signal,
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk: Buffer) => {
@@ -123,14 +127,19 @@ export function dockerRunArgs(options: {
   runId: string;
   seccompProfile: string;
   inference: { baseURL: string; authScheme: 'bearer' | 'x-api-key' };
+  /** Forwarded to the container's desktop-ready helper when set. */
+  warmVmTimeoutS?: string;
 }): string[] {
+  const warm = options.warmVmTimeoutS;
   return [
     'run',
     '--detach',
     '--name',
     options.name,
     '--label',
-    `mst.run=${options.runId}`,
+    `${RUN_LABEL}=${options.runId}`,
+    // Whose it is, so a later run can remove it if this process dies.
+    ...ownerLabelArgs(),
     // Cowork's VM: KVM, its vsock and network devices, and the vsock socket
     // family Docker's default seccomp profile denies. Nothing privileged.
     '--device',
@@ -152,7 +161,42 @@ export function dockerRunArgs(options: {
     `MST_INFERENCE_GATEWAY_URL=${options.inference.baseURL}`,
     '--env',
     `MST_INFERENCE_AUTH_SCHEME=${options.inference.authScheme}`,
+    // The coordinator's Cowork VM warm-up budget; without it the container
+    // falls back to its own default.
+    ...(warm !== undefined && /^[1-9][0-9]*$/.test(warm)
+      ? ['--env', `MST_COWORK_WARM_VM_TIMEOUT_S=${warm}`]
+      : []),
     options.image,
+  ];
+}
+
+/**
+ * `docker run` arguments for a grade shard's container (ADR 0005): the same
+ * image, with no desktop. Grading starts no client, so it needs no VM
+ * devices and no inference, and the entrypoint only keeps the container up
+ * for `mst grade-shard`.
+ */
+function gradeContainerRunArgs(options: {
+  name: string;
+  image: string;
+  runId: string;
+}): string[] {
+  return [
+    'run',
+    '--detach',
+    '--name',
+    options.name,
+    '--label',
+    `${RUN_LABEL}=${options.runId}`,
+    ...ownerLabelArgs(),
+    '--tmpfs',
+    '/run/mst:mode=0755',
+    '--entrypoint',
+    '/usr/bin/tini',
+    options.image,
+    '--',
+    'sleep',
+    'infinity',
   ];
 }
 
@@ -372,23 +416,60 @@ function openDocker(
   const readyTimeoutS = Number(options.readyTimeout ?? DEFAULT_READY_TIMEOUT_S);
   const pool = contextPool(contextsOf(options));
   const seccompProfile = path.join(coworkImageDirectory(), 'seccomp.json');
+  // Once per context: containers an earlier run on this machine left behind.
+  const swept = new Map<string, Promise<void>>();
+  const sweep = (dockerContext: string | undefined) => {
+    const id = dockerContext ?? '';
+    if (!swept.has(id))
+      swept.set(
+        id,
+        sweepOrphanedContainers(dockerContext, (args) =>
+          docker(dockerContext, args)
+        ).then(({ removed, unowned }) => {
+          for (const name of removed)
+            console.error(
+              `[mst] removed container ${name}: the run that started it is gone`
+            );
+          if (unowned.length)
+            console.error(
+              `[mst] ${unowned.length} MST container(s) without an owner (an older MST's) on ${dockerContext ?? 'the current context'}: ${unowned.join(', ')}. Remove them with \`docker${dockerContext ? ` --context ${dockerContext}` : ''} rm -f <name>\` if no run uses them.`
+            );
+        })
+      );
+    return swept.get(id)!;
+  };
+  const contexts = contextsOf(options);
   return machineEnvironment(
     context,
     async (shard, signal): Promise<Machine> => {
+      if (shard.work === 'grade')
+        return gradeMachine(
+          // No VM, so no host-wide vsock port: grade shards share contexts.
+          contexts[shard.index % contexts.length],
+          containerName(shard.runId, shard.index),
+          image,
+          shard.runId,
+          sweep,
+          signal
+        );
       const dockerContext = await pool.acquire(signal);
       const name = containerName(shard.runId, shard.index);
       let refresh: NodeJS.Timeout | undefined;
       const remove = async () => {
         clearInterval(refresh);
         await docker(dockerContext, ['rm', '--force', name]);
+        releaseContainer(dockerContext, name);
       };
       try {
+        await sweep(dockerContext);
         const credential = await inference();
         const digest = await dockerOk(
           dockerContext,
           ['image', 'inspect', '--format', '{{.Id}}', image],
           `Finding image ${image} (build it with \`mst env setup docker\`)`
         );
+        // Guarded from here: removed at exit even if this run never disposes it.
+        claimContainer(dockerContext, name);
         await dockerOk(
           dockerContext,
           dockerRunArgs({
@@ -397,6 +478,7 @@ function openDocker(
             runId: shard.runId,
             seccompProfile,
             inference: credential,
+            warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
           }),
           `Starting container ${name}`,
           { signal }
@@ -425,8 +507,14 @@ function openDocker(
             try {
               if (keep) {
                 clearInterval(refresh);
+                // Renamed so no later run's sweep removes it.
+                const kept = `${name}${KEPT_SUFFIX}`;
+                const renamed =
+                  (await docker(dockerContext, ['rename', name, kept])).code ===
+                  0;
+                releaseContainer(dockerContext, name);
                 console.error(
-                  `[mst] kept container ${name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${name} bash`
+                  `[mst] kept container ${renamed ? kept : name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${renamed ? kept : name} bash`
                 );
               } else await remove();
             } finally {
@@ -443,16 +531,91 @@ function openDocker(
   );
 }
 
-/** Builds the image on each context (`mst env setup docker`). */
 /**
- * `npm pack`s the package in `dir` into `destination`, running its `prepare`
- * script, so a checkout is packed as built. `MST_NPM` names another npm CLI.
+ * A grade shard's machine: a container of the image with no desktop, whose
+ * worker runs `mst grade-shard` (ADR 0005).
  */
-async function npmPack(dir: string, destination: string): Promise<void> {
+async function gradeMachine(
+  dockerContext: string | undefined,
+  name: string,
+  image: string,
+  runId: string,
+  sweep: (dockerContext: string | undefined) => Promise<void>,
+  signal: AbortSignal
+): Promise<Machine> {
+  const remove = async () => {
+    await docker(dockerContext, ['rm', '--force', name]);
+    releaseContainer(dockerContext, name);
+  };
+  try {
+    await sweep(dockerContext);
+    const digest = await dockerOk(
+      dockerContext,
+      ['image', 'inspect', '--format', '{{.Id}}', image],
+      `Finding image ${image} (build it with \`mst env setup docker\`)`
+    );
+    claimContainer(dockerContext, name);
+    await dockerOk(
+      dockerContext,
+      gradeContainerRunArgs({ name, image, runId }),
+      `Starting container ${name}`,
+      { signal }
+    );
+    await dockerOk(
+      dockerContext,
+      ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
+      'Creating the work directory'
+    );
+    return {
+      id: name,
+      image: { ref: image, digest },
+      workDir: WORK_DIR,
+      channel: containerChannel(dockerContext, name),
+      async dispose({ keep }) {
+        if (!keep) return remove();
+        const kept = `${name}${KEPT_SUFFIX}`;
+        const renamed =
+          (await docker(dockerContext, ['rename', name, kept])).code === 0;
+        releaseContainer(dockerContext, name);
+        console.error(
+          `[mst] kept container ${renamed ? kept : name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${renamed ? kept : name} bash`
+        );
+      },
+    };
+  } catch (error) {
+    await remove();
+    throw error;
+  }
+}
+
+/**
+ * `npm pack` arguments. A checkout runs its `prepare` script so it is packed
+ * as built; an installed package is already built (and lacks the dev
+ * dependencies its build needs), so its scripts are skipped.
+ */
+export function npmPackArgs(
+  destination: string,
+  { ignoreScripts }: { ignoreScripts: boolean }
+): string[] {
+  return [
+    'pack',
+    '--silent',
+    ...(ignoreScripts ? ['--ignore-scripts'] : []),
+    '--pack-destination',
+    destination,
+  ];
+}
+
+/** `npm pack`s the package in `dir` into `destination`. `MST_NPM` names another npm CLI. */
+async function npmPack(
+  dir: string,
+  destination: string,
+  { ignoreScripts = false }: { ignoreScripts?: boolean } = {}
+): Promise<void> {
   const packed = await new Promise<number>((resolve) => {
     const child = spawn(
       process.env.MST_NPM || 'npm',
-      ['pack', '--silent', '--pack-destination', destination],
+      npmPackArgs(destination, { ignoreScripts }),
       { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] }
     );
     child.on('error', () => resolve(-1));
@@ -473,13 +636,13 @@ async function setupDocker(
     await fs.cp(source, build, { recursive: true });
     const packages = path.join(build, 'mst-package');
     await fs.mkdir(packages, { recursive: true });
-    // A source checkout installs itself, so the worker runs this MST.
+    // The worker runs this MST, packed from where it runs: a source checkout
+    // or an installed package. Installing the published version instead
+    // would let the worker drift from the coordinator.
     const root = path.resolve(source, '../..');
     const checkout = existsSync(path.join(root, 'src', 'cli', 'index.ts'));
-    if (checkout) {
-      log(`Packing MST from ${root}…`);
-      await npmPack(root, packages);
-    }
+    log(`Packing MST from ${root}…`);
+    await npmPack(root, packages, { ignoreScripts: !checkout });
     // The eval's plugins, packed from where this machine has them, so a
     // private or linked package needs no registry: the image installs them
     // (and their dependencies) in MST_PLUGIN_DIR.
@@ -497,12 +660,6 @@ async function setupDocker(
           'build',
           '--tag',
           image,
-          ...(checkout
-            ? []
-            : [
-                '--build-arg',
-                `MST_PACKAGE=@gleanwork/mcp-server-tester@${packageJson.version}`,
-              ]),
           ...(options.claudeDesktopVersion
             ? [
                 '--build-arg',

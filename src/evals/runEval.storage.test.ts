@@ -6,17 +6,16 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
   FileEvalResultStore,
-  compareEvalRuns,
-  loadStoredEvalRunnerResult,
   runEvalBatch,
   runEval,
   type EvalConfig,
-  type EvaluationSummary,
   type ClientDefinition,
   type ResultStoreDefinition,
+  type RunStore,
 } from '../entries/evals.js';
 import type { Plugin } from '../index.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
+import { fileRunStore } from './runStore.js';
 
 const dirs: string[] = [];
 let sequence = 0;
@@ -38,6 +37,7 @@ let testPlugin = newTestPlugin();
 afterEach(async () => {
   resetPluginsForTests();
   testPlugin = newTestPlugin();
+  vi.restoreAllMocks();
   await Promise.all(
     dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))
   );
@@ -92,6 +92,25 @@ async function fixture() {
   return { rootDir, configPath, evalConfig, storeDir, run };
 }
 
+/** Every file under `dir`, relative and `/`-separated, sorted. */
+async function filesUnder(dir: string): Promise<string[]> {
+  return (await fs.readdir(dir, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) =>
+      path
+        .relative(dir, path.join(entry.parentPath, entry.name))
+        .split(path.sep)
+        .join('/')
+    )
+    .sort();
+}
+
+async function readLatest(storeDir: string, evalName: string) {
+  return JSON.parse(
+    await fs.readFile(path.join(storeDir, evalName, 'latest.json'), 'utf8')
+  ) as { runId: string; path: string };
+}
+
 describe('eval storage through public APIs', () => {
   it.each(['explicit', 'default'])(
     'saves and resumes with a once-transformed %s store directory',
@@ -109,10 +128,7 @@ describe('eval storage through public APIs', () => {
             .transform((dir) => path.join(dir, 'resolved')),
         }),
         create(config) {
-          return new FileEvalResultStore({
-            provider: 'file',
-            dir: String(config.dir),
-          });
+          return fileRunStore(String(config.dir));
         },
       };
       testPlugin.resultStores[aliasName] = {
@@ -140,6 +156,8 @@ describe('eval storage through public APIs', () => {
         passed: 1,
         failed: 0,
       });
+      const resolved = path.join(f.storeDir, 'resolved');
+      expect(first.storedIn).toBe(resolved);
       expect(f.run).toHaveBeenCalledTimes(1);
       const resumed = await runEvalBatch({
         configPaths: [f.configPath],
@@ -151,17 +169,14 @@ describe('eval storage through public APIs', () => {
       expect(resumed.items[0]?.result).toBeUndefined();
       expect(f.run).toHaveBeenCalledTimes(1);
 
-      const store = new FileEvalResultStore({
-        provider: 'file',
-        dir: path.join(f.storeDir, 'resolved'),
+      const runId = path.basename(first.outputDir);
+      expect(await readLatest(resolved, 'storage-suite')).toMatchObject({
+        runId,
+        path: `runs/${runId}`,
       });
-      const saved = await store.loadArtifact<EvaluationSummary>(
-        'eval-run-summary',
-        path.basename(first.outputDir)
-      );
-      expect(saved.data.configId).toBe(first.summary.configId);
-      expect(saved.data.contentHash).toBe(first.summary.contentHash);
-      expect(await store.listArtifacts('eval-run-summary')).toHaveLength(1);
+      expect(
+        await fs.readdir(path.join(resolved, 'storage-suite', 'runs'))
+      ).toEqual([runId]);
 
       f.evalConfig.name = 'changed-storage-suite';
       await fs.writeFile(f.configPath, JSON.stringify(f.evalConfig));
@@ -173,7 +188,10 @@ describe('eval storage through public APIs', () => {
       });
       expect(changed).toMatchObject({ skipped: 0, passed: 1, failed: 0 });
       expect(f.run).toHaveBeenCalledTimes(2);
-      expect(await store.listArtifacts('eval-run-summary')).toHaveLength(2);
+      expect((await fs.readdir(resolved)).sort()).toEqual([
+        'changed-storage-suite',
+        'storage-suite',
+      ]);
     }
   );
 
@@ -203,139 +221,227 @@ describe('eval storage through public APIs', () => {
       redact: true,
     },
   ])(
-    'roundtrips persisted per-variant pointers with $label',
+    'stores the run directory as written, with $label',
     async ({ configRedact, apiRedact, redact }) => {
       const f = await fixture();
       f.evalConfig.variants = [{ name: 'baseline' }, { name: 'candidate' }];
       f.evalConfig.trials = 2;
       f.evalConfig.redactStoredResponses = configRedact;
       await fs.writeFile(f.configPath, JSON.stringify(f.evalConfig));
-      // Exercise unique per-ID artifacts; shared latest.json atomicity is out of scope.
-      const runs = await Promise.all(
-        Array.from({ length: 2 }, () =>
-          runEval({
+      const runs = [];
+      for (let i = 0; i < 2; i++)
+        runs.push(
+          await runEval({
             configPath: f.configPath,
             rootDir: f.rootDir,
             plugins: [testPlugin],
             redactStoredResponses: apiRedact,
           })
-        )
-      );
+        );
       expect(f.run).toHaveBeenCalledTimes(8);
-      expect(new Set(runs.map((run) => run.outputDir)).size).toBe(2);
-      const store = new FileEvalResultStore({
-        provider: 'file',
-        dir: f.storeDir,
-      });
-      const allPointers: string[] = [];
       for (const result of runs) {
         const id = path.basename(result.outputDir);
         expect(id).toMatch(RUN_ID_PATTERN);
-        const localText = await fs.readFile(
-          path.join(result.outputDir, 'summary.json'),
-          'utf8'
+        const stored = path.join(f.storeDir, 'storage-suite', 'runs', id);
+        // The same files, byte for byte, report included, and the
+        // manifest of them that the upload writes last.
+        const files = await filesUnder(result.outputDir);
+        expect(await filesUnder(stored)).toEqual(
+          [...files, 'manifest.json'].sort()
         );
-        const local = JSON.parse(localText) as EvaluationSummary;
-        const saved = await store.loadArtifact<EvaluationSummary>(
-          'eval-run-summary',
-          id
+        expect(files).toEqual(
+          expect.arrayContaining([
+            'run.json',
+            'results.json',
+            'summary.json',
+            'report/index.html',
+          ])
         );
-        expect(local.caseArtifactPointers).toEqual(
-          result.summary.caseArtifactPointers
+        expect(files.some((file) => file.startsWith('traces/'))).toBe(true);
+        for (const file of files)
+          expect(await fs.readFile(path.join(stored, file))).toEqual(
+            await fs.readFile(path.join(result.outputDir, file))
+          );
+        const storedText = await Promise.all(
+          files
+            .filter((file) => file.endsWith('.json'))
+            .map((file) => fs.readFile(path.join(stored, file), 'utf8'))
         );
-        expect(saved.data.caseArtifactPointers).toEqual(
-          result.summary.caseArtifactPointers
-        );
-        expect(Object.keys(local.caseArtifactPointers!)).toEqual([
-          'baseline',
-          'candidate',
-        ]);
-        // The stored summary is summary.json plus the case results (overall
-        // and per variant), which the run directory keeps in results.json.
-        const { results: savedResults, ...savedSummary } = saved.data;
-        const { kind: _kind, ...localSummary } = local as EvaluationSummary & {
-          kind?: string;
-        };
-        expect({
-          ...savedSummary,
-          variants: savedSummary.variants.map((variant) =>
-            variant.result
-              ? {
-                  ...variant,
-                  result: (({ caseResults: _cases, ...totals }) => totals)(
-                    variant.result
-                  ),
-                }
-              : variant
-          ),
-        }).toEqual(localSummary);
-        const localResults = JSON.parse(
-          await fs.readFile(path.join(result.outputDir, 'results.json'), 'utf8')
-        ) as { cases: unknown[] };
-        expect(savedResults).toEqual(localResults.cases);
-        expect(saved.metadata.labels).toMatchObject({
-          configId: result.summary.configId,
-          contentHash: result.summary.contentHash,
-        });
-        const artifacts = [];
-        for (const variant of local.variants) {
-          const pointers = local.caseArtifactPointers![variant.name]!;
-          expect(pointers).toHaveLength(1);
-          allPointers.push(...pointers);
-          const artifact = await loadStoredEvalRunnerResult(store, {
-            id: pointers[0]!,
-          });
-          expect(artifact.kind).toBe('eval-runner-result');
-          expect(artifact.id).toBe(pointers[0]);
-          expect(artifact.metadata.labels).toMatchObject({
-            variant: variant.name,
-            configId: local.configId,
-            contentHash: local.contentHash,
-          });
-          // summary.json keeps a variant's totals; its cases are in results.json.
-          const { caseResults: _cases, ...totals } = artifact.data;
-          expect(totals).toEqual(variant.result);
-          expect(artifact.data.caseResults).toHaveLength(1);
-          expect(artifact.data.caseResults[0]?.trialResults).toHaveLength(2);
-          artifacts.push(artifact.data);
-        }
-        expect(
-          compareEvalRuns({ baseline: artifacts[0]!, candidate: artifacts[1]! })
-        ).toMatchObject({
-          baselinePassRate: 1,
-          candidatePassRate: 0,
-          deltaPassRate: -1,
-        });
         for (const marker of [
           'PRIVATE_RESPONSE_MARKER',
           'PRIVATE_TOOL_OUTPUT_MARKER',
         ]) {
           expect(JSON.stringify(result.summary)).toContain(marker);
-          for (const persisted of [
-            // Responses are in results.json, not summary.json.
-            await fs.readFile(
-              path.join(result.outputDir, 'results.json'),
-              'utf8'
-            ),
-            JSON.stringify(saved),
-            ...artifacts.map((data) => JSON.stringify(data)),
-          ]) {
-            expect(persisted.includes(marker)).toBe(!redact);
-          }
+          expect(storedText.some((text) => text.includes(marker))).toBe(
+            !redact
+          );
         }
       }
-      expect(allPointers).toHaveLength(4);
-      expect(new Set(allPointers).size).toBe(4);
-      expect(await store.listArtifacts('eval-runner-result')).toHaveLength(4);
-      expect(await store.listArtifacts('eval-run-summary')).toHaveLength(2);
-      const resumed = await runEvalBatch({
-        configPaths: [f.configPath],
-        rootDir: f.rootDir,
-        skipExisting: true,
-        plugins: [testPlugin],
-      });
-      expect(resumed).toMatchObject({ skipped: 1, failed: 0, passed: 0 });
-      expect(f.run).toHaveBeenCalledTimes(8);
+      // The second run is the store's latest, and was compared with the first.
+      const [first, second] = runs;
+      expect((await readLatest(f.storeDir, 'storage-suite')).runId).toBe(
+        path.basename(second!.outputDir)
+      );
+      expect(second!.summary.previousRun?.runId).toBe(first!.summary.runId);
     }
   );
+
+  it('finds the previous run in the store when the run starts with no local runs', async () => {
+    const f = await fixture();
+    const first = await runEval({
+      configPath: f.configPath,
+      rootDir: f.rootDir,
+      outputDir: path.join(f.rootDir, 'machine-1'),
+      plugins: [testPlugin],
+    });
+    // Another machine: an empty output directory, the same store.
+    const second = await runEval({
+      configPath: f.configPath,
+      rootDir: f.rootDir,
+      outputDir: path.join(f.rootDir, 'machine-2'),
+      plugins: [testPlugin],
+    });
+    expect(second.summary.previousRun).toMatchObject({
+      runId: first.summary.runId,
+      sameConfig: true,
+    });
+  });
+
+  it('keeps the run in the store --results names, instead of the config store', async () => {
+    const f = await fixture();
+    const elsewhere = path.join(f.rootDir, 'elsewhere');
+    const result = await runEval({
+      configPath: f.configPath,
+      rootDir: f.rootDir,
+      plugins: [testPlugin],
+      results: `file:${elsewhere}`,
+    });
+    const runId = path.basename(result.outputDir);
+    expect(result.storedIn).toBe(elsewhere);
+    expect((await readLatest(elsewhere, 'storage-suite')).runId).toBe(runId);
+    await expect(fs.stat(f.storeDir)).rejects.toThrow();
+  });
+
+  it('takes a plugin store by name in --results, and checks its namespace is loaded', async () => {
+    const f = await fixture();
+    const target = path.join(f.rootDir, 'plugin-store');
+    testPlugin.resultStores['shared'] = {
+      schema: z.object({ dir: z.string().default(target) }),
+      create: (config) => fileRunStore(String(config.dir)),
+    };
+    delete f.evalConfig.results;
+    await fs.writeFile(f.configPath, JSON.stringify(f.evalConfig));
+    const result = await runEval({
+      configPath: f.configPath,
+      rootDir: f.rootDir,
+      plugins: [testPlugin],
+      results: 'test/result-store/shared',
+    });
+    expect(result.storedIn).toBe(target);
+    await expect(
+      runEval({
+        configPath: f.configPath,
+        rootDir: f.rootDir,
+        plugins: [testPlugin],
+        results: 'other/result-store/shared',
+      })
+    ).rejects.toThrow(/other/);
+    await expect(
+      runEval({
+        configPath: f.configPath,
+        rootDir: f.rootDir,
+        plugins: [testPlugin],
+        results: './not-a-store',
+      })
+    ).rejects.toThrow(/isn't a result store/);
+  });
+
+  it('keeps a partial run in the store without making it the latest', async () => {
+    const f = await fixture();
+    const full = await runEval({
+      configPath: f.configPath,
+      rootDir: f.rootDir,
+      plugins: [testPlugin],
+    });
+    const partial = await runEval({
+      configPath: f.configPath,
+      rootDir: f.rootDir,
+      plugins: [testPlugin],
+      trials: 1,
+    });
+    expect(partial.summary.partial).toBe(true);
+    expect(
+      (await fs.readdir(path.join(f.storeDir, 'storage-suite', 'runs'))).sort()
+    ).toEqual(
+      [full, partial].map((result) => path.basename(result.outputDir)).sort()
+    );
+    expect((await readLatest(f.storeDir, 'storage-suite')).runId).toBe(
+      path.basename(full.outputDir)
+    );
+  });
+
+  it('fails a run the store rejects, leaving the run on disk and the store latest as it was', async () => {
+    const f = await fixture();
+    const inner = fileRunStore(f.storeDir);
+    let puts: number | undefined;
+    const flaky: RunStore = {
+      ...inner,
+      async put(key, body) {
+        // Once armed, fail partway through the upload.
+        if (puts !== undefined && ++puts > 2)
+          throw new Error('bucket unavailable');
+        await inner.put(key, body);
+      },
+    };
+    testPlugin.resultStores['flaky'] = {
+      schema: z.object({}),
+      create: () => flaky,
+    };
+    const kept = await runEval({
+      configPath: f.configPath,
+      rootDir: f.rootDir,
+      plugins: [testPlugin],
+    });
+    puts = 0;
+    const failed = runEval({
+      configPath: f.configPath,
+      rootDir: f.rootDir,
+      plugins: [testPlugin],
+      results: 'test/result-store/flaky',
+    });
+    await expect(failed).rejects.toThrow(
+      /wasn't saved to the result store .*bucket unavailable.*The run is in /
+    );
+    expect((await readLatest(f.storeDir, 'storage-suite')).runId).toBe(
+      path.basename(kept.outputDir)
+    );
+    const local = await fs.readdir(
+      path.join(f.rootDir, '.mcp-test-results', 'storage-suite', 'runs')
+    );
+    expect(local).toHaveLength(2);
+  });
+
+  it('rejects a store that returns an artifact store, with what to change', async () => {
+    const f = await fixture();
+    testPlugin.resultStores['old'] = {
+      schema: z.object({}),
+      create: () =>
+        new FileEvalResultStore({
+          provider: 'file',
+          dir: f.storeDir,
+        }) as unknown as RunStore,
+    };
+    await expect(
+      runEval({
+        configPath: f.configPath,
+        rootDir: f.rootDir,
+        plugins: [testPlugin],
+        results: 'test/result-store/old',
+        dryRun: true,
+      })
+    ).rejects.toThrow(
+      /returns an artifact store .*RunStore \(put, get, list\)/
+    );
+    expect(f.run).not.toHaveBeenCalled();
+  });
 });

@@ -5,6 +5,7 @@ import {
   readFile,
   realpath,
   rm,
+  stat,
   symlink,
   writeFile,
 } from 'node:fs/promises';
@@ -19,6 +20,7 @@ import {
   linuxCoworkPlatform,
   COWORK_MANAGED_ONLY,
   desktopRestartTimeoutMs,
+  installedDebVersion,
 } from './linux.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
@@ -26,6 +28,7 @@ import {
   CoworkHitlBudgetError,
   CoworkUserQuestionError,
 } from './driver.js';
+import type * as ChildProcess from 'node:child_process';
 import type { EvalConfig } from '../evalConfig.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 
@@ -128,6 +131,55 @@ const marketplace = {
   installationPreference: 'required',
   expectedName: 'acme-marketplace',
 };
+
+describe('a failed Linux Cowork case (diagnose)', () => {
+  it("keeps the driver's read-only capture, the end of Cowork's logs, and the machine's state", async () => {
+    const claude = join(directory, 'Claude-3p');
+    const dataDir = join(claude, 'local-agent-mode-sessions');
+    await mkdir(dataDir, { recursive: true });
+    await mkdir(join(claude, 'logs'));
+    await writeFile(
+      join(claude, 'logs', 'main.log'),
+      `${'x'.repeat(300 * 1024)}END\n`
+    );
+    await writeFile(join(claude, 'logs', 'cowork_vm_node.log'), 'vm ok\n');
+    await writeFile(join(claude, 'logs', 'notes.txt'), 'not a log');
+    const out = join(directory, 'diagnosis');
+    await mkdir(out);
+    child.responses.push({
+      value: { status: 'diagnosed', action_count: 0, duration_ms: 5 },
+    });
+    await linuxCoworkPlatform.diagnose!({ dir: out, dataDir, env: session });
+
+    // The driver ran in diagnose mode, told only where to write.
+    const args = child.exec.mock.calls[0]![1] as string[];
+    expect(args[args.indexOf('--mode') + 1]).toBe('diagnose');
+    expect(JSON.parse(child.payloads[0]!)).toEqual({ dir: out });
+    // The end of each log, at most 256 KiB; nothing that isn't a log.
+    const main = await readFile(join(out, 'logs', 'main.log'), 'utf8');
+    expect(main.length).toBe(256 * 1024);
+    expect(main.endsWith('END\n')).toBe(true);
+    expect(
+      await readFile(join(out, 'logs', 'cowork_vm_node.log'), 'utf8')
+    ).toBe('vm ok\n');
+    await expect(stat(join(out, 'logs', 'notes.txt'))).rejects.toThrow();
+    const system = JSON.parse(await readFile(join(out, 'system.json'), 'utf8'));
+    expect(system.memory.totalBytes).toBeGreaterThan(0);
+    expect(system.dataDisk.freeBytes).toBeGreaterThan(0);
+  });
+
+  it("still keeps the logs and the machine's state when the driver can't capture", async () => {
+    const dataDir = join(directory, 'Claude-3p', 'local-agent-mode-sessions');
+    await mkdir(dataDir, { recursive: true });
+    const out = join(directory, 'diagnosis');
+    await mkdir(out);
+    child.responses.push({ failed: true });
+    await linuxCoworkPlatform.diagnose!({ dir: out, dataDir, env: session });
+    expect(
+      JSON.parse(await readFile(join(out, 'system.json'), 'utf8'))
+    ).toHaveProperty('memory');
+  });
+});
 
 describe('caller-owned Linux Cowork desktop', () => {
   it('only probes prepared settings and never changes or tears down the runtime', async () => {
@@ -300,14 +352,26 @@ describe('caller-owned Linux Cowork desktop', () => {
     );
     expect(child.exec).not.toHaveBeenCalled();
   });
-  it('bounds UI submission independently of the native execution deadline', async () => {
+  it('allows a UI submission up to ten minutes within the case deadline', async () => {
     await linuxCoworkPlatform.submit('unchanged', {
       deadlineAt: Date.now() + 900_000,
       env: session,
     });
     const [, args, execution] = child.exec.mock.calls[0]!;
-    expect(execution.timeout).toBe(60_000);
-    expect(args[args.indexOf('--timeout-ms') + 1]).toBe('59000');
+    expect(execution.timeout).toBe(10 * 60_000);
+    expect(args[args.indexOf('--timeout-ms') + 1]).toBe('599000');
+  });
+  it('never lets a UI submission outlast a shorter case deadline', async () => {
+    await linuxCoworkPlatform.submit('unchanged', {
+      deadlineAt: Date.now() + 30_000,
+      env: session,
+    });
+    const [, args, execution] = child.exec.mock.calls[0]!;
+    expect(execution.timeout).toBeGreaterThan(0);
+    expect(execution.timeout).toBeLessThanOrEqual(30_000);
+    expect(Number(args[args.indexOf('--timeout-ms') + 1])).toBeLessThan(
+      Number(execution.timeout)
+    );
   });
   it('reports bounded driver error codes without including arbitrary diagnostics', async () => {
     child.responses.push({
@@ -543,6 +607,68 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await expect(lifecycle).rejects.toThrow('needs MST_DESKTOP_RESTART');
     expect(await readFile(file, 'utf8')).toBe(original);
     expect(child.exec).not.toHaveBeenCalled();
+  });
+
+  it("gives a server with credentials MST's headers helper, never the secret in the settings", async () => {
+    const file = join(directory, 'settings.json');
+    await writeFile(file, `${JSON.stringify(image, null, 2)}\n`);
+    const token = 'connector-token-123';
+    const prepared = await linuxCoworkPlatform.prepare({
+      evalConfig: {
+        ...evalConfig,
+        servers: [
+          ...evalConfig.servers!,
+          {
+            transport: 'http',
+            label: 'docs',
+            serverUrl: 'https://docs.example/mcp',
+            auth: { accessTokenEnv: 'MST_CONNECTOR_TOKEN_DOCS' },
+          },
+        ],
+      },
+      model: 'test-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+        MST_CONNECTOR_TOKEN_DOCS: token,
+        // Where the helper can run: the headers stay beside the settings.
+        MST_COWORK_HELPER_DIR: join(directory, 'helpers'),
+      },
+    });
+    const text = await readFile(file, 'utf8');
+    expect(text).not.toContain(token);
+    const helper = join(directory, 'helpers', 'docs-headers');
+    const servers = JSON.parse(text).managedMcpServers;
+    expect(servers).toEqual([
+      // The image's helper, for a server with no credentials of MST's.
+      expect.objectContaining({
+        name: 'primary',
+        headersHelper: '/opt/mst/primary-headers.sh',
+      }),
+      {
+        name: 'docs',
+        transport: 'http',
+        url: 'https://docs.example/mcp',
+        headersHelper: helper,
+      },
+    ]);
+    const headers = join(directory, 'mcp-headers', 'docs.json');
+    expect((await stat(headers)).mode & 0o777).toBe(0o600);
+    expect((await stat(helper)).mode & 0o777).toBe(0o700);
+    // What Claude Desktop runs when it connects.
+    const { spawnSync } =
+      await vi.importActual<typeof ChildProcess>('node:child_process');
+    const run = spawnSync(helper, { encoding: 'utf8' });
+    expect(run.status).toBe(0);
+    expect(JSON.parse(run.stdout)).toEqual({
+      Authorization: `Bearer ${token}`,
+    });
+
+    await prepared.dispose();
+    await expect(stat(headers)).rejects.toThrow();
+    await expect(stat(helper)).rejects.toThrow();
   });
 
   it('restores the settings when the desktop is not ready after them', async () => {
@@ -849,6 +975,32 @@ describe('Linux Cowork plugins with a stdio eval server', () => {
       'settings do not match'
     );
     expect(child.exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('installedDebVersion', () => {
+  const status = [
+    'Package: claude-desktop-beta',
+    'Status: install ok installed',
+    'Version: 9.9.9',
+    '',
+    'Package: claude-desktop',
+    'Status: install ok installed',
+    'Architecture: arm64',
+    'Version: 2.31226.1',
+    'Depends: libgtk-3-0',
+    '',
+    'Package: removed-app',
+    'Status: deinstall ok config-files',
+    'Version: 1.0',
+    '',
+  ].join('\n');
+
+  it("reads an installed package's version from dpkg's status file", () => {
+    expect(installedDebVersion(status, 'claude-desktop')).toBe('2.31226.1');
+    // Removed, with only its config files left: not installed.
+    expect(installedDebVersion(status, 'removed-app')).toBeUndefined();
+    expect(installedDebVersion(status, 'missing')).toBeUndefined();
   });
 });
 

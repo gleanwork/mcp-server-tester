@@ -11,6 +11,7 @@ import type {
   ClientBatchRequest,
   ClientRunResult,
   ShardOutcome,
+  ShardProgress,
 } from '../evalFrameworkTypes.js';
 import type { EvalConfig, EvalVariant } from '../evalConfig.js';
 import type { ResolvedEnvironment } from './builtinEnvironments.js';
@@ -20,7 +21,8 @@ import {
   writeShardBundle,
   type TrialKey,
 } from './protocol.js';
-import { ALL_ARTIFACTS, copyArtifacts } from '../trialArtifacts.js';
+import { ALL_ARTIFACTS } from '../allArtifacts.js';
+import { copyArtifacts } from '../trialArtifacts.js';
 
 /**
  * A trial's artifacts, where grading reads them: a worker names its copy
@@ -101,6 +103,20 @@ export interface CollectInEnvironmentOptions {
   log?: (line: string) => void;
 }
 
+/** What a shard ran on, as its worker said (`hello`), and how it ended. */
+export interface ShardRecord {
+  /** 1-based, as the run's log numbers shards. */
+  shard: number;
+  /** The worker's MST version. */
+  mst?: string;
+  /** The machine's image: `ref@id`, or what the worker reported. */
+  image?: string;
+  client?: string;
+  ok: boolean;
+  collected: number;
+  reason?: string;
+}
+
 /** What the shards brought back. */
 export interface GatheredResults {
   /** A trial's result; a trial whose shard ended without it is `missing`. */
@@ -108,6 +124,8 @@ export interface GatheredResults {
   /** The trials with no result. */
   missing: TrialKey[];
   outcomes: ShardOutcome[];
+  /** Each shard that had work, in shard order. */
+  shards: ShardRecord[];
 }
 
 const keyString = (key: TrialKey) =>
@@ -135,6 +153,19 @@ export async function collectInEnvironment(
   });
   const reasons = new Map<number, string>();
   const outcomes: ShardOutcome[] = [];
+  const hellos = new Map<number, Extract<ShardProgress, { type: 'hello' }>>();
+  // The shards that have work, by index.
+  const shards = Array.from({ length: count }, (_, index) => ({
+    index,
+    batches: options.groups
+      .map((group) => ({
+        variant: group.variant,
+        requests: group.requests.filter(
+          (request) => shardOf(request.caseId, count) === index
+        ),
+      }))
+      .filter((batch) => batch.requests.length > 0),
+  })).filter((shard) => shard.batches.length > 0);
   const limiter = createLimiter(options.limits);
   const resources = new Map<string, string[]>();
   for (const group of options.groups)
@@ -148,18 +179,6 @@ export async function collectInEnvironment(
         trialResources(request.config.model, request.input.servers)
       );
   try {
-    const shards = Array.from({ length: count }, (_, index) => ({
-      index,
-      batches: options.groups
-        .map((group) => ({
-          variant: group.variant,
-          requests: group.requests.filter(
-            (request) => shardOf(request.caseId, count) === index
-          ),
-        }))
-        .filter((batch) => batch.requests.length > 0),
-    })).filter((shard) => shard.batches.length > 0);
-
     await Promise.all(
       shards.map(async ({ index, batches }) => {
         const root = path.join(options.workDir, `shard-${index}`);
@@ -213,16 +232,18 @@ export async function collectInEnvironment(
             runId: options.runId,
             index,
             count,
+            work: 'collect',
             bundleDir,
             resultsDir,
           },
           {
             progress(event) {
-              if (event.type === 'hello')
+              if (event.type === 'hello') {
+                hellos.set(index, event);
                 log(
                   `shard ${index + 1}/${count}: ${event.client} on MST ${event.mst}${event.image ? ` (${event.image})` : ''}`
                 );
-              else if (event.type === 'trial') {
+              } else if (event.type === 'trial') {
                 giveBack(keyString(event.key));
                 log(
                   `shard ${index + 1}/${count}: ${event.key.variant} ${event.key.caseId} #${event.key.trial + 1} ${event.status}`
@@ -278,6 +299,20 @@ export async function collectInEnvironment(
     },
     missing,
     outcomes: outcomes.filter(Boolean),
+    shards: shards.map(({ index }) => {
+      const hello = hellos.get(index);
+      const outcome = outcomes[index];
+      return {
+        shard: index + 1,
+        ...(hello ? { mst: hello.mst, client: hello.client } : {}),
+        ...(hello?.image ? { image: hello.image } : {}),
+        ok: outcome?.ok ?? false,
+        collected: outcome?.collected ?? 0,
+        ...(outcome && !outcome.ok && outcome.reason
+          ? { reason: outcome.reason }
+          : {}),
+      };
+    }),
   };
 }
 

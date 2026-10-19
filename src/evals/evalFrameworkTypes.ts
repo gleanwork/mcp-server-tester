@@ -3,7 +3,7 @@ import type { Plugin } from '../plugins/plugin.js';
 import type { RUN_FORMAT } from './resultFormat.js';
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
-import type { EvalCaseResult } from '../types/reporter.js';
+import type { EvalCaseResult, PairedChange } from '../types/reporter.js';
 import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
@@ -14,11 +14,12 @@ import type {
   ClientConfig,
   ModelPricing,
 } from './evalConfig.js';
-import type { EvalResultStore } from './resultStore.js';
+import type { RunStore } from './runStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
 import type { PairwiseComparisonResult } from './pairwiseComparison.js';
 import type { ShardTokens, TrialKey } from './environments/protocol.js';
+import type { GradeKey } from './gradingSource.js';
 
 /** Which copy of a dataset with snapshots to read. */
 export interface DatasetRequest {
@@ -188,6 +189,11 @@ export interface ClientArtifacts {
    * includes everything. Symbolic links and other non-regular files are never copied.
    */
   include: readonly string[];
+  /**
+   * `dir` was made for this trial alone (a failure diagnosis): copying the
+   * artifacts removes it, whether the copy succeeds or not.
+   */
+  temporary?: boolean;
 }
 
 /**
@@ -319,10 +325,15 @@ export interface JudgeDefinition {
   preflight?: (options: Record<string, unknown>) => Promise<void>;
 }
 
-/** Public result-store extension point. */
+/**
+ * A result store extension: where an eval config's runs are kept besides the
+ * local run directory. `create` gets the options `schema` parsed and returns
+ * the store, which only moves bytes; MST owns the layout in it.
+ */
 export interface ResultStoreDefinition {
   readonly schema: ZodType;
-  create(config: ExtensionConfig): EvalResultStore;
+  readonly description?: string;
+  create(config: ExtensionConfig): RunStore;
 }
 
 /**
@@ -340,10 +351,22 @@ export interface EnvironmentContext {
 }
 
 /** One shard of a run, as the coordinator hands it to an environment. */
+/**
+ * What a shard runs: collecting trials (ADR 0004), or grading a stored run's
+ * (`mst grade --env`, ADR 0005).
+ */
+export type ShardWork = 'collect' | 'grade';
+
 export interface ShardSpec {
   readonly runId: string;
   readonly index: number;
   readonly count: number;
+  /**
+   * What the shard runs. Its worker command follows: `mst collect` or
+   * `mst grade-shard`. An environment built with `machineEnvironment` runs
+   * either.
+   */
+  readonly work: ShardWork;
   /** A local directory holding the shard's bundle (`writeShardBundle`). */
   readonly bundleDir: string;
   /** A local directory the shard's result files are copied into. */
@@ -357,6 +380,12 @@ export type ShardProgress =
       type: 'trial';
       key: TrialKey;
       status: 'collected' | 'infra';
+      path: string;
+    }
+  | {
+      type: 'graded';
+      key: GradeKey;
+      status: 'graded' | 'failed';
       path: string;
     }
   | { type: 'heartbeat'; at: string };
@@ -383,6 +412,10 @@ export interface ShardOutcome {
   reason?: string;
   collected: number;
   infra: number;
+  /** A grade shard's trials and cases whose grading came back. */
+  graded?: number;
+  /** Those of them a grader couldn't give a verdict for. */
+  failed?: number;
   cancelled: boolean;
 }
 
@@ -424,6 +457,11 @@ export interface Machine {
  * `machineEnvironment`, from a function that creates a machine.
  */
 export interface Environment {
+  /**
+   * The work its shards can run. Default `['collect']`. `machineEnvironment`
+   * runs both kinds, over the machine's channel.
+   */
+  readonly work?: readonly ShardWork[];
   /** Runs one shard. Its failures are its outcome, not a throw. */
   runShard(
     shard: ShardSpec,
@@ -533,6 +571,13 @@ export interface RunTelemetry {
 export interface PreviousRunVariant {
   passRateDelta: number;
   trialPassRateDelta?: number;
+  /**
+   * The change in the variant's headline pass rate (capability cases, or
+   * regression cases when every case is tagged regression), paired over the
+   * cases both runs scored and tested as variant comparisons are. Absent in
+   * older runs.
+   */
+  change?: PairedChange;
   /** Case IDs that passed before and fail now. */
   regressed: string[];
   /** Case IDs that failed before and pass now. */
@@ -604,7 +649,6 @@ export interface RunSummary {
   metrics: Record<string, unknown>;
   telemetry?: RunTelemetry;
   variantDeltas: Record<string, Record<string, unknown>>;
-  caseArtifactPointers?: Record<string, string[]>;
   results: EvalCaseResult[];
   /** A tool optimization the run reported (the Playwright reporter's runs). */
   toolOptimization?: MCPToolOptimizationData;

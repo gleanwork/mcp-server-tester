@@ -3,7 +3,13 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { gradeRun, runEval } from './runEval.js';
+import { gradeRun, gradeStoredRun, resumeRun, runEval } from './runEval.js';
+import {
+  gatheredGrading,
+  gradeKeyString,
+  recordingGrading,
+  type GradeRecord,
+} from './gradingSource.js';
 import { printRunResult } from '../cli/commands/run/index.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -622,6 +628,191 @@ describe("trials' client artifacts", () => {
     await expect(
       fs.stat(path.join(collected.outputDir, 'artifacts'))
     ).rejects.toThrow();
+  });
+});
+
+describe('mst grade --results: a run collected on another machine', () => {
+  it('is fetched from the result store and graded, and regrades elsewhere take new IDs', async () => {
+    const t = await setup();
+    const store = path.join(t.dir, 'store');
+    const results = `file:${store}`;
+    const collected = await runEval({ ...t.base, results, grade: false });
+    const runId = path.basename(collected.outputDir);
+    // Another machine: its own results directory, without the run.
+    const elsewhere = path.join(t.dir, 'machine-2');
+    const graded = await gradeRun({
+      ...t.base,
+      results,
+      outputDir: elsewhere,
+      run: runId.slice(-6),
+    });
+    expect(graded.gradedFrom).toBe(runId);
+    expect(t.client).toHaveBeenCalledTimes(4);
+    expect(t.judge).toHaveBeenCalledTimes(4);
+    expect(graded.outputDir).toBe(path.join(elsewhere, 'runs', `${runId}.g2`));
+    await expect(
+      fs.stat(path.join(elsewhere, 'runs', runId, 'manifest.json'))
+    ).resolves.toBeTruthy();
+    // The regrade is stored, complete.
+    await expect(
+      fs.stat(
+        path.join(store, 'grade-test', 'runs', `${runId}.g2`, 'manifest.json')
+      )
+    ).resolves.toBeTruthy();
+    // A third machine takes the next regrade ID, not the stored one's.
+    const third = await gradeRun({
+      ...t.base,
+      results,
+      outputDir: path.join(t.dir, 'machine-3'),
+      run: runId,
+    });
+    expect(path.basename(third.outputDir)).toBe(`${runId}.g3`);
+    // Graded again where it was fetched: the local copy, not a new fetch.
+    const again = await gradeRun({
+      ...t.base,
+      results,
+      outputDir: elsewhere,
+      run: runId,
+    });
+    expect(path.basename(again.outputDir)).toBe(`${runId}.g4`);
+    // --resume fetches it too (here, to find there's nothing to resume).
+    const fourth = path.join(t.dir, 'machine-4');
+    await expect(
+      resumeRun({ ...t.base, results, outputDir: fourth, run: runId })
+    ).rejects.toThrow('there is nothing to resume');
+    await expect(
+      fs.stat(path.join(fourth, 'runs', runId, 'run.json'))
+    ).resolves.toBeTruthy();
+  });
+
+  it('refuses a stored run that is incomplete or tampered with, and says where it looked', async () => {
+    const t = await setup();
+    const store = path.join(t.dir, 'store');
+    const results = `file:${store}`;
+    const collected = await runEval({ ...t.base, results, grade: false });
+    const runId = path.basename(collected.outputDir);
+    const stored = path.join(store, 'grade-test', 'runs', runId);
+    const elsewhere = path.join(t.dir, 'machine-2');
+    await fs.appendFile(path.join(stored, 'run.json'), ' ');
+    await expect(
+      gradeRun({ ...t.base, results, outputDir: elsewhere, run: runId })
+    ).rejects.toThrow("run.json doesn't match its manifest");
+    await fs.rm(path.join(stored, 'manifest.json'));
+    await expect(
+      gradeRun({ ...t.base, results, outputDir: elsewhere, run: runId })
+    ).rejects.toThrow('has no manifest.json');
+    expect(
+      await fs.readdir(path.join(elsewhere, 'runs')).catch(() => [])
+    ).toEqual([]);
+    await expect(
+      gradeRun({ ...t.base, results, outputDir: elsewhere, run: 'ffffff' })
+    ).rejects.toThrow(`The result store ${store} hasn't it either`);
+  });
+});
+
+describe('grading elsewhere (ADR 0005)', () => {
+  it('a regrade assembled from recorded grading is the local regrade, and runs no judge', async () => {
+    const t = await setup({ trials: 2, keyword: '41 minutes' });
+    const collected = await runEval({ ...t.base, grade: false });
+    const runId = path.basename(collected.outputDir);
+    const local = await gradeRun({ ...t.base, run: runId });
+    const judged = t.judge.mock.calls.length;
+    const compared = t.pairwise.mock.calls.length;
+
+    // A worker: grades here, and records what grading produced.
+    const records = new Map<string, GradeRecord>();
+    await gradeStoredRun(
+      { ...t.base, run: runId },
+      {
+        source: recordingGrading({
+          record: async (record) => {
+            records.set(gradeKeyString(record.key), structuredClone(record));
+          },
+          stopped: () => false,
+        }),
+      }
+    );
+    // 2 variants x 2 cases x 2 trials, and 2 cases' comparisons.
+    expect(records.size).toBe(8 + 2);
+    expect(t.judge.mock.calls.length).toBe(2 * judged);
+
+    // The coordinator: no judge runs; the records are the grading.
+    const missing = vi.fn(() => 'Missing: never called');
+    const assembled = await gradeStoredRun(
+      { ...t.base, run: runId },
+      {
+        elsewhere: async (prepared) => {
+          expect(prepared.datasets.map((d) => d.cases.length)).toEqual([2]);
+          expect(prepared.replay.gradedFrom).toBe(runId);
+          return {
+            source: gatheredGrading(records, missing),
+            environment: {
+              name: 'test/env/fake',
+              shards: 2,
+              keep: 'never',
+              options: {},
+            },
+            machines: [{ shard: 1, ok: true, graded: 10, failed: 0 }],
+          };
+        },
+      }
+    );
+    expect(t.judge.mock.calls.length).toBe(2 * judged);
+    expect(t.pairwise.mock.calls.length).toBe(2 * compared);
+    expect(missing).not.toHaveBeenCalled();
+    expect(verdicts(assembled)).toEqual(verdicts(local));
+    expect(assembled.summary.variants.map((v) => v.pairwise)).toEqual(
+      local.summary.variants.map((v) => v.pairwise)
+    );
+    const run = await readJson(path.join(assembled.outputDir, 'run.json'));
+    expect(run.grading).toEqual({
+      environment: {
+        name: 'test/env/fake',
+        shards: 2,
+        machines: [{ shard: 1, ok: true, graded: 10, failed: 0 }],
+      },
+    });
+    expect(run.phases).toMatchObject({ grade: 'complete' });
+  });
+
+  it("grading a shard didn't bring back is a grading error, and the regrade is partial", async () => {
+    const t = await setup();
+    const collected = await runEval({ ...t.base, grade: false });
+    const runId = path.basename(collected.outputDir);
+    const assembled = await gradeStoredRun(
+      { ...t.base, run: runId },
+      {
+        elsewhere: async () => ({
+          source: gatheredGrading(
+            new Map(),
+            (key) =>
+              `Missing: grade shard 1 ended before ${key.caseId} was graded.`
+          ),
+          environment: {
+            name: 'test/env/fake',
+            shards: 1,
+            keep: 'never',
+            options: {},
+          },
+          machines: [
+            { shard: 1, ok: false, graded: 0, failed: 0, reason: 'gone' },
+          ],
+        }),
+      }
+    );
+    expect(t.judge).not.toHaveBeenCalled();
+    expect(t.pairwise).not.toHaveBeenCalled();
+    expect(assembled.summary.results.map((r) => r.gradingError)).toEqual(
+      expect.arrayContaining([
+        'error: Missing: grade shard 1 ended before cause was graded.',
+      ])
+    );
+    const run = await readJson(path.join(assembled.outputDir, 'run.json'));
+    expect(run.phases).toMatchObject({ grade: 'partial' });
+    const pairwise = assembled.summary.variants.find(
+      (v) => v.pairwise
+    )?.pairwise;
+    expect(pairwise?.summary[0]).toMatchObject({ errors: 2, compared: 0 });
   });
 });
 

@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push *)",
+      "Bash(gh pr create --draft *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh pr ready *)"
+    ],
+    "ask": [
+      "Bash(gh pr comment *)",
+      "Bash(gh pr review *)",
+      "Bash(gh pr close *)",
+      "Bash(gh issue create *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh issue close *)",
+      "Bash(gh release *)",
+      "Bash(npm publish *)",
+      "Bash(pnpm publish *)",
+      "Bash(yarn npm publish *)",
+      "Bash(git push -f *)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "Bash(git push *--force*)",
+      "Bash(git push * main)",
+      "Bash(git push * master)",
+      "Bash(git push *:main)",
+      "Bash(git push *:master)",
+      "mcp__*github*__create_*",
+      "mcp__*github*__add_*",
+      "mcp__*github*__update_*",
+      "mcp__*github*__merge_*",
+      "mcp__*github*__submit_*",
+      "mcp__*github*__delete_*",
+      "mcp__*github*__push_*",
+      "mcp__*slack*__*post*",
+      "mcp__*slack*__*send*"
+    ],
+    "deny": []
+  }
+}

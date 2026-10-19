@@ -26,7 +26,8 @@ import { isInfrastructureError } from '../infrastructureFailure.js';
 import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
-import { ALL_ARTIFACTS, copyArtifacts } from '../trialArtifacts.js';
+import { ALL_ARTIFACTS } from '../allArtifacts.js';
+import { copyArtifacts } from '../trialArtifacts.js';
 import {
   usesToolSurfaceProxy,
   withoutToolVariant,
@@ -81,7 +82,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
-async function writeFileAtomically(
+export async function writeFileAtomically(
   file: string,
   content: string,
   mode?: number
@@ -97,8 +98,8 @@ async function writeFileAtomically(
  * `MST_PLUGIN_DIR` (where a worker image installs them; default: the working
  * directory). Each plugin package must be the version the coordinator runs.
  */
-async function loadWorkerPlugins(
-  bundle: ShardBundle,
+export async function loadWorkerPlugins(
+  bundle: Pick<ShardBundle, 'plugins' | 'pluginPackages'>,
   bundleDir: string,
   pluginDir: string | undefined
 ) {

@@ -10,6 +10,12 @@ import type { ClientMetadata } from './externalClient/types.js';
 export const CLAUDE_SESSION_TIMEOUT_MESSAGE =
   'Timed out waiting for Claude session';
 export const CLAUDE_NO_MATCHING_SESSION_MESSAGE = 'No matching Claude session';
+/**
+ * A Cowork trial whose sandbox (Cowork's VM) didn't start: the task ran
+ * without its shell, so the answer says nothing about the servers under test.
+ */
+export const COWORK_WORKSPACE_UNAVAILABLE_MESSAGE =
+  "Cowork's workspace was unavailable";
 
 /**
  * Returns true when the error message appears to be caused by network or
@@ -48,6 +54,7 @@ export function isInfrastructureError(err: unknown): boolean {
     // Cowork reports Claude binding failures as text; the wording is shared.
     msg.includes(CLAUDE_NO_MATCHING_SESSION_MESSAGE.toLowerCase()) ||
     msg.includes(CLAUDE_SESSION_TIMEOUT_MESSAGE.toLowerCase()) ||
+    msg.includes(COWORK_WORKSPACE_UNAVAILABLE_MESSAGE.toLowerCase()) ||
     msg.includes('failed to submit prompt to claude') ||
     msg.includes('failed to submit prompt to desktop client') ||
     // Prompt/context overflow — LLM couldn't run, not a tool discoverability failure

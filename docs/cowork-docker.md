@@ -47,7 +47,7 @@ Options (`--env-option key=value`):
 | `keep`                 | `never` (default), `failed` or `always`: keep containers to look at afterwards.                            |
 | `claudeDesktopVersion` | `mst env setup` only: the Claude Desktop package to install.                                               |
 
-**One container per Docker host at a time.** Claude Desktop's VM service listens on a fixed vsock port for the whole host, and containers don't separate vsock. So two Cowork containers can't run on one Docker host. To run shards side by side, give each its own host: several Colima VMs on a Mac, or remote Docker hosts, listed in `contexts`. With more shards than contexts, the extra shards wait for a free context.
+**One container per Docker host at a time.** Claude Desktop's VM service listens on a fixed vsock port for the whole host, and containers don't separate vsock. So two Cowork containers can't run on one Docker host. To run shards side by side, give each its own host: several Colima VMs on a Mac, or remote Docker hosts, listed in `contexts`. With more shards than contexts, the extra shards wait for a free context. A plugin environment that creates its own hosts (VMs, say) can hand their contexts to this one: see `dockerEnvironment` in [the evaluation framework](./evaluation-framework.md#plugins).
 
 ## Plugins
 
@@ -60,6 +60,8 @@ Each container's worker loads the eval's plugins, so the image must have them. `
 
 The image holds one set of plugins: setting it up for another eval replaces them.
 
+`mst grade --env docker` grades in these containers too ([Grading in an environment](./cli.md#grading-in-an-environment)). Its workers load the eval's judge plugins from the same `/opt/mst/plugins`, and need the SDK each judge runs, which the image doesn't have (`openai`, `@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`): add them in an image of your own, for example `FROM mst-cowork-linux:<tag>` with `RUN npm install -g openai`, and pass it with `--env-option image=<ref>`. Grade containers start without a desktop, VM devices or inference, so several share one Docker context.
+
 ## What happens
 
 For each shard, MST:
@@ -70,15 +72,26 @@ For each shard, MST:
 4. Copies the shard's bundle in, and runs `mst collect` as the desktop user. For each variant, MST writes its servers and model into Claude Desktop's managed settings and restarts it ([owned-desktop mode](./cowork.md#attach-to-a-prepared-linux-desktop)). The restart boots Cowork's VM, and returns once the VM is ready.
 5. Copies results and each trial's Cowork session folder back as trials finish, then removes the container.
 
+**Containers don't outlive their run.** A Cowork container holds its unpacked VM, about 10 GB, so a leftover one can leave the next run's container without the disk Cowork's VM install needs. When MST exits, or gets SIGTERM or SIGHUP, it removes its containers before it goes; Ctrl-C stops the shards first and removes them as usual. If it's killed outright (SIGKILL, a crash), the next `--env docker` run on the same machine removes them: each container is labeled with the machine and process that started it (`mst.owner.host`, `mst.owner.pid`), and a container whose process is gone is removed before a new one starts. Containers another machine started are left alone, and so are kept ones (`keep`), which MST renames `<name>-kept`; remove those yourself with `docker rm -f <name>-kept`.
+
 ## Each variant costs a VM boot
 
 Claude Desktop reads its managed settings, and lists each MCP server's tools, only when it starts. It keeps the tool list for its whole run: a server's `notifications/tools/list_changed` doesn't refresh it. So each variant on a shard is a restart, and a restart stops Cowork's VM and boots a new one. A shard runs all of one variant's cases before the next variant's, so it restarts once per variant. A variant's datasets share that restart: MST skips a restart when the settings are the ones the desktop already runs with. Variants with tool metadata are the exception: their servers are a proxy with a URL of its own for each batch, so each of their datasets restarts too.
 
-On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest takes 1.5 to 2.5 minutes to start, while Claude Desktop gives it 60 seconds and fails that task. After each restart, the image starts one-line warm-up tasks ("Reply with OK.") until the VM is up, so a case finds it running. You'll see those tasks in the container's Cowork history. Measured on an M5 Pro: a fresh container to a finished one-case run took 2 min 39 s. A Linux host with KVM, without nesting, should boot the VM much faster; that hasn't been measured yet.
+On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest takes 1.5 to 2.5 minutes to start, while Claude Desktop gives it 60 seconds and fails that task. After each restart, the image starts one-line warm-up tasks ("Reply with OK.") until a VM startup completes, so a case finds it running. The guest connecting isn't enough: Cowork then installs its SDK in the guest within 30 seconds, and when that times out, the startup fails with the VM still connected. Another warm-up task retries the install. Claude Desktop reinstalls the VM after a failed start unless the bundle is marked as reinstalled already, and clears that mark once a start succeeds. The image marks the seeded bundle again before each restart, so a variant's restart doesn't reinstall it. You'll see those tasks in the container's Cowork history. Measured on an M5 Pro: a fresh container to a finished one-case run took 2 min 39 s. A Linux host with KVM, without nesting, should boot the VM much faster; that hasn't been measured yet.
 
 ## When something fails
 
-Keep the container and look inside:
+A case that fails and leaves the desktop in an unknown state (a task that didn't submit, a session MST can't read) keeps a failure diagnosis: what the desktop showed at that moment, before MST resets it for the next case. A run that keeps full traces (`"redactStoredResponses": false` in the eval config) stores it as the trial's artifacts, `.mcp-test-results/<eval>/runs/<run>/artifacts/<variant>/<case>/<trial>/`; a run with redacted traces (the default) doesn't keep it, since it holds what the screen and logs showed:
+
+- `screen.png`: the screen
+- `accessibility.txt`: every control the app showed, with its role, name and whether it was enabled
+- `logs/`: the last 256 KiB of each of Claude Desktop's logs (`main.log`, `cowork_vm_node.log`, `mcp.log`, …)
+- `system.json`: free memory, load, and the free space on the disk Cowork's sessions are on
+
+They can hold what the case's session would have: keep them like any run's results. Capturing them takes no action on the app. A case that kept a session of its own (a task that found Cowork's VM down) keeps that instead.
+
+To look further, keep the container and look inside:
 
 ```bash
 npx mst run --config eval.json --env docker --env-option keep=failed
@@ -88,5 +101,7 @@ docker exec -it -u mst <container> bash
 - `/run/mst/session/`: the session's logs (`claude.log`, `restart.log`), and `ready` or `failed`
 - `~/.config/Claude-3p/logs/`: Claude Desktop's logs. `main.log` says whether it took the managed settings, and `cowork_vm_node.log` covers the VM
 - `/etc/claude-desktop/managed-settings.json`: the settings Claude Desktop reads
+
+A trial whose task found Cowork's VM down (its shell answers "Workspace unavailable") is an infrastructure failure, `Cowork's workspace was unavailable: …`, left out of pass rates. Its session is kept as evidence, and `cowork_vm_node.log` says why the VM startup failed.
 
 The image is in `docker/cowork-linux/` of the package. Its `seccomp.json` is Docker's default profile ([moby/profiles](https://github.com/moby/profiles), Apache-2.0) with one rule added: sockets of the `AF_VSOCK` family, which Claude Desktop uses to reach Cowork's VM.

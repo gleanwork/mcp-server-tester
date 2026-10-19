@@ -62,6 +62,9 @@ function inputQueue() {
 
 const STDERR_TAIL = 4096;
 
+/** The hidden command a shard's work runs on its machine. */
+const WORKER_COMMANDS = { collect: 'collect', grade: 'grade-shard' } as const;
+
 /** Runs `shard` on the machine behind `channel`, start to finish. */
 export async function runShardOverChannel(
   channel: WorkerChannel,
@@ -95,7 +98,7 @@ export async function runShardOverChannel(
   const run = channel.exec(
     [
       ...(options.command ?? ['mst']),
-      'collect',
+      WORKER_COMMANDS[shard.work],
       '--bundle',
       remoteBundle,
       '--results',
@@ -181,8 +184,8 @@ export async function runShardOverChannel(
           (error: unknown) =>
             fail(error instanceof Error ? error.message : String(error))
         );
-      } else if (message.type === 'trial') {
-        // Copy as the trials come, so a dropped channel loses at most one. A
+      } else if (message.type === 'trial' || message.type === 'graded') {
+        // Copy as the results come, so a dropped channel loses at most one. A
         // copy that fails (it can race the worker's next write) is retried
         // by the next one, and by the final copy.
         await channel.get(remoteResults, shard.resultsDir).catch(() => {});
@@ -191,8 +194,13 @@ export async function runShardOverChannel(
         events.progress(message);
       } else {
         done = true;
-        outcome.collected = message.collected;
-        outcome.infra = message.infra;
+        if ('graded' in message) {
+          outcome.graded = message.graded;
+          outcome.failed = message.failed;
+        } else {
+          outcome.collected = message.collected;
+          outcome.infra = message.infra;
+        }
         outcome.cancelled ||= message.cancelled;
         cleanupFailed = message.cleanup === 'failed';
         stdin.close();
@@ -246,6 +254,8 @@ export function machineEnvironment(
 ): Environment {
   const live = new Set<Machine>();
   return {
+    // Its shards run over the machine's channel, whatever their work.
+    work: ['collect', 'grade'],
     async runShard(shard, events, signal) {
       let machine: Machine;
       try {
@@ -262,10 +272,26 @@ export function machineEnvironment(
       live.add(machine);
       let outcome: ShardOutcome | undefined;
       try {
+        // The machine's image, for a worker that doesn't say (MST_IMAGE).
+        const image = machine.image
+          ? machine.image.digest
+            ? `${machine.image.ref}@${machine.image.digest}`
+            : machine.image.ref
+          : undefined;
         outcome = await runShardOverChannel(
           machine.channel,
           shard,
-          events,
+          image
+            ? {
+                ...events,
+                progress: (event) =>
+                  events.progress(
+                    event.type === 'hello' && !event.image
+                      ? { ...event, image }
+                      : event
+                  ),
+              }
+            : events,
           signal,
           {
             ...options,

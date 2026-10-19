@@ -8,6 +8,8 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { ClientBatchRequest } from '../evalFrameworkTypes.js';
 import type { EvalConfig, EvalVariant } from '../evalConfig.js';
+import type { EvalDataset } from '../datasetTypes.js';
+import type { GradeRecord } from '../gradingSource.js';
 
 export const SHARD_PROTOCOL = 'mst.shard/v1';
 
@@ -19,13 +21,28 @@ const TrialKeySchema = z.object({
 /** One trial of a run: a variant's trial of a case. */
 export type TrialKey = z.infer<typeof TrialKeySchema>;
 
+/** One trial's grading, or one case's pairwise comparison (ADR 0005). */
+const GradeKeySchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('trial'),
+    variant: z.string(),
+    caseId: z.string(),
+    trial: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal('pairwise'),
+    candidate: z.string(),
+    caseId: z.string(),
+  }),
+]);
+
 const TokenSchema = z.object({
   accessToken: z.string(),
   /** Epoch milliseconds. */
   expiresAt: z.number().optional(),
 });
 
-const WorkerMessageSchema = z.discriminatedUnion('type', [
+const WorkerMessageSchema = z.union([
   z.object({
     type: z.literal('hello'),
     protocol: z.literal(SHARD_PROTOCOL),
@@ -50,11 +67,28 @@ const WorkerMessageSchema = z.discriminatedUnion('type', [
     /** The result file, relative to the worker's results directory. */
     path: z.string(),
   }),
+  // A grade shard (ADR 0005): a trial's grading or a case's comparison was
+  // written. `failed`: a grader or pairwise judge couldn't give a verdict.
+  z.object({
+    type: z.literal('graded'),
+    key: GradeKeySchema,
+    status: z.enum(['graded', 'failed']),
+    /** The result file, relative to the worker's results directory. */
+    path: z.string(),
+  }),
   z.object({ type: z.literal('heartbeat'), at: z.string() }),
   z.object({
     type: z.literal('done'),
     collected: z.number().int().nonnegative(),
     infra: z.number().int().nonnegative(),
+    cancelled: z.boolean(),
+    cleanup: z.enum(['ok', 'failed']),
+  }),
+  // How a grade shard ended.
+  z.object({
+    type: z.literal('done'),
+    graded: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
     cancelled: z.boolean(),
     cleanup: z.enum(['ok', 'failed']),
   }),
@@ -255,4 +289,118 @@ export async function readClientResult(
   if (!result.success)
     throw new Error(`${file} isn't a ${SHARD_PROTOCOL} client result.`);
   return result.data;
+}
+
+/** What a grade shard runs: the shard's cases of a stored run (ADR 0005). */
+export interface GradeShardBundle {
+  /** The stored run being graded. */
+  runId: string;
+  shard: { index: number; count: number };
+  /** The coordinator's MST version. */
+  mst: string;
+  /** Plugin specifiers the worker loads: its judges' and clients'. */
+  plugins: string[];
+  pluginPackages?: Array<{ specifier: string; name: string; version: string }>;
+  /** The eval config as its file has it, without `plugins` or `results`. */
+  evalConfig: { name: string } & Record<string, unknown>;
+  /**
+   * The coordinator's loaded datasets, one per eval config source, in
+   * order, with the shard's cases only: the worker loads none itself.
+   */
+  datasets: EvalDataset[];
+}
+
+const GradeShardBundleSchema = z.object({
+  format: z.literal(SHARD_PROTOCOL),
+  kind: z.literal('grade-bundle'),
+  runId: z.string(),
+  shard: z.object({
+    index: z.number().int().nonnegative(),
+    count: z.number().int().positive(),
+  }),
+  mst: z.string(),
+  plugins: z.array(z.string()),
+  pluginPackages: z
+    .array(
+      z.object({ specifier: z.string(), name: z.string(), version: z.string() })
+    )
+    .optional(),
+  evalConfig: z.looseObject({ name: z.string() }),
+  datasets: z.array(
+    z.looseObject({
+      name: z.string(),
+      cases: z.array(z.looseObject({ id: z.string() })),
+    })
+  ),
+});
+
+/**
+ * Where a grade bundle keeps the stored run's files for its cases, so that a
+ * regrade of it goes beside it: `runs/<run-id>/` in the bundle.
+ */
+export function bundledRunDir(bundleDir: string, runId: string): string {
+  return path.join(bundleDir, 'runs', runId);
+}
+
+/** Writes a grade shard's bundle file to `dir` (the run's files go beside it). */
+export async function writeGradeShardBundle(
+  dir: string,
+  bundle: GradeShardBundle
+): Promise<void> {
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, BUNDLE_FILE),
+    `${JSON.stringify({ format: SHARD_PROTOCOL, kind: 'grade-bundle', ...bundle }, null, 2)}\n`
+  );
+}
+
+/** Reads and checks the grade bundle in `dir`. */
+export async function readGradeShardBundle(
+  dir: string
+): Promise<GradeShardBundle> {
+  const file = path.join(dir, BUNDLE_FILE);
+  let value: unknown;
+  try {
+    value = JSON.parse(await fs.readFile(file, 'utf8'));
+  } catch (error) {
+    throw new Error(
+      `Couldn't read the grade bundle ${file}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  const result = GradeShardBundleSchema.safeParse(value);
+  if (!result.success)
+    throw new Error(
+      `${file} isn't a ${SHARD_PROTOCOL} grade bundle: ${result.error.message}`
+    );
+  return result.data as unknown as GradeShardBundle;
+}
+
+const GradeResultFileSchema = z.object({
+  format: z.literal(SHARD_PROTOCOL),
+  kind: z.literal('grade-result'),
+  record: z.union([
+    z.object({
+      key: GradeKeySchema.options[0],
+      outcome: z.looseObject({ scores: z.looseObject({}) }),
+    }),
+    z.object({
+      key: GradeKeySchema.options[1],
+      preferences: z.array(z.looseObject({ judge: z.string() })),
+    }),
+  ]),
+});
+
+/** A grade worker's result file: what grading produced for one key. */
+export function gradeResultFile(record: GradeRecord): string {
+  return `${JSON.stringify({ format: SHARD_PROTOCOL, kind: 'grade-result', record })}\n`;
+}
+
+/** Reads a grade worker's result file, as `mst grade-shard` wrote it. */
+export async function readGradeResult(file: string): Promise<GradeRecord> {
+  const result = GradeResultFileSchema.safeParse(
+    JSON.parse(await fs.readFile(file, 'utf8'))
+  );
+  if (!result.success)
+    throw new Error(`${file} isn't a ${SHARD_PROTOCOL} grade result.`);
+  return result.data.record as unknown as GradeRecord;
 }

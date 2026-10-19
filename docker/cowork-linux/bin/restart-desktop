@@ -15,6 +15,13 @@ if pkill -u mst -f '^/usr/lib/claude-desktop/' 2>/dev/null; then
   pkill -9 -u mst -f '^/usr/lib/claude-desktop/' 2>/dev/null || true
 fi
 rm -f "${HOME}"/.config/Claude-3p/Singleton* "${HOME}"/.config/Claude/Singleton*
+# Claude clears its reinstall marker once a VM startup succeeds, so after a
+# restart the first (expected) failed start would delete the bundle and
+# reinstall it. The image seeded and checked the bundle: mark it again, as
+# desktop-session does at the first launch.
+if [[ -s /opt/cowork-vm/bundle ]]; then
+  touch "${HOME}/.config/Claude-3p/vm_bundles/claudevm.bundle/.auto_reinstall_attempted"
+fi
 
 setsid /opt/mst/bin/claude >> "${log}/claude.log" 2>&1 < /dev/null &
 exec /opt/mst/bin/desktop-ready

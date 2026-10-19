@@ -118,6 +118,16 @@ describe('a run is compared with the previous run of the same eval config', () =
         default: {
           passRateDelta: -0.5,
           trialPassRateDelta: -0.5,
+          // One of two cases failing is the paired test's "can't tell".
+          change: {
+            mean: -0.5,
+            lower: -1,
+            upper: 1,
+            cases: 2,
+            pBetter: 1,
+            pWorse: 0.5,
+            assessment: 'unclear',
+          },
           regressed: ['b'],
           improved: [],
           added: [],
@@ -133,9 +143,7 @@ describe('a run is compared with the previous run of the same eval config', () =
     const evalRun = path.join(root, 'suite');
     await fs.mkdir(evalRun);
     // A store directory of the same name where the run starts.
-    await fs.mkdir(path.join(root, 'store', 'eval-summaries'), {
-      recursive: true,
-    });
+    await fs.mkdir(path.join(root, 'store'), { recursive: true });
     await fs.writeFile(
       path.join(evalRun, 'cases.json'),
       JSON.stringify({
@@ -166,17 +174,21 @@ describe('a run is compared with the previous run of the same eval config', () =
         outputDir: path.join(root, 'out'),
         plugins: [clientPlugin],
       });
-    await run();
-    expect(
-      await fs.readdir(path.join(root, 'store', 'eval-summaries'))
-    ).toEqual([]);
+    const first = await run();
+    expect(await fs.readdir(path.join(root, 'store'))).toEqual([]);
     // A summary that can't be read isn't a baseline, and doesn't fail the run.
-    await fs.writeFile(
-      path.join(evalRun, 'store', 'eval-summaries', 'broken.json'),
-      '{'
+    const broken = path.join(
+      evalRun,
+      'store',
+      'm',
+      'runs',
+      '20990101T000000Z-b40e40'
     );
+    await fs.mkdir(broken, { recursive: true });
+    await fs.writeFile(path.join(broken, 'summary.json'), '{');
     const second = await run();
     expect(second.summary.metrics.passRate).toBe(1);
+    expect(second.summary.previousRun?.runId).toBe(first.summary.runId);
   });
 });
 
@@ -210,6 +222,43 @@ describe('findPreviousRun', () => {
     await expect(findPreviousRun(lookup)).resolves.toMatchObject({
       runId: 'current',
     });
+  });
+
+  it('skips a run with missing trials (a shard that ended early)', async () => {
+    const { findPreviousRun } = await import('./runBaseline.js');
+    const outputRoot = await tempDir();
+    const write = async (
+      runId: string,
+      timestamp: string,
+      metrics: Record<string, unknown>
+    ) => {
+      await fs.mkdir(path.join(outputRoot, runId));
+      await fs.writeFile(
+        path.join(outputRoot, runId, 'summary.json'),
+        JSON.stringify({
+          format: 'mst.run/v1',
+          configId: 'cfg',
+          runId,
+          timestamp,
+          variants: [{ name: 'a' }],
+          metrics,
+        })
+      );
+    };
+    await write('complete', '2026-10-01T00:00:00.000Z', { passRate: 1 });
+    // Newer, but 5 of its trials never came back.
+    await write('incomplete', '2026-10-02T00:00:00.000Z', {
+      passRate: 0,
+      incomplete: 5,
+    });
+    await expect(
+      findPreviousRun({
+        configId: 'cfg',
+        runId: 'now',
+        variants: ['a'],
+        outputRoot,
+      })
+    ).resolves.toMatchObject({ runId: 'complete' });
   });
 });
 

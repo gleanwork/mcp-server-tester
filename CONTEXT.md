@@ -47,7 +47,16 @@ MST's own connection to an MCP server, through which tests call tools directly.
 _Avoid_: client (that is the application under test)
 
 **Vendor MCP server**:
-A third-party service's MCP server (Slack's, Jira's, GitHub's) that an eval config defines, usually through a connector, so MST hands it tokens and can put a proxy in front of it.
+A third-party service's MCP server (Slack's, Jira's, GitHub's) that an eval config defines, usually through a connector, so MST hands it tokens and can put a proxy in front of it. The service may publish it, or someone else may.
+_Avoid_: native server, external server
+
+**Official MCP server**:
+A vendor MCP server the service publishes itself, such as the one Slack runs for Slack, rather than a community server for the same service.
+_Avoid_: native server, first-party server
+
+**Client's own connector**:
+A connector a user adds inside the client, such as one from Cowork's connector directory, hosted by the client's maker. MST doesn't configure or observe it. Unrelated to an MST connector.
+_Avoid_: native connector, built-in connector
 
 **Variant**:
 One setup an eval tests: the client, its model and options (such as a system prompt), the MCP servers, and the tool metadata the client sees. Every variant runs the same cases.
@@ -72,6 +81,10 @@ _Avoid_: transcript, trajectory, log, response
 **Client artifacts**:
 A bounded copy of the files a client kept for one trial (such as Cowork's session folder), taken from the paths the client names as evidence, for judges to read. A run that keeps full traces stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
 _Avoid_: attachments, session dump
+
+**Failure diagnosis**:
+What a desktop client captured when a case failed and left the app in an unknown state, before the reset changed it: the screen, the controls it showed, the app's logs. For whoever runs the eval, not for judges; it is the failed trial's client artifacts, and kept only where those are.
+_Avoid_: crash dump, debug bundle
 
 **Evidence**:
 How far a client's trace can be trusted for tool assertions: `structured` (protocol or the client's own records), `observed` (best effort) or `none`. Only `structured` evidence can pass tool-call assertions; a client that declares nothing counts as unverified.
@@ -103,6 +116,10 @@ _Avoid_: comparator, preference model
 A judge that runs an agent (on the `claude-agent` or `codex` runtime) over a workspace of the trial's evidence, which it can read and search before it scores, instead of getting the trial in one prompt. It can be pointwise or pairwise.
 _Avoid_: agent grader, tool-using judge
 
+**Staged judge**:
+An agentic pairwise judge described as data, a bundle: the files it needs (prompts, helper scripts), programs that prepare the workspace, and a graph of agent stages whose answers later stages quote, ending in verdict stages. `stagedPairwiseJudge` runs one, so a judge maintained elsewhere as prompt files runs in MST without being reimplemented.
+_Avoid_: composite judge, judge pipeline
+
 **Preference**:
 A pairwise judge's result comparing two variants on one case: which side's trials it prefers (or a tie), how strongly, and why. Several reps, and the swapped order, reconcile into one preference per case.
 _Avoid_: verdict, vote
@@ -122,6 +139,10 @@ _Avoid_: verdict, success
 **Metric**:
 An aggregate over a run's trials or cases, such as pass rate, pass^k, tool recall, tokens, cost or latency.
 _Avoid_: KPI, stat
+
+**Likely range**:
+Where a pass rate's true value, the rate over unlimited trials, lies with 95% confidence. It shows how much a run measured, not how flaky the client is: 8 of 8 cases passing is likely 63.1–100%. A rate over several cases counts cases, not trials, as the sample. A range wider than ±10 points means too few trials to tell.
+_Avoid_: margin of error, error bars
 
 **Regrade**:
 Grading a stored run's traces again with the eval config's graders as they are now (`mst grade`), without running the client. It is saved as a new run, `<run-id>.g2` and so on, whose `run.json` names the original in `gradedFrom`. Needs traces stored with `"redactStoredResponses": false`.
@@ -154,7 +175,7 @@ How a variant differs from the baseline, or a run from an earlier run: metric ch
 _Avoid_: diff, A/B result, verdict
 
 **Result store**:
-Where an eval's results go besides its run directories: today a `file` directory or a `gcs` bucket (`results.store`), which gets each run's results and summary. Stores that hold whole runs, with `mst run --results` and `mst open --results`, are planned.
+Where an eval's runs are kept besides the local run directories: a `file` directory, a `gcs` bucket, or a plugin's store, chosen with `mst run --results` or the eval config's `results.store`. It gets a copy of each whole run directory, in the same layout, with a manifest written last, and is where the previous run comes from; `mst grade` and `--resume` fetch a run from it that isn't local. A plugin's store only moves bytes (a `RunStore`); MST owns the layout. Opening a stored run (`mst open --results`) is planned.
 _Avoid_: results backend, sink
 
 **Regression case**:
@@ -176,7 +197,7 @@ _Avoid_: variant experiment, tool experiment
 ### Where a run happens
 
 **Coordinator**:
-The machine where `mst run` was typed (your machine or a CI job). It loads, resolves, prepares, gathers, grades, compares and reports; only collecting can happen elsewhere.
+The machine where `mst run` or `mst grade` was typed (your machine or a CI job). It loads, resolves, prepares, gathers, grades, compares and reports. Collecting can happen elsewhere, and with `mst grade --env` so can running the graders: the coordinator still resolves what they grade with and writes the regrade ([ADR 0005](docs/adr/0005-grading-runs-in-an-environment.md)).
 _Avoid_: controller, host, driver
 
 **Environment**:
@@ -184,11 +205,11 @@ Where a run's trials are collected, chosen with `--env`: `local` (in the `mst ru
 _Avoid_: sandbox, backend, runner, target
 
 **Shard**:
-One machine's part of a run's trials. Trials are split by case, so a case's variants and trials all run on one shard.
+One machine's part of a run's trials, to collect, or to grade (a **grade shard**, `mst grade --env`). Trials are split by case, so a case's variants and trials all run on one shard.
 _Avoid_: partition, worker (for the slice)
 
 **Worker**:
-The process that collects a shard's trials on its machine (`mst collect`), with the same code a local run uses.
+The process that runs a shard on its machine with the same code a local run uses: `mst collect` collects its trials, and `mst grade-shard` grades them.
 _Avoid_: agent, guest, runner
 
 **Channel**:

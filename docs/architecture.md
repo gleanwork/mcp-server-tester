@@ -126,6 +126,10 @@ eval-runs/, eval-summaries/, or comparisons/
 latest.json + immutable <id>.json
 ```
 
+An eval config's result store is different: `mst run` copies each `mst.run/v1`
+run directory into a `RunStore` (`src/evals/runStore.ts`), which only moves
+bytes, and reads its earlier runs from there.
+
 The eval runner uses stored `eval-runner-result` artifacts for baseline
 regression detection. `compareEvalRuns()` remains pure; helpers load stored runs
 and save comparison artifacts around it. The Playwright reporter writes each

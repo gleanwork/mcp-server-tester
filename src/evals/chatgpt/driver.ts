@@ -23,7 +23,9 @@ export interface ChatgptApplicationController {
 export function submitChatgptQuery(
   query: string,
   config: ExternalClientConfig,
-  deadlineAt: number
+  deadlineAt: number,
+  /** macOS: the trusted empty folder the task opens in. */
+  workspace?: string
 ): Promise<ComputerUseSubmissionResult> {
   if (isLinuxChatgpt(config))
     throw new Error(
@@ -38,6 +40,7 @@ export function submitChatgptQuery(
     maxActions: Number(config.options?.computerUseMaxActions ?? 32),
     deadlineAt,
     env: plannerEnvironment(config),
+    ...(workspace ? { workspace } : {}),
   });
 }
 

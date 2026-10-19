@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,9 +10,13 @@ import {
   coworkImageDirectory,
   DEFAULT_COWORK_IMAGE,
   dockerRunArgs,
+  npmPackArgs,
 } from './docker.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
-import { runEval } from '../runEval.js';
+import { gradeRun, runEval } from '../runEval.js';
+import { readRunDirectory } from '../runFormat.js';
+import { buildRunReport } from '../runReport.js';
+import packageJson from '../../../package.json' with { type: 'json' };
 import { setupEnvironment } from '../../cli/commands/env/index.js';
 import { resetPluginsForTests } from '../../plugins/extensions.js';
 
@@ -29,6 +34,40 @@ afterEach(async () => {
 });
 
 describe('the docker environment', () => {
+  it("forwards the coordinator's Cowork VM warm-up budget to the container", () => {
+    const base = {
+      name: 'mst-run-1',
+      image: 'mst-cowork-linux:test',
+      runId: 'run',
+      seccompProfile: '/pkg/docker/cowork-linux/seccomp.json',
+      inference: {
+        baseURL: 'https://gateway.example/anthropic',
+        authScheme: 'bearer' as const,
+      },
+    };
+    const args = dockerRunArgs({ ...base, warmVmTimeoutS: '1740' });
+    expect(args[args.indexOf('MST_COWORK_WARM_VM_TIMEOUT_S=1740') - 1]).toBe(
+      '--env'
+    );
+    expect(args.at(-1)).toBe('mst-cowork-linux:test');
+    for (const warmVmTimeoutS of [undefined, '', '0', '12s', '-5'])
+      expect(
+        dockerRunArgs({ ...base, warmVmTimeoutS }).join(' ')
+      ).not.toContain('MST_COWORK_WARM_VM_TIMEOUT_S');
+  });
+
+  it('packs a checkout as built, and an installed package without its scripts', () => {
+    expect(npmPackArgs('/out', { ignoreScripts: false })).toEqual([
+      'pack',
+      '--silent',
+      '--pack-destination',
+      '/out',
+    ]);
+    expect(npmPackArgs('/out', { ignoreScripts: true })).toContain(
+      '--ignore-scripts'
+    );
+  });
+
   it('starts a container with the VM devices and the seccomp profile, and no credential', () => {
     const args = dockerRunArgs({
       name: 'mst-run-1',
@@ -53,6 +92,10 @@ describe('the docker environment', () => {
     );
     expect(args).toContain('MST_INFERENCE_AUTH_SCHEME=bearer');
     expect(args).not.toContain('--privileged');
+    // Whose it is: a later run removes it if this process dies.
+    expect(args).toContain('mst.run=run');
+    expect(args).toContain(`mst.owner.host=${os.hostname()}`);
+    expect(args).toContain(`mst.owner.pid=${process.pid}`);
     expect(args.at(-1)).toBe('mst-cowork-linux:test');
   });
 
@@ -359,6 +402,132 @@ describe('a run in docker (a fake Docker CLI)', () => {
       ).toBe(`${id}\n`);
     // Both containers are gone.
     expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
+    // run.json says what each shard's machine ran, and so does the report.
+    const stored = await readRunDirectory(result.outputDir);
+    const machines = [1, 2].map((shard) => ({
+      shard,
+      mst: packageJson.version,
+      image: 'mst-test:1@sha256:fake-image',
+      client: 'dt/client/notes',
+      ok: true,
+      collected: expect.any(Number),
+    }));
+    expect(stored.run.environment.machines).toEqual(machines);
+    expect(buildRunReport(stored).run.environment).toEqual({
+      name: 'docker',
+      shards: 2,
+      machines: machines.map(({ shard, mst, image }) => ({
+        shard,
+        mst,
+        image,
+      })),
+    });
+  }, 120_000);
+
+  it('grades a stored run in containers without a desktop or inference, two to a context (ADR 0005)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, root, configPath, calls } = await fixture();
+    const outputDir = path.join(dir, 'out');
+    const collected = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir,
+      env: 'docker',
+      envOptions: { contexts: 'ctx-a', image: 'mst-test:1' },
+      grade: false,
+      report: false,
+    });
+    const before = (await calls()).length;
+    // Grading starts no client: it needs no inference.
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    const graded = await gradeRun({
+      configPath,
+      rootDir: dir,
+      outputDir,
+      run: path.basename(collected.outputDir),
+      env: 'docker',
+      envOptions: { shards: '2', contexts: 'ctx-a', image: 'mst-test:1' },
+      report: false,
+    });
+    expect(graded.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    const runs = (await calls())
+      .slice(before)
+      .filter((call) => call.args[0] === 'run');
+    // Both on the one context: no VM, so no host-wide port to share.
+    expect(runs.map((call) => call.context)).toEqual(['ctx-a', 'ctx-a']);
+    for (const run of runs) {
+      expect(run.args).not.toContain('/dev/kvm');
+      expect(run.args.join(' ')).not.toContain('MST_INFERENCE');
+      expect(run.args.slice(-4)).toEqual([
+        'mst-test:1',
+        '--',
+        'sleep',
+        'infinity',
+      ]);
+    }
+    // Each container's worker graded; none collected.
+    const workers = (await calls())
+      .slice(before)
+      .filter((call) => call.args[0] === 'exec')
+      .map((call) =>
+        call.args.find((arg) => /^(collect|grade-shard)$/.test(arg))
+      )
+      .filter(Boolean);
+    expect(workers).toEqual(['grade-shard', 'grade-shard']);
+    const stored = await readRunDirectory(graded.outputDir);
+    expect(stored.run.grading?.environment).toMatchObject({
+      name: 'docker',
+      shards: 2,
+    });
+    expect(
+      stored.run.grading?.environment.machines?.map((machine) => machine.ok)
+    ).toEqual([true, true]);
+    expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
+  }, 120_000);
+
+  it('removes the containers a dead run on this machine left, and only those', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, root, configPath } = await fixture();
+    // A process that has exited: the owner of the orphan.
+    const dead = spawnSync(process.execPath, ['-e', '']).pid;
+    const container = async (name: string, labels: string[]) => {
+      await fs.mkdir(path.join(root, 'containers', name), { recursive: true });
+      await fs.writeFile(
+        path.join(root, 'containers', name, 'run-args.json'),
+        JSON.stringify(labels.flatMap((label) => ['--label', label]))
+      );
+    };
+    await container('mst-orphan-1', [
+      'mst.run=orphan',
+      `mst.owner.host=${os.hostname()}`,
+      `mst.owner.pid=${dead}`,
+    ]);
+    await container('mst-elsewhere-1', [
+      'mst.run=elsewhere',
+      'mst.owner.host=another-machine',
+      `mst.owner.pid=${dead}`,
+    ]);
+    await container('mst-debug-1-kept', [
+      'mst.run=debug',
+      `mst.owner.host=${os.hostname()}`,
+      `mst.owner.pid=${dead}`,
+    ]);
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { shards: '1', image: 'mst-test:1' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    expect((await fs.readdir(path.join(root, 'containers'))).sort()).toEqual([
+      'mst-debug-1-kept',
+      'mst-elsewhere-1',
+    ]);
+    expect(log.mock.calls.map((call) => String(call[0]))).toContain(
+      '[mst] removed container mst-orphan-1: the run that started it is gone'
+    );
   }, 120_000);
 
   it("fails a shard whose desktop doesn't come up, with the image's reason", async () => {

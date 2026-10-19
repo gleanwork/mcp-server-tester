@@ -15,6 +15,32 @@
 
 
 
+## v2.0.0-beta.12 (2026-10-14)
+
+
+## v2.0.0-beta.11 (2026-10-13)
+
+#### :rocket: Enhancement
+
+- [#437](https://github.com/gleanwork/mcp-server-tester/pull/437) feat(evals): record each shard's machine and the client app a run ran ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#433](https://github.com/gleanwork/mcp-server-tester/pull/433) feat(evals): install an eval's plugins in the docker image, and check workers run their versions ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :bug: Bug Fix
+
+- [#438](https://github.com/gleanwork/mcp-server-tester/pull/438) fix(report): keep each variant's trials in its own column in the trial dialog ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#436](https://github.com/gleanwork/mcp-server-tester/pull/436) fix(report): count cached tokens, only the eval's servers' MCP calls, and never compare with a run missing trials ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [#435](https://github.com/gleanwork/mcp-server-tester/pull/435) fix(cowork): give a Linux owned desktop's HTTP servers their credentials ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :memo: Documentation
+
+- [#439](https://github.com/gleanwork/mcp-server-tester/pull/439) docs: define official MCP servers and the client's own connectors ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### Committers: 1
+
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+
+
 ## v2.0.0-beta.10 (2026-10-12)
 
 #### :boom: Breaking Change

@@ -38,12 +38,12 @@ npm run format:check        # Check formatting
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities. `auth/grants/` holds connectors and refresh grants: connector lookup and grant grouping (`connectors.ts`), sign-in, refresh and revocation (`grants.ts`), and the built-in credential store `mst/credential-store/local` (`localStore.ts`). A run stages and renews connector tokens in `evals/connectorServers.ts`
 - **`assertions/`** - Unified assertion architecture (see below)
-- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `mst` client on a Playwright test's connection, an eval's client, a custom `executeCase`) returns a typed `CaseExecution` (`completed` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTrace` view, resolves judge settings (including the eval config's judges), then calls the validators. Desktop clients (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, client-native session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop client supplies only prepare, one case, reset and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
+- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `mst` client on a Playwright test's connection, an eval's client, a custom `executeCase`) returns a typed `CaseExecution` (`completed` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTrace` view, resolves judge settings (including the eval config's judges), then calls the validators. Desktop clients (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, failure diagnosis before a reset, client-native session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop client supplies only prepare, one case, reset, an optional diagnose and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
 - **`llm/`** - `resolveLLMEndpoint()`: the one place MST's own LLM calls (SDK client, judges) get their base URL and credential, including gateway bearer tokens and `MST_LLM_AUTH_COMMAND`. New LLM consumers resolve through it rather than reading `*_API_KEY` themselves. See `docs/llm-gateways.md`
 - **`evals/runFormat.ts`** - The `mst.run/v1` run directory: run IDs, paths, the writer and the Zod schemas `schema/run/v1/` is generated from (`npm run schema:generate`)
-- **`judge/`** - LLM-as-a-judge. `llmJudge.ts` is the one core (prompt, verdict parser, output guard); each provider in `JUDGE_PROVIDER_KINDS` (`anthropic`, `vertex-anthropic`, `anthropic-agent-sdk`, `openai`, `google`) is a completion adapter mapped in `judgeClient.ts`. `judge/agentic/` holds agentic judges (`agenticJudge`, `agenticPairwiseJudge`), which run an agent over a workspace of the trial's evidence on the `claude-agent` or `codex` runtime. `builtinJudges.ts` has the built-in `rubric` judge
+- **`judge/`** - LLM-as-a-judge. `llmJudge.ts` is the one core (prompt, verdict parser, output guard); each provider in `JUDGE_PROVIDER_KINDS` (`anthropic`, `vertex-anthropic`, `anthropic-agent-sdk`, `openai`, `google`) is a completion adapter mapped in `judgeClient.ts`. `judge/agentic/` holds agentic judges (`agenticJudge`, `agenticPairwiseJudge`), which run an agent over a workspace of the trial's evidence on the `claude-agent` or `codex` runtime, and `stagedPairwiseJudge` (`stagedJudge.ts`), which runs a staged judge: a serialized bundle of files, prepare programs and agent stages. `builtinJudges.ts` has the built-in `rubric` judge
 - **`proxy/`** - The dry-run proxy (`dryRunProxyServer()`), which a connector's `launch` puts in front of a vendor server to let reads through and block writes, and simulated writes (`simulatedWrites.ts`), which answer blocked writes with a success reply when an eval config sets `simulateWrites`
-- **`evals/environments/`** - Where trials are collected (ADR 0004): the `env` kind's built-ins `local` (`builtinEnvironments.ts`) and `docker` (`docker.ts`: containers from the Linux Cowork image in `docker/cowork-linux/`, one per Docker context at a time, over the Docker CLI; `mst env setup docker` builds the image), the channel helper `machineEnvironment` (`channel.ts`), the `mst.shard/v1` messages (`protocol.ts`), the coordinator's sharded collect (`shardedCollect.ts`), the worker behind the hidden `mst collect` (`collect.ts`), and the run-wide `limits` (`limiter.ts`)
+- **`evals/environments/`** - Where trials are collected (ADR 0004): the `env` kind's built-ins `local` (`builtinEnvironments.ts`) and `docker` (`docker.ts`: containers from the Linux Cowork image in `docker/cowork-linux/`, one per Docker context at a time, over the Docker CLI; `dockerContainers.ts` removes them when MST exits or its process is gone; `mst env setup docker` builds the image), the channel helper `machineEnvironment` (`channel.ts`), the `mst.shard/v1` messages (`protocol.ts`), the coordinator's sharded collect (`shardedCollect.ts`), the worker behind the hidden `mst collect` (`collect.ts`), and the run-wide `limits` (`limiter.ts`)
 - **`plugins/`** - ESLint-style plugins: the `Plugin` shape and validation (`plugin.ts`), the process-wide extension table keyed by `<namespace>/<kind>/<name>` (names parsed and kind-checked in `plugin.ts` and `extensions.ts`), where each kind's lookup (next to its built-ins) adds them under bare names (`extensions.ts`), and the loader (`loadPlugins.ts`). `evals/evalPlugins.ts` loads an eval's plugins and checks it only references namespaces it loads. Domain terms are in `CONTEXT.md`; decisions in `docs/adr/`
 - **`spec/`** - Conformance check registry (`checks/core.ts`, `checks/modern.ts`, `checks/skills.ts`), raw probe channel, and cross-era checks
 - **`reporters/`** - The run report UI (React) and the MCP Playwright reporter, which reports evals only: each Playwright run's eval results are a `mst.run/v1` run (a variant per project) with the same report `mst run` writes (`evals/runReport.ts`). Tests and conformance checks are in Playwright's own reporter. `reporters/channel.ts` owns every attachment the reporter reads (names, payload types, read-side Zod schemas). Write with `attachReporterData(testInfo, { kind, data })`, never `testInfo.attach('mcp-...')` directly
@@ -114,7 +114,7 @@ The public API is tiered. Each name is exported from exactly one of these entry 
 - `./auth` (`src/entries/auth.ts`) - Low-level OAuth: discovery, token storage, client credentials
 - `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop-run metadata types, Cowork settings and audit, client plugins (may change between minors)
 - `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
-- `./cowork-runtime`, `./cowork-linux-runtime`, `./chatgpt-linux-runtime`, `./cowork-requirements` - The desktop drivers' Python scripts and pinned requirements, exported as files rather than code
+- `./cowork-linux-runtime`, `./chatgpt-linux-runtime` - The Linux desktop drivers' Python scripts, exported as files rather than code
 - `./cowork-linux-image` - The Linux Cowork image's Dockerfile (`docker/cowork-linux/`, with its scripts and seccomp profile), exported as a file so `mst env setup docker` finds the directory
 
 The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (the extension table, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only `Symbol.for` state (the extension table and the plugin-load cache) is shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. `src/publicApi.test.ts` pins each entry point's runtime exports: after a deliberate change, update it with `npx vitest run src/publicApi.test.ts -u` and note any removal in the migration guides. Tests count as users, so an export only a test imports is not flagged.
@@ -345,3 +345,56 @@ To add a new provider:
 1. Implement the `OAuthClientProvider` interface from `@modelcontextprotocol/client`
 2. Add utilities to `src/auth/` module
 3. Export documented helpers from `src/index.ts` (root); export low-level OAuth from `src/entries/auth.ts` (`./auth`)
+
+<!-- configure-agents:review start -->
+
+## Ask first
+
+Agents ask a person in the current conversation before running these commands or tools in this repository. The rules live in `.claude/settings.json` (the `self-merge` preset); edit them there and run `configure-agents review` to update this section.
+
+- `Bash(gh pr comment *)`
+- `Bash(gh pr review *)`
+- `Bash(gh pr close *)`
+- `Bash(gh issue create *)`
+- `Bash(gh issue comment *)`
+- `Bash(gh issue close *)`
+- `Bash(gh release *)`
+- `Bash(npm publish *)`
+- `Bash(pnpm publish *)`
+- `Bash(yarn npm publish *)`
+- `Bash(git push -f *)`
+- `Bash(git push * -f)`
+- `Bash(git push * -f *)`
+- `Bash(git push *--force*)`
+- `Bash(git push * main)`
+- `Bash(git push * master)`
+- `Bash(git push *:main)`
+- `Bash(git push *:master)`
+- `mcp__*github*__create_*`
+- `mcp__*github*__add_*`
+- `mcp__*github*__update_*`
+- `mcp__*github*__merge_*`
+- `mcp__*github*__submit_*`
+- `mcp__*github*__delete_*`
+- `mcp__*github*__push_*`
+- `mcp__*slack*__*post*`
+- `mcp__*slack*__*send*`
+
+## Never
+
+Agents never run these in this repository:
+
+- Nothing is denied outright.
+
+## Code review
+
+Follow [REVIEW.md](REVIEW.md) when reviewing changes in this repository.
+
+<!-- configure-agents:review end -->
+
+## Commit and PR guidelines
+
+- Branch names: a short description of the change, such as `fix/report-columns`. No tool prefixes.
+- Commits: Conventional Commits, `type(scope): summary`, for example `fix(report): ...`.
+- Merge method: squash, the only method this repo enables.
+- Releases: `release-it` with `@release-it-plugins/lerna-changelog`. A maintainer runs it; agents do not.

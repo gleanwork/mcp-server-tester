@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { runEval } from '../src/evals/runEval.js';
-import { runReportPath } from '../src/evals/runReport.js';
+import { runReportPath, writeRunReport } from '../src/evals/runReport.js';
 import type { Plugin } from '../src/plugins/plugin.js';
 
 const plugin: Plugin = {
@@ -28,6 +28,21 @@ const plugin: Plugin = {
             finalText: '',
             events: [],
             error: 'connect ETIMEDOUT 10.0.0.1:443',
+          };
+        // The `long` variant's call and answer have lines nothing can break.
+        if (context.variant?.name === 'long')
+          return {
+            finalText: `See https://example.com/${'x'.repeat(240)}`,
+            events: [
+              {
+                kind: 'tool_call' as const,
+                source: 'mcp' as const,
+                name: 'grep',
+                server: 'acme',
+                arguments: { pattern: '(^##\\d+\\.|^\\*\\*Source|'.repeat(12) },
+                isError: false,
+              },
+            ],
           };
         const calls =
           context.variant?.name === 'searching' ||
@@ -169,17 +184,103 @@ test.describe('run report', () => {
     await expect(result).toContainText('ETIMEDOUT');
   });
 
-  test('a single variant opens on the cases that need attention', async ({
+  test("keeps each variant's trials in its own column, however long their lines", async ({
     page,
   }) => {
+    const report = await reportFor([{ name: 'quiet' }, { name: 'long' }]);
+    await page.setViewportSize({ width: 1024, height: 900 });
+    await page.goto(`file://${report}`);
+    await page.getByRole('button', { name: /^long, find-refunds: / }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('acme.grep(pattern:');
+    // Side by side, neither column is wider than its share of the dialog.
+    const overflow = await dialog.locator('h3').evaluateAll((headings) =>
+      headings.map((heading) => {
+        const column = (
+          heading as unknown as {
+            parentElement: { scrollWidth: number; clientWidth: number };
+          }
+        ).parentElement;
+        return column.scrollWidth - column.clientWidth;
+      })
+    );
+    expect(overflow).toEqual([0, 0]);
+  });
+
+  test('a single variant has the same sections, and opens on the cases that need attention', async ({
+    page,
+  }) => {
+    // quiet calls no tools, so every case fails.
     const report = await reportFor([{ name: 'quiet' }]);
     await page.goto(`file://${report}`);
-    await expect(page.getByText('of trials passed.')).toBeVisible();
+    const result = page.getByRole('heading', { name: 'Result' }).locator('..');
+    await expect(result).toContainText('Pass rate, and where it likely lies');
+    await expect(result).toContainText('likely 0–');
+    await expect(result).toContainText('Too few trials to tell.');
+    await expect(page.getByRole('heading', { name: 'Variant' })).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /Needs attention/, pressed: true })
+      page.getByRole('button', { name: /Not fully passing/, pressed: true })
     ).toBeVisible();
+  });
+
+  test('a run with too few trials never headlines a green 100%', async ({
+    page,
+  }) => {
+    // searching passes every trial of its 3 cases.
+    const report = await reportFor([{ name: 'searching' }]);
+    await page.goto(`file://${report}`);
+    const result = page.getByRole('heading', { name: 'Result' }).locator('..');
+    const rate = result.getByText('100%', { exact: true });
+    await expect(rate).toBeVisible();
+    await expect(rate).not.toHaveClass(/green/);
+    await expect(result).toContainText(
+      // The low end, said as the weakest rate the run can't rule out.
+      "All 6 trials passed, but 2 trials per case can't tell a server that always passes from one that passes 17.9% of the time."
+    );
+    // Three cases: no number of trials pins the rate down.
+    await expect(result).toContainText(
+      "More trials per case won't narrow it enough with 3 cases: add cases."
+    );
+    await expect(result).toContainText('36 passing trials in a row');
+    // Nothing needs attention, so the grid shows every case.
     await expect(
-      page.getByRole('heading', { name: 'Variants compared' })
-    ).toHaveCount(0);
+      page.getByRole('button', { name: /^All/, pressed: true })
+    ).toBeVisible();
+  });
+
+  test('says where a regrade graded the trials, and on which machines', async ({
+    page,
+  }) => {
+    const report = await reportFor([{ name: 'searching' }]);
+    // A regrade on an environment's machines (mst grade --env) records them.
+    const runDirectory = path.dirname(path.dirname(report));
+    const runJson = path.join(runDirectory, 'run.json');
+    const run = JSON.parse(await fs.readFile(runJson, 'utf8'));
+    run.grading = {
+      environment: {
+        name: 'acme/env/cloud-vm',
+        shards: 2,
+        machines: [1, 2].map((shard) => ({
+          shard,
+          mst: '2.0.0',
+          image: 'acme-grader:1@sha256:feed',
+          ok: true,
+          graded: 3,
+          failed: 0,
+        })),
+      },
+    };
+    await fs.writeFile(runJson, JSON.stringify(run));
+    await writeRunReport(runDirectory);
+    await page.goto(`file://${report}`);
+    await page.getByText('Run details').click();
+    const details = page.getByText('Run details').locator('..');
+    await expect(details).toContainText('Environmentlocal');
+    await expect(details).toContainText(
+      'Grading environmentacme/env/cloud-vm · 2 shards'
+    );
+    await expect(details).toContainText(
+      'shard 2: acme-grader:1@sha256:feed · MST 2.0.0'
+    );
   });
 });

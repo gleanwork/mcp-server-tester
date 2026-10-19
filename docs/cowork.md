@@ -131,7 +131,7 @@ servers through Claude's supported local Developer MCP surface instead:
   made concurrently. `cowork recover` also restores the developer configuration.
 
 Use actual tool-call assertions: successful endpoint preflight alone is not proof
-that the native session received a connector. A live pinned run has passed with
+that the Cowork session received the server. A live pinned run has passed with
 an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 
 ## Run on macOS from a source checkout
@@ -140,8 +140,7 @@ an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 COWORK_ENV_FILE=/absolute/path/to/existing.env ./scripts/run-cowork.sh --configs /absolute/path/to/eval.json
 ```
 
-This prepares a local Python environment, builds MST, and runs the supplied
-eval configs through `batch`. It submits real Claude tasks. The invoking terminal
+This builds MST and runs the supplied eval configs through `batch`. It submits real Claude tasks. The invoking terminal
 must have Accessibility and Screen Recording permission. Credentials remain in
 the existing dotenv file or exported environment; the runner never rewrites or
 shell-sources that file. Node loads dotenv before plugins/custom judges start.
@@ -195,7 +194,7 @@ never resubmitted. Follow-up usage is recorded under
 `clientTelemetry.computerUse.hitlFollowups`.
 
 MST does not configure or observe connectors added from Cowork's own connector
-directory, so disconnect any that could write to real accounts before a run, or
+directory (the client's own connectors), so disconnect any that could write to real accounts before a run, or
 use test accounts.
 
 ## Run an installed release
@@ -206,14 +205,12 @@ node --env-file=/absolute/path/to/existing.env node_modules/@gleanwork/mcp-serve
 
 For several eval configs, use `batch --configs <files...> --workers 1`.
 
-The release bundles the CU script and pinned Python requirements. Resolution does
-not depend on the caller's working directory or the location of its Python binary.
-Without `MST_COWORK_PYTHON`, MST creates a private temporary Python environment,
-installs the bundled requirements, reuses it within the process, and removes it
-at process exit. This requires Python 3.10+, pip access, and macOS desktop permissions.
-Set `MST_COWORK_PYTHON` to reuse a worker-prepared interpreter instead; MST never
-modifies it. `MST_COWORK_DRIVER_ROOT` remains an explicit development override.
-The source-checkout wrapper is a convenience, not required by `run` or `batch`.
+The Computer Use driver runs in the MST process. For mouse and keyboard input it
+compiles a small Swift helper, once per process, which needs the Xcode Command
+Line Tools (`xcode-select --install`). Screenshots use macOS's `screencapture`
+and `sips`. The terminal that runs MST needs Accessibility and Screen Recording
+permission. Nothing else is installed. The source-checkout wrapper is a
+convenience, not required by `run` or `batch`.
 
 ## Install an unreleased source pin
 
@@ -262,8 +259,15 @@ else can write it, so an image points `MST_COWORK_SETTINGS_FILE` at a staging
 file the desktop user owns, and its restart command installs a root-owned copy
 first. For each variant, MST then writes the
 variant's servers, plugins and model over the image's own settings, keeping the
-image's other keys and the `headersHelper` of an HTTP server with the same name
-and URL (MST writes no secrets there). It adds `AskUserQuestion` to the image's
+image's other keys. An HTTP server with headers or an access token (such as a
+connector server's) gets a `headersHelper` that prints its headers from a
+private file beside the staging file (`mcp-headers/`), so the settings hold no
+secrets. The helper holds none either; it's written to `MST_COWORK_HELPER_DIR`
+when the staging file's directory doesn't allow executing files (Docker mounts
+a tmpfs `noexec`), else beside the headers. Both are removed when the variant
+ends. Another HTTP
+server keeps the image's `headersHelper` for the same name and URL. It adds
+`AskUserQuestion` to the image's
 `disabledBuiltinTools`, so the image needn't. It runs the restart command, checks the
 file as above, and probes. When the variant ends, or if the desktop isn't ready,
 the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
@@ -403,9 +407,15 @@ the bytes present at audit time; notices contain no original digest to authentic
 - `cowork/driver.ts`: shared receipts, error classifications, and scoped telemetry.
 - `cowork/linux.ts`: readiness checks and execution against a caller-owned desktop.
 - `scripts/cowork_linux.py`: bounded semantic UI actions; no lifecycle or answer parsing.
-- `cowork/anthropicComputerUse.ts`: the macOS CU driver entry point and process limits.
-- `scripts/cowork_computer_use.py`: bounded screenshot navigation, executor-owned
-  query insertion, one submit boundary, and bounded first-option HITL handling.
+- `cowork/anthropicComputerUse.ts`: the macOS CU driver entry point, its deadline
+  and its error reporting.
+- `cowork/computerUseLoop.ts`: the planner loop: bounded screenshot navigation,
+  executor-owned query insertion, one submit boundary, model confirmation, focus
+  checks, and bounded HITL and reset handling.
+- `cowork/computerUsePlanner.ts`: the planner's Messages API calls, through
+  `resolveLLMEndpoint()`, with the Anthropic SDK's retry rules.
+- `cowork/macDesktop.ts`: screenshots, and input through a Swift helper
+  (`macDesktopSource.ts`) built with `nativeHelper.ts`.
 
 Cases run sequentially: snapshot, submit, bind, HITL, then native collection.
 Already-complete native tasks skip unnecessary HITL navigation. An exhausted inspection budget is
@@ -444,12 +454,14 @@ every click, key or scroll, the driver checks, and if another app is in front it
 brings Claude back, skips the action and has the planner take a new screenshot.
 If Claude can't be brought back, the case stops with `navigation_blocked` and
 nothing more is sent. A planner request that can't reach the API (a short network
-drop) is sent again after 2, 4, 8 and 16 seconds, on top of the SDK's own two
-quick retries: it has no effect on the desktop. If the API stays unreachable,
-the case fails with `provider_unavailable`; the driver log names the error's
-classes, such as `APIConnectionError <- ConnectError`. Timeouts aren't
-retried. MST discards the driver's own log; set
-`MST_COWORK_CUA_LOG_FILE` to a path to keep it. The log holds action and app
+drop) is sent again after 2, 4, 8 and 16 seconds, on top of two quick retries
+for each request, as the Anthropic SDK does: it has no effect on the desktop.
+If the API stays unreachable, the case fails with `provider_unavailable`; the
+driver log names the error's classes and system code, such as
+`TypeError <- Error(ECONNREFUSED)`. A request that times out gets the two quick
+retries, but not the longer ones: it may still be running. MST doesn't print
+the driver's step-by-step log; set `MST_COWORK_CUA_LOG_FILE` to a path to keep
+it. The log holds action and app
 names, never the query.
 
 Claude Code replaces a large tool result in its transcript with a

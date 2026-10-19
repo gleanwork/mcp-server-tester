@@ -13,6 +13,8 @@ import type {
   MCPComparisonData,
   MCPRunReportData,
   RunReportDifference,
+  RunReportEnvironment,
+  RunReportEvidence,
   RunReportPreference,
   RunReportScore,
   RunReportTrial,
@@ -20,7 +22,11 @@ import type {
   TrialResult,
 } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
-import type { EvaluationVariantResult } from './evalFrameworkTypes.js';
+import { totalTokens } from '../utils/usageUtils.js';
+import type {
+  EvaluationSummary,
+  EvaluationVariantResult,
+} from './evalFrameworkTypes.js';
 import { RUN_FORMAT } from './resultFormat.js';
 import {
   isInfraTrial,
@@ -28,7 +34,16 @@ import {
   type RunRecord,
   type StoredRun,
 } from './runFormat.js';
-import { compareVariants } from './variantComparison.js';
+import {
+  compareVariants,
+  headlineGroup,
+  headlineTallies,
+} from './variantComparison.js';
+import {
+  passRateInterval,
+  suggestedTrialsPerCase,
+  trialsToShow,
+} from './passRateInterval.js';
 import type { EvalRunnerResult, ToolMetadataOverride } from './evalRunner.js';
 
 /** The tag that marks a regression case in an eval's datasets. */
@@ -131,7 +146,7 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
     ...(usage &&
     (usage.inputTokens !== undefined || usage.outputTokens !== undefined)
       ? {
-          tokens: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+          tokens: totalTokens(usage),
         }
       : {}),
   };
@@ -277,6 +292,29 @@ function emptyResult(): EvalRunnerResult {
  * narrowed run left the baseline out, the first variant that ran is the
  * reference.
  */
+/**
+ * The client apps a run's trials recorded (`clientTelemetry.clientApp`), each
+ * once: a run whose app changed partway shows both.
+ */
+function clientApps(variants: EvaluationSummary['variants']): string[] {
+  const apps = new Set<string>();
+  for (const variant of variants)
+    for (const result of variant.result?.caseResults ?? [])
+      for (const telemetry of [
+        result.clientTelemetry,
+        ...(result.trialResults ?? []).map((trial) => trial.clientTelemetry),
+      ]) {
+        const app = telemetry?.clientApp as
+          | { name?: unknown; version?: unknown; source?: unknown }
+          | undefined;
+        if (typeof app?.name === 'string' && typeof app.version === 'string')
+          apps.add(
+            `${app.name} ${app.version}${app.source === 'pinned' ? ' (pinned)' : ''}`
+          );
+      }
+  return [...apps].sort();
+}
+
 export function buildRunReport(stored: StoredRun): MCPRunReportData {
   const { run, summary } = stored;
   const ran = summary.variants;
@@ -428,6 +466,10 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
   const counts = comparison.cases.flatMap((row) =>
     Object.values(row.trials).map((list) => list.length)
   );
+  const evidence =
+    run.phases.grade === 'skipped'
+      ? undefined
+      : evidenceOf(stored, comparison, counts.length ? Math.min(...counts) : 0);
   return {
     format: RUN_FORMAT,
     kind: 'report',
@@ -443,10 +485,23 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
       ...(run.selection ? { selection: run.selection } : {}),
       baseline: baselineName,
       baselineRan: baseline?.name === baselineName,
-      datasets: run.datasets.map(({ name, caseCount }) => ({
+      datasets: run.datasets.map(({ name, caseCount, contentHash }) => ({
         name,
         caseCount,
+        contentHash,
       })),
+      ...(run.environment.name
+        ? {
+            environment: reportEnvironment({
+              ...run.environment,
+              name: run.environment.name,
+            }),
+          }
+        : {}),
+      ...(run.grading
+        ? { gradingEnvironment: reportEnvironment(run.grading.environment) }
+        : {}),
+      ...(clientApps(ran).length ? { clientApps: clientApps(ran) } : {}),
       // Cases any variant ran; the grid shows the ones the baseline ran.
       cases: new Set(
         ran.flatMap((v) => (v.result?.caseResults ?? []).map((r) => r.id))
@@ -470,6 +525,7 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
     trials,
     preferences,
     graders: gradersOf(trials),
+    ...(evidence ? { evidence } : {}),
     ...(summary.toolOptimization
       ? { toolOptimization: summary.toolOptimization }
       : {}),
@@ -485,6 +541,89 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
         }
       : {}),
   };
+}
+
+/**
+ * Whether the run's headline pass rates are pinned down, and, when they
+ * aren't, the trials per case to run next with its time and cost at this
+ * run's pace.
+ */
+function evidenceOf(
+  stored: StoredRun,
+  comparison: MCPComparisonData,
+  trialsPerCase: number
+): RunReportEvidence | undefined {
+  const { run, summary } = stored;
+  if (comparison.variants.length === 0) return undefined;
+  const intervals = comparison.variants.map(
+    (variant) => headlineGroup(variant).interval
+  );
+  if (intervals.every((interval) => interval === undefined)) return undefined;
+  const tooWide = intervals.some((interval) => interval?.tooWide === true);
+  const trialsRan = comparison.variants.reduce((sum, v) => sum + v.trials, 0);
+  const allPassed =
+    trialsRan > 0 && comparison.variants.every((v) => v.failedTrials === 0);
+  const ran = summary.variants.filter((variant) => variant.result);
+  const next = tooWide ? nextTrialsPerCase(ran, trialsPerCase) : undefined;
+  const casesOf = (variant: EvaluationVariantResult) =>
+    variant.result?.caseResults.length ?? 0;
+  const suggestedTrials =
+    next === undefined
+      ? undefined
+      : ran.reduce((sum, variant) => sum + casesOf(variant) * next, 0);
+  const elapsedMs =
+    new Date(run.finishedAt).getTime() - new Date(run.createdAt).getTime();
+  // A run's pace is its own collect: a regrade's clock times grading only.
+  const estimatedMinutes =
+    suggestedTrials !== undefined &&
+    run.phases.collect === 'complete' &&
+    run.gradedFrom === undefined &&
+    elapsedMs > 0 &&
+    trialsRan > 0
+      ? (elapsedMs / 60_000) * (suggestedTrials / trialsRan)
+      : undefined;
+  const costs = ran.map((variant) => numberMetric(variant, 'cost_usd_mean'));
+  const estimatedCostUsd =
+    next !== undefined && costs.every((cost) => cost !== undefined)
+      ? ran.reduce(
+          (sum, variant, index) =>
+            sum + costs[index]! * casesOf(variant) * next,
+          0
+        )
+      : undefined;
+  return {
+    tooWide,
+    allPassed,
+    trialsPerCase,
+    ...(next !== undefined ? { suggestedTrialsPerCase: next } : {}),
+    ...(suggestedTrials !== undefined ? { suggestedTrials } : {}),
+    ...(estimatedMinutes !== undefined ? { estimatedMinutes } : {}),
+    ...(estimatedCostUsd !== undefined ? { estimatedCostUsd } : {}),
+    trialsToShow: [0.9, 0.95].map((rate) => ({
+      rate,
+      trials: trialsToShow(rate),
+    })),
+  };
+}
+
+/**
+ * The trials per case expected to pin down every variant's headline rate:
+ * the most any variant needs. Undefined when some variant's rate is held
+ * back by how much its cases differ, which more trials won't fix.
+ */
+function nextTrialsPerCase(
+  variants: EvaluationVariantResult[],
+  trialsPerCase: number
+): number | undefined {
+  let most: number | undefined;
+  for (const variant of variants) {
+    const tallies = headlineTallies(variant.result!);
+    if (!passRateInterval(tallies)?.tooWide) continue;
+    const next = suggestedTrialsPerCase(tallies, trialsPerCase);
+    if (next === undefined) return undefined;
+    most = Math.max(most ?? 0, next);
+  }
+  return most;
 }
 
 /** Clearly better, clearly worse, or unclear, from the paired tests. */
@@ -563,4 +702,25 @@ export async function writeRunReport(
     'utf8'
   );
   return runReportPath(runDirectory);
+}
+
+/** An environment and its shards' machines, as the report shows them. */
+function reportEnvironment(environment: {
+  name: string;
+  shards?: number;
+  machines?: Array<{ shard: number; image?: string; mst?: string }>;
+}): RunReportEnvironment {
+  return {
+    name: environment.name,
+    shards: environment.shards ?? 1,
+    ...(environment.machines?.length
+      ? {
+          machines: environment.machines.map(({ shard, image, mst }) => ({
+            shard,
+            ...(image ? { image } : {}),
+            ...(mst ? { mst } : {}),
+          })),
+        }
+      : {}),
+  };
 }

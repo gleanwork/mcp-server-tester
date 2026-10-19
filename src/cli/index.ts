@@ -12,6 +12,7 @@ import { run } from './commands/run/index.js';
 import { grade } from './commands/grade/index.js';
 import { batch } from './commands/batch/index.js';
 import { collect } from './commands/collect/index.js';
+import { gradeShardCommand } from './commands/grade-shard/index.js';
 import { setupCowork } from './commands/cowork/index.js';
 import {
   auth,
@@ -250,6 +251,10 @@ program
     "Don't write the run's report (mst open writes it when it opens the run)"
   )
   .option(
+    '--results <store>',
+    "Also keep the run in a result store, instead of the eval config's: gs://<bucket>/<prefix>, file:<dir>, or <namespace>/result-store/<name>"
+  )
+  .option(
     '--store <dir>',
     'Credential store for connector servers (default: ~/.mcp-server-tester/grants)'
   )
@@ -294,6 +299,20 @@ program
   .option(
     '--no-report',
     "Don't write the regrade's report (mst open writes it when it opens the run)"
+  )
+  .option(
+    '--results <store>',
+    "Also keep the regrade in a result store, instead of the eval config's: gs://<bucket>/<prefix>, file:<dir>, or <namespace>/result-store/<name>"
+  )
+  .option(
+    '--env <name>',
+    'Where to grade: local (the default), docker, or a plugin environment (<namespace>/env/<name>); judge keys go to its machines from --secrets-file'
+  )
+  .option(
+    '--env-option <key=value>',
+    "An environment option; repeat for more: shards=N, keep=never|failed|always, or the environment's own",
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[]
   )
   .action((runArg: string, options: Record<string, unknown>) =>
     grade(runArg, options as unknown as Parameters<typeof grade>[1])
@@ -395,6 +414,14 @@ program
   .requiredOption('--bundle <dir>', "The shard's bundle directory")
   .requiredOption('--results <dir>', 'Where to write result files')
   .action(collect);
+
+// Grade shard command: a grade shard's worker, started by environments (ADR 0005)
+program
+  .command('grade-shard', { hidden: true })
+  .description("Grade a shard of a stored run's cases (environments run this)")
+  .requiredOption('--bundle <dir>', "The shard's grade bundle directory")
+  .requiredOption('--results <dir>', 'Where to write result files')
+  .action(gradeShardCommand);
 
 // An ordinary mistake (a missing file, a misspelt key) prints one message,
 // not a stack trace; DEBUG shows the stack.

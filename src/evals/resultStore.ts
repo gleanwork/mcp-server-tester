@@ -1,4 +1,5 @@
 import { RUN_FORMAT, olderResultsError } from './resultFormat.js';
+import { loadGCSStorage } from './gcsStorage.js';
 import type { ProtocolEra } from '../types/index.js';
 import { readdir } from 'fs/promises';
 import { Readable, type Writable } from 'node:stream';
@@ -315,10 +316,6 @@ export class FileEvalResultStore implements EvalResultStore {
   }
 }
 
-type GCSStorageConstructor = new () => {
-  bucket(name: string): GCSBucket;
-};
-
 interface GCSBucket {
   file(name: string): GCSFile;
   getFiles(options: { prefix: string }): Promise<[GCSFile[]]>;
@@ -416,23 +413,7 @@ export class GCSEvalResultStore implements EvalResultStore {
   }
 
   private async getBucket(): Promise<GCSBucket> {
-    if (!this.storage) {
-      const moduleName = '@google-cloud/storage';
-      let Storage: GCSStorageConstructor;
-      try {
-        const mod = (await import(moduleName)) as {
-          Storage: GCSStorageConstructor;
-        };
-        Storage = mod.Storage;
-      } catch (error) {
-        throw new Error(
-          'GCS result storage requires the optional `@google-cloud/storage` package. ' +
-            'Install it and authenticate with Application Default Credentials via GOOGLE_APPLICATION_CREDENTIALS.\n' +
-            `Original error: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-      this.storage = new Storage();
-    }
+    this.storage ??= await loadGCSStorage<GCSBucket>();
     return this.storage.bucket(this.bucketName);
   }
 

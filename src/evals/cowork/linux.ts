@@ -1,15 +1,28 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  readdir,
+  statfs,
+  writeFile,
+} from 'node:fs/promises';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import { mcpServerLabel } from '../../config/mcpConfig.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { freemem, homedir, loadavg, totalmem, uptime } from 'node:os';
+import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
 import { transportServers } from '../evalConfig.js';
+import { headersHelper } from '../coworkSetup/bundle.js';
+import { resolveCoworkMcpHeaders } from '../coworkSetup/config.js';
 import {
   clientStdioFileContents,
   clientStdioServers,
@@ -45,6 +58,9 @@ import {
   type SemanticDesktopTelemetry,
 } from './driver.js';
 
+/** The most one UI submission may take, within the case deadline. */
+export const SUBMIT_TIMEOUT_MS = 10 * 60_000;
+
 const SESSION_ENV = [
   'PATH',
   'HOME',
@@ -59,7 +75,7 @@ const SESSION_ENV = [
   'LC_ALL',
 ];
 interface Receipt {
-  status: 'ready' | 'submitted' | 'hitl_checked' | 'failed';
+  status: 'ready' | 'submitted' | 'hitl_checked' | 'diagnosed' | 'failed';
   action_count: number;
   duration_ms: number;
   errorCode?: string;
@@ -122,9 +138,11 @@ async function writeSettingsText(file: string, text: string): Promise<void> {
 /**
  * Managed settings for owned-desktop mode (ADR 0004): the image's own
  * settings, with the variant's servers, plugins and model in place of
- * whatever was there. An HTTP server keeps the image's `headersHelper` for
- * the same name and URL, since MST writes no secrets here. Exactly what
- * `prepare` then checks.
+ * whatever was there. An HTTP server with credentials gets MST's
+ * `headersHelper` (`helpers`, by name), which reads them from a private file;
+ * the settings hold no secrets. Another HTTP server keeps the image's
+ * `headersHelper` for the same name and URL. Exactly what `prepare` then
+ * checks.
  */
 function coworkLinuxOwnedSettings(
   base: Record<string, unknown>,
@@ -134,6 +152,7 @@ function coworkLinuxOwnedSettings(
     paths?: ClientStdioPaths;
     approveWriteTools?: boolean;
     model?: string;
+    helpers?: ReadonlyMap<string, string>;
   }
 ): Record<string, unknown> {
   const managed = coworkManagedPluginSettings(options);
@@ -143,12 +162,14 @@ function coworkLinuxOwnedSettings(
   const http = options.servers.flatMap((server, index) => {
     if (server.transport !== 'http') return [];
     const name = mcpServerLabel(server, index);
-    const helper = prior.find(
-      (entry) =>
-        entry?.name === name &&
-        entry.transport === 'http' &&
-        entry.url === server.serverUrl
-    )?.headersHelper;
+    const helper =
+      options.helpers?.get(name) ??
+      prior.find(
+        (entry) =>
+          entry?.name === name &&
+          entry.transport === 'http' &&
+          entry.url === server.serverUrl
+      )?.headersHelper;
     return [
       {
         name,
@@ -226,6 +247,103 @@ export function desktopRestartTimeoutMs(
  */
 const ownedDesktopSettings = new Map<string, string>();
 
+/**
+ * A Debian package's installed version, from dpkg's status file (the
+ * `Package:` stanza whose `Status:` says installed). Undefined when it isn't
+ * installed.
+ */
+export function installedDebVersion(
+  status: string,
+  name: string
+): string | undefined {
+  for (const stanza of status.split(/\n\s*\n/)) {
+    const field = (key: string) =>
+      new RegExp(`^${key}: (.+)$`, 'm').exec(stanza)?.[1]?.trim();
+    if (field('Package') !== name) continue;
+    if (!/\binstalled$/.test(field('Status') ?? '')) continue;
+    return field('Version');
+  }
+  return undefined;
+}
+
+/** The Claude Desktop package this machine runs, as each case records it. */
+async function installedClaudeDesktop(): Promise<
+  { name: string; version: string; source: 'installed' } | undefined
+> {
+  try {
+    const version = installedDebVersion(
+      await readFile('/var/lib/dpkg/status', 'utf8'),
+      'claude-desktop'
+    );
+    return version
+      ? { name: 'Claude', version, source: 'installed' }
+      : undefined;
+  } catch {
+    // Not a Debian system, or no dpkg: nothing to record.
+    return undefined;
+  }
+}
+
+interface ServerHeaderFiles {
+  /** Each server's helper, by server name. */
+  helpers: Map<string, string>;
+  remove(): Promise<void>;
+}
+
+/**
+ * For each HTTP server with headers or an access token (a connector server's
+ * comes in `env`), a private file of its headers in `directories.headers`,
+ * and a `headersHelper` that prints them in `directories.helpers`. Claude
+ * Desktop runs the helper when it connects, so the managed settings never
+ * hold a credential. The helper holds none either, so it can be on a disk
+ * that allows executing it while the headers stay in a tmpfs that doesn't.
+ */
+async function writeServerHeaders(
+  servers: readonly MCPConfig[],
+  env: Record<string, string | undefined>,
+  directories: { headers: string; helpers: string }
+): Promise<ServerHeaderFiles> {
+  const helpers = new Map<string, string>();
+  const files: string[] = [];
+  for (const [index, server] of servers.entries()) {
+    if (server.transport !== 'http') continue;
+    const name = mcpServerLabel(server, index);
+    const headers = Object.values(
+      resolveCoworkMcpHeaders([{ ...server, label: name }], env)
+    )[0]!;
+    if (Object.keys(headers).length === 0) continue;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name))
+      throw new Error(
+        `Linux Cowork can't name a credentials file for server "${name}": use a label of letters, digits, ".", "_" and "-".`
+      );
+    for (const directory of new Set(Object.values(directories)))
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+    const file = join(directories.headers, `${name}.json`);
+    const helper = join(directories.helpers, `${name}-headers`);
+    // Replaced whole, so the helper never reads a file being written.
+    const temporary = `${file}.${process.pid}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(headers)}\n`, { mode: 0o600 });
+    await rename(temporary, file);
+    await writeFile(
+      helper,
+      headersHelper(
+        file,
+        Object.keys(headers),
+        Object.keys(server.auth ?? {}).length > 0
+      ),
+      { mode: 0o700 }
+    );
+    helpers.set(name, helper);
+    files.push(file, helper);
+  }
+  return {
+    helpers,
+    async remove() {
+      await Promise.all(files.map((file) => rm(file, { force: true })));
+    },
+  };
+}
+
 /** Runs the image's desktop restart command; it returns once Claude is back. */
 async function restartDesktop(
   command: string,
@@ -284,7 +402,7 @@ function receipt(stdout: string): Receipt | undefined {
     if (!parsed || typeof parsed !== 'object') return undefined;
     const r = parsed as Record<string, unknown>;
     if (
-      !['ready', 'submitted', 'hitl_checked', 'failed'].includes(
+      !['ready', 'submitted', 'hitl_checked', 'diagnosed', 'failed'].includes(
         String(r.status)
       ) ||
       typeof r.action_count !== 'number' ||
@@ -310,7 +428,7 @@ function receipt(stdout: string): Receipt | undefined {
 }
 
 async function execute(
-  mode: 'probe' | 'reset' | 'submit' | 'hitl',
+  mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'diagnose',
   payload: object,
   options: CoworkDriverOptions
 ): Promise<Receipt> {
@@ -335,7 +453,16 @@ async function execute(
   const script = createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url
   ).resolve('@gleanwork/mcp-server-tester/cowork-linux-runtime');
-  const timeout = Math.min(remaining, mode === 'submit' ? 60_000 : 10_000);
+  // A hard query's UI submission can take minutes on a cold desktop; the
+  // case deadline still bounds it.
+  const timeout = Math.min(
+    remaining,
+    mode === 'submit'
+      ? SUBMIT_TIMEOUT_MS
+      : mode === 'diagnose'
+        ? 20_000
+        : 10_000
+  );
   // Reserve time for the bounded driver to return its final receipt.
   const driverTimeout = Math.max(
     1,
@@ -380,7 +507,9 @@ async function execute(
       ? 'ready'
       : mode === 'submit'
         ? 'submitted'
-        : 'hitl_checked';
+        : mode === 'diagnose'
+          ? 'diagnosed'
+          : 'hitl_checked';
   if (
     result.failed ||
     record?.status !== expected ||
@@ -458,6 +587,58 @@ async function verifyStdioPaths(
   }
 }
 
+/** How much of the end of each of Cowork's logs a failed case keeps. */
+const LOG_TAIL_BYTES = 256 * 1024;
+
+/** The last LOG_TAIL_BYTES of each of Cowork's logs in `from`, into `to`. */
+async function copyLogTails(from: string, to: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(from);
+  } catch {
+    return;
+  }
+  await mkdir(to, { recursive: true });
+  for (const name of names) {
+    if (!/^[\w.-]+\.(log|jsonl)$/.test(name)) continue;
+    let file;
+    try {
+      file = await open(
+        join(from, name),
+        constants.O_RDONLY | constants.O_NOFOLLOW
+      );
+      const info = await file.stat();
+      if (!info.isFile()) continue;
+      const length = Math.min(info.size, LOG_TAIL_BYTES);
+      const buffer = Buffer.alloc(length);
+      await file.read(buffer, 0, length, info.size - length);
+      await writeFile(join(to, name), buffer, { mode: 0o600 });
+    } catch {
+      // Best effort: the rest still says what happened.
+    } finally {
+      await file?.close();
+    }
+  }
+}
+
+/** The machine's state when a case failed: memory, load and the data disk. */
+async function systemState(dataDir: string): Promise<object> {
+  const disk = await statfs(dataDir).catch(() => undefined);
+  return {
+    memory: { freeBytes: freemem(), totalBytes: totalmem() },
+    loadAverage: loadavg(),
+    uptimeSeconds: uptime(),
+    ...(disk
+      ? {
+          dataDisk: {
+            freeBytes: disk.bavail * disk.bsize,
+            totalBytes: disk.blocks * disk.bsize,
+          },
+        }
+      : {}),
+  };
+}
+
 /** Attach to caller-owned resources. Never create, authenticate, or stop a desktop. */
 export const linuxCoworkPlatform: CoworkPlatform = {
   dataDirectory: (options) =>
@@ -478,6 +659,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     const owned = env.MST_DESKTOP_OWNED === '1';
     let original: string | undefined;
     let ownedText: string | undefined;
+    let headerFiles: ServerHeaderFiles | undefined;
     if (owned) {
       const restart = env.MST_DESKTOP_RESTART;
       if (!restart || !isAbsolute(restart))
@@ -488,22 +670,37 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       const base = original
         ? (JSON.parse(original) as Record<string, unknown>)
         : {};
+      const servers = transportServers(evalConfig.servers, 'Cowork');
+      // MST_COWORK_HELPER_DIR: where the helpers can be executed, when the
+      // staging file's directory is a noexec tmpfs (as Docker mounts one).
+      const headers = join(dirname(settingsFile), 'mcp-headers');
+      const helperDir = env.MST_COWORK_HELPER_DIR ?? headers;
+      if (!isAbsolute(helperDir))
+        throw new Error('MST_COWORK_HELPER_DIR must be an absolute path.');
+      headerFiles = await writeServerHeaders(servers, env, {
+        headers,
+        helpers: helperDir,
+      });
       ownedText = `${JSON.stringify(
         coworkLinuxOwnedSettings(base, {
-          servers: transportServers(evalConfig.servers, 'Cowork'),
+          servers,
           plugins,
           paths: stdioPaths,
           approveWriteTools: evalConfig.coworkSetup?.approveWriteTools === true,
           ...(model ? { model } : {}),
+          helpers: headerFiles.helpers,
         }),
         null,
         2
       )}\n`;
       await writeSettingsText(settingsFile, ownedText);
     }
-    // In owned mode the settings go back, whether or not the desktop is ready.
+    // In owned mode the settings go back, whether or not the desktop is ready,
+    // and the servers' credentials are removed.
     const restore = async () => {
-      if (owned) await writeSettingsText(settingsFile, original ?? '{}\n');
+      if (!owned) return;
+      await writeSettingsText(settingsFile, original ?? '{}\n');
+      await headerFiles?.remove();
     };
     try {
       if (owned && ownedDesktopSettings.get(settingsFile) !== ownedText) {
@@ -521,7 +718,8 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       await restore().catch(() => {});
       throw error;
     }
-    return { dispose: restore };
+    const app = await installedClaudeDesktop();
+    return { dispose: restore, ...(app ? { app } : {}) };
 
     async function checkAndProbe(): Promise<void> {
       try {
@@ -566,6 +764,24 @@ export const linuxCoworkPlatform: CoworkPlatform = {
   async recover() {
     throw new Error(
       'Linux desktop recovery belongs to the runtime owner, not the MST driver.'
+    );
+  },
+  async diagnose({ dir, dataDir, env }) {
+    // Read-only: the screen and the app's accessible controls (the driver's
+    // diagnose mode), Cowork's own logs, and the machine's state.
+    await execute(
+      'diagnose',
+      { dir },
+      { deadlineAt: Date.now() + 20_000, maxActions: 1, env }
+    ).catch(() => {
+      // Partial is still useful: the driver records what it couldn't capture.
+    });
+    // Cowork keeps its logs beside its session data (Claude-3p/logs).
+    await copyLogTails(join(dirname(dataDir), 'logs'), join(dir, 'logs'));
+    await writeFile(
+      join(dir, 'system.json'),
+      `${JSON.stringify(await systemState(dataDir), null, 2)}\n`,
+      { mode: 0o600 }
     );
   },
   async reset(options) {

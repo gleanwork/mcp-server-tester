@@ -38,7 +38,7 @@ runtime validation is provided by `EvalConfigSchema`.
   "results": {
     "store": {
       "type": "file",
-      "dir": ".mcp-test-results"
+      "dir": "./shared-results"
     }
   },
   "variants": [
@@ -95,7 +95,7 @@ export default plugin;
 - **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
 - **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEval` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** An eval config may only reference namespaces of plugins it loads, even if another eval in the same process (a batch) loaded more. The same check applies to the clients and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
-- **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), `create` (result stores), and `open` (environments, with an optional positive `maxShards`). MST validates the plugin when it loads, and names the plugin and extension in any error.
+- **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), `create` (result stores, returning a [`RunStore`](#result-stores)), and `open` (environments, with an optional positive `maxShards`). MST validates the plugin when it loads, and names the plugin and extension in any error.
 - **Environments.** `environments` declares where a run's trials can be collected, used as `mst run --env acme/env/cloud-vm` ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)). An environment's `schema` checks its `--env-option`s, which arrive as strings, except `shards` and `keep`, which MST owns. In a plugin environment, MST first collects every variant's trials on `shards` machines, splitting cases by `hash(caseId) mod shards` so that a case's variants and trials share one machine. It saves each trial as it comes back, then grades them all on this machine as it grades a batch's. A trial whose shard ended without it is **missing** (`failureKind: 'missing'`): its case is incomplete, so it is left out of `total`, `passed`, `failed` and the pass rate, and counted in `incomplete`. The run is `collect: partial` and doesn't become `latest.json`. Ctrl-C stops the shards and keeps what came back; a second Ctrl-C quits. Workers get the `--secrets-file` values (not this machine's environment) and resolve their servers' secrets themselves. A connector server goes to a worker as its declaration: the worker's plugin launches it with the worker's paths, and the worker asks this machine for the server's access token when it starts and again before the token expires, so refresh grants stay here. A variant's tool metadata is served by a proxy on the worker. `mst run --resume <run-id>` (`resumeRun`) completes such a run: it collects only the missing trials in the same environment, grades every trial again (the others from their stored traces, so the run must store them with `"redactStoredResponses": false`), and writes the run into its own directory, which becomes `latest.json` once nothing is missing. Connector servers and variants with tool metadata can't run in an environment yet. `run.json`'s `environment` records the environment's name, shards, and any `keep` or options, so options must not hold secrets.
 
   Most environments only create machines. `machineEnvironment` (from `./evals`) builds the rest: it copies the shard's bundle to the machine, starts the hidden `mst collect` there, answers the worker's `mst.shard/v1` messages (tokens, progress, heartbeats, cancel), copies the results back after each trial, and deletes the machine when the shard ends, or keeps it as `keep` says:
@@ -120,6 +120,8 @@ export default plugin;
     },
   };
   ```
+
+  An environment whose machines are Docker hosts, such as cloud VMs, can leave the containers to the built-in `docker` environment: create the hosts and a Docker context for each, then return `dockerEnvironment.open({ contexts: names.join(','), image }, context)` (from `./evals`) with a `close` that also deletes the hosts. Its `setup` builds the image on the contexts it's given.
 
   A worker machine needs the same MST version as the coordinator (a mismatch fails the shard at `hello`), on `PATH` as `mst`, and the client's plugin. Access tokens reach it only over stdin; the worker writes them to `MST_TOKENS_DIR` (default `/run/mst/tokens`, which a worker image should mount as tmpfs), one file per server label, renews them before they expire, and removes them at the end. `MST_IMAGE` names the image in the worker's `hello`. A shard's failures (no machine, a silent or cancelled worker) are its outcome; `runShard` doesn't throw for them.
 
@@ -380,7 +382,11 @@ What each runtime can reach:
   the network, and web search is off. It is **not** confined to the
   workspace: read-only means its shell can read any file the user running MST
   can, by absolute path. Use it only on a machine where that is acceptable,
-  such as a CI runner with nothing else on it.
+  such as a CI runner with nothing else on it. In a container its sandbox
+  can't start (bubblewrap needs user namespaces), so every command fails; an
+  image that is the judge's sandbox sets `MST_JUDGE_SANDBOX=container`, and
+  Codex then runs unsandboxed inside it (MST's Linux Cowork image does, for
+  `mst grade --env`).
 - Each run starts with a fresh, empty config home (`CLAUDE_CONFIG_DIR`,
   `CODEX_HOME`) and loads no user settings, rules, memory or MCP servers. The
   agent's environment is an allowlist: `PATH`, `TMPDIR`, `LANG` and the
@@ -404,8 +410,78 @@ Claude uses `ANTHROPIC_API_KEY`, or `ANTHROPIC_BASE_URL` with
 `OPENAI_API_KEY`, or `OPENAI_BASE_URL` with `MST_LLM_AUTH_COMMAND`. The agent
 gets only the credential MST resolved. Claude needs
 `@anthropic-ai/claude-agent-sdk` and Codex `@openai/codex-sdk`, optional peer
-dependencies loaded only when the judge runs. A pointwise agentic judge's
-preflight checks the SDK and the credential before a run starts any client.
+dependencies loaded only when the judge runs. An agentic judge's preflight
+(pointwise or pairwise) checks the SDK and the credential before a run starts
+any client.
+
+#### Staged pairwise judges
+
+An agentic pairwise judge can also be data: a bundle of the files it needs
+and a graph of agent stages, which `stagedPairwiseJudge(bundle)` runs. A
+judge maintained elsewhere as prompt files, such as a team's production
+judge, runs in MST without being reimplemented: the plugin builds the bundle
+from those files and registers the result.
+
+```js
+import { stagedPairwiseJudge } from '@gleanwork/mcp-server-tester/evals';
+
+export default {
+  meta: { name: 'acme-judges', version: '1.0.0', namespace: 'acme' },
+  pairwiseJudges: {
+    'two-step': stagedPairwiseJudge({
+      schemaVersion: 1,
+      name: 'two-step',
+      files: [{ path: 'prompts/gather.md', content: gatherPrompt }],
+      stages: [
+        {
+          id: 'gather',
+          prompt: [{ file: 'prompts/gather.md' }],
+          forbidKeys: ['preferred'],
+        },
+        {
+          id: 'verdict',
+          after: ['gather'],
+          prompt: [
+            { text: 'Notes:\n{{stages.gather.text}}\nCompare a/ and b/.' },
+          ],
+          output: 'verdict',
+        },
+      ],
+      result: { overall: 'verdict' },
+    }),
+  },
+};
+```
+
+| Field      | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `files`    | Prompts and helper scripts, written into the workspace (`content`, or `base64`).                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `prepare`  | Trusted programs (`argv`) run in the workspace, in order, before any stage: to turn both trials into the layout the prompts expect. They run unsandboxed, as the plugin's own code.                                                                                                                                                                                                                                                                                                                           |
+| `workdir`  | Where agents start and are confined to, under the workspace (default the root).                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `stages`   | Agent runs. A stage runs when every stage in `after` is done; independent stages run at once. `prompt` (and `system`) is a list of parts: `{ file }`, `{ text }`, or `{ json, format }` (`pretty`, or `python` for `json.dumps(..., sort_keys=True)`). `writes` writes files before the stage runs. `output` is `text`, `json` (the first JSON object in the answer) or `verdict`. `forbidKeys` fails the judgment when a JSON answer has one. `maxTurns`, `model` and `effort` override the judge's options. |
+| `result`   | `overall`: the verdict stage that decides; `dimensions`: named verdict stages, reported as the preference's dimensions.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `order`    | `randomized` (default): which run is slot A is picked per case from a SHA-256 of `seed` (default the case ID), so the judge can't tell the baseline, and MST doesn't also swap positions. `baseline-first`: A is the baseline, and MST swaps.                                                                                                                                                                                                                                                                 |
+| `requires` | Input paths, such as `candidate.artifactsDir`, whose absence skips the comparison.                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `defaults` | Agentic judge options (runtime, model, effort, turns, timeout).                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+Text and JSON strings take placeholders: `{{workspace}}` (the workspace root),
+`{{case.id}}`, `{{case.input}}` (the prompt), `{{stages.<id>.text}}` and
+`{{stages.<id>.json}}` (an earlier stage's answer; a stage can quote only
+stages it is after), and `{{file.text:<path>}}` / `{{file.json:<path>}}` (a
+workspace file). A JSON string that is a single placeholder takes its value,
+not its text.
+
+A verdict stage answers `{ "preferred": "A" | "B" | "tie", "gap_score": 0-5 }`
+about slots A and B (or both `absolute_score_a`/`_b`, 0-10), plus an optional
+`explanation`. MST maps slots back to baseline and candidate: the preference
+from `overall`, its strength `gap_score / 5`. A stage that fails, or a verdict
+that isn't one, fails the comparison. The preference's `version` is the
+bundle's SHA-256 unless the bundle sets one; `metadata` records which slot held
+the candidate, each verdict by slot, and each stage's tool calls.
+
+The workspace is `agenticPairwiseJudge`'s, with the trials in slot order:
+`a/` and `b/` (`response.md`, `trace/`, `artifacts/`), `case.json`, and the
+bundle's files.
 
 ### Client artifacts
 
@@ -664,7 +740,45 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 - **`--output-dir`** names the eval's directory (`<output-dir>/runs/<run-id>/`).
 - **`report/`** is built from the run's own files, so `mst open <run>` can rebuild it for a run copied without it. `run.json` records each variant's setup (client, model, servers, tool metadata, input template, judges, and client options, with any whose name suggests a credential replaced by a hash) for the report's _What differs_. See [`mst open`](./cli.md#open---open-a-runs-report).
 
-A result store set in the eval config also gets the run summary, as before.
+### Result stores
+
+A result store keeps each run's directory besides the local one, so runs from CI or other machines are in one place. Choose it per run with `mst run --results <store>`, or set `results.store` in the eval config; the flag wins.
+
+```bash
+npx mst run --config eval.json --results gs://my-bucket/evals   # a GCS bucket and prefix
+npx mst run --config eval.json --results file:./shared-results  # a local directory
+npx mst run --config eval.json --results acme/result-store/eval-results  # a plugin's store
+```
+
+The store holds the same layout as a local results directory: `<eval name>/runs/<run-id>/` (every file, the report included, and `manifest.json`) and `<eval name>/latest.json`. The run is written locally first, then copied: its files, then its `manifest.json` (each file's size and SHA-256); `latest.json` is written last, and only when the run became the local latest run (a full, graded run). If the copy fails, `mst run` fails and names the local run directory, and the store's `latest.json` is unchanged. Redaction applies before the copy, so the store gets what the run directory has.
+
+A run in a store can be graded or resumed on another machine. When `mst grade <run>` or `mst run --resume <run>` doesn't find the run locally, it fetches it from the store (`--results`, else the eval config's): by its run ID or short form among the store's runs. The fetch checks every file against the manifest, and moves the run into the eval's local runs only once it is all there. A run without a manifest is still uploading, its upload failed, or an MST before beta.13 uploaded it, and isn't fetched. A regrade takes the next `.g<n>` that neither the local runs nor the store has, so regrades on two machines don't overwrite each other.
+
+```bash
+npx mst run --config eval.json --no-grade --env docker --results gs://my-bucket/evals  # on a VM
+npx mst grade 7f3c2a --config eval.json --results gs://my-bucket/evals                 # anywhere
+```
+
+With a store, the [previous run](#compared-with-the-previous-run) is the store's newest comparable run, so a CI machine with no local runs still compares with the last one. `mst batch --skip-existing` also reads the store.
+
+The `gcs` store needs the optional `@google-cloud/storage` package and Application Default Credentials. A plugin's result store returns a `RunStore` from `create`: it only moves bytes, and MST owns the layout.
+
+```ts
+import type { RunStore } from '@gleanwork/mcp-server-tester/evals';
+
+const store: RunStore = {
+  location: 's3://bucket/prefix', // shown in messages
+  async put(key, body) {}, // write bytes at a `/`-separated key
+  async get(key) {
+    return null; // the bytes, or null when there are none
+  },
+  async list(prefix, { shallow } = {}) {
+    return []; // every key under prefix; with shallow, one level, "directories" ending in /
+  },
+};
+```
+
+Opening a stored run (`mst open --results`) and listing runs (`mst runs list`) are planned.
 
 Run JSON and file/GCS result-store artifacts are written and read in chunks,
 so large batches of tool traces do not require one V8 string for the whole
@@ -763,8 +877,9 @@ MST ships no prices; they change too often to bake in.
 
 Every run has a `runId`. Its summary's `previousRun` compares it with the previous run of the same eval config that ran the same variants, when there is one:
 
-- **Which run.** The eval config's `name` identifies it, so two eval configs with the same name share a history. With a result store, the previous run is the store's newest summary for that eval config. Without one, it's the newest earlier run in the eval's `runs/` directory (under `--output-dir`, by default `.mcp-test-results/<name>/`), read from its `summary.json` and `results.json`.
-- **Output.** `mst run` prints the change and the regressed, improved, added and removed cases.
+- **Which run.** The eval config's `name` identifies it, so two eval configs with the same name share a history. With a result store, the previous run is the store's newest comparable run of that eval config. Without one, it's the newest earlier run in the eval's `runs/` directory (under `--output-dir`, by default `.mcp-test-results/<name>/`), read from its `summary.json` and `results.json`.
+- **The test.** Each variant's `change` is the paired test the report's variant comparisons use, on the variant's headline cases (capability cases, or regression cases when every case is tagged `regression`): the mean per-case change, its 95% range and `assessment` (`better`, `worse` or `unclear`). The report and `mst run` show a change only through it, and show none when `sameConfig` is false.
+- **Output.** `mst run` prints each variant's tested change and the regressed, improved, added and removed cases.
 - **Best effort.** A previous run that can't be read is skipped with a warning; it never fails the run.
 
 ```json
@@ -778,6 +893,15 @@ Every run has a `runId`. Its summary's `previousRun` compares it with the previo
     "default": {
       "passRateDelta": -0.5,
       "trialPassRateDelta": -0.1,
+      "change": {
+        "mean": -0.1,
+        "lower": -0.32,
+        "upper": 0.12,
+        "cases": 10,
+        "pBetter": 0.94,
+        "pWorse": 0.25,
+        "assessment": "unclear"
+      },
       "regressed": ["billing-owner"],
       "improved": [],
       "added": [],
@@ -787,7 +911,7 @@ Every run has a `runId`. Its summary's `previousRun` compares it with the previo
 }
 ```
 
-`sameConfig` is false when the eval config changed between the runs, so a difference may come from the configuration rather than the server. Datasets aren't part of that hash.
+`sameConfig` is false when the eval config changed between the runs, so a difference may come from the configuration rather than the server: the report and `mst run` then show no change. Datasets aren't part of that hash.
 
 ## CLI
 

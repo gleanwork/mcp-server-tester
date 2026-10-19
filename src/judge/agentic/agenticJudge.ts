@@ -61,7 +61,7 @@ const DEFAULTS = {
   // Confined to the workspace; Codex's read-only sandbox can read the disk.
   runtime: 'claude-agent',
   maxTurns: 20,
-  timeoutMs: 15 * 60_000,
+  timeoutMs: 10 * 60_000,
 } as const satisfies AgentJudgeOptions;
 
 /** What `buildPrompt` returns. */
@@ -125,11 +125,18 @@ const RUNTIMES: Readonly<Record<AgentJudgeRuntimeId, () => AgentJudgeRuntime>> =
     'claude-agent': () => claudeRuntime(),
   };
 
+/** The built-in runtime with this id. */
+export function agentRuntime(id: AgentJudgeRuntimeId): AgentJudgeRuntime {
+  return RUNTIMES[id]();
+}
+
 /**
  * Fails, naming what to install or set, unless the runtime's SDK loads and
  * its credential is configured: checked before a run starts any client.
  */
-async function preflightRuntime(runtime: AgentJudgeRuntimeId): Promise<void> {
+export async function preflightRuntime(
+  runtime: AgentJudgeRuntimeId
+): Promise<void> {
   if (runtime === 'codex') {
     requireJudgeCredential('Codex agent', 'openai', {});
     await loadJudgeSdk(
@@ -147,13 +154,13 @@ async function preflightRuntime(runtime: AgentJudgeRuntimeId): Promise<void> {
   }
 }
 
-function optionsSchema(spec: { schema?: z.ZodObject }): ZodType {
+export function optionsSchema(spec: { schema?: z.ZodObject }): ZodType {
   return spec.schema
     ? spec.schema.extend(AgentJudgeOptionsSchema.shape).strict()
     : AgentJudgeOptionsSchema;
 }
 
-function settings(
+export function settings(
   spec: { defaults?: AgentJudgeOptions },
   options: Record<string, unknown>
 ) {
@@ -255,6 +262,7 @@ export function agenticPairwiseJudge(
     ...(spec.swapPositions !== undefined && {
       swapPositions: spec.swapPositions,
     }),
+    preflight: (options) => preflightRuntime(settings(spec, options).runtime),
     compare: (input, options) =>
       runAgent(
         spec,

@@ -614,12 +614,30 @@ export interface PairedChange {
   assessment: ChangeAssessment;
 }
 
+/**
+ * A pass rate's 95% interval: Clopper–Pearson, counting cases rather than
+ * trials as the sampling unit (see `src/evals/passRateInterval.ts`).
+ */
+export interface PassRateInterval {
+  lower: number;
+  upper: number;
+  /**
+   * How many independent trials the interval counts: between the number of
+   * cases and the number of trials (Kish's effective sample size).
+   */
+  effectiveTrials: number;
+  /** Wider than ±10 points: too few trials or cases to pin the rate down. */
+  tooWide: boolean;
+}
+
 /** A variant's results over one case group. */
 export interface VariantGroupStats {
   /** Cases in the group. */
   cases: number;
   /** Mean per-case pass rate (pass@1). Absent when the group is empty. */
   passRate?: number;
+  /** The 95% interval of `passRate`. Absent when the group is empty. */
+  interval?: PassRateInterval;
   /** Pass rate over cases without the held-out tag, when the group has both kinds. */
   seenPassRate?: number;
   /** Pass rate over held-out cases, when the group has any. */
@@ -660,6 +678,11 @@ export interface VariantComparisonCase {
   expectedTools?: string[];
   /** Trials keyed by variant id (the baseline uses `baselineId`). */
   trials: Record<string, VariantTrial[]>;
+  /**
+   * Each variant's 95% interval for this case's pass rate (Clopper–Pearson
+   * over its trials, infrastructure failures left out), keyed as `trials`.
+   */
+  intervals?: Record<string, { lower: number; upper: number }>;
 }
 
 /** One tool field a variant changed. */
@@ -885,9 +908,51 @@ export interface RunReportVariant {
   /** Changes since the previous run of the eval. */
   previous?: {
     passRateDelta: number;
+    /**
+     * The headline pass rate's change, paired over cases and tested as the
+     * variant comparisons are. Absent in older runs.
+     */
+    change?: PairedChange;
     regressed: string[];
     improved: string[];
   };
+}
+
+/**
+ * Whether a run has trials enough to pin down its pass rates, and what to
+ * run when it hasn't.
+ */
+export interface RunReportEvidence {
+  /** Some variant's headline pass rate has a 95% interval wider than ±10 points. */
+  tooWide: boolean;
+  /** Every trial in the run passed. */
+  allPassed: boolean;
+  /** Fewest trials any case ran. */
+  trialsPerCase: number;
+  /**
+   * Trials per case to set as `run.trials` next: 10 while developing, 20
+   * for release decisions. Absent when the run is precise enough, or already
+   * ran 20: then more cases narrow the intervals more than more trials.
+   */
+  suggestedTrialsPerCase?: number;
+  /** Trials the suggested run takes, over every variant and case. */
+  suggestedTrials?: number;
+  /** How long the suggested run takes at this run's pace. */
+  estimatedMinutes?: number;
+  /** What the suggested run costs at this run's cost per trial. */
+  estimatedCostUsd?: number;
+  /**
+   * Passing trials in a row a case needs before the lower end of its 95%
+   * interval reaches `rate`: 36 for 90%, 72 for 95%.
+   */
+  trialsToShow: Array<{ rate: number; trials: number }>;
+}
+
+/** An environment a run's trials were collected or graded on, in the report. */
+export interface RunReportEnvironment {
+  name: string;
+  shards: number;
+  machines?: Array<{ shard: number; image?: string; mst?: string }>;
 }
 
 /** Everything the run report shows: computed by `buildRunReport`, rendered as is. */
@@ -916,9 +981,18 @@ export interface MCPRunReportData {
     baseline: string;
     /** False when a narrowed run left the baseline out. */
     baselineRan: boolean;
-    datasets: Array<{ name: string; caseCount: number }>;
+    datasets: Array<{ name: string; caseCount: number; contentHash?: string }>;
     cases: number;
     trialsPerCase: { min: number; max: number };
+    /** Where the trials were collected (`--env`), and each shard's machine. */
+    environment?: RunReportEnvironment;
+    /**
+     * Where a regrade graded the trials (`mst grade --env`, ADR 0005), and
+     * each grade shard's machine. Absent when graded where MST ran.
+     */
+    gradingEnvironment?: RunReportEnvironment;
+    /** The client apps the trials ran, as each recorded it: `Claude 2.31226.1`. */
+    clientApps?: string[];
   };
   comparison: MCPComparisonData;
   variants: RunReportVariant[];
@@ -934,6 +1008,8 @@ export interface MCPRunReportData {
    * were called), so a run graded only by those never checked an answer.
    */
   graders: Array<{ name: string; judge: boolean; readsAnswer: boolean }>;
+  /** Whether the run has trials enough for its pass rates. Absent for an ungraded run. */
+  evidence?: RunReportEvidence;
   previousRun?: {
     runId: string;
     timestamp: string;

@@ -24,6 +24,7 @@ exports[`public API > ./evals 1`] = `
   "FileEvalResultStore",
   "GCSEvalResultStore",
   "PLANNED_WRITE_KEY",
+  "StagedJudgeBundleSchema",
   "agenticJudge",
   "agenticPairwiseJudge",
   "buildEvalDataset",
@@ -35,6 +36,7 @@ exports[`public API > ./evals 1`] = `
   "createEvalResultStore",
   "createStoredEvalArtifact",
   "defaultEnvironmentMetadata",
+  "dockerEnvironment",
   "dryRunProxyServer",
   "getMissingDependencyMessage",
   "getPairwiseJudge",
@@ -55,6 +57,7 @@ exports[`public API > ./evals 1`] = `
   "runToolOptimization",
   "saveBaseline",
   "saveEvalRunComparison",
+  "stagedPairwiseJudge",
   "validateEvalConfig",
   "variantToolMetadata",
 ]

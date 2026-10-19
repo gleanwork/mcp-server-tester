@@ -38,6 +38,30 @@ export function listPairwiseJudges(): Array<[string, PairwiseJudgeDefinition]> {
   return pairwiseJudges.list();
 }
 
+/**
+ * Checks that each pairwise judge can run (`PairwiseJudgeDefinition.preflight`),
+ * once per judge and options, before anything is collected.
+ */
+export async function preflightPairwiseJudges(
+  specs: readonly PairwiseJudgeSpec[]
+): Promise<void> {
+  const checked = new Set<string>();
+  for (const spec of specs) {
+    const key = JSON.stringify([spec.type, spec.options ?? {}]);
+    if (checked.has(key)) continue;
+    const judge = getPairwiseJudge(spec.type);
+    if (judge.preflight)
+      await judge.preflight(
+        parseExtensionOptions(
+          judge.schema,
+          spec.options ?? {},
+          `pairwise judge options "${spec.type}"`
+        )
+      );
+    checked.add(key);
+  }
+}
+
 /** One pairwise judge to run, as an eval config lists it. */
 export interface PairwiseJudgeSpec {
   type: string;
@@ -58,6 +82,18 @@ export interface ComparePairwiseOptions {
   cases?: ReadonlyMap<string, JudgeCaseSource>;
   /** Cases compared at once. @default 4 */
   concurrency?: number;
+  /**
+   * Where each case is compared: called with the case's id, the pairwise
+   * judges' names (one preference each, in order), and `judge`, which runs
+   * every pairwise judge on it here. Without it, every case is
+   * compared here. `mst grade --env` (ADR 0005) records what workers' judges
+   * preferred, and reads those records back on the coordinator.
+   */
+  judgeCase?: (
+    caseId: string,
+    judges: readonly string[],
+    judge: () => Promise<PairwiseCasePreference[]>
+  ) => Promise<PairwiseCasePreference[]>;
 }
 
 /** One judge's comparison of one case. */
@@ -395,11 +431,21 @@ export async function comparePairwise(
       baseline: trial(b),
       candidate: trial(c),
     };
-    const preferences: PairwiseCasePreference[] = [];
-    for (const r of resolved)
-      preferences.push(
-        await judgeCase(r.label, r.judge, r.options, r.reps, input)
-      );
+    const judge = async () => {
+      const preferences: PairwiseCasePreference[] = [];
+      for (const r of resolved)
+        preferences.push(
+          await judgeCase(r.label, r.judge, r.options, r.reps, input)
+        );
+      return preferences;
+    };
+    const preferences = options.judgeCase
+      ? await options.judgeCase(
+          id,
+          resolved.map((r) => r.label),
+          judge
+        )
+      : await judge();
     return { id, preferences };
   });
   const summary = resolved.map((r) =>

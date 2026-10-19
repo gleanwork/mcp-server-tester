@@ -1,13 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type {
   MCPComparisonData,
+  PassRateInterval,
   RunReportTrial,
   VariantTrial,
   VariantComparisonCase,
   VariantComparisonEntry,
 } from '../../types';
 import { CaseCounts } from './VariantTable';
-import { FAILURE_LABEL, pct, variantName } from './format';
+import {
+  FAILURE_LABEL,
+  likelyText,
+  likelyTitle,
+  pct,
+  variantName,
+} from './format';
 import {
   Preferences,
   TrialView,
@@ -54,6 +61,8 @@ interface Section {
   hint: string;
   rows: VariantComparisonCase[];
   rate: (v: VariantComparisonEntry) => number | undefined;
+  /** The rate's 95% range, when the section is a whole case group. */
+  interval?: (v: VariantComparisonEntry) => PassRateInterval | undefined;
 }
 
 function sectionsOf(data: MCPComparisonData): Section[] {
@@ -69,6 +78,7 @@ function sectionsOf(data: MCPComparisonData): Section[] {
           : 'pass rate per variant',
         rows: data.cases.filter((c) => c.group === 'capability'),
         rate: (v: VariantComparisonEntry) => v.capability.passRate,
+        interval: (v: VariantComparisonEntry) => v.capability.interval,
       },
       {
         key: 'keep',
@@ -76,6 +86,7 @@ function sectionsOf(data: MCPComparisonData): Section[] {
         hint: `tagged “${data.regressionTag}”`,
         rows: regression,
         rate: (v: VariantComparisonEntry) => v.regression.passRate,
+        interval: (v: VariantComparisonEntry) => v.regression.interval,
       },
     ].filter((s) => s.rows.length > 0);
   }
@@ -150,7 +161,9 @@ function Cell({
         : p === k
           ? 'bg-green-500/10'
           : 'bg-amber-500/10';
-  const label = `${variantName(data, variant)}, ${row.id}: ${p} of ${k} trials passed${
+  const interval = row.intervals?.[variant.id];
+  const range = interval ? `, ${likelyText(interval)}` : '';
+  const label = `${variantName(data, variant)}, ${row.id}: ${p} of ${k} trials passed${range}${
     change
       ? `, ${change === 'up' ? 'better' : 'worse'} than ${variantName(data, { id: data.baselineId })}`
       : ''
@@ -160,6 +173,7 @@ function Cell({
       <button
         type="button"
         aria-label={label}
+        title={`${p} of ${k} passed${interval ? `. ${likelyTitle(interval, false)}` : ''}`}
         onClick={(e) => onOpen(e.currentTarget)}
         className={`relative grid min-h-[44px] w-full justify-items-center gap-0.5 rounded-md border border-transparent p-1 hover:border-border ${tone}`}
       >
@@ -303,11 +317,21 @@ function AttemptDialog({
         className={`grid gap-4 p-4 ${sides.length > 1 ? 'md:grid-cols-2' : ''}`}
       >
         {sides.map((id) => (
-          <div key={id} className="grid content-start gap-2">
+          // min-w-0: a long line (a call chain, a URL) wraps in its column
+          // instead of widening it over the other variant's.
+          <div
+            key={id}
+            className="grid min-w-0 grid-cols-[minmax(0,1fr)] content-start gap-2"
+          >
             <h3 className="font-mono text-sm font-semibold">
               {variantName(data, { id })}{' '}
               <span className="font-sans font-normal text-muted-foreground">
                 {passes(row, id)}/{(row.trials[id] ?? []).length} passed
+                {row.intervals?.[id] ? (
+                  <span title={likelyTitle(row.intervals[id]!, false)}>
+                    {` · ${likelyText(row.intervals[id]!)}`}
+                  </span>
+                ) : null}
               </span>
             </h3>
             {lookup?.trials[id]?.[row.id] ? (
@@ -322,7 +346,7 @@ function AttemptDialog({
                     {sameNote(lookup.trials[id]![row.id]!)}
                   </p>
                 )}
-                <ol className="grid gap-2">
+                <ol className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
                   {lookup.trials[id]![row.id]!.map((trial, i) => (
                     <TrialView key={i} trial={trial} index={i} />
                   ))}
@@ -361,10 +385,11 @@ export function CaseGrid({
       passes(row, selectedId) < (row.trials[selectedId] ?? []).length,
   };
   const single = data.purpose === 'eval' && data.variants.length === 1;
+  // One variant has nothing to be better or worse than.
   const filters: Array<[CaseFilter, string]> = single
     ? [
-        ['unsteady', 'Needs attention'],
         ['all', 'All'],
+        ['unsteady', 'Not fully passing'],
       ]
     : [
         ['all', 'All'],
@@ -527,12 +552,21 @@ export function CaseGrid({
                     </td>
                     {data.variants.map((v) => {
                       const rate = section.rate(v);
+                      const interval = section.interval?.(v);
                       return (
                         <td
                           key={v.id}
                           className="px-2 py-2 text-center font-mono text-xs text-muted-foreground"
                         >
                           {rate !== undefined ? pct(rate) : '—'}
+                          {interval && (
+                            <span
+                              className="block text-[11px]"
+                              title={likelyTitle(interval, true)}
+                            >
+                              {likelyText(interval)}
+                            </span>
+                          )}
                         </td>
                       );
                     })}

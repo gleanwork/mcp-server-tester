@@ -4,6 +4,10 @@
 This module does not provision, authenticate, launch a desktop session, or collect
 answers. The MST client binds and reads native sessions. JSON input arrives on stdin;
 stdout contains only an allowlisted receipt, never prompt or accessibility text.
+
+`--mode diagnose` takes no action: after a failed case it writes what the desktop
+shows into the payload's `dir` (a trial artifact, as private as the session it
+failed to produce): `screen.png` and `accessibility.txt`.
 """
 from __future__ import annotations
 
@@ -13,7 +17,9 @@ import os
 import re
 import subprocess
 import sys
+import struct
 import time
+import zlib
 from urllib.parse import quote
 
 
@@ -39,7 +45,8 @@ class Desktop:
             raise DriverFailure("desktop_missing_or_ambiguous")
         return matches[0]
 
-    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True):
+    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True,
+                 require_showing: bool = True):
         pending = [self.application()]
         found = []
         seen = 0
@@ -52,7 +59,7 @@ class Desktop:
                 states = node.get_state_set()
                 if (node.get_role_name() in roles and self.label(node) in names
                         and states.contains(self.api.StateType.VISIBLE)
-                        and states.contains(self.api.StateType.SHOWING)
+                        and (not require_showing or states.contains(self.api.StateType.SHOWING))
                         and (not require_enabled or (
                             states.contains(self.api.StateType.ENABLED)
                             and states.contains(self.api.StateType.SENSITIVE)))):
@@ -69,6 +76,11 @@ class Desktop:
         # Newer desktops append a control's keyboard shortcut to its
         # accessible name ("Allow once 3", "Deny 1").
         return SHORTCUT_SUFFIX.sub("", node.get_name() or "")
+
+    def reveal(self, node) -> None:
+        """Scrolls a control into view. Never presses it."""
+        if not node.scroll_to(self.api.ScrollType.ANYWHERE):
+            raise DriverFailure("reveal_failed")
 
     def selected(self, node) -> bool:
         states = node.get_state_set()
@@ -87,6 +99,79 @@ class Desktop:
             [configured_opener or "xdg-open", "claude://claude.ai/new?q=" + quote(prompt, safe="")],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(timeout, 15),
         )
+
+
+def accessibility_text(desktop, budget: int = 5000) -> str:
+    """Every showing, named node of the app: role, name, and whether it is enabled."""
+    lines = []
+    pending = [(desktop.application(), 0)]
+    while pending and len(lines) < budget:
+        node, depth = pending.pop()
+        try:
+            states = node.get_state_set()
+            name = (node.get_name() or "").replace("\n", " ")[:200]
+            if name and states.contains(desktop.api.StateType.SHOWING):
+                enabled = states.contains(desktop.api.StateType.ENABLED)
+                lines.append(f"{'  ' * min(depth, 16)}{node.get_role_name()}: {name}{'' if enabled else ' [disabled]'}")
+            pending.extend((node.get_child_at_index(i), depth + 1)
+                           for i in reversed(range(node.get_child_count())))
+        except Exception:
+            continue
+    return "\n".join(lines) + "\n"
+
+
+def xwd_to_png(data: bytes) -> bytes:
+    """A TrueColor X window dump (`xwd`, ZPixmap, 24/32 bits per pixel) as a PNG."""
+    header = struct.unpack(">25I", data[:100])
+    header_size, _, pixmap_format, _, width, height = header[:6]
+    byte_order, bits_per_pixel, bytes_per_line = header[7], header[11], header[12]
+    red_mask, green_mask, blue_mask, ncolors = header[14], header[15], header[16], header[19]
+    if pixmap_format != 2 or bits_per_pixel not in (24, 32):
+        raise ValueError("unsupported_xwd")
+    pixels = data[header_size + ncolors * 12:]
+    step = bits_per_pixel // 8
+    order = "little" if byte_order == 0 else "big"
+    shift = lambda mask: (mask & -mask).bit_length() - 1
+    shifts = [(mask, shift(mask)) for mask in (red_mask, green_mask, blue_mask)]
+    rows = bytearray()
+    for y in range(height):
+        rows.append(0)
+        line = pixels[y * bytes_per_line:y * bytes_per_line + width * step]
+        for x in range(0, len(line), step):
+            value = int.from_bytes(line[x:x + step], order)
+            rows.extend(((value & mask) >> offset) & 0xFF for mask, offset in shifts)
+
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(rows), 6)) + chunk(b"IEND", b""))
+
+
+def diagnose(directory, timeout: float) -> dict:
+    """Read-only: what the desktop shows, as files in `directory`. Never acts."""
+    if not isinstance(directory, str) or not os.path.isabs(directory) or not os.path.isdir(directory):
+        raise DriverFailure("invalid_directory")
+    started = time.monotonic()
+    written = []
+    try:
+        dump = subprocess.run(["xwd", "-root", "-silent"], check=True, capture_output=True,
+                              timeout=max(1.0, min(timeout / 2, 15)))
+        with open(os.path.join(directory, "screen.png"), "wb") as file:
+            file.write(xwd_to_png(dump.stdout))
+        written.append("screen.png")
+    except Exception as error:
+        with open(os.path.join(directory, "screen.error"), "w") as file:
+            file.write(f"{type(error).__name__}\n")
+    try:
+        with open(os.path.join(directory, "accessibility.txt"), "w") as file:
+            file.write(accessibility_text(Desktop()))
+        written.append("accessibility.txt")
+    except Exception as error:
+        with open(os.path.join(directory, "accessibility.error"), "w") as file:
+            file.write(f"{error if isinstance(error, DriverFailure) else type(error).__name__}\n")
+    return {"status": "diagnosed", "action_count": 0,
+            "duration_ms": (time.monotonic() - started) * 1000, "files": written}
 
 
 SHORTCUT_SUFFIX = re.compile(r" [0-9]$")
@@ -128,22 +213,45 @@ class Driver:
 
     def reset(self) -> dict:
         # After a failed case: leave its view with one empty new-task deep link,
-        # then wait read-only for the Cowork start surface. Never types or sends.
+        # then wait read-only for an empty Cowork start surface. Never types or
+        # sends. An empty composer disables Start task; one still enabled holds
+        # a draft the link didn't clear, which the next case's link would not
+        # replace either (a long prompt's draft did, on Linux).
         self.action(lambda: self.desktop.open_prompt("", self.remaining()))
+        draft = False
         while True:
-            self.remaining()
-            if self.desktop.controls({"Cowork", "Start task"}, {"button", "radio button"},
-                                     require_enabled=False):
-                return self.receipt("ready")
-            time.sleep(min(0.1, self.remaining()))
+            try:
+                left = self.remaining()
+            except DriverFailure:
+                if draft:
+                    raise DriverFailure("draft_not_cleared") from None
+                raise
+            starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False,
+                                           require_showing=False)
+            if len(starts) == 1:
+                if not self.desktop.controls({"Start task"}, {"button"}, require_showing=False):
+                    return self.receipt("ready")
+                draft = True
+            elif not starts:
+                # Not in Cowork mode only if the composer's mode switch says so:
+                # one Cowork radio, unselected. The sidebar's Cowork button is
+                # always on screen, the old task view included, and the link
+                # returns before the app has navigated, so it proves nothing.
+                radios = self.desktop.controls({"Cowork"}, {"radio button"}, require_enabled=False)
+                if len(radios) == 1 and not self.desktop.selected(radios[0]):
+                    # The next submit selects it.
+                    return self.receipt("ready")
+            time.sleep(min(0.1, left))
 
     def select_cowork(self) -> None:
         requested = set()
         while True:
             self.remaining()
             # The empty Cowork composer disables Start task until text is inserted.
-            # Its visible presence proves the mode, not permission to submit.
-            starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False)
+            # Its presence proves the mode, not permission to submit; below the
+            # window (a long draft) still counts.
+            starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False,
+                                           require_showing=False)
             if len(starts) > 1:
                 raise DriverFailure("submission_control_ambiguous")
             if starts:
@@ -171,6 +279,7 @@ class Driver:
             raise DriverFailure("invalid_prompt")
         self.select_cowork()
         self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
+        revealed = False
         while True:
             self.remaining()
             starts = self.desktop.controls({"Start task"}, {"button"})
@@ -180,6 +289,13 @@ class Driver:
                 # Exactly one submit attempt. No key fallback or action retry.
                 self.action(lambda: self.desktop.activate(starts[0]))
                 return self.receipt("submitted")
+            # A long prompt grows the composer until Start task is below the
+            # window: scroll the one there is into view, once.
+            hidden = self.desktop.controls({"Start task"}, {"button"}, require_showing=False)
+            if len(hidden) == 1 and not revealed:
+                revealed = True
+                self.action(lambda: self.desktop.reveal(hidden[0]))
+                continue
             time.sleep(min(0.1, self.remaining()))
 
     def hitl(self, approve_writes: bool) -> dict:
@@ -211,7 +327,7 @@ class Driver:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["probe", "reset", "submit", "hitl"], required=True)
+    parser.add_argument("--mode", choices=["probe", "reset", "submit", "hitl", "diagnose"], required=True)
     parser.add_argument("--timeout-ms", type=int, required=True)
     parser.add_argument("--max-actions", type=int, default=24)
     args = parser.parse_args()
@@ -222,6 +338,9 @@ def main() -> int:
         payload = json.loads(sys.stdin.read(2 * 1024 * 1024))
         if not isinstance(payload, dict):
             raise DriverFailure("invalid_input")
+        if args.mode == "diagnose":
+            print(json.dumps(diagnose(payload.get("dir"), args.timeout_ms / 1000)))
+            return 0
         driver = Driver(Desktop(), args.timeout_ms, args.max_actions)
         if args.mode == "submit":
             result = driver.submit(payload.get("prompt"))

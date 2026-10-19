@@ -21,11 +21,6 @@ import type {
   ClientRunContext,
   JudgeDefinition,
 } from './evalFrameworkTypes.js';
-import { FileEvalResultStore } from './resultStore.js';
-import {
-  compareEvalRuns,
-  loadStoredEvalRunnerResult,
-} from './evalRunComparison.js';
 
 /** Matches a judge input whose reference answer is `answer`. */
 function expectedAnswer(answer: unknown): unknown {
@@ -858,21 +853,21 @@ describe('eval review regressions', () => {
         'utf8'
       );
       expect(local.includes('PRIVATE_RESPONSE_MARKER')).toBe(!redact);
-      const store = new FileEvalResultStore({
-        provider: 'file',
-        dir: storeDir,
-      });
-      for (const kind of ['eval-runner-result', 'eval-run-summary'] as const) {
-        expect(
-          JSON.stringify(await store.loadLatestArtifact(kind)).includes(
-            'PRIVATE_RESPONSE_MARKER'
-          )
-        ).toBe(!redact);
+      const stored = path.join(
+        storeDir,
+        result.evalConfig.name,
+        'runs',
+        path.basename(result.outputDir)
+      );
+      for (const file of ['results.json', 'summary.json']) {
+        expect(await fs.readFile(path.join(stored, file), 'utf8')).toBe(
+          await fs.readFile(path.join(result.outputDir, file), 'utf8')
+        );
       }
     }
   );
 
-  it('keeps unique per-variant canonical artifacts consumable by comparison and stores separate summaries', async () => {
+  it('keeps each run in the store as its own run directory', async () => {
     const f = await fixture([scenario]);
     const storeDir = path.join(f.dir, 'store');
     await fs.writeFile(
@@ -882,19 +877,23 @@ describe('eval review regressions', () => {
         results: { store: { type: 'file', dir: storeDir } },
       })
     );
-    await runEvalConfig({ configPath: f.configPath, rootDir: f.dir });
-    await runEvalConfig({ configPath: f.configPath, rootDir: f.dir });
-    const store = new FileEvalResultStore({ provider: 'file', dir: storeDir });
-    const entries = await store.listArtifacts('eval-runner-result');
-    expect(entries).toHaveLength(2);
-    expect(await store.listArtifacts('eval-run-summary')).toHaveLength(2);
-    const result = await loadStoredEvalRunnerResult(store, {
-      id: entries[0]!.id,
-    });
-    expect(result.data.caseResults).toHaveLength(1);
-    expect(() =>
-      compareEvalRuns({ baseline: result.data, candidate: result.data })
-    ).not.toThrow();
+    const runs = [
+      await runEvalConfig({ configPath: f.configPath, rootDir: f.dir }),
+      await runEvalConfig({ configPath: f.configPath, rootDir: f.dir }),
+    ];
+    const runsDir = path.join(storeDir, runs[0]!.evalConfig.name, 'runs');
+    expect((await fs.readdir(runsDir)).sort()).toEqual(
+      runs.map((run) => path.basename(run.outputDir)).sort()
+    );
+    for (const run of runs) {
+      const results = JSON.parse(
+        await fs.readFile(
+          path.join(runsDir, path.basename(run.outputDir), 'results.json'),
+          'utf8'
+        )
+      ) as { cases: unknown[] };
+      expect(results.cases).toHaveLength(1);
+    }
   });
 });
 

@@ -12,8 +12,9 @@ spec.loader.exec_module(module)
 
 
 class Node:
-    def __init__(self, name):
+    def __init__(self, name, role="button"):
         self.name = name
+        self.role = role
 
     def get_name(self):
         return self.name
@@ -22,17 +23,36 @@ class Node:
 class Desktop:
     def __init__(self):
         self.starts = [Node("Start task")]
-        self.radios = [Node("Cowork")]
+        # The composer's mode switch.
+        self.radios = [Node("Cowork", "radio button")]
+        self.radio_selected = True
+        # The sidebar's Cowork button: on screen in every view.
+        self.tabs = [Node("Cowork")]
         self.approvals = []
         self.actions = []
         self.prompt = None
         self.fail = False
+        # Below the window until revealed (a composer grown by a long prompt).
+        self.hidden = set()
+        # The composer keeps its draft when an empty new-task link opens.
+        self.keeps_draft = False
 
-    def controls(self, names, roles, *, require_enabled=True):
-        return [node for node in self.starts + self.radios + self.approvals if node.name in names]
+    def controls(self, names, roles, *, require_enabled=True, require_showing=True):
+        return [node for node in self.starts + self.radios + self.tabs + self.approvals
+                if node.name in names and node.role in roles
+                # The empty composer disables Start task.
+                and not (node.name == "Start task" and require_enabled and not self.prompt)
+                and not (require_showing and node.name in self.hidden)]
+
+    def reveal(self, node):
+        self.actions.append(f"reveal {node.name}")
+        self.hidden.discard(node.name)
 
     def selected(self, node):
-        return True
+        return self.radio_selected
+
+    def label(self, node):
+        return module.Desktop.label(node)
 
     def activate(self, node):
         self.actions.append(node.name)
@@ -40,7 +60,90 @@ class Desktop:
             raise module.DriverFailure("action_acknowledgement_uncertain")
 
     def open_prompt(self, prompt, timeout):
-        self.prompt = prompt
+        if not (self.keeps_draft and self.prompt and not prompt):
+            self.prompt = prompt
+
+
+class AtspiStates:
+    def __init__(self, states):
+        self.states = states
+
+    def contains(self, state):
+        return state in self.states
+
+
+class AtspiNode:
+    """An accessible node, as gi.repository.Atspi returns it."""
+
+    def __init__(self, name, role="button", states=("VISIBLE", "SHOWING", "ENABLED", "SENSITIVE"),
+                 children=(), scrolls=True):
+        self.name, self.role, self.states = name, role, set(states)
+        self.children = list(children)
+        self.scrolls = scrolls
+        self.scrolled = []
+
+    def get_name(self):
+        return self.name
+
+    def get_role_name(self):
+        return self.role
+
+    def get_state_set(self):
+        return AtspiStates(self.states)
+
+    def get_child_count(self):
+        return len(self.children)
+
+    def get_child_at_index(self, index):
+        return self.children[index]
+
+    def scroll_to(self, kind):
+        self.scrolled.append(kind)
+        return self.scrolls
+
+
+class FakeAtspi:
+    class StateType:
+        VISIBLE, SHOWING, ENABLED, SENSITIVE, CHECKED, SELECTED = (
+            "VISIBLE", "SHOWING", "ENABLED", "SENSITIVE", "CHECKED", "SELECTED")
+
+    class ScrollType:
+        ANYWHERE = "ANYWHERE"
+
+    def __init__(self, *app_children):
+        self.root = AtspiNode("", "desktop frame", children=[AtspiNode("Claude", "application",
+                                                                         children=app_children)])
+
+    def get_desktop(self, index):
+        return self.root
+
+
+def real_desktop(api):
+    """The driver's own Desktop on a fake Atspi API: its filters and actions, unreplaced."""
+    desktop = object.__new__(module.Desktop)
+    desktop.api = api
+    return desktop
+
+
+class AtspiDesktopTests(unittest.TestCase):
+    def test_a_control_below_the_window_is_found_only_when_asked_for(self):
+        # VISIBLE but not SHOWING: laid out, but scrolled out of the window.
+        below = AtspiNode("Start task", states=("VISIBLE", "ENABLED", "SENSITIVE"))
+        desktop = real_desktop(FakeAtspi(below))
+        self.assertEqual(desktop.controls({"Start task"}, {"button"}), [])
+        self.assertEqual(desktop.controls({"Start task"}, {"button"}, require_showing=False), [below])
+        # An invisible one is never found.
+        below.states.discard("VISIBLE")
+        self.assertEqual(desktop.controls({"Start task"}, {"button"}, require_showing=False), [])
+
+    def test_reveal_scrolls_anywhere_and_fails_when_it_cannot(self):
+        node = AtspiNode("Start task")
+        desktop = real_desktop(FakeAtspi(node))
+        desktop.reveal(node)
+        self.assertEqual(node.scrolled, ["ANYWHERE"])
+        node.scrolls = False
+        with self.assertRaisesRegex(module.DriverFailure, "reveal_failed"):
+            desktop.reveal(node)
 
 
 class LinuxDriverTests(unittest.TestCase):
@@ -87,8 +190,8 @@ class LinuxDriverTests(unittest.TestCase):
 
     def test_disabled_start_button_proves_mode_before_prefill(self):
         class EmptyComposer(Desktop):
-            def controls(self, names, roles, *, require_enabled=True):
-                controls = super().controls(names, roles, require_enabled=require_enabled)
+            def controls(self, names, roles, *, require_enabled=True, require_showing=True):
+                controls = super().controls(names, roles, require_enabled=require_enabled, require_showing=require_showing)
                 return [node for node in controls if node.name != 'Start task' or not require_enabled or self.prompt is not None]
 
             def selected(self, node):
@@ -101,7 +204,7 @@ class LinuxDriverTests(unittest.TestCase):
 
     def test_disabled_submit_is_never_activated(self):
         class DisabledSubmit(Desktop):
-            def controls(self, names, roles, *, require_enabled=True):
+            def controls(self, names, roles, *, require_enabled=True, require_showing=True):
                 return [] if require_enabled else self.starts
         desktop = DisabledSubmit()
         with self.assertRaisesRegex(module.DriverFailure, 'deadline'):
@@ -126,6 +229,70 @@ class LinuxDriverTests(unittest.TestCase):
         with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
             module.Driver(desktop, 200, 4).reset()
         self.assertEqual((desktop.prompt, desktop.actions), ("", []))
+
+    def test_reset_never_takes_the_old_task_view_for_ready(self):
+        # A failed case's view: no Start task, no mode switch, only the
+        # sidebar's Cowork button, which the link leaves on screen.
+        desktop = Desktop()
+        desktop.starts = desktop.radios = []
+        with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
+            module.Driver(desktop, 200, 4).reset()
+        self.assertEqual(desktop.actions, [])
+        # Cowork selected but its composer not up yet: not ready either.
+        desktop = Desktop()
+        desktop.starts = []
+        with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
+            module.Driver(desktop, 200, 4).reset()
+        # Outside Cowork mode (its radio unselected), the next submit selects it.
+        desktop = Desktop()
+        desktop.starts, desktop.radio_selected = [], False
+        receipt = module.Driver(desktop, 1000, 4).reset()
+        self.assertEqual((receipt["status"], receipt["action_count"]), ("ready", 1))
+        self.assertEqual(desktop.actions, [])
+
+    def test_a_start_task_below_the_window_proves_cowork_mode(self):
+        # A long draft pushed Start task below the window, and no mode switch
+        # is on screen: Cowork is already selected, so nothing is pressed (the
+        # sidebar's Cowork button could navigate away).
+        desktop = Desktop()
+        desktop.prompt = "a long draft"
+        desktop.hidden.add("Start task")
+        desktop.radios = []
+        module.Driver(desktop, 1000, 4).select_cowork()
+        self.assertEqual(desktop.actions, [])
+
+    def test_long_prompt_scrolls_start_task_into_view_once_then_submits(self):
+        class LongPrompt(Desktop):
+            def open_prompt(self, prompt, timeout):
+                super().open_prompt(prompt, timeout)
+                self.hidden.add("Start task")
+        desktop = LongPrompt()
+        receipt = module.Driver(desktop, 1000, 4).submit("is my email OK?\n\n" + "line\n" * 25)
+        self.assertEqual(desktop.actions, ["reveal Start task", "Start task"])
+        self.assertEqual((receipt["status"], receipt["action_count"]), ("submitted", 3))
+        # One that stays below the window is revealed once, never pressed.
+        class StaysHidden(LongPrompt):
+            def reveal(self, node):
+                self.actions.append(f"reveal {node.name}")
+        desktop = StaysHidden()
+        with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
+            module.Driver(desktop, 200, 4).submit("long")
+        self.assertEqual(desktop.actions, ["reveal Start task"])
+
+    def test_reset_fails_on_a_draft_the_empty_link_left(self):
+        desktop = Desktop()
+        desktop.prompt, desktop.keeps_draft = "is my email OK?", True
+        desktop.hidden.add("Start task")
+        with self.assertRaisesRegex(module.DriverFailure, "draft_not_cleared"):
+            module.Driver(desktop, 200, 4).reset()
+        # One link, then read-only: never reveals, types or sends.
+        self.assertEqual(desktop.actions, [])
+        # An empty composer below the window is ready.
+        desktop = Desktop()
+        desktop.prompt = "earlier"
+        desktop.hidden.add("Start task")
+        self.assertEqual(module.Driver(desktop, 1000, 4).reset()["status"], "ready")
+        self.assertEqual(desktop.actions, [])
 
     def test_uncertain_submit_never_retries(self):
         desktop = Desktop()
@@ -229,6 +396,68 @@ class LinuxDriverTests(unittest.TestCase):
         with patch.object(module.subprocess, 'run') as run:
             desktop.open_prompt('unchanged', 900)
         self.assertEqual(run.call_args.kwargs['timeout'], 15)
+
+
+
+def xwd(width, height, pixels, *, byte_order=0, bits=32):
+    """A minimal TrueColor ZPixmap X window dump, as `xwd -root` writes it."""
+    step = bits // 8
+    bytes_per_line = width * step
+    header = module.struct.pack(">25I", 100 + 4, 7, 2, 24, width, height, 0, byte_order, 32, 0, 32, bits,
+                                bytes_per_line, 4, 0xFF0000, 0x00FF00, 0x0000FF, 8, 256, 0,
+                                width, height, 0, 0, 0)
+    order = "little" if byte_order == 0 else "big"
+    body = b"".join(value.to_bytes(step, order) for value in pixels)
+    return header + b"root" + body
+
+
+def png_pixels(png):
+    """The RGB rows of an 8-bit, colour-type-2, unfiltered PNG."""
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    position, data, width = 8, b"", None
+    while position < len(png):
+        length = module.struct.unpack(">I", png[position:position + 4])[0]
+        kind = png[position + 4:position + 8]
+        body = png[position + 8:position + 8 + length]
+        if kind == b"IHDR":
+            width = module.struct.unpack(">I", body[:4])[0]
+        if kind == b"IDAT":
+            data += body
+        position += 12 + length
+    raw = module.zlib.decompress(data)
+    stride = 1 + width * 3
+    return [list(raw[row + 1:row + stride]) for row in range(0, len(raw), stride)]
+
+
+class LinuxDiagnoseTests(unittest.TestCase):
+    def test_screen_dump_becomes_a_png_with_the_same_pixels(self):
+        for byte_order in (0, 1):
+            png = module.xwd_to_png(xwd(2, 2, [0xFF0000, 0x00FF00, 0x0000FF, 0x102030], byte_order=byte_order))
+            self.assertEqual(png_pixels(png), [[255, 0, 0, 0, 255, 0], [0, 0, 255, 16, 32, 48]])
+
+    def test_screen_dump_in_an_unsupported_format_is_refused(self):
+        dump = bytearray(xwd(1, 1, [0]))
+        dump[8:12] = (1).to_bytes(4, "big")  # XYPixmap
+        with self.assertRaises(ValueError):
+            module.xwd_to_png(bytes(dump))
+
+    def test_diagnose_writes_the_screen_and_what_the_desktop_shows_and_never_acts(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            dump = subprocess.CompletedProcess([], 0, stdout=xwd(1, 1, [0xFFFFFF]))
+            with patch.object(module.subprocess, "run", return_value=dump) as run, \
+                    patch.object(module, "Desktop", side_effect=RuntimeError("no bus")):
+                receipt = module.diagnose(directory, 10)
+            self.assertEqual(run.call_args.args[0], ["xwd", "-root", "-silent"])
+            self.assertEqual((receipt["status"], receipt["action_count"], receipt["files"]), ("diagnosed", 0, ["screen.png"]))
+            self.assertEqual(png_pixels(open(os.path.join(directory, "screen.png"), "rb").read()), [[255, 255, 255]])
+            # Without an accessibility bus it says why, without the error's text.
+            self.assertEqual(open(os.path.join(directory, "accessibility.error")).read(), "RuntimeError\n")
+
+    def test_diagnose_needs_an_existing_absolute_directory(self):
+        for directory in (None, "relative", "/nonexistent/mst-diagnose"):
+            with self.assertRaises(module.DriverFailure):
+                module.diagnose(directory, 10)
 
 
 if __name__ == "__main__":
