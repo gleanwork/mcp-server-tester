@@ -780,9 +780,9 @@ const store: RunStore = {
 
 Opening a stored run (`mst open --results`) and listing runs (`mst runs list`) are planned.
 
-Run JSON and file/GCS result-store artifacts are written and read in chunks,
-so large batches of tool traces do not require one V8 string for the whole
-summary. Local JSON files are replaced only after serialization completes; a
+Run JSON, file/GCS result-store artifacts and `saveResultsTo` baselines are
+written and read in chunks, so large batches of tool traces do not require one
+V8 string for the whole summary. Local JSON files are replaced only after serialization completes; a
 failed write leaves the previous file intact. This preserves every result and
 trace field without truncating tool output or relaxing evidence checks. The
 result objects still need to fit in memory, and a single string value remains

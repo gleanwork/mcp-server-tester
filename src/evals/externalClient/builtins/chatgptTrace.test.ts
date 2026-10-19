@@ -1323,6 +1323,62 @@ describe('ChatGPT native response_item tool calls', () => {
   );
 
   it.each([
+    'await tools . list_mcp_resources ({server:"acme_eval"});',
+    'await tools.list_mcp_resources ( { server : "acme_eval" } ) ;',
+    'const r = await tools\n  .list_mcp_resources({server:"acme_eval"});\ntext(r);',
+  ])('allows whitespace between the tokens of a helper: %s', (input) => {
+    const trace = parse([
+      ...exec('resource', input, 1, 2),
+      item(
+        {
+          type: 'McpToolCall',
+          id: 'native',
+          server: 'acme_eval',
+          tool: 'list_mcp_resources',
+          arguments: { server: 'acme_eval' },
+        },
+        1.2,
+        1.3
+      ),
+    ]);
+    expect(trace.toolCalls.find((c) => c.id === 'native')).toMatchObject({
+      source: 'builtin',
+    });
+    expect(trace.telemetry.mcpToolCallCount).toBe(0);
+  });
+
+  it('counts a replayed helper record once, so the helper stays built-in', () => {
+    const native = item(
+      {
+        type: 'McpToolCall',
+        id: 'native',
+        server: 'acme_eval',
+        tool: 'list_mcp_resources',
+        arguments: { server: 'acme_eval' },
+      },
+      1.2,
+      1.3
+    );
+    const call = exec(
+      'resource',
+      'await tools.list_mcp_resources({server:"acme_eval"});',
+      1,
+      2
+    );
+    // The transcript repeats both the native item and its enclosing exec.
+    for (const body of [
+      [...call, native, native],
+      [...call, ...call, native],
+    ]) {
+      const trace = parse(body);
+      expect(trace.toolCalls.find((c) => c.id === 'native')).toMatchObject({
+        source: 'builtin',
+      });
+      expect(trace.telemetry.mcpToolCallCount).toBe(0);
+    }
+  });
+
+  it.each([
     '// await tools.list_mcp_resources({server:"acme_eval"});',
     `text('await tools.list_mcp_resources({server:"acme_eval"});');`,
     'if (false) { await tools.list_mcp_resources({server:"acme_eval"}); }',

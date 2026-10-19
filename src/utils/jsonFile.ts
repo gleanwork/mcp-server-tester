@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseChunked, stringifyChunked } from '@discoveryjs/json-ext';
 
@@ -14,17 +14,87 @@ export async function readJsonFile(file: string): Promise<unknown> {
   return parseChunked(createReadStream(file));
 }
 
-/** Publish only complete JSON; failed serialization leaves the previous file intact. */
+/**
+ * Publish only complete JSON; failed serialization leaves the previous file
+ * intact. The file keeps the mode it had, and a new file gets the default
+ * mode, as `writeFile` gives it.
+ */
 export async function writeJsonFile(
   file: string,
   value: unknown
 ): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
+  const mode = await stat(file).then(
+    (info) => info.mode & 0o7777,
+    () => undefined
+  );
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, jsonChunks(value), { flag: 'wx', mode: 0o600 });
+    await writeFile(temporary, jsonChunks(value), { flag: 'wx' });
+    if (mode !== undefined) await chmod(temporary, mode);
     await rename(temporary, file);
   } finally {
     await rm(temporary, { force: true });
+  }
+}
+
+/**
+ * A deep copy with `JSON.parse(JSON.stringify(value))`'s semantics (`toJSON`,
+ * `undefined` and functions dropped, non-finite numbers as `null`), built
+ * without one string of the whole value, which can pass V8's limit.
+ */
+export function jsonCopy<T>(value: T): T {
+  return copyJson(value, '', new Set()) as T;
+}
+
+function copyJson(
+  value: unknown,
+  key: string,
+  ancestors: Set<object>
+): unknown {
+  if (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'bigint') &&
+    typeof (value as { toJSON?: unknown }).toJSON === 'function'
+  )
+    value = (value as { toJSON(key: string): unknown }).toJSON(key);
+  if (
+    value instanceof Number ||
+    value instanceof String ||
+    value instanceof Boolean
+  )
+    value = value.valueOf();
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return value;
+    case 'number':
+      return Number.isFinite(value) ? value : null;
+    case 'bigint':
+      throw new TypeError('Do not know how to serialize a BigInt');
+    case 'undefined':
+    case 'function':
+    case 'symbol':
+      return undefined;
+  }
+  if (value === null) return null;
+  const object = value as object;
+  if (ancestors.has(object))
+    throw new TypeError('Converting circular structure to JSON');
+  ancestors.add(object);
+  try {
+    if (Array.isArray(object))
+      return object.map(
+        (item: unknown, index) =>
+          copyJson(item, String(index), ancestors) ?? null
+      );
+    const copy: Record<string, unknown> = {};
+    for (const [name, item] of Object.entries(object)) {
+      const copied = copyJson(item, name, ancestors);
+      if (copied !== undefined) copy[name] = copied;
+    }
+    return copy;
+  } finally {
+    ancestors.delete(object);
   }
 }

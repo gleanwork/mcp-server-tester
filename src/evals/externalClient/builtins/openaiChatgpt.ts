@@ -515,6 +515,22 @@ async function captureChatgptComputerUseResult({
     computerUse: runState.computerUse,
     nativeController: runState.nativeController,
   };
+  // A rewrite that never finishes is a transcript failure, not a lost
+  // submission. Keep what the bound turn recorded before it.
+  const unfinishedRewrite = (error: string): Promise<ExternalClientRunResult> =>
+    withEvidence(
+      latest
+        ? partialFailure(metadataOptions, latest, 'parse_failure', error)
+        : failureResult({
+            ...metadataOptions,
+            failureKind: 'parse_failure',
+            error,
+            limitations: [],
+          }),
+      run,
+      runState,
+      boundEvidence(bound)
+    );
   try {
     const baseline = runState.baseline;
     if (!baseline || !runState.promptSubmitted)
@@ -559,7 +575,7 @@ async function captureChatgptComputerUseResult({
         if (!(error instanceof PendingChatgptRecordError)) throw error;
         pendingRecordSince ??= Date.now();
         if (Date.now() - pendingRecordSince >= CHATGPT_STALL_MS)
-          throw new Error(
+          return await unfinishedRewrite(
             'Native ChatGPT record rewrite did not complete within the stall deadline.'
           );
         // Read-only polling: no record is accepted or discarded, and no prompt
@@ -710,6 +726,12 @@ async function captureChatgptComputerUseResult({
         )
       );
     }
+    if (pendingRecordSince !== undefined)
+      return await unfinishedRewrite(
+        matched
+          ? 'Native ChatGPT record rewrite did not complete before the run timeout.'
+          : 'Native ChatGPT record rewrite did not complete before the binding deadline.'
+      );
     const timeoutError =
       'Timed out waiting for the native ChatGPT turn to complete.';
     const result = await withEvidence(

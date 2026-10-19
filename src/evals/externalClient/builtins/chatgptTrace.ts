@@ -106,7 +106,7 @@ function standaloneResourceLookup(
   input: string
 ): { tool: string; server: string } | undefined {
   const match =
-    /^\s*(?:(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*)?await\s+tools\.(list_mcp_resources|list_mcp_resource_templates)\(\s*\{\s*(?:server|"server"|'server')\s*:\s*(?:"([^"\\\r\n]*)"|'([^'\\\r\n]*)')\s*\}\s*\)\s*;?\s*([\s\S]*)$/.exec(
+    /^\s*(?:(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*)?await\s+tools\s*\.\s*(list_mcp_resources|list_mcp_resource_templates)\s*\(\s*\{\s*(?:server|"server"|'server')\s*:\s*(?:"([^"\\\r\n]*)"|'([^'\\\r\n]*)')\s*\}\s*\)\s*;?\s*([\s\S]*)$/.exec(
       input
     );
   if (!match) return undefined;
@@ -122,12 +122,37 @@ function standaloneResourceLookup(
   return { tool: match[2]!, server: match[3] ?? match[4]! };
 }
 
+/** The first record of each ID; a transcript can replay a record. */
+function firstOfEach(
+  events: Event[],
+  key: (event: Event) => string | undefined
+): Event[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    const id = key(event);
+    if (id === undefined) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 /** Bind the literal helper to its sole native child, inside a completed call. */
 function targetedResourceHelpers(
   turn: Event[],
   outputs: Map<string, Event>
 ): Set<string> {
-  const wrappers = turn.flatMap((event) => {
+  // Count each call and each native item once, as the main loop does.
+  const calls = firstOfEach(
+    turn.filter(
+      (event) =>
+        event.type === 'response_item' &&
+        (event.payload.type === 'function_call' ||
+          event.payload.type === 'custom_tool_call')
+    ),
+    (event) => string(event.payload.call_id)
+  );
+  const wrappers = calls.flatMap((event) => {
     const p = event.payload;
     if (
       event.type !== 'response_item' ||
@@ -139,11 +164,14 @@ function targetedResourceHelpers(
     const end = output ? time(output.timestamp) : Infinity;
     return start > 0 && end >= start ? [{ event, start, end }] : [];
   });
-  const native = turn.filter(
-    (event) =>
-      event.type === 'event_msg' &&
-      event.payload.type === 'item_completed' &&
-      object(event.payload.item)?.type === 'McpToolCall'
+  const native = firstOfEach(
+    turn.filter(
+      (event) =>
+        event.type === 'event_msg' &&
+        event.payload.type === 'item_completed' &&
+        object(event.payload.item)?.type === 'McpToolCall'
+    ),
+    (event) => string(object(event.payload.item)?.id)
   );
   const helpers = new Set<string>();
   for (const wrapper of wrappers) {

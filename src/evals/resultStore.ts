@@ -5,7 +5,12 @@ import { readdir } from 'fs/promises';
 import { Readable, type Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { parseChunked } from '@discoveryjs/json-ext';
-import { jsonChunks, readJsonFile, writeJsonFile } from '../utils/jsonFile.js';
+import {
+  jsonChunks,
+  jsonCopy,
+  readJsonFile,
+  writeJsonFile,
+} from '../utils/jsonFile.js';
 import { join } from 'path';
 
 export type StoredArtifactKind =
@@ -191,7 +196,9 @@ function stripResponses(value: unknown): void {
  * including each trace's events, servers, arguments and usage.
  */
 export function redactStoredResponses<T>(value: T): T {
-  const copy = structuredClone(value);
+  // JSON's semantics, as stored results are JSON: a judge's metadata only has
+  // to be JSON-serializable, which a structured clone is not (a URL, say).
+  const copy = jsonCopy(value);
   stripResponses(copy);
   return copy;
 }

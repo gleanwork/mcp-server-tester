@@ -1,7 +1,6 @@
 import { assertCurrentRunResult } from './resultFormat.js';
-import { readFile, writeFile, mkdir } from 'fs/promises';
-import { dirname } from 'path';
 import type { EvalRunnerResult } from './evalRunner.js';
+import { readJsonFile, writeJsonFile } from '../utils/jsonFile.js';
 import {
   REDACT_STORED_RESPONSES_BY_DEFAULT,
   redactStoredResponses,
@@ -39,8 +38,8 @@ export async function saveBaseline(
   const { omitResponses = REDACT_STORED_RESPONSES_BY_DEFAULT } = options;
   const toSave = omitResponses ? redactStoredResponses(result) : result;
 
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, JSON.stringify(toSave, null, 2), 'utf8');
+  // In chunks, like every run file: a large result can pass V8's string limit.
+  await writeJsonFile(filePath, toSave);
 }
 
 /**
@@ -53,8 +52,7 @@ export async function saveBaseline(
 export async function loadBaseline(
   filePath: string
 ): Promise<EvalRunnerResult> {
-  const raw = await readFile(filePath, 'utf8');
-  const result: unknown = JSON.parse(raw);
+  const result = await readJsonFile(filePath);
   assertCurrentRunResult(result, `Baseline ${filePath}`);
   return result as EvalRunnerResult;
 }

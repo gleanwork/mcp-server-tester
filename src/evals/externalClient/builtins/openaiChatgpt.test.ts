@@ -509,12 +509,66 @@ describe('bounded native binding wait and failure classification', () => {
         new PendingChatgptRecordError()
       );
       const result = await capture(ctx);
+      // A rewrite that never finishes is a transcript failure, not a lost
+      // submission (no_matching_session).
       expect(result).toMatchObject({
         success: false,
-        clientMetadata: { traceConfidence: 'unknown' },
+        error: expect.stringContaining('binding deadline'),
+        clientMetadata: {
+          failureKind: 'parse_failure',
+          traceConfidence: 'unknown',
+        },
       });
       expect(clock.now).toBe(4000);
       expect(runLinuxChatgptDesktop).not.toHaveBeenCalled();
+      expect(submitChatgptQuery).not.toHaveBeenCalled();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the bound turn when a rewrite after binding never finishes', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-rewrite-bound-'));
+    try {
+      const ctx = context(home, true, 900_000);
+      const root = chatgptRunState(ctx.state).sessionsRoot as string;
+      await mkdir(root, { recursive: true });
+      const path = join(root, 'rollout.jsonl');
+      await writeFile(path, 'fixture native transcript');
+      const call = {
+        id: 'call',
+        name: 'search',
+        server: 'acme-eval',
+        source: 'mcp' as const,
+        arguments: { query: 'q' },
+      };
+      vi.mocked(findChatgptTrace)
+        .mockResolvedValueOnce({
+          path,
+          trace: {
+            sessionId: 'session',
+            turnId: 'turn',
+            complete: false,
+            toolCalls: [call],
+            conversationHistory: [],
+            telemetry: {},
+            limitations: [],
+          },
+        })
+        .mockRejectedValue(new PendingChatgptRecordError());
+      const result = await capture(ctx);
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining('stall deadline'),
+        toolCalls: [call],
+        clientMetadata: {
+          failureKind: 'parse_failure',
+          traceConfidence: 'low',
+        },
+      });
+      // Stops at the 120s stall limit, not the 900s case timeout.
+      expect(clock.now - 1000).toBeGreaterThanOrEqual(120_000);
+      expect(clock.now - 1000).toBeLessThan(125_000);
       expect(submitChatgptQuery).not.toHaveBeenCalled();
     } finally {
       await rm(home, { recursive: true, force: true });

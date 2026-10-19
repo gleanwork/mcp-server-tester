@@ -418,7 +418,9 @@ If a truncated JSONL record is followed by an unfinished native replacement with
 the same next ordinal, collection waits read-only for the replacement. It never
 accepts that fragment as evidence. A completed replacement must pass the normal
 parser; corruption, mismatched ordinals, or a rewrite that never finishes still
-fails within the binding/run/stall deadlines. A Linux binding timeout also saves
+fails within the binding/run/stall deadlines. A rewrite that never finishes is a
+`parse_failure`, not `no_matching_session`, and keeps the tool calls the bound
+turn recorded before it. A Linux binding timeout also saves
 a diagnostic screenshot; it is not native answer or tool evidence and does not
 trigger a resubmission.
 
