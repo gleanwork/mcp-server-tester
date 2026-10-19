@@ -163,6 +163,33 @@ function same(a: unknown, b: unknown): boolean {
     b === undefined ? undefined : JSON.parse(JSON.stringify(b))
   );
 }
+/**
+ * The correlation telemetry the native session supports for this case: its
+ * initial message is the case's prompt, or, for a case recorded as bound to
+ * the only new session, how the stored prompt differs (lengths, first
+ * differing index). Undefined when neither holds.
+ */
+function replayedCorrelation(
+  saved: ObjectValue,
+  trace: ClaudeTrace
+): Record<string, unknown> | undefined {
+  const prompt = object(saved.request).input;
+  if (typeof prompt !== 'string') return undefined;
+  const stored = trace.candidate.metadata.initialMessage;
+  if (stored === prompt) return { correlation: 'exact-initial-prompt' };
+  const recorded = object(saved.clientTelemetry);
+  if (recorded.correlation !== 'only-new-session') return undefined;
+  const text = stored ?? '';
+  let i = 0;
+  while (i < text.length && i < prompt.length && text[i] === prompt[i]) i++;
+  const promptDifference = {
+    storedChars: text.length,
+    promptChars: prompt.length,
+    firstDifferenceAt: i,
+  };
+  if (!same(recorded.promptDifference, promptDifference)) return undefined;
+  return { correlation: 'only-new-session', promptDifference };
+}
 function issue(
   error: unknown,
   fallback: CoworkNativeAuditIssue
@@ -567,11 +594,8 @@ async function auditCase(
       servers
     ).response
   );
-  if (
-    typeof object(saved.request).input !== 'string' ||
-    trace.candidate.metadata.initialMessage !== object(saved.request).input
-  )
-    result.issues.push('PROMPT_MISMATCH');
+  const correlation = replayedCorrelation(saved, trace);
+  if (!correlation) result.issues.push('PROMPT_MISMATCH');
   if (
     trace.finalAnswer === undefined ||
     response.response !== trace.finalAnswer
@@ -599,7 +623,7 @@ async function auditCase(
     costScope: 'native-inference-only',
     ...trace.telemetry,
     nativeSessionId: sessionId,
-    correlation: 'exact-initial-prompt',
+    ...(correlation ?? { correlation: 'exact-initial-prompt' }),
   };
   for (const stored of [
     object(saved.clientTelemetry),

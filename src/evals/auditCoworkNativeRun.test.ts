@@ -325,6 +325,31 @@ describe('auditCoworkNativeRun', () => {
     });
   });
 
+  it('verifies a case bound as the only new session by the prompt difference it recorded', async () => {
+    const f = await fixture();
+    const stored = f.saved.request.input;
+    // Claude stored the prompt without the quotes the case had.
+    f.saved.request.input = `"${stored}"`;
+    const binding = {
+      correlation: 'only-new-session',
+      promptDifference: {
+        storedChars: stored.length,
+        promptChars: stored.length + 2,
+        firstDifferenceAt: 0,
+      },
+    };
+    Object.assign(f.saved.clientTelemetry, binding);
+    Object.assign(f.saved.response.telemetry as RecordValue, binding);
+    expect(await f.audit()).toMatchObject({
+      evidencePassed: true,
+      cases: [{ issues: [] }],
+    });
+    (
+      f.saved.clientTelemetry.promptDifference as RecordValue
+    ).firstDifferenceAt = 1;
+    expect((await f.audit()).cases[0]?.issues).toContain('PROMPT_MISMATCH');
+  });
+
   it('keeps unknown quality null and pseudonymizes arbitrary case IDs', async () => {
     const f = await fixture();
     f.saved.pass = null;

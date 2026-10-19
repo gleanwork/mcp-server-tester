@@ -425,11 +425,19 @@ both legacy session folders and the current short-ID/cwd-root layout. Native too
 server names are retained; built-in tools are not attributed to the tested server.
 
 The executor inserts the dataset query unchanged. No marker, prefix, or suffix is
-added. Correlation requires exact native `initialMessage` equality, a metadata path
-absent from the per-case snapshot, and a recent creation timestamp (five seconds
-of clock tolerance). Existing sessions remain excluded even if updated. Answers
-and tool output are never prompt matches. MST binds the unique new session within
-30 seconds after submission and pins collection to it. A failed case is never
+added. MST binds the case to the session its submission created: a metadata
+path absent from the per-case snapshot, with a recent creation timestamp (five
+seconds of clock tolerance). Existing sessions remain excluded even if updated.
+A new session whose native `initialMessage` equals the prompt binds at once.
+Claude can store a prompt changed from what the deep link carried (a long
+prompt truncated, say), so when no new session has it exactly, the only new
+session binds, once it has stayed the only one for two polls. Two new sessions without exactly one exact match are
+ambiguous, and the case fails. The trace's `correlation` says which binding
+held (`exact-initial-prompt` or `only-new-session`); for `only-new-session`,
+`promptDifference` gives the stored and submitted lengths and the first
+differing index, never the text. Answers and tool output are never prompt
+matches. MST binds within 30 seconds after submission and pins collection to
+the bound session. A failed case is never
 retried or resent. Each case is self-contained: after a submit, binding, HITL, or
 trace failure, MST records that case's failure and resets the app before the next
 case. On Linux the reset opens one empty new-task deep link and waits read-only

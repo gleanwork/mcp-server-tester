@@ -25,7 +25,10 @@ import {
   waitForClaudeTrace,
   waitForClaudeSession,
 } from './externalClient/builtins/claudeSessions.js';
-import { awaitingUserAnswer } from './externalClient/builtins/claudeTrace.js';
+import {
+  awaitingUserAnswer,
+  type ClaudeTrace,
+} from './externalClient/builtins/claudeTrace.js';
 import { COWORK_WORKSPACE_UNAVAILABLE_MESSAGE } from './infrastructureFailure.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
@@ -142,6 +145,17 @@ const COWORK_SESSION_EVIDENCE = [
 
 /** Platforms with managed stdio setup, readiness, and cleanup support. */
 export const COWORK_STDIO_PLATFORMS = ['darwin', 'linux'] as const;
+
+/**
+ * How the trace was bound to its case, for its telemetry: an exact initial
+ * prompt, or the only new session, with how its stored prompt differs.
+ */
+function correlationTelemetry(trace: ClaudeTrace): Record<string, unknown> {
+  const binding = trace.binding ?? { kind: 'exact-initial-prompt' };
+  return binding.kind === 'only-new-session'
+    ? { correlation: binding.kind, promptDifference: binding.promptDifference }
+    : { correlation: binding.kind };
+}
 
 const failure = (error: string): ClientRunResult => ({
   finalText: '',
@@ -495,7 +509,7 @@ async function runBatch(
                     costScope: 'native-inference-only',
                     ...pending.telemetry,
                     nativeSessionId: pending.candidate.id,
-                    correlation: 'exact-initial-prompt',
+                    ...correlationTelemetry(pending),
                     awaitingUser: 'AskUserQuestion',
                   },
                 }
@@ -617,7 +631,7 @@ async function runBatch(
               costScope: 'native-inference-only',
               ...trace.telemetry,
               nativeSessionId: trace.candidate.id,
-              correlation: 'exact-initial-prompt',
+              ...correlationTelemetry(trace),
               ...(hitlWarning ? { hitlWarning } : {}),
             },
             llmDurationMs: trace.llmDurationMs,
