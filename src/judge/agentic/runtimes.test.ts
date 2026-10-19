@@ -212,6 +212,71 @@ describe('commandTool', () => {
   });
 });
 
+describe('probeCodexSandbox', () => {
+  /** A fake `codex.js`: `codex sandbox -- cat <file>` runs `body` in its cwd. */
+  async function launcher(body: string): Promise<string> {
+    const path = join(root, `fake-codex-${Math.random()}.mjs`);
+    await writeFile(
+      path,
+      `import { readFileSync } from 'node:fs';\n` +
+        `const [cmd, dashes, , file] = process.argv.slice(2);\n` +
+        `if (cmd !== 'sandbox' || dashes !== '--') process.exit(9);\n` +
+        body
+    );
+    return path;
+  }
+
+  it('passes when the sandboxed command prints the file', async () => {
+    vi.stubEnv('MST_JUDGE_SANDBOX', '');
+    const { probeCodexSandbox } = await import('./codexRuntime.js');
+    await expect(
+      probeCodexSandbox({
+        launcher: await launcher(
+          `process.stdout.write(readFileSync(file, 'utf8'));`
+        ),
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("fails with the sandbox's error when it can't start, or prints something else", async () => {
+    vi.stubEnv('MST_JUDGE_SANDBOX', '');
+    const { probeCodexSandbox } = await import('./codexRuntime.js');
+    await expect(
+      probeCodexSandbox({
+        launcher: await launcher(
+          `process.stderr.write('WARNING: noise\\nbwrap: No permissions to create a new namespace\\n'); process.exit(1);`
+        ),
+      })
+    ).rejects.toThrow(
+      /read-only sandbox can't run commands here.*bwrap: No permissions to create a new namespace.*MST_JUDGE_SANDBOX=container/
+    );
+    await expect(
+      probeCodexSandbox({
+        launcher: await launcher(`process.stdout.write('');`),
+      })
+    ).rejects.toThrow(/the sandboxed command printed ""/);
+  });
+
+  it('checks nothing where the container is the sandbox', async () => {
+    vi.stubEnv('MST_JUDGE_SANDBOX', 'container');
+    const { probeCodexSandbox } = await import('./codexRuntime.js');
+    await expect(
+      probeCodexSandbox({ launcher: '/nonexistent/codex.js' })
+    ).resolves.toBeUndefined();
+  });
+
+  it.runIf(process.platform === 'darwin')(
+    "runs the SDK's own Codex sandbox (macOS: Seatbelt)",
+    async () => {
+      vi.stubEnv('MST_JUDGE_SANDBOX', '');
+      const { probeCodexSandbox, codexLauncherPath } =
+        await import('./codexRuntime.js');
+      expect(codexLauncherPath()).toMatch(/@openai\/codex\/bin\/codex\.js$/);
+      await expect(probeCodexSandbox()).resolves.toBeUndefined();
+    }
+  );
+});
+
 describe('codexRuntime', () => {
   it('runs read-only, offline, with a fresh home and only its key', async () => {
     clearLLMEnv();

@@ -391,6 +391,15 @@ What each runtime can reach:
   image that is the judge's sandbox sets `MST_JUDGE_SANDBOX=container`, and
   Codex then runs unsandboxed inside it (MST's Linux Cowork image does, for
   `mst grade --env`).
+- **A Codex judge's preflight checks its sandbox.** It runs `codex sandbox`
+  on a file it wrote in a temporary directory, with no model call, and fails
+  unless the sandboxed command prints the file. A sandbox that can't start for
+  any reason (no user namespaces, a seccomp or AppArmor profile, a missing
+  helper) then stops `mst run` or `mst grade` before any judgment, with the
+  sandbox's own error. Without the check, the judge's commands fail, the
+  model answers anyway, and its guess (a tie, in practice) counts as a
+  verdict. With `MST_JUDGE_SANDBOX=container` there is no Codex sandbox to
+  check.
 - Each run starts with a fresh, empty config home (`CLAUDE_CONFIG_DIR`,
   `CODEX_HOME`) and loads no user settings, rules, memory or MCP servers. The
   agent's environment is an allowlist: `PATH`, `TMPDIR`, `LANG` and the
