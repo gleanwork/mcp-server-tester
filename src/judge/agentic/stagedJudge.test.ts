@@ -18,6 +18,7 @@ const runtimes = vi.hoisted(
 );
 vi.mock('./codexRuntime.js', () => ({
   codexRuntime: () => runtimes.codex!(),
+  probeCodexSandbox: async () => {},
 }));
 vi.mock('./claudeRuntime.js', () => ({
   claudeRuntime: () => runtimes['claude-agent']!(),

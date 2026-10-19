@@ -11,7 +11,8 @@
  * In a worker container, Codex's sandbox can't start: bubblewrap needs user
  * namespaces, which Docker's seccomp and AppArmor profiles (and hosts that
  * restrict unprivileged user namespaces, such as Ubuntu 24.04) deny. Every
- * shell command then fails, and the judge decides without its evidence. An
+ * shell command then fails, and the judge decides without its evidence; the
+ * judge's preflight (`probeCodexSandbox`) fails first instead. An
  * image whose container is a disposable sandbox sets MST_JUDGE_SANDBOX=container:
  * Codex runs without its own sandbox, confined by the container, which can
  * write only its own files and reach what its network allows.
@@ -22,9 +23,13 @@
  * and credential come from `resolveLLMEndpoint('openai')`.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { loadJudgeSdk } from '../adapterSupport.js';
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
 import {
@@ -102,6 +107,91 @@ function stepOf(
     default:
       return undefined;
   }
+}
+
+const PROBE_TIMEOUT_MS = 30_000;
+const PROBE_FILE = 'mst-sandbox-probe.txt';
+
+/**
+ * The `@openai/codex` CLI launcher the SDK runs, from where `@openai/codex-sdk`
+ * resolves for MST: the SDK's own dependency, so the probe runs the same
+ * binary as the judge.
+ */
+export function codexLauncherPath(): string {
+  const here = createRequire(
+    typeof __filename === 'string' ? __filename : import.meta.url
+  );
+  // The SDK's package exports only its entry, so find its directory.
+  const sdkDir = (here.resolve.paths('@openai/codex-sdk') ?? [])
+    .map((dir) => join(dir, '@openai', 'codex-sdk'))
+    .find((dir) => existsSync(join(dir, 'package.json')));
+  if (!sdkDir)
+    throw new Error(
+      'Codex judge requires the `@openai/codex-sdk` package. Install it with: npm install @openai/codex-sdk'
+    );
+  return createRequire(join(sdkDir, 'package.json')).resolve(
+    '@openai/codex/bin/codex.js'
+  );
+}
+
+/**
+ * Fails unless Codex's read-only sandbox can run a command that reads a file:
+ * `codex sandbox` on a file written to a temporary directory, with no model
+ * call. Whatever stops the sandbox (no user namespaces, a seccomp or AppArmor
+ * profile, a missing helper), the judge's commands would all fail and its
+ * verdicts would be guesses, so this fails the judge's preflight, with the
+ * sandbox's own error. Nothing to check with MST_JUDGE_SANDBOX=container.
+ */
+export async function probeCodexSandbox(
+  options: { launcher?: string; env?: readonly string[] } = {}
+): Promise<void> {
+  if (codexSandboxMode() !== 'read-only') return;
+  const launcher = options.launcher ?? codexLauncherPath();
+  const dir = await mkdtemp(join(tmpdir(), 'mst-codex-probe-'));
+  try {
+    const home = join(dir, 'home');
+    const work = join(dir, 'work');
+    await mkdir(home);
+    await mkdir(work);
+    const sentinel = `mst-sandbox-probe ${Date.now()}`;
+    await writeFile(join(work, PROBE_FILE), sentinel);
+    let stdout = '';
+    let failure: string | undefined;
+    try {
+      ({ stdout } = await promisify(execFile)(
+        process.execPath,
+        [launcher, 'sandbox', '--', 'cat', PROBE_FILE],
+        {
+          cwd: work,
+          env: runtimeEnv(options.env ?? [], { CODEX_HOME: home, HOME: home }),
+          timeout: PROBE_TIMEOUT_MS,
+          maxBuffer: 1024 * 1024,
+        }
+      ));
+    } catch (err) {
+      const e = err as { stderr?: string; message?: string };
+      failure = (e.stderr || e.message || String(err)).trim();
+    }
+    if (failure === undefined && stdout.trim() === sentinel) return;
+    throw new Error(
+      `Codex judge's read-only sandbox can't run commands here, so it couldn't read its evidence: ` +
+        `${lastLines(failure ?? `the sandboxed command printed ${JSON.stringify(stdout.slice(0, 200))}`)}. ` +
+        `In a container that is itself the sandbox, set MST_JUDGE_SANDBOX=container.`
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** The last lines of a probe's error output, which say why it failed. */
+function lastLines(text: string): string {
+  const lines = text.split('\n').filter((l) => l.trim());
+  const reasons = lines.filter((l) => !l.startsWith('WARNING:'));
+  return (reasons.length ? reasons : lines)
+    .slice(-3)
+    .join(' ')
+    .slice(0, 600)
+    .replace(/[.\s]+$/, '');
 }
 
 /** A Codex SDK runtime. */

@@ -30,8 +30,11 @@ import type {
 const runtimes = vi.hoisted(
   () => ({}) as Record<string, (() => AgentJudgeRuntime) | undefined>
 );
+// The Codex sandbox probe, replaced per test.
+const probe = vi.hoisted(() => ({ run: async (): Promise<void> => {} }));
 vi.mock('./codexRuntime.js', () => ({
   codexRuntime: () => runtimes.codex!(),
+  probeCodexSandbox: () => probe.run(),
 }));
 vi.mock('./claudeRuntime.js', () => ({
   claudeRuntime: () => runtimes['claude-agent']!(),
@@ -180,6 +183,26 @@ describe('agenticJudge', () => {
     await expect(
       judge.preflight!({ runtime: 'codex' })
     ).resolves.toBeUndefined();
+  });
+
+  it("preflight fails a Codex judge whose sandbox can't read a file", async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test');
+    const judge = agenticJudge({
+      buildPrompt: () => ({ prompt: 'p' }),
+      parseScore: () => ({ score: 1 }),
+    });
+    probe.run = () =>
+      Promise.reject(new Error("Codex judge's read-only sandbox can't run"));
+    try {
+      await expect(judge.preflight!({ runtime: 'codex' })).rejects.toThrow(
+        "read-only sandbox can't run"
+      );
+      // Claude has no OS sandbox to probe.
+      await expect(judge.preflight!({})).resolves.toBeUndefined();
+    } finally {
+      probe.run = async () => {};
+    }
   });
 
   it('writes the full evidence, runs the configured runtime, and parses the verdict', async () => {

@@ -23,7 +23,7 @@ import type {
   PairwisePreference,
 } from '../pairwiseContract.js';
 import { claudeRuntime } from './claudeRuntime.js';
-import { codexRuntime } from './codexRuntime.js';
+import { codexRuntime, probeCodexSandbox } from './codexRuntime.js';
 import { loadJudgeSdk, requireJudgeCredential } from '../adapterSupport.js';
 import type {
   AgentJudgeResult,
@@ -132,7 +132,8 @@ export function agentRuntime(id: AgentJudgeRuntimeId): AgentJudgeRuntime {
 
 /**
  * Fails, naming what to install or set, unless the runtime's SDK loads and
- * its credential is configured: checked before a run starts any client.
+ * its credential is configured, and, for Codex, its sandbox can read a file
+ * (`probeCodexSandbox`): checked before a run starts any client.
  */
 export async function preflightRuntime(
   runtime: AgentJudgeRuntimeId
@@ -144,6 +145,7 @@ export async function preflightRuntime(
       'Codex agent',
       '@openai/codex-sdk'
     );
+    await probeCodexSandbox();
   } else {
     requireJudgeCredential('Claude agent', 'anthropic', {});
     await loadJudgeSdk(
