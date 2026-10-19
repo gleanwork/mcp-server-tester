@@ -143,17 +143,14 @@ export async function startToolSurfaceProxy(
     let closing: Promise<void> | undefined;
     return {
       serversFor(scope) {
+        // Only what every proxied client can take. The proxy applies each
+        // server's timeouts to its own calls upstream; copying them here
+        // would hand an HTTP client a stdio server's options (a connector's
+        // dry-run proxy sets them), which Cowork and Claude Code reject.
         return upstreams.map(({ config }, index) => ({
           transport: 'http',
           serverUrl: `http://127.0.0.1:${port}/${token}/${encodeURIComponent(scope)}/${index}/mcp`,
           ...(config.label !== undefined ? { label: config.label } : {}),
-          // The client keeps the server's timeouts, as without tool metadata.
-          ...(config.requestTimeoutMs !== undefined
-            ? { requestTimeoutMs: config.requestTimeoutMs }
-            : {}),
-          ...(config.callTimeoutMs !== undefined
-            ? { callTimeoutMs: config.callTimeoutMs }
-            : {}),
         }));
       },
       activity: activityOf,

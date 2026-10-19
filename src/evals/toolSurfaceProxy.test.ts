@@ -14,6 +14,10 @@ import {
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 import { startToolSurfaceProxy } from './toolSurfaceProxyServer.js';
+import {
+  createCoworkMcpPlan,
+  resolveCoworkMcpHeaders,
+} from './coworkSetup/config.js';
 
 const FIXTURES = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -135,6 +139,26 @@ describe('startToolSurfaceProxy', () => {
     const closing = proxy.close();
     expect(proxy.close()).toBe(closing);
     await closing;
+  }, 30_000);
+
+  it("keeps a stdio server's timeouts to itself, so Cowork can take its endpoints", async () => {
+    // A connector's dry-run proxy is a stdio server with timeouts set.
+    const proxy = await start([
+      {
+        ...catalog('docs', 'docs'),
+        connectTimeoutMs: 120_000,
+        requestTimeoutMs: 120_000,
+        callTimeoutMs: 120_000,
+      },
+    ]);
+    const servers = proxy.serversFor('case-1');
+    expect(servers).toEqual([
+      { transport: 'http', serverUrl: expect.any(String), label: 'docs' },
+    ]);
+    expect(
+      createCoworkMcpPlan(servers, '/opt/acme/mcp-helpers').servers
+    ).toMatchObject([{ label: 'docs' }]);
+    expect(resolveCoworkMcpHeaders(servers, {})).toEqual({ docs: {} });
   }, 30_000);
 });
 
