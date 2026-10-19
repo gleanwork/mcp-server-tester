@@ -8,6 +8,14 @@
  * MST can, by absolute path. Use it only where that is acceptable; the
  * Claude Agent runtime, the default, confines reads to the workspace.
  *
+ * In a worker container, Codex's sandbox can't start: bubblewrap needs user
+ * namespaces, which Docker's seccomp and AppArmor profiles (and hosts that
+ * restrict unprivileged user namespaces, such as Ubuntu 24.04) deny. Every
+ * shell command then fails, and the judge decides without its evidence. An
+ * image whose container is a disposable sandbox sets MST_JUDGE_SANDBOX=container:
+ * Codex runs without its own sandbox, confined by the container, which can
+ * write only its own files and reach what its network allows.
+ *
  * It starts with a fresh, empty CODEX_HOME, which is also its HOME, so the
  * caller's config, login, rules, session history and dotfiles aren't loaded,
  * and it gets only the environment variables listed in `env`. Its endpoint
@@ -56,6 +64,22 @@ export interface CodexRuntimeOptions {
 }
 
 const DEFAULT_CODEX_JUDGE_MODEL = 'gpt-5.5';
+
+/**
+ * Codex's sandbox mode from MST_JUDGE_SANDBOX: `os` (the default), its own
+ * read-only OS sandbox; `container`, none, because the machine is a
+ * disposable container that is the sandbox (see above).
+ */
+export function codexSandboxMode(
+  env: NodeJS.ProcessEnv = process.env
+): 'read-only' | 'danger-full-access' {
+  const value = env.MST_JUDGE_SANDBOX?.trim() || 'os';
+  if (value === 'os') return 'read-only';
+  if (value === 'container') return 'danger-full-access';
+  throw new Error(
+    `MST_JUDGE_SANDBOX must be "os" or "container", not "${value}".`
+  );
+}
 
 function stepOf(
   item: Record<string, unknown> & { type: string }
@@ -119,7 +143,7 @@ export function codexRuntime(
         });
         const thread = codex.startThread({
           model: task.model ?? DEFAULT_CODEX_JUDGE_MODEL,
-          sandboxMode: 'read-only',
+          sandboxMode: codexSandboxMode(),
           workingDirectory: task.workspace,
           skipGitRepoCheck: true,
           approvalPolicy: 'never',

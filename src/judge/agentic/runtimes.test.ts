@@ -257,6 +257,30 @@ describe('codexRuntime', () => {
     expect(result.steps[0]).toEqual({ tool: 'shell', isError: false });
   });
 
+  it('runs without its own sandbox where the container is one (MST_JUDGE_SANDBOX=container)', async () => {
+    clearLLMEnv();
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
+    vi.stubEnv('MST_JUDGE_SANDBOX', 'container');
+    const { codexRuntime, codexSandboxMode } =
+      await import('./codexRuntime.js');
+    await codexRuntime().run({
+      workspace: root,
+      prompt: 'P',
+      maxTurns: 1,
+      timeoutMs: 10_000,
+    });
+    expect(codexCalls.thread).toMatchObject({
+      sandboxMode: 'danger-full-access',
+      networkAccessEnabled: false,
+      approvalPolicy: 'never',
+    });
+    expect(codexSandboxMode({})).toBe('read-only');
+    expect(codexSandboxMode({ MST_JUDGE_SANDBOX: 'os' })).toBe('read-only');
+    expect(() => codexSandboxMode({ MST_JUDGE_SANDBOX: 'off' })).toThrow(
+      /must be "os" or "container"/
+    );
+  });
+
   it('takes its endpoint from resolveLLMEndpoint, as other OpenAI calls do', async () => {
     clearLLMEnv();
     vi.stubEnv('OPENAI_BASE_URL', 'https://gateway.example/v1');

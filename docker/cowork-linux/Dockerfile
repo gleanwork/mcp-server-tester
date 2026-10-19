@@ -92,7 +92,8 @@ RUN set -e; \
 
 # What `docker exec` inherits: the session MST's Linux driver attaches to,
 # and owned-desktop mode (MST writes each variant's settings and restarts
-# Claude Desktop with MST_DESKTOP_RESTART).
+# Claude Desktop with MST_DESKTOP_RESTART). MST_JUDGE_SANDBOX: a grade
+# shard's Codex judge can't start its own sandbox here; the container is it.
 ENV DISPLAY=:99 \
   DBUS_SESSION_BUS_ADDRESS=unix:path=/run/mst/session/bus \
   XDG_RUNTIME_DIR=/run/mst/session \
@@ -105,6 +106,7 @@ ENV DISPLAY=:99 \
   MST_COWORK_PYTHON=/usr/bin/python3 \
   MST_TOKENS_DIR=/run/mst/tokens \
   MST_PLUGIN_DIR=/opt/mst/plugins \
+  MST_JUDGE_SANDBOX=container \
   LANG=C.UTF-8
 
 LABEL org.opencontainers.image.title="MST Cowork Linux desktop" \

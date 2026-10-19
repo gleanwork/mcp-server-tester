@@ -382,7 +382,11 @@ What each runtime can reach:
   the network, and web search is off. It is **not** confined to the
   workspace: read-only means its shell can read any file the user running MST
   can, by absolute path. Use it only on a machine where that is acceptable,
-  such as a CI runner with nothing else on it.
+  such as a CI runner with nothing else on it. In a container its sandbox
+  can't start (bubblewrap needs user namespaces), so every command fails; an
+  image that is the judge's sandbox sets `MST_JUDGE_SANDBOX=container`, and
+  Codex then runs unsandboxed inside it (MST's Linux Cowork image does, for
+  `mst grade --env`).
 - Each run starts with a fresh, empty config home (`CLAUDE_CONFIG_DIR`,
   `CODEX_HOME`) and loads no user settings, rules, memory or MCP servers. The
   agent's environment is an allowlist: `PATH`, `TMPDIR`, `LANG` and the
