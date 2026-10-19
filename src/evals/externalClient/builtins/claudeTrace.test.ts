@@ -1399,3 +1399,113 @@ describe('Claude session MCP names', () => {
     expect(trace.toolCalls[0]).toMatchObject({ server: 'a', name: 'b__c' });
   });
 });
+
+describe('the final turn answer', () => {
+  const text = (id: string, value: string) => ({
+    type: 'assistant',
+    message: { id, content: [{ type: 'text', text: value }] },
+  });
+  const tool = (id: string, name: string) => ({
+    type: 'assistant',
+    message: {
+      id,
+      content: [{ type: 'tool_use', id: `${id}-${name}`, name, input: {} }],
+    },
+  });
+  const prompt = { type: 'user', message: { content: 'the question' } };
+  const toolResult = (id: string) => ({
+    type: 'user',
+    message: {
+      content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }],
+    },
+  });
+  const answer = `The answer.\n${'Detail. '.repeat(40)}`;
+
+  async function parse(events: unknown[]) {
+    const root = await mkdtemp(join(tmpdir(), 'claude-answer-'));
+    onTestFinished(() => rm(root, { recursive: true, force: true }));
+    const sessionDir = join(root, 'local_answer');
+    await mkdir(sessionDir, { recursive: true });
+    await writeJsonl(join(sessionDir, 'audit.jsonl'), events);
+    return parseClaudeTrace({
+      id: 'local_answer',
+      metadataPath: join(root, 'local_answer.json'),
+      sessionDir,
+      statMtimeMs: Date.now(),
+      metadata: { sessionId: 'local_answer', initialMessage: 'the question' },
+    });
+  }
+
+  it('keeps the answer Cowork wrote before saving memory and a short wrap-up, without the narration before it', async () => {
+    const trace = await parse([
+      prompt,
+      text('m1', 'Let me search for that.'),
+      tool('m1', 'search'),
+      toolResult('m1-search'),
+      text('m2', answer),
+      tool('m2', 'Write'),
+      toolResult('m2-Write'),
+      tool('m3', 'Edit'),
+      toolResult('m3-Edit'),
+      text('m4', 'Saved the context to memory.'),
+      // Logged twice; counted once.
+      text('m4', 'Saved the context to memory.'),
+      { type: 'result', result: 'Saved the context to memory.' },
+    ]);
+    expect(trace.finalAnswer).toBe(
+      `${answer.trim()}\n\nSaved the context to memory.`
+    );
+    expect(trace.telemetry).toMatchObject({
+      answerSource: 'longest-text-onward',
+      finalMessageChars: 'Saved the context to memory.'.length,
+    });
+  });
+
+  it("is the native result when the last message is the turn's longest text", async () => {
+    const trace = await parse([
+      prompt,
+      text('m1', 'Let me search.'),
+      tool('m1', 'search'),
+      toolResult('m1-search'),
+      text('m2', answer),
+      { type: 'result', result: answer },
+    ]);
+    expect(trace.finalAnswer).toBe(answer);
+    expect(trace.telemetry).toMatchObject({
+      answerSource: 'final-message',
+      finalMessageChars: answer.length,
+    });
+  });
+
+  it('reads only the last turn, and keeps a native result that is not its last text', async () => {
+    const earlier = await parse([
+      { type: 'user', message: { content: 'an earlier question' } },
+      text('m0', answer),
+      prompt,
+      text('m1', 'Short reply.'),
+      { type: 'result', result: 'Short reply.' },
+    ]);
+    expect(earlier.finalAnswer).toBe('Short reply.');
+    const disagreeing = await parse([
+      prompt,
+      text('m1', answer),
+      text('m2', 'Done.'),
+      { type: 'result', result: 'Something else.' },
+    ]);
+    expect(disagreeing.finalAnswer).toBe('Something else.');
+    expect(disagreeing.telemetry.answerSource).toBeUndefined();
+  });
+
+  it('gives an unfinished task its answer so far', async () => {
+    const trace = await parse([
+      prompt,
+      text('m1', 'Let me look.'),
+      tool('m1', 'search'),
+      toolResult('m1-search'),
+      text('m2', answer),
+      tool('m2', 'search'),
+    ]);
+    expect(trace.isComplete).toBe(false);
+    expect(trace.finalAnswer).toBe(answer);
+  });
+});

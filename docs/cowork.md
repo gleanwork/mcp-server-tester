@@ -456,6 +456,22 @@ desktop that every case fails on. Per-case snapshots distinguish
 repeated identical prompts. Use a dedicated desktop: do not manually create or
 switch tasks during evaluation.
 
+The case's answer is the last turn's assistant text from its longest text block
+on. Cowork often writes its answer, then saves memory or files and ends with a
+short message ("Saved the context…"); the native result holds only that last
+message, so grading it would grade the wrap-up. Shorter text before the longest
+block, the narration between tool calls, is left out. The trace's
+`answerSource` says which held: `final-message` when the last text block is the
+longest, else `longest-text-onward`, with `finalMessageChars`, the last block's
+length.
+
+A case has `timeout` milliseconds from submission (default 900000, 15 minutes)
+to complete. When the session hasn't completed by then, the case fails with
+`Native Claude trace deadline exceeded` but keeps what the session did: its
+tool calls, usage, its answer so far, and the session folder, with
+`deadlineExceeded: true` in its telemetry. Set a longer `timeout` in the eval
+config for long tasks.
+
 On macOS the driver acts only while Claude is the frontmost app. A click that
 misses Claude's window (on the desktop, say) brings another app forward; before
 every click, key or scroll, the driver checks, and if another app is in front it

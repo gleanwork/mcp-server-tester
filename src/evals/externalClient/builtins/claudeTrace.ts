@@ -55,6 +55,14 @@ interface ClaudeNativeTelemetry {
   toolCallCount: number;
   /** Observed tool_result errors; absent when no tool results were observed. */
   toolErrorCount?: number;
+  /**
+   * Where the answer came from: the last turn's last text block
+   * (`final-message`), or its longest text block and the text after it
+   * (`longest-text-onward`). Absent without assistant text.
+   */
+  answerSource?: 'final-message' | 'longest-text-onward';
+  /** The last text block's length, what the native result holds. */
+  finalMessageChars?: number;
 }
 
 /**
@@ -215,10 +223,15 @@ export async function parseClaudeTrace(
     ...transcriptEventsForRun.filter((event) => event.type === 'result'),
   ]);
   const resultEvent = resultEvents.at(-1);
+  const answer = finalTurnAnswer(
+    auditEventsForRun.some(hasAssistantText)
+      ? auditEventsForRun
+      : transcriptEventsForRun,
+    typeof resultEvent?.result === 'string' ? resultEvent.result : undefined
+  );
   const finalAnswer =
-    typeof resultEvent?.result === 'string'
-      ? resultEvent.result
-      : extractAssistantText(combinedEventsForRun);
+    answer?.text ??
+    (typeof resultEvent?.result === 'string' ? resultEvent.result : undefined);
   const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(auditEventsForRun, transcriptEventsForRun);
   // Large results are only placeholders in the transcript; while the
@@ -256,12 +269,20 @@ export async function parseClaudeTrace(
     ),
     parseWarnings,
     rawText: `${rawAudit}\n${rawTranscript}`,
-    telemetry: buildNativeTelemetry(
-      resultEvents,
-      toolCalls,
-      usage,
-      combinedEventsForRun
-    ),
+    telemetry: {
+      ...buildNativeTelemetry(
+        resultEvents,
+        toolCalls,
+        usage,
+        combinedEventsForRun
+      ),
+      ...(answer
+        ? {
+            answerSource: answer.source,
+            finalMessageChars: answer.finalMessageChars,
+          }
+        : {}),
+    },
   };
 }
 
@@ -324,21 +345,82 @@ async function parseNdjsonContent<T>(
   return { events, ok: warnings.length === 0, warnings };
 }
 
-function extractAssistantText(events: ClaudeAuditEvent[]): string | undefined {
-  const parts: string[] = [];
+function assistantTextBlocks(event: ClaudeAuditEvent): string[] {
+  if (event.type !== 'assistant' || !Array.isArray(event.message?.content))
+    return [];
+  return event.message.content
+    .filter((block) => block.type === 'text' && block.text?.trim())
+    .map((block) => block.text!);
+}
 
-  for (const event of events) {
-    const blocks = Array.isArray(event.message?.content)
-      ? event.message.content
-      : [];
-    for (const block of blocks) {
-      if (block.type === 'text' && block.text) {
-        parts.push(block.text);
-      }
+const hasAssistantText = (event: ClaudeAuditEvent) =>
+  assistantTextBlocks(event).length > 0;
+
+/** A user message with text: a prompt, not a tool result. */
+function isUserPrompt(event: ClaudeAuditEvent): boolean {
+  if (event.type !== 'user') return false;
+  const content = event.message?.content;
+  if (typeof content === 'string') return content.trim().length > 0;
+  return (
+    Array.isArray(content) &&
+    content.some((block) => block.type === 'text') &&
+    !content.some((block) => block.type === 'tool_result')
+  );
+}
+
+/**
+ * The last turn's answer: its longest assistant text block and every text
+ * block after it. Cowork can write its answer, then save memory or files, then
+ * end with a short message; the native result holds only that last message.
+ * Narration between tool calls, before the longest block, is left out. When a
+ * native result disagrees with the last text block, the result stands alone.
+ */
+function finalTurnAnswer(
+  events: ClaudeAuditEvent[],
+  result: string | undefined
+):
+  | {
+      text: string;
+      source: 'final-message' | 'longest-text-onward';
+      finalMessageChars: number;
+    }
+  | undefined {
+  let start = 0;
+  for (const [index, event] of events.entries())
+    if (isUserPrompt(event)) start = index + 1;
+  const blocks: string[] = [];
+  const seen = new Set<string>();
+  for (const event of events.slice(start)) {
+    for (const [index, text] of assistantTextBlocks(event).entries()) {
+      // A message can be logged more than once; its id and block identify it.
+      const key = event.message?.id
+        ? `${event.message.id}:${index}:${text}`
+        : undefined;
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
+      blocks.push(text);
     }
   }
-
-  return parts.length > 0 ? parts.join('') : undefined;
+  const last = blocks.at(-1);
+  if (last === undefined) return undefined;
+  if (result !== undefined && result.trim() !== last.trim()) return undefined;
+  let longest = blocks.length - 1;
+  for (const [index, text] of blocks.entries())
+    if (text.trim().length > blocks[longest]!.trim().length) longest = index;
+  return longest === blocks.length - 1
+    ? {
+        text: result ?? last,
+        source: 'final-message',
+        finalMessageChars: (result ?? last).length,
+      }
+    : {
+        text: blocks
+          .slice(longest)
+          .map((text) => text.trim())
+          .join('\n\n'),
+        source: 'longest-text-onward',
+        finalMessageChars: (result ?? last).length,
+      };
 }
 
 function nativeEvent(event: ClaudeAuditEvent): ClaudeAuditEvent {
