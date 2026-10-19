@@ -34,7 +34,7 @@ async function fixture() {
   }
   return { root, startedAtMs, prompt, session };
 }
-it('matches only the exact initial prompt of a new recent session, never updated old sessions or answer echoes', async () => {
+it('binds the exact initial prompt among new recent sessions, never updated old sessions or answer echoes', async () => {
   const f = await fixture();
   await f.session('old');
   const snapshot = await snapshotClaudeSessions(f.root);
@@ -90,13 +90,84 @@ it('fails ambiguous prompt binding; fresh snapshots distinguish repeated prompts
       .metadataPath
   ).toBe(first);
 });
-it('fails a missing binding without choosing an unrelated recent session', async () => {
+it('binds the only new session when Claude changed its stored prompt, recording how, never the text', async () => {
   const f = await fixture();
-  await f.session('wrong', 'different query');
+  await f.session('old', 'another prompt');
+  const snapshot = await snapshotClaudeSessions(f.root);
+  const options = {
+    dataDir: f.root,
+    snapshot,
+    startedAtMs: f.startedAtMs,
+    exactPrompt: '"quoted prompt"',
+    timeoutMs: 5000,
+  };
+  const only = await f.session('only', 'quoted prompt');
+  const bound = await waitForClaudeSession(options);
+  expect(bound.candidate.metadataPath).toBe(only);
+  expect(bound.binding).toEqual({
+    kind: 'only-new-session',
+    promptDifference: {
+      storedChars: 13,
+      promptChars: 15,
+      firstDifferenceAt: 0,
+    },
+  });
+  // Collection pinned to it keeps it, though its text differs.
+  expect(
+    (await findMatchingClaudeSessions({ ...options, sessionPath: only })).map(
+      (t) => t.candidate.metadataPath
+    )
+  ).toEqual([only]);
+});
+it('prefers an exact session, and fails two new sessions without one as ambiguous', async () => {
+  const f = await fixture();
+  const options = {
+    dataDir: f.root,
+    snapshot: new Map(),
+    startedAtMs: f.startedAtMs,
+    exactPrompt: f.prompt,
+    timeoutMs: 2000,
+  };
+  await f.session('changed', 'changed prompt');
+  const exact = await f.session('exact');
+  const bound = await waitForClaudeSession(options);
+  expect(bound.candidate.metadataPath).toBe(exact);
+  expect(bound.binding).toEqual({ kind: 'exact-initial-prompt' });
+
+  const g = await fixture();
+  await g.session('one', 'changed prompt');
+  await g.session('two', 'other changed prompt');
+  await expect(
+    waitForClaudeSession({ ...options, dataDir: g.root })
+  ).rejects.toThrow('Ambiguous');
+});
+it('does not bind the only new session until it stayed the only one for a poll', async () => {
+  const f = await fixture();
+  await f.session('first', 'changed prompt');
+  const waiting = waitForClaudeSession({
+    dataDir: f.root,
+    snapshot: new Map(),
+    startedAtMs: f.startedAtMs,
+    exactPrompt: f.prompt,
+    timeoutMs: 3000,
+  });
+  // Appears before the next poll: neither can be the submission's for sure.
+  await f.session('second', 'another changed prompt');
+  await expect(waiting).rejects.toThrow('Ambiguous');
+});
+it('fails when no new session appeared, saying so', async () => {
+  const f = await fixture();
+  await f.session('old', 'different query');
+  const snapshot = await snapshotClaudeSessions(f.root);
+  await f.session(
+    'stale',
+    f.prompt,
+    new Date(f.startedAtMs - 60000).toISOString()
+  );
   expect(
     await findMatchingClaudeSessions({
       dataDir: f.root,
-      snapshot: new Map(),
+      snapshot,
       startedAtMs: f.startedAtMs,
       exactPrompt: f.prompt,
     })
@@ -104,10 +175,12 @@ it('fails a missing binding without choosing an unrelated recent session', async
   await expect(
     waitForClaudeSession({
       dataDir: f.root,
-      snapshot: new Map(),
+      snapshot,
       startedAtMs: f.startedAtMs,
       exactPrompt: f.prompt,
       timeoutMs: 0,
     })
-  ).rejects.toThrow('No matching Claude session');
+  ).rejects.toThrow(
+    'No matching Claude session found for a new native session after submission'
+  );
 });

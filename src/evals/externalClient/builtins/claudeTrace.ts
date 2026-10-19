@@ -57,8 +57,26 @@ interface ClaudeNativeTelemetry {
   toolErrorCount?: number;
 }
 
+/**
+ * How a fresh-session trace was bound to its case: its initial message equals
+ * the prompt, or it is the only session the submission created, whose stored
+ * prompt Claude changed. `promptDifference` says how, never with the text.
+ */
+export type ClaudeSessionBinding =
+  | { kind: 'exact-initial-prompt' }
+  | {
+      kind: 'only-new-session';
+      promptDifference: {
+        storedChars: number;
+        promptChars: number;
+        firstDifferenceAt: number;
+      };
+    };
+
 export interface ClaudeTrace {
   candidate: SessionCandidate;
+  /** Set for fresh-session (exact prompt) correlation. */
+  binding?: ClaudeSessionBinding;
   auditPath?: string;
   transcriptPath?: string;
   finalAnswer?: string;

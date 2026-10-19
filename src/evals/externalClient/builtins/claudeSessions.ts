@@ -9,6 +9,7 @@ import {
   CLAUDE_SESSION_TIMEOUT_MESSAGE,
 } from '../../infrastructureFailure.js';
 import {
+  type ClaudeSessionBinding,
   type ClaudeSessionMetadata,
   type ClaudeTrace,
   type SessionCandidate,
@@ -62,7 +63,12 @@ interface ClaudeSessionMatchOptions {
   correlation?: ClientRunContext['correlation'];
   snapshot: ClaudeSessionSnapshot;
   startedAtMs: number;
-  /** Fresh-session correlation: exact initial user text, never raw-text substring matching. */
+  /**
+   * Fresh-session correlation: the session the submission created. One whose
+   * initial user text is exactly this binds; without one, the only new
+   * session does (see `findMatchingClaudeSessions`). Never raw-text substring
+   * matching.
+   */
   exactPrompt?: string;
   sessionPath?: string;
   /** Bound pending trace inspection; never submits or changes session identity. */
@@ -88,6 +94,8 @@ async function waitForClaudeMatch(
   const deadline = Date.now() + options.timeoutMs;
   let lastPending: ClaudeTrace | undefined;
   let completeTraceFirstSeenAtMs: number | undefined;
+  // The only new session, seen on the previous poll without an exact match.
+  let onlyNewSeen: string | undefined;
 
   while (Date.now() < deadline) {
     const matches = await findMatchingClaudeSessions(options);
@@ -103,6 +111,17 @@ async function waitForClaudeMatch(
 
     if (matches.length === 1) {
       const trace = matches[0]!;
+      // Bind the only new session only once it stayed the only one for a
+      // poll: a second session appearing makes the binding ambiguous.
+      if (
+        !options.sessionPath &&
+        trace.binding?.kind === 'only-new-session' &&
+        onlyNewSeen !== trace.candidate.metadataPath
+      ) {
+        onlyNewSeen = trace.candidate.metadataPath;
+        await delay(POLL_INTERVAL_MS);
+        continue;
+      }
       if (
         !requireCompletion ||
         isTraceReady(trace, completeTraceFirstSeenAtMs)
@@ -156,6 +175,8 @@ export async function findMatchingClaudeSessions(
 ): Promise<ClaudeTrace[]> {
   const sessions = await listSessionCandidates(options.dataDir);
   const traces: ClaudeTrace[] = [];
+  // Fresh-session correlation: the sessions the submission could have created.
+  const fresh: SessionCandidate[] = [];
 
   for (const session of sessions) {
     const previous = options.snapshot.get(session.metadataPath);
@@ -168,16 +189,15 @@ export async function findMatchingClaudeSessions(
     if (options.sessionPath && session.metadataPath !== options.sessionPath)
       continue;
     if (options.exactPrompt !== undefined) {
-      // Existing sessions remain excluded even if they change. The creation window
-      // alone is never evidence of ownership. Do not match answers or tool output.
+      // Only sessions the submission created: existing ones remain excluded
+      // even if they change. Do not match answers or tool output.
       if (
         previous !== undefined ||
         !isRecent ||
-        createdAtMs > Date.now() + 5_000 ||
-        session.metadata.initialMessage !== options.exactPrompt
+        createdAtMs > Date.now() + 5_000
       )
         continue;
-      traces.push(await parseClaudeTrace(session, undefined, LIVE_COLLECTION));
+      fresh.push(session);
       continue;
     }
     if (!isNewOrUpdated && !isRecent) {
@@ -207,12 +227,51 @@ export async function findMatchingClaudeSessions(
     }
   }
 
-  return traces;
+  if (options.exactPrompt === undefined) return traces;
+  return bindFreshSessions(fresh, options.exactPrompt);
+}
+
+/**
+ * The fresh sessions a case binds: those whose initial message is exactly the
+ * prompt; without one, the only fresh session, whatever Claude stored as its
+ * prompt (it can drop a prompt's surrounding quotes, say). Several fresh
+ * sessions without exactly one exact match are all returned: ambiguous.
+ */
+async function bindFreshSessions(
+  fresh: readonly SessionCandidate[],
+  prompt: string
+): Promise<ClaudeTrace[]> {
+  const exact = fresh.filter((s) => s.metadata.initialMessage === prompt);
+  const bound = exact.length > 0 ? exact : fresh;
+  return Promise.all(
+    bound.map(async (session) => ({
+      ...(await parseClaudeTrace(session, undefined, LIVE_COLLECTION)),
+      binding: sessionBinding(session.metadata.initialMessage, prompt),
+    }))
+  );
+}
+
+function sessionBinding(
+  stored: string | undefined,
+  prompt: string
+): ClaudeSessionBinding {
+  if (stored === prompt) return { kind: 'exact-initial-prompt' };
+  const text = stored ?? '';
+  let i = 0;
+  while (i < text.length && i < prompt.length && text[i] === prompt[i]) i++;
+  return {
+    kind: 'only-new-session',
+    promptDifference: {
+      storedChars: text.length,
+      promptChars: prompt.length,
+      firstDifferenceAt: i,
+    },
+  };
 }
 
 function describeCorrelation(options: ClaudeSessionMatchOptions): string {
   if (options.exactPrompt !== undefined)
-    return 'exact initial prompt in a new native session';
+    return 'a new native session after submission';
   if (options.correlation?.includedInPrompt) {
     return `marker ${options.marker}`;
   }
