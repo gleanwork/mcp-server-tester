@@ -634,6 +634,7 @@ async function auditCase(
     const {
       computerUse: _computerUse,
       hitlWarning: _hitlWarning,
+      deadlineExceeded: _deadlineExceeded,
       clientApp: _clientApp,
       batchCase: _batchCase,
       batchLifecycle: _batchLifecycle,

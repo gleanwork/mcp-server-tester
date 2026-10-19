@@ -1230,6 +1230,58 @@ describe('V2 Cowork client', () => {
     expect(result[0]).not.toHaveProperty('artifacts');
   });
 
+  it('keeps what the task did by its deadline as a failed case, not an empty one', async () => {
+    const partial = (sessionPath: string) =>
+      ({
+        candidate: {
+          id: 'local_partial',
+          metadataPath: sessionPath,
+          sessionDir: '/fixture/local_partial',
+        },
+        finalAnswer: 'answer so far',
+        toolCalls: [
+          { name: 'search', arguments: { query: 'test' }, output: 'found' },
+        ],
+        usage: { inputTokens: 10, outputTokens: 4 },
+        isComplete: false,
+        telemetry: {
+          resultCount: 0,
+          observationSource: 'claude-native-audit-and-transcript',
+          toolCallCount: 1,
+          models: ['native-model'],
+        },
+      }) as unknown as ClaudeTrace;
+    mocks.matches.mockImplementation(
+      async (options: { sessionPath?: string }) => [
+        partial(options.sessionPath ?? ''),
+      ]
+    );
+    // The watcher runs until the deadline, as on Linux.
+    mocks.hitl.mockImplementation(async ({ deadlineAt }) => {
+      await new Promise((r) =>
+        setTimeout(r, Math.max(0, deadlineAt - Date.now()) + 5)
+      );
+      return { status: 'hitl_checked', action_count: 0 };
+    });
+    const [request] = requests();
+    const [result] = await COWORK_CLIENT.runBatch!(
+      [{ ...request!, config: { ...clientConfig, timeout: 50 } }],
+      readOnlyContext
+    );
+    expect(mocks.trace).not.toHaveBeenCalled();
+    expect(result!.error).toBe(
+      'Native Claude trace deadline exceeded. No resubmission attempted.'
+    );
+    expect(isInfrastructureFailure(result!)).toBe(false);
+    expect(result!.finalText).toBe('answer so far');
+    expect(result!.events.map((event) => event.name)).toEqual(['search']);
+    expect(result!.artifacts?.dir).toBe('/fixture/local_partial');
+    expect(result!.telemetry).toMatchObject({
+      nativeSessionId: 'local_partial',
+      deadlineExceeded: true,
+      toolCallCount: 1,
+    });
+  });
   it("records a task that found Cowork's VM down as an infrastructure failure, then resets", async () => {
     const reset = vi.fn().mockResolvedValue(undefined);
     const client = createCoworkClient({

@@ -651,6 +651,40 @@ async function runBatch(
         } catch (error) {
           // Trace collection or attribution failed: the app state is unknown.
           result = failure(safeError(error));
+          if (Date.now() >= deadlineAt) {
+            // Past the deadline the task may still be running: keep what
+            // its bound session did by now, as a failed case's evidence.
+            const [partial] = await findMatchingClaudeSessions({
+              ...match,
+              sessionPath,
+            }).catch(() => []);
+            if (partial?.candidate.metadataPath === sessionPath)
+              result = {
+                ...simulationToClientRun(
+                  {
+                    success: false,
+                    response: partial.finalAnswer,
+                    toolCalls: coworkOwnToolCalls(partial.toolCalls, servers),
+                    usage: partial.usage,
+                    error: result.error,
+                  },
+                  servers
+                ),
+                artifacts: {
+                  dir: partial.candidate.sessionDir,
+                  include: COWORK_SESSION_EVIDENCE,
+                },
+                telemetry: {
+                  source: 'claude-native',
+                  costScope: 'native-inference-only',
+                  ...partial.telemetry,
+                  nativeSessionId: partial.candidate.id,
+                  ...correlationTelemetry(partial),
+                  deadlineExceeded: true,
+                  ...(hitlWarning ? { hitlWarning } : {}),
+                },
+              };
+          }
           if (platform.reset) continuation = 'reset';
         }
         // A HITL failure may leave a prompt open; reset before the next task.
