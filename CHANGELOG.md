@@ -15,6 +15,40 @@
 
 
 
+
+## v2.0.0-beta.13 (2026-10-19)
+
+#### :rocket: Enhancement
+* [#451](https://github.com/gleanwork/mcp-server-tester/pull/451) feat(evals): export dockerEnvironment, so plugin environments can run Cowork containers on Docker hosts they create (such as cloud VMs) ([@aurelia-wang-glean](https://github.com/aurelia-wang-glean))
+* [#450](https://github.com/gleanwork/mcp-server-tester/pull/450) feat(grade): mst grade --env grades a stored run on an environment's machines (ADR 0005) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#447](https://github.com/gleanwork/mcp-server-tester/pull/447) feat(report): show each pass rate's likely range, flag runs with too few trials, and use one layout for every run ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#444](https://github.com/gleanwork/mcp-server-tester/pull/444) feat(results): result stores hold whole runs, and mst run --results chooses one ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :bug: Bug Fix
+* [#461](https://github.com/gleanwork/mcp-server-tester/pull/461) fix(cowork): grade the answer Cowork wrote, not its closing message, and keep a timed-out task's trace ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#460](https://github.com/gleanwork/mcp-server-tester/pull/460) fix(evals): tool-variant proxy endpoints carry no server timeouts, so Cowork takes them ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#459](https://github.com/gleanwork/mcp-server-tester/pull/459) fix(cowork): bind the session a submission created when Claude changed its stored prompt ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#458](https://github.com/gleanwork/mcp-server-tester/pull/458) fix(judge): check a Codex judge's sandbox in its preflight, so a broken sandbox stops grading instead of recording guesses ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#457](https://github.com/gleanwork/mcp-server-tester/pull/457) fix(judge): let a container be a Codex judge's sandbox, so mst grade --env can run Codex judges ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#454](https://github.com/gleanwork/mcp-server-tester/pull/454) fix(cowork): ten-minute Cowork queries and judges; workers run the coordinator's MST ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#448](https://github.com/gleanwork/mcp-server-tester/pull/448) fix(cowork-linux): submit a long prompt whose Start task is below the window, and fail a reset that leaves a draft ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#449](https://github.com/gleanwork/mcp-server-tester/pull/449) fix(chatgpt): isolate macOS runs and recover from the quit prompt ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#446](https://github.com/gleanwork/mcp-server-tester/pull/446) fix(cowork-docker): remove a run's containers even when it dies, and keep what the desktop showed when a case fails ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :memo: Documentation
+* [#452](https://github.com/gleanwork/mcp-server-tester/pull/452) docs(adr): MST is written in TypeScript (ADR 0006) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#453](https://github.com/gleanwork/mcp-server-tester/pull/453) docs(evals): describe a Docker-host environment that keeps hosts and has the image ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :house: Internal
+* [#455](https://github.com/gleanwork/mcp-server-tester/pull/455) refactor(cowork): port the macOS Computer Use driver to TypeScript ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#456](https://github.com/gleanwork/mcp-server-tester/pull/456) test(chatgpt): don't depend on Linux's coarse mtime in the quit-prompt test ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### Committers: 3
+- Aurelia Wang ([@aurelia-wang-glean](https://github.com/aurelia-wang-glean))
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+
 ## v2.0.0-beta.12 (2026-10-14)
 
 
