@@ -122,6 +122,14 @@ export interface JudgeConfig {
   maxBudgetUsd?: number;
 
   /**
+   * Reasoning effort for a reasoning model, such as `'high'` or `'xhigh'`.
+   * OpenAI only: when set, the judge calls the Responses API with this
+   * effort and `maxTokens` as its output budget (reasoning included), and
+   * sends no temperature, which reasoning models reject.
+   */
+  effort?: string;
+
+  /**
    * Maximum size (in bytes) for tool output before failing the test
    * When set, the judge will fail if the candidate response exceeds this size
    */

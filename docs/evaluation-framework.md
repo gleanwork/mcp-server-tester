@@ -217,14 +217,14 @@ judges: {
 
 A judge returns a `JudgeScore`. Only `score` (0 to 1) is required:
 
-| Field               | Effect                                                                                                           |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `pass`              | The judge's own pass/fail. Without it, the case passes when the mean score meets the threshold.                  |
-| `skipped`           | The judge cannot grade this case. It doesn't count for pass/fail or judge metrics; the remaining reps don't run. |
-| `subScores`         | Named sub-scores, such as one per criterion: `{ [key]: { score, pass?, reasoning? } }`.                          |
-| `usage`             | The judge's own token usage and cost, summed over reps.                                                          |
-| `provider`, `model` | Reported as `judgeProvider` and `judgeModel`.                                                                    |
-| `metadata`          | Other JSON output, kept in the result.                                                                           |
+| Field               | Effect                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pass`              | The judge's own pass/fail. Without it, the case passes when the mean score meets the threshold.                                                                                            |
+| `skipped`           | The judge cannot grade this case. It doesn't count for pass/fail or judge metrics; the remaining reps don't run. Its `reasoning`, `usage` and `metadata` are recorded, its `score` is not. |
+| `subScores`         | Named sub-scores, such as one per criterion: `{ [key]: { score, pass?, reasoning? } }`.                                                                                                    |
+| `usage`             | The judge's own token usage and cost, summed over reps.                                                                                                                                    |
+| `provider`, `model` | Reported as `judgeProvider` and `judgeModel`.                                                                                                                                              |
+| `metadata`          | Other JSON output, kept in the result.                                                                                                                                                     |
 
 A score or sub-score outside 0 to 1 is an error, not a result. When every
 judge of a case skips, the judge assertion passes.

@@ -385,15 +385,15 @@ The matcher takes `passingThreshold` where datasets use `threshold`, plus `refer
 
 ### Judge Configuration
 
-| Field        | Default                        | Description                                                                                                                   |
-| ------------ | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| `judge`      | `rubric`                       | The judge: the built-in `rubric`, or `<namespace>/judge/<name>` from a plugin.                                                |
-| `rubric`     | —                              | A built-in rubric name or `{ "text": "..." }`. Shorthand for the `rubric` judge.                                              |
-| `threshold`  | `0.7`                          | Minimum mean score (0–1) to pass.                                                                                             |
-| `reference`  | the case's `expected.answer`   | What the judge compares the response with.                                                                                    |
-| `reps`       | the case's `judgeReps`, or `1` | Times the judge scores the same response; the mean is compared with `threshold`.                                              |
-| `options`    | —                              | The judge's own options. Without `options`, a named judge gets its other flat fields.                                         |
-| LLM settings | `provider`: `anthropic`        | The `rubric` judge's `provider`, `model`, `apiKeyEnvVar`, `maxTokens`, `temperature`, `maxBudgetUsd` and `maxToolOutputSize`. |
+| Field        | Default                        | Description                                                                                                                             |
+| ------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `judge`      | `rubric`                       | The judge: the built-in `rubric`, or `<namespace>/judge/<name>` from a plugin.                                                          |
+| `rubric`     | —                              | A built-in rubric name or `{ "text": "..." }`. Shorthand for the `rubric` judge.                                                        |
+| `threshold`  | `0.7`                          | Minimum mean score (0–1) to pass.                                                                                                       |
+| `reference`  | the case's `expected.answer`   | What the judge compares the response with.                                                                                              |
+| `reps`       | the case's `judgeReps`, or `1` | Times the judge scores the same response; the mean is compared with `threshold`.                                                        |
+| `options`    | —                              | The judge's own options. Without `options`, a named judge gets its other flat fields.                                                   |
+| LLM settings | `provider`: `anthropic`        | The `rubric` judge's `provider`, `model`, `apiKeyEnvVar`, `maxTokens`, `temperature`, `maxBudgetUsd`, `effort` and `maxToolOutputSize`. |
 
 `reps` repeats only the judge, not the case: `trials: 3` with `judgeReps: 2` is 6 calls per judge.
 

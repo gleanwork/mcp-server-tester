@@ -1206,6 +1206,7 @@ Create an LLM judge for semantic evaluation of tool responses.
   - `temperature?: number` - Temperature 0–1 (default: `0.0`)
   - `maxTokens?: number` - Maximum tokens for response (default: `4096`)
   - `maxBudgetUsd?: number` - Maximum budget in USD (default: `0.10`)
+  - `effort?: string` - Reasoning effort, such as `'high'` or `'xhigh'`. OpenAI only: the judge calls the Responses API with this effort, `maxTokens` as its output budget (reasoning included) and no temperature, which reasoning models reject
   - `maxToolOutputSize?: number` - Fail if response exceeds this byte count
 
 **Returns:** `Judge`
@@ -1229,6 +1230,25 @@ const judge = createJudge({
   temperature: 0.0,
 });
 // Requires: OPENAI_API_KEY environment variable, or a gateway credential
+```
+
+### `createJudgeCompletion(config?)`
+
+The provider call `createJudge` is built on, without its prompt or parser: a plugin judge that brings its own prompt and reads its own answer uses it to reach models the way MST's judges do, with the same providers, credentials and [LLM gateway](./llm-gateways.md) settings. It takes the same `JudgeConfig` and throws, as `createJudge` does, for an unknown provider or a missing credential. `preflightJudge(config)` checks the same without calling a model, for a plugin judge's `preflight`.
+
+```typescript
+import { createJudgeCompletion } from '@gleanwork/mcp-server-tester';
+
+const complete = createJudgeCompletion({
+  provider: 'openai',
+  model: 'gpt-5.6-luna',
+  effort: 'xhigh',
+  maxTokens: 64000,
+});
+const { text, usage, truncated } = await complete({
+  system: 'Answer in JSON.',
+  prompt: 'Rate each citation.',
+});
 ```
 
 ### LLM Client Diagnostic Utilities
