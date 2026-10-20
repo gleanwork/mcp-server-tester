@@ -17,10 +17,7 @@ import {
   grantTargets,
   type ConnectorUse,
 } from '../../../auth/grants/connectors.js';
-import {
-  defaultGrantsDirectory,
-  localCredentialStore,
-} from '../../../auth/grants/localStore.js';
+import { credentialStoreFor } from '../../../auth/grants/stores.js';
 import type { CredentialStore } from '../../../auth/grants/types.js';
 import { loadEvalConfig } from '../../../evals/evalConfig.js';
 import { resolveConfigExtends } from '../../../evals/configExtends.js';
@@ -77,9 +74,8 @@ async function context(
       );
     uses = uses.filter((use) => wanted.has(use.label));
   }
-  const store = localCredentialStore(
-    options.store ? path.resolve(options.store) : defaultGrantsDirectory()
-  );
+  // A plugin's store resolves now that the eval's plugins are loaded.
+  const store = credentialStoreFor(options.store);
   return { targets: grantTargets(uses), store, print };
 }
 

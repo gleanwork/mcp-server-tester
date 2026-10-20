@@ -127,3 +127,21 @@ export interface CredentialStore {
   /** Where the store is, for messages. */
   describe(): string;
 }
+
+/**
+ * A credential store extension: `--store <namespace>/credential-store/<name>`,
+ * from a plugin's `credentialStores`. `create` returns the store; it takes no
+ * options, so a plugin reads what it needs (a project, a prefix) from its own
+ * configuration.
+ */
+export interface CredentialStoreDefinition {
+  readonly description?: string;
+  /**
+   * Whether other machines reach the same grants, as a cloud secret manager
+   * does. `--detach` needs one (ADR 0007): its coordinator machine refreshes
+   * the grants, and a provider that rotates refresh tokens invalidates any
+   * copy left behind.
+   */
+  readonly shared?: boolean;
+  create(): CredentialStore;
+}

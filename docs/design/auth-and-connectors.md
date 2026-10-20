@@ -169,7 +169,7 @@ interface StoredGrant {
 }
 ```
 
-MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester/grants/<namespace>.<grant>.json` (or `$MST_CREDENTIALS_DIR`, or `--store <dir>`), with a 0700 directory, 0600 files and a lock file. The key is per user, not per eval config, so one sign-in serves every config that uses the connector. Plugin stores, such as a cloud secret manager with per-user scoping, implement the same interface; they aren't built yet, so there is no `credentialStores` plugin kind yet.
+MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester/grants/<namespace>.<grant>.json` (or `$MST_CREDENTIALS_DIR`, or `--store <dir>`), with a 0700 directory, 0600 files and a lock file. The key is per user, not per eval config, so one sign-in serves every config that uses the connector. A plugin can add stores that implement the same interface, such as a cloud secret manager, in its `credentialStores`: `mst auth`, `run` and `grade` take one as `--store <namespace>/credential-store/<name>`. A store's definition has `create()`, which takes no options (the plugin reads its own configuration), and `shared: true` when other machines reach the same grants. Keep one copy of each grant: a provider that rotates refresh tokens invalidates any other copy at the first refresh.
 
 ## Security rules
 
@@ -190,7 +190,6 @@ MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester
 
 ## Out of scope
 
-- Remote credential stores.
 - Token staging in environments: delivering connector tokens into VMs and containers. The environment contract must carry `tokenFile` renewal across the boundary. The `mst.shard/v1` protocol carries tokens ([ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md)), but today a run refuses connector servers in any environment other than `local`.
 - An MST-owned interceptor kind.
 

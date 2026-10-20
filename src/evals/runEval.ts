@@ -163,7 +163,7 @@ import {
   startConnectorCredentials,
   type ConnectorCredentials,
 } from './connectorServers.js';
-import { localCredentialStore } from '../auth/grants/localStore.js';
+import { credentialStoreFor } from '../auth/grants/stores.js';
 import { resolveServerSecrets } from './serverSecrets.js';
 import type { CredentialStore } from '../auth/grants/types.js';
 import {
@@ -222,9 +222,15 @@ export interface RunEvalOptions {
   report?: boolean;
   /**
    * Where connector servers' grants are (`mst auth` puts them there).
-   * Default: `mst/credential-store/local`.
+   * Default: the store `store` names.
    */
   credentialStore?: CredentialStore;
+  /**
+   * `--store`: a directory, or a plugin's `<namespace>/credential-store/<name>`,
+   * resolved once the eval's plugins are loaded. Default:
+   * `~/.mcp-server-tester/grants`.
+   */
+  store?: string;
   /** Where to collect trials (`--env`). Default: `local`. */
   env?: string;
   /** The environment's options (`--env-option key=value`), as strings. */
@@ -1008,6 +1014,8 @@ export interface ResumeRunOptions extends GradeRunOptions {
   /** Its options. Default: the run's (`shards`, `keep` and its own). */
   envOptions?: Readonly<Record<string, string>>;
   credentialStore?: CredentialStore;
+  /** `--store`, as for `runEval`. */
+  store?: string;
 }
 
 /**
@@ -1411,7 +1419,7 @@ async function evaluate(
     ? { env: {}, secrets: () => [], stop: async () => {} }
     : await startConnectorCredentials(
         connectors,
-        options.credentialStore ?? localCredentialStore(),
+        options.credentialStore ?? credentialStoreFor(options.store),
         {
           configPath: options.configPath,
           variants: variants.map((variant) => variant.name),
@@ -1632,7 +1640,7 @@ async function evaluate(
             ? {
                 connectorTokens: connectorTokenSource(
                   connectors,
-                  options.credentialStore ?? localCredentialStore()
+                  options.credentialStore ?? credentialStoreFor(options.store)
                 ),
               }
             : {}),
