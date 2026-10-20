@@ -10,7 +10,10 @@ import type {
 } from '../evals/evalFrameworkTypes.js';
 import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
 import type { PluginConfig } from '../evals/evalConfig.js';
-import type { ConnectorDefinition } from '../auth/grants/types.js';
+import type {
+  ConnectorDefinition,
+  CredentialStoreDefinition,
+} from '../auth/grants/types.js';
 
 /** Identifies a plugin. Its extensions are named `<namespace>/<kind>/<name>`. */
 export interface PluginMeta {
@@ -47,6 +50,14 @@ export interface Plugin {
    */
   readonly environments?: Readonly<Record<string, EnvironmentDefinition>>;
   /**
+   * Where connector sign-ins (refresh grants) are kept, beside MST's local
+   * directory: `--store <namespace>/credential-store/<name>`. A detached run
+   * needs one its coordinator machine can reach (ADR 0007).
+   */
+  readonly credentialStores?: Readonly<
+    Record<string, CredentialStoreDefinition>
+  >;
+  /**
    * Shared eval config settings. An eval config that lists this plugin applies one
    * with `extends: ["namespace/config/name"]`. A config may use only this plugin's
    * extensions and built-ins.
@@ -63,6 +74,7 @@ export const EXTENSION_KINDS = [
   'resultStores',
   'connectors',
   'environments',
+  'credentialStores',
 ] as const;
 export type ExtensionKind = (typeof EXTENSION_KINDS)[number];
 
@@ -79,6 +91,7 @@ export const KIND_SEGMENTS = {
   resultStores: 'result-store',
   connectors: 'connector',
   environments: 'env',
+  credentialStores: 'credential-store',
 } as const satisfies Record<ExtensionKind, string>;
 export type KindSegment = (typeof KIND_SEGMENTS)[ExtensionKind] | 'config';
 
@@ -100,6 +113,7 @@ export interface ExtensionsByKind {
   resultStores: ResultStoreDefinition;
   connectors: ConnectorDefinition;
   environments: EnvironmentDefinition;
+  credentialStores: CredentialStoreDefinition;
 }
 
 const NAMESPACE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
@@ -117,6 +131,7 @@ const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   // A connector is data plus optional functions; checked in extensionProblem.
   connectors: [],
   environments: ['open'],
+  credentialStores: ['create'],
 };
 
 /** Every metric kind; a Record so a new MetricKind must be added here. */
@@ -149,6 +164,14 @@ function extensionProblem(
   if (!isRecord(definition)) return `${label} must be an object`;
   // A connector has no options, so no schema.
   if (kind === 'connectors') return connectorProblem(label, definition);
+  // Nor has a credential store: `create` takes none.
+  if (kind === 'credentialStores')
+    return typeof definition.create === 'function'
+      ? definition.shared === undefined ||
+        typeof definition.shared === 'boolean'
+        ? undefined
+        : `${label}: shared must be a boolean`
+      : `${label} needs a create function`;
   const schema = definition.schema as { safeParse?: unknown } | undefined;
   if (typeof schema?.safeParse !== 'function')
     return `${label} needs a Zod schema`;

@@ -50,6 +50,7 @@ function baseExtensions(): Required<TestExtensions> {
     resultStores: { file: resultStore },
     connectors: {},
     environments: {},
+    credentialStores: {},
   };
 }
 

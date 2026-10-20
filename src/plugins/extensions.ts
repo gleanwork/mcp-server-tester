@@ -40,6 +40,7 @@ const KIND_LABELS: Record<ExtensionKind, string> = {
   resultStores: 'Result store',
   connectors: 'Connector',
   environments: 'Environment',
+  credentialStores: 'Credential store',
 };
 
 // Shared across the CommonJS and ESM copies of this package. Versioned so a
@@ -64,6 +65,7 @@ function emptyState(): ExtensionTableState {
       resultStores: new Map(),
       connectors: new Map(),
       environments: new Map(),
+      credentialStores: new Map(),
     },
   };
 }
@@ -232,6 +234,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   'result-store': 'result store',
   connector: 'connector',
   env: 'environment',
+  'credential-store': 'credential store',
   config: 'shared config',
 };
 

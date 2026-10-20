@@ -124,8 +124,8 @@ function authOptions(command: Command): Command {
     .option('--plugins <paths...>', 'Plugin modules to load')
     .option('--server <labels...>', 'Only these servers')
     .option(
-      '--store <dir>',
-      'Credential store directory (default: ~/.mcp-server-tester/grants)'
+      '--store <store>',
+      'Credential store: a directory (default: ~/.mcp-server-tester/grants) or <namespace>/credential-store/<name>'
     )
     .option('--root-dir <dir>', 'Fallback directory for relative paths', '.');
 }
@@ -255,8 +255,8 @@ program
     "Also keep the run in a result store, instead of the eval config's: gs://<bucket>/<prefix>, file:<dir>, or <namespace>/result-store/<name>"
   )
   .option(
-    '--store <dir>',
-    'Credential store for connector servers (default: ~/.mcp-server-tester/grants)'
+    '--store <store>',
+    'Credential store for connector servers: a directory (default: ~/.mcp-server-tester/grants) or <namespace>/credential-store/<name>'
   )
   .option(
     '--env <name>',

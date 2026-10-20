@@ -95,6 +95,11 @@ export type {
   EvalSummaryGenerator,
 } from '../evals/evalFrameworkTypes.js';
 export type { RunStore } from '../evals/runStore.js';
+export type {
+  CredentialStore,
+  CredentialStoreDefinition,
+  StoredGrant,
+} from '../auth/grants/types.js';
 export type { GradeKey } from '../evals/gradingSource.js';
 export {
   resolveResultStoreConfig,

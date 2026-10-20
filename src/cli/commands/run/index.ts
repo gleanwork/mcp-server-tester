@@ -8,7 +8,6 @@ import {
 import { suggestedTrialsPerCase } from '../../../evals/passRateInterval.js';
 import path from 'node:path';
 import { z } from 'zod';
-import { localCredentialStore } from '../../../auth/grants/localStore.js';
 import { describeError } from '../../../utils/describeError.js';
 import {
   resumeRun,
@@ -35,7 +34,7 @@ export interface RunOptions {
   trials?: string | number;
   outputDir?: string;
   secretsFile?: string;
-  /** Credential store directory for connector servers. */
+  /** Credential store for connector servers: a directory or a plugin's. */
   store?: string;
   /** `--env`: where to collect trials. */
   env?: string;
@@ -119,9 +118,7 @@ export async function run(options: RunOptions): Promise<void> {
     ...(options.trials !== undefined
       ? { trials: positiveInteger('--trials', options.trials) }
       : {}),
-    ...(options.store
-      ? { credentialStore: localCredentialStore(path.resolve(options.store)) }
-      : {}),
+    ...(options.store ? { store: options.store } : {}),
     ...(options.env ? { env: options.env } : {}),
     ...(options.envOption?.length
       ? { envOptions: parseEnvOptions(options.envOption) }
@@ -162,9 +159,7 @@ export async function run(options: RunOptions): Promise<void> {
             ...(evalOptions.envOptions
               ? { envOptions: evalOptions.envOptions }
               : {}),
-            ...(evalOptions.credentialStore
-              ? { credentialStore: evalOptions.credentialStore }
-              : {}),
+            ...(evalOptions.store ? { store: evalOptions.store } : {}),
             ...(evalOptions.results ? { results: evalOptions.results } : {}),
           });
   } catch (error) {
