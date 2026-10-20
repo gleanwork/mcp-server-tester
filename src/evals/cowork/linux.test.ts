@@ -522,6 +522,29 @@ describe('caller-owned Linux Cowork desktop', () => {
     });
     expect(child.exec).not.toHaveBeenCalled();
   });
+  it('goes on past a scan that could not finish, and counts it', async () => {
+    // A presented spreadsheet can make one pass's scan too large to finish:
+    // that pass saw no prompt; the next one may.
+    child.responses.push({
+      failed: false,
+      value: {
+        status: 'hitl_checked',
+        action_count: 0,
+        duration_ms: 1,
+        scan: 'incomplete',
+      },
+    });
+    let checks = 0;
+    const result = await linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete: async () => ++checks > 1,
+    });
+    expect(result).toMatchObject({
+      status: 'hitl_checked',
+      action_count: 0,
+      telemetry: { accounting: 'complete', incomplete_scans: 1 },
+    });
+  });
   it('counts a driver call that failed with a receipt by its actions', async () => {
     child.responses.push({
       failed: true,

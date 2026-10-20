@@ -49,6 +49,11 @@ export interface SemanticDesktopTelemetry {
   accounting: 'complete' | 'partial';
   duration_ms: number;
   action_count: number;
+  /**
+   * HITL passes whose screen scan couldn't finish (the app's tree too large,
+   * or the call out of time). Each saw no prompt; HITL scanned again.
+   */
+  incomplete_scans?: number;
   planner: { status: 'not-applicable' };
   cost: { status: 'not-applicable' };
 }

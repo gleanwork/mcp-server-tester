@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import os
 import subprocess
+import time
 import unittest
 from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
@@ -135,6 +136,37 @@ class AtspiDesktopTests(unittest.TestCase):
         # An invisible one is never found.
         below.states.discard("VISIBLE")
         self.assertEqual(desktop.controls({"Start task"}, {"button"}, require_showing=False), [])
+
+    def test_a_large_table_neither_hides_a_prompt_nor_exhausts_the_scan(self):
+        # A presented spreadsheet: 3,000 cells, more than the 5,000-node budget
+        # once each cell's text counts. The scan skips the table.
+        cells = [AtspiNode("x", "table cell", children=[AtspiNode("x", "label")]) for _ in range(3000)]
+        allow = AtspiNode("Allow once")
+        desktop = real_desktop(FakeAtspi(AtspiNode("", "table", children=cells), allow))
+        self.assertEqual(desktop.controls({"Allow once"}, {"button"}), [allow])
+
+    def test_a_scan_past_its_deadline_gives_up_rather_than_be_killed(self):
+        desktop = real_desktop(FakeAtspi(*[AtspiNode("x", "label") for _ in range(200)]))
+        desktop.scan_deadline = time.monotonic() - 1
+        with self.assertRaisesRegex(module.DriverFailure, "accessibility_scan_timeout"):
+            desktop.controls({"Allow"}, {"button"})
+
+    def test_hitl_whose_scan_cannot_finish_sees_no_prompt_this_pass(self):
+        for code in ("accessibility_tree_budget", "accessibility_scan_timeout"):
+            class Unscannable(Desktop):
+                def controls(self, names, roles, *, require_enabled=True, require_showing=True):
+                    raise module.DriverFailure(code)
+            desktop = Unscannable()
+            result = module.Driver(desktop, 1000, 4).hitl(True)
+            self.assertEqual((result["status"], result["scan"], result["action_count"]),
+                             ("hitl_checked", "incomplete", 0))
+            self.assertEqual(desktop.actions, [])
+        # Any other failure still ends the call.
+        class Missing(Desktop):
+            def controls(self, names, roles, *, require_enabled=True, require_showing=True):
+                raise module.DriverFailure("desktop_missing_or_ambiguous")
+        with self.assertRaisesRegex(module.DriverFailure, "desktop_missing"):
+            module.Driver(Missing(), 1000, 4).hitl(True)
 
     def test_reveal_scrolls_anywhere_and_fails_when_it_cannot(self):
         node = AtspiNode("Start task")

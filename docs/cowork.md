@@ -425,6 +425,11 @@ assertions/judges. So is a Linux HITL error that provably left the app untouched
 for one), when the task goes on to finish: it can't have changed the answer.
 Other HITL errors, those that acted or can't tell, remain failures. A HITL
 error keeps its cause (`Linux HITL failed for the bound native session: …`).
+On Linux, HITL's scan for approval prompts skips tables (an answer's, or a
+presented spreadsheet's preview, whose cells can number in the thousands) and
+gives up before its call's deadline; a pass whose scan still can't finish saw
+no prompt, and HITL scans again (counted in
+`computerUse.hitl.telemetry.incomplete_scans`).
 Native paths support
 both legacy session folders and the current short-ID/cwd-root layout. Native tool
 server names are retained; built-in tools are not attributed to the tested server.
