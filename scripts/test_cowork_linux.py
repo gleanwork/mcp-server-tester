@@ -368,6 +368,26 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(desktop.actions, [])
         self.assertIsNone(desktop.prompt)
 
+    def test_hitl_denies_a_folder_request_under_either_policy(self):
+        for approve_writes in (False, True):
+            desktop = Desktop()
+            desktop.approvals = [Node("Deny"), Node("Choose folder")]
+            result = module.Driver(desktop, 1000, 4).hitl(approve_writes)
+            self.assertEqual((result["denied"], result["action_count"]), ("folder_request", 1))
+            # Deny, never Choose folder.
+            self.assertEqual(desktop.actions, ["Deny"])
+        # A Deny without its folder card is another prompt's: not this one.
+        desktop = Desktop()
+        desktop.approvals = [Node("Deny")]
+        self.assertNotIn("denied", module.Driver(desktop, 1000, 4).hitl(True))
+        self.assertEqual(desktop.actions, [])
+        # Two cards, or two Deny buttons: which is the folder's is unknown.
+        desktop = Desktop()
+        desktop.approvals = [Node("Deny"), Node("Deny"), Node("Choose folder")]
+        with self.assertRaisesRegex(module.DriverFailure, "folder_request_ambiguous"):
+            module.Driver(desktop, 1000, 4).hitl(True)
+        self.assertEqual(desktop.actions, [])
+
     def test_hitl_respects_explicit_approval_policy(self):
         desktop = Desktop()
         desktop.approvals = [Node("Allow once")]

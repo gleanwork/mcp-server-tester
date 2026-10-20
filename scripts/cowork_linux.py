@@ -324,6 +324,18 @@ class Driver:
         if approve_writes:
             names |= {"Always allow", "Allow always", "Full access", "Allow full access"}
         try:
+            # The task asked for a folder of the user's computer
+            # (request_cowork_directory): a card with Choose folder beside
+            # Deny. A headless run has no folder to give; it answers as a user
+            # without one would, and the model goes on with the tools it has.
+            # Denying grants nothing, so either policy may.
+            folder = self.desktop.controls({"Choose folder"}, {"button"})
+            if folder:
+                denies = self.desktop.controls({"Deny"}, {"button"})
+                if len(folder) != 1 or len(denies) != 1:
+                    raise DriverFailure("folder_request_ambiguous")
+                self.action(lambda: self.desktop.activate(denies[0]))
+                return {**self.receipt("hitl_checked"), "denied": "folder_request"}
             controls = self.desktop.controls(names, {"button"})
             if not controls:
                 # Cowork confirms built-in tools with an inline card whose primary

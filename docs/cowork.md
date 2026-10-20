@@ -301,6 +301,14 @@ desktop offers no Skip all approvals mode, so under `approveWriteTools` HITL
 approves that card; read-only runs refuse it. More than one candidate action
 fails closed.
 
+A task can ask for a folder of the user's computer (`request_cowork_directory`,
+often for code it can't find): a card with `Choose folder` beside `Deny`. Nobody
+can choose one in a headless run, and managed settings can't remove the tool
+(`disabledBuiltinTools` doesn't apply to Cowork's own MCP tools), so HITL clicks
+`Deny`, under either policy, since denying grants nothing. The model is told the
+user rejected it and answers with the tools it has; the case is graded on that
+answer. `computerUse.hitl.telemetry.folder_requests_denied` counts them.
+
 `clientTelemetry.computerUse` records `driver: "linux-desktop"`, observed semantic
 actions, and elapsed time. Planner tokens and planner cost are **not applicable**,
 not synthetic zero-usage Anthropic calls. Native usage and cost retain their own scope.
