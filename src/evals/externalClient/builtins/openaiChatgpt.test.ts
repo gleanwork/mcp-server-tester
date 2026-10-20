@@ -505,10 +505,16 @@ describe('bounded native binding wait and failure classification', () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-rewrite-'));
     try {
       const ctx = context(home, true, 3000);
+      await mkdir(join(home, 'evidence'), { recursive: true });
+      screenshots.saveStallScreenshot.mockResolvedValue({
+        path: join(home, 'timeout.png'),
+      });
       vi.mocked(findChatgptTrace).mockRejectedValue(
         new PendingChatgptRecordError()
       );
       const result = await capture(ctx);
+      // The display is kept, as for any binding timeout.
+      expect(screenshots.saveStallScreenshot).toHaveBeenCalledOnce();
       // A rewrite that never finishes is a transcript failure, not a lost
       // submission (no_matching_session).
       expect(result).toMatchObject({
@@ -526,6 +532,54 @@ describe('bounded native binding wait and failure classification', () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    ['bound', 'timeout'],
+    ['unbound', 'no_matching_session'],
+  ] as const)(
+    'treats a rewrite caught only on the last polls as an ordinary %s timeout',
+    async (state, failureKind) => {
+      const home = await mkdtemp(join(tmpdir(), 'chatgpt-late-rewrite-'));
+      try {
+        const ctx = context(home, true, 3000);
+        const root = chatgptRunState(ctx.state).sessionsRoot as string;
+        await mkdir(root, { recursive: true });
+        await mkdir(join(home, 'evidence'), { recursive: true });
+        const path = join(root, 'rollout.jsonl');
+        await writeFile(path, 'fixture native transcript');
+        screenshots.saveStallScreenshot.mockResolvedValue({
+          path: join(home, 'timeout.png'),
+        });
+        const end = ctx.run.startedAtMs + ctx.run.timeoutMs;
+        vi.mocked(findChatgptTrace).mockImplementation(async () => {
+          if (clock.now >= end - 800) throw new PendingChatgptRecordError();
+          return state === 'bound'
+            ? {
+                path,
+                trace: {
+                  sessionId: 'session',
+                  turnId: 'turn',
+                  complete: false,
+                  toolCalls: [],
+                  conversationHistory: [],
+                  telemetry: {},
+                  limitations: [],
+                },
+              }
+            : undefined;
+        });
+        const result = await capture(ctx);
+        expect(result).toMatchObject({
+          success: false,
+          clientMetadata: { failureKind },
+        });
+        if (state === 'unbound')
+          expect(screenshots.saveStallScreenshot).toHaveBeenCalledOnce();
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('keeps the bound turn when a rewrite after binding never finishes', async () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-rewrite-bound-'));

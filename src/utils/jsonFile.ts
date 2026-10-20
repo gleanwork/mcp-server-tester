@@ -17,8 +17,10 @@ export async function readJsonFile(file: string): Promise<unknown> {
 /**
  * Publish only complete JSON; failed serialization leaves the previous file
  * intact. The file keeps the mode it had, and a new file gets the default
- * mode, as `writeFile` gives it. The temporary file is owner-only until it
- * is complete, so replacing a private file never exposes its contents.
+ * mode, as `writeFile` gives it. Replacing a file, the temporary file is
+ * owner-only until it is complete, so a private file's contents are never
+ * exposed. A new file has no earlier contents to protect, so the umask sets
+ * its mode (reading the umask in Node briefly clears it for every thread).
  */
 export async function writeJsonFile(
   file: string,
@@ -27,12 +29,15 @@ export async function writeJsonFile(
   await mkdir(dirname(file), { recursive: true });
   const mode = await stat(file).then(
     (info) => info.mode & 0o7777,
-    () => 0o666 & ~process.umask()
+    () => undefined
   );
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, jsonChunks(value), { flag: 'wx', mode: 0o600 });
-    await chmod(temporary, mode);
+    await writeFile(temporary, jsonChunks(value), {
+      flag: 'wx',
+      ...(mode === undefined ? {} : { mode: 0o600 }),
+    });
+    if (mode !== undefined) await chmod(temporary, mode);
     await rename(temporary, file);
   } finally {
     await rm(temporary, { force: true });

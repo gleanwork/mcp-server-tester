@@ -2,7 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { saveBaseline } from './baseline.js';
+import { chmod, stat } from 'node:fs/promises';
+import { loadBaseline, saveBaseline } from './baseline.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import { RUN_FORMAT } from './resultFormat.js';
@@ -11,7 +12,7 @@ import {
   createStoredEvalArtifact,
   redactStoredResponses,
 } from './resultStore.js';
-import { writeRun, type RunFacts } from './runFormat.js';
+import { writeLatest, writeRun, type RunFacts } from './runFormat.js';
 
 /**
  * A run can be larger than V8's longest string, so no persistence path may
@@ -94,6 +95,37 @@ describe('large results never become one string', () => {
     });
     expect(longest).toBeLessThan(LIMIT);
   });
+
+  it('reads a baseline back without one string', async () => {
+    const file = join(root, 'baseline.json');
+    await saveBaseline(
+      { format: RUN_FORMAT, caseResults: CASES } as unknown as EvalRunnerResult,
+      file,
+      { omitResponses: false }
+    );
+    let longestInput = 0;
+    const parse = JSON.parse;
+    vi.spyOn(JSON, 'parse').mockImplementation(((
+      ...args: Parameters<typeof JSON.parse>
+    ) => {
+      longestInput = Math.max(longestInput, String(args[0]).length);
+      return parse(...args) as unknown;
+    }) as typeof JSON.parse);
+    const loaded = await loadBaseline(file);
+    expect(loaded.caseResults).toHaveLength(CASES.length);
+    expect(longestInput).toBeLessThan(LIMIT);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps latest.json’s mode when a run replaces it',
+    async () => {
+      const dir = join(root, 'eval');
+      await writeLatest(dir, 'run-1', '2026-10-19T00:00:00.000Z');
+      await chmod(join(dir, 'latest.json'), 0o600);
+      await writeLatest(dir, 'run-2', '2026-10-19T00:01:00.000Z');
+      expect((await stat(join(dir, 'latest.json'))).mode & 0o777).toBe(0o600);
+    }
+  );
 
   it('copies a result for redaction without one string', () => {
     const redacted = redactStoredResponses({ results: CASES });

@@ -384,11 +384,12 @@ async function writeJson(file: string, value: unknown): Promise<void> {
   await writeJsonFile(file, value);
 }
 
-/** Writes a JSON file in one step: a kill mid-write leaves the old file or none. */
+/**
+ * Writes a JSON file in one step: a kill mid-write leaves the old file or none.
+ * `writeJsonFile` already replaces atomically, and keeps the file's mode.
+ */
 async function replaceJson(file: string, value: unknown): Promise<void> {
-  const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
-  await writeJson(temporary, value);
-  await fs.rename(temporary, file);
+  await writeJsonFile(file, value);
 }
 
 /** A case result's trials: its trial results, or the case itself when it ran once. */

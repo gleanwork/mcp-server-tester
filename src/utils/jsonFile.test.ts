@@ -11,7 +11,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { constants } from 'node:buffer';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   jsonChunks,
   jsonCopy,
@@ -83,7 +83,12 @@ describe('chunked result JSON', () => {
 
       const fresh = join(root, 'fresh.json');
       const plain = join(root, 'plain.json');
+      // Reading the umask clears it for every thread for a moment, so a
+      // concurrent write could get mode 0o666.
+      const umask = vi.spyOn(process, 'umask');
       await writeJsonFile(fresh, { a: 1 });
+      expect(umask).not.toHaveBeenCalled();
+      umask.mockRestore();
       await writeFile(plain, '{}');
       // Same as fs.writeFile: 0o666 less the umask, not owner-only.
       expect((await stat(fresh)).mode & 0o777).toBe(

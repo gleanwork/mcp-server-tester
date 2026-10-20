@@ -517,8 +517,10 @@ async function captureChatgptComputerUseResult({
   };
   // A rewrite that never finishes is a transcript failure, not a lost
   // submission. Keep what the bound turn recorded before it.
-  const unfinishedRewrite = (error: string): Promise<ExternalClientRunResult> =>
-    withEvidence(
+  const unfinishedRewrite = async (
+    error: string
+  ): Promise<ExternalClientRunResult> => {
+    const result = await withEvidence(
       latest
         ? partialFailure(metadataOptions, latest, 'parse_failure', error)
         : failureResult({
@@ -531,6 +533,20 @@ async function captureChatgptComputerUseResult({
       runState,
       boundEvidence(bound)
     );
+    // Without a bound turn, keep the display, as a binding timeout does.
+    if (!latest && isLinuxChatgpt(config) && runState.evidenceDir)
+      attachScreenshot(
+        result,
+        await saveStallScreenshot({
+          evidenceDir: runState.evidenceDir,
+          caseId: run.caseId,
+          display: process.env.DISPLAY,
+          xauthority: process.env.XAUTHORITY,
+        }),
+        'ChatGPT display at native binding timeout'
+      );
+    return result;
+  };
   try {
     const baseline = runState.baseline;
     if (!baseline || !runState.promptSubmitted)
@@ -726,7 +742,13 @@ async function captureChatgptComputerUseResult({
         )
       );
     }
-    if (pendingRecordSince !== undefined)
+    // Only a rewrite left unfinished for most of the wait is why the wait
+    // failed; one caught on the last polls is an ordinary timeout.
+    const waitEnd = matched ? run.startedAtMs + run.timeoutMs : bindingDeadline;
+    if (
+      pendingRecordSince !== undefined &&
+      waitEnd - pendingRecordSince >= (waitEnd - run.startedAtMs) / 2
+    )
       return await unfinishedRewrite(
         matched
           ? 'Native ChatGPT record rewrite did not complete before the run timeout.'
