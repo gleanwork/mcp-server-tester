@@ -533,6 +533,46 @@ describe('bounded native binding wait and failure classification', () => {
     }
   });
 
+  it('measures a bound turn’s unfinished rewrite from when it bound', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-rewrite-bound-late-'));
+    try {
+      const ctx = context(home, false, 60_000);
+      const root = chatgptRunState(ctx.state).sessionsRoot as string;
+      await mkdir(root, { recursive: true });
+      const path = join(root, 'rollout.jsonl');
+      await writeFile(path, 'fixture native transcript');
+      const start = ctx.run.startedAtMs;
+      // Binds at +29s; a rewrite is then pending from +31s to the end: most
+      // of the bound wait, though under half of the whole run.
+      vi.mocked(findChatgptTrace).mockImplementation(async () => {
+        if (clock.now < start + 29_000) return undefined;
+        if (clock.now >= start + 31_000) throw new PendingChatgptRecordError();
+        return {
+          path,
+          trace: {
+            sessionId: 'session',
+            turnId: 'turn',
+            complete: false,
+            toolCalls: [],
+            conversationHistory: [],
+            telemetry: {},
+            limitations: [],
+          },
+        };
+      });
+      const result = await capture(ctx);
+      expect(result).toMatchObject({
+        success: false,
+        clientMetadata: {
+          failureKind: 'parse_failure',
+          traceConfidence: 'low',
+        },
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('measures an unfinished rewrite against the collection wait, not setup time', async () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-rewrite-setup-'));
     try {

@@ -499,6 +499,8 @@ async function captureChatgptComputerUseResult({
   let pendingReads = 0;
   // The wait is measured from here: setup and submission happen before it.
   const collectionStartedAt = Date.now();
+  // A bound turn's wait starts when it bound: its deadline is the run's.
+  let boundAtMs: number | undefined;
   let progressKey: string | undefined;
   let progressAtMs = Date.now();
   const selector: ChatgptTraceSelector =
@@ -617,6 +619,7 @@ async function captureChatgptComputerUseResult({
       if (found) {
         matched = true;
         const { trace, path } = found;
+        boundAtMs ??= Date.now();
         bound ??= { path, sessionId: trace.sessionId, turnId: trace.turnId };
         latest = found;
         const size = await stat(path).then(
@@ -754,7 +757,8 @@ async function captureChatgptComputerUseResult({
     if (
       pendingRecordSince !== undefined &&
       pendingReads > 1 &&
-      waitEnd - pendingRecordSince >= (waitEnd - collectionStartedAt) / 2
+      waitEnd - pendingRecordSince >=
+        (waitEnd - (boundAtMs ?? collectionStartedAt)) / 2
     )
       return await unfinishedRewrite(
         matched
