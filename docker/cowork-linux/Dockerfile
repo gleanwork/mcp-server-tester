@@ -26,7 +26,7 @@ RUN arch="$(dpkg --print-architecture)" \
   && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg tini procps sudo \
     xvfb x11-utils x11-apps dbus dbus-x11 at-spi2-core libglib2.0-bin \
-    python3 python3-gi gir1.2-atspi-2.0 \
+    python3 python3-gi gir1.2-atspi-2.0 xclip \
     fonts-dejavu-core virtiofsd ipxe-qemu ${vm_packages} \
   && curl -fsSLo /usr/share/keyrings/claude-desktop.asc \
     https://downloads.claude.ai/claude-desktop/key.asc \

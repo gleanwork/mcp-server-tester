@@ -10,6 +10,7 @@ import {
   createCoworkClient,
   deadlineWait,
   describeDeadlineWait,
+  truncatedPrompt,
 } from './coworkClient.js';
 import {
   isInfrastructureError,
@@ -1315,6 +1316,67 @@ describe('V2 Cowork client', () => {
       toolCallCount: 1,
     });
   });
+  it('fails a task whose prompt Claude kept only the beginning of, as an infrastructure failure', async () => {
+    const client = createCoworkClient({
+      dataDirectory: () => '/prepared/session',
+      prepare: mocks.setup,
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const original = mocks.trace.getMockImplementation()!;
+    mocks.trace.mockImplementationOnce(
+      async (options: { sessionPath: string }) => ({
+        ...((await original(options)) as ClaudeTrace),
+        // A deep link's 14,336 characters of a 23,661-character prompt.
+        binding: {
+          kind: 'only-new-session',
+          promptDifference: {
+            storedChars: 14336,
+            promptChars: 23661,
+            firstDifferenceAt: 14336,
+          },
+        },
+      })
+    );
+    const result = await client.runBatch!(requests(), context);
+    expect(result[0]!.error).toBe(
+      "Claude kept 14336 of the prompt's 23661 characters: the model got only its beginning. No resubmission attempted."
+    );
+    expect(result[0]!.diagnostics?.failureKind).toBe('input');
+    // As the runner records it: the client's diagnostics with the error.
+    expect(
+      isInfrastructureFailure({
+        error: result[0]!.error,
+        clientDiagnostics: result[0]!.diagnostics,
+      })
+    ).toBe(true);
+    // Kept with its evidence.
+    expect(result[0]!.finalText).toBe('answer');
+  });
+
+  it('tells a truncated prompt from one Claude changed otherwise', () => {
+    const binding = (
+      storedChars: number,
+      promptChars: number,
+      firstDifferenceAt: number
+    ) => ({
+      binding: {
+        kind: 'only-new-session' as const,
+        promptDifference: { storedChars, promptChars, firstDifferenceAt },
+      },
+    });
+    expect(truncatedPrompt(binding(14336, 23661, 14336))).toEqual({
+      storedChars: 14336,
+      promptChars: 23661,
+    });
+    // Surrounding quotes dropped: different from the start.
+    expect(truncatedPrompt(binding(538, 540, 0))).toBeUndefined();
+    expect(
+      truncatedPrompt({ binding: { kind: 'exact-initial-prompt' } })
+    ).toBeUndefined();
+  });
+
   it("records a task that found Cowork's VM down as an infrastructure failure, then resets", async () => {
     const reset = vi.fn().mockResolvedValue(undefined);
     const client = createCoworkClient({

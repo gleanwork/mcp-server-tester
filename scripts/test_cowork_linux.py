@@ -68,8 +68,13 @@ class Desktop:
             raise module.DriverFailure("action_acknowledgement_uncertain")
 
     def open_prompt(self, prompt, timeout):
+        self.links = getattr(self, "links", []) + [prompt]
         if not (self.keeps_draft and self.prompt and not prompt):
             self.prompt = prompt
+
+    def paste_prompt(self, prompt, timeout):
+        self.actions.append("paste")
+        self.prompt = prompt
 
 
 class AtspiStates:
@@ -323,6 +328,30 @@ class LinuxDriverTests(unittest.TestCase):
         desktop.radios = []
         module.Driver(desktop, 1000, 4).select_cowork()
         self.assertEqual(desktop.actions, [])
+
+    def test_a_prompt_too_long_for_the_link_is_pasted_into_an_empty_task(self):
+        prompt = "x" * module.DEEP_LINK_PROMPT_CHARS
+        desktop = Desktop()
+        module.Driver(desktop, 1000, 6).submit(prompt)
+        # Up to the link's limit: the link carries it.
+        self.assertEqual((desktop.links, desktop.actions), ([prompt], ["Start task"]))
+        desktop = Desktop()
+        receipt = module.Driver(desktop, 1000, 6).submit(prompt + "y")
+        # Longer: an empty task, the prompt pasted, then one submit.
+        self.assertEqual(desktop.links, [""])
+        self.assertEqual(desktop.actions, ["paste", "Start task"])
+        self.assertEqual((desktop.prompt, receipt["action_count"]), (prompt + "y", 3))
+
+    def test_paste_refuses_a_composer_that_holds_a_draft_or_no_clipboard(self):
+        entry = AtspiNode("Write your prompt to Claude", "entry",
+                          children=[AtspiNode("an old draft", "static")])
+        desktop = real_desktop(FakeAtspi(entry))
+        with self.assertRaisesRegex(module.DriverFailure, "composer_not_empty"):
+            desktop.paste_prompt("prompt", 1)
+        entry.children = []
+        with patch.object(module.subprocess, "Popen", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(module.DriverFailure, "clipboard_unavailable"):
+                desktop.paste_prompt("prompt", 1)
 
     def test_long_prompt_scrolls_start_task_into_view_once_then_submits(self):
         class LongPrompt(Desktop):

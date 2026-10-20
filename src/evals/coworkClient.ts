@@ -201,6 +201,24 @@ export function describeDeadlineWait(wait: DeadlineWait): string {
   return `It had been waiting on ${what} for ${idle}.`;
 }
 
+/**
+ * How much of the prompt Claude kept, when it kept only its beginning: the
+ * bound session's stored prompt is a strict prefix of the case's. A deep link
+ * keeps 14,336 characters on Linux, so the driver pastes a longer prompt;
+ * this catches any other path that cuts one.
+ */
+export function truncatedPrompt(
+  trace: Pick<ClaudeTrace, 'binding'>
+): { storedChars: number; promptChars: number } | undefined {
+  const binding = trace.binding;
+  if (binding?.kind !== 'only-new-session') return undefined;
+  const { storedChars, promptChars, firstDifferenceAt } =
+    binding.promptDifference;
+  return storedChars < promptChars && firstDifferenceAt === storedChars
+    ? { storedChars, promptChars }
+    : undefined;
+}
+
 const failure = (error: string): ClientRunResult => ({
   finalText: '',
   events: [],
@@ -705,6 +723,15 @@ async function runBatch(
             };
             if (platform.reset) continuation = 'reset';
           }
+          const truncated = truncatedPrompt(trace);
+          if (truncated !== undefined)
+            // The model answered the beginning of the prompt, not the case:
+            // never graded, kept with its evidence.
+            result = {
+              ...result,
+              error: `Claude kept ${truncated.storedChars} of the prompt's ${truncated.promptChars} characters: the model got only its beginning. No resubmission attempted.`,
+              diagnostics: { ...result.diagnostics, failureKind: 'input' },
+            };
         } catch (error) {
           // Trace collection or attribution failed: the app state is unknown.
           result = failure(safeError(error));
