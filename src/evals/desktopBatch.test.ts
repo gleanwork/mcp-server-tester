@@ -209,21 +209,36 @@ describe('runDesktopBatch', () => {
       await fs.rm(artifacts.dir, { recursive: true });
     });
 
-    it('takes none for a case that passed, one that left the app known, or one with artifacts of its own', async () => {
+    it('takes none for a case that passed or one that left the app known', async () => {
       const diagnose = vi.fn(async () => undefined);
       const known = fakeClient({ diagnose });
       known.runCase = failing(known, {}, 'allowed');
       await runDesktopBatch(known, requests(2));
-      const ownArtifacts = fakeClient({ diagnose });
-      ownArtifacts.runCase = failing(ownArtifacts, {
+      expect(diagnose).not.toHaveBeenCalled();
+    });
+
+    it('keeps it beside the artifacts of a case that has its own, as a timed-out task does', async () => {
+      const client = fakeClient({
+        async diagnose(_session, dir) {
+          await fs.writeFile(path.join(dir, 'screen.png'), 'png');
+        },
+      });
+      client.runCase = failing(client, {
         artifacts: { dir: '/session', include: ['audit.jsonl'] },
       });
-      const results = await runDesktopBatch(ownArtifacts, requests(2));
-      expect(diagnose).not.toHaveBeenCalled();
-      expect(results[0]!.artifacts).toEqual({
+      const results = await runDesktopBatch(client, requests(2));
+      const artifacts = results[0]!.artifacts!;
+      // The session folder stays what it was; the diagnosis rides with it.
+      expect(artifacts).toMatchObject({
         dir: '/session',
         include: ['audit.jsonl'],
+        diagnosis: expect.any(String),
       });
+      expect(artifacts).not.toHaveProperty('temporary');
+      expect(
+        await fs.readFile(path.join(artifacts.diagnosis!, 'screen.png'), 'utf8')
+      ).toBe('png');
+      await fs.rm(artifacts.diagnosis!, { recursive: true });
     });
 
     it('keeps only the error, and no directory, when the diagnosis fails', async () => {

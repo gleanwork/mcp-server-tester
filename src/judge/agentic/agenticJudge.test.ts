@@ -310,6 +310,9 @@ describe('agenticJudge', () => {
       await writeFile(join(stored, 'audit.jsonl'), '{}\n');
       await writeFile(join(stored, 'outputs', 'plan.md'), '# Plan\n');
       await symlink('/etc/hosts', join(stored, 'outputs', 'link'));
+      // A timed-out task's failure diagnosis: not the task's output.
+      await mkdir(join(stored, 'mst-diagnosis'));
+      await writeFile(join(stored, 'mst-diagnosis', 'screen.png'), 'png');
       const seen: { files?: Record<string, string> } = {};
       runtimes['claude-agent'] = fakeRuntime(() => ({}), seen);
       const judge = agenticJudge({
@@ -323,6 +326,9 @@ describe('agenticJudge', () => {
       expect(seen.files!['artifacts/audit.jsonl']).toBe('{}\n');
       expect(seen.files!['artifacts/outputs/plan.md']).toBe('# Plan\n');
       expect(seen.files).not.toHaveProperty('artifacts/outputs/link');
+      expect(
+        Object.keys(seen.files!).filter((f) => f.includes('mst-diagnosis'))
+      ).toEqual([]);
       expect(await readFile(join(stored, 'outputs', 'plan.md'), 'utf-8')).toBe(
         '# Plan\n'
       );

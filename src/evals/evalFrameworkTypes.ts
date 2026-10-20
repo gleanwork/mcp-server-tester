@@ -194,6 +194,13 @@ export interface ClientArtifacts {
    * artifacts removes it, whether the copy succeeds or not.
    */
   temporary?: boolean;
+  /**
+   * An absolute path: a temporary directory of a failure diagnosis (what the
+   * app showed, its logs) for a trial that keeps a folder of its own, such as
+   * a timed-out task's session. Copied whole into the folder's
+   * `mst-diagnosis/`, and removed either way.
+   */
+  diagnosis?: string;
 }
 
 /**

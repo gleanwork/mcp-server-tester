@@ -11,7 +11,7 @@ import type { EvalCase } from './datasetTypes.js';
 import type { CaseExecution } from './caseExecution.js';
 import type { ClientArtifacts } from './evalFrameworkTypes.js';
 import { trialArtifactsPath } from './runFormat.js';
-import { ALL_ARTIFACTS } from './allArtifacts.js';
+import { ALL_ARTIFACTS, DIAGNOSIS_DIR } from './allArtifacts.js';
 
 /** The most a trial's copy may hold. A copy over a limit fails. */
 export const ARTIFACT_LIMITS = {
@@ -102,10 +102,20 @@ export async function copyArtifacts(
 ): Promise<void> {
   try {
     await copyArtifactsTo(artifacts, target, limits);
+    if (artifacts.diagnosis)
+      await copyArtifactsTo(
+        { dir: artifacts.diagnosis, include: ALL_ARTIFACTS },
+        path.join(target, DIAGNOSIS_DIR),
+        limits
+      ).catch(() => {
+        // Only the diagnosis is lost: the trial keeps its own evidence.
+      });
   } finally {
     // A directory made for this trial alone: the copy is all that's kept.
     if (artifacts.temporary)
       await fs.rm(artifacts.dir, { recursive: true, force: true });
+    if (artifacts.diagnosis)
+      await fs.rm(artifacts.diagnosis, { recursive: true, force: true });
   }
 }
 
