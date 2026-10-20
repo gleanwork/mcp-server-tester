@@ -8,6 +8,8 @@ import {
   coworkOwnToolCalls,
   coworkWorkspaceUnavailable,
   createCoworkClient,
+  deadlineWait,
+  describeDeadlineWait,
 } from './coworkClient.js';
 import {
   isInfrastructureError,
@@ -1273,6 +1275,7 @@ describe('V2 Cowork client', () => {
         ],
         usage: { inputTokens: 10, outputTokens: 4 },
         isComplete: false,
+        lastEventAt: new Date(Date.now() - 90_000).toISOString(),
         telemetry: {
           resultCount: 0,
           observationSource: 'claude-native-audit-and-transcript',
@@ -1298,8 +1301,8 @@ describe('V2 Cowork client', () => {
       readOnlyContext
     );
     expect(mocks.trace).not.toHaveBeenCalled();
-    expect(result!.error).toBe(
-      'Native Claude trace deadline exceeded. No resubmission attempted.'
+    expect(result!.error).toMatch(
+      /^Native Claude trace deadline exceeded\. No resubmission attempted\. It had been waiting on the model's response for 1m 3\ds\.$/
     );
     expect(isInfrastructureFailure(result!)).toBe(false);
     expect(result!.finalText).toBe('answer so far');
@@ -1308,6 +1311,7 @@ describe('V2 Cowork client', () => {
     expect(result!.telemetry).toMatchObject({
       nativeSessionId: 'local_partial',
       deadlineExceeded: true,
+      deadlineWait: { on: 'model', idleMs: expect.any(Number) },
       toolCallCount: 1,
     });
   });
@@ -1591,6 +1595,45 @@ describe("Cowork's workspace unavailable", () => {
         "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s"
       )
     ).toBe(true);
+  });
+});
+
+describe('what a task past its deadline was waiting on', () => {
+  const at = Date.parse('2026-10-20T05:59:31Z');
+  it("is a tool call with no result yet, by Claude's name for it", () => {
+    const wait = deadlineWait(
+      {
+        toolCalls: [
+          { name: 'search', rawName: 'mcp__slack__search', arguments: {} },
+        ],
+        lastEventAt: '2026-10-20T05:58:31Z',
+      },
+      at
+    );
+    expect(wait).toEqual({
+      on: 'tool',
+      tool: 'mcp__slack__search',
+      idleMs: 60_000,
+    });
+    expect(describeDeadlineWait(wait)).toBe(
+      'It had been waiting on the tool mcp__slack__search for 1m 0s.'
+    );
+  });
+  it('is the model once every call has its result, as in a stalled response', () => {
+    const wait = deadlineWait(
+      {
+        toolCalls: [{ name: 'bash', arguments: {}, output: 'ok' }],
+        lastEventAt: '2026-10-20T05:48:36.896Z',
+      },
+      at
+    );
+    expect(wait).toMatchObject({ on: 'model' });
+    expect(describeDeadlineWait(wait)).toBe(
+      "It had been waiting on the model's response for 10m 54s."
+    );
+    expect(describeDeadlineWait({ on: 'model' })).toBe(
+      "It was waiting on the model's response."
+    );
   });
 });
 

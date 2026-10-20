@@ -216,6 +216,21 @@ describe('Claude local-agent trace parsing', () => {
     ]);
   });
 
+  it("records when the task last did something, from either source's latest event", async () => {
+    const trace = await parseNativeEvents(
+      [
+        toolUseEvent('a', 'Read', '2026-09-17T00:00:01Z'),
+        toolUseEvent('b', 'Bash', '2026-09-17T00:05:00Z'),
+        toolUseEvent('c', 'Bash', 'invalid'),
+      ],
+      [toolUseEvent('d', 'Write', '2026-09-17T00:03:00Z')]
+    );
+    expect(trace.lastEventAt).toBe('2026-09-17T00:05:00.000Z');
+    expect(
+      (await parseNativeEvents([toolUseEvent('a', 'Read')])).lastEventAt
+    ).toBeUndefined();
+  });
+
   it('correlates results across sources and deduplicates calls and errors by tool ID', async () => {
     const calls = {
       type: 'assistant',

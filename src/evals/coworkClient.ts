@@ -158,6 +158,49 @@ function correlationTelemetry(trace: ClaudeTrace): Record<string, unknown> {
     : { correlation: binding.kind };
 }
 
+/**
+ * What a task past its deadline was waiting on, and for how long: a tool call
+ * with no result yet, or else the model (a response under way, or the next
+ * one). A long wait on the model can be a stalled response or one very long
+ * one; the transcript can't tell which, since Claude logs a message when it
+ * ends.
+ */
+export interface DeadlineWait {
+  on: 'model' | 'tool';
+  /** The tool, as Claude names it (`mcp__slack__slack_search`). */
+  tool?: string;
+  /** Since the task's last native event. */
+  idleMs?: number;
+}
+
+export function deadlineWait(
+  trace: Pick<ClaudeTrace, 'toolCalls' | 'lastEventAt'>,
+  now = Date.now()
+): DeadlineWait {
+  const last = trace.toolCalls.at(-1);
+  const lastEvent = trace.lastEventAt ? Date.parse(trace.lastEventAt) : NaN;
+  return {
+    ...(last && last.output === undefined
+      ? { on: 'tool' as const, tool: last.rawName ?? last.name }
+      : { on: 'model' as const }),
+    ...(Number.isFinite(lastEvent)
+      ? { idleMs: Math.max(0, now - lastEvent) }
+      : {}),
+  };
+}
+
+export function describeDeadlineWait(wait: DeadlineWait): string {
+  const what =
+    wait.on === 'tool' ? `the tool ${wait.tool}` : "the model's response";
+  if (wait.idleMs === undefined) return `It was waiting on ${what}.`;
+  const seconds = Math.round(wait.idleMs / 1000);
+  const idle =
+    seconds >= 60
+      ? `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+      : `${seconds}s`;
+  return `It had been waiting on ${what} for ${idle}.`;
+}
+
 const failure = (error: string): ClientRunResult => ({
   finalText: '',
   events: [],
@@ -672,6 +715,10 @@ async function runBatch(
               ...match,
               sessionPath,
             }).catch(() => []);
+            const wait =
+              partial?.candidate.metadataPath === sessionPath
+                ? deadlineWait(partial)
+                : undefined;
             if (partial?.candidate.metadataPath === sessionPath)
               result = {
                 ...simulationToClientRun(
@@ -680,7 +727,9 @@ async function runBatch(
                     response: partial.finalAnswer,
                     toolCalls: coworkOwnToolCalls(partial.toolCalls, servers),
                     usage: partial.usage,
-                    error: result.error,
+                    error: wait
+                      ? `${result.error} ${describeDeadlineWait(wait)}`
+                      : result.error,
                   },
                   servers
                 ),
@@ -695,6 +744,7 @@ async function runBatch(
                   nativeSessionId: partial.candidate.id,
                   ...correlationTelemetry(partial),
                   deadlineExceeded: true,
+                  ...(wait ? { deadlineWait: wait } : {}),
                   ...(hitlWarning ? { hitlWarning } : {}),
                 },
               };

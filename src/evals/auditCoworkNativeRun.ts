@@ -635,6 +635,7 @@ async function auditCase(
       computerUse: _computerUse,
       hitlWarning: _hitlWarning,
       deadlineExceeded: _deadlineExceeded,
+      deadlineWait: _deadlineWait,
       clientApp: _clientApp,
       batchCase: _batchCase,
       batchLifecycle: _batchLifecycle,
