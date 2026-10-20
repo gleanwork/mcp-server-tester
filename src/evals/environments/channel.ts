@@ -249,7 +249,11 @@ export async function runShardOverChannel(
  */
 export function machineEnvironment(
   context: EnvironmentContext,
-  provision: (shard: ShardSpec, signal: AbortSignal) => Promise<Machine>,
+  provision: (
+    shard: ShardSpec,
+    signal: AbortSignal,
+    events: ShardEvents
+  ) => Promise<Machine>,
   options: Omit<ShardChannelOptions, 'workDir'> = {}
 ): Environment {
   const live = new Set<Machine>();
@@ -259,7 +263,7 @@ export function machineEnvironment(
     async runShard(shard, events, signal) {
       let machine: Machine;
       try {
-        machine = await provision(shard, signal);
+        machine = await provision(shard, signal, events);
       } catch (error) {
         return {
           ok: false,

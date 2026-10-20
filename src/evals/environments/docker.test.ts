@@ -5,9 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  chatgptDockerRunArgs,
+  chatgptImageDirectory,
   containerName,
   contextPool,
   coworkImageDirectory,
+  DEFAULT_CHATGPT_IMAGE,
   DEFAULT_COWORK_IMAGE,
   dockerRunArgs,
   npmPackArgs,
@@ -99,6 +102,19 @@ describe('the docker environment', () => {
     expect(args.at(-1)).toBe('mst-cowork-linux:test');
   });
 
+  it('starts a ChatGPT container with a disposable profile and without Cowork VM devices', () => {
+    const args = chatgptDockerRunArgs({
+      name: 'mst-chatgpt-1',
+      image: 'mst-chatgpt-linux:test',
+      runId: 'run',
+    });
+    expect(args).toContain('no-new-privileges');
+    expect(args).toContain('/config:rw,nosuid,nodev,size=2g,mode=0700');
+    expect(args).not.toContain('/dev/kvm');
+    expect(args.join(' ')).not.toContain('MST_INFERENCE');
+    expect(args.at(-1)).toBe('mst-chatgpt-linux:test');
+  });
+
   it('names containers by run and shard, as Docker allows', () => {
     expect(containerName('20261011T020624Z-51a866', 0)).toBe(
       'mst-20261011T020624Z-51a866-1'
@@ -137,6 +153,12 @@ describe('the docker environment', () => {
     expect(() =>
       resolveEnvironment('docker', { readyTimeout: 'soon' })
     ).toThrow();
+    expect(
+      resolveEnvironment('docker', { desktop: 'chatgpt' }).options
+    ).toMatchObject({
+      desktop: 'chatgpt',
+    });
+    expect(() => resolveEnvironment('docker', { desktop: 'other' })).toThrow();
   });
 
   it('ships the image beside the package', async () => {
@@ -155,6 +177,10 @@ describe('the docker environment', () => {
       )
     ).toBe(true);
     expect(DEFAULT_COWORK_IMAGE).toMatch(/^mst-cowork-linux:/);
+    const chatgpt = chatgptImageDirectory();
+    for (const file of ['Dockerfile', 'bin/session.py', 'bin/run-worker.py'])
+      await expect(fs.stat(path.join(chatgpt, file))).resolves.toBeTruthy();
+    expect(DEFAULT_CHATGPT_IMAGE).toMatch(/^mst-chatgpt-linux:/);
   });
 });
 
@@ -313,6 +339,76 @@ describe('a run in docker (a fake Docker CLI)', () => {
         plugins: ['acme-mst-dt-1.2.3.tgz'],
       },
     ]);
+  }, 120_000);
+
+  it('builds the ChatGPT image from caller-verified app and base pins', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { project, configPath, calls } = await fixture(
+      { MST_NPM: mock('fakeNpm.mjs') },
+      []
+    );
+    await setupEnvironment('docker', {
+      config: configPath,
+      rootDir: project,
+      envOption: [
+        'desktop=chatgpt',
+        'chatgptBaseImage=example/base@sha256:123',
+        'chatgptAppPackage=chatgpt',
+        'chatgptAppVersion=26.915.31945',
+        'chatgptAppArchitecture=amd64',
+        'chatgptAppUrl=https://example.com/chatgpt.deb',
+        `chatgptAppSha256=${'a'.repeat(64)}`,
+        'chatgptAppSize=417340066',
+      ],
+    });
+    const build = (await calls()).find((call) => call.args[0] === 'build')!;
+    expect(build.args).toContain('BASE_IMAGE=example/base@sha256:123');
+    expect(build.args).toContain('APP_VERSION=26.915.31945');
+    expect(build.args).toContain(`APP_SHA256=${'a'.repeat(64)}`);
+    expect(build.args).not.toContain('CLAUDE_DESKTOP_VERSION=26.915.31945');
+  }, 120_000);
+
+  it('refuses ChatGPT setup without verified app pins', async () => {
+    const { project, configPath } = await fixture(
+      { MST_NPM: mock('fakeNpm.mjs') },
+      []
+    );
+    await expect(
+      setupEnvironment('docker', {
+        config: configPath,
+        rootDir: project,
+        envOption: ['desktop=chatgpt'],
+      })
+    ).rejects.toThrow('ChatGPT Docker setup needs BASE_IMAGE');
+  });
+
+  it('collects a ChatGPT Docker shard with a private API key from --secrets-file', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath, calls, root } = await fixture();
+    vi.stubEnv('OPENAI_API_KEY', '');
+    const secretsFile = path.join(dir, 'secrets.json');
+    await fs.writeFile(
+      secretsFile,
+      JSON.stringify({ OPENAI_API_KEY: 'test-openai-key' })
+    );
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { desktop: 'chatgpt', image: 'mst-chatgpt-linux:test' },
+      secretsFile,
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    const recorded = await calls();
+    const run = recorded.find((call) => call.args[0] === 'run')!;
+    expect(run.args).not.toContain('/dev/kvm');
+    expect(
+      recorded.some((call) => call.args.includes('/opt/mst/bin/run-worker.py'))
+    ).toBe(true);
+    expect(JSON.stringify(recorded)).not.toContain('test-openai-key');
+    expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
   }, 120_000);
 
   it('refuses to build with a plugin that is a file, not a package', async () => {

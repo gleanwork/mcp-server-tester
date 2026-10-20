@@ -1,6 +1,6 @@
 /**
  * The built-in `docker` environment (ADR 0004): each shard runs in a
- * container from MST's Linux Cowork image (docker/cowork-linux), on a Docker
+ * container from MST's Linux Cowork or ChatGPT image, on a Docker
  * context. The channel is the Docker CLI: `docker exec` runs `mst collect`
  * as the desktop user, and `docker cp` moves the bundle and results.
  *
@@ -36,12 +36,16 @@ import type {
   WorkerChannel,
 } from '../evalFrameworkTypes.js';
 
-/** The image `mst env setup docker` builds for this MST version. */
+/** The Cowork image `mst env setup docker` builds for this MST version. */
 export const DEFAULT_COWORK_IMAGE = `mst-cowork-linux:${packageJson.version}`;
+export const DEFAULT_CHATGPT_IMAGE = `mst-chatgpt-linux:${packageJson.version}`;
 
 /** Inside the image (docker/cowork-linux/Dockerfile). */
 const USER = 'mst';
 const WORK_DIR = '/home/mst/work';
+const CHATGPT_USER = 'abc';
+const CHATGPT_WORK_DIR = '/run/mst/work';
+const CHATGPT_KEY_FILE = '/run/mst/inference-key';
 const SESSION_DIR = '/run/mst/session';
 const TOKEN_FILE = '/run/mst/inference-token';
 const DEFAULT_READY_TIMEOUT_S = 1200;
@@ -50,6 +54,8 @@ const TOKEN_REFRESH_MS = 4 * 60 * 1000;
 
 const DockerOptionsSchema = z
   .object({
+    /** Desktop hosted by the container. Cowork remains the default. */
+    desktop: z.enum(['cowork', 'chatgpt']).optional(),
     image: z.string().min(1).optional(),
     /** Docker contexts, comma-separated. Default: the current context. */
     contexts: z.string().min(1).optional(),
@@ -57,6 +63,20 @@ const DockerOptionsSchema = z
     readyTimeout: z.string().regex(/^\d+$/).optional(),
     /** `mst env setup docker` only: the Claude Desktop package to install. */
     claudeDesktopVersion: z.string().min(1).optional(),
+    /** `mst env setup docker --env-option desktop=chatgpt` only. */
+    chatgptBaseImage: z.string().min(1).optional(),
+    chatgptAppPackage: z.string().min(1).optional(),
+    chatgptAppVersion: z.string().min(1).optional(),
+    chatgptAppArchitecture: z.string().min(1).optional(),
+    chatgptAppUrl: z.string().url().optional(),
+    chatgptAppSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    chatgptAppSize: z
+      .string()
+      .regex(/^[1-9][0-9]*$/)
+      .optional(),
   })
   .strict();
 type DockerOptions = z.infer<typeof DockerOptionsSchema>;
@@ -120,6 +140,15 @@ export function coworkImageDirectory(): string {
   );
 }
 
+/** The packaged ChatGPT worker image and its session scripts. */
+export function chatgptImageDirectory(): string {
+  return path.dirname(
+    createRequire(
+      typeof __filename === 'string' ? __filename : import.meta.url
+    ).resolve('@gleanwork/mcp-server-tester/chatgpt-linux-image')
+  );
+}
+
 /** `docker run` arguments for a shard's container. */
 export function dockerRunArgs(options: {
   name: string;
@@ -166,6 +195,34 @@ export function dockerRunArgs(options: {
     ...(warm !== undefined && /^[1-9][0-9]*$/.test(warm)
       ? ['--env', `MST_COWORK_WARM_VM_TIMEOUT_S=${warm}`]
       : []),
+    options.image,
+  ];
+}
+
+/** ChatGPT uses its own disposable profile and does not need Cowork's VM. */
+export function chatgptDockerRunArgs(options: {
+  name: string;
+  image: string;
+  runId: string;
+}): string[] {
+  return [
+    'run',
+    '--detach',
+    '--name',
+    options.name,
+    '--label',
+    `${RUN_LABEL}=${options.runId}`,
+    ...ownerLabelArgs(),
+    '--security-opt',
+    'no-new-privileges',
+    '--tmpfs',
+    '/config:rw,nosuid,nodev,size=2g,mode=0700',
+    '--tmpfs',
+    '/tmp:rw,nosuid,nodev,size=1g,mode=1777',
+    '--tmpfs',
+    '/run/mst:rw,nosuid,nodev,size=1g,mode=0700',
+    '--shm-size',
+    '1g',
     options.image,
   ];
 }
@@ -280,6 +337,65 @@ async function deliverToken(
   );
 }
 
+/** The native app reads this short-lived key file, never a Docker env or arg. */
+async function deliverChatgptKey(
+  context: string | undefined,
+  name: string,
+  key: string
+): Promise<void> {
+  await dockerOk(
+    context,
+    [
+      'exec',
+      '-i',
+      '-u',
+      CHATGPT_USER,
+      name,
+      'sh',
+      '-c',
+      `umask 077 && cat > ${CHATGPT_KEY_FILE}.new && mv -f ${CHATGPT_KEY_FILE}.new ${CHATGPT_KEY_FILE}`,
+    ],
+    'Delivering the ChatGPT API key',
+    { input: key }
+  );
+}
+
+async function waitForChatgptDisplay(
+  context: string | undefined,
+  name: string,
+  timeoutS: number,
+  signal: AbortSignal
+): Promise<void> {
+  const deadline = Date.now() + timeoutS * 1000;
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw new Error('The run was cancelled.');
+    const ready = await docker(context, [
+      'exec',
+      '-u',
+      CHATGPT_USER,
+      '-e',
+      'DISPLAY=:1',
+      name,
+      'xdpyinfo',
+    ]);
+    if (ready.code === 0) return;
+    const live = await docker(context, [
+      'inspect',
+      '--format',
+      '{{.State.Running}}',
+      name,
+    ]);
+    if (live.code !== 0 || live.stdout.trim() !== 'true')
+      throw new Error(
+        `The ChatGPT desktop container ${name} stopped before its display was ready.`
+      );
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  throw new Error(
+    `The ChatGPT desktop in container ${name} was not ready within ${timeoutS} s.`
+  );
+}
+
 /** Waits for the image's desktop session to say it's ready (or failed). */
 async function waitForDesktop(
   context: string | undefined,
@@ -328,8 +444,12 @@ async function waitForDesktop(
 /** The channel to a container: the Docker CLI on its context. */
 function containerChannel(
   context: string | undefined,
-  name: string
+  name: string,
+  desktop: 'cowork' | 'chatgpt',
+  work: 'collect' | 'grade'
 ): WorkerChannel {
+  const user = desktop === 'chatgpt' ? CHATGPT_USER : USER;
+  const workDir = desktop === 'chatgpt' ? CHATGPT_WORK_DIR : WORK_DIR;
   return {
     exec(argv, { stdin, signal }) {
       const child = spawn(
@@ -339,10 +459,13 @@ function containerChannel(
           'exec',
           '-i',
           '-u',
-          USER,
+          user,
           '-w',
-          WORK_DIR,
+          workDir,
           name,
+          ...(desktop === 'chatgpt' && work === 'collect'
+            ? ['/usr/bin/python3', '/opt/mst/bin/run-worker.py']
+            : []),
           ...argv,
         ],
         { stdio: ['pipe', 'pipe', 'pipe'] }
@@ -386,7 +509,7 @@ function containerChannel(
           name,
           'chown',
           '-R',
-          `${USER}:${USER}`,
+          `${user}:${user}`,
           remoteDir,
         ],
         'Handing the bundle to the desktop user'
@@ -412,10 +535,16 @@ function openDocker(
   options: DockerOptions,
   context: EnvironmentContext
 ): ReturnType<typeof machineEnvironment> {
-  const image = options.image ?? DEFAULT_COWORK_IMAGE;
+  const desktop = options.desktop ?? 'cowork';
+  const image =
+    options.image ??
+    (desktop === 'chatgpt' ? DEFAULT_CHATGPT_IMAGE : DEFAULT_COWORK_IMAGE);
   const readyTimeoutS = Number(options.readyTimeout ?? DEFAULT_READY_TIMEOUT_S);
   const pool = contextPool(contextsOf(options));
-  const seccompProfile = path.join(coworkImageDirectory(), 'seccomp.json');
+  const seccompProfile =
+    desktop === 'cowork'
+      ? path.join(coworkImageDirectory(), 'seccomp.json')
+      : undefined;
   // Once per context: containers an earlier run on this machine left behind.
   const swept = new Map<string, Promise<void>>();
   const sweep = (dockerContext: string | undefined) => {
@@ -441,7 +570,7 @@ function openDocker(
   const contexts = contextsOf(options);
   return machineEnvironment(
     context,
-    async (shard, signal): Promise<Machine> => {
+    async (shard, signal, events): Promise<Machine> => {
       if (shard.work === 'grade')
         return gradeMachine(
           // No VM, so no host-wide vsock port: grade shards share contexts.
@@ -450,7 +579,8 @@ function openDocker(
           image,
           shard.runId,
           sweep,
-          signal
+          signal,
+          desktop
         );
       const dockerContext = await pool.acquire(signal);
       const name = containerName(shard.runId, shard.index);
@@ -462,7 +592,16 @@ function openDocker(
       };
       try {
         await sweep(dockerContext);
-        const credential = await inference();
+        const credential = desktop === 'cowork' ? await inference() : undefined;
+        const chatgptKey =
+          desktop === 'chatgpt'
+            ? ((await events.requestTokens({ servers: [], reason: 'start' }))
+                .env?.OPENAI_API_KEY ?? process.env.OPENAI_API_KEY)
+            : undefined;
+        if (desktop === 'chatgpt' && !chatgptKey)
+          throw new Error(
+            'ChatGPT Docker needs OPENAI_API_KEY in the environment or --secrets-file.'
+          );
         const digest = await dockerOk(
           dockerContext,
           ['image', 'inspect', '--format', '{{.Id}}', image],
@@ -472,37 +611,65 @@ function openDocker(
         claimContainer(dockerContext, name);
         await dockerOk(
           dockerContext,
-          dockerRunArgs({
-            name,
-            image,
-            runId: shard.runId,
-            seccompProfile,
-            inference: credential,
-            warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
-          }),
+          desktop === 'cowork'
+            ? dockerRunArgs({
+                name,
+                image,
+                runId: shard.runId,
+                seccompProfile: seccompProfile!,
+                inference: credential!,
+                warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
+              })
+            : chatgptDockerRunArgs({ name, image, runId: shard.runId }),
           `Starting container ${name}`,
           { signal }
         );
-        await deliverToken(dockerContext, name, credential.token);
-        refresh = setInterval(() => {
-          void inference()
-            .then((fresh) => deliverToken(dockerContext, name, fresh.token))
-            .catch(() => {
-              // The next refresh tries again; the token still has time.
-            });
-        }, TOKEN_REFRESH_MS);
-        refresh.unref();
-        await waitForDesktop(dockerContext, name, readyTimeoutS, signal);
+        if (desktop === 'cowork') {
+          await deliverToken(dockerContext, name, credential!.token);
+          refresh = setInterval(() => {
+            void inference()
+              .then((fresh) => deliverToken(dockerContext, name, fresh.token))
+              .catch(() => {
+                // The next refresh tries again; the token still has time.
+              });
+          }, TOKEN_REFRESH_MS);
+          refresh.unref();
+          await waitForDesktop(dockerContext, name, readyTimeoutS, signal);
+        } else {
+          await dockerOk(
+            dockerContext,
+            [
+              'exec',
+              '-u',
+              'root',
+              name,
+              'chown',
+              `${CHATGPT_USER}:${CHATGPT_USER}`,
+              '/config',
+              '/run/mst',
+            ],
+            'Preparing the private ChatGPT directories'
+          );
+          await waitForChatgptDisplay(
+            dockerContext,
+            name,
+            readyTimeoutS,
+            signal
+          );
+          await deliverChatgptKey(dockerContext, name, chatgptKey!);
+        }
+        const user = desktop === 'chatgpt' ? CHATGPT_USER : USER;
+        const workDir = desktop === 'chatgpt' ? CHATGPT_WORK_DIR : WORK_DIR;
         await dockerOk(
           dockerContext,
-          ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
+          ['exec', '-u', user, name, 'mkdir', '-p', workDir],
           'Creating the work directory'
         );
         return {
           id: name,
           image: { ref: image, digest },
-          workDir: WORK_DIR,
-          channel: containerChannel(dockerContext, name),
+          workDir,
+          channel: containerChannel(dockerContext, name, desktop, 'collect'),
           async dispose({ keep }) {
             try {
               if (keep) {
@@ -541,7 +708,8 @@ async function gradeMachine(
   image: string,
   runId: string,
   sweep: (dockerContext: string | undefined) => Promise<void>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  desktop: 'cowork' | 'chatgpt'
 ): Promise<Machine> {
   const remove = async () => {
     await docker(dockerContext, ['rm', '--force', name]);
@@ -561,16 +729,32 @@ async function gradeMachine(
       `Starting container ${name}`,
       { signal }
     );
+    const user = desktop === 'chatgpt' ? CHATGPT_USER : USER;
+    const workDir = desktop === 'chatgpt' ? CHATGPT_WORK_DIR : WORK_DIR;
+    if (desktop === 'chatgpt')
+      await dockerOk(
+        dockerContext,
+        [
+          'exec',
+          '-u',
+          'root',
+          name,
+          'chown',
+          `${CHATGPT_USER}:${CHATGPT_USER}`,
+          '/run/mst',
+        ],
+        'Preparing the private grade directory'
+      );
     await dockerOk(
       dockerContext,
-      ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
+      ['exec', '-u', user, name, 'mkdir', '-p', workDir],
       'Creating the work directory'
     );
     return {
       id: name,
       image: { ref: image, digest },
-      workDir: WORK_DIR,
-      channel: containerChannel(dockerContext, name),
+      workDir,
+      channel: containerChannel(dockerContext, name, desktop, 'grade'),
       async dispose({ keep }) {
         if (!keep) return remove();
         const kept = `${name}${KEPT_SUFFIX}`;
@@ -624,14 +808,48 @@ async function npmPack(
   if (packed !== 0) throw new Error(`npm pack failed in ${dir}.`);
 }
 
+function chatgptBuildArgs(options: DockerOptions): string[] {
+  const required = {
+    BASE_IMAGE: options.chatgptBaseImage,
+    APP_PACKAGE: options.chatgptAppPackage,
+    APP_VERSION: options.chatgptAppVersion,
+    APP_ARCHITECTURE: options.chatgptAppArchitecture,
+    APP_URL: options.chatgptAppUrl,
+    APP_SHA256: options.chatgptAppSha256,
+    APP_SIZE: options.chatgptAppSize,
+  };
+  const missing = Object.entries(required)
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+  if (missing.length)
+    throw new Error(
+      `ChatGPT Docker setup needs ${missing.join(', ')} via the chatgpt* --env-option values.`
+    );
+  return Object.entries(required).flatMap(([name, value]) => [
+    '--build-arg',
+    `${name}=${value}`,
+  ]);
+}
+
 async function setupDocker(
   options: DockerOptions,
   log: (line: string) => void,
   plugins: ReadonlyArray<{ name: string; version: string; dir: string }>
 ): Promise<void> {
-  const image = options.image ?? DEFAULT_COWORK_IMAGE;
-  const source = coworkImageDirectory();
-  const build = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-cowork-image-'));
+  const desktop = options.desktop ?? 'cowork';
+  const image =
+    options.image ??
+    (desktop === 'chatgpt' ? DEFAULT_CHATGPT_IMAGE : DEFAULT_COWORK_IMAGE);
+  const source =
+    desktop === 'chatgpt' ? chatgptImageDirectory() : coworkImageDirectory();
+  const buildArgs = desktop === 'chatgpt' ? chatgptBuildArgs(options) : [];
+  if (desktop === 'chatgpt' && options.claudeDesktopVersion)
+    throw new Error(
+      'claudeDesktopVersion applies only to Cowork Docker setup.'
+    );
+  const build = await fs.mkdtemp(
+    path.join(os.tmpdir(), `mst-${desktop}-image-`)
+  );
   try {
     await fs.cp(source, build, { recursive: true });
     const packages = path.join(build, 'mst-package');
@@ -666,6 +884,7 @@ async function setupDocker(
                 `CLAUDE_DESKTOP_VERSION=${options.claudeDesktopVersion}`,
               ]
             : []),
+          ...buildArgs,
           build,
         ],
         { echo: true }
@@ -684,7 +903,7 @@ async function setupDocker(
 export const dockerEnvironment: EnvironmentDefinition = {
   schema: DockerOptionsSchema,
   description:
-    "Run shards in containers from MST's Linux Cowork image, one per Docker context at a time.",
+    'Run Cowork or ChatGPT shards in their Linux desktop images, one per Docker context at a time.',
   async open(options, context) {
     return openDocker(options as DockerOptions, context);
   },

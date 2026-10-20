@@ -89,6 +89,9 @@ permission the driver already uses.
 
 ## Linux runtime contract
 
+For the built-in Docker worker, see [ChatGPT Work and Codex in Docker](chatgpt-docker.md).
+The contract below also applies to a caller-prepared Linux container.
+
 The caller (your eval harness) owns the VM/container, display, D-Bus, keyring,
 AT-SPI bus, the fresh HOME and API-key file (creation and deletion), the package
 version check, the disposable no-new-privileges container, and uploading `MST_CHATGPT_EVIDENCE_DIR`. It runs MST as the

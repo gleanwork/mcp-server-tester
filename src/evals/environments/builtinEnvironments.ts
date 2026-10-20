@@ -14,7 +14,7 @@ const KEEP: readonly EnvironmentKeep[] = ['never', 'failed', 'always'];
 
 /**
  * `local` has no machines, and no options of its own. `docker` runs shards
- * in containers from MST's Linux Cowork image.
+ * in containers from MST's Linux Cowork or ChatGPT image.
  */
 function builtinEnvironments(): Readonly<
   Record<string, EnvironmentDefinition>

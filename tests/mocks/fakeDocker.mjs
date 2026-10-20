@@ -98,6 +98,8 @@ if (command === 'image') {
   fs.rmSync(containerRoot(rest.at(-1)), { recursive: true, force: true });
 } else if (command === 'logs') {
   // Nothing logged.
+} else if (command === 'inspect') {
+  process.stdout.write('true\n');
 } else if (command === 'cp') {
   const [from, to] = rest;
   const resolve = (value) => {
@@ -114,14 +116,22 @@ if (command === 'image') {
   const name = rest[index];
   const argv = rest.slice(index + 1);
   if (!fs.existsSync(containerRoot(name))) fail(`No such container: ${name}`);
-  if (argv[0] === 'mst') {
+  if (argv[0] === 'xdpyinfo') {
+    process.exit(0);
+  } else if (
+    argv[0] === 'mst' ||
+    (argv[0] === '/usr/bin/python3' &&
+      argv[1] === '/opt/mst/bin/run-worker.py' &&
+      argv[2] === 'mst')
+  ) {
+    const worker = argv[0] === 'mst' ? argv : argv.slice(2);
     const child = spawn(
       process.execPath,
       [
         '--import',
         'tsx',
         CLI,
-        ...argv.slice(1).map((value) => inside(name, value)),
+        ...worker.slice(1).map((value) => inside(name, value)),
       ],
       {
         cwd: REPO,
