@@ -145,7 +145,8 @@ export async function evaluateJudge(
         return judgeSkipped(
           label,
           repScore.reasoning,
-          sumJudgeUsage(repScores.map((v) => v.usage))
+          sumJudgeUsage(repScores.map((v) => v.usage)),
+          repScore.metadata
         );
     }
     const last = repScores.at(-1);
@@ -206,11 +207,16 @@ export async function evaluateJudge(
   }
 }
 
-/** A judge that could not grade this case: recorded, passed, not scored. */
+/**
+ * A judge that could not grade this case: recorded, passed, not scored. Its
+ * metadata is kept, so a judge can say why it skipped in a form a script can
+ * read (for example `{ noLinks: true }`); its score never is.
+ */
 function judgeSkipped(
   label: string,
   reason: string | undefined,
-  usage: ReturnType<typeof sumJudgeUsage>
+  usage: ReturnType<typeof sumJudgeUsage>,
+  metadata?: Record<string, unknown>
 ): ValidationResult {
   return {
     pass: true,
@@ -220,6 +226,7 @@ function judgeSkipped(
       skipped: true,
       ...(reason !== undefined ? { reasoning: reason } : {}),
       ...(usage !== undefined ? { usage } : {}),
+      ...(metadata !== undefined ? { metadata } : {}),
     },
   };
 }

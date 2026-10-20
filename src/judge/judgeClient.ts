@@ -88,6 +88,23 @@ export async function preflightJudge(config: JudgeConfig = {}): Promise<void> {
   await JUDGE_SDKS[config.provider ?? DEFAULT_JUDGE_PROVIDER]();
 }
 
+/**
+ * The provider's raw completion: a system prompt and a user prompt in, the
+ * model's text, usage and truncation out. For a plugin judge that brings its
+ * own prompt and parser but should reach models the way MST's judges do
+ * (same providers, credentials and LLM gateway settings). Throws for an
+ * unknown provider or a missing credential.
+ *
+ * @example
+ * const complete = createJudgeCompletion({ provider: 'openai', model: 'gpt-5.6-luna', effort: 'xhigh' });
+ * const { text, usage } = await complete({ system: 'Answer in JSON.', prompt });
+ */
+export function createJudgeCompletion(
+  config: JudgeConfig = {}
+): JudgeCompletionAdapter {
+  return judgeCompletion(config);
+}
+
 /** The provider's completion adapter; throws for an unknown provider or a missing credential. */
 function judgeCompletion(config: JudgeConfig): JudgeCompletionAdapter {
   const provider: ProviderKind = config.provider ?? DEFAULT_JUDGE_PROVIDER;

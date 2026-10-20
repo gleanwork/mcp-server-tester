@@ -359,10 +359,11 @@ describe('judge output', () => {
       input.case.expected.criteria
         ? { score: 0.2, usage: { inputTokens: 7, outputTokens: 1 } }
         : {
-            score: 0,
+            score: -1,
             skipped: true,
             reasoning: 'no criteria',
             usage: { inputTokens: 3, outputTokens: 0 },
+            metadata: { noCriteria: true },
           }
     );
     judge('always', async () => ({
@@ -395,7 +396,12 @@ describe('judge output', () => {
     const skippedEntry = skippedCase!.scores.judge?.judgeResults?.find(
       (entry) => entry.judgeName === 'needs-criteria/judge/judge'
     );
-    expect(skippedEntry).toMatchObject({ skipped: true, pass: true });
+    expect(skippedEntry).toMatchObject({
+      skipped: true,
+      pass: true,
+      reasoning: 'no criteria',
+      metadata: { noCriteria: true },
+    });
     expect(skippedEntry?.score).toBeUndefined();
     expect(gradedCase!.pass).toBe(false);
     expect(skippedCase!.judgeUsage).toEqual({

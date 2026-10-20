@@ -99,7 +99,8 @@ export interface JudgeScore {
   pass?: boolean;
   /**
    * The judge cannot grade this case. A skipped judge is recorded but
-   * excluded from pass/fail and judge metrics.
+   * excluded from pass/fail and judge metrics. Its `reasoning`, `usage` and
+   * `metadata` are kept; its `score` is not.
    */
   skipped?: boolean;
   /** Named sub-scores, such as one per rubric criterion. */

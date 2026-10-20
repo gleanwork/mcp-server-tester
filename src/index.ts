@@ -196,7 +196,16 @@ export type {
   ClientResponse,
 } from './evals/caseExecution.js';
 export type { ClientSkillsMode, SkillLoad } from './evals/mstClient/types.js';
-export { createJudge } from './judge/judgeClient.js';
+export {
+  createJudge,
+  createJudgeCompletion,
+  preflightJudge,
+} from './judge/judgeClient.js';
+export type {
+  JudgeCompletion,
+  JudgeCompletionAdapter,
+  JudgeCompletionRequest,
+} from './judge/llmJudge.js';
 export {
   BUILT_IN_RUBRICS,
   resolveRubric,

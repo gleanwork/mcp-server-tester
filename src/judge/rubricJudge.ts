@@ -33,6 +33,7 @@ export const RubricJudgeLLMSchema = z.object({
   maxTokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(1).optional(),
   maxBudgetUsd: z.number().positive().optional(),
+  effort: z.string().min(1).optional(),
   maxToolOutputSize: z.number().int().positive().optional(),
 });
 

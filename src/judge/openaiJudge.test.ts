@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Mock the OpenAI module before importing the judge (Vitest hoists vi.mock)
 vi.mock('openai', () => {
   const mockCreate = vi.fn();
+  const mockResponsesCreate = vi.fn();
   const MockOpenAI = vi.fn().mockImplementation(function () {
     return {
       chat: {
@@ -10,6 +11,7 @@ vi.mock('openai', () => {
           create: mockCreate,
         },
       },
+      responses: { create: mockResponsesCreate },
     };
   });
   // Attach the mockCreate so tests can configure it
@@ -18,10 +20,11 @@ vi.mock('openai', () => {
   return {
     default: MockOpenAI,
     __mockCreate: mockCreate,
+    __mockResponsesCreate: mockResponsesCreate,
   };
 });
 
-import { createJudge } from './judgeClient.js';
+import { createJudge, createJudgeCompletion } from './judgeClient.js';
 import type { JudgeConfig } from './judgeTypes.js';
 
 /** The openai judge, through the public createJudge. */
@@ -35,6 +38,13 @@ async function getMockCreate() {
   const openai = await import('openai' as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion
   return (openai as any).__mockCreate;
+}
+
+async function getMockResponsesCreate() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unnecessary-type-assertion
+  const openai = await import('openai' as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion
+  return (openai as any).__mockResponsesCreate;
 }
 
 function makeCompletionResponse(
@@ -273,6 +283,92 @@ describe('openaiJudge', () => {
       // Empty string is passed to parseJudgeResponse, which fails to parse JSON -> throws
       await expect(judge.evaluate('candidate', null, 'rubric')).rejects.toThrow(
         'Failed to parse judge response as JSON'
+      );
+    });
+  });
+
+  describe('effort (Responses API)', () => {
+    it('sends the effort and output budget, and no temperature', async () => {
+      const mockResponsesCreate = await getMockResponsesCreate();
+      mockResponsesCreate.mockResolvedValue({
+        output_text: JSON.stringify({ pass: true, score: 1, reasoning: 'OK' }),
+        status: 'completed',
+        usage: { input_tokens: 120, output_tokens: 30 },
+      });
+
+      const result = await createOpenAIJudge({
+        model: 'gpt-5.6-luna',
+        effort: 'xhigh',
+        maxTokens: 64000,
+      }).evaluate('candidate', null, 'rubric');
+
+      expect(mockResponsesCreate).toHaveBeenCalledWith({
+        model: 'gpt-5.6-luna',
+        instructions: expect.any(String),
+        input: expect.stringContaining('candidate'),
+        reasoning: { effort: 'xhigh' },
+        max_output_tokens: 64000,
+      });
+      expect(await getMockCreate()).not.toHaveBeenCalled();
+      expect(result.pass).toBe(true);
+      expect(result.usage).toMatchObject({
+        inputTokens: 120,
+        outputTokens: 30,
+      });
+    });
+
+    it('reports an answer cut off at the output budget as truncated', async () => {
+      (await getMockResponsesCreate()).mockResolvedValue({
+        output_text: '{"verdict":',
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+        usage: { input_tokens: 10, output_tokens: 5 },
+      });
+
+      const completion = await createJudgeCompletion({
+        provider: 'openai',
+        effort: 'high',
+      })({ system: 'Answer in JSON.', prompt: 'p' });
+
+      expect(completion).toMatchObject({
+        text: '{"verdict":',
+        truncated: true,
+      });
+    });
+  });
+
+  describe('createJudgeCompletion', () => {
+    it('returns the raw text of a plugin prompt, without the rubric parser', async () => {
+      (await getMockCreate()).mockResolvedValue(
+        makeCompletionResponse('{"entries":[]}', {
+          promptTokens: 7,
+          completionTokens: 3,
+        })
+      );
+
+      const completion = await createJudgeCompletion({ provider: 'openai' })({
+        system: 'Answer in JSON.',
+        prompt: 'Rate these citations.',
+      });
+
+      expect(completion).toEqual({
+        text: '{"entries":[]}',
+        usage: { inputTokens: 7, outputTokens: 3 },
+      });
+      expect(await getMockCreate()).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            { role: 'system', content: 'Answer in JSON.' },
+            { role: 'user', content: 'Rate these citations.' },
+          ],
+        })
+      );
+    });
+
+    it('throws for a missing credential before any call', () => {
+      delete process.env.OPENAI_API_KEY;
+      expect(() => createJudgeCompletion({ provider: 'openai' })).toThrow(
+        'OpenAI judge requires an API key'
       );
     });
   });
