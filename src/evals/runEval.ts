@@ -1080,6 +1080,9 @@ export async function resumeRun(
       redactStoredResponses: run.redactStoredResponses,
       env,
       envOptions,
+      // A run collected with --no-grade stays ungraded: grade it with
+      // `mst grade` (and its --env) once it's complete.
+      ...(run.phases?.grade === 'skipped' ? { grade: false } : {}),
     },
     { ...replay, resume: true }
   );

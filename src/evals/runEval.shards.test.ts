@@ -67,13 +67,14 @@ async function fixture({
         run,
         ...(envOptions ? { envOptions } : {}),
       }),
-    run: (envOptions: Record<string, string>) =>
+    run: (envOptions: Record<string, string>, grade = true) =>
       runEval({
         configPath,
         rootDir: dir,
         outputDir,
         env: 'fork/env/children',
         envOptions,
+        ...(grade ? {} : { grade: false }),
       }),
   };
 }
@@ -188,6 +189,22 @@ describe('a run in an environment with shards', () => {
     await expect(f.resume(runId)).rejects.toThrow(
       `Run ${runId} has no missing trials: there is nothing to resume.`
     );
+  }, 90_000);
+
+  it('--resume leaves a run collected with --no-grade ungraded', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture({ redact: false });
+    const partial = await f.run({ shards: '2', fail: '1' }, false);
+    const runId = path.basename(partial.outputDir);
+
+    const resumed = await f.resume(runId, { shards: '2' });
+
+    expect(resumed.summary.graded).toBe(false);
+    const run = await f.readJson<{ phases: unknown }>(
+      path.join(resumed.outputDir, 'run.json')
+    );
+    // Graded later, with `mst grade` (and its --env), not by the resume.
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'skipped' });
   }, 90_000);
 
   it('keeps run-wide limits across shards', async () => {
