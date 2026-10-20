@@ -211,6 +211,7 @@ for client-specific fields, environment rules, and setup ownership.
 - [Evaluation Framework](./docs/evaluation-framework.md) — eval configs, plugins and their extension kinds, the run format
 - [Cowork](./docs/cowork.md) and [ChatGPT Desktop](./docs/chatgpt-desktop.md) — running evals on desktop clients
 - [Design walkthrough](./docs/design/README.md) and [explainer](./docs/design/explainer.md) — how evals are meant to run end to end, and what is built so far
+- [Architecture decisions](./docs/adr/) — why MST is built as it is, including [detached runs](./docs/adr/0007-detached-runs-move-the-coordinator.md): a run on an environment that keeps going with the laptop off
 - [Glossary](./CONTEXT.md) — the terms MST uses
 - [The run report](./docs/ui-reporter.md): the report every eval run writes
 - [Development](./docs/development.md) — contributing and building

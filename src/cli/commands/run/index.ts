@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import type { EvalDataset } from '../../../evals/datasetTypes.js';
 import { datasetContentHash } from '../../../evals/runFormat.js';
 import { runReportPath } from '../../../evals/runReport.js';
 import {
@@ -10,10 +12,12 @@ import path from 'node:path';
 import { z } from 'zod';
 import { describeError } from '../../../utils/describeError.js';
 import {
+  gradeRun,
   resumeRun,
   runEval,
   type RunEvalOptions,
 } from '../../../evals/runEval.js';
+import { detach } from '../../../evals/detach/launch.js';
 
 export interface RunOptions {
   config: string;
@@ -46,6 +50,27 @@ export interface RunOptions {
   resume?: string;
   /** `--results <store>`: the result store that keeps the run. */
   results?: string;
+  /** `--detach`: run the coordinator on a machine the environment creates (ADR 0007). */
+  detach?: boolean;
+  /** `--grade-env`: after collecting, grade in the environment (`mst grade --env`). */
+  gradeEnv?: boolean;
+  /** `--loaded-datasets <file>` (hidden): datasets loaded where a detached run started. */
+  loadedDatasets?: string;
+}
+
+/** The datasets `--loaded-datasets` names: JSON, one per eval config source. */
+export async function readLoadedDatasets(
+  file: string | undefined
+): Promise<{ loadedDatasets?: EvalDataset[] }> {
+  if (!file) return {};
+  const parsed: unknown = JSON.parse(
+    await readFile(path.resolve(file), 'utf8')
+  );
+  if (!Array.isArray(parsed))
+    throw new Error(
+      `--loaded-datasets ${file} must hold a JSON array of datasets.`
+    );
+  return { loadedDatasets: parsed as EvalDataset[] };
 }
 
 /** Flags that would change what a resumed run is. */
@@ -58,22 +83,9 @@ const NOT_WITH_RESUME = [
   ['dryRun', '--dry-run'],
 ] as const;
 
-/** `--env-option key=value` flags as an object; a key may be given once. */
-export function parseEnvOptions(
-  flags: readonly string[]
-): Record<string, string> {
-  const options: Record<string, string> = {};
-  for (const flag of flags) {
-    const separator = flag.indexOf('=');
-    if (separator < 1)
-      throw new Error(`--env-option takes key=value, got "${flag}"`);
-    const key = flag.slice(0, separator);
-    if (Object.hasOwn(options, key))
-      throw new Error(`--env-option ${key} is given twice`);
-    options[key] = flag.slice(separator + 1);
-  }
-  return options;
-}
+import { parseEnvOptions } from '../../../evals/environments/envOptions.js';
+
+export { parseEnvOptions };
 
 function positiveInteger(flag: string, value: string | number): number {
   const number = Number(value);
@@ -99,7 +111,75 @@ function describeSelection(
     .join(', ');
 }
 
+/** `mst run`'s flags that choose cases and trials, as the coordinator passes them on. */
+function selectionArgs(options: RunOptions): string[] {
+  return [
+    ...(options.variant?.length ? ['--variant', ...options.variant] : []),
+    ...(options.case?.length ? ['--case', ...options.case] : []),
+    ...(options.filterTag?.length
+      ? ['--filter-tag', ...options.filterTag]
+      : []),
+    ...(options.maxCases !== undefined
+      ? [
+          '--max-cases',
+          String(positiveInteger('--max-cases', options.maxCases)),
+        ]
+      : []),
+    ...(options.trials !== undefined
+      ? ['--trials', String(positiveInteger('--trials', options.trials))]
+      : []),
+    ...(options.report === false ? ['--no-report'] : []),
+  ];
+}
+
+/** Where to look at a detached run, and how to stop it. */
+export function printDetached(
+  result: Awaited<ReturnType<typeof detach>>,
+  config: string,
+  results: string | undefined
+): void {
+  const flags = `-c ${config}${results ? ` --results ${results}` : ''}`;
+  console.log(
+    `Detached run ${result.id} is running on ${result.machine}. This machine can go offline.`
+  );
+  console.log(`  Watch it:  mst runs watch ${result.id.slice(-6)} ${flags}`);
+  console.log(`  Stop it:   mst runs cancel ${result.id.slice(-6)} ${flags}`);
+  console.log(
+    `  Status and logs: ${result.storeLocation}/${result.evalName}/detached/${result.id}/`
+  );
+}
+
 export async function run(options: RunOptions): Promise<void> {
+  if (options.gradeEnv && !options.env)
+    throw new Error("--grade-env grades in the run's environment: give --env.");
+  if (options.gradeEnv && options.grade === false)
+    throw new Error('--grade-env grades the run: drop --no-grade.');
+  if (options.detach) {
+    if (options.dryRun) throw new Error("--detach can't take --dry-run.");
+    if (options.outputDir)
+      throw new Error(
+        '--detach keeps the run in its result store, not --output-dir: fetch it with mst grade or mst open.'
+      );
+    const result = await detach({
+      command: 'run',
+      configPath: options.config,
+      ...(options.rootDir ? { rootDir: options.rootDir } : {}),
+      ...(options.resume !== undefined
+        ? { run: options.resume, resume: true }
+        : {}),
+      ...(options.env ? { env: options.env } : {}),
+      envOptions: options.envOption ?? [],
+      ...(options.results ? { results: options.results } : {}),
+      ...(options.store ? { store: options.store } : {}),
+      ...(options.secretsFile ? { secretsFile: options.secretsFile } : {}),
+      ...(options.plugins ? { plugins: options.plugins } : {}),
+      runArgs: options.resume === undefined ? selectionArgs(options) : [],
+      noGrade: options.grade === false,
+      gradeEnv: options.gradeEnv === true,
+    });
+    printDetached(result, options.config, options.results);
+    return;
+  }
   const evalOptions: RunEvalOptions = {
     configPath: options.config,
     rootDir: options.rootDir,
@@ -108,7 +188,7 @@ export async function run(options: RunOptions): Promise<void> {
     secretsFile: options.secretsFile,
     dryRun: options.dryRun,
     ...(options.report === false ? { report: false } : {}),
-    ...(options.grade === false ? { grade: false } : {}),
+    ...(options.grade === false || options.gradeEnv ? { grade: false } : {}),
     ...(options.variant?.length ? { variant: options.variant } : {}),
     ...(options.case?.length ? { cases: options.case } : {}),
     ...(options.filterTag?.length ? { filterTags: options.filterTag } : {}),
@@ -124,6 +204,7 @@ export async function run(options: RunOptions): Promise<void> {
       ? { envOptions: parseEnvOptions(options.envOption) }
       : {}),
     ...(options.results ? { results: options.results } : {}),
+    ...(await readLoadedDatasets(options.loadedDatasets)),
   };
   if (options.resume !== undefined) {
     const given: string[] = NOT_WITH_RESUME.filter(([key]) => {
@@ -161,6 +242,9 @@ export async function run(options: RunOptions): Promise<void> {
               : {}),
             ...(evalOptions.store ? { store: evalOptions.store } : {}),
             ...(evalOptions.results ? { results: evalOptions.results } : {}),
+            ...(evalOptions.loadedDatasets
+              ? { loadedDatasets: evalOptions.loadedDatasets }
+              : {}),
           });
   } catch (error) {
     // A validation failure says which config it is in.
@@ -169,6 +253,35 @@ export async function run(options: RunOptions): Promise<void> {
         cause: error,
       });
     throw error;
+  }
+
+  if (options.gradeEnv && !options.dryRun) {
+    // Collected; now graded on the environment's machines, as `mst grade --env`.
+    console.log(
+      `\nCollected run ${path.basename(result.outputDir)}; grading it in ${options.env}.`
+    );
+    const graded = await gradeRun({
+      run: result.outputDir,
+      configPath: evalOptions.configPath,
+      ...(evalOptions.rootDir ? { rootDir: evalOptions.rootDir } : {}),
+      ...(evalOptions.pluginPaths
+        ? { pluginPaths: evalOptions.pluginPaths }
+        : {}),
+      ...(evalOptions.outputDir ? { outputDir: evalOptions.outputDir } : {}),
+      ...(evalOptions.secretsFile
+        ? { secretsFile: evalOptions.secretsFile }
+        : {}),
+      ...(evalOptions.report === false ? { report: false } : {}),
+      ...(evalOptions.results ? { results: evalOptions.results } : {}),
+      ...(evalOptions.env ? { env: evalOptions.env } : {}),
+      ...(evalOptions.envOptions ? { envOptions: evalOptions.envOptions } : {}),
+      ...(evalOptions.loadedDatasets
+        ? { loadedDatasets: evalOptions.loadedDatasets }
+        : {}),
+    });
+    console.log(`Graded the traces of run ${graded.gradedFrom}.`);
+    printRunResult(graded, options.config);
+    return;
   }
 
   if (options.dryRun) {

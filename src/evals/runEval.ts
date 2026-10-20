@@ -226,6 +226,12 @@ export interface RunEvalOptions {
    */
   credentialStore?: CredentialStore;
   /**
+   * The eval config's datasets, already loaded where the run was started,
+   * one per source in order (`--detach`, ADR 0007): a coordinator machine
+   * then needs no dataset credentials. Each keeps the origin it loaded with.
+   */
+  loadedDatasets?: readonly EvalDataset[];
+  /**
    * `--store`: a directory, or a plugin's `<namespace>/credential-store/<name>`,
    * resolved once the eval's plugins are loaded. Default:
    * `~/.mcp-server-tester/grants`.
@@ -260,7 +266,8 @@ export interface RunEvalResult {
   gradedFrom?: string;
 }
 
-async function loadSecretsFile(
+/** A secrets file's values: JSON, or dotenv-style `KEY=value` lines. */
+export async function loadSecretsFile(
   secretsFile: string
 ): Promise<Record<string, string>> {
   const raw = await fs.readFile(secretsFile, 'utf8');
@@ -667,6 +674,7 @@ export interface GradeRunOptions extends Pick<
   | 'secretsFile'
   | 'report'
   | 'results'
+  | 'loadedDatasets'
 > {
   /**
    * The run to grade: its directory, its run ID, or the ID's short form (the
@@ -702,8 +710,12 @@ export async function gradeRun(
  */
 export async function gradeStoredRun(
   options: GradeRunOptions,
-  plan: GradingPlan
+  given: GradingPlan
 ): Promise<RunEvalResult> {
+  let plan: GradingPlan =
+    given.datasets || !options.loadedDatasets
+      ? given
+      : { ...given, datasets: options.loadedDatasets };
   const rootDir = options.rootDir ?? process.cwd();
   const { name } = loadEvalConfig(options.configPath, {
     rootDir,
@@ -792,6 +804,65 @@ function openResultStore(
         resolveStorePaths(evalConfig.results.store, dirs)
       )
     : undefined;
+}
+
+/**
+ * The eval config's datasets, loaded as a run loads them, one per source in
+ * order: what `--detach` ships to its coordinator machine.
+ */
+export async function loadEvalDatasets(options: {
+  configPath: string;
+  rootDir?: string;
+}): Promise<EvalDataset[]> {
+  const rootDir = options.rootDir ?? process.cwd();
+  const configDir = path.dirname(path.resolve(options.configPath));
+  const loaded = loadEvalConfig(options.configPath, { rootDir });
+  const namespaces = await loadEvalPlugins({
+    configPath: options.configPath,
+    evalConfig: loaded,
+    rootDir,
+  });
+  const resolved = resolveConfigExtends(loaded, namespaces);
+  const evalConfig = validateEvalConfig(
+    { ...resolved, client: resolved.client ?? DEFAULT_CLIENT },
+    { namespaces }
+  );
+  const sourceConfig: EvalConfig = {
+    ...evalConfig,
+    maxCases: undefined,
+    filterTags: undefined,
+    run: undefined,
+  };
+  return Promise.all(
+    (evalConfig.datasets ?? []).map((source) =>
+      loadDataset(source, { rootDir, configDir, evalConfig: sourceConfig })
+    )
+  );
+}
+
+/**
+ * The eval's name and the result store its runs are kept in (`--results`,
+ * else the eval config's), with its plugins loaded: for `--detach` and
+ * `mst runs`.
+ */
+export async function evalResultStore(options: {
+  configPath: string;
+  rootDir?: string;
+  pluginPaths?: string[];
+  results?: string;
+}): Promise<{ evalName: string; store: RunStore | undefined }> {
+  const rootDir = options.rootDir ?? process.cwd();
+  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  const store = await gradeResultStore(
+    {
+      configPath: options.configPath,
+      run: '',
+      ...(options.pluginPaths ? { pluginPaths: options.pluginPaths } : {}),
+      ...(options.results ? { results: options.results } : {}),
+    },
+    rootDir
+  );
+  return { evalName: name, store };
 }
 
 /** The result store `mst grade` or `--resume` would keep the run in, with the eval's plugins loaded. */
@@ -1148,10 +1219,13 @@ async function evaluate(
   const runStartTime = Date.now();
   const rootDir = options.rootDir ?? process.cwd();
   const configDir = path.dirname(path.resolve(options.configPath));
+  // Datasets loaded elsewhere: by a grade worker's coordinator, or where a
+  // detached run was started.
+  const givenDatasets = options.grading?.datasets ?? options.loadedDatasets;
   const loadedConfig = loadEvalConfig(options.configPath, {
     rootDir,
     // Datasets given as loaded aren't read from the config's paths.
-    ...(options.grading?.datasets ? { skipDatasetValidation: true } : {}),
+    ...(givenDatasets ? { skipDatasetValidation: true } : {}),
   });
   // Whether judges run in this process: then their preflight runs here.
   const judgesRunHere =
@@ -1354,18 +1428,15 @@ async function evaluate(
   // Trials an environment's shards didn't bring back: the run is partial.
   let missingTrials = 0;
   const sourceVariant = variants[0] ?? { name: 'default' };
-  if (
-    options.grading?.datasets &&
-    options.grading.datasets.length !== datasets.length
-  )
+  if (givenDatasets && givenDatasets.length !== datasets.length)
     throw new Error(
-      `The eval config has ${datasets.length} datasets, but ${options.grading.datasets.length} were given as loaded.`
+      `The eval config has ${datasets.length} datasets, but ${givenDatasets.length} were given as loaded.`
     );
   const canonicalDatasets = await Promise.all(
     datasets.map(async (source, index) => ({
       source,
       dataset:
-        options.grading?.datasets?.[index] ??
+        givenDatasets?.[index] ??
         (await loadDataset(source, {
           rootDir,
           configDir,

@@ -17,6 +17,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
 - [grade - Grade a Stored Run Again](#grade---grade-a-stored-run-again)
+- [runs - Detached Runs](#runs---detached-runs)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open a Run's Report](#open---open-a-runs-report)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
@@ -820,6 +821,8 @@ npx mst run --config ./eval.json [options]
 | `--results <store>`      | Also keep the run in this result store, instead of the eval config's `results.store`: `gs://<bucket>/<prefix>`, `file:<dir>` (relative to the working directory), or a plugin's store, `<namespace>/result-store/<name>`. With `--resume`, a run that isn't local is fetched from it. See [Result stores](./evaluation-framework.md#result-stores).                                                                                                                                                                                                                                            |
 | `--no-report`            | Don't write the run's report. `mst open` writes it when it opens the run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `--store <store>`        | Where connector servers' grants are (see [`auth`](#auth---sign-in-to-connector-servers)): a directory, or a plugin's credential store, `<namespace>/credential-store/<name>`. Default: `$MST_CREDENTIALS_DIR`, else `~/.mcp-server-tester/grants`.                                                                                                                                                                                                                                                                                                                                             |
+| `--grade-env`            | After collecting, grade the run in its environment (as [`grade --env`](#grading-in-an-environment)), with the same `--env-option`s, instead of on this machine. Needs `--env`.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `--detach`               | Run the coordinator on a machine the environment creates, and return: this machine can go offline. Needs `--env`, a result store other machines reach, and, for connector servers, a shared `--store`. See [Detached runs](#runs---detached-runs).                                                                                                                                                                                                                                                                                                                                             |
 | `--env <name>`           | Where to collect the trials: `local` (the default, in the `mst run` process), `docker` (containers from MST's Linux Cowork image; see [Cowork in Docker](./cowork-docker.md)), or a plugin environment, `<namespace>/env/<name>`, which runs the trials on `shards` machines, a case's variants and trials on one. A trial whose shard ended without it is missing: its case is incomplete, the run is partial, and `run` exits 1. Connector servers and variants with tool metadata run there too: each worker launches the connectors itself and gets their access tokens from this machine. |
 | `--env-option <k=v>`     | An environment option; repeat the flag for more. MST owns `shards` (a positive integer, default 1; `local` runs one) and `keep` (`never`, `failed` or `always`); the environment's schema checks the rest. Options are recorded in `run.json`.                                                                                                                                                                                                                                                                                                                                                 |
 | `--resume <run>`         | Complete a run whose shards ended early: collect only its missing trials, in the environment it ran in (its `shards`, `keep` and options, unless `--env` and `--env-option` say otherwise), then grade the whole run again into its own directory, every other trial from its stored trace; a run collected with `--no-grade` stays ungraded. Needs the run stored with `"redactStoredResponses": false`, as `grade` does. Can't take `--variant`, `--case`, `--filter-tag`, `--max-cases`, `--trials`, `--dry-run` or `--no-grade`.                                                           |
@@ -854,6 +857,7 @@ npx mst grade 7f3c2a --config ./eval.json     # grade later, as often as the gra
 | `--results <store>`     | Also keep the regrade in this result store, instead of the eval config's, as for `run`. A run that isn't local is fetched from the store (`--results`, else the eval config's), checked against its manifest. See [Result stores](./evaluation-framework.md#result-stores). |
 | `--env <name>`          | Grade in this environment: `local` (the default, in this process), `docker`, or a plugin environment (`<namespace>/env/<name>`). See [Grading in an environment](#grading-in-an-environment).                                                                               |
 | `--env-option <k=v>`    | An environment option; repeat for more: `shards=N`, `keep=never\|failed\|always`, or the environment's own, as for `run`.                                                                                                                                                   |
+| `--detach`              | Grade from a coordinator machine the environment creates, and return, as for `run`. The run must be in the result store.                                                                                                                                                    |
 
 The datasets are loaded again, so each case's `expected` and judges are the dataset's current ones; `run.json` records their content hashes. Every variant and case the run stored must still be in the eval config and its datasets. A trial that failed when it ran stays failed and isn't judged. A trial a grader couldn't score (`phases.grade: partial`, `gradingError`) is graded again: finishing those is what a regrade is for. No client starts, so grading needs no connector tokens.
 
@@ -882,6 +886,29 @@ npx mst grade 7f3c2a --config ./eval.json --env acme/env/cloud-vm --env-option s
 - **A key must last the shard.** A worker gets the secrets file's values once, when its shard starts. A short-lived gateway token (one `MST_LLM_AUTH_COMMAND` makes, say) can expire during a long shard, and its judge calls then fail.
 - **A shard that stops leaves its cases' grading missing.** Those trials and comparisons get a grading error (`Missing: grade shard 2 ended before …`), the regrade is `phases.grade: partial`, and the next `mst grade` grades them.
 - An environment must be able to run grade shards. One built with `machineEnvironment`, such as `docker`, can; `mst grade --env` refuses one that can't (`Environment.work`) before any shard runs.
+
+## `runs` - Detached Runs
+
+`mst run --detach` and `mst grade --detach` run the coordinator on a machine the environment creates, so the machine you typed them on can go offline ([ADR 0007](./adr/0007-detached-runs-move-the-coordinator.md)). The coordinator runs `mst run`, then `mst run --resume` once if the run is partial, then `mst grade --env` with `--grade-env`, and keeps the run in the result store.
+
+```bash
+npx mst run --config ./eval.json --env acme/env/cloud-vm --env-option shards=20 --grade-env \
+  --results gs://my-bucket/evals --store acme/credential-store/secret-manager \
+  --secrets-file ./run.env --detach
+# Detached run d20261020T181638Z-e33763 is running on …. This machine can go offline.
+
+npx mst runs list --config ./eval.json --results gs://my-bucket/evals
+npx mst runs watch e33763 --config ./eval.json --results gs://my-bucket/evals
+npx mst runs logs e33763 --config ./eval.json --results gs://my-bucket/evals
+npx mst runs cancel e33763 --config ./eval.json --results gs://my-bucket/evals
+```
+
+- **This machine loads the eval config, its plugins and its datasets**, and sends the coordinator machine the config and the loaded datasets. A dataset plugin's credentials stay here. `--detach` can't take `--plugins` or `--output-dir`: plugins come from the coordinator machine's installation, and the run goes to the result store.
+- **The environment must support it**: its `coordinator` creates the machine, with this machine's MST and plugins and a cloud identity of its own. An environment without one refuses `--detach`.
+- **Secrets go only in `--secrets-file`.** Its values reach the coordinator over its channel, and are kept in memory-backed storage there until the run ends. This machine's own environment isn't sent, so put what the run needs (a model key, judge keys) in the file.
+- **Connector servers need a shared credential store** (`--store <namespace>/credential-store/<name>`, one whose definition is `shared`), since the coordinator machine refreshes the grants. Sign in to it with `mst auth --store`, and use it for local runs too, or a provider that rotates refresh tokens invalidates the local copy.
+- **The run's status is in the result store**, at `<eval>/detached/<id>/`: `status.json` (rewritten every 30 seconds), `log.txt` and, after `cancel`, `cancel`. Each `mst runs` command takes the eval config and the `--results` the run was given, and an id or its last six characters.
+- **`runs cancel`** asks the coordinator to stop: within a minute it interrupts the command under way as Ctrl-C does, deleting its machines and keeping what was collected. A coordinator that stops reporting for five minutes shows as `lost`; finish its run with `mst run --resume <run> --detach`.
 
 ## `batch` - Run Several Eval Configs
 

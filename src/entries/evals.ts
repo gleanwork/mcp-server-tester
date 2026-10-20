@@ -84,6 +84,8 @@ export type {
   EnvironmentKeep,
   Machine,
   WorkerChannel,
+  CoordinatorMachine,
+  CoordinatorContext,
   ShardSpec,
   ShardWork,
   ShardEvents,
@@ -100,6 +102,7 @@ export type {
   CredentialStoreDefinition,
   StoredGrant,
 } from '../auth/grants/types.js';
+export type { DetachStatus } from '../evals/detach/status.js';
 export type { GradeKey } from '../evals/gradingSource.js';
 export {
   resolveResultStoreConfig,

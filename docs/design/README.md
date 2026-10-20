@@ -263,18 +263,22 @@ npx mst run --config evals/cowork-tool-descriptions.json \
 
 The VMs run the trials. Your machine gathers their traces, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the traces collected so far. Rerun with `--resume <run-id>` to collect only what's missing. `--env-option keep=failed` keeps a VM whose shard failed, as it does for containers.
 
-To walk away from a long run, detach it (`--detach` and `mst runs` are planned):
+To walk away from a long run, detach it ([ADR 0007](../adr/0007-detached-runs-move-the-coordinator.md)). The run's coordinator then runs on a machine the environment creates, with a cloud identity of its own, and your machine can go offline. It needs a result store and, for connector servers, a credential store that machine reaches:
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json \
-  --env acme/env/cloud-vm --env-option shards=5 \
-  --results acme/result-store/eval-results --detach
-# → run 7f3c2a started on acme/env/cloud-vm
+  --env acme/env/cloud-vm --env-option shards=5 --grade-env \
+  --results acme/result-store/eval-results \
+  --store acme/credential-store/secret-manager \
+  --secrets-file .env --detach
+# → Detached run d20261020T181638Z-e33763 is running on …
 
-npx mst runs list --env acme/env/cloud-vm
-npx mst runs watch 7f3c2a
-npx mst runs cancel 7f3c2a
+npx mst runs list -c evals/cowork-tool-descriptions.json --results acme/result-store/eval-results
+npx mst runs watch e33763 -c evals/cowork-tool-descriptions.json --results acme/result-store/eval-results
+npx mst runs cancel e33763 -c evals/cowork-tool-descriptions.json --results acme/result-store/eval-results
 ```
+
+`--grade-env` grades the run on the environment's machines once it is collected, so the coordinator runs no judges.
 
 ### On a schedule
 

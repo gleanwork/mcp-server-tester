@@ -453,6 +453,36 @@ export interface Machine {
 }
 
 /**
+ * The machine a detached run's coordinator runs on (`--detach`, ADR 0007).
+ * It must have the MST and plugins the run's workers have, and a cloud
+ * identity of its own that can create the workers, open their channels and
+ * reach the result and credential stores. MST never copies the user's login
+ * to it.
+ */
+export interface CoordinatorMachine {
+  readonly id: string;
+  readonly channel: WorkerChannel;
+  /** Where the coordinator bundle goes on the machine. Default `/mst`. */
+  readonly workDir?: string;
+  /** How to run MST on the machine. Default `['mst']`. */
+  readonly mst?: readonly string[];
+  /**
+   * What the coordinator runs on the machine once the run has ended, on
+   * failure too: typically deleting the machine itself.
+   */
+  readonly finish?: readonly string[];
+  /** Deletes the machine, when starting the coordinator failed. */
+  dispose(options: { keep: boolean }): Promise<void>;
+}
+
+/** What an environment's `coordinator` is given, beside its own options. */
+export interface CoordinatorContext {
+  /** The detached run's id: `mst runs watch <id>`. */
+  readonly id: string;
+  readonly log: (line: string) => void;
+}
+
+/**
  * An environment, opened for one run. Most environments build it with
  * `machineEnvironment`, from a function that creates a machine.
  */
@@ -491,6 +521,16 @@ export interface EnvironmentDefinition {
     options: Record<string, unknown>,
     context: EnvironmentContext
   ): Promise<Environment>;
+  /**
+   * Creates the machine a detached run's coordinator runs on, for
+   * `mst run --detach` and `mst grade --detach` (ADR 0007). It takes the
+   * same `--env-option`s as `open`. Without it, the environment refuses
+   * `--detach`.
+   */
+  coordinator?(
+    options: Record<string, unknown>,
+    context: CoordinatorContext
+  ): Promise<CoordinatorMachine>;
   /**
    * Prepares what runs need, once (`mst env setup <environment>`): for
    * example, builds an image. Takes the same `--env-option`s.
