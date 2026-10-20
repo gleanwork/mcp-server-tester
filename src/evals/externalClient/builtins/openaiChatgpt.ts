@@ -495,6 +495,10 @@ async function captureChatgptComputerUseResult({
   const platform = chatgptPlatform(config);
   // Transcript growth is the only progress signal; a silent turn is stalled.
   let pendingRecordSince: number | undefined;
+  // Consecutive pending reads; one read alone doesn't show an unfinished rewrite.
+  let pendingReads = 0;
+  // The wait is measured from here: setup and submission happen before it.
+  const collectionStartedAt = Date.now();
   let progressKey: string | undefined;
   let progressAtMs = Date.now();
   const selector: ChatgptTraceSelector =
@@ -587,9 +591,11 @@ async function captureChatgptComputerUseResult({
           }
         );
         pendingRecordSince = undefined;
+        pendingReads = 0;
       } catch (error) {
         if (!(error instanceof PendingChatgptRecordError)) throw error;
         pendingRecordSince ??= Date.now();
+        pendingReads += 1;
         if (Date.now() - pendingRecordSince >= CHATGPT_STALL_MS)
           return await unfinishedRewrite(
             'Native ChatGPT record rewrite did not complete within the stall deadline.'
@@ -742,12 +748,13 @@ async function captureChatgptComputerUseResult({
         )
       );
     }
-    // Only a rewrite left unfinished for most of the wait is why the wait
-    // failed; one caught on the last polls is an ordinary timeout.
+    // Only a rewrite left unfinished for most of this wait is why the wait
+    // failed; one caught on the last poll is an ordinary timeout.
     const waitEnd = matched ? run.startedAtMs + run.timeoutMs : bindingDeadline;
     if (
       pendingRecordSince !== undefined &&
-      waitEnd - pendingRecordSince >= (waitEnd - run.startedAtMs) / 2
+      pendingReads > 1 &&
+      waitEnd - pendingRecordSince >= (waitEnd - collectionStartedAt) / 2
     )
       return await unfinishedRewrite(
         matched

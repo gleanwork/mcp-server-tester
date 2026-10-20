@@ -533,15 +533,37 @@ describe('bounded native binding wait and failure classification', () => {
     }
   });
 
+  it('measures an unfinished rewrite against the collection wait, not setup time', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-rewrite-setup-'));
+    try {
+      const ctx = context(home, true, 4000);
+      // Setup and submission took most of the run's time.
+      clock.now += 2500;
+      vi.mocked(findChatgptTrace).mockRejectedValue(
+        new PendingChatgptRecordError()
+      );
+      const result = await capture(ctx);
+      expect(result).toMatchObject({
+        success: false,
+        clientMetadata: { failureKind: 'parse_failure' },
+      });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it.each([
-    ['bound', 'timeout'],
-    ['unbound', 'no_matching_session'],
+    ['bound', 'timeout', 3000],
+    ['unbound', 'no_matching_session', 3000],
+    // Short enough that one final-poll read is half the wait.
+    ['bound', 'timeout', 1500],
+    ['unbound', 'no_matching_session', 1500],
   ] as const)(
-    'treats a rewrite caught only on the last polls as an ordinary %s timeout',
-    async (state, failureKind) => {
+    'treats a rewrite caught only on the last poll as an ordinary %s timeout (%s, %ims)',
+    async (state, failureKind, timeoutMs) => {
       const home = await mkdtemp(join(tmpdir(), 'chatgpt-late-rewrite-'));
       try {
-        const ctx = context(home, true, 3000);
+        const ctx = context(home, true, timeoutMs);
         const root = chatgptRunState(ctx.state).sessionsRoot as string;
         await mkdir(root, { recursive: true });
         await mkdir(join(home, 'evidence'), { recursive: true });
