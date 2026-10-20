@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { describeError } from '../../../utils/describeError.js';
 import { gradeRun } from '../../../evals/runEval.js';
-import { parseEnvOptions, printRunResult } from '../run/index.js';
+import { detach } from '../../../evals/detach/launch.js';
+import {
+  parseEnvOptions,
+  printDetached,
+  printRunResult,
+  readLoadedDatasets,
+} from '../run/index.js';
 
 export interface GradeOptions {
   config: string;
@@ -17,10 +23,36 @@ export interface GradeOptions {
   envOption?: string[];
   /** `--results <store>`: the result store that keeps the regrade. */
   results?: string;
+  /** `--detach`: grade from a coordinator machine the environment creates (ADR 0007). */
+  detach?: boolean;
+  /** `--loaded-datasets <file>` (hidden): datasets loaded where a detached run started. */
+  loadedDatasets?: string;
 }
 
 /** `mst grade <run>`: grade a stored run's traces again, as a new run. */
 export async function grade(run: string, options: GradeOptions): Promise<void> {
+  if (options.detach) {
+    if (options.outputDir)
+      throw new Error(
+        '--detach grades the run in its result store, not --output-dir.'
+      );
+    const detached = await detach({
+      command: 'grade',
+      configPath: options.config,
+      ...(options.rootDir ? { rootDir: options.rootDir } : {}),
+      run,
+      ...(options.env ? { env: options.env } : {}),
+      envOptions: options.envOption ?? [],
+      ...(options.results ? { results: options.results } : {}),
+      ...(options.secretsFile ? { secretsFile: options.secretsFile } : {}),
+      ...(options.plugins ? { plugins: options.plugins } : {}),
+      runArgs: options.report === false ? ['--no-report'] : [],
+      noGrade: false,
+      gradeEnv: false,
+    });
+    printDetached(detached, options.config, options.results);
+    return;
+  }
   let result: Awaited<ReturnType<typeof gradeRun>>;
   try {
     result = await gradeRun({
@@ -36,6 +68,7 @@ export async function grade(run: string, options: GradeOptions): Promise<void> {
       ...(options.envOption?.length
         ? { envOptions: parseEnvOptions(options.envOption) }
         : {}),
+      ...(await readLoadedDatasets(options.loadedDatasets)),
     });
   } catch (error) {
     if (error instanceof z.ZodError)

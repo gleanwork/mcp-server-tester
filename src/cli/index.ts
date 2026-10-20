@@ -13,6 +13,14 @@ import { grade } from './commands/grade/index.js';
 import { batch } from './commands/batch/index.js';
 import { collect } from './commands/collect/index.js';
 import { gradeShardCommand } from './commands/grade-shard/index.js';
+import { coordinate } from './commands/coordinate/index.js';
+import {
+  cancelRun,
+  listRuns,
+  runLogs,
+  runStatus,
+  watchRun,
+} from './commands/runs/index.js';
 import { setupCowork } from './commands/cowork/index.js';
 import {
   auth,
@@ -259,6 +267,20 @@ program
     'Credential store for connector servers: a directory (default: ~/.mcp-server-tester/grants) or <namespace>/credential-store/<name>'
   )
   .option(
+    '--detach',
+    'Run the coordinator on a machine the environment creates, and return: this machine can then go offline (needs a remote --results and, for connectors, a shared --store)'
+  )
+  .addOption(
+    new Option(
+      '--loaded-datasets <file>',
+      "The eval config's datasets as loaded elsewhere (a detached run's coordinator passes them)"
+    ).hideHelp()
+  )
+  .option(
+    '--grade-env',
+    'After collecting, grade the run in its environment (mst grade --env), instead of on this machine'
+  )
+  .option(
     '--env <name>',
     'Where to collect trials: local (the default), docker, or a plugin environment (<namespace>/env/<name>)'
   )
@@ -307,6 +329,16 @@ program
   .option(
     '--env <name>',
     'Where to grade: local (the default), docker, or a plugin environment (<namespace>/env/<name>); judge keys go to its machines from --secrets-file'
+  )
+  .option(
+    '--detach',
+    'Grade from a coordinator machine the environment creates, and return (the run must be in the result store)'
+  )
+  .addOption(
+    new Option(
+      '--loaded-datasets <file>',
+      "The eval config's datasets as loaded elsewhere (a detached run's coordinator passes them)"
+    ).hideHelp()
   )
   .option(
     '--env-option <key=value>',
@@ -414,6 +446,69 @@ program
   .requiredOption('--bundle <dir>', "The shard's bundle directory")
   .requiredOption('--results <dir>', 'Where to write result files')
   .action(collect);
+
+// Coordinate command: a detached run's coordinator, started by --detach (ADR 0007)
+program
+  .command('coordinate', { hidden: true })
+  .description("Run a detached run's coordinator (--detach starts this)")
+  .requiredOption('--bundle <dir>', "The detached run's bundle directory")
+  .option('--daemon', 'Run the coordinator in this process')
+  .option('--secrets <file>', "The run's secrets file")
+  .action(coordinate);
+
+// Runs command: detached runs (ADR 0007)
+const runsCommand = program
+  .command('runs')
+  .description(
+    'Detached runs (mst run --detach): list, watch, show logs, cancel'
+  );
+function runsFlags(command: Command): Command {
+  return command
+    .requiredOption('-c, --config <path>', 'The eval config the run ran')
+    .option(
+      '--results <store>',
+      "The result store the run was given, if not the eval config's"
+    )
+    .option('--root-dir <dir>', 'Fallback directory for relative paths', '.');
+}
+runsFlags(
+  runsCommand
+    .command('list')
+    .description("The eval's detached runs, newest first")
+).action((options: Parameters<typeof listRuns>[0]) => listRuns(options));
+runsFlags(
+  runsCommand
+    .command('status')
+    .description('One detached run: its state and last lines')
+    .argument('<id>', 'Its id, or the end of it (3fa9c1)')
+).action((id: string, options: Parameters<typeof runStatus>[1]) =>
+  runStatus(id, options)
+);
+runsFlags(
+  runsCommand
+    .command('watch')
+    .description('Follow a detached run until it ends')
+    .argument('<id>', 'Its id, or the end of it (3fa9c1)')
+    .option('--interval <seconds>', 'How often to check', '30')
+).action((id: string, options: Parameters<typeof watchRun>[1]) =>
+  watchRun(id, options)
+);
+runsFlags(
+  runsCommand
+    .command('logs')
+    .description("A detached run's coordinator output")
+    .argument('<id>', 'Its id, or the end of it (3fa9c1)')
+).action((id: string, options: Parameters<typeof runLogs>[1]) =>
+  runLogs(id, options)
+);
+runsFlags(
+  runsCommand
+    .command('cancel')
+    .description('Stop a detached run: it keeps what it collected')
+    .argument('<id>', 'Its id, or the end of it (3fa9c1)')
+).action((id: string, options: Parameters<typeof cancelRun>[1]) =>
+  cancelRun(id, options)
+);
 
 // Grade shard command: a grade shard's worker, started by environments (ADR 0005)
 program
