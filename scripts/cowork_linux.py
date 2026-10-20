@@ -232,12 +232,34 @@ class Driver:
             raise DriverFailure("cowork_not_ready")
         return self.receipt("ready")
 
+    def stop_running_task(self) -> bool:
+        # A failed case's task may still run (past its deadline, or waiting on
+        # a prompt): its composer shows Stop response. Stop it, so it doesn't
+        # go on using Cowork's VM and the connectors beside the next task;
+        # it's stopped once Stop response is gone (Send message is back,
+        # within 2 s on Linux). Never sends.
+        stops = self.desktop.controls({"Stop response"}, {"button"})
+        if not stops:
+            return False
+        if len(stops) != 1:
+            raise DriverFailure("stop_control_ambiguous")
+        self.action(lambda: self.desktop.activate(stops[0]))
+        while self.desktop.controls({"Stop response"}, {"button"}):
+            try:
+                left = self.remaining()
+            except DriverFailure:
+                raise DriverFailure("task_not_stopped") from None
+            time.sleep(min(0.1, left))
+        return True
+
     def reset(self) -> dict:
-        # After a failed case: leave its view with one empty new-task deep link,
-        # then wait read-only for an empty Cowork start surface. Never types or
-        # sends. An empty composer disables Start task; one still enabled holds
-        # a draft the link didn't clear, which the next case's link would not
-        # replace either (a long prompt's draft did, on Linux).
+        # After a failed case: stop its task if it still runs, leave its view
+        # with one empty new-task deep link, then wait read-only for an empty
+        # Cowork start surface. Never types or sends. An empty composer
+        # disables Start task; one still enabled holds a draft the link didn't
+        # clear, which the next case's link would not replace either (a long
+        # prompt's draft did, on Linux).
+        stopped = self.stop_running_task()
         self.action(lambda: self.desktop.open_prompt("", self.remaining()))
         draft = False
         while True:
@@ -251,7 +273,7 @@ class Driver:
                                            require_showing=False)
             if len(starts) == 1:
                 if not self.desktop.controls({"Start task"}, {"button"}, require_showing=False):
-                    return self.receipt("ready")
+                    return {**self.receipt("ready"), **({"stopped": True} if stopped else {})}
                 draft = True
             elif not starts:
                 # Not in Cowork mode only if the composer's mode switch says so:
@@ -261,7 +283,7 @@ class Driver:
                 radios = self.desktop.controls({"Cowork"}, {"radio button"}, require_enabled=False)
                 if len(radios) == 1 and not self.desktop.selected(radios[0]):
                     # The next submit selects it.
-                    return self.receipt("ready")
+                    return {**self.receipt("ready"), **({"stopped": True} if stopped else {})}
             time.sleep(min(0.1, left))
 
     def select_cowork(self) -> None:

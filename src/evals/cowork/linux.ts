@@ -802,8 +802,9 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     );
   },
   async reset(options) {
-    // One empty new-task deep link, then a read-only wait. Never types or sends.
-    await execute('reset', {}, { ...options, maxActions: 1 });
+    // Stop the failed case's task if it still runs (its Stop response), then
+    // one empty new-task deep link and a read-only wait. Never types or sends.
+    await execute('reset', {}, { ...options, maxActions: 2 });
   },
   async submit(query, options) {
     const started = Date.now();

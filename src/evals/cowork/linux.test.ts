@@ -496,6 +496,23 @@ describe('caller-owned Linux Cowork desktop', () => {
       })
     ).rejects.toBeInstanceOf(CoworkHitlBudgetError);
   });
+  it("lets reset stop the failed case's task, then open the empty task", async () => {
+    child.responses.push({
+      value: {
+        status: 'ready',
+        action_count: 2,
+        duration_ms: 1,
+        stopped: true,
+      },
+    });
+    await linuxCoworkPlatform.reset!(options());
+    const args = child.exec.mock.calls[0]![1] as string[];
+    expect(
+      args.slice(args.indexOf('--mode'), args.indexOf('--mode') + 2)
+    ).toEqual(['--mode', 'reset']);
+    // Stop response, and the new-task link: two actions, never a send.
+    expect(args[args.indexOf('--max-actions') + 1]).toBe('2');
+  });
   it('fails fast when the bound task waits on an AskUserQuestion answer', async () => {
     const pending = linuxCoworkPlatform.handleHitl({
       ...options(),
