@@ -17,7 +17,8 @@ export async function readJsonFile(file: string): Promise<unknown> {
 /**
  * Publish only complete JSON; failed serialization leaves the previous file
  * intact. The file keeps the mode it had, and a new file gets the default
- * mode, as `writeFile` gives it.
+ * mode, as `writeFile` gives it. The temporary file is owner-only until it
+ * is complete, so replacing a private file never exposes its contents.
  */
 export async function writeJsonFile(
   file: string,
@@ -26,12 +27,12 @@ export async function writeJsonFile(
   await mkdir(dirname(file), { recursive: true });
   const mode = await stat(file).then(
     (info) => info.mode & 0o7777,
-    () => undefined
+    () => 0o666 & ~process.umask()
   );
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, jsonChunks(value), { flag: 'wx' });
-    if (mode !== undefined) await chmod(temporary, mode);
+    await writeFile(temporary, jsonChunks(value), { flag: 'wx', mode: 0o600 });
+    await chmod(temporary, mode);
     await rename(temporary, file);
   } finally {
     await rm(temporary, { force: true });
@@ -91,7 +92,15 @@ function copyJson(
     const copy: Record<string, unknown> = {};
     for (const [name, item] of Object.entries(object)) {
       const copied = copyJson(item, name, ancestors);
-      if (copied !== undefined) copy[name] = copied;
+      // Define, not assign: assigning `__proto__` would set the prototype and
+      // drop the key, where JSON.parse keeps it as a property.
+      if (copied !== undefined)
+        Object.defineProperty(copy, name, {
+          value: copied,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
     }
     return copy;
   } finally {

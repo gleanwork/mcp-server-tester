@@ -7,6 +7,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
+import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { constants } from 'node:buffer';
@@ -108,6 +109,14 @@ describe('chunked result JSON', () => {
     circular.self = circular;
     expect(() => jsonCopy(circular)).toThrow(/circular/i);
     expect(() => jsonCopy({ n: 1n })).toThrow(/BigInt/);
+    // An own __proto__ key, as JSON.parse makes, stays a key.
+    const parsed = JSON.parse(
+      '{"__proto__":{"target":"kept"},"q":"q"}'
+    ) as object;
+    const copied = jsonCopy(parsed);
+    expect(Object.hasOwn(copied, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(copied)).toBe(Object.prototype);
+    expect(JSON.stringify(copied)).toBe(JSON.stringify(parsed));
     // A shared, non-circular value is copied at each place it appears.
     const shared = { a: 1 };
     expect(jsonCopy({ x: shared, y: [shared] })).toEqual({
@@ -115,6 +124,33 @@ describe('chunked result JSON', () => {
       y: [{ a: 1 }],
     });
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'never exposes a private file while replacing it',
+    async () => {
+      const file = join(root, 'private.json');
+      await writeFile(file, '{}\n');
+      await chmod(file, 0o600);
+      const modes: number[] = [];
+      // Read the temporary file's mode while it is being written.
+      const value = {
+        secret: 'private-token',
+        list: Array.from({ length: 2000 }, (_, index) => ({
+          index,
+          toJSON() {
+            if (index === 1000)
+              for (const name of readdirSync(root))
+                if (name.endsWith('.tmp'))
+                  modes.push(statSync(join(root, name)).mode & 0o777);
+            return index;
+          },
+        })),
+      };
+      await writeJsonFile(file, value);
+      expect(modes).toEqual([0o600]);
+      expect((await stat(file)).mode & 0o777).toBe(0o600);
+    }
+  );
 
   it('rejects malformed saved JSON rather than returning partial results', async () => {
     const file = join(root, 'results.json');
