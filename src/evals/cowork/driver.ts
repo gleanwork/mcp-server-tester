@@ -84,6 +84,22 @@ export class CoworkHitlBudgetError extends CoworkDriverError {
   override readonly kind = 'hitl-budget-exhausted';
 }
 
+/**
+ * The HITL check stopped with an error. `touchedUi` says whether it may have
+ * acted on the app: it took an action, or a driver call ended without a
+ * receipt, so whether it acted is unknown. A check that touched nothing can't
+ * have changed what the task did.
+ */
+export class CoworkHitlError extends CoworkDriverError {
+  constructor(
+    message: string,
+    telemetry: CoworkDriverTelemetry | undefined,
+    readonly touchedUi: boolean
+  ) {
+    super(message, telemetry);
+  }
+}
+
 /** The native task asked the user a question; nothing headless can answer it. */
 export class CoworkUserQuestionError extends CoworkDriverError {
   override readonly kind = 'awaiting-user';

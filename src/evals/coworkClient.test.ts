@@ -14,6 +14,7 @@ import {
   isInfrastructureFailure,
 } from './infrastructureFailure.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
+import { CoworkHitlError } from './cowork/driver.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { ClaudeTrace } from './externalClient/builtins/claudeTrace.js';
@@ -1106,6 +1107,34 @@ describe('V2 Cowork client', () => {
       usage: { inputTokens: 10 },
     });
     expect(result[1]!.error).toBeUndefined();
+  });
+  it("keeps a finished task's answer when HITL failed without acting on the app", async () => {
+    mocks.hitl.mockRejectedValueOnce(
+      new CoworkHitlError(
+        'Linux HITL failed for the bound native session: Bound native session is missing or ambiguous.',
+        undefined,
+        false
+      )
+    );
+    const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    expect(result[0]!.error).toBeUndefined();
+    expect(result[0]).toMatchObject({
+      finalText: 'answer',
+      telemetry: {
+        hitlWarning:
+          'Linux HITL failed for the bound native session: Bound native session is missing or ambiguous.',
+      },
+    });
+  });
+  it('fails a finished task when HITL may have acted before failing', async () => {
+    mocks.hitl.mockRejectedValueOnce(
+      new CoworkHitlError('Linux HITL failed: no receipt', undefined, true)
+    );
+    const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    expect(result[0]).toMatchObject({
+      error: 'Linux HITL failed: no receipt',
+      finalText: 'answer',
+    });
   });
   it('never resubmits or runs HITL for a missing or ambiguous native binding; resets and runs the next case', async () => {
     mocks.bind.mockRejectedValueOnce(

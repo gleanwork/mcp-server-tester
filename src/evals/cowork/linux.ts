@@ -53,6 +53,7 @@ export {
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,
+  CoworkHitlError,
   CoworkUserQuestionError,
   type CoworkDriverOptions,
   type SemanticDesktopTelemetry,
@@ -802,6 +803,8 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       throw new Error('Linux HITL requires a bound native completion check.');
     const started = Date.now();
     let actions = 0;
+    // Set while the driver runs: a failure then may have acted on the app.
+    let driving = false;
     const budget = options.maxActions ?? 12;
     try {
       while (Date.now() < options.deadlineAt) {
@@ -821,11 +824,13 @@ export const linuxCoworkPlatform: CoworkPlatform = {
             'Linux HITL action budget exhausted.',
             telemetry(started, actions, 'partial')
           );
+        driving = true;
         const result = await execute(
           'hitl',
           { approveWriteTools: options.approveWriteTools === true },
           { ...options, maxActions: budget - actions }
         );
+        driving = false;
         actions += result.action_count;
         await delay(
           Math.min(500, Math.max(0, options.deadlineAt - Date.now()))
@@ -841,9 +846,14 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         error instanceof CoworkDriverError
           ? (error.telemetry?.action_count ?? 0)
           : 0;
-      throw new CoworkDriverError(
-        'Linux HITL failed for the bound native session.',
-        telemetry(started, actions + partialActions, 'partial')
+      // A driver call that failed without a receipt may have acted.
+      const unknown =
+        driving &&
+        !(error instanceof CoworkDriverError && error.telemetry !== undefined);
+      throw new CoworkHitlError(
+        `Linux HITL failed for the bound native session: ${error instanceof Error ? error.message : String(error)}`,
+        telemetry(started, actions + partialActions, 'partial'),
+        actions + partialActions > 0 || unknown
       );
     }
     throw new CoworkDriverError(

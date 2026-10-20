@@ -26,6 +26,7 @@ import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,
+  CoworkHitlError,
   CoworkUserQuestionError,
 } from './driver.js';
 import type * as ChildProcess from 'node:child_process';
@@ -505,6 +506,52 @@ describe('caller-owned Linux Cowork desktop', () => {
     await expect(pending).rejects.toMatchObject({ kind: 'awaiting-user' });
     // No approval click is attempted for a question.
     expect(child.exec).not.toHaveBeenCalled();
+  });
+  it('says why HITL failed, and that a failed completion check touched nothing', async () => {
+    const pending = linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete: async () => {
+        throw new Error('Bound native session is missing or ambiguous.');
+      },
+    });
+    await expect(pending).rejects.toBeInstanceOf(CoworkHitlError);
+    await expect(pending).rejects.toMatchObject({
+      message:
+        'Linux HITL failed for the bound native session: Bound native session is missing or ambiguous.',
+      touchedUi: false,
+    });
+    expect(child.exec).not.toHaveBeenCalled();
+  });
+  it('counts a driver call that failed with a receipt by its actions', async () => {
+    child.responses.push({
+      failed: true,
+      value: {
+        status: 'failed',
+        action_count: 0,
+        duration_ms: 1,
+        error: 'approval_control_ambiguous',
+      },
+    });
+    const pending = linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete: async () => false,
+    });
+    await expect(pending).rejects.toMatchObject({
+      message: expect.stringContaining('(approval_control_ambiguous)'),
+      touchedUi: false,
+    });
+  });
+  it('treats a driver call that failed without a receipt as one that may have acted', async () => {
+    child.responses.push({ failed: true, value: 'not a receipt' });
+    await expect(
+      linuxCoworkPlatform.handleHitl({
+        ...options(),
+        isComplete: async () => false,
+      })
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('(missing_or_invalid_receipt)'),
+      touchedUi: true,
+    });
   });
   it('refuses unbound HITL', async () => {
     await expect(linuxCoworkPlatform.handleHitl(options())).rejects.toThrow(
