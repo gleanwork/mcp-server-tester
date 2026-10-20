@@ -1,7 +1,16 @@
 import { RUN_FORMAT, olderResultsError } from './resultFormat.js';
 import { loadGCSStorage } from './gcsStorage.js';
 import type { ProtocolEra } from '../types/index.js';
-import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
+import { readdir } from 'fs/promises';
+import { Readable, type Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { parseChunked } from '@discoveryjs/json-ext';
+import {
+  jsonChunks,
+  jsonCopy,
+  readJsonFile,
+  writeJsonFile,
+} from '../utils/jsonFile.js';
 import { join } from 'path';
 
 export type StoredArtifactKind =
@@ -178,7 +187,7 @@ function stripResponses(value: unknown): void {
 }
 
 /**
- * The one redaction policy for stored results: returns a JSON copy in which
+ * The one redaction policy for stored results: returns a deep copy in which
  * every eval case result, wherever it is nested (runs, eval variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
  * `expect.response`, no `finalText` or event `output` in its traces, and no
@@ -187,7 +196,9 @@ function stripResponses(value: unknown): void {
  * including each trace's events, servers, arguments and usage.
  */
 export function redactStoredResponses<T>(value: T): T {
-  const copy = JSON.parse(JSON.stringify(value)) as T;
+  // JSON's semantics, as stored results are JSON: a judge's metadata only has
+  // to be JSON-serializable, which a structured clone is not (a URL, say).
+  const copy = jsonCopy(value);
   stripResponses(copy);
   return copy;
 }
@@ -252,37 +263,29 @@ export class FileEvalResultStore implements EvalResultStore {
 
   async saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void> {
     const artifactDir = join(this.dir, KIND_DIRS[artifact.kind]);
-    await mkdir(artifactDir, { recursive: true });
-    const serialized = JSON.stringify(artifact, null, 2);
-    await writeFile(
-      join(artifactDir, `${artifact.id}.json`),
-      serialized,
-      'utf8'
-    );
+    await writeJsonFile(join(artifactDir, `${artifact.id}.json`), artifact);
     if (!isPartial(artifact))
-      await writeFile(join(artifactDir, 'latest.json'), serialized, 'utf8');
+      await writeJsonFile(join(artifactDir, 'latest.json'), artifact);
   }
 
   async loadArtifact<T>(
     kind: StoredArtifactKind,
     id: string
   ): Promise<StoredEvalArtifact<T>> {
-    const raw = await readFile(
-      join(this.dir, KIND_DIRS[kind], `${id}.json`),
-      'utf8'
+    const raw = await readJsonFile(
+      join(this.dir, KIND_DIRS[kind], `${id}.json`)
     );
-    return currentArtifact<T>(JSON.parse(raw), `Stored ${kind} '${id}'`);
+    return currentArtifact<T>(raw, `Stored ${kind} '${id}'`);
   }
 
   async loadLatestArtifact<T>(
     kind: StoredArtifactKind
   ): Promise<StoredEvalArtifact<T> | null> {
     try {
-      const raw = await readFile(
-        join(this.dir, KIND_DIRS[kind], 'latest.json'),
-        'utf8'
+      const raw = await readJsonFile(
+        join(this.dir, KIND_DIRS[kind], 'latest.json')
       );
-      return currentArtifact<T>(JSON.parse(raw), `The latest stored ${kind}`);
+      return currentArtifact<T>(raw, `The latest stored ${kind}`);
     } catch (error) {
       if (isMissingFileError(error)) {
         return null;
@@ -309,11 +312,8 @@ export class FileEvalResultStore implements EvalResultStore {
       files
         .filter((f) => f.endsWith('.json') && f !== 'latest.json')
         .map(async (file) => {
-          const raw = await readFile(
-            join(this.dir, KIND_DIRS[kind], file),
-            'utf8'
-          );
-          return JSON.parse(raw) as StoredEvalArtifact<unknown>;
+          const raw = await readJsonFile(join(this.dir, KIND_DIRS[kind], file));
+          return raw as StoredEvalArtifact<unknown>;
         })
     );
 
@@ -330,11 +330,12 @@ interface GCSBucket {
 
 interface GCSFile {
   name: string;
-  save(
-    data: string,
-    options?: { contentType?: string; resumable?: boolean; validation?: false }
-  ): Promise<unknown>;
-  download(): Promise<[Buffer]>;
+  createWriteStream(options: {
+    contentType: string;
+    resumable: boolean;
+    validation: false;
+  }): Writable;
+  createReadStream(): Readable;
   exists(): Promise<[boolean]>;
 }
 
@@ -350,27 +351,18 @@ export class GCSEvalResultStore implements EvalResultStore {
 
   async saveArtifact<T>(artifact: StoredEvalArtifact<T>): Promise<void> {
     const bucket = await this.getBucket();
-    const serialized = JSON.stringify(artifact, null, 2);
-    await bucket
-      .file(
-        this.objectPath(
-          artifact.kind,
-          `${encodeURIComponent(artifact.id)}.json`
-        )
-      )
-      .save(serialized, {
-        contentType: 'application/json',
-        resumable: false,
-        validation: false,
-      });
-    if (isPartial(artifact)) return;
-    await bucket
-      .file(this.objectPath(artifact.kind, 'latest.json'))
-      .save(serialized, {
-        contentType: 'application/json',
-        resumable: false,
-        validation: false,
-      });
+    const upload = async (name: string): Promise<void> => {
+      await pipeline(
+        Readable.from(jsonChunks(artifact)),
+        bucket.file(this.objectPath(artifact.kind, name)).createWriteStream({
+          contentType: 'application/json',
+          resumable: false,
+          validation: false,
+        })
+      );
+    };
+    await upload(`${encodeURIComponent(artifact.id)}.json`);
+    if (!isPartial(artifact)) await upload('latest.json');
   }
 
   async loadArtifact<T>(
@@ -381,9 +373,8 @@ export class GCSEvalResultStore implements EvalResultStore {
     const file = bucket.file(
       this.objectPath(kind, `${encodeURIComponent(id)}.json`)
     );
-    const [buffer] = await file.download();
     return currentArtifact<T>(
-      JSON.parse(buffer.toString('utf8')),
+      await parseChunked(file.createReadStream()),
       `Stored ${kind} '${id}'`
     );
   }
@@ -396,9 +387,8 @@ export class GCSEvalResultStore implements EvalResultStore {
     const [exists] = await file.exists();
     if (!exists) return null;
 
-    const [buffer] = await file.download();
     return currentArtifact<T>(
-      JSON.parse(buffer.toString('utf8')),
+      await parseChunked(file.createReadStream()),
       `The latest stored ${kind}`
     );
   }
@@ -418,10 +408,9 @@ export class GCSEvalResultStore implements EvalResultStore {
           (f) => f.name.endsWith('.json') && !f.name.endsWith('/latest.json')
         )
         .map(async (file) => {
-          const [buffer] = await file.download();
-          return JSON.parse(
-            buffer.toString('utf8')
-          ) as StoredEvalArtifact<unknown>;
+          return (await parseChunked(
+            file.createReadStream()
+          )) as StoredEvalArtifact<unknown>;
         })
     );
 

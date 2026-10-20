@@ -1,3 +1,4 @@
+import { readJsonFile, writeJsonFile } from '../utils/jsonFile.js';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -380,15 +381,15 @@ type RunPhases = Pick<
 >;
 
 async function writeJson(file: string, value: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`);
+  await writeJsonFile(file, value);
 }
 
-/** Writes a JSON file in one step: a kill mid-write leaves the old file or none. */
+/**
+ * Writes a JSON file in one step: a kill mid-write leaves the old file or none.
+ * `writeJsonFile` already replaces atomically, and keeps the file's mode.
+ */
 async function replaceJson(file: string, value: unknown): Promise<void> {
-  const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
-  await writeJson(temporary, value);
-  await fs.rename(temporary, file);
+  await writeJsonFile(file, value);
 }
 
 /** A case result's trials: its trial results, or the case itself when it ran once. */
@@ -666,9 +667,7 @@ export async function readLatestRunId(
   evalDirectory: string
 ): Promise<string | undefined> {
   try {
-    const value: unknown = JSON.parse(
-      await fs.readFile(path.join(evalDirectory, 'latest.json'), 'utf8')
-    );
+    const value = await readJsonFile(path.join(evalDirectory, 'latest.json'));
     return LatestRecordSchema.parse(value).runId;
   } catch {
     return undefined;
@@ -745,15 +744,15 @@ export interface StoredRun {
 export async function readRunDirectory(directory: string): Promise<StoredRun> {
   const read = async (name: string): Promise<unknown> => {
     const file = path.join(directory, name);
-    let text: string;
+    let value: unknown;
     try {
-      text = await fs.readFile(file, 'utf8');
-    } catch {
+      value = await readJsonFile(file);
+    } catch (error) {
+      if (error instanceof SyntaxError) throw error;
       throw new Error(
         `${file} is missing: ${directory} isn't a complete MST run.`
       );
     }
-    const value: unknown = JSON.parse(text);
     assertRunFormat(value, file);
     return value;
   };
@@ -786,7 +785,7 @@ export async function readRunTrials(directory: string): Promise<TrialRecord[]> {
   const trials = await Promise.all(
     files.map(async (file) => {
       const full = path.join(root, file);
-      const value: unknown = JSON.parse(await fs.readFile(full, 'utf8'));
+      const value = await readJsonFile(full);
       assertRunFormat(value, full);
       return TrialRecordSchema.parse(value);
     })

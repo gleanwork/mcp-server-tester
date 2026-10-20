@@ -393,6 +393,12 @@ UTF-8 bytes. Resolved object markers are not counted. Unreadable text omits thes
 measurements. Readback failures return `composer_text_unavailable`, never raw RPC
 errors. The successful receipt schema is unchanged.
 
+During draft transitions, the controller polls temporary composer/Send overlap
+and unreadable text within the existing deadline. It acts only after a fresh
+snapshot confirms the exact prompt, configured surface and unique enabled Send.
+Persistent ambiguity or unreadable text still fails without sending; the draft
+is opened once and Send is never retried.
+
 Offline tests cover these controller contracts. Verify the app flags and hand-off
 against the caller's pinned image. A native fresh-session binding remains mandatory even
 after a successful UI receipt.
@@ -407,6 +413,17 @@ punctuation backslash-escaped by the app, reported as
 query, and complete native final-answer/model/effort evidence. UI text is never
 treated as an answer.
 Explicit `prompt_marker` correlation remains opt-in.
+
+If a truncated JSONL record is followed by an unfinished native replacement with
+the same next ordinal, collection waits read-only for the replacement. It never
+accepts that fragment as evidence. A completed replacement must pass the normal
+parser; corruption, mismatched ordinals, or a rewrite that never finishes still
+fails within the binding/run/stall deadlines. A rewrite left unfinished for most
+of the wait is a `parse_failure`, not `no_matching_session`, and keeps the tool
+calls the bound turn recorded before it; one caught only on the last polls is an
+ordinary timeout. A Linux binding timeout also saves
+a diagnostic screenshot; it is not native answer or tool evidence and does not
+trigger a resubmission.
 
 Native originator acceptance is surface-specific and case-sensitive:
 
@@ -456,7 +473,16 @@ The parser reads only native structure in the matched turn, never tool-result te
   tools, including when recorded as native `McpToolCall` items. Resource listing
   does not satisfy `requireMcpCalls`. The `cua_repl` and `codex` server labels are
   reserved for the app; rename configured MCP servers using either label.
-  Other server/tool pairs remain external MCP calls.
+  A targeted lookup can instead record the requested server as `item.server`.
+  MST recognizes this shape only when a completed `exec` contains a standalone
+  `await tools.list_mcp_resources({server: "..."})` (or
+  `list_mcp_resource_templates`) with a literal server, optionally assigned and
+  printed with `text(result)` or `text(JSON.stringify(result))`, allowing whitespace
+  between tokens. Exactly one matching native item must fall inside
+  that call's timing, with no overlapping enclosing call. The lookup's server,
+  arguments, error and duration remain intact. Mixed/dynamic code, unmatched
+  items and real MCP tools with the same name retain their MCP classification;
+  a failed lookup does not become a successful call or satisfy `requireMcpCalls`.
 - Work code mode: a `custom_tool_call` `exec` is one built-in call. MST keeps only the
   nested built-in tool names (for example `web__run`, `exec_command`), input length,
   and sha256, never the code. Each nested `tools.mcp__<label>__<tool>` reference

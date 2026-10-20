@@ -331,6 +331,29 @@ describe('GCSEvalResultStore', () => {
 });
 
 describe('redactStoredResponses', () => {
+  it('accepts any JSON-serializable judge metadata, as stored JSON does', () => {
+    // A structured clone throws on a URL; the stored file is JSON either way.
+    const result = {
+      id: 'case',
+      pass: true,
+      scores: {
+        judge: {
+          pass: true,
+          metadata: { source: new URL('https://example.com') },
+        },
+      },
+      response: 'private',
+      checkedAt: new Date('2026-10-12T00:00:00Z'),
+    };
+    const redacted = redactStoredResponses({ results: [result] });
+    expect(redacted.results[0]).toEqual({
+      id: 'case',
+      pass: true,
+      scores: { judge: { pass: true } },
+      checkedAt: '2026-10-12T00:00:00.000Z',
+    });
+  });
+
   const trace = () => ({
     events: [
       {

@@ -485,9 +485,11 @@ class Driver:
             try:
                 matched = predicate(nodes)
             except DriverFailure as error:
-                # Only predicate reads may tolerate transient editor/Send overlap.
+                # Only predicate reads may tolerate transient editor/Send overlap or
+                # text RPC failures while the draft accessibility tree is changing.
                 # Snapshot failures and every action remain fail-closed, with no retry.
-                if str(error) not in {'composer_missing_or_ambiguous', 'send_missing_or_ambiguous'}:
+                if str(error) not in {'composer_missing_or_ambiguous', 'send_missing_or_ambiguous',
+                                      'composer_text_unavailable'}:
                     raise
                 if ambiguity is None:
                     ambiguity = error
@@ -634,7 +636,16 @@ class Driver:
         nodes = self.snapshot()
         if controls(nodes, set(MODE_LABELS.values())) and not self.selected(nodes, surface):
             raise DriverFailure('surface_mismatch')
-        if not self.ready(nodes, surface):
+        try:
+            initial_ready = self.ready(nodes, surface)
+        except DriverFailure as error:
+            if str(error) not in {'composer_missing_or_ambiguous', 'send_missing_or_ambiguous'}:
+                raise
+            # The first snapshot can straddle a renderer transition too. Give
+            # it the same read-only settle; persistent ambiguity blocks actions.
+            nodes = self.wait(lambda ns: self.ready(ns, surface), polls=IDLE_POLLS)
+            initial_ready = True
+        if not initial_ready:
             # Brief read-only settle only; a conversation view never becomes ready.
             try:
                 nodes = self.wait(lambda ns: self.ready(ns, surface), polls=IDLE_POLLS)
