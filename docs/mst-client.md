@@ -429,6 +429,7 @@ test('optimize search description (agent loop)', async ({ mcp }, testInfo) => {
 | `metric`           | `'passRate'`    | Ranking metric: `passRate` / `toolF1` / `toolPrecision` / `toolRecall`, without held-out cases. |
 | `maxRounds`        | `1`             | Maximum optimization rounds.                                                                    |
 | `minImprovement`   | `0`             | Stop when a round's best gain falls below this.                                                 |
+| `maxVariants`      | no limit        | Most candidates tried across rounds; the reason is `'max-variants'` once spent.                 |
 | `allowRegressions` | `false`         | Allow a winner that breaks cases.                                                               |
 | `regressionCheck`  | `'significant'` | How breakage is judged: `'significant'` or `'any-case'` (see below).                            |
 | `regressionTag`    | `'regression'`  | Tag that marks regression cases (see below).                                                    |

@@ -332,6 +332,11 @@ function setupChange(
     JSON.stringify(run.datasets.map((d) => [d.name, d.contentHash]).sort());
   if (hashes(baseline) !== hashes(round))
     return 'its datasets changed (different cases or case content)';
+  // Each judge with a hash of its options, so a changed rubric or threshold
+  // shows even when the judge's type doesn't.
+  const judges = (run: RunRecord) => JSON.stringify(run.judges ?? []);
+  if (judges(baseline) !== judges(round))
+    return "the eval config's judges or their options changed";
   const base = setupOf(baseline.variants[0]!);
   const changed = round.variants.find((variant) => setupOf(variant) !== base);
   return changed
@@ -533,6 +538,15 @@ function session(
     if (record.finished)
       throw new Error(
         `Optimization ${record.id} is finished. Start a new one with mst optimize start.`
+      );
+    // Rounds are scored in order, so a round after the scored ones that has
+    // a run is one whose run is missing trials. Reopening refuses it too.
+    const incomplete = record.rounds
+      .slice(state.rounds.length)
+      .find((round) => round.runId);
+    if (incomplete)
+      throw new Error(
+        `Round ${incomplete.round}'s run ${incomplete.runId} is missing trials. Complete it with mst run --resume ${incomplete.runId} -c ${target.configPath}, then continue.`
       );
   };
 

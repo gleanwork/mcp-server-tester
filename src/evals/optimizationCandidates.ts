@@ -173,7 +173,9 @@ export function checkCandidates(
     }
     const overrides = tools as Record<string, unknown>;
     for (const [key, override] of Object.entries(overrides))
-      problems.push(...checkOverride(name, key, override, rules));
+      problems.push(
+        ...checkOverride(name, key, override, rules, Object.keys(overrides))
+      );
     if (problems.length > before) continue;
     const variant: ToolOverrideVariant = {
       id,
@@ -200,7 +202,8 @@ function checkOverride(
   name: string,
   key: string,
   override: unknown,
-  rules: CandidateRules
+  rules: CandidateRules,
+  keys: readonly string[]
 ): string[] {
   const where = `${name}, tool "${key}"`;
   if (!override || typeof override !== 'object' || Array.isArray(override))
@@ -218,7 +221,7 @@ function checkOverride(
       (typeof fields[field] !== 'string' || fields[field] === '')
     )
       problems.push(`${where}: ${field} must be a non-empty string.`);
-  const served = servedTool(key, rules.servedTools);
+  const served = servedTool(key, rules.servedTools, keys);
   if (!served) return problems; // buildToolSurface names the key.
   if (rules.editableTools && !isEditable(served, rules.editableTools))
     problems.push(
@@ -244,10 +247,15 @@ function checkOverride(
   return problems;
 }
 
-/** The served tool a key names (a bare name, or `server.tool`), when exactly one. */
-function servedTool(
+/**
+ * The served tool a key names (a bare name, or `server.tool`), when exactly
+ * one. As buildToolSurface resolves it: a bare key skips a tool that another
+ * of the candidate's `keys` names by its qualified key.
+ */
+export function servedTool(
   key: string,
-  listed: readonly ListedServerTools[]
+  listed: readonly ListedServerTools[],
+  keys: readonly string[] = []
 ): { server?: string; tool: ListedServerTools['tools'][number] } | undefined {
   const entries = listed.flatMap(({ server, tools }) =>
     tools.map((tool) => ({ server, tool }))
@@ -257,7 +265,11 @@ function servedTool(
       server !== undefined && `${server}.${tool.name}` === key
   );
   if (qualified.length === 1) return qualified[0];
-  const bare = entries.filter(({ tool }) => tool.name === key);
+  const bare = entries.filter(
+    ({ server, tool }) =>
+      tool.name === key &&
+      (server === undefined || !keys.includes(`${server}.${tool.name}`))
+  );
   return bare.length === 1 ? bare[0] : undefined;
 }
 
