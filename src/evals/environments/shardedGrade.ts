@@ -37,7 +37,34 @@ export interface GradeInEnvironmentOptions {
   log?: (line: string) => void;
 }
 
-/** The run files the shard's worker needs, beside its bundle. */
+/**
+ * Each shard's cases' results, as the shard's `results.json`: a run's holds
+ * every case. The run's is parsed once, here, and each shard's written in
+ * turn, so the coordinator holds one copy of the run's traces, not one per
+ * shard: a 278 MB results.json is about 450 MB of heap, and 20 shards parsing
+ * it at once ran a coordinator out of memory. Read and written in chunks: it
+ * can pass V8's string limit.
+ */
+async function stageResults(
+  prepared: PreparedGrading,
+  shards: ReadonlyArray<{ cases: ReadonlySet<string>; target: string }>
+): Promise<void> {
+  const source = prepared.replay.directory;
+  const results = (await readJsonFile(path.join(source, 'results.json'))) as {
+    cases?: Array<{ id?: string }>;
+  };
+  for (const { cases, target } of shards) {
+    await fs.mkdir(target, { recursive: true });
+    await writeJsonFile(path.join(target, 'results.json'), {
+      ...results,
+      cases: (results.cases ?? []).filter(
+        (result) => result.id !== undefined && cases.has(result.id)
+      ),
+    });
+  }
+}
+
+/** The rest of the run files the shard's worker needs, beside its bundle. */
 async function stageRun(
   prepared: PreparedGrading,
   caseIds: ReadonlySet<string>,
@@ -47,17 +74,6 @@ async function stageRun(
   await fs.mkdir(target, { recursive: true });
   for (const file of ['run.json', 'summary.json'])
     await fs.copyFile(path.join(source, file), path.join(target, file));
-  // The shard's cases' results only: a run's results.json holds every case.
-  // Read and written in chunks: it can pass V8's string limit.
-  const results = (await readJsonFile(path.join(source, 'results.json'))) as {
-    cases?: Array<{ id?: string }>;
-  };
-  await writeJsonFile(path.join(target, 'results.json'), {
-    ...results,
-    cases: (results.cases ?? []).filter(
-      (result) => result.id !== undefined && caseIds.has(result.id)
-    ),
-  });
   for (const variant of prepared.replay.trials.keys())
     for (const caseId of caseIds)
       for (const relative of caseRunPaths(variant, caseId)) {
@@ -131,6 +147,16 @@ export async function gradeInEnvironment(
     };
   }
 
+  const bundleDirOf = (index: number) =>
+    path.join(options.workDir, `shard-${index}`, 'bundle');
+  await stageResults(
+    prepared,
+    shards.map(({ index, cases }) => ({
+      cases,
+      target: bundledRunDir(bundleDirOf(index), runId),
+    }))
+  );
+
   const opened = await environment.definition.open(environment.options, {
     runId: prepared.replay.runId,
     shards: count,
@@ -147,7 +173,7 @@ export async function gradeInEnvironment(
     await Promise.all(
       shards.map(async ({ index, cases }) => {
         const root = path.join(options.workDir, `shard-${index}`);
-        const bundleDir = path.join(root, 'bundle');
+        const bundleDir = bundleDirOf(index);
         const resultsDir = path.join(root, 'results');
         await writeGradeShardBundle(bundleDir, {
           runId,
