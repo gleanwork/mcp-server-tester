@@ -7,6 +7,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { settingsFor, type SettingsSections } from '../../plugins/settings.js';
 import packageJson from '../../../package.json' with { type: 'json' };
 import type { EvalDataset } from '../datasetTypes.js';
 import type { ShardOutcome } from '../evalFrameworkTypes.js';
@@ -161,6 +162,10 @@ export async function gradeInEnvironment(
     runId: prepared.replay.runId,
     shards: count,
     keep: environment.keep,
+    settings: settingsFor(
+      prepared.configFile.settings as SettingsSections | undefined,
+      environment.name
+    ),
   });
   const records = new Map<string, GradeRecord>();
   const outcomes = new Map<number, ShardOutcome>();

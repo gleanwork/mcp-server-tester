@@ -11,6 +11,7 @@ import type { MCPConfig } from '../config/mcpConfig.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
 import type { EvalCase } from './datasetTypes.js';
+import { settingsFor } from '../plugins/settings.js';
 import type { EvalVariant, EvalConfig, ClientConfig } from './evalConfig.js';
 import { clientPatchOf, type ClientFields } from './clientFields.js';
 import type {
@@ -229,7 +230,12 @@ export function createEvalCaseExecutor(
       throw new Error(
         `Client ${declaration.type} must expose run() for per-case dispatch.`
       );
-    const context = { evalConfig, variant, env };
+    const context = {
+      evalConfig,
+      variant,
+      env,
+      settings: settingsFor(evalConfig.settings, declaration.type),
+    };
     if (options.toolVariant && usesToolSurfaceProxy(definition)) {
       const proxy = await options.toolVariant.proxy();
       const scope = randomUUID();

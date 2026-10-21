@@ -10,6 +10,7 @@
  * See docs/design/auth-and-connectors.md.
  */
 import type { MCPConfig } from '../../config/mcpConfig.js';
+import type { SettingsContext } from '../../plugins/plugin.js';
 
 /** A registered OAuth client. `clientSecret` only when the provider requires it. */
 export interface OAuthClient {
@@ -21,13 +22,13 @@ export interface OAuthClient {
 export type ConnectorAuth =
   | { type: 'none' }
   /** A long-lived token the plugin supplies at call time. */
-  | { type: 'static'; token(): Promise<string> }
+  | { type: 'static'; token(context?: SettingsContext): Promise<string> }
   /** OAuth client credentials: no user, no consent. */
   | {
       type: 'client-credentials';
       tokenEndpoint: string;
       scopes?: readonly string[];
-      client(): Promise<OAuthClient>;
+      client(context?: SettingsContext): Promise<OAuthClient>;
     }
   /** OAuth with a user: browser redirect (authorization code + PKCE) or device code. */
   | {
@@ -38,7 +39,7 @@ export type ConnectorAuth =
       /** When the server does not publish where its authorization server is. */
       issuer?: string;
       /** The registered client. Omit to register one (DCR). */
-      client?(): Promise<OAuthClient>;
+      client?(context?: SettingsContext): Promise<OAuthClient>;
       /** When the vendor pre-registers the redirect URI `http://localhost:<port>/callback`. */
       redirectPort?: number;
       /**
@@ -52,7 +53,7 @@ export type ConnectorAuth =
     };
 
 /** What a connector's `launch` gets. */
-export interface ConnectorLaunchContext {
+export interface ConnectorLaunchContext extends SettingsContext {
   /** The server's endpoint: the connector's `url`, or the eval config's override. */
   url: string;
   /** The server's label in the eval config. */
@@ -143,5 +144,5 @@ export interface CredentialStoreDefinition {
    * copy left behind.
    */
   readonly shared?: boolean;
-  create(): CredentialStore;
+  create(context?: SettingsContext): CredentialStore;
 }

@@ -266,7 +266,10 @@ describe('runEvalBatch skipExisting', () => {
     await fs.writeFile(configPath, JSON.stringify(configInput));
     await saveValidSummary();
     expect((await run({ plugins: [plugin] })).skipped).toBe(1);
-    expect(create).toHaveBeenCalledWith({ type: 'test/result-store/custom' });
+    expect(create).toHaveBeenCalledWith(
+      { type: 'test/result-store/custom' },
+      { settings: undefined }
+    );
     expect(runEval).not.toHaveBeenCalled();
   });
 
@@ -368,7 +371,10 @@ describe('runEvalBatch skipExisting', () => {
       });
 
       expect((await run({ plugins: [plugin] })).skipped).toBe(1);
-      expect(create).toHaveBeenCalledWith({ type: 'test/result-store/custom' });
+      expect(create).toHaveBeenCalledWith(
+        { type: 'test/result-store/custom' },
+        { settings: undefined }
+      );
       expect(runEval).not.toHaveBeenCalled();
     });
 

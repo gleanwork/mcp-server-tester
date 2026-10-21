@@ -334,6 +334,13 @@
       },
       "description": "Shared configs (<namespace>/config/<name>) from listed plugins, applied in order under the eval config's own settings."
     },
+    "settings": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object"
+      },
+      "description": "Plugin settings by plugin namespace, each checked by its plugin's settings schema. Each section replaces the same namespace's section of the repo's mst.config.json (ADR 0008)."
+    },
     "coworkSetup": {
       "type": "object",
       "description": "Cowork desktop setup; see docs/cowork.md."

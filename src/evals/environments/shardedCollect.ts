@@ -4,6 +4,7 @@
  * one set the run grades as it grades a batch's.
  */
 import { createHash } from 'node:crypto';
+import { settingsFor } from '../../plugins/settings.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
@@ -150,6 +151,7 @@ export async function collectInEnvironment(
     runId: options.runId,
     shards: count,
     keep: environment.keep,
+    settings: settingsFor(options.evalConfig.settings, environment.name),
   });
   const reasons = new Map<number, string>();
   const outcomes: ShardOutcome[] = [];

@@ -35,6 +35,7 @@ import {
 } from '../toolSurfaceProxy.js';
 import { startToolSurfaceProxy } from '../toolSurfaceProxyServer.js';
 import { installPlugins } from '../../plugins/extensions.js';
+import { settingsFor } from '../../plugins/settings.js';
 import {
   loadPlugins,
   resolvePluginPackage,
@@ -390,6 +391,10 @@ export async function collectShard(
         evalConfig: bundle.evalConfig,
         variant: batch.variant,
         env: runtimeEnv,
+        settings: settingsFor(
+          bundle.evalConfig.settings,
+          batch.requests[0]!.config.type
+        ),
       };
       // A variant's tool metadata reaches a proxied client through a proxy
       // on this machine, as in a local run.

@@ -70,13 +70,17 @@ import { z } from 'zod';
 
 const plugin: Plugin = {
   meta: { name: '@acme/mst-plugin', version: '1.0.0', namespace: 'acme' },
+  // The repo's values, from mst.config.json (see Settings below).
+  settings: { schema: z.object({ project: z.string() }).strict() },
   datasetSources: {
     legacy: { schema: LegacySchema, load: loadLegacyDataset },
   },
   judges: {
     completeness: {
       schema: z.object({}).passthrough(),
-      evaluate: async ({ case: c, trial }, options) => ({ score: 1 }),
+      evaluate: async ({ case: c, trial }, options, { settings } = {}) => ({
+        score: 1,
+      }),
     },
   },
   // Also: clients, metrics, resultStores, connectors, environments, credentialStores.
@@ -92,7 +96,7 @@ export default plugin;
 ```
 
 - **Names.** Each map key names an extension within the plugin's namespace. Eval configs and datasets reference it as `<namespace>/<kind>/<name>`, such as `{ "type": "acme/dataset/legacy" }` or a case's `"judges": ["acme/judge/completeness"]`. The kind is `dataset`, `client`, `judge`, `pairwise-judge`, `metric`, `result-store`, `connector`, `env`, `credential-store` or `config`, and it must match where the name is used: `acme/judge/x` in `datasets` is an error. Built-ins (`file`, `claude-code`, `rubric`, `passed`, ...) use bare names, or the full `mst/<kind>/<name>` (`mst/judge/rubric`); the `mst` namespace is reserved.
-- **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions and configs. A plugin factory that builds differently configured copies needs a namespace per copy. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
+- **Namespace.** `meta.namespace` is required: lowercase, optionally scoped as `@scope/name`. Two different plugins can't share a namespace. Loading the same plugin again is a no-op, including a rebuilt object with the same name, version, extension definitions, configs and settings schema. A plugin factory that builds differently configured copies needs a namespace per copy; a plugin that needs repo-wide values takes them as [settings](#plugins) instead. A package's CommonJS and ESM builds are different objects too, so load a plugin one way; publishing plugins as ESM avoids the question.
 - **Loading.** An eval config lists plugin specifiers in `plugins`. Each one resolves relative to the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default), then as a package name, resolved as `import` resolves it. `--plugins` and the `pluginPaths` / `plugins` options of `runEval` and `runEvalBatch` add to that list. Code that runs datasets directly passes plugin objects: `runEvalDataset({ dataset, plugins: [plugin] }, ctx)`, or `test.use({ mcpPlugins: [plugin] })` in Playwright. Code that calls validators or matchers on its own installs them with `installPlugins([plugin])`.
 - **Scope.** An eval config may only reference namespaces of plugins it loads, even if another eval in the same process (a batch) loaded more. The same check applies to the clients and judges its datasets name. `runEvalDataset`, `runEvalCase` and the fixtures have no eval config, so they resolve against every plugin installed in the process.
 - **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run` or `runBatch` (clients), `evaluate` (judges), `kind` and `compute` (metrics), `create` (result stores, returning a [`RunStore`](#result-stores)), `open` (environments, with an optional positive `maxShards` and an optional `coordinator`, which creates the machine a detached run's coordinator runs on; see [Detached runs](./cli.md#runs---detached-runs)), and `create` (credential stores, returning a `CredentialStore`; they take no options, so no `schema`). MST validates the plugin when it loads, and names the plugin and extension in any error.
@@ -142,6 +146,14 @@ export default plugin;
   ```
 
   A config is typed `PluginConfig` and can set any documented eval config key except `name`, `datasets`, `variants`, `baseline`, `plugins`, `extends`, `run` and `filterTags`. That includes `redactStoredResponses` and `simulateWrites`, so one config can keep full traces (for `--no-grade`, `mst grade` and `--resume`) for every eval that extends it. Other keys are rejected when an eval config extends the config; until then MST only checks that it's an object. Configs apply in order, then the eval config's own settings, including its `run` controls. Each top-level key is replaced, never merged: here the eval config's `trials` replaces the config's, and an eval config `judges` list would replace the config's list rather than add to it. A config may use only its own plugin's extensions and built-ins, and can't extend other configs. MST has no built-in configs. An eval's `contentHash` is computed with its configs applied, so `runEvalBatch` doesn't resume a saved run after a config changes. Code that validates an eval config itself applies `extends` first with `resolveConfigExtends` (from `./evals`).
+
+- **Settings.** `settings: { schema }` declares values the plugin takes from the repo that runs evals, not from one extension's options: a cloud project, an internal endpoint ([ADR 0008](./adr/0008-plugin-settings.md)). The repo writes them in `mst.config.json`, one section per plugin namespace, and an eval config may set `settings` too, whose section replaces the file's for that namespace, whole:
+
+  ```json
+  { "settings": { "acme": { "project": "acme-evals" } } }
+  ```
+
+  MST reads the nearest `mst.config.json` at or above the eval config's directory, up to the repository root (the directory holding `.git`); `mst datasets`, `mst judges` and `mst env setup` without `--config` read the one at or above `--root-dir`. Once the eval's plugins load, MST keeps the sections of those plugins, drops the rest, and parses each plugin's section with its schema (`{}` when it has none), so a missing or wrong setting fails before the run starts. A section for a plugin that takes no settings is an error. Every extension of the plugin gets the parsed section as `settings`: in its context (dataset source `load` and `describe`, client `run` and `runBatch`, environment `open`, `setup` and `coordinator`, connector `launch`), or as an optional last argument (judge `evaluate` and `preflight`, pairwise judge `compare` and `preflight`, metric `compute` and `aggregate`, result store and credential store `create`, connector `auth.token` and `auth.client`). It's undefined for built-ins and plugins without settings. The settings are part of the resolved eval config, so they go with it to workers, grade shards and a detached coordinator, and an eval's `contentHash` changes when they do. They are JSON values: a path in them means nothing on another machine, so files an extension reads still ship in its package.
 
 - **Judges.** A judge's `evaluate({ case, trial }, options)` returns a score: `score` from 0 to 1 ([Judge contract](#judge-contract)). MST parses `options` with the judge's schema, calls `evaluate` once per `reps`, and compares the mean score with the judge entry's `threshold`. The schema sees only the judge's own options, never `threshold`, `reference`, `reps` or an eval config entry's `type` and `name`. The built-in `rubric` judge has the same contract, and an eval config can list it: `judges: [{ "type": "rubric", "rubric": "correctness" }]`. An optional `description` (on judges and pairwise judges) is what [`mst judges`](cli.md#judges---find-judges) shows, with `requires` and the options schema.
 
