@@ -37,9 +37,27 @@ function fail(message) {
   process.exit(1);
 }
 
+/** FAKE_DOCKER_OOM: containers out of memory, comma-separated, or `*`. */
+const outOfMemory = (name) => {
+  const names = (process.env.FAKE_DOCKER_OOM ?? '').split(',');
+  return names.includes('*') || names.includes(name);
+};
+
 const [command, ...rest] = args;
 if (command === 'image') {
   process.stdout.write('sha256:fake-image\n');
+} else if (command === 'info') {
+  // `info --format '{{.MemTotal}} {{.NCPU}}'`: the context's size, as the
+  // test sets it (FAKE_DOCKER_INFO, `<bytes> <cpus>`), or 8 GiB and 4 CPUs.
+  // FAKE_DOCKER_INFO=fail: a daemon that doesn't answer.
+  const info = process.env.FAKE_DOCKER_INFO ?? `${8 * 1024 ** 3} 4`;
+  if (info === 'fail') fail('Cannot connect to the Docker daemon');
+  process.stdout.write(`${info}\n`);
+} else if (command === 'inspect') {
+  // `inspect --format '{{.State.OOMKilled}}' <name>`.
+  const name = rest.at(-1);
+  if (!fs.existsSync(containerRoot(name))) fail(`No such container: ${name}`);
+  process.stdout.write(`${outOfMemory(name)}\n`);
 } else if (command === 'build') {
   // What the image would install: the plugin packages in the context.
   const plugins = path.join(rest.at(-1), 'plugins');
@@ -114,7 +132,11 @@ if (command === 'image') {
   const name = rest[index];
   const argv = rest.slice(index + 1);
   if (!fs.existsSync(containerRoot(name))) fail(`No such container: ${name}`);
-  if (argv[0] === 'mst') {
+  if (argv[0] === 'mst' && outOfMemory(name)) {
+    // The kernel killed the worker: out of the container's memory.
+    process.stderr.write('Killed\n');
+    process.exit(137);
+  } else if (argv[0] === 'mst') {
     const child = spawn(
       process.execPath,
       [

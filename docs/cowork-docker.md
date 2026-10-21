@@ -38,16 +38,32 @@ The eval config needs nothing Docker-specific. A Cowork eval uses `clientOptions
 
 Options (`--env-option key=value`):
 
-| Option                 | Meaning                                                                                                    |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `shards`               | How many containers. A case's variants and trials all run in one.                                          |
-| `contexts`             | Docker contexts, comma-separated. Each runs one container at a time (see below). Default: the current one. |
-| `image`                | Another image, such as one your organization builds. Default: `mst-cowork-linux:<MST version>`.            |
-| `readyTimeout`         | Seconds a new container's desktop has to come up. Default: 1200.                                           |
-| `keep`                 | `never` (default), `failed` or `always`: keep containers to look at afterwards.                            |
-| `claudeDesktopVersion` | `mst env setup` only: the Claude Desktop package to install.                                               |
+| Option                 | Meaning                                                                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `shards`               | How many containers. A case's variants and trials all run in one.                                                            |
+| `contexts`             | Docker contexts, comma-separated. Each runs one Cowork container at a time (see below). Default: the current one.            |
+| `image`                | Another image, such as one your organization builds. Default: `mst-cowork-linux:<MST version>`.                              |
+| `readyTimeout`         | Seconds a new container's desktop has to come up. Default: 1200.                                                             |
+| `memory`               | Each container's memory, in Docker's syntax (`8g`, `512m`). Default: all the context can spare for Cowork, `2g` for grading. |
+| `cpus`                 | Each container's CPUs (`1.5`, `4`). Default: no limit.                                                                       |
+| `keep`                 | `never` (default), `failed` or `always`: keep containers to look at afterwards.                                              |
+| `claudeDesktopVersion` | `mst env setup` only: the Claude Desktop package to install.                                                                 |
 
 **One container per Docker host at a time.** Claude Desktop's VM service listens on a fixed vsock port for the whole host, and containers don't separate vsock. So two Cowork containers can't run on one Docker host. To run shards side by side, give each its own host: several Colima VMs on a Mac, or remote Docker hosts, listed in `contexts`. With more shards than contexts, the extra shards wait for a free context. A plugin environment that creates its own hosts (VMs, say) can hand their contexts to this one: see `dockerEnvironment` in [the evaluation framework](./evaluation-framework.md#plugins).
+
+### Memory and CPUs
+
+`shards` decides how a run's cases are split, not how much memory it uses. MST reads each context's memory and CPUs (`docker info`), and limits each container to its share:
+
+```text
+[mst] colima-mst-kvm has 11.7 GiB and 6 CPUs: 1 Cowork container at a time, 10.7 GiB each
+```
+
+- **A Cowork container** is alone on its context, so it may use all the context can spare: its memory less 1 GiB for Docker itself. Claude Desktop gives Cowork's VM 4 GB, which it fills only as it needs: one shard with one remote server peaked at 2.5 GiB for the whole container, with about two CPUs busy.
+- **Grade containers** share a context: as many run at once as fit in 2 GiB each (or `memory`), and in `cpus` each when you set it. The rest wait. A grade shard whose judges run their own agents (Claude Code, Codex) at `concurrency` above 1 needs more: raise `memory`.
+- **Out of memory**, the kernel stops a process in that container, not the Docker daemon or another shard's. MST says so: a shard whose worker was stopped fails with `Container … ran out of memory`, and one whose desktop or VM was stopped ends `done, but Container … ran out of memory`, its trials failed as infrastructure.
+
+A Docker context's memory is its VM's, not the machine's. Colima and Docker Desktop VMs take their memory from your Mac: two 12 GiB Colima VMs on a 16 GiB Mac can run out of memory however few shards you run. Size the VMs (`colima start --memory`) to fit beside what else the machine runs. The shard count never changes with a context's size: it decides which shard each case is on, and `--resume` relies on it.
 
 ## Plugins
 
@@ -60,7 +76,7 @@ Each container's worker loads the eval's plugins, so the image must have them. `
 
 The image holds one set of plugins: setting it up for another eval replaces them.
 
-`mst grade --env docker` grades in these containers too ([Grading in an environment](./cli.md#grading-in-an-environment)). Its workers load the eval's judge plugins from the same `/opt/mst/plugins`, and need the SDK each judge runs, which the image doesn't have (`openai`, `@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`): add them in an image of your own, for example `FROM mst-cowork-linux:<tag>` with `RUN npm install -g openai`, and pass it with `--env-option image=<ref>`. Grade containers start without a desktop, VM devices or inference, so several share one Docker context.
+`mst grade --env docker` grades in these containers too ([Grading in an environment](./cli.md#grading-in-an-environment)). Its workers load the eval's judge plugins from the same `/opt/mst/plugins`, and need the SDK each judge runs, which the image doesn't have (`openai`, `@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`): add them in an image of your own, for example `FROM mst-cowork-linux:<tag>` with `RUN npm install -g openai`, and pass it with `--env-option image=<ref>`. Grade containers start without a desktop, VM devices or inference, so several share one Docker context: as many as its memory holds (see [Memory and CPUs](#memory-and-cpus)).
 
 ## What happens
 

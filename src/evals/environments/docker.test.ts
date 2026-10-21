@@ -10,6 +10,7 @@ import {
   coworkImageDirectory,
   DEFAULT_COWORK_IMAGE,
   dockerRunArgs,
+  gradeContainerRunArgs,
   npmPackArgs,
 } from './docker.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
@@ -99,6 +100,42 @@ describe('the docker environment', () => {
     expect(args.at(-1)).toBe('mst-cowork-linux:test');
   });
 
+  it('limits a container to its memory and CPUs, when they are set', () => {
+    const base = {
+      name: 'mst-run-1',
+      image: 'mst-cowork-linux:test',
+      runId: 'run',
+      seccompProfile: '/pkg/docker/cowork-linux/seccomp.json',
+      inference: {
+        baseURL: 'https://gateway.example/anthropic',
+        authScheme: 'bearer' as const,
+      },
+    };
+    const args = dockerRunArgs({
+      ...base,
+      limits: { memory: 8 * 1024 ** 3, cpus: 2 },
+    });
+    expect(args.slice(-5)).toEqual([
+      '--memory',
+      '8192m',
+      '--cpus',
+      '2',
+      'mst-cowork-linux:test',
+    ]);
+    expect(dockerRunArgs({ ...base, limits: {} })).not.toContain('--memory');
+    expect(dockerRunArgs(base)).not.toContain('--cpus');
+    const grade = gradeContainerRunArgs({
+      name: 'mst-run-1',
+      image: 'mst-cowork-linux:test',
+      runId: 'run',
+      limits: { memory: 2 * 1024 ** 3 },
+    });
+    expect(grade[grade.indexOf('--memory') + 1]).toBe('2048m');
+    expect(grade.indexOf('--memory')).toBeLessThan(
+      grade.indexOf('--entrypoint')
+    );
+  });
+
   it('names containers by run and shard, as Docker allows', () => {
     expect(containerName('20261011T020624Z-51a866', 0)).toBe(
       'mst-20261011T020624Z-51a866-1'
@@ -125,6 +162,34 @@ describe('the docker environment', () => {
     await expect(cancelled).rejects.toThrow('cancelled');
   });
 
+  it('runs as many containers on a context as it has slots, roomiest first', async () => {
+    const sizes: Record<string, number> = { a: 2, b: 1, c: 0 };
+    const pool = contextPool(['a', 'b', 'c'], async (context) =>
+      context === 'c'
+        ? Promise.reject(new Error('no answer'))
+        : sizes[context!]!
+    );
+    const signal = new AbortController().signal;
+    // c's size is unknown: one slot, like a context that can't say.
+    const taken = [
+      await pool.acquire(signal),
+      await pool.acquire(signal),
+      await pool.acquire(signal),
+      await pool.acquire(signal),
+    ];
+    expect(taken).toEqual(['a', 'a', 'b', 'c']);
+    let fifth: string | undefined = 'waiting';
+    const waiting = pool.acquire(signal).then((context) => (fifth = context));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fifth).toBe('waiting');
+    pool.release('a');
+    await waiting;
+    expect(fifth).toBe('a');
+    // A released slot with no one waiting is taken again.
+    pool.release('b');
+    expect(await pool.acquire(signal)).toBe('b');
+  });
+
   it('checks its options', () => {
     expect(
       resolveEnvironment('docker', { contexts: 'a,b', shards: '2' })
@@ -137,6 +202,15 @@ describe('the docker environment', () => {
     expect(() =>
       resolveEnvironment('docker', { readyTimeout: 'soon' })
     ).toThrow();
+    expect(
+      resolveEnvironment('docker', { memory: '8g', cpus: '1.5' }).options
+    ).toEqual({ memory: '8g', cpus: '1.5' });
+    expect(() => resolveEnvironment('docker', { memory: 'lots' })).toThrow(
+      'memory must be a size such as 8g or 512m'
+    );
+    expect(() => resolveEnvironment('docker', { cpus: '0' })).toThrow(
+      'cpus must be more than 0'
+    );
   });
 
   it('ships the image beside the package', async () => {
@@ -385,6 +459,13 @@ describe('a run in docker (a fake Docker CLI)', () => {
         call.args.includes('MST_INFERENCE_AUTH_SCHEME=x-api-key')
       )
     ).toBe(true);
+    // Each Cowork container may use all its context can spare: the fake's
+    // 8 GiB, less 1 GiB for the daemon.
+    for (const run of runs)
+      expect(run.args[run.args.indexOf('--memory') + 1]).toBe('7168m');
+    expect(lines).toContain(
+      '[mst] ctx-a has 8 GiB and 4 CPUs: 1 Cowork container at a time, 7 GiB each'
+    );
     // Every trial's artifacts are in the run, copied from the worker.
     for (const id of ['alpha', 'bravo', 'charlie'])
       expect(
@@ -458,6 +539,7 @@ describe('a run in docker (a fake Docker CLI)', () => {
     for (const run of runs) {
       expect(run.args).not.toContain('/dev/kvm');
       expect(run.args.join(' ')).not.toContain('MST_INFERENCE');
+      expect(run.args[run.args.indexOf('--memory') + 1]).toBe('2048m');
       expect(run.args.slice(-4)).toEqual([
         'mst-test:1',
         '--',
@@ -484,6 +566,87 @@ describe('a run in docker (a fake Docker CLI)', () => {
     ).toEqual([true, true]);
     expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
   }, 120_000);
+
+  it('grades one container at a time on a context with room for one', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath, calls } = await fixture();
+    const outputDir = path.join(dir, 'out');
+    const collected = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir,
+      env: 'docker',
+      envOptions: { contexts: 'ctx-a', image: 'mst-test:1' },
+      grade: false,
+      report: false,
+    });
+    const before = (await calls()).length;
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    // 4 GiB, so 3 GiB to spare: one 3g grade container fits.
+    vi.stubEnv('FAKE_DOCKER_INFO', `${4 * 1024 ** 3} 4`);
+    const graded = await gradeRun({
+      configPath,
+      rootDir: dir,
+      outputDir,
+      run: path.basename(collected.outputDir),
+      env: 'docker',
+      envOptions: {
+        shards: '2',
+        contexts: 'ctx-a',
+        image: 'mst-test:1',
+        memory: '3g',
+      },
+      report: false,
+    });
+    expect(graded.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    // Every container is removed before the next one starts.
+    const lifecycle = (await calls())
+      .slice(before)
+      .filter((call) => call.args[0] === 'run' || call.args[0] === 'rm')
+      .map((call) => call.args[0]);
+    expect(lifecycle).toEqual(['run', 'rm', 'run', 'rm']);
+    expect(log.mock.calls.map((call) => String(call[0]))).toContain(
+      '[mst] ctx-a has 4 GiB and 4 CPUs: 1 grade container at a time, 3 GiB each'
+    );
+  }, 120_000);
+
+  it('says a shard ran out of memory when Docker killed its worker for it', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath } = await fixture({ FAKE_DOCKER_OOM: '*' });
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { image: 'mst-test:1', memory: '6g' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 0 });
+    expect(log.mock.calls.map((call) => String(call[0])).join('\n')).toMatch(
+      /Container mst-\S+-1 ran out of memory \(its limit: 6 GiB\): raise --env-option memory, or give the Docker context more memory\. The worker exited \(code 137\)/
+    );
+  }, 60_000);
+
+  it('says a desktop that ran out of memory starting up did', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath, root } = await fixture({
+      FAKE_DOCKER_OOM: '*',
+      FAKE_DOCKER_DESKTOP: 'failed',
+    });
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { image: 'mst-test:1' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 0 });
+    expect(log.mock.calls.map((call) => String(call[0])).join('\n')).toMatch(
+      /Couldn't create a machine for shard 1: Container mst-\S+-1 ran out of memory \(its limit: 7 GiB\): give the Docker context more memory\. The desktop in container mst-\S+-1 didn't come up/
+    );
+    expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
+  }, 60_000);
 
   it('removes the containers a dead run on this machine left, and only those', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -298,6 +298,18 @@ export function machineEnvironment(
             ...(machine.workDir ? { workDir: machine.workDir } : {}),
           }
         );
+        const troubled = !outcome.ok
+          ? !outcome.cancelled
+          : outcome.infra > 0 || (outcome.failed ?? 0) > 0;
+        const cause =
+          troubled && machine.diagnose
+            ? await machine.diagnose().catch(() => undefined)
+            : undefined;
+        if (cause && outcome.ok) outcome.note = cause;
+        else if (cause)
+          outcome.reason = outcome.reason
+            ? `${cause} ${outcome.reason}`
+            : cause;
         return outcome;
       } finally {
         live.delete(machine);
