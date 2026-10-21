@@ -77,7 +77,7 @@ interface OptimizationSelection {
 }
 
 /** Where an optimization's runs run, and with what. */
-interface StoredOptimizationTarget extends ToolOptimizationEval {
+export interface StoredOptimizationTarget extends ToolOptimizationEval {
   /** The eval's directory (`mst run --output-dir`). Default: `.mcp-test-results/<eval name>`. */
   outputDir?: string;
   /** Where every run collects its trials (`--env`). Default: `local`. */
@@ -143,7 +143,7 @@ interface OptimizationBudget {
 }
 
 /** What one `try` ran: the scored round, and how much it improved on the best before it. */
-interface TriedRound {
+export interface TriedRound {
   round: ToolOptimizationRound;
   runId: string;
   improvement: number;

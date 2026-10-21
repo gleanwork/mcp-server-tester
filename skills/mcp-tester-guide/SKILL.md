@@ -267,17 +267,18 @@ Options: `outputDir` (default `.mcp-test-results`), `name` (the eval's name, def
 
 ## CLI
 
-| Command                                                  | Does                                                                                                                           |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `npx @gleanwork/mcp-server-tester@beta init`             | Scaffold a project: Playwright config, a tool test, a dataset                                                                  |
-| `mst generate [-o tests/generated.spec.ts] [--snapshot]` | Call tools interactively and write the calls as a Playwright spec                                                              |
-| `mst login <server-url> [--scopes a,b] [--force]`        | OAuth login; the `mcp` fixture uses the stored tokens                                                                          |
-| `mst token <server-url> [--format env\|json\|gh]`        | Print stored tokens for CI                                                                                                     |
-| `mst run --config <path>`                                | Run an eval config. `--variant`, `--case <ids...>`, `--trials <n>`, `--plugins`, `--output-dir`, `--secrets-file`, `--dry-run` |
-| `mst batch --config-dir <dir>`                           | Run several eval configs. `--configs`, `--workers`, `--skip-existing`, `--dry-run`                                             |
-| `mst auth --config <path>`                               | Sign in to an eval config's connector servers (`status`, `revoke`)                                                             |
-| `mst open [run or eval dir]`                             | Open a run's report: the newest run, or the one named. `--print` prints its path                                               |
-| `mst cowork setup`                                       | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                               |
+| Command                                                     | Does                                                                                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `npx @gleanwork/mcp-server-tester@beta init`                | Scaffold a project: Playwright config, a tool test, a dataset                                                                  |
+| `mst generate [-o tests/generated.spec.ts] [--snapshot]`    | Call tools interactively and write the calls as a Playwright spec                                                              |
+| `mst login <server-url> [--scopes a,b] [--force]`           | OAuth login; the `mcp` fixture uses the stored tokens                                                                          |
+| `mst token <server-url> [--format env\|json\|gh]`           | Print stored tokens for CI                                                                                                     |
+| `mst run --config <path>`                                   | Run an eval config. `--variant`, `--case <ids...>`, `--trials <n>`, `--plugins`, `--output-dir`, `--secrets-file`, `--dry-run` |
+| `mst batch --config-dir <dir>`                              | Run several eval configs. `--configs`, `--workers`, `--skip-existing`, `--dry-run`                                             |
+| `mst auth --config <path>`                                  | Sign in to an eval config's connector servers (`status`, `revoke`)                                                             |
+| `mst optimize start\|evidence\|try\|finish --config <path>` | Improve tool metadata a round at a time, ending in a recommendation (see `optimize-mcp-tool-metadata`)                         |
+| `mst open [run or eval dir]`                                | Open a run's report: the newest run, or the one named. `--print` prints its path                                               |
+| `mst cowork setup`                                          | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                               |
 
 Inside a project, `npx mst` and `npx mcp-server-tester` run the same binary. Before installing, use `npx @gleanwork/mcp-server-tester@beta`: `npx mst` alone downloads an unrelated package.
 

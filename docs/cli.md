@@ -17,6 +17,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
 - [grade - Grade a Stored Run Again](#grade---grade-a-stored-run-again)
+- [optimize - Improve Tool Metadata](#optimize---improve-tool-metadata)
 - [runs - Detached Runs](#runs---detached-runs)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open a Run's Report](#open---open-a-runs-report)
@@ -886,6 +887,81 @@ npx mst grade 7f3c2a --config ./eval.json --env acme/env/cloud-vm --env-option s
 - **A key must last the shard.** A worker gets the secrets file's values once, when its shard starts. A short-lived gateway token (one `MST_LLM_AUTH_COMMAND` makes, say) can expire during a long shard, and its judge calls then fail.
 - **A shard that stops leaves its cases' grading missing.** Those trials and comparisons get a grading error (`Missing: grade shard 2 ended before …`), the regrade is `phases.grade: partial`, and the next `mst grade` grades them.
 - An environment must be able to run grade shards. One built with `machineEnvironment`, such as `docker`, can; `mst grade --env` refuses one that can't (`Environment.work`) before any shard runs.
+
+## `optimize` - Improve Tool Metadata
+
+Finds tool metadata (names, descriptions, input-schema text) that measurably helps a client use a server's tools, and recommends applying it or not. You, or an agent, write the candidates; MST checks them, runs them on the eval config's client, model and environment, compares each with the current metadata case by case, and keeps the cases that work today working. Each step is its own command, and the optimization is stored with the eval's runs, so it continues where it stopped ([ADR 0008](./adr/0008-a-tool-optimization-is-a-stored-experiment.md)).
+
+### Usage
+
+```bash
+npx mst optimize start -c ./eval.json --tool search --max-variants 6   # measure the current metadata
+npx mst optimize evidence -c ./eval.json                               # what the next candidates can learn from
+npx mst optimize try ./round-0.json -c ./eval.json                     # run a round of candidates
+npx mst optimize evidence -c ./eval.json                               # read the round, write the next
+npx mst optimize try ./round-1.json -c ./eval.json
+npx mst optimize finish -c ./eval.json                                 # write the recommendation
+```
+
+A candidates file is a JSON array, or an object whose `candidates` is that array (`-` reads it from stdin). Each candidate has a unique `id`, a `description` of the idea it tests, and `tools`, keyed by the tool's name on its server (`server.tool` when several servers serve it):
+
+```json
+[
+  {
+    "id": "search-scope",
+    "description": "Say what search covers and when to use it",
+    "tools": {
+      "search": {
+        "description": "Search every connected app: documents, tickets, chats and email. Use it first for any question about company information."
+      }
+    }
+  }
+]
+```
+
+### Commands
+
+- **`start`** runs the base variant once (the baseline) and, when no case is tagged `regression`, once more to find the cases that work today. It lists the tools the servers serve and stores them, then writes the optimization to `<eval dir>/optimizations/<id>/optimization.json`.
+- **`evidence`** prints the served tools (which are editable, with their parameters), the baseline and each round so far: every case's input, what its assertions expect, its trials passed, and each failed trial's tool calls, missed tools and failed graders. Cases tagged `held-out` are left out. `--json` prints the same as JSON, with each tool's full input schema to copy.
+- **`try <file>`** checks the candidates, then runs them together as one round, and prints each one's metric, its change from the baseline and whether it is clearly better. `--retry` runs a round that didn't finish again. `--proposer <name>` records who wrote the candidates in the round (default: `agent`).
+- **`finish`** judges every candidate against the number tried and writes `recommendation.md` next to the record: apply, reject or inconclusive, the metadata to apply, a row for capability, regression and held-out cases, every candidate, and the runs.
+
+### What `try` refuses
+
+A round that can't measure what it means to stops before anything runs, and says why:
+
+- **A candidate that changes more than text.** It may change only a tool's `name`, its `description`, and `description` and `title` text inside its `inputSchema`. A changed parameter, type, enum or `required` list would measure rejected calls, since the server still gets every call under its own schema. A tool key that names no tool, or several, also fails, as does a tool outside `--tool`.
+- **A repeated id.** Ids are unique across the optimization, and differ from the base variant's name.
+- **More candidates than the budget has left.** `--max-variants` (default 6) caps the candidates across every round.
+- **A server that changed.** Every round lists the servers' tools before any client starts. When a name, title, description or input schema differs from what the baseline was measured with, the round stops, and the optimization can't continue: start a new one.
+- **A setup that changed.** The same holds for a round that differs from the baseline in what else it measures with: its datasets' content, the base variant's client, model or options, or the eval config's judges and their options.
+- **Another process stepping it.** `try` and `finish` hold a `lock` file in the optimization's directory while they run. A second command fails, and names the process that holds the lock. A lock left by a process on the same machine that has ended is taken over; for any other stale lock, delete the file.
+
+### Options
+
+Every command takes `-c, --config` (required), `--plugins`, `--output-dir`, `--root-dir`, `--secrets-file`, `--store` and `--results`, as `run` does. The optimization doesn't store them, so give each command the same ones; the `Next:` line each command prints repeats them. `evidence`, `try` and `finish` take `--id <id>` (the optimization, or the end of its id; default: the latest).
+
+| `start` option                                      | Description                                                                                                                                     |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--variant <name>`                                  | The config's variant the candidates build on. Each candidate runs as a copy of it with the candidate's `tools`. Default: the config's baseline. |
+| `--tool <names...>`                                 | The tools candidates may change: names, or `server.tool`. Each must name one served tool. Default: every tool.                                  |
+| `--metric <name>`                                   | What to improve: `passRate` (the default), `trialPassRate`, or a variant metric key such as `tool_search_hit_rate` or `input_tokens_mean`.      |
+| `--better <direction>`                              | `higher` (the default) or `lower`, for tokens, cost or time.                                                                                    |
+| `--max-variants <n>`                                | The most candidates to run, across every round. Default: 6.                                                                                     |
+| `--regression-check <c>`                            | What breaks a regression case: `significant` (the default: a case or group clearly got worse) or `any-case` (one regressed case).               |
+| `--allow-regressions`                               | Let a candidate that breaks regression cases win.                                                                                               |
+| `--case`, `--filter-tag`, `--max-cases`, `--trials` | Narrow every run of the optimization, as for `run`.                                                                                             |
+| `--env <name>`, `--env-option <k=v>`                | Where every run collects its trials, as for `run`: `local`, `docker`, or a plugin environment.                                                  |
+
+### What it stores
+
+Each run is an ordinary run in the eval's `runs/`, with `optimization` in its `run.json` (the optimization's id, and `baseline`, `grouping` or `round` with its number) and the tools the servers served. `mst open <run-id>` opens any of them. They never become the eval's `latest.json`, so `mst run` keeps comparing with your last ordinary run.
+
+`optimization.json` (`mst.optimization/v1`) names those runs, the base variant, the metric, the budget, the rules and every round's candidates. Opening the optimization reads the runs and scores them again, so its numbers always come from the stored trials. The optimization's runs aren't resumed with `mst run --resume`, because resumed trials would run against tools nobody checked. A round whose run is missing trials (its shards ended early) runs again in full with `try --retry`. When a run is stored complete and then a step fails (a result store that rejects it, say), the optimization keeps the run.
+
+### How "clearly better" is decided
+
+A candidate is clearly better when its metric went up and a paired sign-flip test over the capability cases gives p < 0.025 divided by the number of candidates tried. Each candidate tried makes the threshold stricter, so a verdict `try` printed can turn inconclusive after later rounds, never the other way. With 6 candidates and every capability case improving, that takes at least 8 capability cases (p = 1/256); more trials per case help when cases improve only some of the time. Held-out cases never rank candidates, so their change is shown uncorrected. A variant metric with no per-case scores (`input_tokens_mean`) isn't tested: a gain counts unless it breaks regression cases.
 
 ## `runs` - Detached Runs
 
