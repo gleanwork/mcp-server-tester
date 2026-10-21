@@ -4,6 +4,7 @@
  * catalog server read from a copy of its catalog, so a test can change what
  * the server serves.
  */
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +15,7 @@ import {
   readOptimizationRecord,
   writeOptimizationRecord,
 } from './optimizationFormat.js';
+import { resumeRun } from './runEval.js';
 import { readRunDirectory, runsDirectory } from './runFormat.js';
 import {
   CandidateError,
@@ -365,9 +367,12 @@ describe('stored tool optimization', () => {
     await editJson(path.join(path.dirname(configPath), 'cases.json'), (d) => {
       (d.cases as Array<{ input: string }>)[0]!.input = 'Something else';
     });
+    const before = await runIds(optimization.evalDirectory);
     await expect(optimization.tryCandidates([verbose])).rejects.toThrow(
-      /datasets changed/
+      /datasets changed[\s\S]*Nothing ran/
     );
+    // Refused before any client started: no run.
+    expect(await runIds(optimization.evalDirectory)).toEqual(before);
     const record = await readOptimizationRecord(optimization.directory);
     expect(record.rounds).toEqual([]);
   }, 120_000);
@@ -384,9 +389,11 @@ describe('stored tool optimization', () => {
         { type: 'usecase/judge/keywords', keywords: ['incident'] },
       ];
     });
+    const before = await runIds(optimization.evalDirectory);
     await expect(optimization.tryCandidates([verbose])).rejects.toThrow(
       /judges or their options changed/
     );
+    expect(await runIds(optimization.evalDirectory)).toEqual(before);
   }, 120_000);
 
   it('runs a round that did not finish again, and nothing else until then', async () => {
@@ -418,27 +425,12 @@ describe('stored tool optimization', () => {
     expect(record.rounds[0]?.runId).toBe(retried.runId);
   }, 120_000);
 
-  it('refuses to continue past a round whose run is missing trials', async () => {
+  it('runs a round whose run is missing trials again, instead of resuming it', async () => {
     const { configPath } = await evalDir();
     const optimization = await startToolOptimization({
       evalConfig: target(configPath),
     });
     const { runId } = await optimization.tryCandidates([concise]);
-    // In this session: a later round with a run that wasn't scored.
-    optimization.record.rounds.push({
-      round: 1,
-      createdAt: new Date().toISOString(),
-      proposer: 'agent',
-      candidates: [verbose],
-      runId: 'partial-run',
-    });
-    await expect(optimization.tryCandidates([verbose])).rejects.toThrow(
-      /Round 1's run partial-run is missing trials/
-    );
-    await expect(optimization.finish()).rejects.toThrow(/missing trials/);
-    optimization.record.rounds.pop();
-
-    // In another process: the stored run says so.
     const runJson = path.join(
       runsDirectory(optimization.evalDirectory),
       runId,
@@ -447,9 +439,107 @@ describe('stored tool optimization', () => {
     await editJson(runJson, (run) => {
       (run.phases as { collect: string }).collect = 'partial';
     });
+    // Resumed trials would run against unchecked tools.
     await expect(
-      openToolOptimization({ evalConfig: target(configPath) })
-    ).rejects.toThrow(/missing trials[\s\S]*mst run --resume/);
+      resumeRun({ run: runId, configPath, rootDir: path.dirname(configPath) })
+    ).rejects.toThrow(/isn't resumed[\s\S]*mst optimize try --retry/);
+
+    const reopened = await openToolOptimization({
+      evalConfig: target(configPath),
+    });
+    expect(reopened.pendingRound?.round).toBe(0);
+    expect(reopened.state.rounds).toEqual([]);
+    await expect(reopened.tryCandidates([verbose])).rejects.toThrow(
+      /Round 0 didn't finish/
+    );
+    const retried = await reopened.retry();
+    expect(retried.runId).not.toBe(runId);
+    expect(retried.round.candidates.map((c) => c.variant.id)).toEqual([
+      'concise',
+    ]);
+    const record = await readOptimizationRecord(reopened.directory);
+    expect(record.rounds.map((round) => round.runId)).toEqual([retried.runId]);
+  }, 120_000);
+
+  it('keeps a complete run when storing it in the result store fails', async () => {
+    const { configPath } = await evalDir();
+    // A file where the store's directory would go: every upload fails.
+    const blocker = path.join(path.dirname(configPath), 'blocker');
+    await fs.writeFile(blocker, '');
+    const evalConfig = {
+      ...target(configPath),
+      results: `file:${path.join(blocker, 'runs')}`,
+    };
+    const optimization = await startToolOptimization({ evalConfig });
+    expect(optimization.record.grouping.runId).toBeDefined();
+    const tried = await optimization.tryCandidates([verbose]);
+    expect(tried.round.candidates.map((c) => c.metricValue)).toEqual([1]);
+    const record = await readOptimizationRecord(optimization.directory);
+    expect(record.rounds[0]?.runId).toBe(tried.runId);
+    // Each run once: nothing was collected again.
+    expect(await runIds(optimization.evalDirectory)).toHaveLength(3);
+  }, 120_000);
+
+  it('runs the grouping run before the next round when it is still to run', async () => {
+    const { configPath } = await evalDir();
+    const started = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    // As a stop during the grouping run leaves the record.
+    started.record.grouping = { source: 'grouping-run' };
+    await writeOptimizationRecord(started.evalDirectory, started.record);
+
+    const reopened = await openToolOptimization({
+      evalConfig: target(configPath),
+    });
+    expect(reopened.state.grouping).toBeUndefined();
+    const before = await runIds(reopened.evalDirectory);
+    await reopened.tryCandidates([verbose]);
+    const record = await readOptimizationRecord(reopened.directory);
+    expect(record.grouping.runId).toBeDefined();
+    expect(record.grouping.runId).not.toBe(started.record.grouping.runId);
+    expect(reopened.state.grouping).toBeDefined();
+    expect(await runIds(reopened.evalDirectory)).toHaveLength(
+      before.length + 2
+    );
+  }, 120_000);
+
+  it('lets one process step an optimization at a time', async () => {
+    const { configPath } = await evalDir();
+    const optimization = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    const lock = path.join(optimization.directory, 'lock');
+    const holder = {
+      pid: process.pid,
+      host: os.hostname(),
+      since: new Date().toISOString(),
+      step: 'run a round',
+    };
+    await fs.writeFile(lock, JSON.stringify(holder));
+    await expect(optimization.tryCandidates([verbose])).rejects.toThrow(
+      new RegExp(`in use: process ${process.pid}[\\s\\S]*delete`)
+    );
+    await expect(optimization.finish()).rejects.toThrow(/in use/);
+
+    // A lock whose process is gone is taken over.
+    const gone = spawnSync(process.execPath, ['-e', '']).pid;
+    await fs.writeFile(lock, JSON.stringify({ ...holder, pid: gone }));
+    await optimization.tryCandidates([verbose]);
+    await expect(fs.access(lock)).rejects.toThrow();
+
+    // A session whose record another process stepped since it read it.
+    const first = await openToolOptimization({
+      evalConfig: target(configPath),
+    });
+    const second = await openToolOptimization({
+      evalConfig: target(configPath),
+    });
+    await second.tryCandidates([concise]);
+    await expect(first.finish()).rejects.toThrow(/changed since this process/);
+    const record = await readOptimizationRecord(optimization.directory);
+    expect(record.rounds).toHaveLength(2);
+    expect(record.finished).toBeUndefined();
   }, 120_000);
 
   it('shows evidence without the held-out cases', async () => {

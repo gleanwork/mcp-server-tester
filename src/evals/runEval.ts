@@ -234,6 +234,13 @@ export interface RunEvalOptions {
    */
   expectedServedTools?: readonly ListedServerTools[];
   /**
+   * Called once before any client starts, with what run.json will record
+   * about the run's datasets, judges and variants. Throwing stops the run
+   * there, before it costs anything (a tool optimization's round refuses a
+   * setup that differs from its baseline's).
+   */
+  beforeCollect?: (planned: PlannedRun) => void;
+  /**
    * The tool optimization this run is for, recorded in run.json. Such a run
    * never becomes the eval's latest run.
    */
@@ -271,6 +278,14 @@ export interface RunEvalOptions {
    * store extension, `<namespace>/result-store/<name>`.
    */
   results?: string;
+}
+
+/** What a run will record about its setup, before any client starts (`beforeCollect`). */
+export interface PlannedRun {
+  datasets: Array<{ name: string; contentHash: string }>;
+  judges: Array<{ type: string; level: string; optionsHash: string }>;
+  /** Each variant's setup, as run.json's variants record it. */
+  variants: Array<{ name: string } & Record<string, unknown>>;
 }
 
 export interface RunEvalResult {
@@ -1144,6 +1159,16 @@ export async function resumeRun(
     throw new Error(
       `Run ${run.runId} is a regrade of ${run.gradedFrom}: resume ${run.gradedFrom} instead.`
     );
+  // Resumed trials would run against whatever the servers serve now,
+  // unchecked against the optimization's baseline.
+  if (run.optimization)
+    throw new Error(
+      `Run ${run.runId} is the ${run.optimization.role} of tool optimization ${run.optimization.id}, so it isn't resumed: its servers' tools must be checked again. ${
+        run.optimization.role === 'round'
+          ? 'Run the round again with mst optimize try --retry.'
+          : 'Start the optimization again with mst optimize start.'
+      }`
+    );
   const trials = await readRunTrials(directory);
   const missing = trials.filter(isMissingTrial).length;
   if (missing === 0)
@@ -1817,6 +1842,23 @@ async function evaluate(
         servedTools.set(variant.name, listed);
       }
     }
+
+    if (options.beforeCollect && !replay)
+      options.beforeCollect({
+        // As run.json records them: the narrowed cases, once per dataset.
+        datasets: canonicalDatasets
+          .map(({ dataset }) => narrowEvalCases(dataset, evalConfig, narrowing))
+          .filter((dataset) => dataset.cases.length > 0)
+          .map((dataset) => ({
+            name: dataset.name,
+            contentHash: datasetContentHash(dataset),
+          })),
+        judges: judgeRecords(evalConfig),
+        variants: variants.map((variant) => ({
+          name: variant.name,
+          ...variantSetup(evalConfig, variant, runKey),
+        })),
+      });
 
     // In an environment, every variant's trials are collected first, on
     // shards that each hold whole cases (ADR 0004); the loop below grades them.
