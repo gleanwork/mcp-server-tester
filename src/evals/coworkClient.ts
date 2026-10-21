@@ -41,6 +41,7 @@ import { coworkManagedPluginSettings } from './cowork/managedSettings.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import {
   CoworkDriverError,
+  CoworkHitlError,
   type CoworkDriverTelemetry,
 } from './cowork/driver.js';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
@@ -357,6 +358,8 @@ async function runBatch(
         const startedAtMs = Date.now();
         const deadlineAt = startedAtMs + config.timeout;
         let hitlError: string | undefined;
+        // The HITL check failed without acting on the app (CoworkHitlError).
+        let hitlUntouched = false;
         let hitlWarning: string | undefined;
         let awaitingUser = false;
         let sessionPath: string;
@@ -483,6 +486,8 @@ async function runBatch(
             hitlWarning = message;
           } else {
             hitlError = message;
+            hitlUntouched =
+              error instanceof CoworkHitlError && !error.touchedUi;
           }
           if (
             error instanceof CoworkDriverError &&
@@ -625,14 +630,23 @@ async function runBatch(
                   },
                 }
               : {}),
-            error: nativeResult.error ?? hitlError,
+            // A HITL check that failed without acting on the app can't have
+            // changed a task that went on to finish: its answer stands, and
+            // the failure is kept as a warning. One that may have acted fails
+            // the case.
+            error:
+              nativeResult.error ?? (hitlUntouched ? undefined : hitlError),
             telemetry: {
               source: 'claude-native',
               costScope: 'native-inference-only',
               ...trace.telemetry,
               nativeSessionId: trace.candidate.id,
               ...correlationTelemetry(trace),
-              ...(hitlWarning ? { hitlWarning } : {}),
+              ...(hitlWarning
+                ? { hitlWarning }
+                : hitlUntouched && hitlError && !nativeResult.error
+                  ? { hitlWarning: hitlError }
+                  : {}),
             },
             llmDurationMs: trace.llmDurationMs,
           };

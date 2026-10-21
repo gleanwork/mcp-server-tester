@@ -27,12 +27,26 @@ class DriverFailure(RuntimeError):
     pass
 
 
+# A scan that can't finish: the app's tree is too large to walk, or walking
+# it would outlast the call. Nothing is known about the controls, so nothing
+# was found or acted on.
+SCAN_INCOMPLETE = {"accessibility_tree_budget", "accessibility_scan_timeout"}
+
+# Controls never live inside a table: an answer's markdown table, or a
+# presented spreadsheet's preview, whose cells can number in the thousands.
+# The scan skips their subtrees.
+SKIPPED_ROLES = {"table", "tree table"}
+
+
 class Desktop:
     def __init__(self) -> None:
         import gi
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
         self.api = Atspi
+        # A scan gives up (accessibility_scan_timeout) past this monotonic
+        # time, so the call still returns its receipt before it's killed.
+        self.scan_deadline: float | None = None
 
     def application(self):
         root = self.api.get_desktop(0)
@@ -55,9 +69,15 @@ class Desktop:
             seen += 1
             if seen > 5000:
                 raise DriverFailure("accessibility_tree_budget")
+            deadline = getattr(self, "scan_deadline", None)
+            if seen % 50 == 0 and deadline is not None and time.monotonic() > deadline:
+                raise DriverFailure("accessibility_scan_timeout")
             try:
                 states = node.get_state_set()
-                if (node.get_role_name() in roles and self.label(node) in names
+                role = node.get_role_name()
+                if role in SKIPPED_ROLES:
+                    continue
+                if (role in roles and self.label(node) in names
                         and states.contains(self.api.StateType.VISIBLE)
                         and (not require_showing or states.contains(self.api.StateType.SHOWING))
                         and (not require_enabled or (
@@ -187,6 +207,7 @@ class Driver:
         self.deadline = self.started + timeout_ms / 1000
         self.max_actions = max_actions
         self.actions = 0
+        desktop.scan_deadline = self.deadline - min(0.5, timeout_ms / 10_000)
 
     def remaining(self) -> float:
         remaining = self.deadline - time.monotonic()
@@ -302,15 +323,22 @@ class Driver:
         names = {"Allow once", "Allow"}
         if approve_writes:
             names |= {"Always allow", "Allow always", "Full access", "Allow full access"}
-        controls = self.desktop.controls(names, {"button"})
-        if not controls:
-            # Cowork confirms built-in tools with an inline card whose primary
-            # action names the write (artifacts: Create/Update; scheduled tasks:
-            # Schedule/Update/Run/Delete) beside Cancel, not an Allow prompt.
-            # 3p desktops offer no Skip all approvals mode, so approve the card
-            # itself. Only the write policy may do this; read-only refuses below.
-            if self.desktop.controls({"Cancel"}, {"button"}):
-                controls = self.desktop.controls(CARD_ACTIONS, {"button"})
+        try:
+            controls = self.desktop.controls(names, {"button"})
+            if not controls:
+                # Cowork confirms built-in tools with an inline card whose primary
+                # action names the write (artifacts: Create/Update; scheduled tasks:
+                # Schedule/Update/Run/Delete) beside Cancel, not an Allow prompt.
+                # 3p desktops offer no Skip all approvals mode, so approve the card
+                # itself. Only the write policy may do this; read-only refuses below.
+                if self.desktop.controls({"Cancel"}, {"button"}):
+                    controls = self.desktop.controls(CARD_ACTIONS, {"button"})
+        except DriverFailure as failure:
+            # A scan that couldn't finish, before any action: no prompt seen
+            # this pass. The caller scans again; it doesn't end HITL.
+            if str(failure) not in SCAN_INCOMPLETE:
+                raise
+            return {**self.receipt("hitl_checked"), "scan": "incomplete"}
         if not controls:
             return self.receipt("hitl_checked")
         # Do not choose among unrelated prompts or continue arbitrary onboarding.

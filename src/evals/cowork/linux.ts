@@ -53,6 +53,7 @@ export {
 import {
   CoworkDriverError,
   CoworkHitlBudgetError,
+  CoworkHitlError,
   CoworkUserQuestionError,
   type CoworkDriverOptions,
   type SemanticDesktopTelemetry,
@@ -79,6 +80,8 @@ interface Receipt {
   action_count: number;
   duration_ms: number;
   errorCode?: string;
+  /** HITL's scan couldn't finish (too large, or out of time): it saw nothing. */
+  scanIncomplete?: boolean;
 }
 
 async function readSettings(file: string): Promise<Record<string, unknown>> {
@@ -384,13 +387,15 @@ async function restartDesktop(
 function telemetry(
   started: number,
   actions: number,
-  accounting: 'complete' | 'partial'
+  accounting: 'complete' | 'partial',
+  incompleteScans = 0
 ): SemanticDesktopTelemetry {
   return {
     driver: 'linux-desktop',
     accounting,
     duration_ms: Math.max(0, Date.now() - started),
     action_count: actions,
+    ...(incompleteScans > 0 ? { incomplete_scans: incompleteScans } : {}),
     planner: { status: 'not-applicable' },
     cost: { status: 'not-applicable' },
   };
@@ -421,6 +426,7 @@ function receipt(stdout: string): Receipt | undefined {
         typeof r.error === 'string' && /^[a-z_]{1,64}$/.test(r.error)
           ? r.error
           : undefined,
+      ...(r.scan === 'incomplete' ? { scanIncomplete: true } : {}),
     };
   } catch {
     return undefined;
@@ -802,6 +808,10 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       throw new Error('Linux HITL requires a bound native completion check.');
     const started = Date.now();
     let actions = 0;
+    // Passes whose scan couldn't finish: they saw no prompt, and HITL went on.
+    let incompleteScans = 0;
+    // Set while the driver runs: a failure then may have acted on the app.
+    let driving = false;
     const budget = options.maxActions ?? 12;
     try {
       while (Date.now() < options.deadlineAt) {
@@ -809,24 +819,27 @@ export const linuxCoworkPlatform: CoworkPlatform = {
           return {
             status: 'hitl_checked',
             action_count: actions,
-            telemetry: telemetry(started, actions, 'complete'),
+            telemetry: telemetry(started, actions, 'complete', incompleteScans),
           };
         if (await options.awaitingUser?.())
           throw new CoworkUserQuestionError(
             'Cowork is waiting for an answer to a question (AskUserQuestion); a headless run cannot answer it. No resubmission attempted.',
-            telemetry(started, actions, 'partial')
+            telemetry(started, actions, 'partial', incompleteScans)
           );
         if (actions >= budget)
           throw new CoworkHitlBudgetError(
             'Linux HITL action budget exhausted.',
-            telemetry(started, actions, 'partial')
+            telemetry(started, actions, 'partial', incompleteScans)
           );
+        driving = true;
         const result = await execute(
           'hitl',
           { approveWriteTools: options.approveWriteTools === true },
           { ...options, maxActions: budget - actions }
         );
+        driving = false;
         actions += result.action_count;
+        if (result.scanIncomplete) incompleteScans += 1;
         await delay(
           Math.min(500, Math.max(0, options.deadlineAt - Date.now()))
         );
@@ -841,14 +854,24 @@ export const linuxCoworkPlatform: CoworkPlatform = {
         error instanceof CoworkDriverError
           ? (error.telemetry?.action_count ?? 0)
           : 0;
-      throw new CoworkDriverError(
-        'Linux HITL failed for the bound native session.',
-        telemetry(started, actions + partialActions, 'partial')
+      // A driver call that failed without a receipt may have acted.
+      const unknown =
+        driving &&
+        !(error instanceof CoworkDriverError && error.telemetry !== undefined);
+      throw new CoworkHitlError(
+        `Linux HITL failed for the bound native session: ${error instanceof Error ? error.message : String(error)}`,
+        telemetry(
+          started,
+          actions + partialActions,
+          'partial',
+          incompleteScans
+        ),
+        actions + partialActions > 0 || unknown
       );
     }
     throw new CoworkDriverError(
       'Linux HITL deadline exceeded.',
-      telemetry(started, actions, 'partial')
+      telemetry(started, actions, 'partial', incompleteScans)
     );
   },
 };

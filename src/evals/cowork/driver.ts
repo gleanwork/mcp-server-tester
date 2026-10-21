@@ -49,6 +49,11 @@ export interface SemanticDesktopTelemetry {
   accounting: 'complete' | 'partial';
   duration_ms: number;
   action_count: number;
+  /**
+   * HITL passes whose screen scan couldn't finish (the app's tree too large,
+   * or the call out of time). Each saw no prompt; HITL scanned again.
+   */
+  incomplete_scans?: number;
   planner: { status: 'not-applicable' };
   cost: { status: 'not-applicable' };
 }
@@ -82,6 +87,22 @@ export class CoworkDriverError extends Error {
 
 export class CoworkHitlBudgetError extends CoworkDriverError {
   override readonly kind = 'hitl-budget-exhausted';
+}
+
+/**
+ * The HITL check stopped with an error. `touchedUi` says whether it may have
+ * acted on the app: it took an action, or a driver call ended without a
+ * receipt, so whether it acted is unknown. A check that touched nothing can't
+ * have changed what the task did.
+ */
+export class CoworkHitlError extends CoworkDriverError {
+  constructor(
+    message: string,
+    telemetry: CoworkDriverTelemetry | undefined,
+    readonly touchedUi: boolean
+  ) {
+    super(message, telemetry);
+  }
 }
 
 /** The native task asked the user a question; nothing headless can answer it. */
