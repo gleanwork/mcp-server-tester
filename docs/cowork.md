@@ -229,7 +229,8 @@ backend for the current OS. Cross-platform provider combinations fail before UI
 activity rather than silently selecting another driver.
 
 The caller supplies a working Claude Desktop session with the desired model/MCP
-settings. MST accesses that session through X11, D-Bus, and AT-SPI (Python `gi`).
+settings. MST accesses that session through X11, D-Bus, and AT-SPI (Python `gi`),
+and `xclip` to paste a prompt longer than a deep link carries.
 Run MST in the prepared desktop's filesystem and session context. `DISPLAY` and `DBUS_SESSION_BUS_ADDRESS` are
 required. `MST_COWORK_PYTHON` can select a prepared system interpreter; MST does not
 install Linux desktop dependencies. The packaged `cowork-linux-runtime` export
@@ -289,7 +290,14 @@ handler, then attempts one semantic `Start task` action. Alternatively, set
 `MST_COWORK_URL_OPENER` to an absolute executable path that accepts the URL as its
 sole argument. The caller owns protocol registration and application launch flags;
 MST does not select an application binary or sandbox policy. The prompt is preserved
-unchanged, and the opener runs without a shell and with a bounded deadline. There is no keyboard fallback or retry after an
+unchanged, and the opener runs without a shell and with a bounded deadline. Claude
+keeps only the first 14,336 characters of a deep link's prompt, so a longer one
+(1–2.5% of the Cortex eval sets' cases, up to 135,000 characters) goes another
+way: an empty new-task link, then the prompt pasted into the composer (`xclip`
+holds it on the clipboard; AT-SPI presses Ctrl+V), checked against the composer's
+text before `Start task`. A bound session whose stored prompt is only the
+prompt's beginning fails as an infrastructure failure (`failureKind: "input"`):
+its answer says nothing about the case. There is no keyboard fallback or retry after an
 uncertain action. The shared native collector still requires a new exact-prompt
 session. HITL only operates on approval controls while that bound session is pending;
 it never types, creates tasks, or continues onboarding. Unclassified approval prompts
@@ -447,8 +455,8 @@ added. MST binds the case to the session its submission created: a metadata
 path absent from the per-case snapshot, with a recent creation timestamp (five
 seconds of clock tolerance). Existing sessions remain excluded even if updated.
 A new session whose native `initialMessage` equals the prompt binds at once.
-Claude can store a prompt changed from what the deep link carried (a long
-prompt truncated, say), so when no new session has it exactly, the only new
+Claude can store a prompt changed from what the deep link carried (its
+surrounding quotes dropped, say), so when no new session has it exactly, the only new
 session binds, once it has stayed the only one for two polls. Two new sessions without exactly one exact match are
 ambiguous, and the case fails. The trace's `correlation` says which binding
 held (`exact-initial-prompt` or `only-new-session`); for `only-new-session`,

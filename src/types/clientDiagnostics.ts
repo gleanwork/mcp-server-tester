@@ -7,7 +7,9 @@ export interface ClientDiagnostics {
    * its state (and the case's isolation) is unknown. `missing`: the trial's
    * shard ended before it ran or before its result came back (ADR 0004).
    * `artifacts`: the case ran, but its client artifacts couldn't be copied
-   * for the judges.
+   * for the judges. `input`: the client didn't get the case's whole input
+   * (Claude kept only the beginning of a long prompt), so its answer says
+   * nothing about the case.
    */
   failureKind?:
     | 'startup'
@@ -17,7 +19,8 @@ export interface ClientDiagnostics {
     | 'not-submitted'
     | 'cleanup'
     | 'missing'
-    | 'artifacts';
+    | 'artifacts'
+    | 'input';
   claudeStartup?: {
     status: 'ready' | 'failed' | 'missing';
     elapsedMs: number;

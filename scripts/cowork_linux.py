@@ -37,6 +37,18 @@ SCAN_INCOMPLETE = {"accessibility_tree_budget", "accessibility_scan_timeout"}
 # The scan skips their subtrees.
 SKIPPED_ROLES = {"table", "tree table"}
 
+# Claude Desktop keeps this many characters of a new-task deep link's prompt
+# and drops the rest: the model would get a truncated prompt. A longer prompt
+# is pasted into the empty task's composer instead (140,000 characters
+# measured, in about a second).
+DEEP_LINK_PROMPT_CHARS = 14_336
+
+# X's ControlMask: AT-SPI locks it around a key, as a held Ctrl.
+CONTROL_MASK = 1 << 2
+
+# The composer's entry, in every Cowork view.
+COMPOSER = "Write your prompt to Claude"
+
 
 class Desktop:
     def __init__(self) -> None:
@@ -110,6 +122,60 @@ class Desktop:
         if not node.is_action() or not node.do_action(0):
             # Even a failed action acknowledgement may have had an effect.
             raise DriverFailure("action_acknowledgement_uncertain")
+
+    def composer_text(self, entry) -> str:
+        """The composer's text: its paragraphs' names, one per line."""
+        lines, pending = [], [entry]
+        while pending:
+            node = pending.pop()
+            for index in reversed(range(node.get_child_count())):
+                child = node.get_child_at_index(index)
+                if child.get_role_name() in ("static", "text") and child.get_name():
+                    lines.append(child.get_name())
+                pending.append(child)
+        return "\n".join(lines)
+
+    def paste_prompt(self, prompt: str, timeout: float) -> None:
+        # Into the empty composer: the clipboard holds the prompt (xclip, which
+        # serves it until killed) and Ctrl+V pastes it. Synthesized typing
+        # drops a long string, and the composer has no editable-text interface.
+        entries = self.controls({COMPOSER}, {"entry"})
+        if len(entries) != 1:
+            raise DriverFailure("composer_missing_or_ambiguous")
+        entry = entries[0]
+        if self.composer_text(entry).strip():
+            raise DriverFailure("composer_not_empty")
+        try:
+            clipboard = subprocess.Popen(
+                ["xclip", "-selection", "clipboard", "-quiet"], stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            raise DriverFailure("clipboard_unavailable") from None
+        try:
+            clipboard.stdin.write(prompt.encode("utf-8"))
+            clipboard.stdin.close()
+            # xclip owns the selection once it has read its input.
+            time.sleep(0.5)
+            if clipboard.poll() is not None:
+                raise DriverFailure("clipboard_unavailable")
+            if not self.api.Component.grab_focus(entry):
+                raise DriverFailure("composer_not_focused")
+            self.api.generate_keyboard_event(CONTROL_MASK, None, self.api.KeySynthType.LOCKMODIFIERS)
+            try:
+                self.api.generate_keyboard_event(0x76, None, self.api.KeySynthType.SYM)
+            finally:
+                self.api.generate_keyboard_event(CONTROL_MASK, None, self.api.KeySynthType.UNLOCKMODIFIERS)
+            # The pasted text, up to whitespace: the composer's paragraphs
+            # don't keep blank lines. Claude records the exact prompt, which
+            # MST checks against the case's.
+            expected = " ".join(prompt.split())
+            deadline = time.monotonic() + timeout
+            while " ".join(self.composer_text(entry).split()) != expected:
+                if time.monotonic() > deadline:
+                    raise DriverFailure("prompt_not_pasted")
+                time.sleep(0.2)
+        finally:
+            clipboard.kill()
 
     def open_prompt(self, prompt: str, timeout: float) -> None:
         configured_opener = os.environ.get("MST_COWORK_URL_OPENER")
@@ -317,11 +383,28 @@ class Driver:
                     self.action(lambda: self.desktop.activate(tabs[0]))
             time.sleep(min(0.1, self.remaining()))
 
+    def wait_for_empty_composer(self) -> None:
+        # The empty task's Cowork composer: its Start task, disabled while empty.
+        while True:
+            left = self.remaining()
+            starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False,
+                                           require_showing=False)
+            if len(starts) == 1 and not self.desktop.controls({"Start task"}, {"button"},
+                                                              require_showing=False):
+                return
+            time.sleep(min(0.1, left))
+
     def submit(self, prompt: str) -> dict:
         if not isinstance(prompt, str) or not prompt.strip():
             raise DriverFailure("invalid_prompt")
         self.select_cowork()
-        self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
+        if len(prompt) <= DEEP_LINK_PROMPT_CHARS:
+            self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
+        else:
+            # Too long for the link: an empty task, then the prompt pasted.
+            self.action(lambda: self.desktop.open_prompt("", self.remaining()))
+            self.wait_for_empty_composer()
+            self.action(lambda: self.desktop.paste_prompt(prompt, self.remaining()))
         revealed = False
         while True:
             self.remaining()
