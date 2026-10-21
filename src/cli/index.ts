@@ -10,6 +10,18 @@ import { token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
 import { grade } from './commands/grade/index.js';
+import {
+  optimizeEvidence,
+  optimizeFinish,
+  optimizeStart,
+  optimizeTry,
+} from './commands/optimize/index.js';
+import type {
+  OptimizeEvidenceOptions,
+  OptimizeStartOptions,
+  OptimizeTargetOptions,
+  OptimizeTryOptions,
+} from './commands/optimize/index.js';
 import { batch } from './commands/batch/index.js';
 import { collect } from './commands/collect/index.js';
 import { gradeShardCommand } from './commands/grade-shard/index.js';
@@ -384,6 +396,132 @@ program
         dryRun: options.dryRun,
       })
   );
+
+// Optimize command: a stored tool optimization, a step at a time (ADR 0008)
+const optimizeCommand = program
+  .command('optimize')
+  .description(
+    "Improve a server's tool metadata: measure it, try candidates in rounds, and get a recommendation"
+  );
+/** The flags every optimize command takes to find the eval and its optimization. */
+function optimizeTarget(command: Command, withId = true): Command {
+  command
+    .requiredOption('-c, --config <path>', 'Path to an eval config JSON')
+    .option('--plugins <paths...>', 'Plugin modules to load before each run')
+    .option(
+      '--output-dir <dir>',
+      "The eval's directory: runs in <dir>/runs/, optimizations in <dir>/optimizations/"
+    )
+    .option(
+      '--secrets-file <path>',
+      'JSON or dotenv-style runtime secrets file'
+    )
+    .option(
+      '--store <store>',
+      'Credential store for connector servers: a directory or <namespace>/credential-store/<name>'
+    )
+    .option(
+      '--results <store>',
+      'Also keep each run in a result store: gs://<bucket>/<prefix>, file:<dir>, or <namespace>/result-store/<name>'
+    )
+    .option(
+      '--root-dir <dir>',
+      'Fallback directory for relative config paths; default location for results',
+      '.'
+    );
+  if (withId)
+    command.option(
+      '--id <id>',
+      'The optimization, or the end of its id (default: the latest)'
+    );
+  return command;
+}
+optimizeTarget(
+  optimizeCommand
+    .command('start')
+    .description(
+      'Measure the current tool metadata (the baseline) and store a new optimization'
+    ),
+  false
+)
+  .option(
+    '--variant <name>',
+    "The config's variant the candidates build on (default: its baseline)"
+  )
+  .option(
+    '--tool <names...>',
+    'The tools candidates may change: a name, or server.tool (default: every tool)'
+  )
+  .option(
+    '--metric <name>',
+    'The variant metric to improve: passRate (default), trialPassRate, or a metric key'
+  )
+  .option('--better <direction>', 'higher (default) or lower')
+  .option(
+    '--max-variants <n>',
+    'Most candidates to run, across every round (default: 6)'
+  )
+  .option(
+    '--regression-check <check>',
+    'What breaks a regression case: significant (default) or any-case'
+  )
+  .option(
+    '--allow-regressions',
+    'Let a candidate that breaks regression cases win'
+  )
+  .option('--case <ids...>', 'Run only these case ids, every run')
+  .option(
+    '--filter-tag <tags...>',
+    'Run the cases with any of these tags, every run'
+  )
+  .option('--max-cases <n>', 'Cases per dataset, every run')
+  .option('--trials <n>', 'Trials per case, every run')
+  .option(
+    '--env <name>',
+    'Where every run collects trials: local (the default), docker, or <namespace>/env/<name>'
+  )
+  .option(
+    '--env-option <key=value>',
+    'An environment option; repeat for more',
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[]
+  )
+  .action((options: OptimizeStartOptions) => optimizeStart(options));
+optimizeTarget(
+  optimizeCommand
+    .command('evidence')
+    .description(
+      'Show the tools, the baseline and each round so far: what the next candidates can learn from (held-out cases left out)'
+    )
+)
+  .option('--json', 'Print the evidence as JSON, with full input schemas')
+  .action((options: OptimizeEvidenceOptions) => optimizeEvidence(options));
+optimizeTarget(
+  optimizeCommand
+    .command('try')
+    .argument(
+      '[file]',
+      'Candidates as JSON: [{ "id", "description", "tools": { "<tool>": { "description" } } }], or - for stdin'
+    )
+    .description(
+      'Check a round of candidates against the served tools, then run them'
+    )
+)
+  .option('--retry', "Run the round that didn't finish again")
+  .option(
+    '--proposer <name>',
+    'Who wrote the candidates, for the record (default: agent)'
+  )
+  .action((file: string | undefined, options: OptimizeTryOptions) =>
+    optimizeTry(file, options)
+  );
+optimizeTarget(
+  optimizeCommand
+    .command('finish')
+    .description(
+      'End the optimization and write its recommendation (recommendation.md)'
+    )
+).action((options: OptimizeTargetOptions) => optimizeFinish(options));
 
 // Cowork setup command
 program
