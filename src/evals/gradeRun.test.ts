@@ -834,4 +834,18 @@ describe('withoutTrialArtifacts', () => {
     expect(stored.results[0]!.response).toEqual({ artifacts: ['report.md'] });
     expect(result.artifacts.dir).toBe('/tmp/session');
   });
+
+  it('copies without one string of the whole summary, which large tool outputs can push past V8’s limit', () => {
+    const stringify = vi.spyOn(JSON, 'stringify');
+    const stored = withoutTrialArtifacts({
+      results: [
+        { id: 'big', artifacts: { dir: '/tmp/x' }, output: 'x'.repeat(1024) },
+      ],
+    });
+    expect(stringify).not.toHaveBeenCalled();
+    stringify.mockRestore();
+    expect(stored).toEqual({
+      results: [{ id: 'big', output: 'x'.repeat(1024) }],
+    });
+  });
 });

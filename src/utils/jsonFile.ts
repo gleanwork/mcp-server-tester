@@ -48,15 +48,21 @@ export async function writeJsonFile(
  * A deep copy with `JSON.parse(JSON.stringify(value))`'s semantics (`toJSON`,
  * `undefined` and functions dropped, non-finite numbers as `null`), built
  * without one string of the whole value, which can pass V8's limit.
+ * `replacer` is `JSON.stringify`'s: called with each key and value (after
+ * `toJSON`), and a property it returns `undefined` for is dropped.
  */
-export function jsonCopy<T>(value: T): T {
-  return copyJson(value, '', new Set()) as T;
+export function jsonCopy<T>(
+  value: T,
+  replacer?: (key: string, value: unknown) => unknown
+): T {
+  return copyJson(value, '', new Set(), replacer) as T;
 }
 
 function copyJson(
   value: unknown,
   key: string,
-  ancestors: Set<object>
+  ancestors: Set<object>,
+  replacer?: (key: string, value: unknown) => unknown
 ): unknown {
   if (
     value !== null &&
@@ -64,6 +70,7 @@ function copyJson(
     typeof (value as { toJSON?: unknown }).toJSON === 'function'
   )
     value = (value as { toJSON(key: string): unknown }).toJSON(key);
+  if (replacer) value = replacer(key, value);
   if (
     value instanceof Number ||
     value instanceof String ||
@@ -92,11 +99,11 @@ function copyJson(
     if (Array.isArray(object))
       return object.map(
         (item: unknown, index) =>
-          copyJson(item, String(index), ancestors) ?? null
+          copyJson(item, String(index), ancestors, replacer) ?? null
       );
     const copy: Record<string, unknown> = {};
     for (const [name, item] of Object.entries(object)) {
-      const copied = copyJson(item, name, ancestors);
+      const copied = copyJson(item, name, ancestors, replacer);
       // Define, not assign: assigning `__proto__` would set the prototype and
       // drop the key, where JSON.parse keeps it as a property.
       if (copied !== undefined)

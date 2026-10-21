@@ -9,6 +9,7 @@ import type {
 import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalResultStore } from './resultStore.js';
 import { joinCaseResults } from './runFormat.js';
+import { readJsonFile } from '../utils/jsonFile.js';
 import {
   DEFAULT_REGRESSION_TAG,
   headlineGroup,
@@ -76,12 +77,10 @@ function localRunHistory(runsDirectory: string): RunHistory {
       return value;
     },
     async cases(runId) {
-      const results = JSON.parse(
-        await fs.readFile(
-          path.join(runsDirectory, runId, 'results.json'),
-          'utf8'
-        )
-      ) as { cases?: EvalCaseResult[] };
+      // In chunks: a run's results can pass V8's string limit.
+      const results = (await readJsonFile(
+        path.join(runsDirectory, runId, 'results.json')
+      )) as { cases?: EvalCaseResult[] };
       return results.cases ?? [];
     },
   };

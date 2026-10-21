@@ -26,6 +26,7 @@ import {
   type GradeShardBundle,
 } from './protocol.js';
 import { shardOf } from './shardedCollect.js';
+import { readJsonFile, writeJsonFile } from '../../utils/jsonFile.js';
 
 export interface GradeInEnvironmentOptions {
   environment: ResolvedEnvironment;
@@ -47,18 +48,16 @@ async function stageRun(
   for (const file of ['run.json', 'summary.json'])
     await fs.copyFile(path.join(source, file), path.join(target, file));
   // The shard's cases' results only: a run's results.json holds every case.
-  const results = JSON.parse(
-    await fs.readFile(path.join(source, 'results.json'), 'utf8')
-  ) as { cases?: Array<{ id?: string }> };
-  await fs.writeFile(
-    path.join(target, 'results.json'),
-    `${JSON.stringify({
-      ...results,
-      cases: (results.cases ?? []).filter(
-        (result) => result.id !== undefined && caseIds.has(result.id)
-      ),
-    })}\n`
-  );
+  // Read and written in chunks: it can pass V8's string limit.
+  const results = (await readJsonFile(path.join(source, 'results.json'))) as {
+    cases?: Array<{ id?: string }>;
+  };
+  await writeJsonFile(path.join(target, 'results.json'), {
+    ...results,
+    cases: (results.cases ?? []).filter(
+      (result) => result.id !== undefined && caseIds.has(result.id)
+    ),
+  });
   for (const variant of prepared.replay.trials.keys())
     for (const caseId of caseIds)
       for (const relative of caseRunPaths(variant, caseId)) {
