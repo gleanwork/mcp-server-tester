@@ -166,17 +166,18 @@ function surfaceable(
 }
 
 /**
- * `result` with the adapter's failure diagnosis as its artifacts, in a
- * temporary directory that copying the artifacts removes. Unchanged when the
- * adapter has none, the case keeps artifacts of its own (a session folder),
- * or the diagnosis fails or times out. Never throws.
+ * `result` with the adapter's failure diagnosis, in a temporary directory
+ * that copying the artifacts removes: its artifacts, or, when the case keeps
+ * artifacts of its own (a timed-out task's session folder), beside them
+ * (`artifacts.diagnosis`). Unchanged when the adapter has none, or the
+ * diagnosis fails or times out. Never throws.
  */
 async function withDiagnosis<Session>(
   adapter: DesktopClientAdapter<Session>,
   session: Session,
   result: ClientRunResult
 ): Promise<ClientRunResult> {
-  if (!adapter.diagnose || result.artifacts) return result;
+  if (!adapter.diagnose || result.artifacts?.diagnosis) return result;
   let dir: string | undefined;
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -192,7 +193,9 @@ async function withDiagnosis<Session>(
     ]);
     return {
       ...result,
-      artifacts: { dir, include: ALL_ARTIFACTS, temporary: true },
+      artifacts: result.artifacts
+        ? { ...result.artifacts, diagnosis: dir }
+        : { dir, include: ALL_ARTIFACTS, temporary: true },
     };
   } catch {
     // Never fails the batch: the case keeps only its error.

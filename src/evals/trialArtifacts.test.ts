@@ -197,6 +197,38 @@ describe('copyArtifacts', () => {
     expect((await fs.stat(own)).isDirectory()).toBe(true);
   });
 
+  it("copies a diagnosis into the trial's own folder, and removes it either way", async () => {
+    const own = await tree({ 'audit.jsonl': '{}', 'secret.json': 'no' });
+    const diagnosis = await tree({
+      'screen.png': 'png',
+      'logs/main.log': 'stalled',
+    });
+    const target = path.join(await tree({}), 'copy');
+    await copyArtifacts(
+      { dir: own, include: ['audit.jsonl'], diagnosis },
+      target
+    );
+    expect(await listed(target)).toEqual([
+      'audit.jsonl',
+      'mst-diagnosis/logs/main.log',
+      'mst-diagnosis/screen.png',
+    ]);
+    await expect(fs.stat(diagnosis)).rejects.toThrow();
+    // The session folder stays.
+    expect((await fs.stat(own)).isDirectory()).toBe(true);
+
+    // A diagnosis that can't be copied loses only itself.
+    const tooBig = await tree({ 'screen.png': 'x'.repeat(10) });
+    const kept = path.join(await tree({}), 'copy');
+    await copyArtifacts(
+      { dir: own, include: ['audit.jsonl'], diagnosis: tooBig },
+      kept,
+      { ...ARTIFACT_LIMITS, fileBytes: 5 }
+    );
+    expect(await listed(kept)).toEqual(['audit.jsonl']);
+    await expect(fs.stat(tooBig)).rejects.toThrow();
+  });
+
   it('defaults to the limits of the native audit', () => {
     expect(ARTIFACT_LIMITS).toEqual({
       fileBytes: 16 * 1024 * 1024,

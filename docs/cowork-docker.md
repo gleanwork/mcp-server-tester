@@ -89,7 +89,7 @@ A case that fails and leaves the desktop in an unknown state (a task that didn't
 - `logs/`: the last 256 KiB of each of Claude Desktop's logs (`main.log`, `cowork_vm_node.log`, `mcp.log`, …)
 - `system.json`: free memory, load, and the free space on the disk Cowork's sessions are on
 
-They can hold what the case's session would have: keep them like any run's results. Capturing them takes no action on the app. A case that kept a session of its own (a task that found Cowork's VM down) keeps that instead.
+They can hold what the case's session would have: keep them like any run's results. Capturing them takes no action on the app. A case that kept a session of its own (a task past its deadline, or one that found Cowork's VM down) keeps the diagnosis beside it, in the session copy's `mst-diagnosis/`. Judges don't see `mst-diagnosis/`: it's evidence of the run, not the task's output.
 
 To look further, keep the container and look inside:
 

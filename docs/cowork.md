@@ -487,8 +487,13 @@ A case has `timeout` milliseconds from submission (default 900000, 15 minutes)
 to complete. When the session hasn't completed by then, the case fails with
 `Native Claude trace deadline exceeded` but keeps what the session did: its
 tool calls, usage, its answer so far, and the session folder, with
-`deadlineExceeded: true` in its telemetry. Set a longer `timeout` in the eval
-config for long tasks.
+`deadlineExceeded: true` in its telemetry. `deadlineWait` says what the task
+was waiting on and since when: `{ "on": "tool", "tool": "mcp__slack__…" }` for a
+tool call with no result yet, else `{ "on": "model" }`, with `idleMs` since its
+last native event; the error says the same (`It had been waiting on the model's
+response for 10m 54s.`). A long wait on the model is a stalled response or one
+very long one: Claude logs a message only when it ends, so the transcript can't
+tell which. Set a longer `timeout` in the eval config for long tasks.
 
 On macOS the driver acts only while Claude is the frontmost app. A click that
 misses Claude's window (on the desktop, say) brings another app forward; before

@@ -30,6 +30,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { DIAGNOSIS_DIR } from '../../evals/allArtifacts.js';
 import type { JudgeCase, JudgeTrial } from '../judgeContract.js';
 
 /** A file added to a workspace, relative to its root. */
@@ -124,11 +125,16 @@ async function copyArtifacts(
 ): Promise<void> {
   const target = confinedPath(root, at);
   await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+  // A failure diagnosis (the screen, the app's logs) isn't the task's output.
+  const diagnosis = join(dir, DIAGNOSIS_DIR);
   await cp(dir, target, {
     recursive: true,
     errorOnExist: true,
     force: false,
-    filter: async (source) => !(await lstat(source)).isSymbolicLink(),
+    filter: async (source) =>
+      source !== diagnosis &&
+      !source.startsWith(`${diagnosis}${sep}`) &&
+      !(await lstat(source)).isSymbolicLink(),
   });
 }
 

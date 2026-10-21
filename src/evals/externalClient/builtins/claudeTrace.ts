@@ -92,6 +92,11 @@ export interface ClaudeTrace {
   usage?: UsageMetrics;
   requestId?: string;
   completedAt?: string;
+  /**
+   * When the task last did something: the latest timestamp among its native
+   * events (ISO). A task that runs past its deadline is idle since then.
+   */
+  lastEventAt?: string;
   llmDurationMs?: number;
   terminalReason?: string;
   isError?: boolean;
@@ -234,6 +239,11 @@ export async function parseClaudeTrace(
     (typeof resultEvent?.result === 'string' ? resultEvent.result : undefined);
   const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(auditEventsForRun, transcriptEventsForRun);
+  const lastEventMs = Math.max(
+    ...combinedEventsForRun
+      .map((event) => metadataTimestampMs(event.timestamp))
+      .filter(Number.isFinite)
+  );
   // Large results are only placeholders in the transcript; while the
   // session's files exist, read back what the model saw. On macOS, Claude
   // Desktop's TMPDIR is MST's native helper scratch.
@@ -256,6 +266,9 @@ export async function parseClaudeTrace(
     usage,
     requestId: resultEvent?.requestId ?? resultEvent?.request_id,
     completedAt: resultEvent?.timestamp,
+    ...(Number.isFinite(lastEventMs)
+      ? { lastEventAt: new Date(lastEventMs).toISOString() }
+      : {}),
     llmDurationMs: resultEvent?.duration_api_ms ?? resultEvent?.duration_ms,
     terminalReason: resultEvent?.terminal_reason,
     isError: resultEvent?.is_error === true,
