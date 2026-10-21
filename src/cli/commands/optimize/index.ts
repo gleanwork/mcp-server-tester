@@ -103,12 +103,30 @@ function targetOf(
   };
 }
 
-/** How the commands that continue an optimization are spelled for this eval. */
+/** A word as a shell reads it back: quoted when it holds more than path characters. */
+function shellWord(word: string): string {
+  return /^[\w@%+=:,./-]+$/.test(word)
+    ? word
+    : `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
+/**
+ * How the commands that continue an optimization are spelled for this eval:
+ * every flag that finds it, or that its runs need, as this command got it.
+ */
 function continueFlags(options: OptimizeTargetOptions, id: string): string {
+  const flag = (name: string, value: string | undefined) =>
+    value ? `${name} ${shellWord(value)}` : '';
   return [
-    `-c ${options.config}`,
-    options.plugins?.length ? `--plugins ${options.plugins.join(' ')}` : '',
-    options.outputDir ? `--output-dir ${options.outputDir}` : '',
+    flag('-c', options.config),
+    options.plugins?.length
+      ? `--plugins ${options.plugins.map(shellWord).join(' ')}`
+      : '',
+    flag('--output-dir', options.outputDir),
+    flag('--root-dir', options.rootDir === '.' ? undefined : options.rootDir),
+    flag('--secrets-file', options.secretsFile),
+    flag('--store', options.store),
+    flag('--results', options.results),
     `--id ${id}`,
   ]
     .filter(Boolean)

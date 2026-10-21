@@ -20,12 +20,22 @@ const FIXTURES = fileURLToPath(
   new URL('../../../../tests/usecases/fixtures', import.meta.url)
 );
 
+/** The words of the command a `Next:` line prints, after `mst`. */
+function nextCommand(stdout: unknown): string[] {
+  const line = String(stdout).match(
+    /Next: mst (optimize evidence [^,\n]+)/
+  )?.[1];
+  expect(line).toBeDefined();
+  return line!.trim().split(' ');
+}
+
 describe('mst optimize', () => {
   let project: BintasticProject;
+  let files: Record<string, string>;
 
   beforeEach(async () => {
     project = await setupProject();
-    await project.write({
+    files = {
       'cases.json': JSON.stringify({
         name: 'triggering',
         cases: [
@@ -88,7 +98,9 @@ describe('mst optimize', () => {
       'bad.json': JSON.stringify([
         { id: 'covers', tools: { read_document: { description: 'Read.' } } },
       ]),
-    });
+      'not-json.json': '[{ id: covers }',
+    };
+    await project.write(files);
   });
 
   afterEach(() => {
@@ -174,6 +186,125 @@ describe('mst optimize', () => {
     expect(markdown).toContain('apply `covers`');
     expect(markdown).toContain('| Capability cases (6) | 0% | 100%');
     expect(markdown).toContain('| Regression cases (1) | 100% | 100%');
+  }, 120_000);
+
+  it('prints Next: commands that find the optimization, and keeps its narrowing', async () => {
+    // The eval in a directory of its own, with its results there too.
+    await project.write({ evals: files });
+    const start = await runBin(
+      'optimize',
+      'start',
+      '-c',
+      'evals/eval.json',
+      '--root-dir',
+      'evals',
+      '--trials',
+      '2',
+      '--max-variants',
+      '1'
+    );
+    // Two trials a case only warns.
+    expect(start.stderr).not.toMatch(/error/i);
+    expect(start.exitCode).toBe(0);
+    await expect(
+      fs.access(path.join(project.baseDir, 'evals', '.mcp-test-results'))
+    ).resolves.toBeUndefined();
+
+    // The printed command, as an agent copies it.
+    const next = nextCommand(start.stdout);
+    expect(next).toContain('--root-dir');
+    const evidence = await runBin(...next);
+    expect(evidence.stderr).not.toMatch(/error/i);
+    expect(evidence.exitCode).toBe(0);
+    // --trials 2 holds for every run of the optimization.
+    expect(evidence.stdout).toContain(
+      '`case-0` [capability] 0/2 trials passed.'
+    );
+
+    // Candidates from stdin, wrapped in { candidates }.
+    const flags = next.slice(2);
+    const round = JSON.parse(files['round-0.json']!) as unknown[];
+    const tried = await runBin('optimize', 'try', '-', ...flags, {
+      input: JSON.stringify({ candidates: round }),
+    });
+    expect(tried.stderr).not.toMatch(/error/i);
+    expect(tried.exitCode).toBe(0);
+    expect(tried.stdout).toContain('covers');
+    expect(tried.stdout).toContain(
+      'The budget is spent. Next: mst optimize finish'
+    );
+
+    const finish = await runBin('optimize', 'finish', ...flags);
+    expect(finish.exitCode).toBe(0);
+    const recommendation = String(finish.stdout).match(
+      /Recommendation: (.+)/
+    )?.[1];
+    const markdown = await fs.readFile(
+      path.join(project.baseDir, recommendation!.trim()),
+      'utf8'
+    );
+    expect(markdown).toContain('It ended when the variant budget ran out');
+  }, 120_000);
+
+  it('refuses bad flags and input, and finishes with nothing tried', async () => {
+    const sideways = await runBin(
+      'optimize',
+      'start',
+      '-c',
+      'eval.json',
+      '--better',
+      'sideways'
+    );
+    expect(sideways.exitCode).toBe(1);
+    expect(sideways.stderr).toContain(
+      '--better must be higher or lower, got "sideways"'
+    );
+    const none = await runBin(
+      'optimize',
+      'start',
+      '-c',
+      'eval.json',
+      '--max-variants',
+      '0'
+    );
+    expect(none.exitCode).toBe(1);
+    expect(none.stderr).toContain('--max-variants must be a positive integer');
+
+    const start = await runBin('optimize', 'start', '-c', 'eval.json');
+    expect(start.exitCode).toBe(0);
+    const neither = await runBin('optimize', 'try', '-c', 'eval.json');
+    expect(neither.exitCode).toBe(1);
+    expect(neither.stderr).toContain('Give a candidates file');
+    const both = await runBin(
+      'optimize',
+      'try',
+      'round-0.json',
+      '--retry',
+      '-c',
+      'eval.json'
+    );
+    expect(both.exitCode).toBe(1);
+    expect(both.stderr).toContain(
+      'Give a candidates file or --retry, not both.'
+    );
+    const retry = await runBin('optimize', 'try', '--retry', '-c', 'eval.json');
+    expect(retry.exitCode).toBe(1);
+    expect(retry.stderr).toContain('has no round to run again');
+    const notJson = await runBin(
+      'optimize',
+      'try',
+      'not-json.json',
+      '-c',
+      'eval.json'
+    );
+    expect(notJson.exitCode).toBe(1);
+    expect(notJson.stderr).toContain("not-json.json isn't JSON");
+
+    const finish = await runBin('optimize', 'finish', '-c', 'eval.json');
+    expect(finish.exitCode).toBe(0);
+    expect(finish.stdout).toContain(
+      'No candidates ran, so there is nothing to recommend.'
+    );
   }, 120_000);
 
   it('says how to start when there is no optimization', async () => {

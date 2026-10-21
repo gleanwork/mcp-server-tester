@@ -903,7 +903,7 @@ npx mst optimize try ./round-1.json -c ./eval.json
 npx mst optimize finish -c ./eval.json                                 # write the recommendation
 ```
 
-A candidates file is a JSON array (or `-` for stdin). Each candidate has a unique `id`, a `description` of the idea it tests, and `tools`, keyed by the tool's name on its server (`server.tool` when several servers serve it):
+A candidates file is a JSON array, or an object whose `candidates` is that array (`-` reads it from stdin). Each candidate has a unique `id`, a `description` of the idea it tests, and `tools`, keyed by the tool's name on its server (`server.tool` when several servers serve it):
 
 ```json
 [
@@ -923,7 +923,7 @@ A candidates file is a JSON array (or `-` for stdin). Each candidate has a uniqu
 
 - **`start`** runs the base variant once (the baseline) and, when no case is tagged `regression`, once more to find the cases that work today. It lists the tools the servers serve and stores them, then writes the optimization to `<eval dir>/optimizations/<id>/optimization.json`.
 - **`evidence`** prints the served tools (which are editable, with their parameters), the baseline and each round so far: every case's input, what its assertions expect, its trials passed, and each failed trial's tool calls, missed tools and failed graders. Cases tagged `held-out` are left out. `--json` prints the same as JSON, with each tool's full input schema to copy.
-- **`try <file>`** checks the candidates, then runs them together as one round, and prints each one's metric, its change from the baseline and whether it is clearly better. `--retry` runs a round that didn't finish again.
+- **`try <file>`** checks the candidates, then runs them together as one round, and prints each one's metric, its change from the baseline and whether it is clearly better. `--retry` runs a round that didn't finish again. `--proposer <name>` records who wrote the candidates in the round (default: `agent`).
 - **`finish`** judges every candidate against the number tried and writes `recommendation.md` next to the record: apply, reject or inconclusive, the metadata to apply, a row for capability, regression and held-out cases, every candidate, and the runs.
 
 ### What `try` refuses
@@ -935,11 +935,11 @@ A round that can't measure what it means to stops before anything runs, and says
 - **More candidates than the budget has left.** `--max-variants` (default 6) caps the candidates across every round.
 - **A server that changed.** Every round lists the servers' tools before any client starts. When a name, title, description or input schema differs from what the baseline was measured with, the round stops, and the optimization can't continue: start a new one.
 
-A round whose run differs from the baseline's in another way (its datasets' content, or the base variant's client, model, options or judges) is refused after it runs, for the same reason.
+A round whose run differs from the baseline's in another way (its datasets' content, the base variant's client, model or options, or the eval config's judges and their options) is refused after it runs, for the same reason.
 
 ### Options
 
-Every command takes `-c, --config` (required), `--plugins`, `--output-dir`, `--root-dir`, `--secrets-file`, `--store` and `--results`, as `run` does. `evidence`, `try` and `finish` take `--id <id>` (the optimization, or the end of its id; default: the latest).
+Every command takes `-c, --config` (required), `--plugins`, `--output-dir`, `--root-dir`, `--secrets-file`, `--store` and `--results`, as `run` does. The optimization doesn't store them, so give each command the same ones; the `Next:` line each command prints repeats them. `evidence`, `try` and `finish` take `--id <id>` (the optimization, or the end of its id; default: the latest).
 
 | `start` option                                      | Description                                                                                                                                     |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
