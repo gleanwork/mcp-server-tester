@@ -11,6 +11,7 @@ import type { EvalDataset } from './datasetTypes.js';
 import { isInfrastructureFailure } from './infrastructureFailure.js';
 import type { RunEnvironment } from './environments/builtinEnvironments.js';
 import type { ShardRecord } from './environments/shardedCollect.js';
+import type { ListedServerTools } from './toolSurface.js';
 
 /**
  * The run format, `mst.run/v1`: what a run leaves behind, one directory per
@@ -96,8 +97,32 @@ const RunRecordSchema = z.looseObject({
       tools: z.record(z.string(), z.unknown()).optional(),
       inputTemplate: z.string().optional(),
       judges: z.array(z.string()).optional(),
+      /**
+       * The tools the variant's servers served before its tool metadata,
+       * listed once before any client started. Only when the run was asked
+       * to record them (a tool optimization's runs).
+       */
+      servedTools: z
+        .array(
+          z.looseObject({
+            server: z.string().optional(),
+            tools: z.array(z.looseObject({ name: z.string() })),
+          })
+        )
+        .optional(),
     })
   ),
+  /**
+   * The tool optimization the run was made for: its baseline, its grouping
+   * run, or a round of candidates. Such a run never becomes the latest.
+   */
+  optimization: z
+    .looseObject({
+      id: z.string(),
+      role: z.enum(['baseline', 'grouping', 'round']),
+      round: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
   datasets: z.array(
     z.looseObject({
       name: z.string(),
@@ -348,7 +373,10 @@ export interface RunFacts {
     servers?: unknown[];
     client?: string;
     model?: string;
+    servedTools?: ListedServerTools[];
   }>;
+  /** The tool optimization the run was made for. */
+  optimization?: RunOptimization;
   datasets: Array<{
     name: string;
     caseCount: number;
@@ -373,6 +401,11 @@ export interface RunFacts {
   /** The run a regrade graded the traces of. */
   gradedFrom?: string;
 }
+
+/** `run.json`'s `optimization`: which tool optimization a run was made for, and as what. */
+export type RunOptimization = NonNullable<
+  z.infer<typeof RunRecordSchema>['optimization']
+>;
 
 /** `run.json`'s `phases`: how far collecting traces and grading them got. */
 type RunPhases = Pick<
@@ -564,6 +597,7 @@ export async function writeRun(
     ...(summary.selection ? { selection: summary.selection } : {}),
     redactStoredResponses: facts.redactStoredResponses,
     ...(facts.gradedFrom ? { gradedFrom: facts.gradedFrom } : {}),
+    ...(facts.optimization ? { optimization: facts.optimization } : {}),
     environment: {
       name: facts.environment?.name ?? 'local',
       shards: facts.environment?.shards ?? 1,

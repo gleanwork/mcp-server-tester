@@ -341,6 +341,44 @@ describe('runToolOptimization — multi-round proposeVariants', () => {
     expect(result.winner?.variant.id).toBe('b');
   });
 
+  it('caps the variants across rounds at maxVariants', async () => {
+    setRuns({
+      __baseline__: makeResult([
+        { id: 'c1', pass: false },
+        { id: 'c2', pass: false },
+      ]),
+      a: makeResult([
+        { id: 'c1', pass: true },
+        { id: 'c2', pass: false },
+      ]),
+      b: makeResult([
+        { id: 'c1', pass: true },
+        { id: 'c2', pass: true },
+      ]),
+      c: makeResult([
+        { id: 'c1', pass: true },
+        { id: 'c2', pass: true },
+      ]),
+    });
+
+    const proposeVariants = vi.fn(async (ctx) =>
+      ctx.round === 0 ? [variant('a')] : [variant('b'), variant('c')]
+    );
+
+    const result = await runToolOptimization(
+      { dataset, proposeVariants, maxRounds: 5, maxVariants: 2 },
+      context
+    );
+
+    // Round 1 is cut to the one variant the budget has room for, and the
+    // optimization stops there rather than asking for a third round.
+    expect(
+      result.rounds.map((r) => r.candidates.map((c) => c.variant.id))
+    ).toEqual([['a'], ['b']]);
+    expect(result.reason).toBe('max-variants');
+    expect(proposeVariants).toHaveBeenCalledTimes(2);
+  });
+
   it('uses static variants in round 0 and the callback for later rounds', async () => {
     setRuns({
       __baseline__: makeResult([{ id: 'c1', pass: false }]),
