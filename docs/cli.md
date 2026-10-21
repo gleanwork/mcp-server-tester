@@ -934,8 +934,8 @@ A round that can't measure what it means to stops before anything runs, and says
 - **A repeated id.** Ids are unique across the optimization, and differ from the base variant's name.
 - **More candidates than the budget has left.** `--max-variants` (default 6) caps the candidates across every round.
 - **A server that changed.** Every round lists the servers' tools before any client starts. When a name, title, description or input schema differs from what the baseline was measured with, the round stops, and the optimization can't continue: start a new one.
-
-A round whose run differs from the baseline's in another way (its datasets' content, the base variant's client, model or options, or the eval config's judges and their options) is refused after it runs, for the same reason.
+- **A setup that changed.** The same holds for a round that differs from the baseline in what else it measures with: its datasets' content, the base variant's client, model or options, or the eval config's judges and their options.
+- **Another process stepping it.** `try` and `finish` hold a `lock` file in the optimization's directory while they run. A second command fails, and names the process that holds the lock. A lock left by a process on the same machine that has ended is taken over; for any other stale lock, delete the file.
 
 ### Options
 
@@ -957,7 +957,7 @@ Every command takes `-c, --config` (required), `--plugins`, `--output-dir`, `--r
 
 Each run is an ordinary run in the eval's `runs/`, with `optimization` in its `run.json` (the optimization's id, and `baseline`, `grouping` or `round` with its number) and the tools the servers served. `mst open <run-id>` opens any of them. They never become the eval's `latest.json`, so `mst run` keeps comparing with your last ordinary run.
 
-`optimization.json` (`mst.optimization/v1`) names those runs, the base variant, the metric, the budget, the rules and every round's candidates. Opening the optimization reads the runs and scores them again, so its numbers always come from the stored trials. A round whose run is missing trials (its shards ended early) is completed with `mst run --resume <run-id>`.
+`optimization.json` (`mst.optimization/v1`) names those runs, the base variant, the metric, the budget, the rules and every round's candidates. Opening the optimization reads the runs and scores them again, so its numbers always come from the stored trials. The optimization's runs aren't resumed with `mst run --resume`, because resumed trials would run against tools nobody checked. A round whose run is missing trials (its shards ended early) runs again in full with `try --retry`. When a run is stored complete and then a step fails (a result store that rejects it, say), the optimization keeps the run.
 
 ### How "clearly better" is decided
 
