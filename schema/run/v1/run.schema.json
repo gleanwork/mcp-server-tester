@@ -49,11 +49,45 @@
             "additionalProperties": {}
           },
           "inputTemplate": { "type": "string" },
-          "judges": { "type": "array", "items": { "type": "string" } }
+          "judges": { "type": "array", "items": { "type": "string" } },
+          "servedTools": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "server": { "type": "string" },
+                "tools": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": { "name": { "type": "string" } },
+                    "required": ["name"],
+                    "additionalProperties": {}
+                  }
+                }
+              },
+              "required": ["tools"],
+              "additionalProperties": {}
+            }
+          }
         },
         "required": ["name"],
         "additionalProperties": {}
       }
+    },
+    "optimization": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "role": { "type": "string", "enum": ["baseline", "grouping", "round"] },
+        "round": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": ["id", "role"],
+      "additionalProperties": {}
     },
     "datasets": {
       "type": "array",

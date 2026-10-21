@@ -18,10 +18,8 @@ import type {
 } from '../types/reporter.js';
 import type { ZodType } from 'zod';
 import { attachReporterData } from '../reporters/channel.js';
-import type { EvalVariant } from './evalConfig.js';
 import type { EvaluationVariantResult } from './evalFrameworkTypes.js';
 import type { Plugin } from '../plugins/plugin.js';
-import { runEval } from './runEval.js';
 import {
   DEFAULT_HELD_OUT_TAG,
   DEFAULT_REGRESSION_TAG,
@@ -79,6 +77,9 @@ function isOptimizationMetric(
  *   at least `minImprovement`, or `proposeVariants` returned no further
  *   candidates.
  * - `max-rounds`: the configured `maxRounds` budget was exhausted.
+ * - `max-variants`: the `maxVariants` budget was spent.
+ * - `finished`: whoever stepped a stored optimization finished it
+ *   (`mst optimize finish`).
  * - `threshold-met`: reserved for future absolute-target convergence; not
  *   emitted by the current delta-based logic.
  */
@@ -86,7 +87,9 @@ export type ToolOptimizationReason =
   | 'threshold-met'
   | 'no-improvement'
   | 'max-rounds'
-  | 'no-variants';
+  | 'max-variants'
+  | 'no-variants'
+  | 'finished';
 
 /** Whether a winning variant should be applied, rejected, or is inconclusive. */
 export type VariantRecommendation = 'apply' | 'reject' | 'inconclusive';
@@ -212,6 +215,14 @@ export interface ToolOptimizationOptions {
   /** Maximum number of rounds to run. @default 1 */
   maxRounds?: number;
   /**
+   * Most candidates to run, across every round. A round's candidates past the
+   * budget are skipped with a warning, and the optimization stops once it is
+   * spent. Trying more variants also makes each one's improvement harder to
+   * show, because the test is corrected for every variant tried.
+   * @default no limit
+   */
+  maxVariants?: number;
+  /**
    * Convergence threshold. Stop when a round's best metric improvement over the
    * prior best-so-far is below this value. @default 0
    */
@@ -291,6 +302,20 @@ export interface ToolOptimizationEval {
   pluginPaths?: string[];
   plugins?: readonly Plugin[];
   secretsFile?: string;
+  /**
+   * The eval's directory (`mst run --output-dir`): the runs go in its
+   * `runs/`, the optimization in its `optimizations/`. Default:
+   * `.mcp-test-results/<eval name>` under `rootDir`.
+   */
+  outputDir?: string;
+  /** Where every run collects its trials (`--env`). Default: `local`. */
+  env?: string;
+  /** The environment's options (`--env-option key=value`). */
+  envOptions?: Readonly<Record<string, string>>;
+  /** Credential store for connector servers (`--store`), as `runEval`'s. */
+  store?: string;
+  /** A result store that also keeps every run (`--results`), as `runEval`'s. */
+  results?: string;
 }
 
 /**
@@ -303,6 +328,7 @@ export interface EvalToolOptimizationOptions extends Pick<
   | 'variants'
   | 'proposeVariants'
   | 'maxRounds'
+  | 'maxVariants'
   | 'minImprovement'
   | 'allowRegressions'
   | 'regressionCheck'
@@ -319,6 +345,22 @@ export interface EvalToolOptimizationOptions extends Pick<
   metric?: string;
   /** Whether higher or lower values of `metric` are better. @default 'higher' */
   better?: 'higher' | 'lower';
+  /**
+   * The tools candidates may change: names on their servers, or
+   * `server.tool`. A candidate that changes another tool fails before it
+   * runs. Default: every tool the servers serve.
+   */
+  editableTools?: string[];
+  /**
+   * Narrowing for every run, as `mst run`'s `--case`, `--filter-tag`,
+   * `--max-cases` and `--trials`.
+   */
+  selection?: {
+    cases?: string[];
+    filterTags?: string[];
+    maxCases?: number;
+    trials?: number;
+  };
 }
 
 /** Aggregated result of a tool optimization. */
@@ -393,13 +435,10 @@ export async function runToolOptimization(
       { manifestPath: 'configPath', arm: 'baseVariant' },
       'runToolOptimization evalConfig'
     );
-    return optimize(
-      options,
-      options.metric ?? 'passRate',
-      options.better ?? 'higher',
-      { run: evalRunner(options), withBaseline: true },
-      undefined
-    );
+    // Loaded on use: the stored optimization builds on this module.
+    const { runStoredToolOptimization } =
+      await import('./storedOptimization.js');
+    return runStoredToolOptimization(options);
   }
   rejectRenamedOptions(
     options,
@@ -431,17 +470,29 @@ export async function runToolOptimization(
     }
     return runs;
   };
-  return optimize(
-    options,
-    metric,
-    'higher',
-    { run, withBaseline: false },
-    context
+  return optimize(options, metric, run, context);
+}
+
+/**
+ * The first candidates that fit the variant budget, with a warning for the
+ * ones left out.
+ */
+export function withinBudget(
+  variants: readonly ToolOverrideVariant[],
+  maxVariants: number,
+  tried: number
+): ToolOverrideVariant[] {
+  const left = Math.max(0, maxVariants - tried);
+  if (variants.length <= left) return [...variants];
+  const dropped = variants.slice(left).map((variant) => variant.id);
+  console.warn(
+    `[mst] The tool optimization's budget is ${maxVariants} variants and ${tried} ran, so it skips ${dropped.map((id) => `"${id}"`).join(', ')}.`
   );
+  return variants.slice(0, left);
 }
 
 /** A run of the baseline (no variant) or a variant, with its metric value. */
-interface OptimizationRun {
+export interface OptimizationRun {
   result: EvalRunnerResult;
   value: number | undefined;
 }
@@ -451,71 +502,8 @@ type RunVariants = (
   variants: Array<ToolOverrideVariant | undefined>
 ) => Promise<OptimizationRun[]>;
 
-interface OptimizationRunner {
-  run: RunVariants;
-  /** Run round 0's static variants together with the baseline. */
-  withBaseline: boolean;
-}
-
-/** Each call runs one eval whose variants are the base variant and/or candidates built on it. */
-function evalRunner(options: EvalToolOptimizationOptions): RunVariants {
-  const { evalConfig: target } = options;
-  const metric = options.metric ?? 'passRate';
-  return async (variants) => {
-    const { summary } = await runEval({
-      configPath: target.configPath,
-      rootDir: target.rootDir,
-      // Rounds rank candidates by the metric; pairwise judges would only cost.
-      skipPairwise: true,
-      // The optimization writes its own report.
-      report: false,
-      pluginPaths: target.pluginPaths,
-      plugins: target.plugins,
-      secretsFile: target.secretsFile,
-      variants: (configVariants) => {
-        const base =
-          target.baseVariant === undefined
-            ? (configVariants[0] ?? { name: 'default' })
-            : configVariants.find(
-                (candidate) => candidate.name === target.baseVariant
-              );
-        if (!base)
-          throw new Error(
-            `The eval config has no variant named "${target.baseVariant}".`
-          );
-        const names = new Set<string>();
-        return variants.map((candidate) => {
-          const variant: EvalVariant = candidate
-            ? {
-                ...base,
-                name: candidate.id,
-                ...(candidate.description !== undefined
-                  ? { description: candidate.description }
-                  : {}),
-                tools: candidate.tools,
-              }
-            : base;
-          if (
-            names.has(variant.name) ||
-            (candidate && candidate.id === base.name)
-          )
-            throw new Error(
-              `Candidate ids must be unique and differ from the base variant's name; "${variant.name}" repeats.`
-            );
-          names.add(variant.name);
-          return variant;
-        });
-      },
-    });
-    return summary.variants.map((variant) => ({
-      result: variant.result!,
-      value: variantMetric(variant, metric),
-    }));
-  };
-}
-
 /** A variant's value for an eval-config metric, if it reports one. */
-function variantMetric(
+export function variantMetric(
   variant: EvaluationVariantResult,
   metric: string
 ): number | undefined {
@@ -526,43 +514,65 @@ function variantMetric(
   return typeof value === 'number' ? value : undefined;
 }
 
-async function optimize(
-  options: Pick<
-    ToolOptimizationOptions,
-    | 'variants'
-    | 'proposeVariants'
-    | 'maxRounds'
-    | 'minImprovement'
-    | 'allowRegressions'
-    | 'regressionCheck'
-    | 'regressionTag'
-    | 'heldOutTag'
-  >,
+/** The rules an optimization scores candidates by, as given. */
+type OptimizationRuleOptions = Pick<
+  ToolOptimizationOptions,
+  | 'minImprovement'
+  | 'allowRegressions'
+  | 'regressionCheck'
+  | 'regressionTag'
+  | 'heldOutTag'
+>;
+
+/**
+ * An optimization part way through: its baseline, how its cases are grouped,
+ * and every round scored so far. The in-memory loop and a stored
+ * optimization (storedOptimization.ts) advance it the same way, so reopening
+ * a stored one scores it exactly as it was scored when it ran.
+ */
+export interface OptimizationState {
+  readonly metric: MetricName;
+  readonly better: 'higher' | 'lower';
+  readonly minImprovement: number;
+  readonly allowRegressions: boolean;
+  readonly regressionCheck: RegressionCheck;
+  readonly regressionTag: string;
+  readonly heldOutTag: string;
+  readonly baseline: EvalRunnerResult;
+  /** The baseline without held-out cases: what a proposer sees. */
+  readonly seenBaseline: EvalRunnerResult;
+  readonly baselineValue: number;
+  /** Whether a case carries the regression tag. */
+  readonly declared: boolean;
+  /** Set once there is a variant to compare (see `groupWith`). */
+  grouping?: CaseGrouping;
+  groupingBaseline?: EvalRunnerResult;
+  readonly rounds: ToolOptimizationRound[];
+  /** The rounds as a proposer sees them: without held-out cases. */
+  readonly proposerHistory: ToolOptimizationRound[];
+  bestSoFar?: VariantCandidateResult;
+  bestAttempted?: VariantCandidateResult;
+}
+
+/** How much better a value is: larger is better either way. */
+function gainOf(state: Pick<OptimizationState, 'better'>) {
+  return (value: number) => (state.better === 'lower' ? -value : value);
+}
+
+/**
+ * An optimization with its baseline run and no rounds. Throws when the
+ * baseline reports no value for the metric.
+ */
+export function startOptimizationState(
+  baselineRun: OptimizationRun,
   metric: MetricName,
   better: 'higher' | 'lower',
-  runner: OptimizationRunner,
-  context: EvalContext | undefined
-): Promise<ToolOptimizationResult> {
-  const maxRounds = options.maxRounds ?? 1;
-  const minImprovement = options.minImprovement ?? 0;
-  const allowRegressions = options.allowRegressions ?? false;
-  const regressionCheck = options.regressionCheck ?? 'significant';
+  options: OptimizationRuleOptions
+): OptimizationState {
   const heldOutTag = options.heldOutTag ?? DEFAULT_HELD_OUT_TAG;
   const regressionTag = options.regressionTag ?? DEFAULT_REGRESSION_TAG;
-  // How much better a value is: larger is better either way.
-  const gain = (value: number) => (better === 'lower' ? -value : value);
-
-  // On an eval, static round-0 variants run with the baseline: one eval
-  // run, which also checks their ids before anything runs. A dataset runs the
-  // baseline first, so an unavailable metric fails before any candidate runs.
-  const initialVariants = runner.withBaseline ? (options.variants ?? []) : [];
-  const [baselineRun, ...initialRuns] = await runner.run([
-    undefined,
-    ...initialVariants,
-  ]);
-  const baseline = baselineRun!.result;
-  const seenBaseline = withoutHeldOut(baseline, heldOutTag);
-  const baselineValue = metricOf(baselineRun!, metric, heldOutTag);
+  const baseline = baselineRun.result;
+  const baselineValue = metricOf(baselineRun, metric, heldOutTag);
   if (baselineValue === undefined) {
     throw new Error(
       `Metric '${metric}' is unavailable for the baseline. For a dataset, ` +
@@ -572,125 +582,253 @@ async function optimize(
         `dataset metrics).`
     );
   }
-
   // Groups must not come from `baseline` itself: cases picked for passing a
   // run tend to do worse when re-run, and cases picked for failing tend to do
   // better, even with no change at all. Declared tags are independent of any
-  // run; otherwise a separate run does the grouping. It runs only once there
-  // is a variant to compare.
+  // run; otherwise a separate run does the grouping.
   const declared = baseline.caseResults.some((c) =>
     caseTags(c).includes(regressionTag)
   );
-  let grouping: CaseGrouping | undefined = declared
-    ? { source: 'declared', tag: regressionTag }
+  return {
+    metric,
+    better,
+    minImprovement: options.minImprovement ?? 0,
+    allowRegressions: options.allowRegressions ?? false,
+    regressionCheck: options.regressionCheck ?? 'significant',
+    regressionTag,
+    heldOutTag,
+    baseline,
+    seenBaseline: withoutHeldOut(baseline, heldOutTag),
+    baselineValue,
+    declared,
+    ...(declared
+      ? { grouping: { source: 'declared' as const, tag: regressionTag } }
+      : {}),
+    rounds: [],
+    proposerHistory: [],
+  };
+}
+
+/** Groups the cases by a separate run of the baseline, when none is tagged. */
+export function groupWith(
+  state: OptimizationState,
+  groupingRun: EvalRunnerResult
+): void {
+  if (state.grouping) return;
+  state.groupingBaseline = groupingRun;
+  state.grouping = { source: 'grouping-run', run: groupingRun };
+}
+
+/** What a proposer sees before `round`: no held-out cases. */
+export function proposerContextOf(
+  state: OptimizationState,
+  round: number
+): ProposeVariantsContext {
+  return {
+    round,
+    baseline: state.seenBaseline,
+    metric: state.metric,
+    history: state.proposerHistory,
+    ...(state.bestSoFar
+      ? { bestSoFar: proposerViewOf(state.bestSoFar, state.proposerHistory) }
+      : {}),
+  };
+}
+
+/**
+ * Scores a round's candidates against the baseline and adds the round.
+ * Returns how much the round's best improved on the best before it (0 when
+ * every candidate was disqualified).
+ */
+export function addRound(
+  state: OptimizationState,
+  variants: readonly ToolOverrideVariant[],
+  runs: readonly OptimizationRun[]
+): { improvement: number; best?: VariantCandidateResult } {
+  if (!state.grouping)
+    throw new Error(
+      'The optimization has no case grouping yet: run the grouping run first.'
+    );
+  const gain = gainOf(state);
+  const rules: ScoringRules = {
+    metric: state.metric,
+    better: state.better,
+    allowRegressions: state.allowRegressions,
+    regressionCheck: state.regressionCheck,
+    heldOutTag: state.heldOutTag,
+    grouping: state.grouping,
+  };
+  const round = state.rounds.length;
+  const candidates = variants.map((variant, index) =>
+    scoreVariant(
+      state.baseline,
+      state.baselineValue,
+      rules,
+      variant,
+      runs[index]!
+    )
+  );
+  for (const candidate of candidates)
+    state.bestAttempted = pickBetter(
+      state.bestAttempted,
+      candidate,
+      true,
+      gain
+    );
+  const roundBest = candidates.reduce<VariantCandidateResult | undefined>(
+    (best, candidate) => pickBetter(best, candidate, false, gain),
+    undefined
+  );
+  state.rounds.push({ round, candidates, best: roundBest });
+  state.proposerHistory.push(
+    proposerRound(
+      { round, candidates, best: roundBest },
+      state.seenBaseline,
+      rules
+    )
+  );
+  if (!roundBest) return { improvement: 0 };
+  const improvement =
+    gain(roundBest.metricValue) -
+    gain(state.bestSoFar?.metricValue ?? state.baselineValue);
+  state.bestSoFar = pickBetter(state.bestSoFar, roundBest, false, gain);
+  return { improvement, best: roundBest };
+}
+
+/** How many candidates the optimization has run. */
+export function variantsTriedOf(state: OptimizationState): number {
+  return state.rounds.reduce((n, round) => n + round.candidates.length, 0);
+}
+
+/**
+ * Judges whether each candidate is clearly better, against every variant
+ * tried so far, in place. Trying more variants raises the chance that one
+ * looks better by luck, so a verdict can only get stricter as rounds run:
+ * the final one is the one finishing gives.
+ */
+export function judgeAgainstTried(state: OptimizationState): void {
+  if (!state.grouping) return;
+  const tried = variantsTriedOf(state);
+  for (const candidate of state.rounds.flatMap((r) => r.candidates)) {
+    judgeImprovement(candidate, state.baseline, {
+      metric: state.metric,
+      better: state.better,
+      grouping: state.grouping,
+      heldOutTag: state.heldOutTag,
+      variantsTried: tried,
+    });
+  }
+}
+
+/**
+ * Ends the optimization: judges every candidate against the number of
+ * variants tried, and builds the proposal. Scores the state's candidates in
+ * place.
+ */
+export function finishOptimizationState(
+  state: OptimizationState,
+  reason: ToolOptimizationReason
+): ToolOptimizationResult {
+  judgeAgainstTried(state);
+  const winner = state.bestSoFar;
+  const proposalSource = winner ?? state.bestAttempted;
+  const proposal = proposalSource
+    ? buildProposal(
+        state.metric,
+        state.baselineValue,
+        proposalSource,
+        winner !== undefined
+      )
     : undefined;
-  let groupingBaseline: EvalRunnerResult | undefined;
-  const ensureGrouping = async (): Promise<CaseGrouping> => {
-    if (!grouping) {
-      const [groupingRun] = await runner.run([undefined]);
-      groupingBaseline = groupingRun!.result;
-      grouping = { source: 'grouping-run', run: groupingBaseline };
-    }
-    return grouping;
+  return {
+    metric: state.metric,
+    baseline: state.baseline,
+    grouping:
+      state.grouping?.source ?? (state.declared ? 'declared' : 'grouping-run'),
+    ...(state.groupingBaseline
+      ? { groupingBaseline: state.groupingBaseline }
+      : {}),
+    rounds: state.rounds,
+    winner,
+    proposal,
+    converged: true,
+    reason,
+  };
+}
+
+/** A dataset optimization in memory: every run is a `runEvalDataset` call. */
+async function optimize(
+  options: Pick<
+    ToolOptimizationOptions,
+    | 'variants'
+    | 'proposeVariants'
+    | 'maxRounds'
+    | 'maxVariants'
+    | 'minImprovement'
+    | 'allowRegressions'
+    | 'regressionCheck'
+    | 'regressionTag'
+    | 'heldOutTag'
+  >,
+  metric: MetricName,
+  run: RunVariants,
+  context: EvalContext
+): Promise<ToolOptimizationResult> {
+  const maxRounds = options.maxRounds ?? 1;
+  const maxVariants = options.maxVariants ?? Number.POSITIVE_INFINITY;
+
+  // The baseline runs first, so an unavailable metric fails before any
+  // candidate runs.
+  const [baselineRun] = await run([undefined]);
+  const state = startOptimizationState(baselineRun!, metric, 'higher', options);
+  // The grouping run runs only once there is a variant to compare.
+  const ensureGrouping = async (): Promise<void> => {
+    if (state.grouping) return;
+    const [groupingRun] = await run([undefined]);
+    groupWith(state, groupingRun!.result);
   };
 
-  const rounds: ToolOptimizationRound[] = [];
-  const proposerHistory: ToolOptimizationRound[] = [];
-  let bestSoFar: VariantCandidateResult | undefined;
-  let bestAttempted: VariantCandidateResult | undefined;
   let reason: ToolOptimizationReason = 'max-rounds';
-
   for (let round = 0; round < maxRounds; round++) {
-    const variants = await gatherVariants(options, {
-      round,
-      baseline: seenBaseline,
-      metric,
-      history: proposerHistory,
-      bestSoFar: bestSoFar && proposerViewOf(bestSoFar, proposerHistory),
-    });
+    const left = maxVariants - variantsTriedOf(state);
+    if (left <= 0) {
+      reason = 'max-variants';
+      break;
+    }
+    const variants = withinBudget(
+      await gatherVariants(options, proposerContextOf(state, round)),
+      maxVariants,
+      variantsTriedOf(state)
+    );
 
     if (variants.length === 0) {
       reason = round === 0 ? 'no-variants' : 'no-improvement';
       break;
     }
 
-    const runs =
-      round === 0 && initialVariants.length > 0 && variants === options.variants
-        ? initialRuns
-        : await runner.run(variants);
-    const rules: ScoringRules = {
-      metric,
-      better,
-      allowRegressions,
-      regressionCheck,
-      heldOutTag,
-      grouping: await ensureGrouping(),
-    };
-    const candidates = variants.map((variant, index) =>
-      scoreVariant(baseline, baselineValue, rules, variant, runs[index]!)
-    );
-    for (const candidate of candidates)
-      bestAttempted = pickBetter(bestAttempted, candidate, true, gain);
-
-    const roundBest = candidates.reduce<VariantCandidateResult | undefined>(
-      (best, candidate) => pickBetter(best, candidate, false, gain),
-      undefined
-    );
-    rounds.push({ round, candidates, best: roundBest });
-    proposerHistory.push(
-      proposerRound({ round, candidates, best: roundBest }, seenBaseline, rules)
-    );
-
-    if (roundBest) {
-      const improvement =
-        gain(roundBest.metricValue) -
-        gain(bestSoFar?.metricValue ?? baselineValue);
-      bestSoFar = pickBetter(bestSoFar, roundBest, false, gain);
-      if (improvement < minImprovement) {
-        reason = 'no-improvement';
-        break;
-      }
+    const runs = await run(variants);
+    await ensureGrouping();
+    const { improvement, best } = addRound(state, variants, runs);
+    if (best && improvement < state.minImprovement) {
+      reason = 'no-improvement';
+      break;
+    }
+    if (variantsTriedOf(state) >= maxVariants) {
+      reason = 'max-variants';
+      break;
     }
   }
 
-  // Trying more variants raises the chance that one looks better by luck, so
-  // improvement is judged once, at the end, against every variant tried.
-  const tried = rounds.reduce((n, round) => n + round.candidates.length, 0);
-  if (grouping) {
-    const finalGrouping: CaseGrouping = grouping;
-    for (const candidate of rounds.flatMap((r) => r.candidates)) {
-      judgeImprovement(candidate, baseline, {
-        metric,
-        better,
-        grouping: finalGrouping,
-        heldOutTag,
-        variantsTried: tried,
-      });
-    }
-  }
+  const result = finishOptimizationState(state, reason);
+  const { heldOutTag, regressionTag, regressionCheck, baselineValue } = state;
+  const { winner } = result;
+  const bestAttempted = state.bestAttempted;
 
-  const winner = bestSoFar;
-  const proposalSource = winner ?? bestAttempted;
-  const proposal = proposalSource
-    ? buildProposal(metric, baselineValue, proposalSource, winner !== undefined)
-    : undefined;
-
-  const result: ToolOptimizationResult = {
-    metric,
-    baseline,
-    grouping: grouping?.source ?? (declared ? 'declared' : 'grouping-run'),
-    ...(groupingBaseline ? { groupingBaseline } : {}),
-    rounds,
-    winner,
-    proposal,
-    converged: true,
-    reason,
-  };
-
-  if (context?.testInfo) {
+  if (context.testInfo) {
     // Surface the best run's case results so the report reflects the optimized
     // state, plus a compact summary of how the optimization got there.
-    const surfaceRun = winner?.result ?? bestAttempted?.result ?? baseline;
+    const surfaceRun =
+      winner?.result ?? bestAttempted?.result ?? state.baseline;
     await attachReporterData(context.testInfo, {
       kind: 'evalResults',
       data: { caseResults: surfaceRun.caseResults },

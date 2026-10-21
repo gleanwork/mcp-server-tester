@@ -109,6 +109,13 @@ import {
 import type { ToolSurfaceProxy } from './toolSurfaceProxy.js';
 import { startToolSurfaceProxy } from './toolSurfaceProxyServer.js';
 import {
+  ServedToolsChangedError,
+  listServedTools,
+  servedToolsChange,
+} from './servedTools.js';
+import type { ListedServerTools } from './toolSurface.js';
+import type { RunOptimization } from './runFormat.js';
+import {
   collectInEnvironment,
   gatheredQueues,
   type GatheredResults,
@@ -215,6 +222,23 @@ export interface RunEvalOptions {
   /** Skip the eval config's pairwise judges (tool optimization ranks variants itself). */
   skipPairwise?: boolean;
   /**
+   * List each variant's servers' tools once, before any client starts, and
+   * keep them in the run (`servedTools` on each of run.json's variants, and
+   * on the result). A tool optimization compares them across its runs.
+   */
+  recordServedTools?: boolean;
+  /**
+   * With `recordServedTools`: what every variant's servers must serve. The
+   * run fails before any client starts when they serve other tool metadata
+   * (a tool optimization's rounds must see its baseline's tools).
+   */
+  expectedServedTools?: readonly ListedServerTools[];
+  /**
+   * The tool optimization this run is for, recorded in run.json. Such a run
+   * never becomes the eval's latest run.
+   */
+  optimization?: RunOptimization;
+  /**
    * Write the run's report (`report/`, about 650 KB of reporter UI plus the
    * run's data). `mst open` writes a missing report when it opens a run.
    * @default true
@@ -264,6 +288,8 @@ export interface RunEvalResult {
   summary: EvaluationSummary;
   /** A regrade's source: the run whose traces it graded. */
   gradedFrom?: string;
+  /** Each variant's servers' tools, by variant name, with `recordServedTools`. */
+  servedTools?: Record<string, ListedServerTools[]>;
 }
 
 /** A secrets file's values: JSON, or dotenv-style `KEY=value` lines. */
@@ -1325,6 +1351,16 @@ async function evaluate(
   const recordedDeclarations = connectorDeclarations(connectors);
   // What each shard ran on, for run.json.
   let shardRecords: ShardRecord[] | undefined;
+  // What each variant's servers served, with `recordServedTools`: listed
+  // here, or kept from the run a resume or regrade continues.
+  const servedTools = new Map<string, ListedServerTools[]>();
+  for (const variant of replay?.run.variants ?? [])
+    if (variant.servedTools)
+      servedTools.set(
+        variant.name,
+        variant.servedTools as unknown as ListedServerTools[]
+      );
+  const optimization = options.optimization ?? replay?.run.optimization;
 
   const executionId = replay?.runId ?? newRunId();
   // The eval's directory holds its runs (runs/<run-id>/) and latest.json.
@@ -1760,6 +1796,27 @@ async function evaluate(
         await fs.rm(workDir, { recursive: true, force: true });
       }
     };
+
+    // Listed before any client starts, once per set of servers.
+    if (options.recordServedTools && !replay) {
+      const listings = new Map<string, Promise<ListedServerTools[]>>();
+      for (const variant of variants) {
+        const { servers, resolvedServers } = setupVariant(variant);
+        const key = JSON.stringify(servers);
+        let listing = listings.get(key);
+        if (!listing)
+          listings.set(key, (listing = listServedTools(resolvedServers)));
+        const listed = await listing;
+        const change = options.expectedServedTools
+          ? servedToolsChange(options.expectedServedTools, listed)
+          : undefined;
+        if (change)
+          throw new ServedToolsChangedError(
+            `Variant "${variant.name}"'s servers serve different tool metadata from what was expected: ${change}.`
+          );
+        servedTools.set(variant.name, listed);
+      }
+    }
 
     // In an environment, every variant's trials are collected first, on
     // shards that each hold whole cases (ADR 0004); the loop below grades them.
@@ -2261,8 +2318,12 @@ async function evaluate(
               )
             : variant.servers,
           ...variantSetup(evalConfig, declared, runKey),
+          ...(servedTools.has(variant.name)
+            ? { servedTools: servedTools.get(variant.name) }
+            : {}),
         };
       }),
+      ...(optimization ? { optimization } : {}),
       // The cases each dataset ran (the first variant's selection).
       datasets: allDatasets
         .map((item) => item.dataset)
@@ -2365,9 +2426,10 @@ async function evaluate(
   }
   // Last, so a crash leaves latest.json at the previous run; a partial or
   // ungraded run never becomes the latest, nor does a regrade of an older
-  // run, nor a run with missing trials.
+  // run, nor a run with missing trials, nor a tool optimization's run.
   const takesLatest =
     !summary.partial &&
+    !optimization &&
     missingTrials === 0 &&
     options.grade !== false &&
     (!regrade || (await regradeTakesLatest(evalDirectory, regrade)));
@@ -2397,5 +2459,8 @@ async function evaluate(
     datasets: allDatasets,
     summary,
     ...(regrade ? { gradedFrom: regrade.gradedFrom } : {}),
+    ...(servedTools.size
+      ? { servedTools: Object.fromEntries(servedTools) }
+      : {}),
   };
 }

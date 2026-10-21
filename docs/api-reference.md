@@ -686,6 +686,7 @@ Run a tool optimization: establish a baseline, give each candidate its tool meta
   - `proposeVariants?: (ctx: ProposeVariantsContext) => Promise<ToolOverrideVariant[]>` - Callback returning the next candidates from prior-round evidence; return `[]` to stop
   - `metric?: 'passRate' | 'toolF1' | 'toolPrecision' | 'toolRecall'` - Ranking metric (default `'passRate'`)
   - `maxRounds?: number` - Round budget (default `1`)
+  - `maxVariants?: number` - Most candidates to run across every round (default: no limit). Candidates past it are left out, with a warning, and the optimization ends with `reason: 'max-variants'`
   - `minImprovement?: number` - Stop when a round's best gain over the best so far is below this (default `0`); with `better: 'lower'` a gain is a decrease
   - `allowRegressions?: boolean` - Allow winners that break cases (default `false`)
   - `regressionCheck?: 'significant' | 'any-case'` - How breakage is judged on regression cases. `'significant'` (default): they got worse as a group (exact paired sign-flip test, p < 0.025) or one did on its own (Fisher's exact test, Holm-corrected at 0.05). `'any-case'`: any case that passes with the baseline fails with the candidate. Either way, recommending needs a clear improvement: p < 0.025 / variants tried. See [How variants are judged](./mst-client.md#how-variants-are-judged)
@@ -701,7 +702,7 @@ Run a tool optimization: establish a baseline, give each candidate its tool meta
 - `rounds` - Every round's candidates with per-candidate `result`, `comparison`, `metricValue` and `metricDelta` (without held-out cases), `measurement` (per-group pass rates, changes with p-values and verdicts, and `brokenCaseIds`), `improvement` and `fixes` (the clearly-better call, adjusted for every variant tried), `disqualified`
 - `winner` - Best non-disqualified candidate across all rounds
 - `proposal` - `VariantImprovementProposal` with `recommendation: 'apply' | 'reject' | 'inconclusive'`, metric values, `toolChanges`, and improved/regressed case ids
-- `reason` - Why the optimization stopped: `'no-variants' | 'no-improvement' | 'max-rounds' | 'threshold-met'`
+- `reason` - Why the optimization stopped: `'no-variants' | 'no-improvement' | 'max-rounds' | 'max-variants' | 'threshold-met' | 'finished'` (`'finished'`: the optimization was ended by hand)
 
 ```typescript
 import { runToolOptimization } from '@gleanwork/mcp-server-tester/evals';
@@ -734,7 +735,11 @@ const result = await runToolOptimization({
 
 - `metric` - `passRate` (default), `trialPassRate`, or any numeric key of a variant's `metrics`. A candidate that reports no value for it is disqualified, with `metricUnavailable: true`.
 - `better` - `'higher'` (default) or `'lower'`, for tokens, cost or time. Ranking, `minImprovement` and the recommendation follow it; `metricDelta` and `proposal.delta` stay candidate minus baseline.
-- `evalConfig` also takes `rootDir`, `pluginPaths`, `plugins` and `secretsFile`, as `runEval` does. Static `variants` run in one run with the baseline; later rounds run as their own runs. Variant ids must be unique and differ from the base variant's name. Each run is stored like any other run of the eval config.
+- `evalConfig` also takes `rootDir`, `outputDir`, `pluginPaths`, `plugins`, `secretsFile`, `store`, `results`, `env` and `envOptions`, as `runEval` does: every run collects its trials in that environment.
+- `editableTools` - The tools candidates may change (names, or `server.tool`). Default: every tool.
+- `selection` - `{ cases, filterTags, maxCases, trials }`, narrowing every run as `mst run`'s flags do.
+
+On an eval config, the optimization is stored ([ADR 0008](./adr/0008-a-tool-optimization-is-a-stored-experiment.md)): the baseline, the grouping run and each round are runs of the eval, marked as the optimization's, and `<eval dir>/optimizations/<id>/` holds the record and `recommendation.md`. Its runs never become the eval's latest. Candidates are checked before their round runs: unique ids that differ from the base variant's name, a tool key that names one served tool, and no change to an input schema beyond its `description` and `title` text. A round stops before any client starts when the servers serve different tool metadata than they did for the baseline.
 
 A candidate that breaks cases that work today is disqualified from winning unless `allowRegressions: true`; the best candidate tried is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Client Simulation](./mst-client.md#driving-it-from-an-agent-runtooloptimization) for the full agent-loop example.
 
