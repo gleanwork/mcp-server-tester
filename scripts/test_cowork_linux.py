@@ -30,6 +30,9 @@ class Desktop:
         # The sidebar's Cowork button: on screen in every view.
         self.tabs = [Node("Cowork")]
         self.approvals = []
+        # The running task's Stop response, and how many checks it survives a click.
+        self.stops = []
+        self.stop_lingers = 0
         self.actions = []
         self.prompt = None
         self.fail = False
@@ -39,7 +42,11 @@ class Desktop:
         self.keeps_draft = False
 
     def controls(self, names, roles, *, require_enabled=True, require_showing=True):
-        return [node for node in self.starts + self.radios + self.tabs + self.approvals
+        if "Stop response" in self.actions and self.stops:
+            if self.stop_lingers <= 0:
+                self.stops = []
+            self.stop_lingers -= 1
+        return [node for node in self.starts + self.radios + self.tabs + self.approvals + self.stops
                 if node.name in names and node.role in roles
                 # The empty composer disables Start task.
                 and not (node.name == "Start task" and require_enabled and not self.prompt)
@@ -261,6 +268,30 @@ class LinuxDriverTests(unittest.TestCase):
         with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
             module.Driver(desktop, 200, 4).reset()
         self.assertEqual((desktop.prompt, desktop.actions), ("", []))
+
+    def test_reset_stops_a_task_that_still_runs_before_leaving_it(self):
+        desktop = Desktop()
+        desktop.stops, desktop.stop_lingers = [Node("Stop response")], 3
+        receipt = module.Driver(desktop, 1000, 4).reset()
+        self.assertEqual((receipt["status"], receipt["stopped"], receipt["action_count"]),
+                         ("ready", True, 2))
+        # Stopped, then the empty link: never a send.
+        self.assertEqual((desktop.actions, desktop.prompt), (["Stop response"], ""))
+        # A finished task has nothing to stop.
+        self.assertNotIn("stopped", module.Driver(Desktop(), 1000, 4).reset())
+
+    def test_reset_fails_when_the_task_does_not_stop_and_never_guesses_a_stop(self):
+        desktop = Desktop()
+        desktop.stops, desktop.stop_lingers = [Node("Stop response")], 10_000
+        with self.assertRaisesRegex(module.DriverFailure, "task_not_stopped"):
+            module.Driver(desktop, 300, 4).reset()
+        # The old task still running: the link isn't opened.
+        self.assertIsNone(desktop.prompt)
+        desktop = Desktop()
+        desktop.stops = [Node("Stop response"), Node("Stop response")]
+        with self.assertRaisesRegex(module.DriverFailure, "stop_control_ambiguous"):
+            module.Driver(desktop, 1000, 4).reset()
+        self.assertEqual(desktop.actions, [])
 
     def test_reset_never_takes_the_old_task_view_for_ready(self):
         # A failed case's view: no Start task, no mode switch, only the

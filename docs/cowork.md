@@ -458,8 +458,13 @@ matches. MST binds within 30 seconds after submission and pins collection to
 the bound session. A failed case is never
 retried or resent. Each case is self-contained: after a submit, binding, HITL, or
 trace failure, MST records that case's failure and resets the app before the next
-case. On Linux the reset opens one empty new-task deep link and waits read-only
-(about 10 seconds) for the Cowork start surface. On macOS, the Computer Use planner
+case. On Linux the reset first stops the failed case's task if it still runs (a
+task past its deadline, or one waiting on a prompt): it clicks the task's Stop
+response and waits until it's gone, about 2 seconds. A task that won't stop fails
+the reset (`task_not_stopped`), and the old task's view is left as it is. The
+reset then opens one empty new-task deep link and waits read-only (about 10
+seconds) for the Cowork start surface. What the screen showed is captured before
+the reset (When something fails, in [cowork-docker.md](cowork-docker.md)). On macOS, the Computer Use planner
 stops a task that is still running and declines an open permission prompt, within
 eight actions. The driver refuses typing, drags and key presses other than Escape
 (a refused proposal does nothing, and the planner may try again within the
