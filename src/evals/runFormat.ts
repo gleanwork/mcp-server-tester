@@ -117,6 +117,19 @@ const RunRecordSchema = z.looseObject({
   redactStoredResponses: z.boolean(),
   /** A regrade's run: the run whose traces it graded (`mst grade`). */
   gradedFrom: z.string().regex(RUN_ID_PATTERN).optional(),
+  /**
+   * `mst grade --resume`: the regrade whose verdicts this one kept, and how
+   * many trials and pairwise comparisons it kept and graded.
+   */
+  resumedGrading: z
+    .looseObject({
+      from: z.string().regex(RUN_ID_PATTERN),
+      reusedTrials: z.number().int().nonnegative(),
+      gradedTrials: z.number().int().nonnegative(),
+      reusedComparisons: z.number().int().nonnegative(),
+      gradedComparisons: z.number().int().nonnegative(),
+    })
+    .optional(),
   /** Where the trials were collected, and the machine `mst run` ran on. */
   environment: z.looseObject({
     /** `local`, or a plugin environment (`<namespace>/env/<name>`). */
@@ -372,6 +385,18 @@ export interface RunFacts {
   phases?: RunPhases;
   /** The run a regrade graded the traces of. */
   gradedFrom?: string;
+  /** `mst grade --resume`: the grading it kept the verdicts of, and how many. */
+  resumedGrading?: ResumedGradingRecord;
+}
+
+/** `run.json`'s `resumedGrading`. */
+interface ResumedGradingRecord {
+  /** The run whose grading was resumed. */
+  from: string;
+  reusedTrials: number;
+  gradedTrials: number;
+  reusedComparisons: number;
+  gradedComparisons: number;
 }
 
 /** `run.json`'s `phases`: how far collecting traces and grading them got. */
@@ -564,6 +589,7 @@ export async function writeRun(
     ...(summary.selection ? { selection: summary.selection } : {}),
     redactStoredResponses: facts.redactStoredResponses,
     ...(facts.gradedFrom ? { gradedFrom: facts.gradedFrom } : {}),
+    ...(facts.resumedGrading ? { resumedGrading: facts.resumedGrading } : {}),
     environment: {
       name: facts.environment?.name ?? 'local',
       shards: facts.environment?.shards ?? 1,

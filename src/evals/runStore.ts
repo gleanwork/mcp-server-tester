@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { parseChunked } from '@discoveryjs/json-ext';
 import { z } from 'zod';
 import { loadGCSStorage } from './gcsStorage.js';
 import { latestRecord, RUN_ID_PATTERN } from './runFormat.js';
@@ -318,9 +319,15 @@ export async function uploadRun(
 
 async function getJson(store: RunStore, key: string): Promise<unknown> {
   const bytes = await store.get(key);
-  return bytes === null
-    ? undefined
-    : JSON.parse(Buffer.from(bytes).toString('utf8'));
+  // Parsed in chunks: a run's results.json can pass V8's string limit.
+  return bytes === null ? undefined : parseChunked(byteChunks(bytes));
+}
+
+/** `bytes` in 16 MiB pieces, each shorter than one string can be. */
+function* byteChunks(bytes: Uint8Array): Generator<Uint8Array> {
+  const size = 16 * 1024 * 1024;
+  for (let start = 0; start < bytes.length; start += size)
+    yield bytes.subarray(start, start + size);
 }
 
 /** An eval's runs in a store, for finding the previous run. */

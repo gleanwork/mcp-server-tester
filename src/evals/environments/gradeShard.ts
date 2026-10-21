@@ -161,6 +161,7 @@ export async function gradeShard(options: GradeShardOptions): Promise<number> {
           run: bundledRunDir(options.bundleDir, bundle.runId),
           plugins,
           report: false,
+          ...(bundle.resume ? { resume: true } : {}),
         },
         { source, datasets: bundle.datasets }
       );

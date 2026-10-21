@@ -122,7 +122,14 @@ import {
   parseResultsFlag,
   resolveStorePaths,
 } from './builtinResultStores.js';
-import { LOCAL_GRADING, type GradingSource } from './gradingSource.js';
+import {
+  LOCAL_GRADING,
+  gradingToResume,
+  previousGrades,
+  resumedGrading,
+  type GradingSource,
+  type PreviousGrades,
+} from './gradingSource.js';
 import {
   fetchRun,
   storedRunIds,
@@ -571,6 +578,37 @@ export function recordableOptions(
 }
 
 /** The judges a run used, by name and level, each with a hash of its options. */
+/**
+ * `mst grade --resume` keeps a run's verdicts, so it grades with what gave
+ * them: the same judges and pairwise judges, with the same options, and the
+ * same cases (whose own judges, references and thresholds are in their
+ * datasets). Throws, saying what changed, when anything did.
+ */
+function assertResumable(
+  replay: RunReplay,
+  judges: ReturnType<typeof judgeRecords>,
+  datasets: readonly EvalDataset[]
+): void {
+  const { run } = replay;
+  const fullRegrade = `Grade it again in full, without --resume: \`mst grade ${run.runId}\`.`;
+  if (JSON.stringify(run.judges ?? []) !== JSON.stringify(judges))
+    throw new Error(
+      `The eval config's judges or their options changed since run ${run.runId} was graded, so its verdicts can't be kept. ${fullRegrade}`
+    );
+  for (const dataset of datasets) {
+    const recorded = run.datasets.find((item) => item.name === dataset.name);
+    if (!recorded) continue;
+    // run.json records a dataset as the first variant that ran it selected it.
+    const hashes = [...replay.trials.keys()].map((variant) =>
+      datasetContentHash(replayedCases(dataset, replay, variant))
+    );
+    if (!hashes.includes(recorded.contentHash))
+      throw new Error(
+        `Dataset "${dataset.name}" changed since run ${run.runId} was graded (a case's input, expected answer or judges), so its verdicts can't be kept. ${fullRegrade}`
+      );
+  }
+}
+
 function judgeRecords(
   evalConfig: EvalConfig
 ): Array<{ type: string; level: string; optionsHash: string }> {
@@ -688,6 +726,11 @@ export interface GradeRunOptions extends Pick<
   env?: string;
   /** `--env-option`s: `shards`, `keep`, and the environment's own. */
   envOptions?: Readonly<Record<string, string>>;
+  /**
+   * `--resume`: keep every verdict the run's grading has, and grade only the
+   * judges and pairwise judges that failed to run (or never ran).
+   */
+  resume?: boolean;
 }
 
 /**
@@ -754,6 +797,13 @@ export async function gradeStoredRun(
     throw new Error(
       `Run ${run.runId} is a run of eval "${run.evalName}", not of "${name}" (${options.configPath}).`
     );
+  if (options.resume) {
+    if (run.phases.grade === 'skipped')
+      throw new Error(
+        `Run ${run.runId} was never graded, so there is no grading to resume. Grade it with \`mst grade ${run.runId}\`, without --resume.`
+      );
+    plan = { ...plan, previous: previousGrades(run.runId, stored) };
+  }
   const replay = runReplay(
     run,
     directory,
@@ -1017,6 +1067,11 @@ export interface PreparedGrading {
   pluginPackages: Array<{ specifier: string; name: string; version: string }>;
   /** The run's secrets (`--secrets-file`): what workers are sent. */
   secrets: Record<string, string>;
+  /**
+   * `mst grade --resume`: the earlier grading the workers reuse, and the
+   * cases with something it has no verdict for, the only ones to send.
+   */
+  resume?: { previous: PreviousGrades; cases: ReadonlySet<string> };
 }
 
 /** Where a regrade's grading came from, when not this process. */
@@ -1033,6 +1088,11 @@ export interface GradedElsewhere {
 export interface GradingPlan {
   /** Where each trial and case is graded. Default: here. */
   source?: GradingSource;
+  /**
+   * `mst grade --resume`: the stored run's own grading, whose verdicts are
+   * kept; only what has none is graded.
+   */
+  previous?: PreviousGrades;
   /**
    * The datasets as already loaded, one per eval config source, in order:
    * none is loaded again (a worker's, from its bundle).
@@ -1058,7 +1118,7 @@ async function gradeInShards(
   const onInterrupt = () => {
     if (++interrupts > 1) process.exit(130);
     console.error(
-      "[mst] Stopping the grade shards; the grading that came back is kept, and what didn't is graded by the next mst grade (Ctrl-C again to quit now)."
+      "[mst] Stopping the grade shards; the grading that came back is kept, and `mst grade <regrade> --resume` grades what didn't (Ctrl-C again to quit now)."
     );
     controller.abort();
   };
@@ -1457,6 +1517,49 @@ async function evaluate(
       replay,
       canonicalDatasets.map(({ dataset }) => dataset)
     );
+  // `mst grade --resume`: what the run's grading has no verdict for.
+  const previous = options.grading?.previous;
+  let toResume: ReturnType<typeof gradingToResume> | undefined;
+  if (previous) {
+    if (!regrade)
+      throw new Error('Only a regrade of a stored run resumes its grading.');
+    // A grade worker has its shard's cases only: its coordinator checked.
+    if (!options.grading?.source)
+      assertResumable(
+        regrade,
+        judgeRecords(evalConfig),
+        canonicalDatasets.map(({ dataset }) => dataset)
+      );
+    const pairwiseJudges = options.skipPairwise
+      ? []
+      : (evalConfig.pairwiseJudges ?? []).map(
+          (entry) => pairwiseJudgeSpec(entry).type
+        );
+    toResume = gradingToResume(
+      previous,
+      new Map(
+        [...regrade.trials].map(([variant, byCase]) => [
+          variant,
+          new Map(
+            [...byCase].map(([caseId, trials]) => [
+              caseId,
+              trials.map((trial) => ({
+                clientFailed:
+                  trial.error !== undefined && trial.gradingError === undefined,
+              })),
+            ])
+          ),
+        ])
+      ),
+      {
+        baseline: evalConfig.variants?.[0]?.name ?? 'default',
+        judges: pairwiseJudges,
+      }
+    );
+    console.error(
+      `[mst] Resuming the grading of ${previous.runId}: ${toResume.trials} trials and ${toResume.comparisons} pairwise comparisons have a judge without a verdict, in ${toResume.cases.size} cases. Every other verdict is kept.`
+    );
+  }
   // `mst grade --env`: the shards grade with these datasets, and the regrade
   // below reads what they brought back (ADR 0005).
   if (options.grading?.elsewhere) {
@@ -1474,9 +1577,14 @@ async function evaluate(
         rootDir,
       }),
       secrets: fileSecrets,
+      ...(previous && toResume
+        ? { resume: { previous, cases: toResume.cases } }
+        : {}),
     });
     grading = gradedElsewhere.source;
   }
+  const resumed = previous ? resumedGrading(previous, grading) : undefined;
+  if (resumed) grading = resumed;
   const narrowing: CaseNarrowing = {
     cases: options.cases,
     filterTags: options.filterTags,
@@ -2296,6 +2404,9 @@ async function evaluate(
       phases:
         options.grade === false ? { ...phases, grade: 'skipped' } : phases,
       ...(regrade ? { gradedFrom: regrade.gradedFrom } : {}),
+      ...(previous && resumed
+        ? { resumedGrading: { from: previous.runId, ...resumed.counts } }
+        : {}),
     };
   }
   // The comparison is a convenience: it must never cost the run its results.

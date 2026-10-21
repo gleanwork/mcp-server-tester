@@ -12,6 +12,7 @@ import type { CaseExecution } from './caseExecution.js';
 import type { ClientArtifacts } from './evalFrameworkTypes.js';
 import { trialArtifactsPath } from './runFormat.js';
 import { ALL_ARTIFACTS, DIAGNOSIS_DIR } from './allArtifacts.js';
+import { jsonCopy } from '../utils/jsonFile.js';
 
 /** The most a trial's copy may hold. A copy over a limit fails. */
 export const ARTIFACT_LIMITS = {
@@ -230,16 +231,16 @@ export function withCopiedArtifacts(
 /**
  * A stored copy of `value` (a run summary or a result) without trials'
  * `artifacts`: their local paths are for graders, never for results.
+ * Copied without one string of the whole value: a run's tool outputs can
+ * pass V8's string limit.
  */
 export function withoutTrialArtifacts<T>(value: T): T {
-  return JSON.parse(
-    JSON.stringify(value, (key, field: unknown) =>
-      key === 'artifacts' &&
-      typeof field === 'object' &&
-      field !== null &&
-      typeof (field as { dir?: unknown }).dir === 'string'
-        ? undefined
-        : field
-    )
-  ) as T;
+  return jsonCopy(value, (key, field) =>
+    key === 'artifacts' &&
+    typeof field === 'object' &&
+    field !== null &&
+    typeof (field as { dir?: unknown }).dir === 'string'
+      ? undefined
+      : field
+  );
 }

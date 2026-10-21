@@ -130,6 +130,28 @@ describe('chunked result JSON', () => {
     });
   });
 
+  it("takes JSON.stringify's replacer: each key and value after toJSON, undefined dropping a property", () => {
+    const value = {
+      keep: 1,
+      drop: { secret: true },
+      list: [{ drop: 2 }, 'x', { n: 3 }],
+      when: new Date(0),
+    };
+    const seen: string[] = [];
+    const replacer = (key: string, field: unknown) => {
+      seen.push(key);
+      if (key === 'drop') return undefined;
+      if (key === '1') return undefined; // In an array: null, as JSON.stringify writes it.
+      return typeof field === 'string' && key === 'when'
+        ? `at ${field}`
+        : field;
+    };
+    expect(jsonCopy(value, replacer)).toEqual(
+      JSON.parse(JSON.stringify(value, replacer))
+    );
+    expect(seen[0]).toBe('');
+  });
+
   it.skipIf(process.platform === 'win32')(
     'never exposes a private file while replacing it',
     async () => {

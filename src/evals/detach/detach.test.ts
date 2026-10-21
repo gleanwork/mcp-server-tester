@@ -201,6 +201,20 @@ describe('the coordinator', () => {
       '--env-option',
       'shards=20',
     ]);
+    // `mst grade --detach --resume`: the coordinator's grade resumes too.
+    const resumeGrade = planCommands(
+      plan({ command: 'grade', run: 'run1.g3', runArgs: ['--resume'] }),
+      paths,
+      '/dev/shm/x/secrets.json'
+    );
+    expect(resumeGrade.grade('run1.g3')).toEqual([
+      'grade',
+      'run1.g3',
+      ...shared,
+      '--env-option',
+      'shards=20',
+      '--resume',
+    ]);
   });
 
   it('reads progress and the run from what MST prints', () => {
