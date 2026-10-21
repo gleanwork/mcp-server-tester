@@ -104,14 +104,32 @@ export async function gradeInEnvironment(
   const stored = new Set(
     [...prepared.replay.trials.values()].flatMap((cases) => [...cases.keys()])
   );
+  // A resumed grading (`mst grade --resume`) sends only the cases with
+  // something its earlier grading has no verdict for.
+  const toGrade = prepared.resume?.cases;
   const shards = Array.from({ length: count }, (_, index) => ({
     index,
     cases: new Set(
       [...stored].filter(
-        (id) => datasetCases.has(id) && shardOf(id, count) === index
+        (id) =>
+          datasetCases.has(id) &&
+          (!toGrade || toGrade.has(id)) &&
+          shardOf(id, count) === index
       )
     ),
   })).filter((shard) => shard.cases.size > 0);
+  const { definition: _definition, ...environmentRecord } = environment;
+  if (shards.length === 0) {
+    log('nothing to grade: every verdict is kept');
+    return {
+      source: gatheredGrading(
+        new Map(),
+        (key) => `Missing: no grade shard graded ${key.caseId}.`
+      ),
+      environment: environmentRecord,
+      machines: [],
+    };
+  }
 
   const opened = await environment.definition.open(environment.options, {
     runId: prepared.replay.runId,
@@ -146,6 +164,7 @@ export async function gradeInEnvironment(
               cases: dataset.cases.filter((c) => cases.has(c.id)),
             })
           ),
+          ...(prepared.resume ? { resume: true } : {}),
         });
         await stageRun(prepared, cases, bundledRunDir(bundleDir, runId));
         // Results are read as they arrive, one at a time, once each.
@@ -233,10 +252,9 @@ export async function gradeInEnvironment(
         : {}),
     };
   });
-  const { definition: _definition, ...recorded } = environment;
   return {
     source: gatheredGrading(records, missing),
-    environment: recorded,
+    environment: environmentRecord,
     machines,
   };
 }

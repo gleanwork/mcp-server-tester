@@ -85,14 +85,15 @@ export interface ComparePairwiseOptions {
   /**
    * Where each case is compared: called with the case's id, the pairwise
    * judges' names (one preference each, in order), and `judge`, which runs
-   * every pairwise judge on it here. Without it, every case is
-   * compared here. `mst grade --env` (ADR 0005) records what workers' judges
-   * preferred, and reads those records back on the coordinator.
+   * every pairwise judge on it here, or only those `only` names. Without it,
+   * every case is compared here. `mst grade --env` (ADR 0005) records what
+   * workers' judges preferred, and reads those records back on the
+   * coordinator; `mst grade --resume` runs only judges without a preference.
    */
   judgeCase?: (
     caseId: string,
     judges: readonly string[],
-    judge: () => Promise<PairwiseCasePreference[]>
+    judge: (only?: readonly string[]) => Promise<PairwiseCasePreference[]>
   ) => Promise<PairwiseCasePreference[]>;
 }
 
@@ -431,12 +432,13 @@ export async function comparePairwise(
       baseline: trial(b),
       candidate: trial(c),
     };
-    const judge = async () => {
+    const judge = async (only?: readonly string[]) => {
       const preferences: PairwiseCasePreference[] = [];
       for (const r of resolved)
-        preferences.push(
-          await judgeCase(r.label, r.judge, r.options, r.reps, input)
-        );
+        if (!only || only.includes(r.label))
+          preferences.push(
+            await judgeCase(r.label, r.judge, r.options, r.reps, input)
+          );
       return preferences;
     };
     const preferences = options.judgeCase

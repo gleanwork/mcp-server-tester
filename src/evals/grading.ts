@@ -177,10 +177,15 @@ export function mergeEvalJudges(
 async function evaluateJudges(
   response: unknown,
   judges: JudgeExpectConfig[],
-  run: JudgeRun
+  run: JudgeRun,
+  /** Verdicts an earlier grading gave, by judge name: those judges don't run again. */
+  verdicts: ReadonlyMap<string, GraderScore> = new Map()
 ): Promise<GraderScore> {
   const results = await Promise.all(
-    judges.map(async (judge) => {
+    judges.map(async (judge): Promise<GraderScore> => {
+      const name = judgeNameOf(judge);
+      const verdict = name !== undefined ? verdicts.get(name) : undefined;
+      if (verdict) return verdict;
       const validation = await validateJudge(response, judge, run);
       const details = validation.details ?? {};
       return {
@@ -291,7 +296,12 @@ function toolTraceView(
 export async function gradeTrial(
   evalCase: Pick<EvalCase, 'assertions' | 'judges' | 'judgeReps'> &
     JudgeCaseSource,
-  graded: GradedExecution
+  graded: GradedExecution,
+  /**
+   * An earlier grading of the same trace (`mst grade --resume`): each judge
+   * that gave a verdict there isn't run again. Assertions always run.
+   */
+  previous?: GradingOutcome
 ): Promise<GradingOutcome> {
   const expectBlock: EvalAssertions = evalCase.assertions ?? {};
   const { response } = graded;
@@ -355,11 +365,35 @@ export async function gradeTrial(
   }
 
   if (evalCase.judges?.length)
-    results.judge = await evaluateJudges(response, resolveJudges(evalCase), {
-      evalCase,
-      clientResponse: graded.clientResponse,
-      evidence: graded.evidence,
-    });
+    results.judge = await evaluateJudges(
+      response,
+      resolveJudges(evalCase),
+      {
+        evalCase,
+        clientResponse: graded.clientResponse,
+        evidence: graded.evidence,
+      },
+      judgeVerdicts(previous?.scores.judge)
+    );
 
   return outcome;
+}
+
+/** The judge results in a trial's `judge` score that gave a verdict, by judge name. */
+function judgeVerdicts(
+  score: GraderScore | undefined
+): ReadonlyMap<string, GraderScore> {
+  const results = score?.judgeResults?.length
+    ? score.judgeResults
+    : score
+      ? [score]
+      : [];
+  return new Map(
+    results
+      .filter(
+        (result): result is GraderScore & { judgeName: string } =>
+          result.judgeName !== undefined && result.error === undefined
+      )
+      .map((result) => [result.judgeName, result])
+  );
 }

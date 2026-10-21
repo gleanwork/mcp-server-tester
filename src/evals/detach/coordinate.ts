@@ -107,7 +107,7 @@ export function planCommands(
       run,
       ...shared,
       ...envOptionArgs(plan.gradeEnvOptions ?? plan.envOptions),
-      // `mst grade --detach`'s own flags (`--no-report`).
+      // `mst grade --detach`'s own flags (`--no-report`, `--resume`).
       ...(plan.command === 'grade' ? plan.runArgs : []),
     ],
   };

@@ -25,6 +25,8 @@ export interface GradeOptions {
   results?: string;
   /** `--detach`: grade from a coordinator machine the environment creates (ADR 0007). */
   detach?: boolean;
+  /** `--resume`: keep the run's verdicts, and grade only what has none. */
+  resume?: boolean;
   /** `--loaded-datasets <file>` (hidden): datasets loaded where a detached run started. */
   loadedDatasets?: string;
 }
@@ -46,7 +48,10 @@ export async function grade(run: string, options: GradeOptions): Promise<void> {
       ...(options.results ? { results: options.results } : {}),
       ...(options.secretsFile ? { secretsFile: options.secretsFile } : {}),
       ...(options.plugins ? { plugins: options.plugins } : {}),
-      runArgs: options.report === false ? ['--no-report'] : [],
+      runArgs: [
+        ...(options.report === false ? ['--no-report'] : []),
+        ...(options.resume ? ['--resume'] : []),
+      ],
       noGrade: false,
       gradeEnv: false,
     });
@@ -63,6 +68,7 @@ export async function grade(run: string, options: GradeOptions): Promise<void> {
       outputDir: options.outputDir,
       secretsFile: options.secretsFile,
       ...(options.report === false ? { report: false } : {}),
+      ...(options.resume ? { resume: true } : {}),
       ...(options.results ? { results: options.results } : {}),
       ...(options.env ? { env: options.env } : {}),
       ...(options.envOption?.length
