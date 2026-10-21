@@ -545,6 +545,25 @@ describe('caller-owned Linux Cowork desktop', () => {
       telemetry: { accounting: 'complete', incomplete_scans: 1 },
     });
   });
+  it('counts a folder request it denied, and goes on until the task finishes', async () => {
+    child.responses.push({
+      value: {
+        status: 'hitl_checked',
+        action_count: 1,
+        duration_ms: 1,
+        denied: 'folder_request',
+      },
+    });
+    let checks = 0;
+    const result = await linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete: async () => ++checks > 1,
+    });
+    expect(result).toMatchObject({
+      action_count: 1,
+      telemetry: { accounting: 'complete', folder_requests_denied: 1 },
+    });
+  });
   it('counts a driver call that failed with a receipt by its actions', async () => {
     child.responses.push({
       failed: true,

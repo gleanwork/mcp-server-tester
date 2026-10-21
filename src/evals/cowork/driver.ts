@@ -54,6 +54,11 @@ export interface SemanticDesktopTelemetry {
    * or the call out of time). Each saw no prompt; HITL scanned again.
    */
   incomplete_scans?: number;
+  /**
+   * Requests for a folder of the user's computer (Cowork's
+   * request_cowork_directory) HITL denied: a headless run has none to give.
+   */
+  folder_requests_denied?: number;
   planner: { status: 'not-applicable' };
   cost: { status: 'not-applicable' };
 }
