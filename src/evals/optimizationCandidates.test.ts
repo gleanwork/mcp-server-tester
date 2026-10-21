@@ -143,6 +143,34 @@ describe('checkCandidates', () => {
     ]);
   });
 
+  it('checks a bare key next to its qualified twin against the tool it changes', () => {
+    // As buildToolSurface resolves it: "search" is docs.search here.
+    const { problems } = check(
+      [
+        {
+          id: 'a',
+          tools: {
+            'acme.search': { description: 'x' },
+            search: {
+              description: 'y',
+              inputSchema: {
+                type: 'object',
+                properties: { q: { type: 'number' } },
+              },
+            },
+          },
+        },
+      ],
+      { editableTools: ['acme.search'] }
+    );
+    expect(problems).toEqual([
+      expect.stringContaining(
+        "can't change this tool. Editable tools: acme.search"
+      ),
+      expect.stringContaining('inputSchema changes more than description'),
+    ]);
+  });
+
   it('refuses taken, repeated and malformed ids, unknown fields and empty tools', () => {
     const { problems, variants } = check([
       { id: 'baseline', tools: { 'acme.search': { description: 'x' } } },

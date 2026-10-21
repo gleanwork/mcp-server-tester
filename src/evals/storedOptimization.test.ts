@@ -10,7 +10,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildEvidence, renderEvidence } from './optimizationReport.js';
-import { readOptimizationRecord } from './optimizationFormat.js';
+import {
+  readOptimizationRecord,
+  writeOptimizationRecord,
+} from './optimizationFormat.js';
 import { readRunDirectory, runsDirectory } from './runFormat.js';
 import {
   CandidateError,
@@ -46,20 +49,34 @@ afterEach(async () => {
   );
 });
 
-/** Six cases the base metadata fails and one held-out case. */
-async function evalDir(): Promise<{ configPath: string; catalog: string }> {
+/**
+ * Cases the base metadata fails, the last one held out: seven by default.
+ * `judges` are the eval config's.
+ */
+async function evalDir(
+  options: { cases?: number; judges?: unknown[]; regression?: boolean } = {}
+): Promise<{ configPath: string; catalog: string }> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'stored-opt-'));
   dirs.push(dir);
   const catalog = path.join(dir, 'docs.json');
   await fs.copyFile(path.join(FIXTURES, 'catalogs', 'docs.json'), catalog);
-  const cases = Array.from({ length: 7 }, (_, i) => ({
+  const count = options.cases ?? 7;
+  const cases = Array.from({ length: count }, (_, i) => ({
     id: `case-${i}`,
     input: `Find what we know about outage ${i}`,
-    ...(i === 6 ? { tags: ['held-out'] } : {}),
+    ...(i === count - 1 ? { tags: ['held-out'] } : {}),
     assertions: {
       toolsTriggered: { calls: [{ name: 'search', required: true }] },
     },
   }));
+  // Works today (no tool call) and breaks once the model finds search.
+  if (options.regression)
+    cases.push({
+      id: 'no-search',
+      input: 'Say hello',
+      tags: ['regression'],
+      assertions: { toolCallCount: { max: 0 } },
+    } as unknown as (typeof cases)[number]);
   await fs.writeFile(
     path.join(dir, 'cases.json'),
     JSON.stringify({ name: 'triggering', cases })
@@ -79,6 +96,7 @@ async function evalDir(): Promise<{ configPath: string; catalog: string }> {
         },
       },
       client: 'usecase/client/model',
+      ...(options.judges ? { judges: options.judges } : {}),
       clientOptions: {
         policy: [
           {
@@ -102,6 +120,18 @@ function target(configPath: string) {
 
 async function runIds(evalDirectory: string): Promise<string[]> {
   return (await fs.readdir(runsDirectory(evalDirectory))).sort();
+}
+
+async function editJson(
+  file: string,
+  edit: (value: Record<string, unknown>) => void
+): Promise<void> {
+  const value = JSON.parse(await fs.readFile(file, 'utf8')) as Record<
+    string,
+    unknown
+  >;
+  edit(value);
+  await fs.writeFile(file, JSON.stringify(value));
 }
 
 describe('stored tool optimization', () => {
@@ -256,6 +286,170 @@ describe('stored tool optimization', () => {
     expect(await runIds(optimization.evalDirectory)).toEqual(before);
     const record = await readOptimizationRecord(optimization.directory);
     expect(record.rounds).toEqual([]);
+  }, 120_000);
+
+  it('judges an earlier round again when a later round adds a candidate', async () => {
+    // Six cases that all flip: p = 1/64, below 0.025 with one candidate
+    // tried but not with two (0.0125).
+    const { configPath } = await evalDir({ cases: 6 });
+    const optimization = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    const first = await optimization.tryCandidates([verbose]);
+    expect(first.round.candidates.map((c) => c.fixes)).toEqual([true]);
+
+    await optimization.tryCandidates([concise]);
+    expect(optimization.state.rounds[0]?.candidates[0]?.fixes).toBe(false);
+    const reopened = await openToolOptimization({
+      evalConfig: target(configPath),
+    });
+    expect(reopened.state.rounds[0]?.candidates[0]?.fixes).toBe(false);
+    expect((await reopened.finish()).proposal?.recommendation).toBe(
+      'inconclusive'
+    );
+    const recommendation = await fs.readFile(
+      path.join(reopened.directory, 'recommendation.md'),
+      'utf8'
+    );
+    expect(recommendation).toContain(
+      'inconclusive: no candidate is clearly better than the current metadata'
+    );
+    expect(recommendation).toContain("## `verbose`'s tool metadata");
+    expect(recommendation).toContain('divided by the 2 candidates tried');
+  }, 120_000);
+
+  it('recommends rejecting a candidate that breaks working cases', async () => {
+    const { configPath } = await evalDir({ regression: true });
+    const optimization = await startToolOptimization({
+      evalConfig: target(configPath),
+      // One case: the default (significant) check would call it noise.
+      regressionCheck: 'any-case',
+    });
+    expect(optimization.record.grouping.source).toBe('declared');
+    await optimization.tryCandidates([
+      {
+        ...verbose,
+        tools: {
+          search: {
+            ...verbose.tools.search,
+            inputSchema: {
+              type: 'object',
+              properties: {
+                query: { type: 'string', description: 'Words to look for.' },
+                id: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+    ]);
+    const result = await optimization.finish();
+    expect(result.proposal?.recommendation).toBe('reject');
+    const recommendation = await fs.readFile(
+      path.join(optimization.directory, 'recommendation.md'),
+      'utf8'
+    );
+    expect(recommendation).toContain(
+      'reject: the best candidate, `verbose`, breaks cases that work today'
+    );
+    expect(recommendation).toMatch(/\| Regression cases \(1\) \| 100% \| 0%/);
+    expect(recommendation).toContain('Parameter descriptions:');
+    expect(recommendation).toContain('Words to look for.');
+  }, 120_000);
+
+  it('refuses a round when the datasets changed since the baseline', async () => {
+    const { configPath } = await evalDir();
+    const optimization = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    await editJson(path.join(path.dirname(configPath), 'cases.json'), (d) => {
+      (d.cases as Array<{ input: string }>)[0]!.input = 'Something else';
+    });
+    await expect(optimization.tryCandidates([verbose])).rejects.toThrow(
+      /datasets changed/
+    );
+    const record = await readOptimizationRecord(optimization.directory);
+    expect(record.rounds).toEqual([]);
+  }, 120_000);
+
+  it("refuses a round when a judge's options changed since the baseline", async () => {
+    const { configPath } = await evalDir({
+      judges: [{ type: 'usecase/judge/keywords', keywords: ['outage'] }],
+    });
+    const optimization = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    await editJson(configPath, (config) => {
+      config.judges = [
+        { type: 'usecase/judge/keywords', keywords: ['incident'] },
+      ];
+    });
+    await expect(optimization.tryCandidates([verbose])).rejects.toThrow(
+      /judges or their options changed/
+    );
+  }, 120_000);
+
+  it('runs a round that did not finish again, and nothing else until then', async () => {
+    const { configPath } = await evalDir();
+    const started = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    // As a round whose run threw leaves the record: no run.
+    started.record.rounds.push({
+      round: 0,
+      createdAt: new Date().toISOString(),
+      proposer: 'agent',
+      candidates: [verbose],
+    });
+    await writeOptimizationRecord(started.evalDirectory, started.record);
+
+    const reopened = await openToolOptimization({
+      evalConfig: target(configPath),
+    });
+    expect(reopened.pendingRound?.round).toBe(0);
+    await expect(reopened.tryCandidates([concise])).rejects.toThrow(
+      /Round 0 didn't finish/
+    );
+    const retried = await reopened.retry();
+    expect(retried.round.candidates.map((c) => c.metricValue)).toEqual([1]);
+    expect(reopened.pendingRound).toBeUndefined();
+    await expect(reopened.retry()).rejects.toThrow(/no round to run again/);
+    const record = await readOptimizationRecord(reopened.directory);
+    expect(record.rounds[0]?.runId).toBe(retried.runId);
+  }, 120_000);
+
+  it('refuses to continue past a round whose run is missing trials', async () => {
+    const { configPath } = await evalDir();
+    const optimization = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    const { runId } = await optimization.tryCandidates([concise]);
+    // In this session: a later round with a run that wasn't scored.
+    optimization.record.rounds.push({
+      round: 1,
+      createdAt: new Date().toISOString(),
+      proposer: 'agent',
+      candidates: [verbose],
+      runId: 'partial-run',
+    });
+    await expect(optimization.tryCandidates([verbose])).rejects.toThrow(
+      /Round 1's run partial-run is missing trials/
+    );
+    await expect(optimization.finish()).rejects.toThrow(/missing trials/);
+    optimization.record.rounds.pop();
+
+    // In another process: the stored run says so.
+    const runJson = path.join(
+      runsDirectory(optimization.evalDirectory),
+      runId,
+      'run.json'
+    );
+    await editJson(runJson, (run) => {
+      (run.phases as { collect: string }).collect = 'partial';
+    });
+    await expect(
+      openToolOptimization({ evalConfig: target(configPath) })
+    ).rejects.toThrow(/missing trials[\s\S]*mst run --resume/);
   }, 120_000);
 
   it('shows evidence without the held-out cases', async () => {

@@ -10,6 +10,7 @@ import type {
   TrialResult,
 } from '../types/reporter.js';
 import type { EvalRunnerResult, ToolMetadataOverride } from './evalRunner.js';
+import { servedTool } from './optimizationCandidates.js';
 import type { OptimizationRecord } from './optimizationFormat.js';
 import { isInfraTrial } from './runFormat.js';
 import type { ListedServerTools } from './toolSurface.js';
@@ -505,16 +506,6 @@ function verdictOf(
   return candidate.fixes ? 'clearly better' : 'not clearly better';
 }
 
-function originalTool(
-  key: string,
-  servedTools: readonly ListedServerTools[]
-): Tool | undefined {
-  for (const { server, tools } of servedTools)
-    for (const tool of tools)
-      if (tool.name === key || `${server}.${tool.name}` === key) return tool;
-  return undefined;
-}
-
 /** Each parameter whose description a candidate's input schema changes. */
 function parameterChanges(
   original: Tool | undefined,
@@ -627,8 +618,9 @@ export function renderRecommendation(source: RecommendationSource): string {
         : `## \`${chosen.variant.id}\`'s tool metadata`,
       ''
     );
+    const keys = Object.keys(chosen.variant.tools);
     for (const [key, override] of Object.entries(chosen.variant.tools)) {
-      const original = originalTool(key, servedTools);
+      const original = servedTool(key, servedTools, keys)?.tool;
       lines.push(`### ${key}`, '');
       if (override.name && override.name !== original?.name)
         lines.push(`Rename to \`${override.name}\`.`, '');
