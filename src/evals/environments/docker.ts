@@ -5,8 +5,9 @@
  * as the desktop user, and `docker cp` moves the bundle and results.
  *
  * Cowork's VM listens on a host-wide vsock port, so each Docker context runs
- * one container at a time; `contexts=a,b` spreads shards over several.
- * Cowork's inference token comes from MST's LLM gateway settings on this
+ * one Cowork container at a time; `contexts=a,b` spreads shards over several.
+ * Grade containers share a context, as many at once as its memory allows
+ * (dockerCapacity.ts). Cowork's inference token comes from MST's LLM gateway settings on this
  * machine and is kept fresh in the container's tmpfs, never in the image.
  */
 import { spawn } from 'node:child_process';
@@ -19,6 +20,16 @@ import { z } from 'zod';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
 import { machineEnvironment } from './channel.js';
+import {
+  formatMemory,
+  memoryArg,
+  parseDockerInfo,
+  parseMemory,
+  planContext,
+  type ContainerLimits,
+  type ContextCapacity,
+  type ContextPlan,
+} from './dockerCapacity.js';
 import {
   KEPT_SUFFIX,
   RUN_LABEL,
@@ -33,6 +44,7 @@ import type {
   EnvironmentContext,
   EnvironmentDefinition,
   Machine,
+  ShardWork,
   WorkerChannel,
 } from '../evalFrameworkTypes.js';
 
@@ -55,6 +67,22 @@ const DockerOptionsSchema = z
     contexts: z.string().min(1).optional(),
     /** How long a new container's desktop has to come up, in seconds. */
     readyTimeout: z.string().regex(/^\d+$/).optional(),
+    /**
+     * Each container's memory, in Docker's syntax (`8g`, `512m`). Default:
+     * all a context can spare for a Cowork container, 2g for a grade one.
+     */
+    memory: z
+      .string()
+      .refine((value) => parseMemory(value) !== undefined, {
+        message: 'memory must be a size such as 8g or 512m',
+      })
+      .optional(),
+    /** Each container's CPUs (`--cpus`). Default: no limit. */
+    cpus: z
+      .string()
+      .regex(/^\d+(\.\d+)?$/, 'cpus must be a number such as 2 or 1.5')
+      .refine((value) => Number(value) > 0, 'cpus must be more than 0')
+      .optional(),
     /** `mst env setup docker` only: the Claude Desktop package to install. */
     claudeDesktopVersion: z.string().min(1).optional(),
   })
@@ -120,6 +148,16 @@ export function coworkImageDirectory(): string {
   );
 }
 
+/** `--memory` and `--cpus`, for the limits that are set. */
+function limitArgs(limits: ContainerLimits = {}): string[] {
+  return [
+    ...(limits.memory !== undefined
+      ? ['--memory', memoryArg(limits.memory)]
+      : []),
+    ...(limits.cpus !== undefined ? ['--cpus', String(limits.cpus)] : []),
+  ];
+}
+
 /** `docker run` arguments for a shard's container. */
 export function dockerRunArgs(options: {
   name: string;
@@ -129,6 +167,8 @@ export function dockerRunArgs(options: {
   inference: { baseURL: string; authScheme: 'bearer' | 'x-api-key' };
   /** Forwarded to the container's desktop-ready helper when set. */
   warmVmTimeoutS?: string;
+  /** The container's memory and CPUs. Default: no limits. */
+  limits?: ContainerLimits;
 }): string[] {
   const warm = options.warmVmTimeoutS;
   return [
@@ -166,6 +206,9 @@ export function dockerRunArgs(options: {
     ...(warm !== undefined && /^[1-9][0-9]*$/.test(warm)
       ? ['--env', `MST_COWORK_WARM_VM_TIMEOUT_S=${warm}`]
       : []),
+    // Out of memory, the kernel kills a process in this container, not the
+    // Docker daemon or another shard's.
+    ...limitArgs(options.limits),
     options.image,
   ];
 }
@@ -176,10 +219,11 @@ export function dockerRunArgs(options: {
  * devices and no inference, and the entrypoint only keeps the container up
  * for `mst grade-shard`.
  */
-function gradeContainerRunArgs(options: {
+export function gradeContainerRunArgs(options: {
   name: string;
   image: string;
   runId: string;
+  limits?: ContainerLimits;
 }): string[] {
   return [
     'run',
@@ -191,6 +235,7 @@ function gradeContainerRunArgs(options: {
     ...ownerLabelArgs(),
     '--tmpfs',
     '/run/mst:mode=0755',
+    ...limitArgs(options.limits),
     '--entrypoint',
     '/usr/bin/tini',
     options.image,
@@ -206,15 +251,37 @@ export function containerName(runId: string, index: number): string {
 }
 
 /**
- * Docker contexts, each running one container at a time: a shard waits for
- * a free one.
+ * Docker contexts, each running up to `slots(context)` containers at once
+ * (default one, and never fewer): a shard takes the context with the most
+ * room, or waits for room on any.
  */
-export function contextPool(contexts: readonly (string | undefined)[]) {
-  const free = [...contexts];
+export function contextPool(
+  contexts: readonly (string | undefined)[],
+  slots: (context: string | undefined) => Promise<number> = async () => 1
+) {
+  type Entry = { context: string | undefined; free: number };
+  let entries: Entry[] | undefined;
+  let loading: Promise<Entry[]> | undefined;
+  const load = () =>
+    (loading ??= Promise.all(
+      contexts.map(async (context) => ({
+        context,
+        free: Math.max(1, await slots(context).catch(() => 1)),
+      }))
+    ).then((loaded) => (entries = loaded)));
   const waiting: Array<(context: string | undefined) => void> = [];
   return {
-    acquire(signal: AbortSignal): Promise<string | undefined> {
-      if (free.length) return Promise.resolve(free.shift());
+    async acquire(signal: AbortSignal): Promise<string | undefined> {
+      const loaded = await load();
+      if (signal.aborted) throw new Error('The run was cancelled.');
+      const roomiest = loaded.reduce<Entry | undefined>(
+        (best, entry) => (entry.free > (best?.free ?? 0) ? entry : best),
+        undefined
+      );
+      if (roomiest) {
+        roomiest.free--;
+        return roomiest.context;
+      }
       return new Promise((resolve, reject) => {
         const onAbort = () => {
           const index = waiting.indexOf(take);
@@ -232,10 +299,42 @@ export function contextPool(contexts: readonly (string | undefined)[]) {
     },
     release(context: string | undefined) {
       const next = waiting.shift();
-      if (next) next(context);
-      else free.push(context);
+      if (next) return next(context);
+      const entry = entries?.find((candidate) => candidate.context === context);
+      if (entry) entry.free++;
     },
   };
+}
+
+/**
+ * Why a failed shard's container failed, when Docker knows: the kernel
+ * killed one of its processes for memory.
+ */
+async function diagnoseContainer(
+  dockerContext: string | undefined,
+  name: string,
+  work: ShardWork,
+  limits: ContainerLimits,
+  memorySet: boolean
+): Promise<string | undefined> {
+  const result = await docker(dockerContext, [
+    'inspect',
+    '--format',
+    '{{.State.OOMKilled}}',
+    name,
+  ]);
+  if (result.code !== 0 || result.stdout.trim() !== 'true') return undefined;
+  const limit =
+    limits.memory !== undefined
+      ? ` (its limit: ${formatMemory(limits.memory)})`
+      : '';
+  const fix =
+    work === 'grade'
+      ? 'raise --env-option memory (fewer grade containers then share a context)'
+      : memorySet
+        ? 'raise --env-option memory, or give the Docker context more memory'
+        : 'give the Docker context more memory';
+  return `Container ${name} ran out of memory${limit}: ${fix}.`;
 }
 
 /** Cowork's inference: MST's Anthropic gateway settings, or an API key. */
@@ -414,7 +513,64 @@ function openDocker(
 ): ReturnType<typeof machineEnvironment> {
   const image = options.image ?? DEFAULT_COWORK_IMAGE;
   const readyTimeoutS = Number(options.readyTimeout ?? DEFAULT_READY_TIMEOUT_S);
+  const requested: ContainerLimits = {
+    ...(options.memory ? { memory: parseMemory(options.memory) } : {}),
+    ...(options.cpus ? { cpus: Number(options.cpus) } : {}),
+  };
+  // Once per context: its size. Once per context and work: the plan, logged.
+  const capacities = new Map<string, Promise<ContextCapacity | undefined>>();
+  const capacityOf = (dockerContext: string | undefined) => {
+    const id = dockerContext ?? '';
+    if (!capacities.has(id))
+      capacities.set(
+        id,
+        docker(dockerContext, [
+          'info',
+          '--format',
+          '{{.MemTotal}} {{.NCPU}}',
+        ]).then((result) =>
+          result.code === 0 ? parseDockerInfo(result.stdout) : undefined
+        )
+      );
+    return capacities.get(id)!;
+  };
+  const plans = new Map<string, Promise<ContextPlan>>();
+  const planOf = (work: ShardWork, dockerContext: string | undefined) => {
+    const id = `${work}:${dockerContext ?? ''}`;
+    if (!plans.has(id))
+      plans.set(
+        id,
+        capacityOf(dockerContext).then((capacity) => {
+          const plan = planContext(work, capacity, requested);
+          console.error(
+            `[mst] ${dockerContext ?? 'The current Docker context'} ${plan.note}`
+          );
+          return plan;
+        })
+      );
+    return plans.get(id)!;
+  };
+  const diagnose =
+    (
+      dockerContext: string | undefined,
+      name: string,
+      work: ShardWork,
+      limits: ContainerLimits
+    ) =>
+    () =>
+      diagnoseContainer(
+        dockerContext,
+        name,
+        work,
+        limits,
+        requested.memory !== undefined
+      );
+  // Cowork containers: one per context. Grade containers: as many as fit.
   const pool = contextPool(contextsOf(options));
+  const gradePool = contextPool(
+    contextsOf(options),
+    async (dockerContext) => (await planOf('grade', dockerContext)).slots
+  );
   const seccompProfile = path.join(coworkImageDirectory(), 'seccomp.json');
   // Once per context: containers an earlier run on this machine left behind.
   const swept = new Map<string, Promise<void>>();
@@ -438,20 +594,40 @@ function openDocker(
       );
     return swept.get(id)!;
   };
-  const contexts = contextsOf(options);
   return machineEnvironment(
     context,
     async (shard, signal): Promise<Machine> => {
-      if (shard.work === 'grade')
-        return gradeMachine(
-          // No VM, so no host-wide vsock port: grade shards share contexts.
-          contexts[shard.index % contexts.length],
-          containerName(shard.runId, shard.index),
-          image,
-          shard.runId,
-          sweep,
-          signal
-        );
+      if (shard.work === 'grade') {
+        // No VM, so no host-wide vsock port: grade shards share contexts.
+        const dockerContext = await gradePool.acquire(signal);
+        const name = containerName(shard.runId, shard.index);
+        try {
+          const { limits } = await planOf('grade', dockerContext);
+          const machine = await gradeMachine(
+            dockerContext,
+            name,
+            image,
+            shard.runId,
+            limits,
+            sweep,
+            signal
+          );
+          return {
+            ...machine,
+            diagnose: diagnose(dockerContext, name, 'grade', limits),
+            async dispose(options) {
+              try {
+                await machine.dispose(options);
+              } finally {
+                gradePool.release(dockerContext);
+              }
+            },
+          };
+        } catch (error) {
+          gradePool.release(dockerContext);
+          throw error;
+        }
+      }
       const dockerContext = await pool.acquire(signal);
       const name = containerName(shard.runId, shard.index);
       let refresh: NodeJS.Timeout | undefined;
@@ -460,8 +636,10 @@ function openDocker(
         await docker(dockerContext, ['rm', '--force', name]);
         releaseContainer(dockerContext, name);
       };
+      let limits: ContainerLimits | undefined;
       try {
         await sweep(dockerContext);
+        ({ limits } = await planOf('collect', dockerContext));
         const credential = await inference();
         const digest = await dockerOk(
           dockerContext,
@@ -479,6 +657,7 @@ function openDocker(
             seccompProfile,
             inference: credential,
             warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
+            limits,
           }),
           `Starting container ${name}`,
           { signal }
@@ -503,6 +682,7 @@ function openDocker(
           image: { ref: image, digest },
           workDir: WORK_DIR,
           channel: containerChannel(dockerContext, name),
+          diagnose: diagnose(dockerContext, name, 'collect', limits),
           async dispose({ keep }) {
             try {
               if (keep) {
@@ -523,9 +703,18 @@ function openDocker(
           },
         };
       } catch (error) {
+        // A desktop that didn't come up may have run out of memory.
+        const cause = limits
+          ? await diagnose(dockerContext, name, 'collect', limits)().catch(
+              () => undefined
+            )
+          : undefined;
         await remove();
         pool.release(dockerContext);
-        throw error;
+        if (!cause) throw error;
+        throw new Error(
+          `${cause} ${error instanceof Error ? error.message : String(error)}`
+        );
       }
     }
   );
@@ -540,6 +729,7 @@ async function gradeMachine(
   name: string,
   image: string,
   runId: string,
+  limits: ContainerLimits,
   sweep: (dockerContext: string | undefined) => Promise<void>,
   signal: AbortSignal
 ): Promise<Machine> {
@@ -557,7 +747,7 @@ async function gradeMachine(
     claimContainer(dockerContext, name);
     await dockerOk(
       dockerContext,
-      gradeContainerRunArgs({ name, image, runId }),
+      gradeContainerRunArgs({ name, image, runId, limits }),
       `Starting container ${name}`,
       { signal }
     );
@@ -684,7 +874,7 @@ async function setupDocker(
 export const dockerEnvironment: EnvironmentDefinition = {
   schema: DockerOptionsSchema,
   description:
-    "Run shards in containers from MST's Linux Cowork image, one per Docker context at a time.",
+    "Run shards in containers from MST's Linux Cowork image: one Cowork container per Docker context at a time, grade containers as many as fit.",
   async open(options, context) {
     return openDocker(options as DockerOptions, context);
   },
