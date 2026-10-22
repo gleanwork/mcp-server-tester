@@ -130,6 +130,11 @@ servers through Claude's supported local Developer MCP surface instead:
 - Cleanup tolerates Claude's JSON whitespace rewrite, but rejects semantic edits
   made concurrently. `cowork recover` also restores the developer configuration.
 
+A server that fails the preflight is checked again after 10 seconds and then
+after 30 more; only failed servers are rechecked, and the batch fails if one is
+still not ready. `MST_COWORK_MCP_PREFLIGHT_RETRY_S` sets other delays as
+comma-separated seconds (`5,20`); an empty value turns retries off.
+
 Use actual tool-call assertions: successful endpoint preflight alone is not proof
 that the Cowork session received the server. A live pinned run has passed with
 an eval-endpoint search tool and a login-backed GitHub `get_me` call.
@@ -254,7 +259,8 @@ change its launch policy, or manage its lifecycle.
 `MST_DESKTOP_OWNED=1`, makes the settings file writable by the desktop user, and
 sets `MST_DESKTOP_RESTART` to the absolute path of a command that restarts Claude
 Desktop and returns once it's back, within 5 minutes
-(`MST_DESKTOP_RESTART_TIMEOUT_S` sets another limit, up to 3600 seconds). Claude Desktop reads
+(`MST_DESKTOP_RESTART_TIMEOUT_S` sets another limit, up to 3600 seconds). If the
+command fails, MST runs it once more before the variant fails. Claude Desktop reads
 `/etc/claude-desktop/managed-settings.json` only when root owns it and no one
 else can write it, so an image points `MST_COWORK_SETTINGS_FILE` at a staging
 file the desktop user owns, and its restart command installs a root-owned copy

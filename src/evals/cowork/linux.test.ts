@@ -777,6 +777,47 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await expect(stat(helper)).rejects.toThrow();
   });
 
+  it('restarts the desktop again when a restart fails, before failing the variant', async () => {
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+    try {
+      child.responses.push({ failed: true });
+      const prepared = await (await prepareOwned()).lifecycle;
+      expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
+        RESTART,
+        RESTART,
+        'python3',
+      ]);
+      expect(String(stderr.mock.calls.at(-1)?.[0])).toContain(
+        'desktop restart failed'
+      );
+      await prepared.dispose();
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('fails the variant and restores the settings when both restarts fail', async () => {
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+    try {
+      child.responses.push({ failed: true }, { failed: true });
+      const { file, original, lifecycle } = await prepareOwned();
+      await expect(lifecycle).rejects.toThrow(
+        /failed after MST wrote the variant settings, 2 times/
+      );
+      expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
+        RESTART,
+        RESTART,
+      ]);
+      expect(await readFile(file, 'utf8')).toBe(original);
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
   it('restores the settings when the desktop is not ready after them', async () => {
     child.responses.push({}, { failed: true });
     const { file, original, lifecycle } = await prepareOwned();

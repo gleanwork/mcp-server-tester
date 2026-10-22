@@ -349,13 +349,40 @@ async function writeServerHeaders(
   };
 }
 
+/**
+ * How many times MST runs the restart command before the variant fails. A
+ * restart that fails costs the shard every case it has left, and a second one
+ * starts Claude and its VM from scratch.
+ */
+const DESKTOP_RESTART_ATTEMPTS = 2;
+
 /** Runs the image's desktop restart command; it returns once Claude is back. */
 async function restartDesktop(
   command: string,
   env: Record<string, string | undefined>
 ): Promise<void> {
+  const failures: string[] = [];
+  for (let attempt = 1; attempt <= DESKTOP_RESTART_ATTEMPTS; attempt++) {
+    const failure = await runRestartCommand(command, env);
+    if (failure === undefined) return;
+    failures.push(failure);
+    if (attempt < DESKTOP_RESTART_ATTEMPTS)
+      process.stderr.write(
+        `[mst:cowork] desktop restart failed (${failure}); restarting it again\n`
+      );
+  }
+  throw new Error(
+    `The desktop restart command (MST_DESKTOP_RESTART) failed after MST wrote the variant settings, ${failures.length} times: ${failures.join('; then ')}`
+  );
+}
+
+/** One run of the restart command: why it failed, or undefined. */
+function runRestartCommand(
+  command: string,
+  env: Record<string, string | undefined>
+): Promise<string | undefined> {
   const timeout = desktopRestartTimeoutMs(env);
-  const failure = await new Promise<string | undefined>((resolve) => {
+  return new Promise<string | undefined>((resolve) => {
     const child = execFile(
       command,
       [],
@@ -373,17 +400,17 @@ async function restartDesktop(
             ? undefined
             : error.killed
               ? `it didn't return within ${timeout / 1000} s`
-              : String(stderr).trim().split('\n').at(-1)?.slice(0, 300) ||
+              : String(stderr ?? '')
+                  .trim()
+                  .split('\n')
+                  .at(-1)
+                  ?.slice(0, 300) ||
                 `it exited with ${error.code ?? 'an error'}`
         )
     );
     child.stdin?.on('error', () => {});
     child.stdin?.end();
   });
-  if (failure !== undefined)
-    throw new Error(
-      `The desktop restart command (MST_DESKTOP_RESTART) failed after MST wrote the variant settings: ${failure}`
-    );
 }
 
 function telemetry(

@@ -353,6 +353,7 @@ describe('V2 Cowork client', () => {
     expect(mocks.readiness).toHaveBeenCalledWith([check], expect.any(Object), {
       plugins: [],
       paths: {},
+      log: expect.any(Function),
     });
     expect(COWORK_CLIENT.serversPerBatch).toBe(true);
     expect(COWORK_CLIENT.toolSurfaceProxy).toBeUndefined();
@@ -385,6 +386,7 @@ describe('V2 Cowork client', () => {
     expect(mocks.readiness).toHaveBeenCalledWith([server], expect.any(Object), {
       plugins: [],
       paths: {},
+      log: expect.any(Function),
     });
     expect(mocks.submit).toHaveBeenCalledTimes(2);
     expect(mocks.hitl).toHaveBeenCalledWith(
@@ -730,7 +732,7 @@ describe('V2 Cowork client', () => {
       expect(mocks.readiness).toHaveBeenCalledWith(
         [evalServer],
         expect.any(Object),
-        { plugins: [fake], paths }
+        { plugins: [fake], paths, log: expect.any(Function) }
       );
       expect(results[0]!.error).toBeUndefined();
       expect(results[0]!.events).toEqual([
@@ -827,7 +829,7 @@ describe('V2 Cowork client', () => {
         expect(mocks.readiness).toHaveBeenCalledWith(
           servers,
           expect.any(Object),
-          { plugins: [], paths: {} }
+          { plugins: [], paths: {}, log: expect.any(Function) }
         );
         expect(mocks.submit).toHaveBeenCalledTimes(2);
         expect(mocks.dispose).toHaveBeenCalledOnce();
@@ -959,6 +961,7 @@ describe('V2 Cowork client', () => {
         {
           plugins: [],
           paths: { dataRoot: '/synthetic/session/stdio' },
+          log: expect.any(Function),
         }
       );
       expect(mocks.order).toEqual([
