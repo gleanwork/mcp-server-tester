@@ -82,6 +82,21 @@ describe('dryRunProxyServer', () => {
     ).toMatchObject({ requestTimeoutMs: 120_000, callTimeoutMs: 120_000 });
   });
 
+  it('rejects forwarded writes with simulated writes, and a bad timeout, when defined', () => {
+    const base = { label: 'x', upstreamUrl: 'https://x.example' };
+    expect(() =>
+      dryRunProxyServer({
+        ...base,
+        forwardWrites: true,
+        simulateWrites: { file: '/tmp/w.jsonl' },
+      })
+    ).toThrow('exclude each other');
+    for (const requestTimeoutMs of [0, -1, 1.5, Number.NaN])
+      expect(() => dryRunProxyServer({ ...base, requestTimeoutMs })).toThrow(
+        'positive whole number'
+      );
+  });
+
   it('passes simulated writes and their reply templates', () => {
     if (!built()) return;
     const entry = dryRunProxyServer({

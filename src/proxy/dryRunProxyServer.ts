@@ -85,6 +85,19 @@ export function dryRunProxyEntry(): string {
 export function dryRunProxyServer(
   options: DryRunProxyServerOptions
 ): StdioMCPConfig {
+  // Fail here, where the connector is defined, not when the proxy starts.
+  if (options.forwardWrites && options.simulateWrites)
+    throw new Error(
+      'dryRunProxyServer: forwardWrites and simulateWrites exclude each other.'
+    );
+  const { requestTimeoutMs } = options;
+  if (
+    requestTimeoutMs !== undefined &&
+    (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs <= 0)
+  )
+    throw new Error(
+      'dryRunProxyServer: requestTimeoutMs takes a positive whole number of milliseconds.'
+    );
   const args = [
     dryRunProxyEntry(),
     '--upstream-url',
