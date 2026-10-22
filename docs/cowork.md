@@ -716,6 +716,14 @@ annotations, or one the server does not list, is a write. `readOnlyTools`
 allows reads on a server that annotates nothing; `alwaysWriteTools` intercepts
 tools annotated as reads.
 
+A server that handles writes itself, such as an eval endpoint that never
+changes real data, can still use the proxy for its token: with
+`forwardWrites: true`, every call goes upstream. Use it for any connector whose
+session can outlast its access token. A token in an environment variable is
+read once, when the client starts, and is never renewed. `requestTimeoutMs`
+(default 120 seconds) bounds each request; raise it for tools slower than that,
+so the client's own tool limit applies instead.
+
 `dryRunProxyServer()` (from `@gleanwork/mcp-server-tester/evals`) returns the
 stdio server entry. It holds the path of a token file, never a token:
 
