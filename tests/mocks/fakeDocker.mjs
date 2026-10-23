@@ -41,6 +41,12 @@ const [command, ...rest] = args;
 if (command === 'image') {
   process.stdout.write('sha256:fake-image\n');
 } else if (command === 'build') {
+  if (process.env.FAKE_DOCKER_BUILD_ERROR) {
+    process.stderr.write(
+      `#12 [5/9] RUN npm install\n${process.env.FAKE_DOCKER_BUILD_ERROR}\n`
+    );
+    process.exit(1);
+  }
   // What the image would install: the plugin packages in the context.
   const plugins = path.join(rest.at(-1), 'plugins');
   fs.appendFileSync(

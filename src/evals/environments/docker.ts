@@ -670,10 +670,19 @@ async function setupDocker(
         ],
         { echo: true }
       );
-      if (result.code !== 0)
+      // The build's last lines say why (a failed step, or the daemon
+      // connection dropping): a detached run or a plugin deciding whether to
+      // retry sees only this error, not the echoed output.
+      if (result.code !== 0) {
+        const cause = (result.stderr || result.stdout)
+          .trim()
+          .split('\n')
+          .slice(-3)
+          .join(' ');
         throw new Error(
-          `Building ${image}${dockerContext ? ` on ${dockerContext}` : ''} failed.`
+          `Building ${image}${dockerContext ? ` on ${dockerContext}` : ''} failed${cause ? `: ${cause}` : '.'}`
         );
+      }
     }
     log(`Built ${image}. Run with --env docker.`);
   } finally {
