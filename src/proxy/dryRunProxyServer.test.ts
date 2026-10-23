@@ -59,6 +59,44 @@ describe('dryRunProxyServer', () => {
     expect(entry.env).toBeUndefined();
   });
 
+  it('passes forwarded writes, and its request timeout to the client too', () => {
+    if (!built()) return;
+    const entry = dryRunProxyServer({
+      label: 'glean',
+      upstreamUrl: 'https://glean.example/mcp',
+      tokenFile: '/private/run/glean.json',
+      forwardWrites: true,
+      requestTimeoutMs: 300_000,
+    });
+    expect(entry.args?.slice(-3)).toEqual([
+      '--forward-writes',
+      '--request-timeout-ms',
+      '300000',
+    ]);
+    expect(entry).toMatchObject({
+      requestTimeoutMs: 300_000,
+      callTimeoutMs: 300_000,
+    });
+    expect(
+      dryRunProxyServer({ label: 'x', upstreamUrl: 'https://x.example' })
+    ).toMatchObject({ requestTimeoutMs: 120_000, callTimeoutMs: 120_000 });
+  });
+
+  it('rejects forwarded writes with simulated writes, and a bad timeout, when defined', () => {
+    const base = { label: 'x', upstreamUrl: 'https://x.example' };
+    expect(() =>
+      dryRunProxyServer({
+        ...base,
+        forwardWrites: true,
+        simulateWrites: { file: '/tmp/w.jsonl' },
+      })
+    ).toThrow('exclude each other');
+    for (const requestTimeoutMs of [0, -1, 1.5, Number.NaN])
+      expect(() => dryRunProxyServer({ ...base, requestTimeoutMs })).toThrow(
+        'positive whole number'
+      );
+  });
+
   it('passes simulated writes and their reply templates', () => {
     if (!built()) return;
     const entry = dryRunProxyServer({
@@ -181,6 +219,32 @@ describe.skipIf(!built())('built dry-run proxy (stdio)', () => {
         },
       });
       expect(calls).toEqual(['search']);
+    } finally {
+      await closeMCPClient(client);
+    }
+  }, 20_000);
+
+  it('forwards writes on stdio with forwardWrites', async () => {
+    const tokenFile = join(dir, 'token.json');
+    await fs.writeFile(
+      tokenFile,
+      JSON.stringify({ version: 1, accessToken: 'file-token' }),
+      { mode: 0o600 }
+    );
+    calls.length = 0;
+    const client = await createMCPClientForConfig({
+      ...dryRunProxyServer({
+        label: 'vendor',
+        upstreamUrl: url,
+        tokenFile,
+        forwardWrites: true,
+      }),
+      connectTimeoutMs: 10_000,
+    });
+    try {
+      const write = await client.callTool({ name: 'post', arguments: {} });
+      expect(write.content).toEqual([{ type: 'text', text: 'ok' }]);
+      expect(calls).toEqual(['post']);
     } finally {
       await closeMCPClient(client);
     }
