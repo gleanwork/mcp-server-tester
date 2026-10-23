@@ -160,6 +160,8 @@ export async function gradeShard(options: GradeShardOptions): Promise<number> {
           rootDir: workspace,
           run: bundledRunDir(options.bundleDir, bundle.runId),
           plugins,
+          // Its settings came in the bundle's eval config (ADR 0008).
+          settingsFile: false,
           report: false,
           ...(bundle.resume ? { resume: true } : {}),
         },

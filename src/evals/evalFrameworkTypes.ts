@@ -1,5 +1,5 @@
 import type { MCPToolOptimizationData } from '../types/reporter.js';
-import type { Plugin } from '../plugins/plugin.js';
+import type { Plugin, SettingsContext } from '../plugins/plugin.js';
 import type { RUN_FORMAT } from './resultFormat.js';
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
@@ -30,7 +30,7 @@ export interface DatasetRequest {
 }
 
 /** Context provided to a dataset source implementation. */
-export interface DatasetSourceContext {
+export interface DatasetSourceContext extends SettingsContext {
   rootDir: string;
   /** The eval config's directory; relative paths resolve here before `rootDir`. */
   configDir?: string;
@@ -72,7 +72,7 @@ export interface DatasetSource {
   ): Promise<EvalDataset>;
   /** A cheap summary for `mst datasets`, without loading cases. */
   describe?(
-    context: Pick<DatasetSourceContext, 'rootDir' | 'configDir'>
+    context: Pick<DatasetSourceContext, 'rootDir' | 'configDir' | 'settings'>
   ): Promise<DatasetSummary>;
 }
 
@@ -102,7 +102,7 @@ export interface ClientRunInput {
   env?: Record<string, string | undefined>;
 }
 
-export interface ClientRunContext {
+export interface ClientRunContext extends SettingsContext {
   evalConfig: EvalConfig;
   variant?: EvalVariant;
   /** Runtime-only environment isolated per eval. */
@@ -288,11 +288,13 @@ export interface MetricDefinition {
   readonly unit?: string;
   compute(
     caseResult: EvalCaseResult,
-    params?: Record<string, unknown>
+    params?: Record<string, unknown>,
+    context?: SettingsContext
   ): MetricValue;
   aggregate?(
     values: MetricValue[],
-    metric: ResolvedMetric
+    metric: ResolvedMetric,
+    context?: SettingsContext
   ): { key: string; value: unknown } | undefined;
 }
 
@@ -321,7 +323,8 @@ export interface JudgeDefinition {
    */
   evaluate: (
     input: JudgeInput,
-    options: Record<string, unknown>
+    options: Record<string, unknown>,
+    context?: SettingsContext
   ) => Promise<JudgeScore>;
   /**
    * Checks, before a run collects or grades anything, that the judge can run
@@ -329,7 +332,10 @@ export interface JudgeDefinition {
    * Throws what's missing. Must not call a model. `options` is parsed by
    * `schema`.
    */
-  preflight?: (options: Record<string, unknown>) => Promise<void>;
+  preflight?: (
+    options: Record<string, unknown>,
+    context?: SettingsContext
+  ) => Promise<void>;
 }
 
 /**
@@ -340,7 +346,7 @@ export interface JudgeDefinition {
 export interface ResultStoreDefinition {
   readonly schema: ZodType;
   readonly description?: string;
-  create(config: ExtensionConfig): RunStore;
+  create(config: ExtensionConfig, context?: SettingsContext): RunStore;
 }
 
 /**
@@ -350,7 +356,7 @@ export interface ResultStoreDefinition {
 export type EnvironmentKeep = 'never' | 'failed' | 'always';
 
 /** What an environment's `open` is given, beside its own options. */
-export interface EnvironmentContext {
+export interface EnvironmentContext extends SettingsContext {
   readonly runId: string;
   /** How many shards the run has (`--env-option shards`). */
   readonly shards: number;
@@ -483,7 +489,7 @@ export interface CoordinatorMachine {
 }
 
 /** What an environment's `coordinator` is given, beside its own options. */
-export interface CoordinatorContext {
+export interface CoordinatorContext extends SettingsContext {
   /** The detached run's id: `mst runs watch <id>`. */
   readonly id: string;
   readonly log: (line: string) => void;
@@ -544,7 +550,7 @@ export interface EnvironmentDefinition {
    */
   setup?(
     options: Record<string, unknown>,
-    context: {
+    context: SettingsContext & {
       log: (line: string) => void;
       /**
        * The plugin packages an eval loads (`mst env setup --config`), as this

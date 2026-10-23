@@ -26,6 +26,7 @@ import {
   type GrantTarget,
 } from '../auth/grants/grants.js';
 import type { CredentialStore } from '../auth/grants/types.js';
+import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 import type { FetchFn } from '../auth/grants/oauthHttp.js';
 import {
   TOKEN_DIRECTORY_PREFIX,
@@ -83,8 +84,12 @@ export interface ConnectorExpansion {
   simulatedWriteFiles: string[];
 }
 
-function connectorUse(server: ConnectorServerConfig): ConnectorUse {
+function connectorUse(
+  server: ConnectorServerConfig,
+  sections: SettingsSections | undefined
+): ConnectorUse {
   const connector = getConnector(server.connector);
+  const settings = settingsFor(sections, server.connector);
   const url = server.url ?? connector.url;
   const parsed = new URL(url);
   if (
@@ -97,6 +102,7 @@ function connectorUse(server: ConnectorServerConfig): ConnectorUse {
     reference: server.connector,
     connector,
     url,
+    ...(settings ? { settings } : {}),
   };
 }
 
@@ -110,7 +116,7 @@ export function connectorUses(evalConfig: EvalConfig): ConnectorUse[] {
   for (const servers of lists)
     for (const server of servers ?? [])
       if (isConnectorServer(server)) {
-        const use = connectorUse(server);
+        const use = connectorUse(server, evalConfig.settings);
         const key = `${use.label}\0${use.reference}\0${use.url}`;
         if (!seen.has(key)) seen.set(key, use);
       }
@@ -166,7 +172,7 @@ export async function expandConnectorServers(
     variant: string
   ): Promise<MCPConfig> {
     if (!isConnectorServer(server)) return server;
-    const use = connectorUse(server);
+    const use = connectorUse(server, evalConfig.settings);
     const slot = slotFor(use);
     if (slot) {
       const keys = grantsByVariant.get(variant) ?? new Set<string>();
@@ -192,6 +198,7 @@ export async function expandConnectorServers(
         ...(tokenFile ? { tokenFile } : {}),
         platform: options.platform ?? process.platform,
         ...(writesFile ? { simulateWrites: { file: writesFile } } : {}),
+        settings: use.settings,
       });
       const entry = validateMCPConfig({ ...launched, label: use.label });
       if (writesFile) {

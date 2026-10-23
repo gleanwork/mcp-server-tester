@@ -187,6 +187,12 @@ export interface RunEvalOptions {
   pluginPaths?: string[];
   /** Plugin objects, added to the eval config's `plugins`. */
   plugins?: readonly Plugin[];
+  /**
+   * The `mst.config.json` the eval config's settings replace (ADR 0008).
+   * Default: the nearest at or above the eval config. `false` reads none: a
+   * worker's eval config came with its settings in it.
+   */
+  settingsFile?: string | false;
   outputDir?: string;
   secretsFile?: string;
   mcpConfig?: MCPConfig;
@@ -486,6 +492,7 @@ async function comparePairwiseVariants(
       judges,
       cases: byId,
       concurrency: evalConfig.concurrency,
+      ...(evalConfig.settings ? { settings: evalConfig.settings } : {}),
       ...(grading !== LOCAL_GRADING
         ? {
             judgeCase: (caseId, judges, judge) =>
@@ -708,6 +715,7 @@ export interface GradeRunOptions extends Pick<
   | 'rootDir'
   | 'pluginPaths'
   | 'plugins'
+  | 'settingsFile'
   | 'outputDir'
   | 'secretsFile'
   | 'report'
@@ -845,13 +853,14 @@ function openResultStore(
       parseResultsFlag(results),
       { namespaces }
     );
-    return createRunStore(config.type, definition, config);
+    return createRunStore(config.type, definition, config, evalConfig.settings);
   }
   return evalConfig.results?.store
     ? createRunStore(
         evalConfig.results.store.type,
         getResultStore(evalConfig.results.store.type),
-        resolveStorePaths(evalConfig.results.store, dirs)
+        resolveStorePaths(evalConfig.results.store, dirs),
+        evalConfig.settings
       )
     : undefined;
 }
@@ -924,6 +933,9 @@ async function gradeResultStore(
   const loaded = loadEvalConfig(options.configPath, {
     rootDir,
     skipDatasetValidation,
+    ...(options.settingsFile !== undefined
+      ? { settingsFile: options.settingsFile }
+      : {}),
   });
   const namespaces = await loadEvalPlugins({
     configPath: options.configPath,
@@ -1286,6 +1298,9 @@ async function evaluate(
     rootDir,
     // Datasets given as loaded aren't read from the config's paths.
     ...(givenDatasets ? { skipDatasetValidation: true } : {}),
+    ...(options.settingsFile !== undefined
+      ? { settingsFile: options.settingsFile }
+      : {}),
   });
   // Whether judges run in this process: then their preflight runs here.
   const judgesRunHere =
@@ -1479,7 +1494,8 @@ async function evaluate(
   // credential) fails the run now, not after every trial is collected.
   if (!options.skipPairwise && options.grade !== false && judgesRunHere)
     await preflightPairwiseJudges(
-      (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec)
+      (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec),
+      evalConfig.settings
     );
   const allDatasets: RunEvalResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
@@ -1566,10 +1582,14 @@ async function evaluate(
     if (!regrade)
       throw new Error('Only a regrade of a stored run grades elsewhere.');
     gradedElsewhere = await options.grading.elsewhere({
-      // As written, not as loaded: a worker loads it as this process did.
-      configFile: JSON.parse(
-        await fs.readFile(path.resolve(options.configPath), 'utf8')
-      ) as PreparedGrading['configFile'],
+      // As written, not as loaded: a worker loads it as this process did,
+      // with the settings this process merged in (ADR 0008).
+      configFile: {
+        ...(JSON.parse(
+          await fs.readFile(path.resolve(options.configPath), 'utf8')
+        ) as PreparedGrading['configFile']),
+        ...(loadedConfig.settings ? { settings: loadedConfig.settings } : {}),
+      },
       datasets: canonicalDatasets.map(({ dataset }) => dataset),
       replay: regrade,
       ...workerPluginsOf(loadedConfig, options.pluginPaths, {
@@ -1598,7 +1618,8 @@ async function evaluate(
     ? { env: {}, secrets: () => [], stop: async () => {} }
     : await startConnectorCredentials(
         connectors,
-        options.credentialStore ?? credentialStoreFor(options.store),
+        options.credentialStore ??
+          credentialStoreFor(options.store, evalConfig.settings),
         {
           configPath: options.configPath,
           variants: variants.map((variant) => variant.name),
@@ -1759,7 +1780,8 @@ async function evaluate(
           if (options.grade !== false && judgesRunHere)
             await preflightCaseJudges(
               prepared.effectiveDataset.cases,
-              checkedJudges
+              checkedJudges,
+              evalConfig.settings
             );
           for (const evalCase of prepared.effectiveDataset.cases)
             trialCases.set(`${variant.name}\u0000${evalCase.id}`, {
@@ -1819,7 +1841,8 @@ async function evaluate(
             ? {
                 connectorTokens: connectorTokenSource(
                   connectors,
-                  options.credentialStore ?? credentialStoreFor(options.store)
+                  options.credentialStore ??
+                    credentialStoreFor(options.store, evalConfig.settings)
                 ),
               }
             : {}),
@@ -1926,7 +1949,11 @@ async function evaluate(
             // Before this variant's client starts: a judge that can't run
             // (no SDK, no credential) fails the run, not every trial.
             if (options.grade !== false && judgesRunHere)
-              await preflightCaseJudges(effectiveDataset.cases, checkedJudges);
+              await preflightCaseJudges(
+                effectiveDataset.cases,
+                checkedJudges,
+                evalConfig.settings
+              );
             const sourceConfig = source;
             const runClient =
               typeof clientConfig.definition.run === 'function' ||
@@ -2016,6 +2043,9 @@ async function evaluate(
                 defaultPassThreshold: evalConfig.passThreshold,
                 toolOverrides: toolMetadata,
                 toolMap: variant.toolMap ?? evalConfig.toolMap,
+                ...(evalConfig.settings
+                  ? { settings: evalConfig.settings }
+                  : {}),
                 ...(options.grade === false ? { grade: false } : {}),
                 ...(grading !== LOCAL_GRADING
                   ? {
@@ -2242,7 +2272,11 @@ async function evaluate(
         ...CORE_METRICS.filter((core) => !listedNames.has(core)),
         ...listed,
       ];
-      return computeMetrics(specs, variant.result?.caseResults ?? []);
+      return computeMetrics(
+        specs,
+        variant.result?.caseResults ?? [],
+        evalConfig.settings
+      );
     });
     variantResults.forEach((variant, index) => {
       const caseResults = variant.result?.caseResults ?? [];

@@ -15,6 +15,7 @@
  */
 
 import type { ZodType } from 'zod';
+import type { SettingsContext } from '../plugins/plugin.js';
 import type { UsageMetrics } from './judgeTypes.js';
 import type { JudgeCase, JudgeSubScore, JudgeTrial } from './judgeContract.js';
 
@@ -86,9 +87,13 @@ export interface PairwiseJudgeDefinition {
    * Fails, naming what to install or set, when the judge can't run (a missing
    * SDK or credential). Called once before a run collects anything.
    */
-  preflight?: (options: Record<string, unknown>) => Promise<void>;
+  preflight?: (
+    options: Record<string, unknown>,
+    context?: SettingsContext
+  ) => Promise<void>;
   compare: (
     input: PairwiseJudgeInput,
-    options: Record<string, unknown>
+    options: Record<string, unknown>,
+    context?: SettingsContext
   ) => Promise<PairwisePreference>;
 }

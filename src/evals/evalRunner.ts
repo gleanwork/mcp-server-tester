@@ -8,6 +8,7 @@ import {
 import type { Trace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
+import type { SettingsSections } from '../plugins/settings.js';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { ClientOptions } from './clientFields.js';
 import {
@@ -285,6 +286,9 @@ export interface EvalRunnerOptions {
    */
   gradeTrial?: TrialGrader;
 
+  /** The eval's plugin settings, for its judges (ADR 0008). */
+  settings?: SettingsSections;
+
   /**
    * Whether to stop on first failure
    * @default false
@@ -454,6 +458,8 @@ export interface EvalCaseOptions {
    * produced, and reads those records back on the coordinator.
    */
   gradeTrial?: TrialGrader;
+  /** The eval's plugin settings, for its judges (ADR 0008). */
+  settings?: SettingsSections;
   /**
    * Dataset name for the result (defaults to 'single-case')
    */
@@ -824,6 +830,7 @@ async function runTrial(
           clientResponse,
           evidence: executed.traceEvidence,
           clientMetadata: executed.clientMetadata,
+          ...(options.settings ? { settings: options.settings } : {}),
         },
         previous
       );
@@ -1210,6 +1217,7 @@ export async function runEvalDataset(
       executeCase: options.executeCase,
       ...(options.grade === false ? { grade: false } : {}),
       ...(options.gradeTrial ? { gradeTrial: options.gradeTrial } : {}),
+      ...(options.settings ? { settings: options.settings } : {}),
       toolMap: options.toolMap,
       datasetName: dataset.name,
       toolVariantId: toolOverrides?.id,

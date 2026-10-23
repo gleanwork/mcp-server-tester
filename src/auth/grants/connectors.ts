@@ -27,6 +27,8 @@ export interface ConnectorUse {
   connector: ConnectorDefinition;
   /** The endpoint: the eval config's `url`, else the connector's. */
   url: string;
+  /** The connector's plugin's settings (ADR 0008). */
+  settings?: Readonly<Record<string, unknown>>;
 }
 
 /** The store key and display name of a connector's grant. */
@@ -51,11 +53,13 @@ export function grantTargets(
     const identity = grantIdentity(use);
     const existing = groups.get(identity.key);
     if (!existing) {
+      // A grant's key holds its namespace, so its connectors share settings.
       groups.set(identity.key, {
         ...identity,
         auth: use.connector.auth,
         urls: [use.url],
         servers: [use],
+        ...(use.settings ? { settings: use.settings } : {}),
       });
       continue;
     }

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { EvalCase } from './datasetTypes.js';
 import type { ClientConfig } from './evalConfig.js';
 import { clientPatchOf } from './clientFields.js';
+import { settingsFor } from '../plugins/settings.js';
 import type {
   ClientDefinition,
   ClientRunContext,
@@ -203,7 +204,13 @@ export async function prepareClientBatch(
         }
       }
     : undefined;
-  const batchContext = proxied ? withoutToolVariant(context) : context;
+  const withSettings: ClientRunContext = {
+    ...context,
+    settings: settingsFor(context.evalConfig.settings, config.type),
+  };
+  const batchContext = proxied
+    ? withoutToolVariant(withSettings)
+    : withSettings;
   let traces: ClientRunResult[];
   try {
     traces = await definition.runBatch(

@@ -21,6 +21,7 @@ import type { ClientResponse } from './caseExecution.js';
 import type { TraceEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import type { ClientMetadata } from './externalClient/types.js';
+import type { SettingsSections } from '../plugins/settings.js';
 import type { GraderScore } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
@@ -52,6 +53,8 @@ export interface GradedExecution {
   evidence?: TraceEvidence;
   /** External client metadata, whose trace source decides tool-evidence quality. */
   clientMetadata?: ClientMetadata;
+  /** The eval's plugin settings, for its judges (ADR 0008). */
+  settings?: SettingsSections;
 }
 
 export interface GradingOutcome {
@@ -115,13 +118,14 @@ export function resolveJudges(
  */
 export async function preflightCaseJudges(
   cases: ReadonlyArray<Pick<EvalCase, 'judges' | 'judgeReps' | 'expected'>>,
-  checked: Set<string>
+  checked: Set<string>,
+  settings?: SettingsSections
 ): Promise<void> {
   for (const evalCase of cases)
     for (const { reference: _reference, ...judge } of resolveJudges(evalCase)) {
       const key = JSON.stringify(judge);
       if (checked.has(key)) continue;
-      await preflightJudgeAssertion(judge);
+      await preflightJudgeAssertion(judge, settings);
       checked.add(key);
     }
 }
@@ -372,6 +376,7 @@ export async function gradeTrial(
         evalCase,
         clientResponse: graded.clientResponse,
         evidence: graded.evidence,
+        settings: graded.settings,
       },
       judgeVerdicts(previous?.scores.judge)
     );

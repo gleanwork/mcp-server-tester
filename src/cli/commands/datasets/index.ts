@@ -19,6 +19,7 @@ import type { DatasetSummary } from '../../../evals/evalFrameworkTypes.js';
 import { datasetContentHash } from '../../../evals/runFormat.js';
 import { checkReferenceKind } from '../../../plugins/extensions.js';
 import { parseExtensionReference } from '../../../plugins/plugin.js';
+import { settingsFor } from '../../../plugins/settings.js';
 import {
   formatTable,
   inNamespaces,
@@ -82,7 +83,7 @@ export async function listDatasets(
   options: DiscoveryOptions,
   print: (text: string) => void = (text) => process.stdout.write(text)
 ): Promise<void> {
-  const { namespaces, rootDir, configDir } =
+  const { namespaces, rootDir, configDir, settings } =
     await loadDiscoveryPlugins(options);
   const entries = listDatasetSources().filter(
     ([ref]) => isPluginReference(ref) && inNamespaces(ref, namespaces)
@@ -101,7 +102,13 @@ export async function listDatasets(
       try {
         return {
           ...base,
-          ...summaryOf(await source.describe({ rootDir, configDir })),
+          ...summaryOf(
+            await source.describe({
+              rootDir,
+              configDir,
+              settings: settingsFor(settings, ref),
+            })
+          ),
         };
       } catch (error) {
         return { ...base, error: message(error) };
@@ -139,7 +146,7 @@ async function loadNamed(
   options: DatasetSelectOptions
 ): Promise<EvalDataset> {
   checkReferenceKind(ref, 'dataset');
-  const { namespaces, rootDir, configDir } =
+  const { namespaces, rootDir, configDir, settings } =
     await loadDiscoveryPlugins(options);
   if (!isPluginReference(ref) || !inNamespaces(ref, namespaces))
     throw new Error(
@@ -157,7 +164,11 @@ async function loadNamed(
       ? { source: options.source as DatasetConfig['source'] }
       : {}),
   };
-  return loadDataset(config, { rootDir, configDir, evalConfig: ALL_CASES });
+  return loadDataset(config, {
+    rootDir,
+    configDir,
+    evalConfig: settings ? { ...ALL_CASES, settings } : ALL_CASES,
+  });
 }
 
 /** How many cases have each value, most first. */

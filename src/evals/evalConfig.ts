@@ -18,6 +18,12 @@ import {
   CoworkSetupConfigSchema,
   type CoworkSetupConfig,
 } from './coworkSetup/options.js';
+import {
+  SettingsSectionsSchema,
+  mergeSettings,
+  type SettingsSections,
+} from '../plugins/settings.js';
+import { findSettingsFile, readSettingsFile } from '../plugins/settingsFile.js';
 
 /** USD per million tokens for one model. Cache rates default to the input rate. */
 export interface ModelPricing {
@@ -183,6 +189,12 @@ export interface EvalConfig {
    * under the eval config's own settings.
    */
   extends?: string[];
+  /**
+   * Plugin settings, by plugin namespace (ADR 0008). Each section replaces
+   * the same namespace's section of the repo's `mst.config.json`, which
+   * `loadEvalConfig` merges in here.
+   */
+  settings?: SettingsSections;
   /** The model the client uses: a default for every variant and case. */
   model?: string;
   provider?: string;
@@ -441,6 +453,7 @@ export const EvalConfigSchema = z
     results: z.object({ store: ResultStoreConfigSchema }).strict().optional(),
     plugins: z.array(z.string().min(1)).optional(),
     extends: z.array(z.string().min(1)).optional(),
+    settings: SettingsSectionsSchema.optional(),
     provider: z.string().optional(),
     concurrency: z.number().int().positive().optional(),
     trials: z.number().int().positive().optional(),
@@ -522,6 +535,7 @@ const CONFIG_OWN_KEYS = [
   'baseline',
   'plugins',
   'extends',
+  'settings',
 ] as const;
 
 /**
@@ -683,6 +697,13 @@ export interface LoadEvalConfigOptions {
   /** The eval config's directory; `loadEvalConfig` sets it from the path. */
   configDir?: string;
   skipDatasetValidation?: boolean;
+  /**
+   * For `loadEvalConfig`: the `mst.config.json` whose settings the eval
+   * config's own replace. Default: the nearest one at or above the eval
+   * config's directory, up to the repository root. `false` reads none, as for
+   * an eval config a run sent with its settings already in it.
+   */
+  settingsFile?: string | false;
 }
 
 export function loadEvalConfigFromObject(
@@ -723,9 +744,19 @@ export function loadEvalConfig(
       { cause: error }
     );
   }
-  return loadEvalConfigFromObject(raw, {
+  const evalConfig = loadEvalConfigFromObject(raw, {
     ...options,
     rootDir: options.rootDir ?? path.dirname(absolutePath),
     configDir: path.dirname(absolutePath),
   });
+  const settingsFile =
+    options.settingsFile === undefined
+      ? findSettingsFile(path.dirname(absolutePath))
+      : options.settingsFile || undefined;
+  if (settingsFile === undefined) return evalConfig;
+  const settings = mergeSettings(
+    readSettingsFile(settingsFile),
+    evalConfig.settings
+  );
+  return settings ? { ...evalConfig, settings } : evalConfig;
 }

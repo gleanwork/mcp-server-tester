@@ -176,7 +176,13 @@ export {
 } from './evals/datasetLoader.js';
 // Types root APIs take or return: plugins and their judges, and the client
 // trace in tool-call assertions and case results.
-export type { Plugin, PluginMeta } from './plugins/plugin.js';
+export type {
+  Plugin,
+  PluginMeta,
+  PluginSettingsDefinition,
+  SettingsContext,
+} from './plugins/plugin.js';
+export type { SettingsSections } from './plugins/settings.js';
 export type { PluginConfig } from './evals/evalConfig.js';
 // For code that calls validators or matchers outside a runner or the fixture.
 export { installPlugins } from './plugins/extensions.js';

@@ -28,6 +28,7 @@ import {
 import { DATASETS_FILE, PLAN_FILE } from './coordinate.js';
 import { newDetachId, writeStatus, type DetachPlan } from './status.js';
 import { parseEnvOptions } from '../environments/envOptions.js';
+import { settingsFor } from '../../plugins/settings.js';
 
 export interface DetachOptions {
   command: 'run' | 'grade';
@@ -98,6 +99,8 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
   const rootDir = path.resolve(options.rootDir ?? '.');
   const reason = await refusal(options, rootDir);
   if (reason) throw new Error(reason);
+  // Its plugins are loaded (`refusal`); the settings go with the eval config.
+  const { settings } = loadEvalConfig(options.configPath, { rootDir });
   const { evalName, store } = await evalResultStore({
     configPath: options.configPath,
     rootDir,
@@ -126,6 +129,7 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
   const machine = await resolved.definition.coordinator(resolved.options, {
     id,
     log,
+    settings: settingsFor(settings, resolved.name),
   });
   const plan: DetachPlan = {
     format: 1,
@@ -153,9 +157,15 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
       path.join(bundle, PLAN_FILE),
       `${JSON.stringify(plan, null, 2)}\n`
     );
-    await fs.copyFile(
-      path.resolve(rootDir, options.configPath),
-      path.join(bundle, plan.config)
+    // The eval config as written, with the settings it was loaded with: the
+    // coordinator machine has no mst.config.json (ADR 0008).
+    const written = JSON.parse(
+      await fs.readFile(path.resolve(rootDir, options.configPath), 'utf8')
+    ) as Record<string, unknown>;
+    await fs.writeFile(
+      path.join(bundle, plan.config),
+      `${JSON.stringify(settings ? { ...written, settings } : written, null, 2)}
+`
     );
     await fs.writeFile(
       path.join(bundle, DATASETS_FILE),
