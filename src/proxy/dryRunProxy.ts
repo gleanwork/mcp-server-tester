@@ -247,9 +247,13 @@ export async function createDryRunProxy(
     return !isReadOnlyTool(tools.get(name));
   }
 
+  // The upstream's instructions tell the client what the server is for (a
+  // search server's connected sources, say). Without them, a client uses the
+  // server less than it would without the proxy.
+  const instructions = upstream.getInstructions();
   const server = new Server(
     { name: options.name, version: '1.0' },
-    { capabilities }
+    { capabilities, ...(instructions ? { instructions } : {}) }
   );
 
   /**

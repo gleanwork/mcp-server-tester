@@ -157,7 +157,10 @@ describe.skipIf(!built())('built dry-run proxy (stdio)', () => {
           });
           const server = new Server(
             { name: 'vendor', version: '1' },
-            { capabilities: { tools: {} } }
+            {
+              capabilities: { tools: {} },
+              instructions: 'Use vendor for posts.',
+            }
           );
           server.setRequestHandler('tools/list', async () => ({
             tools: [
@@ -242,6 +245,7 @@ describe.skipIf(!built())('built dry-run proxy (stdio)', () => {
       connectTimeoutMs: 10_000,
     });
     try {
+      expect(client.getInstructions()).toBe('Use vendor for posts.');
       const write = await client.callTool({ name: 'post', arguments: {} });
       expect(write.content).toEqual([{ type: 'text', text: 'ok' }]);
       expect(calls).toEqual(['post']);
