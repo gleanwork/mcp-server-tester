@@ -315,6 +315,28 @@ describe('a run in docker (a fake Docker CLI)', () => {
     ]);
   }, 120_000);
 
+  it("fails a build with the build's last lines, so the cause is in the error", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const { project, configPath } = await fixture(
+      {
+        MST_NPM: mock('fakeNpm.mjs'),
+        FAKE_DOCKER_BUILD_ERROR: 'ERROR: error reading from server: EOF',
+      },
+      ['@acme/mst-dt']
+    );
+    await installPluginPackage(project, '1.2.3');
+    await expect(
+      setupEnvironment('docker', {
+        config: configPath,
+        envOption: ['contexts=ctx-a', 'image=mst-test:1'],
+        rootDir: project,
+      })
+    ).rejects.toThrow(
+      'Building mst-test:1 on ctx-a failed: #12 [5/9] RUN npm install ERROR: error reading from server: EOF'
+    );
+  }, 120_000);
+
   it('refuses to build with a plugin that is a file, not a package', async () => {
     const { project, configPath } = await fixture();
     await expect(
