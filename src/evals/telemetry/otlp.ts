@@ -8,13 +8,27 @@
  * each verdict. Attributes follow OpenTelemetry's generative AI conventions
  * (`gen_ai.*`), plus `mst.*` for the eval. Its IDs are derived from the run,
  * variant, case and trial, so a regrade's verdicts join the trial's trace.
+ *
+ * With `telemetry.host`, the host's own telemetry joins the trace: its events
+ * become span events on the model request or tool call they name (by request
+ * or tool call ID; the rest on the root), with each event's first attributes
+ * as `mst.host.<event>.<key>`; its spans join under the root; its metrics are
+ * the root's events.
  */
 import { createHash } from 'node:crypto';
 import packageJson from '../../../package.json' with { type: 'json' };
 import type { OtlpTelemetryConfig } from '../evalConfig.js';
 import type { EvalCaseResult, TrialResult } from '../../types/reporter.js';
 import type { GraderScore } from '../../types/index.js';
-import type { ModelCall, Trace, TraceEvent } from '../evalFrameworkTypes.js';
+import type {
+  HostAttributeValue,
+  HostTelemetry,
+  HostTelemetryEvent,
+  ModelCall,
+  Trace,
+  TraceEvent,
+} from '../evalFrameworkTypes.js';
+import { isHostContentAttribute } from './hostContent.js';
 import type { PairwiseComparisonResult } from '../pairwiseComparison.js';
 
 const DEFAULT_MAX_ATTRIBUTE_CHARS = 16_384;
@@ -29,7 +43,11 @@ const CLIENT = 3;
 const STATUS_OK = 1;
 const STATUS_ERROR = 2;
 
-type AttributeValue = string | number | boolean | string[];
+type AttributeValue =
+  | string
+  | number
+  | boolean
+  | Array<string | number | boolean>;
 
 interface OtlpAnyValue {
   stringValue?: string;
@@ -54,6 +72,13 @@ export interface OtlpSpan {
   endTimeUnixNano: string;
   attributes: OtlpKeyValue[];
   status?: { code: number; message?: string };
+  events?: OtlpSpanEvent[];
+}
+
+interface OtlpSpanEvent {
+  timeUnixNano: string;
+  name: string;
+  attributes: OtlpKeyValue[];
 }
 
 /** An OTLP/JSON `ExportTraceServiceRequest`. */
@@ -224,11 +249,14 @@ function modelCallSpan(
   parent: string,
   fallback: number,
   toolNames: Map<string, string>,
-  options: SpanOptions
+  options: SpanOptions,
+  host: readonly HostTelemetryEvent[] = []
 ): OtlpSpan {
+  const own = call.startedAt !== undefined || call.completedAt !== undefined;
+  const hostTimes = own ? undefined : hostEventTimes(host);
   const times = spanTimes(
-    call.startedAt,
-    call.completedAt,
+    call.startedAt ?? hostTimes?.startedAt,
+    call.completedAt ?? hostTimes?.completedAt,
     call.durationMs,
     fallback
   );
@@ -253,6 +281,7 @@ function modelCallSpan(
       'gen_ai.request.model': call.model,
       'gen_ai.response.model': call.model,
       'gen_ai.response.id': call.id,
+      'mst.request_id': call.requestId,
       'gen_ai.response.finish_reasons': call.finishReason
         ? [call.finishReason]
         : undefined,
@@ -270,7 +299,10 @@ function modelCallSpan(
               },
             ])
           : undefined,
+      'mst.timing': hostTimes && times.timed ? 'host' : undefined,
+      ...promotedHostAttributes(host, options),
     }),
+    ...hostSpanEvents(host, options),
   };
 }
 
@@ -301,14 +333,18 @@ function toolSpan(
   parent: string,
   fallback: number,
   inferred: ReturnType<typeof inferredToolTimes>,
-  options: SpanOptions
+  options: SpanOptions,
+  host: readonly HostTelemetryEvent[] = []
 ): OtlpSpan {
   const own = event.startedAt !== undefined || event.completedAt !== undefined;
-  const around = !own && event.id ? inferred.get(event.id) : undefined;
+  // The host's own measure of the call, when the client's record has none.
+  const hostTimes = own ? undefined : hostEventTimes(host);
+  const around =
+    !own && !hostTimes && event.id ? inferred.get(event.id) : undefined;
   const times = spanTimes(
-    own ? event.startedAt : around?.startedAt,
-    own ? event.completedAt : around?.completedAt,
-    own || !around ? event.durationMs : undefined,
+    own ? event.startedAt : (hostTimes?.startedAt ?? around?.startedAt),
+    own ? event.completedAt : (hostTimes?.completedAt ?? around?.completedAt),
+    own || (!around && !hostTimes) ? event.durationMs : undefined,
     fallback
   );
   const isMcpTool = event.source === 'mcp' && event.kind === 'tool_call';
@@ -333,12 +369,268 @@ function toolSpan(
       'mst.tool.simulated_write': event.simulatedWrite || undefined,
       'error.type': event.isError ? 'tool_error' : undefined,
       'mst.untimed': times.timed ? undefined : true,
-      'mst.timing': times.timed && !own && around ? 'inferred' : undefined,
+      'mst.timing':
+        times.timed && !own
+          ? hostTimes
+            ? 'host'
+            : around
+              ? 'inferred'
+              : undefined
+          : undefined,
       'gen_ai.tool.call.arguments': content(options, event.arguments),
       'gen_ai.tool.call.result': content(options, event.output),
+      ...promotedHostAttributes(host, options),
     }),
     ...(event.isError ? { status: { code: STATUS_ERROR } } : {}),
+    ...hostSpanEvents(host, options),
   };
+}
+
+/** The attributes that name the model request a host's event is about. */
+const HOST_REQUEST_KEYS = [
+  'request_id',
+  'request.id',
+  'gen_ai.response.id',
+  'response_id',
+];
+/** The attributes that name the message record a host's event is about. */
+const HOST_MESSAGE_KEYS = ['message_uuid', 'message.uuid'];
+/** The attributes that name the tool call a host's event is about. */
+const HOST_TOOL_CALL_KEYS = [
+  'tool_use_id',
+  'tool_call_id',
+  'gen_ai.tool.call.id',
+  'call_id',
+];
+
+function hostKey(
+  event: HostTelemetryEvent,
+  keys: readonly string[]
+): string | undefined {
+  for (const key of keys) {
+    const value = event.attributes[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return undefined;
+}
+
+/** A host attribute as a span's: content only when content is sent. */
+function hostAttributes(
+  values: Record<string, HostAttributeValue>,
+  options: SpanOptions,
+  prefix = ''
+): Record<string, AttributeValue | undefined> {
+  const out: Record<string, AttributeValue | undefined> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (!options.content && isHostContentAttribute(key)) continue;
+    out[`${prefix}${key}`] =
+      typeof value === 'string' ? clip(value, options.maxChars) : value;
+  }
+  return out;
+}
+
+/**
+ * The first event of each name as the span's attributes, so a query can
+ * filter on them: `mst.host.api_request.ttft_ms`.
+ */
+function promotedHostAttributes(
+  host: readonly HostTelemetryEvent[],
+  options: SpanOptions
+): Record<string, AttributeValue | undefined> {
+  const seen = new Set<string>();
+  let out: Record<string, AttributeValue | undefined> = {};
+  for (const event of host) {
+    if (seen.has(event.name)) continue;
+    seen.add(event.name);
+    const {
+      'event.name': _n,
+      'event.timestamp': _t,
+      ...rest
+    } = event.attributes;
+    out = {
+      ...out,
+      ...hostAttributes(rest, options, `mst.host.${event.name}.`),
+    };
+  }
+  return out;
+}
+
+function hostSpanEvents(
+  host: readonly HostTelemetryEvent[],
+  options: SpanOptions
+): { events?: OtlpSpanEvent[] } {
+  if (!host.length) return {};
+  return {
+    events: host.map((event) => ({
+      timeUnixNano: nanos(epochMs(event.time) ?? Date.now()),
+      name: event.name,
+      attributes: attributes(hostAttributes(event.attributes, options)),
+    })),
+  };
+}
+
+/**
+ * A request or tool call's times by the host: an event logged as it ended,
+ * with its `duration_ms`.
+ */
+function hostEventTimes(
+  host: readonly HostTelemetryEvent[]
+): { startedAt: string; completedAt: string } | undefined {
+  for (const event of host) {
+    const duration = Number(event.attributes.duration_ms);
+    const end = epochMs(event.time);
+    if (end !== undefined && Number.isFinite(duration) && duration >= 0)
+      return {
+        startedAt: new Date(end - duration).toISOString(),
+        completedAt: event.time,
+      };
+  }
+  return undefined;
+}
+
+/** The host's events, by the model request or tool call each names. */
+function hostEventIndex(
+  telemetry: HostTelemetry | undefined,
+  modelCalls: readonly ModelCall[],
+  events: readonly TraceEvent[]
+): {
+  byModelCall: Map<number, HostTelemetryEvent[]>;
+  byTool: Map<number, HostTelemetryEvent[]>;
+  requests: HostTelemetryEvent[];
+  rest: HostTelemetryEvent[];
+} {
+  const byModelCall = new Map<number, HostTelemetryEvent[]>();
+  const byTool = new Map<number, HostTelemetryEvent[]>();
+  const requests: HostTelemetryEvent[] = [];
+  const rest: HostTelemetryEvent[] = [];
+  const callIndex = new Map<string, number>();
+  const entryIndex = new Map<string, number>();
+  modelCalls.forEach((call, index) => {
+    if (call.requestId) callIndex.set(call.requestId, index);
+    if (call.id && !callIndex.has(call.id)) callIndex.set(call.id, index);
+    for (const entry of call.entryIds ?? []) entryIndex.set(entry, index);
+  });
+  // An event that names both a request and a message entry (Claude's
+  // `assistant_response`) says which request a model call was: then every
+  // event of that request joins it.
+  for (const event of telemetry?.events ?? []) {
+    const request = hostKey(event, HOST_REQUEST_KEYS);
+    const entry = hostKey(event, HOST_MESSAGE_KEYS);
+    if (request && entry && entryIndex.has(entry) && !callIndex.has(request))
+      callIndex.set(request, entryIndex.get(entry)!);
+  }
+  const toolIndex = new Map<string, number>();
+  events.forEach((event, index) => {
+    if (event.id) toolIndex.set(event.id, index);
+  });
+  const add = (
+    map: Map<number, HostTelemetryEvent[]>,
+    index: number,
+    event: HostTelemetryEvent
+  ) => map.set(index, [...(map.get(index) ?? []), event]);
+  for (const event of telemetry?.events ?? []) {
+    const request = hostKey(event, HOST_REQUEST_KEYS);
+    const tool = hostKey(event, HOST_TOOL_CALL_KEYS);
+    if (tool !== undefined && toolIndex.has(tool))
+      add(byTool, toolIndex.get(tool)!, event);
+    else if (request !== undefined && callIndex.has(request))
+      add(byModelCall, callIndex.get(request)!, event);
+    else if (
+      request !== undefined &&
+      tool === undefined &&
+      typeof event.attributes.model === 'string'
+    )
+      // A request the client's record doesn't have: a subagent's, a
+      // summary's. It gets a span of its own.
+      requests.push(event);
+    else rest.push(event);
+  }
+  return { byModelCall, byTool, requests, rest };
+}
+
+/** A model request only the host reported, as its span. */
+function hostRequestSpan(
+  event: HostTelemetryEvent,
+  index: number,
+  traceId: string,
+  parent: string,
+  fallback: number,
+  options: SpanOptions
+): OtlpSpan {
+  const times = hostEventTimes([event]);
+  const span = spanTimes(
+    times?.startedAt,
+    times?.completedAt ?? event.time,
+    undefined,
+    fallback
+  );
+  const model = String(event.attributes.model);
+  const number = (key: string) => {
+    const value = Number(event.attributes[key]);
+    return Number.isFinite(value) ? value : undefined;
+  };
+  return {
+    traceId,
+    spanId: spanId(traceId, `host-request/${index}`),
+    parentSpanId: parent,
+    name: `chat ${model}`,
+    kind: CLIENT,
+    startTimeUnixNano: nanos(span.start),
+    endTimeUnixNano: nanos(span.end),
+    attributes: attributes({
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.request.model': model,
+      'gen_ai.response.model': model,
+      'gen_ai.usage.input_tokens': number('input_tokens'),
+      'gen_ai.usage.output_tokens': number('output_tokens'),
+      'gen_ai.usage.cache_read.input_tokens': number('cache_read_tokens'),
+      'gen_ai.usage.cache_creation.input_tokens': number(
+        'cache_creation_tokens'
+      ),
+      'mst.request_id': hostKey(event, HOST_REQUEST_KEYS),
+      'mst.model_call.source': 'host',
+      ...promotedHostAttributes([event], options),
+    }),
+    ...hostSpanEvents([event], options),
+  };
+}
+
+/** The host's own spans, in the trial's trace: its roots under the trial's. */
+function hostSpans(
+  telemetry: HostTelemetry | undefined,
+  traceId: string,
+  root: string,
+  options: SpanOptions
+): OtlpSpan[] {
+  const spans = telemetry?.spans ?? [];
+  const ids = new Set(spans.map((span) => span.spanId));
+  return spans.map((span) => ({
+    traceId,
+    spanId: span.spanId,
+    parentSpanId:
+      span.parentSpanId && ids.has(span.parentSpanId)
+        ? span.parentSpanId
+        : root,
+    name: span.name,
+    kind: span.kind ?? INTERNAL,
+    startTimeUnixNano: nanos(epochMs(span.startTime) ?? Date.now()),
+    endTimeUnixNano: nanos(epochMs(span.endTime) ?? Date.now()),
+    attributes: attributes({
+      ...hostAttributes(span.attributes, options),
+      'mst.span.source': 'host',
+      'mst.host.trace_id': span.traceId,
+    }),
+    ...(span.status ? { status: span.status } : {}),
+    ...(span.events?.length
+      ? {
+          events: span.events.map((event) => ({
+            timeUnixNano: nanos(epochMs(event.time) ?? Date.now()),
+            name: event.name,
+            attributes: attributes(hostAttributes(event.attributes, options)),
+          })),
+        }
+      : {}),
+  }));
 }
 
 /**
@@ -392,6 +684,7 @@ export function trialSpans(
       ? result.isInfrastructureError === true
       : ((result as EvalCaseResult).infrastructureErrorCount ?? 0) > 0;
   const inferred = inferredToolTimes(modelCalls);
+  const host = hostEventIndex(trace?.hostTelemetry, modelCalls, events);
   const toolNames = new Map(
     events
       .filter((event) => event.id)
@@ -420,6 +713,10 @@ export function trialSpans(
       'mst.tool_call_count': events.length,
       'mst.model_call_count': trace?.modelCalls ? modelCalls.length : undefined,
       'mst.evidence': trace?.evidence,
+      'mst.host.event_count': trace?.hostTelemetry?.events.length,
+      ...(trace?.hostTelemetry?.resource
+        ? hostAttributes(trace.hostTelemetry.resource, options, 'mst.host.')
+        : {}),
       'mst.infrastructure_error': infrastructure || undefined,
       'error.type': error
         ? infrastructure
@@ -445,14 +742,50 @@ export function trialSpans(
       ? { status: { code: STATUS_ERROR, message: clip(error, 1_024) } }
       : {}),
   };
+  // The host's events no request or tool call names, and its metrics.
+  const rootEvents = [
+    ...(hostSpanEvents(host.rest, options).events ?? []),
+    ...(trace?.hostTelemetry?.metrics ?? []).map((metric) => ({
+      timeUnixNano: nanos(epochMs(metric.time) ?? end),
+      name: `metric ${metric.name}`,
+      attributes: attributes({
+        ...hostAttributes(metric.attributes, options),
+        'mst.metric.value': metric.value,
+        'mst.metric.unit': metric.unit,
+      }),
+    })),
+  ];
+  if (rootEvents.length) rootSpan.events = rootEvents;
   return [
     rootSpan,
     ...modelCalls.map((call, index) =>
-      modelCallSpan(call, index, traceId, root, start, toolNames, options)
+      modelCallSpan(
+        call,
+        index,
+        traceId,
+        root,
+        start,
+        toolNames,
+        options,
+        host.byModelCall.get(index)
+      )
     ),
     ...events.map((event, index) =>
-      toolSpan(event, index, traceId, root, start, inferred, options)
+      toolSpan(
+        event,
+        index,
+        traceId,
+        root,
+        start,
+        inferred,
+        options,
+        host.byTool.get(index)
+      )
     ),
+    ...host.requests.map((event, index) =>
+      hostRequestSpan(event, index, traceId, root, start, options)
+    ),
+    ...hostSpans(trace?.hostTelemetry, traceId, root, options),
   ];
 }
 
@@ -648,6 +981,8 @@ export function createTraceExporter(
   ) => Promise<{ ok: boolean; status: number }> = fetch
 ): TraceExporter {
   const url = tracesUrl(config.endpoint);
+  // What each trial's trace was when last sent, by trace ID.
+  const sentTrials = new Map<string, string>();
   const token = config.bearerTokenEnv ? env[config.bearerTokenEnv] : undefined;
   if (config.bearerTokenEnv && !token)
     console.warn(
@@ -732,12 +1067,17 @@ export function createTraceExporter(
   return {
     trial(result, trial, input) {
       try {
-        enqueue(
-          trialSpans(result, identity(result, trial), run, {
-            ...options,
-            input,
-          })
-        );
+        const key = identity(result, trial);
+        const spans = trialSpans(result, key, run, { ...options, input });
+        // A trial saved again as it was (an environment's result, then the
+        // case's) is sent once; one that changed is sent again, same IDs.
+        const digest = createHash('sha256')
+          .update(JSON.stringify(spans))
+          .digest('hex');
+        const name = trialTraceId(key);
+        if (sentTrials.get(name) === digest) return;
+        sentTrials.set(name, digest);
+        enqueue(spans);
       } catch (error) {
         console.warn(
           `[mst] Couldn't trace trial ${trial} of ${result.id}: ${error instanceof Error ? error.message : String(error)}`

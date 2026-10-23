@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,6 +41,26 @@ import { simulationToClientRun } from './clientTrace.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT } from './coworkClient.js';
 import { CHATGPT_CLIENT, CHATGPT_LINUX_CLIENT } from './chatgptClient.js';
+import {
+  claudeCodeOtelEnv,
+  claudeCodeTelemetryClaim,
+  hostTelemetryReceiver,
+  withHostRequestIds,
+  type HostTelemetryReceiver,
+} from './telemetry/hostReceiver.js';
+
+/** Whether the managed-settings telemetry warning was shown. */
+let warnedTelemetryClaim = false;
+
+/** Claude Code flags that pick a session of their own. */
+const CLAUDE_SESSION_FLAGS = new Set([
+  '--session-id',
+  '--resume',
+  '-r',
+  '--continue',
+  '-c',
+  '--fork-session',
+]);
 
 /** A stand-in client for clients that manage their own connections. */
 function missingClient(): Client {
@@ -74,6 +95,9 @@ async function runBuiltinClient(
   let configDir: string | undefined;
   let claudeConfigDir: string | undefined;
   let workDir: string | undefined;
+  // `telemetry.host`: Claude Code's own OpenTelemetry, for this session.
+  let hostReceiver: HostTelemetryReceiver | undefined;
+  let hostSessionId: string | undefined;
   const controller = new AbortController();
   const timeout =
     config.timeout ??
@@ -238,6 +262,40 @@ async function runBuiltinClient(
               `claude-code: cwd ${config.cli.cwd} is not a directory.`
             );
           }
+          const hostConfig = options.evalConfig?.telemetry?.host;
+          const claim = hostConfig ? claudeCodeTelemetryClaim() : undefined;
+          if (claim && !warnedTelemetryClaim) {
+            warnedTelemetryClaim = true;
+            console.warn(
+              `[mst] claude-code: ${claim} sets otelHeadersHelper, so Claude Code keeps its telemetry with that collector and won't send it to MST; no host telemetry is recorded.`
+            );
+          }
+          if (hostConfig && !claim) {
+            hostReceiver = await hostTelemetryReceiver(hostConfig, { env });
+            // The session's ID, chosen here, names its telemetry. A config
+            // that picks a session itself can't be told apart: none.
+            if (config.cli.args.some((arg) => CLAUDE_SESSION_FLAGS.has(arg)))
+              console.warn(
+                '[mst] claude-code: telemetry.host needs MST to choose the session; its args choose one, so no host telemetry is recorded.'
+              );
+            else hostSessionId = randomUUID();
+            config.cli = {
+              ...config.cli,
+              args: hostSessionId
+                ? [...config.cli.args, '--session-id', hostSessionId]
+                : config.cli.args,
+              env: {
+                ...config.cli.env,
+                ...claudeCodeOtelEnv(hostReceiver, {
+                  'mst.eval': options.evalConfig.name,
+                  ...(options.variant?.name
+                    ? { 'mst.variant': options.variant.name }
+                    : {}),
+                  ...(env.MST_RUN_ID ? { 'mst.run_id': env.MST_RUN_ID } : {}),
+                }),
+              },
+            };
+          }
         }
       }
       if (overrides && config.clientType === 'cli')
@@ -255,6 +313,13 @@ async function runBuiltinClient(
         ),
         mcp
       );
+      if (hostReceiver && hostSessionId) {
+        const host = await hostReceiver.collect([hostSessionId]);
+        if (host) {
+          response.hostTelemetry = host;
+          response.modelCalls = withHostRequestIds(response.modelCalls, host);
+        }
+      }
       return simulationToClientRun(response, input.servers);
     } finally {
       await Promise.allSettled(clients.map(closeOwnedClient));

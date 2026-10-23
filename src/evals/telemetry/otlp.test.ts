@@ -228,6 +228,188 @@ describe('trialSpans', () => {
     expect(a[0]!.traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(a[0]!.spanId).toMatch(/^[0-9a-f]{16}$/);
   });
+
+  describe("with the host's own telemetry", () => {
+    function hosted(): EvalCaseResult {
+      const base = trial();
+      base.trace!.modelCalls![0]!.entryIds = ['entry-1'];
+      base.trace!.modelCalls![1]!.requestId = 'req_b';
+      base.trace!.hostTelemetry = {
+        resource: { 'service.name': 'claude-code', 'service.version': '2.1' },
+        events: [
+          {
+            name: 'user_prompt',
+            time: t(0),
+            attributes: { 'session.id': 's1', prompt_length: 17 },
+          },
+          {
+            name: 'assistant_response',
+            time: t(3),
+            attributes: { request_id: 'req_a', message_uuid: 'entry-1' },
+          },
+          {
+            name: 'api_request',
+            time: t(3),
+            attributes: {
+              request_id: 'req_a',
+              model: 'claude-x',
+              duration_ms: 2_000,
+              ttft_ms: 700,
+              cost_usd: 0.01,
+            },
+          },
+          {
+            name: 'tool_decision',
+            time: t(3),
+            attributes: {
+              tool_use_id: 'call-1',
+              decision: 'accept',
+              tool_parameters: '{"secret":1}',
+            },
+          },
+          {
+            name: 'tool_result',
+            time: t(4),
+            attributes: {
+              tool_use_id: 'call-1',
+              duration_ms: 500,
+              success: true,
+            },
+          },
+          {
+            name: 'api_request',
+            time: t(8),
+            attributes: {
+              request_id: 'req_b',
+              model: 'claude-x',
+              ttft_ms: 300,
+            },
+          },
+          {
+            name: 'api_request',
+            time: t(6),
+            attributes: {
+              request_id: 'req_side',
+              model: 'claude-haiku',
+              duration_ms: 1_000,
+              output_tokens: 3,
+            },
+          },
+        ],
+        spans: [
+          {
+            name: 'claude_code.interaction',
+            traceId: 'f'.repeat(32),
+            spanId: 'a'.repeat(16),
+            startTime: t(0),
+            endTime: t(9),
+            attributes: { 'session.id': 's1' },
+          },
+          {
+            name: 'claude_code.llm_request',
+            traceId: 'f'.repeat(32),
+            spanId: 'b'.repeat(16),
+            parentSpanId: 'a'.repeat(16),
+            startTime: t(1),
+            endTime: t(3),
+            attributes: { prompt: 'secret prompt' },
+          },
+        ],
+        metrics: [
+          {
+            name: 'claude_code.active_time.total',
+            unit: 's',
+            time: t(9),
+            value: 4.5,
+            attributes: { type: 'cli' },
+          },
+        ],
+      };
+      return base;
+    }
+
+    it('puts each event on the request or tool call it names, and the rest on the root', () => {
+      const spans = trialSpans(hosted(), identity, run, options);
+      const [root, first, second, tool] = spans;
+      expect(first!.events!.map((event) => event.name)).toEqual([
+        'assistant_response',
+        'api_request',
+      ]);
+      expect(attrs(first!)).toMatchObject({
+        'mst.host.api_request.ttft_ms': 700,
+        'mst.host.api_request.cost_usd': 0.01,
+        'mst.host.api_request.duration_ms': 2_000,
+      });
+      expect(attrs(second!)).toMatchObject({
+        'mst.request_id': 'req_b',
+        'mst.host.api_request.ttft_ms': 300,
+      });
+      expect(tool!.events!.map((event) => event.name)).toEqual([
+        'tool_decision',
+        'tool_result',
+      ]);
+      expect(attrs(tool!)).toMatchObject({
+        'mst.host.tool_decision.decision': 'accept',
+        'mst.host.tool_result.duration_ms': 500,
+        'mst.timing': 'host',
+      });
+      // The host timed the tool call: it ended at 4 s, after 500 ms.
+      expect(tool!.startTimeUnixNano).toBe(
+        `${BigInt(ms(4) - 500) * 1_000_000n}`
+      );
+      expect(root!.events!.map((event) => event.name)).toEqual([
+        'user_prompt',
+        'metric claude_code.active_time.total',
+      ]);
+      expect(attrs(root!)).toMatchObject({
+        'mst.host.service.name': 'claude-code',
+        'mst.host.event_count': 7,
+      });
+    });
+
+    it("gives a request only the host saw a span, and joins the host's spans under the root", () => {
+      const spans = trialSpans(hosted(), identity, run, options);
+      const root = spans[0]!;
+      const side = spans.find((span) => span.name === 'chat claude-haiku')!;
+      expect(attrs(side)).toMatchObject({
+        'mst.model_call.source': 'host',
+        'mst.request_id': 'req_side',
+        'gen_ai.usage.output_tokens': 3,
+      });
+      expect(side.startTimeUnixNano).toBe(nanos(5));
+      const interaction = spans.find(
+        (span) => span.name === 'claude_code.interaction'
+      )!;
+      const request = spans.find(
+        (span) => span.name === 'claude_code.llm_request'
+      )!;
+      expect(interaction.traceId).toBe(root.traceId);
+      expect(interaction.parentSpanId).toBe(root.spanId);
+      expect(request.parentSpanId).toBe('a'.repeat(16));
+      expect(attrs(request)['mst.host.trace_id']).toBe('f'.repeat(32));
+    });
+
+    it("keeps the host's content out unless content is sent", () => {
+      const without = trialSpans(hosted(), identity, run, options);
+      const tool = without[3]!;
+      expect(
+        attrs(tool)['mst.host.tool_decision.tool_parameters']
+      ).toBeUndefined();
+      const request = without.find(
+        (span) => span.name === 'claude_code.llm_request'
+      )!;
+      expect(attrs(request).prompt).toBeUndefined();
+      const withContent = trialSpans(hosted(), identity, run, {
+        ...options,
+        content: true,
+      });
+      expect(
+        attrs(
+          withContent.find((span) => span.name === 'claude_code.llm_request')!
+        ).prompt
+      ).toBe('secret prompt');
+    });
+  });
 });
 
 describe('gradingSpans', () => {
@@ -374,6 +556,21 @@ describe('createTraceExporter', () => {
     expect(spans[0]!.traceId).toBe(trialTraceId(identity));
     // Content is off by default.
     expect(init.body).not.toContain('17 + 25');
+  });
+
+  it('sends a trial saved again as it was once, and again when it changed', async () => {
+    const fetch = vi.fn(async () => ({ ok: true, status: 200 }));
+    const exporter = createTraceExporter(config, run, {}, fetch);
+    exporter.trial({ ...trial(), variant: 'glean' }, 0);
+    exporter.trial({ ...trial(), variant: 'glean' }, 0);
+    await exporter.flush();
+    expect(fetch).toHaveBeenCalledOnce();
+    exporter.trial(
+      { ...trial({ error: 'late failure' }), variant: 'glean' },
+      0
+    );
+    await exporter.flush();
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it('retries a 5xx, gives up on a 4xx, and never throws', async () => {

@@ -1388,6 +1388,8 @@ async function evaluate(
   let shardRecords: ShardRecord[] | undefined;
 
   const executionId = replay?.runId ?? newRunId();
+  // Which run a host's own telemetry belongs to (`telemetry.host`).
+  if (evalConfig.telemetry?.host) env.MST_RUN_ID ??= executionId;
   // The run's traces, sent as trials finish and grades come in. A regrade's
   // verdicts join the traces of the run it grades.
   const traceExporter = evalConfig.telemetry?.otlp

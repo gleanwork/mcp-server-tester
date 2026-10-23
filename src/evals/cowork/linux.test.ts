@@ -706,6 +706,57 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await prepared.dispose();
   });
 
+  it("points Claude Desktop's OpenTelemetry at MST's receiver, in place of the image's", async () => {
+    const file = join(directory, 'settings.json');
+    await writeFile(
+      file,
+      `${JSON.stringify({
+        ...image,
+        otlpEndpoint: 'https://collector.example',
+        otlpHeadersHelper: '/opt/otel-headers.sh',
+        otlpContentCapture: ['userPrompts'],
+      })}\n`
+    );
+    const prepared = await linuxCoworkPlatform.prepare({
+      evalConfig,
+      model: 'test-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+      },
+      otlpSettings: {
+        otlpEndpoint: 'http://localhost:4318/secret',
+        otlpProtocol: 'http/json',
+      },
+    });
+    const written = JSON.parse(await readFile(file, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    expect(
+      Object.fromEntries(
+        Object.entries(written).filter(([key]) => key.startsWith('otlp'))
+      )
+    ).toEqual({
+      otlpEndpoint: 'http://localhost:4318/secret',
+      otlpProtocol: 'http/json',
+    });
+    await prepared.dispose();
+  });
+
+  it('records host telemetry only where MST owns the desktop', async () => {
+    await expect(
+      linuxCoworkPlatform.prepare({
+        evalConfig,
+        model: 'test-model',
+        env: { ...session },
+        otlpSettings: { otlpEndpoint: 'http://localhost:4318/secret' },
+      })
+    ).rejects.toThrow('needs owned-desktop mode');
+  });
+
   it('needs a restart command, and touches nothing without one', async () => {
     const { file, original, lifecycle } = await prepareOwned({
       MST_DESKTOP_RESTART: '',

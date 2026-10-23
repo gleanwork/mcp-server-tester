@@ -625,7 +625,13 @@ describe("Claude Code's final usage", () => {
       );
       const final = claudeTranscriptModelCalls(config);
       expect(final).toEqual([
-        { id: 'msg_1', inputTokens: 4, outputTokens: 250, text: 'Hello' },
+        {
+          id: 'msg_1',
+          requestId: 'req_1',
+          inputTokens: 4,
+          outputTokens: 250,
+          text: 'Hello',
+        },
       ]);
       const streamed = [
         {
@@ -639,7 +645,7 @@ describe("Claude Code's final usage", () => {
         { id: 'msg_2', outputTokens: 3 },
       ];
       expect(withFinalUsage(streamed, final)).toEqual([
-        { ...streamed[0], outputTokens: 250 },
+        { ...streamed[0], requestId: 'req_1', outputTokens: 250 },
         streamed[1],
       ]);
       expect(claudeTranscriptModelCalls(join(config, 'missing'))).toEqual([]);

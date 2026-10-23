@@ -158,6 +158,8 @@ function coworkLinuxOwnedSettings(
     approveWriteTools?: boolean;
     model?: string;
     helpers?: ReadonlyMap<string, string>;
+    /** Desktop's `otlp*` keys (`telemetry.host`), which replace the image's own. */
+    telemetry?: Record<string, unknown>;
   }
 ): Record<string, unknown> {
   const managed = coworkManagedPluginSettings(options);
@@ -196,8 +198,17 @@ function coworkLinuxOwnedSettings(
     allowedPluginMarketplaces: _previous,
     allowedMcpServers: _allowed,
     allowManagedMcpServersOnly: _only,
-    ...rest
+    ...kept
   } = base;
+  // An image's own `otlp*` keys are replaced, never merged.
+  const rest = options.telemetry
+    ? {
+        ...Object.fromEntries(
+          Object.entries(kept).filter(([key]) => !/^otlp[A-Z]/.test(key))
+        ),
+        ...options.telemetry,
+      }
+    : kept;
   const disabled = Array.isArray(base.disabledBuiltinTools)
     ? base.disabledBuiltinTools.filter(
         (tool): tool is string => typeof tool === 'string'
@@ -692,7 +703,14 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       'Claude-3p',
       'local-agent-mode-sessions'
     ),
-  async prepare({ evalConfig, env, model, plugins = [], stdioPaths = {} }) {
+  async prepare({
+    evalConfig,
+    env,
+    model,
+    plugins = [],
+    stdioPaths = {},
+    otlpSettings,
+  }) {
     const settingsFile =
       env.MST_COWORK_SETTINGS_FILE ??
       '/etc/claude-desktop/managed-settings.json';
@@ -704,6 +722,10 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     let original: string | undefined;
     let ownedText: string | undefined;
     let headerFiles: ServerHeaderFiles | undefined;
+    if (otlpSettings && !owned)
+      throw new Error(
+        "telemetry.host on Cowork needs owned-desktop mode (MST_DESKTOP_OWNED=1, MST's Linux image), where MST writes Claude Desktop's settings."
+      );
     if (owned) {
       const restart = env.MST_DESKTOP_RESTART;
       if (!restart || !isAbsolute(restart))
@@ -733,6 +755,7 @@ export const linuxCoworkPlatform: CoworkPlatform = {
           approveWriteTools: evalConfig.coworkSetup?.approveWriteTools === true,
           ...(model ? { model } : {}),
           helpers: headerFiles.helpers,
+          ...(otlpSettings ? { telemetry: otlpSettings } : {}),
         }),
         null,
         2

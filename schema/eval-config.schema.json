@@ -227,7 +227,7 @@
     },
     "telemetry": {
       "type": "object",
-      "description": "Where to send the run's traces as it goes: one OpenTelemetry trace per trial, with its model requests, tool calls and verdicts.",
+      "description": "Where to send the run's traces as it goes (one OpenTelemetry trace per trial, with its model requests, tool calls and verdicts), and whether to record the host's own OpenTelemetry with each trial.",
       "properties": {
         "otlp": {
           "type": "object",
@@ -261,6 +261,44 @@
               "type": "integer",
               "minimum": 1,
               "description": "The most characters of one content attribute (default 16384)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "host": {
+          "type": "object",
+          "description": "Record the host's own OpenTelemetry with each trial: MST runs an OTLP receiver beside the client, points the host's exporter at it, and keeps each trial's events, spans and metrics in its record and trace. Claude Code and Cowork on Linux.",
+          "properties": {
+            "content": {
+              "type": "boolean",
+              "description": "Keep the host's content attributes (prompts, answers, tool input and output), and ask the host to send them. Off by default."
+            },
+            "traces": {
+              "type": "boolean",
+              "description": "Ask the host for its spans too, where it has them."
+            },
+            "forward": {
+              "type": "object",
+              "required": ["endpoint"],
+              "description": "Also pass what the host sent, as it sent it, on to this collector.",
+              "properties": {
+                "endpoint": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "The collector's base URL: MST posts to <endpoint>/v1/<signal>. HTTPS, or HTTP to localhost."
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" },
+                  "description": "Headers to send. Not for secrets: use bearerTokenEnv."
+                },
+                "bearerTokenEnv": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                  "description": "The environment variable (or secrets-file key) holding a bearer token for the collector."
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false

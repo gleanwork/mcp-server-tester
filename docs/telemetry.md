@@ -61,7 +61,38 @@ The trace has what the client recorded. Every client reports its answer and tool
 | ChatGPT       | Each response's usage record                        | From the session log's timestamps; tool calls' own                        |
 | Plugin client | Whatever its `ClientRunResult` has in `modelCalls`  | Its `startedAt` and `completedAt`, and its events' and model calls' times |
 
-A span with no times of its own is placed at the start of its trial and marked `mst.untimed`. A tool call timed from the model requests around it is marked `mst.timing: "inferred"`.
+A span with no times of its own is placed at the start of its trial and marked `mst.untimed`. A tool call timed from the model requests around it is marked `mst.timing: "inferred"`; one timed by the host's own telemetry, `mst.timing: "host"`.
+
+## The host's own telemetry
+
+A client's record of a trial is its conversation: messages, tool calls and results, usage per message. Some hosts also report what they measured while running, over their own OpenTelemetry exporter, and never write it into that record: a request's duration, time to first token and cost, permission decisions, retries and API errors, the hooks and plugins that ran. With `telemetry.host`, MST records that too, in the same trial:
+
+```json
+{
+  "telemetry": {
+    "otlp": { "endpoint": "https://collector.example.com" },
+    "host": {}
+  }
+}
+```
+
+MST runs an OTLP/HTTP receiver beside the client (one per process, on a random port and secret path) and points the host's exporter at it, asking for OTLP/JSON. Each trial takes the records of its own session: Claude Code runs with a session ID MST chooses, and a Cowork task is matched by its session. The trial's record keeps them in `trace.hostTelemetry`: the host's events, spans and metrics (each metric's latest value), with its resource attributes. `telemetry.otlp` isn't needed: without it, they're only in the run.
+
+| Field     | Meaning                                                                                                                                                                                                                                                                                                       |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `content` | Keep the host's content attributes (`prompt`, `response`, `tool_input`, `tool_parameters`, `gen_ai.*.messages`, ...), and ask the host to send them. Off by default: the host is asked for none, and any it sends are dropped. Identity attributes (`user.*`, `organization.id`, `host.name`) are never kept. |
+| `traces`  | Also ask the host for its spans, where it has them (Claude Code's are beta).                                                                                                                                                                                                                                  |
+| `forward` | Also pass what the host sent, as it sent it, on to a collector: `endpoint` (MST posts to `<endpoint>/v1/<signal>`), `headers`, `bearerTokenEnv`. Use it to keep a collector that got the host's telemetry before getting it. Sending never fails the run.                                                     |
+
+In the trial's trace, a host event joins the span it names: an `api_request` the model request with its request ID, a `tool_decision` or `tool_result` the tool call with its ID (`tool_use_id`). Each is a span event, and the first event of each name is also the span's attributes, as `mst.host.<event>.<key>` (for example `mst.host.api_request.ttft_ms`), so a query can filter on them. A request the client's record doesn't have, such as a subagent's, gets a span of its own (`mst.model_call.source: "host"`). Other events, and metrics, are the root's events; the host's resource is the root's `mst.host.*`. The host's spans join under the root (`mst.span.source: "host"`, their own trace ID as `mst.host.trace_id`).
+
+| Client        | How                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `claude-code` | MST sets `CLAUDE_CODE_ENABLE_TELEMETRY` and the per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT`s, and passes `--session-id`. A machine's managed settings with an `otelHeadersHelper` keep Claude Code's telemetry with their own collector by design: Claude Code then ignores MST's endpoints, and MST says so and records none.                                                        |
+| Cowork        | Linux owned-desktop mode only (MST's image): MST writes Claude Desktop's `otlp*` settings, in place of the image's, pointing at the receiver. Desktop gives a task in its VM the host's address for `localhost`, so the receiver listens on every interface of the container, under its secret path. Desktop applies these settings with third-party inference, as MST's image uses. |
+| Plugin client | `hostTelemetryReceiver(config)` (from `./evals`) starts or returns the process's receiver: point the host at its `endpoint`, then `collect(sessionIds)` after the trial and return it as `hostTelemetry`.                                                                                                                                                                            |
+
+When the host sends nothing, the first trial waits 15 seconds for it, MST says so once, and later trials wait only briefly.
 
 ## Try it locally
 

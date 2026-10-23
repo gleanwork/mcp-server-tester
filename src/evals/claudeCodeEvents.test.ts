@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { validateToolCalls } from '../assertions/validators/toolCalls.js';
 import {
+  claudeModelCalls,
   splitClaudeMcpName,
   surfacedTools,
   typeClaudeCodeCall,
+  withFinalUsage,
 } from './claudeCodeEvents.js';
 import { simulationTrace } from './clientTrace.js';
 import { parseStreamJson } from './mstClient/adapters/cli/parsers.js';
@@ -19,6 +21,43 @@ function host(name: string, input: Record<string, unknown>, output?: string) {
     ...(output !== undefined ? { output } : {}),
   } satisfies LLMToolCall;
 }
+
+describe('claudeModelCalls', () => {
+  it("keeps each call's request ID and record IDs, from the stream and the transcript", () => {
+    const streamed = claudeModelCalls([
+      {
+        type: 'assistant',
+        uuid: 'u1',
+        message: {
+          id: 'msg_1',
+          model: 'm',
+          content: [{ type: 'text', text: 'a' }],
+        },
+      },
+      {
+        type: 'assistant',
+        uuid: 'u2',
+        message: {
+          id: 'msg_1',
+          model: 'm',
+          content: [{ type: 'text', text: 'b' }],
+        },
+      },
+    ]);
+    expect(streamed).toMatchObject([{ id: 'msg_1', entryIds: ['u1', 'u2'] }]);
+    const transcript = claudeModelCalls([
+      {
+        type: 'assistant',
+        uuid: 'u3',
+        requestId: 'req_1',
+        message: { id: 'msg_1', model: 'm', content: [] },
+      },
+    ]);
+    expect(withFinalUsage(streamed, transcript)).toMatchObject([
+      { id: 'msg_1', requestId: 'req_1', entryIds: ['u1', 'u2', 'u3'] },
+    ]);
+  });
+});
 
 describe('surfacedTools', () => {
   it('reads tool_reference blocks, strings, and MCP names in text', () => {

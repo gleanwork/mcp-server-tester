@@ -162,6 +162,16 @@ export interface ModelCall {
   model?: string;
   /** The provider's ID for the request or its response. */
   id?: string;
+  /**
+   * The provider's request ID (Anthropic's `request-id`, `req_…`), when it
+   * differs from `id`: what a host's own telemetry names the request by.
+   */
+  requestId?: string;
+  /**
+   * The client's IDs for the records of this request's message (Claude's
+   * transcript entry `uuid`s): how a host's own telemetry can name it.
+   */
+  entryIds?: string[];
   /** ISO 8601. */
   startedAt?: string;
   /** ISO 8601. */
@@ -178,6 +188,69 @@ export interface ModelCall {
   text?: string;
   /** The `TraceEvent.id`s of the tool calls the model asked for. */
   toolCallIds?: string[];
+}
+
+/** An attribute of a host's telemetry record. */
+export type HostAttributeValue =
+  | string
+  | number
+  | boolean
+  | Array<string | number | boolean>;
+
+/** A host's log record: one of its events, such as `api_request`. */
+export interface HostTelemetryEvent {
+  /** The event's name (`event.name`), or else its body. */
+  name: string;
+  /** ISO 8601. */
+  time: string;
+  attributes: Record<string, HostAttributeValue>;
+}
+
+/** A span the host exported. */
+export interface HostTelemetrySpan {
+  name: string;
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  /** OTLP's span kind. */
+  kind?: number;
+  /** ISO 8601. */
+  startTime: string;
+  /** ISO 8601. */
+  endTime: string;
+  attributes: Record<string, HostAttributeValue>;
+  status?: { code: number; message?: string };
+  events?: Array<{
+    name: string;
+    time: string;
+    attributes: Record<string, HostAttributeValue>;
+  }>;
+}
+
+/** A metric's latest data point in the trial, per attribute set. */
+export interface HostTelemetryMetric {
+  name: string;
+  unit?: string;
+  /** ISO 8601. */
+  time: string;
+  value: number;
+  attributes: Record<string, HostAttributeValue>;
+}
+
+/**
+ * What the host itself reported about a trial over OpenTelemetry, as MST's
+ * receiver got it (`telemetry.host`, docs/telemetry.md): the host's events,
+ * spans and metrics for the trial's session. Content attributes (prompts,
+ * answers, tool input and output) are dropped unless `telemetry.host.content`.
+ */
+export interface HostTelemetry {
+  /** The host's resource attributes: its service, version, platform. */
+  resource?: Record<string, HostAttributeValue>;
+  events: HostTelemetryEvent[];
+  spans?: HostTelemetrySpan[];
+  metrics?: HostTelemetryMetric[];
+  /** Records past the per-trial cap, not kept. */
+  dropped?: number;
 }
 
 /** One execution trace. Clients never return evaluation scores. */
@@ -198,6 +271,12 @@ export interface ClientRunResult {
   usage?: UsageMetrics;
   /** Native and driver observations remain separately scoped; UI actions are not LLM usage. */
   telemetry?: Record<string, unknown>;
+  /**
+   * The host's own OpenTelemetry for the trial, from MST's receiver
+   * (`telemetry.host`). A plugin client can fill it with
+   * `hostTelemetryReceiver` (docs/telemetry.md).
+   */
+  hostTelemetry?: HostTelemetry;
   /** Per-request wall time, excluding shared batch setup and cleanup. */
   durationMs?: number;
   llmDurationMs?: number;
@@ -250,7 +329,13 @@ export interface ClientArtifacts {
  */
 export type Trace = Pick<
   ClientRunResult,
-  'events' | 'modelCalls' | 'startedAt' | 'completedAt' | 'usage' | 'error'
+  | 'events'
+  | 'modelCalls'
+  | 'hostTelemetry'
+  | 'startedAt'
+  | 'completedAt'
+  | 'usage'
+  | 'error'
 > & {
   finalText?: string;
   /** Declared evidence; absent for the legacy simulated client. */

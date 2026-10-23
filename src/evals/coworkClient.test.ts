@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CoworkPlatform } from './cowork/platform.js';
 import { runEvalBatch } from './runEvalBatch.js';
 import {
   COWORK_CLIENT,
@@ -395,6 +396,91 @@ describe('V2 Cowork client', () => {
         approveWriteTools: true,
       })
     );
+  });
+  it("records Claude Desktop's own telemetry with each Linux task (telemetry.host)", async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    let endpoint: string | undefined;
+    type Prepare = CoworkPlatform['prepare'];
+    const setup = vi.fn(async (options: Parameters<Prepare>[0]) => {
+      endpoint = options.otlpSettings?.otlpEndpoint as string | undefined;
+      return (await mocks.setup(options)) as Awaited<ReturnType<Prepare>>;
+    });
+    mocks.trace.mockImplementationOnce(async ({ sessionPath }) => {
+      // What Desktop's Claude Code sent for this task's session.
+      await fetch(`${endpoint}/v1/logs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          resourceLogs: [
+            {
+              scopeLogs: [
+                {
+                  logRecords: [
+                    {
+                      timeUnixNano: '1792670400000000000',
+                      attributes: [
+                        {
+                          key: 'event.name',
+                          value: { stringValue: 'api_request' },
+                        },
+                        { key: 'session.id', value: { stringValue: 'cli-1' } },
+                        { key: 'ttft_ms', value: { intValue: '700' } },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      });
+      return {
+        candidate: {
+          id: 'local_1',
+          metadataPath: sessionPath,
+          metadata: { cliSessionId: 'cli-1' },
+        },
+        finalAnswer: 'answer',
+        toolCalls: [],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        isComplete: true,
+      } as unknown as ClaudeTrace;
+    });
+    const prepared = createCoworkClient({
+      dataDirectory: () => '/prepared/session',
+      prepare: setup,
+      recover: vi.fn(),
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+    });
+    const [first] = await prepared.runBatch!(
+      [requests()[0]!].map((r) => ({
+        ...r,
+        config: { ...clientConfig, computerUseProvider: 'linux-desktop' },
+      })),
+      {
+        ...context,
+        evalConfig: { ...context.evalConfig, telemetry: { host: {} } },
+        env: { MST_RUN_ID: 'run-1' },
+      }
+    );
+    expect(endpoint).toMatch(/^http:\/\/localhost:\d+\/[0-9a-f]{32}$/);
+    expect(setup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        otlpSettings: expect.objectContaining({
+          otlpProtocol: 'http/json',
+          otlpResourceAttributes: expect.objectContaining({
+            'mst.run_id': 'run-1',
+          }),
+        }),
+      })
+    );
+    expect(first!.hostTelemetry?.events).toEqual([
+      expect.objectContaining({
+        name: 'api_request',
+        attributes: expect.objectContaining({ ttft_ms: 700 }),
+      }),
+    ]);
   });
   it('rejects a driver/platform mismatch before any desktop action', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');

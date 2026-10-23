@@ -87,12 +87,13 @@ export function clientRunToExecution(
   };
 }
 
-/** A client run's model requests and task times, for its trace. */
+/** A client run's model requests, task times and host telemetry, for its trace. */
 function timing(
   run: ClientRunResult
-): Pick<Trace, 'modelCalls' | 'startedAt' | 'completedAt'> {
+): Pick<Trace, 'modelCalls' | 'hostTelemetry' | 'startedAt' | 'completedAt'> {
   return {
     ...(run.modelCalls?.length ? { modelCalls: run.modelCalls } : {}),
+    ...(run.hostTelemetry ? { hostTelemetry: run.hostTelemetry } : {}),
     ...(run.startedAt ? { startedAt: run.startedAt } : {}),
     ...(run.completedAt ? { completedAt: run.completedAt } : {}),
   };
@@ -141,6 +142,7 @@ export function simulationToClientRun(
       : (result.error ?? 'Client execution failed.'),
     usage: result.usage,
     ...(result.modelCalls?.length ? { modelCalls: result.modelCalls } : {}),
+    ...(result.hostTelemetry ? { hostTelemetry: result.hostTelemetry } : {}),
     ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
     // Skill loads by the simulated client become ordered `skill` events.
     events: result.skillLoads
@@ -179,6 +181,7 @@ export function simulationTrace(result: MstClientSimulationResult): Trace {
         ? withSkillEvents(events, result.skillLoads)
         : events,
     ...(result.modelCalls?.length ? { modelCalls: result.modelCalls } : {}),
+    ...(result.hostTelemetry ? { hostTelemetry: result.hostTelemetry } : {}),
     ...(result.response !== undefined ? { finalText: result.response } : {}),
     ...(result.usage ? { usage: result.usage } : {}),
     ...(result.success === false

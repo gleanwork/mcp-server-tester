@@ -177,8 +177,11 @@ export interface EvalConfig {
   results?: {
     store: ExtensionConfig;
   };
-  /** Where to send the run's traces as they happen (docs/telemetry.md). */
-  telemetry?: { otlp?: OtlpTelemetryConfig };
+  /**
+   * Where to send the run's traces as they happen, and whether to record the
+   * host's own OpenTelemetry with each trial (docs/telemetry.md).
+   */
+  telemetry?: { otlp?: OtlpTelemetryConfig; host?: HostTelemetryConfig };
   plugins?: string[];
   /**
    * Shared configs (`<namespace>/config/<name>`) from listed plugins, applied in order
@@ -427,33 +430,37 @@ export const RENAMED_CONFIG_KEYS = {
  * Where MST sends a run's traces: OTLP over HTTP (JSON), one trace per trial
  * (see docs/telemetry.md).
  */
+/** A collector's URL: HTTPS, or HTTP to this machine. */
+const CollectorEndpointSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' ||
+      (url.protocol === 'http:' &&
+        ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+    );
+  }, 'must be HTTPS, or HTTP to localhost');
+
+/** Headers to send, such as a tenant. Not for secrets: see `bearerTokenEnv`. */
+const CollectorHeadersSchema = z.record(z.string().min(1), z.string());
+
+/**
+ * The environment variable (or secrets-file key) holding a bearer token for
+ * the collector. The token is never written to results.
+ */
+const BearerTokenEnvSchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/);
+
 const OtlpTelemetryConfigSchema = z
   .object({
     /**
      * The collector: its base URL (MST posts to `<endpoint>/v1/traces`) or
      * its traces URL. HTTPS, or HTTP to this machine.
      */
-    endpoint: z
-      .string()
-      .url()
-      .refine((value) => {
-        const url = new URL(value);
-        return (
-          url.protocol === 'https:' ||
-          (url.protocol === 'http:' &&
-            ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
-        );
-      }, 'must be HTTPS, or HTTP to localhost'),
-    /** Headers to send, such as a tenant. Not for secrets: see `bearerTokenEnv`. */
-    headers: z.record(z.string().min(1), z.string()).optional(),
-    /**
-     * The environment variable (or secrets-file key) holding a bearer token
-     * for the collector. The token is never written to results.
-     */
-    bearerTokenEnv: z
-      .string()
-      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
-      .optional(),
+    endpoint: CollectorEndpointSchema,
+    headers: CollectorHeadersSchema.optional(),
+    bearerTokenEnv: BearerTokenEnvSchema.optional(),
     /** Added to every trace's resource, as `service.namespace`. */
     resourceAttributes: z.record(z.string().min(1), z.string()).optional(),
     /**
@@ -469,8 +476,45 @@ const OtlpTelemetryConfigSchema = z
 
 export type OtlpTelemetryConfig = z.infer<typeof OtlpTelemetryConfigSchema>;
 
+/**
+ * The host's own OpenTelemetry, recorded with each trial: MST runs an OTLP
+ * receiver beside the client, points the host's exporter at it, and keeps
+ * each trial's events, spans and metrics in its record (and its trace).
+ * Claude Code and Cowork on Linux; a plugin client can use the receiver
+ * too (docs/telemetry.md).
+ */
+const HostTelemetryConfigSchema = z
+  .object({
+    /**
+     * Keep the host's content attributes (prompts, answers, tool input and
+     * output), and ask the host to send them. Off by default.
+     */
+    content: z.boolean().optional(),
+    /** Ask the host for its spans too, where it has them (beta in Claude Code). */
+    traces: z.boolean().optional(),
+    /**
+     * Also pass what the host sent, as it sent it, on to this collector:
+     * where the host's telemetry went before MST took it.
+     */
+    forward: z
+      .object({
+        /** The collector's base URL: MST posts to `<endpoint>/v1/<signal>`. */
+        endpoint: CollectorEndpointSchema,
+        headers: CollectorHeadersSchema.optional(),
+        bearerTokenEnv: BearerTokenEnvSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+export type HostTelemetryConfig = z.infer<typeof HostTelemetryConfigSchema>;
+
 const TelemetryConfigSchema = z
-  .object({ otlp: OtlpTelemetryConfigSchema.optional() })
+  .object({
+    otlp: OtlpTelemetryConfigSchema.optional(),
+    host: HostTelemetryConfigSchema.optional(),
+  })
   .strict();
 
 export const EvalConfigSchema = z

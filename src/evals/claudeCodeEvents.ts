@@ -8,6 +8,10 @@ import type { LLMToolCall } from './mstClient/types.js';
  */
 export interface ClaudeMessageEvent {
   type?: string;
+  /** The API request's ID, in a session transcript (`req_…`). */
+  requestId?: string;
+  /** The record's own ID. */
+  uuid?: string;
   message?: {
     id?: string;
     model?: string;
@@ -51,6 +55,14 @@ export function claudeModelCalls(
       calls.set(id, call);
     }
     const message = event.message!;
+    if (typeof event.requestId === 'string' && event.requestId)
+      call.requestId = event.requestId;
+    if (
+      typeof event.uuid === 'string' &&
+      event.uuid &&
+      !call.entryIds?.includes(event.uuid)
+    )
+      call.entryIds = [...(call.entryIds ?? []), event.uuid];
     if (message.model) call.model = message.model;
     if (message.stop_reason) call.finishReason = message.stop_reason;
     const usage = message.usage ?? {};
@@ -234,6 +246,13 @@ export function withFinalUsage(
   const byId = new Map(later.map((call) => [call.id, call]));
   return calls.map((call) => {
     const other = call.id ? byId.get(call.id) : undefined;
+    if (other?.requestId && !call.requestId)
+      call = { ...call, requestId: other.requestId };
+    const entryIds = [
+      ...new Set([...(call.entryIds ?? []), ...(other?.entryIds ?? [])]),
+    ];
+    if (entryIds.length > (call.entryIds?.length ?? 0))
+      call = { ...call, entryIds };
     if (!other || (other.outputTokens ?? 0) <= (call.outputTokens ?? 0))
       return call;
     const usage = {
