@@ -9,6 +9,7 @@ import {
 import type { UsageMetrics } from '../../../../types/index.js';
 import {
   claudeModelCalls,
+  claudeThinkingTokens,
   splitClaudeMcpName,
   typeClaudeCodeCall,
   type ClaudeMessageEvent,
@@ -178,6 +179,7 @@ export function parseStreamJson(
           durationApiMs: event.duration_api_ms,
           cacheReadInputTokens: event.usage.cache_read_input_tokens,
           cacheCreationInputTokens: event.usage.cache_creation_input_tokens,
+          ...thinking(event),
         };
       }
     }
@@ -279,10 +281,18 @@ interface StreamJsonEvent {
     output_tokens?: number;
     cache_read_input_tokens?: number;
     cache_creation_input_tokens?: number;
+    output_tokens_details?: { thinking_tokens?: number };
   };
+  modelUsage?: Record<string, unknown>;
   total_cost_usd?: number;
   duration_ms?: number;
   duration_api_ms?: number;
+}
+
+/** A result's thinking tokens, when it reports them. */
+function thinking(event: StreamJsonEvent): Partial<UsageMetrics> {
+  const tokens = claudeThinkingTokens(event.usage, event.modelUsage);
+  return tokens !== undefined ? { reasoningOutputTokens: tokens } : {};
 }
 
 function getNestedValue(obj: Record<string, unknown>, path: string): unknown {

@@ -239,6 +239,43 @@ export function typeClaudeCodeCall(call: LLMToolCall): LLMToolCall {
  * transcript. Each request keeps its own times and text, and takes its usage
  * from the record that saw more of its output.
  */
+function count(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/**
+ * A Claude result's thinking tokens: part of its output tokens, which
+ * Anthropic reports apart (`usage.output_tokens_details.thinking_tokens`) and
+ * Claude's agent repeats per model in `modelUsage[model].thinkingTokens`.
+ * Undefined when the result doesn't say.
+ */
+export function claudeThinkingTokens(
+  usage: unknown,
+  modelUsage?: unknown
+): number | undefined {
+  const details =
+    usage && typeof usage === 'object'
+      ? (usage as Record<string, unknown>).output_tokens_details
+      : undefined;
+  const reported =
+    details && typeof details === 'object'
+      ? count((details as Record<string, unknown>).thinking_tokens)
+      : undefined;
+  if (reported !== undefined) return reported;
+  if (!modelUsage || typeof modelUsage !== 'object') return undefined;
+  const perModel = Object.values(modelUsage).map((model) =>
+    model && typeof model === 'object'
+      ? count((model as Record<string, unknown>).thinkingTokens)
+      : undefined
+  );
+  // Every model's, or none: a partial sum would undercount.
+  if (!perModel.length || perModel.some((value) => value === undefined))
+    return undefined;
+  return perModel.reduce<number>((sum, value) => sum + value!, 0);
+}
+
 export function withFinalUsage(
   calls: ModelCall[],
   later: readonly ModelCall[]

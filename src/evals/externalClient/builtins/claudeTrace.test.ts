@@ -610,6 +610,31 @@ describe('Claude local-agent trace parsing', () => {
     expect(trace.telemetry).not.toHaveProperty('apiCallCount');
   });
 
+  it("sums the results' thinking tokens, only when every result reports them", async () => {
+    const result = (id: string, thinking?: number) => ({
+      type: 'result',
+      requestId: id,
+      result: id,
+      usage: {
+        input_tokens: 5,
+        output_tokens: 20,
+        ...(thinking !== undefined
+          ? { output_tokens_details: { thinking_tokens: thinking } }
+          : {}),
+      },
+    });
+    const both = [result('turn-1', 7), result('turn-2', 9)];
+    const trace = await parseNativeEvents(both, both);
+    expect(trace.usage?.reasoningOutputTokens).toBe(16);
+    expect(trace.knownUsageFields).toContain('reasoningOutputTokens');
+    expect(trace.telemetry.reasoningOutputTokens).toBe(16);
+
+    const one = [result('turn-1', 7), result('turn-2')];
+    const partial = await parseNativeEvents(one, one);
+    expect(partial.usage).not.toHaveProperty('reasoningOutputTokens');
+    expect(partial.knownUsageFields).not.toContain('reasoningOutputTokens');
+  });
+
   it('omits unknown identity and error counts even when a terminal result has usage', async () => {
     const trace = await parseNativeEvents([
       {

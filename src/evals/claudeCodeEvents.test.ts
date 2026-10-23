@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { validateToolCalls } from '../assertions/validators/toolCalls.js';
 import {
   claudeModelCalls,
+  claudeThinkingTokens,
   splitClaudeMcpName,
   surfacedTools,
   typeClaudeCodeCall,
@@ -56,6 +57,30 @@ describe('claudeModelCalls', () => {
     expect(withFinalUsage(streamed, transcript)).toMatchObject([
       { id: 'msg_1', requestId: 'req_1', entryIds: ['u1', 'u2', 'u3'] },
     ]);
+  });
+});
+
+describe('claudeThinkingTokens', () => {
+  it("reads Anthropic's count, else every model's", () => {
+    expect(
+      claudeThinkingTokens({ output_tokens_details: { thinking_tokens: 12 } })
+    ).toBe(12);
+    expect(
+      claudeThinkingTokens(
+        {},
+        { a: { thinkingTokens: 3 }, b: { thinkingTokens: 4 } }
+      )
+    ).toBe(7);
+  });
+
+  it('is undefined when a model or the result does not say', () => {
+    expect(claudeThinkingTokens({ output_tokens: 5 })).toBeUndefined();
+    expect(
+      claudeThinkingTokens({}, { a: { thinkingTokens: 3 }, b: {} })
+    ).toBeUndefined();
+    expect(
+      claudeThinkingTokens({ output_tokens_details: { thinking_tokens: -1 } })
+    ).toBeUndefined();
   });
 });
 

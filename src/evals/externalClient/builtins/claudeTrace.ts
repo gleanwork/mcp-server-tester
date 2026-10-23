@@ -14,6 +14,7 @@ import {
   splitClaudeMcpName,
   timeClaudeToolCalls,
   typeClaudeCodeCall,
+  claudeThinkingTokens,
   withFinalUsage,
   type ClaudeMessageEvent,
 } from '../../claudeCodeEvents.js';
@@ -54,6 +55,8 @@ interface ClaudeNativeTelemetry {
   outputTokens?: number;
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
+  /** Thinking tokens, part of `outputTokens`, from the run's results. */
+  reasoningOutputTokens?: number;
   totalCostUsd?: number;
   durationMs?: number;
   durationApiMs?: number;
@@ -664,6 +667,15 @@ function extractAggregatedUsage(
         previous.cacheCreationInputTokens ?? 0,
         usage.cacheCreationInputTokens ?? 0
       ),
+      ...(previous.reasoningOutputTokens !== undefined ||
+      usage.reasoningOutputTokens !== undefined
+        ? {
+            reasoningOutputTokens: Math.max(
+              previous.reasoningOutputTokens ?? 0,
+              usage.reasoningOutputTokens ?? 0
+            ),
+          }
+        : {}),
     });
   });
 
@@ -686,6 +698,14 @@ function extractAggregatedUsage(
     cacheCreationInputTokens:
       (total.cacheCreationInputTokens ?? 0) +
       (value.cacheCreationInputTokens ?? 0),
+    // Known only when every result says; a partial sum would undercount.
+    ...(total.reasoningOutputTokens !== undefined &&
+    value.reasoningOutputTokens !== undefined
+      ? {
+          reasoningOutputTokens:
+            total.reasoningOutputTokens + value.reasoningOutputTokens,
+        }
+      : {}),
   }));
 }
 
@@ -710,6 +730,10 @@ function knownUsageFields(events: ClaudeAuditEvent[]): (keyof UsageMetrics)[] {
       (event) =>
         event.usage?.cache_creation_input_tokens ??
         event.usage?.cacheCreationInputTokens,
+    ],
+    [
+      'reasoningOutputTokens',
+      (event) => claudeThinkingTokens(event.usage, event.modelUsage),
     ],
     ['totalCostUsd', (event) => event.total_cost_usd],
     ['durationMs', (event) => event.duration_ms],
@@ -738,6 +762,7 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     getNumber(usage, 'input_tokens') ?? getNumber(usage, 'inputTokens');
   const outputTokens =
     getNumber(usage, 'output_tokens') ?? getNumber(usage, 'outputTokens');
+  const reasoningOutputTokens = claudeThinkingTokens(usage, event.modelUsage);
 
   if (
     inputTokens === undefined &&
@@ -761,6 +786,7 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     cacheCreationInputTokens:
       getNumber(usage, 'cache_creation_input_tokens') ??
       getNumber(usage, 'cacheCreationInputTokens'),
+    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
   };
 }
 
@@ -821,6 +847,9 @@ function buildNativeTelemetry(
     outputTokens: usage?.outputTokens,
     cacheReadInputTokens: usage?.cacheReadInputTokens,
     cacheCreationInputTokens: usage?.cacheCreationInputTokens,
+    ...(usage?.reasoningOutputTokens !== undefined
+      ? { reasoningOutputTokens: usage.reasoningOutputTokens }
+      : {}),
     totalCostUsd: usage?.totalCostUsd,
     durationMs: usage?.durationMs,
     durationApiMs: usage?.durationApiMs,

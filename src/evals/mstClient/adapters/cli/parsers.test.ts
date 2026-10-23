@@ -256,6 +256,23 @@ describe('parseStreamJson', () => {
     });
   });
 
+  it("reads a result's thinking tokens as its reasoning output tokens", () => {
+    const stdout = JSON.stringify({
+      type: 'result',
+      result: 'Hello',
+      usage: {
+        input_tokens: 150,
+        output_tokens: 42,
+        output_tokens_details: { thinking_tokens: 30 },
+      },
+      modelUsage: { 'claude-opus-4-8': { thinkingTokens: 30 } },
+    });
+    expect(parseStreamJson(stdout).usage).toMatchObject({
+      outputTokens: 42,
+      reasoningOutputTokens: 30,
+    });
+  });
+
   it('extracts usage metrics from error result event', () => {
     const stdout = JSON.stringify({
       type: 'result',
