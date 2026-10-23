@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { UsageMetrics } from '../../../types/index.js';
+import type { ModelCall } from '../../evalFrameworkTypes.js';
 import type {
   LLMToolCall,
   MstClientSimulationResult,
@@ -236,6 +237,8 @@ export interface ChatgptTrace {
   error?: string;
   response?: string;
   toolCalls: LLMToolCall[];
+  /** The turn's model responses, one per native usage record. */
+  modelCalls?: ModelCall[];
   conversationHistory: NonNullable<
     MstClientSimulationResult['conversationHistory']
   >;
@@ -536,13 +539,43 @@ export function parseChatgptTrace(
   const nestedIds = new Set<string>();
   let response: string | undefined;
   const usageRecords = new Map<string, ObjectValue>();
+  // One per model response: from the last thing before it (the turn's
+  // start, a tool's output) to its usage record.
+  const modelCalls: ModelCall[] = [];
+  let boundary = start?.timestamp;
   let turnUsage: ObjectValue | undefined;
   for (const event of turn) {
     const p = event.payload;
+    if (
+      event.type === 'response_item' &&
+      (p.type === 'function_call_output' ||
+        p.type === 'custom_tool_call_output')
+    )
+      boundary = event.timestamp;
+    if (event.type === 'event_msg' && p.type === 'item_completed') {
+      const kind = string(object(p.item)?.type);
+      if (
+        kind &&
+        ['McpToolCall', 'CommandExecution', 'Extension'].includes(kind)
+      ) {
+        const completed = number(p.completed_at_ms);
+        boundary =
+          completed !== undefined
+            ? new Date(completed).toISOString()
+            : event.timestamp;
+      }
+    }
     if (event.type === 'token_usage_record' && string(p.turn_id) === turnId) {
       const id = string(p.response_id);
       const usage = object(p.usage);
-      if (id && usage) usageRecords.set(id, usage);
+      if (id && usage) {
+        if (!usageRecords.has(id))
+          modelCalls.push(
+            modelCall(id, usage, string(context?.model), boundary, event)
+          );
+        usageRecords.set(id, usage);
+      }
+      boundary = event.timestamp;
       const cumulative = object(p.turn_token_usage);
       if (
         cumulative &&
@@ -798,6 +831,7 @@ export function parseChatgptTrace(
     error: aborted ? 'ChatGPT turn was aborted.' : undefined,
     response,
     toolCalls,
+    ...(modelCalls.length ? { modelCalls } : {}),
     conversationHistory: history,
     usage,
     mcpDurationMs,
@@ -1017,6 +1051,50 @@ function parseArguments(value: unknown): ObjectValue | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * A model response's call, from its usage record. Inputs are counted as MST
+ * counts them: uncached, with cache reads and writes apart (OpenAI's input
+ * total includes both).
+ */
+function modelCall(
+  id: string,
+  usage: ObjectValue,
+  model: string | undefined,
+  startedAt: string | undefined,
+  record: Event
+): ModelCall {
+  const input = number(usage.input_tokens);
+  const cacheRead = number(usage.cached_input_tokens);
+  const cacheWrite = number(usage.cache_write_input_tokens);
+  const output = number(usage.output_tokens);
+  const reasoning = number(usage.reasoning_output_tokens);
+  const start = startedAt ? time(startedAt) : NaN;
+  const end = record.timestamp ? time(record.timestamp) : NaN;
+  return {
+    id,
+    ...(model ? { model } : {}),
+    ...(startedAt ? { startedAt } : {}),
+    ...(record.timestamp ? { completedAt: record.timestamp } : {}),
+    ...(Number.isFinite(start) && Number.isFinite(end)
+      ? { durationMs: Math.max(0, end - start) }
+      : {}),
+    ...(input !== undefined
+      ? {
+          inputTokens: Math.max(
+            0,
+            input - (cacheRead ?? 0) - (cacheWrite ?? 0)
+          ),
+        }
+      : {}),
+    ...(output !== undefined ? { outputTokens: output } : {}),
+    ...(cacheRead !== undefined ? { cacheReadInputTokens: cacheRead } : {}),
+    ...(cacheWrite !== undefined
+      ? { cacheCreationInputTokens: cacheWrite }
+      : {}),
+    ...(reasoning !== undefined ? { reasoningOutputTokens: reasoning } : {}),
+  };
 }
 
 function usageFromRecords(

@@ -1,5 +1,6 @@
 import { RUN_FORMAT, olderResultsError } from './resultFormat.js';
 import { loadGCSStorage } from './gcsStorage.js';
+import { isHostContentAttribute } from './telemetry/hostContent.js';
 import type { ProtocolEra } from '../types/index.js';
 import { readdir } from 'fs/promises';
 import { Readable, type Writable } from 'node:stream';
@@ -150,6 +151,27 @@ function stripTrace(trace: unknown): void {
   if (Array.isArray(trace.events))
     for (const event of trace.events)
       if (isJsonObject(event)) delete event.output;
+  if (Array.isArray(trace.modelCalls))
+    for (const call of trace.modelCalls)
+      if (isJsonObject(call)) delete call.text;
+  // The host's content attributes, kept with `telemetry.host.content`.
+  const host = trace.hostTelemetry;
+  if (isJsonObject(host)) {
+    const strip = (attributes: unknown) => {
+      if (isJsonObject(attributes))
+        for (const key of Object.keys(attributes))
+          if (isHostContentAttribute(key)) delete attributes[key];
+    };
+    for (const kind of ['events', 'spans'] as const)
+      if (Array.isArray(host[kind]))
+        for (const record of host[kind])
+          if (isJsonObject(record)) {
+            strip(record.attributes);
+            if (Array.isArray(record.events))
+              for (const event of record.events)
+                if (isJsonObject(event)) strip(event.attributes);
+          }
+  }
 }
 
 /**
@@ -190,8 +212,8 @@ function stripResponses(value: unknown): void {
  * The one redaction policy for stored results: returns a deep copy in which
  * every eval case result, wherever it is nested (runs, eval variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
- * `expect.response`, no `finalText` or event `output` in its traces, and no
- * judge score `metadata` (in it or its trials).
+ * `expect.response`, no `finalText`, event `output` or model call `text` in
+ * its traces, and no judge score `metadata` (in it or its trials).
  * These may hold data from the server under test. Everything else is kept,
  * including each trace's events, servers, arguments and usage.
  */

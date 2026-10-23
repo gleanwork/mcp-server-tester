@@ -188,6 +188,7 @@ export type { PluginConfig } from './evals/evalConfig.js';
 export { installPlugins } from './plugins/extensions.js';
 export type {
   TraceEvent,
+  ModelCall,
   TraceEvidence,
   Trace,
   JudgeDefinition,

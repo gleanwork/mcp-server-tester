@@ -203,6 +203,7 @@ for client-specific fields, environment rules, and setup ownership.
 - [Assertions](./docs/assertions.md) — all assertion types including snapshot sanitizers
 - [LLM Client Simulation](docs/mst-client.md) — tool discoverability testing
 - [LLM Gateways](./docs/llm-gateways.md) — routing MST's LLM calls through a gateway
+- [Traces](./docs/telemetry.md) — sending each trial to an OpenTelemetry collector
 - [API Reference](./docs/api-reference.md)
 - [Transports](./docs/transports.md) — stdio and HTTP configuration, OAuth
 - [Protocol Versions](./docs/protocol-versions.md) — legacy and 2026-07-28, protocol matrices, era-aware conformance

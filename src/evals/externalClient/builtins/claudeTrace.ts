@@ -8,9 +8,15 @@ import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
 import type { LLMToolCall } from '../../mstClient/types.js';
 import type { UsageMetrics } from '../../../types/index.js';
+import type { ModelCall } from '../../evalFrameworkTypes.js';
 import {
+  claudeModelCalls,
   splitClaudeMcpName,
+  timeClaudeToolCalls,
   typeClaudeCodeCall,
+  claudeThinkingTokens,
+  withFinalUsage,
+  type ClaudeMessageEvent,
 } from '../../claudeCodeEvents.js';
 import { formatError } from './claudeCommon.js';
 import { findFile } from './claudeCommon.js';
@@ -49,6 +55,8 @@ interface ClaudeNativeTelemetry {
   outputTokens?: number;
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
+  /** Thinking tokens, part of `outputTokens`, from the run's results. */
+  reasoningOutputTokens?: number;
   totalCostUsd?: number;
   durationMs?: number;
   durationApiMs?: number;
@@ -91,7 +99,11 @@ export interface ClaudeTrace {
   toolCalls: LLMToolCall[];
   usage?: UsageMetrics;
   requestId?: string;
+  /** When the task's first event was written. */
+  startedAt?: string;
   completedAt?: string;
+  /** The task's model requests, from its native events. */
+  modelCalls?: ModelCall[];
   /**
    * When the task last did something: the latest timestamp among its native
    * events (ISO). A task that runs past its deadline is idle since then.
@@ -239,6 +251,32 @@ export async function parseClaudeTrace(
     (typeof resultEvent?.result === 'string' ? resultEvent.result : undefined);
   const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(auditEventsForRun, transcriptEventsForRun);
+  const timed = (events: ClaudeAuditEvent[]): ClaudeMessageEvent[] =>
+    events.map((event) => {
+      const at = metadataTimestampMs(event.timestamp);
+      return {
+        ...(event as ClaudeMessageEvent),
+        ...(Number.isFinite(at) ? { at } : { at: undefined }),
+      };
+    });
+  // The audit log has the task's model requests when it has its assistant
+  // messages; otherwise the transcript.
+  const hasAuditMessages = auditEventsForRun.some(
+    (event) => event.type === 'assistant'
+  );
+  const messageEvents = timed(
+    hasAuditMessages ? auditEventsForRun : transcriptEventsForRun
+  );
+  const modelCalls = withFinalUsage(
+    claudeModelCalls(messageEvents),
+    hasAuditMessages ? claudeModelCalls(timed(transcriptEventsForRun)) : []
+  );
+  timeClaudeToolCalls(toolCalls, messageEvents);
+  const firstEventMs = Math.min(
+    ...combinedEventsForRun
+      .map((event) => metadataTimestampMs(event.timestamp))
+      .filter(Number.isFinite)
+  );
   const lastEventMs = Math.max(
     ...combinedEventsForRun
       .map((event) => metadataTimestampMs(event.timestamp))
@@ -265,7 +303,11 @@ export async function parseClaudeTrace(
     toolCalls,
     usage,
     requestId: resultEvent?.requestId ?? resultEvent?.request_id,
+    ...(Number.isFinite(firstEventMs)
+      ? { startedAt: new Date(firstEventMs).toISOString() }
+      : {}),
     completedAt: resultEvent?.timestamp,
+    ...(modelCalls.length ? { modelCalls } : {}),
     ...(Number.isFinite(lastEventMs)
       ? { lastEventAt: new Date(lastEventMs).toISOString() }
       : {}),
@@ -625,6 +667,15 @@ function extractAggregatedUsage(
         previous.cacheCreationInputTokens ?? 0,
         usage.cacheCreationInputTokens ?? 0
       ),
+      ...(previous.reasoningOutputTokens !== undefined ||
+      usage.reasoningOutputTokens !== undefined
+        ? {
+            reasoningOutputTokens: Math.max(
+              previous.reasoningOutputTokens ?? 0,
+              usage.reasoningOutputTokens ?? 0
+            ),
+          }
+        : {}),
     });
   });
 
@@ -647,6 +698,14 @@ function extractAggregatedUsage(
     cacheCreationInputTokens:
       (total.cacheCreationInputTokens ?? 0) +
       (value.cacheCreationInputTokens ?? 0),
+    // Known only when every result says; a partial sum would undercount.
+    ...(total.reasoningOutputTokens !== undefined &&
+    value.reasoningOutputTokens !== undefined
+      ? {
+          reasoningOutputTokens:
+            total.reasoningOutputTokens + value.reasoningOutputTokens,
+        }
+      : {}),
   }));
 }
 
@@ -671,6 +730,10 @@ function knownUsageFields(events: ClaudeAuditEvent[]): (keyof UsageMetrics)[] {
       (event) =>
         event.usage?.cache_creation_input_tokens ??
         event.usage?.cacheCreationInputTokens,
+    ],
+    [
+      'reasoningOutputTokens',
+      (event) => claudeThinkingTokens(event.usage, event.modelUsage),
     ],
     ['totalCostUsd', (event) => event.total_cost_usd],
     ['durationMs', (event) => event.duration_ms],
@@ -699,6 +762,7 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     getNumber(usage, 'input_tokens') ?? getNumber(usage, 'inputTokens');
   const outputTokens =
     getNumber(usage, 'output_tokens') ?? getNumber(usage, 'outputTokens');
+  const reasoningOutputTokens = claudeThinkingTokens(usage, event.modelUsage);
 
   if (
     inputTokens === undefined &&
@@ -722,6 +786,7 @@ function extractUsage(event: ClaudeAuditEvent): UsageMetrics | undefined {
     cacheCreationInputTokens:
       getNumber(usage, 'cache_creation_input_tokens') ??
       getNumber(usage, 'cacheCreationInputTokens'),
+    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
   };
 }
 
@@ -782,6 +847,9 @@ function buildNativeTelemetry(
     outputTokens: usage?.outputTokens,
     cacheReadInputTokens: usage?.cacheReadInputTokens,
     cacheCreationInputTokens: usage?.cacheCreationInputTokens,
+    ...(usage?.reasoningOutputTokens !== undefined
+      ? { reasoningOutputTokens: usage.reasoningOutputTokens }
+      : {}),
     totalCostUsd: usage?.totalCostUsd,
     durationMs: usage?.durationMs,
     durationApiMs: usage?.durationApiMs,

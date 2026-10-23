@@ -4,7 +4,13 @@ import type {
   LLMToolCall,
   MstClientSimulationResult,
 } from '../../types.js';
-import { parseStreamJson, createJsonParser } from './parsers.js';
+import {
+  parseStreamJson,
+  createJsonParser,
+  LineClock,
+  claudeTranscriptModelCalls,
+} from './parsers.js';
+import { withFinalUsage } from '../../../claudeCodeEvents.js';
 import { ClaudeStartup } from './claudeStartup.js';
 
 class ProcessFailure extends Error {
@@ -24,7 +30,10 @@ const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
  */
 function getParser(
   format: CLIConfig['outputFormat']
-): (stdout: string) => MstClientSimulationResult {
+): (
+  stdout: string,
+  lineTimes?: readonly number[]
+) => MstClientSimulationResult {
   switch (format ?? 'stream-json') {
     case 'stream-json':
       return parseStreamJson;
@@ -84,6 +93,11 @@ export async function runCLIClient(
     ? new ClaudeStartup(cliConfig.claudeMcpServers)
     : undefined;
 
+  // When each line arrived: stream-json events carry no times of their own.
+  const clock =
+    (cliConfig.outputFormat ?? 'stream-json') === 'stream-json'
+      ? new LineClock()
+      : undefined;
   let stdout: string;
   try {
     const result = await spawnProcess(cliConfig.command, args, {
@@ -101,7 +115,13 @@ export async function runCLIClient(
       signal,
       isClaude,
       cwd: cliConfig.cwd,
-      onStdout: startup ? (chunk) => startup.push(chunk) : undefined,
+      onStdout:
+        startup || clock
+          ? (chunk) => {
+              clock?.push(chunk);
+              return startup?.push(chunk);
+            }
+          : undefined,
     });
     stdout = result.stdout;
   } catch (err) {
@@ -114,7 +134,7 @@ export async function runCLIClient(
       };
       if (err instanceof ProcessFailure) {
         try {
-          partial = getParser(cliConfig.outputFormat)(err.stdout);
+          partial = getParser(cliConfig.outputFormat)(err.stdout, clock?.end());
         } catch {
           /* Keep the process failure, never echo raw output. */
         }
@@ -161,7 +181,15 @@ export async function runCLIClient(
 
   let result: MstClientSimulationResult;
   try {
-    result = parse(stdout);
+    result = parse(stdout, clock?.end());
+    // Claude Code's stream has each message's usage as it started; its
+    // session transcript, in the config directory, has it once done.
+    const configDir = cliConfig.env?.CLAUDE_CONFIG_DIR;
+    if (result.modelCalls && configDir)
+      result.modelCalls = withFinalUsage(
+        result.modelCalls,
+        claudeTranscriptModelCalls(configDir)
+      );
   } catch (err) {
     return {
       success: false,

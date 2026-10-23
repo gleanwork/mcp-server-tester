@@ -348,6 +348,8 @@ export async function collectShard(
       ...runEnv,
       ...connectorEnv,
       MST_TOKENS_DIR: tokensDir,
+      // Which run a host's own telemetry belongs to (`telemetry.host`).
+      MST_RUN_ID: bundle.runId,
     };
     // Servers arrive as declared; their secrets come from this machine's
     // environment and the coordinator's `tokens`.

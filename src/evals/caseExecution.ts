@@ -240,15 +240,17 @@ export function createEvalCaseExecutor(
       const proxy = await options.toolVariant.proxy();
       const scope = randomUUID();
       const checkScope = randomUUID();
-      const trace = await definition.run(
-        {
-          prompt: evalCase.input ?? '',
-          servers: proxy.serversFor(scope),
-          checkServers: proxy.serversFor(checkScope),
-          env,
-        },
-        declaration,
-        withoutToolVariant(context)
+      const trace = await timed(() =>
+        definition.run!(
+          {
+            prompt: evalCase.input ?? '',
+            servers: proxy.serversFor(scope),
+            checkServers: proxy.serversFor(checkScope),
+            env,
+          },
+          declaration,
+          withoutToolVariant(context)
+        )
       );
       proxy.endScope(checkScope);
       return clientRunToExecution(
@@ -263,11 +265,26 @@ export function createEvalCaseExecutor(
         servers
       );
     }
-    const trace = await definition.run(
-      { prompt: evalCase.input ?? '', servers, env },
-      declaration,
-      context
+    const trace = await timed(() =>
+      definition.run!(
+        { prompt: evalCase.input ?? '', servers, env },
+        declaration,
+        context
+      )
     );
     return clientRunToExecution(trace, definition.evidence ?? 'none', servers);
+  };
+}
+
+/** A `run`'s result, with when it started and ended unless the client said. */
+async function timed(
+  run: () => Promise<ClientRunResult>
+): Promise<ClientRunResult> {
+  const startedAt = new Date().toISOString();
+  const trace = await run();
+  return {
+    ...trace,
+    startedAt: trace.startedAt ?? startedAt,
+    completedAt: trace.completedAt ?? new Date().toISOString(),
   };
 }
