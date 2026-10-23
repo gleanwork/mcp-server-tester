@@ -78,6 +78,19 @@ describe('Cowork MCP preflight retries', () => {
     expect(createMCPClientForConfig).toHaveBeenCalledTimes(3);
   });
 
+  it("takes MST_COWORK_MCP_PREFLIGHT_RETRY_S from the run's env", async () => {
+    vi.mocked(createMCPClientForConfig).mockRejectedValue(
+      new Error('fetch failed')
+    );
+    await expect(
+      verifyCoworkMcpServers([httpServer('jira')], {
+        TOKEN: 'secret',
+        MST_COWORK_MCP_PREFLIGHT_RETRY_S: '',
+      })
+    ).rejects.toBeInstanceOf(CoworkMcpReadinessError);
+    expect(createMCPClientForConfig).toHaveBeenCalledOnce();
+  });
+
   it('reads retry delays from MST_COWORK_MCP_PREFLIGHT_RETRY_S', () => {
     expect(preflightRetryDelaysMs(undefined)).toEqual(
       COWORK_MCP_PREFLIGHT_RETRY_DELAYS_MS

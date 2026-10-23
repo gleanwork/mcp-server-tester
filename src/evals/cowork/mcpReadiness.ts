@@ -113,7 +113,12 @@ export async function verifyCoworkMcpServers(
   const check = (subset: MCPConfig[]) =>
     checkMcpServers(subset, (server) => resolveServer(server, env, context));
   const results = await check(labeledServers);
-  for (const delayMs of stdio.retryDelaysMs ?? preflightRetryDelaysMs()) {
+  // The run's setting, like the client's other MST_COWORK_* settings; when
+  // it has none, preflightRetryDelaysMs reads MST's own environment.
+  const delays =
+    stdio.retryDelaysMs ??
+    preflightRetryDelaysMs(env.MST_COWORK_MCP_PREFLIGHT_RETRY_S);
+  for (const delayMs of delays) {
     const failed = results.flatMap((result, index) =>
       isMcpServerReady(result) ? [] : [index]
     );
