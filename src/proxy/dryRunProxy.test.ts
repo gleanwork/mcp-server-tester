@@ -63,7 +63,9 @@ const TOOLS = [
 ];
 
 /** A fake vendor MCP server behind bearer auth, reachable through `fetch`. */
-function fakeVendor(options: { tools?: typeof TOOLS } = {}) {
+function fakeVendor(
+  options: { tools?: typeof TOOLS; instructions?: string } = {}
+) {
   const calls: string[] = [];
   const tokens: string[] = [];
   let validToken = 'token-1';
@@ -72,7 +74,12 @@ function fakeVendor(options: { tools?: typeof TOOLS } = {}) {
   function newServer() {
     const server = new Server(
       { name: 'vendor', version: '1' },
-      { capabilities: { tools: { listChanged: true } } }
+      {
+        capabilities: { tools: { listChanged: true } },
+        ...(options.instructions !== undefined
+          ? { instructions: options.instructions }
+          : {}),
+      }
     );
     server.setRequestHandler('tools/list', async () => ({
       tools: options.tools ?? TOOLS,
@@ -163,6 +170,21 @@ describe('dry-run proxy', () => {
     open.push(connected);
     return connected;
   }
+
+  it("passes on the upstream server's instructions", async () => {
+    const instructions =
+      'Search company knowledge with search. Connected: Slack, Jira.';
+    const { client } = await start({
+      vendor: fakeVendor({ instructions }),
+      token: staticToken('token-1'),
+    });
+    expect(client.getInstructions()).toBe(instructions);
+    const plain = await start({
+      vendor: fakeVendor(),
+      token: staticToken('token-1'),
+    });
+    expect(plain.client.getInstructions()).toBeUndefined();
+  });
 
   it('lists the upstream tools unchanged', async () => {
     const vendor = fakeVendor();
