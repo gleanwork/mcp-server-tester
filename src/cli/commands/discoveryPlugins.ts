@@ -8,12 +8,11 @@ import { loadEvalPlugins } from '../../evals/evalPlugins.js';
 import { installPlugins } from '../../plugins/extensions.js';
 import { loadPlugins } from '../../plugins/loadPlugins.js';
 import { parseExtensionReference } from '../../plugins/plugin.js';
+import { evalSettings, type SettingsSections } from '../../plugins/settings.js';
 import {
-  evalSettings,
   findSettingsFile,
   readSettingsFile,
-  type SettingsSections,
-} from '../../plugins/settings.js';
+} from '../../plugins/settingsFile.js';
 
 export interface DiscoveryOptions {
   config?: string;

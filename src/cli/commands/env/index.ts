@@ -9,11 +9,13 @@ import {
 } from '../../../plugins/loadPlugins.js';
 import { parseEnvOptions } from '../run/index.js';
 import {
-  findSettingsFile,
-  readSettingsFile,
   settingsFor,
   type SettingsSections,
 } from '../../../plugins/settings.js';
+import {
+  findSettingsFile,
+  readSettingsFile,
+} from '../../../plugins/settingsFile.js';
 
 export interface EnvSetupOptions {
   /** `--env-option key=value`, each time it was given. */

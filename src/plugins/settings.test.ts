@@ -7,7 +7,7 @@ import { runEval } from '../evals/runEval.js';
 import { loadEvalConfig } from '../evals/evalConfig.js';
 import { resetPluginsForTests } from './extensions.js';
 import { assertPlugin, type Plugin } from './plugin.js';
-import { findSettingsFile, SETTINGS_FILE } from './settings.js';
+import { findSettingsFile, SETTINGS_FILE } from './settingsFile.js';
 import { grantTargets } from '../auth/grants/connectors.js';
 import { accessToken } from '../auth/grants/grants.js';
 import { connectorUses } from '../evals/connectorServers.js';

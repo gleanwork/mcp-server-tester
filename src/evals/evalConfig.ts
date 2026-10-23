@@ -20,11 +20,10 @@ import {
 } from './coworkSetup/options.js';
 import {
   SettingsSectionsSchema,
-  findSettingsFile,
   mergeSettings,
-  readSettingsFile,
   type SettingsSections,
 } from '../plugins/settings.js';
+import { findSettingsFile, readSettingsFile } from '../plugins/settingsFile.js';
 
 /** USD per million tokens for one model. Cache rates default to the input rate. */
 export interface ModelPricing {
