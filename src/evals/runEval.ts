@@ -162,6 +162,7 @@ import {
   REDACT_STORED_RESPONSES_BY_DEFAULT,
   redactStoredResponses,
 } from './resultStore.js';
+import { createTraceExporter } from './telemetry/otlp.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import {
   connectorDeclarations,
@@ -1387,6 +1388,20 @@ async function evaluate(
   let shardRecords: ShardRecord[] | undefined;
 
   const executionId = replay?.runId ?? newRunId();
+  // The run's traces, sent as trials finish and grades come in. A regrade's
+  // verdicts join the traces of the run it grades.
+  const traceExporter = evalConfig.telemetry?.otlp
+    ? createTraceExporter(
+        evalConfig.telemetry.otlp,
+        {
+          eval: evalConfig.name,
+          runId: regrade?.gradedFrom ?? executionId,
+          gradingRunId: executionId,
+          client: evalConfig.client ?? DEFAULT_CLIENT,
+        },
+        env
+      )
+    : undefined;
   // The eval's directory holds its runs (runs/<run-id>/) and latest.json.
   const evalDirectory =
     options.outputDir ??
@@ -2188,6 +2203,8 @@ async function evaluate(
     result: EvalCaseResult,
     trial: number
   ): Promise<void> {
+    // A replayed trial was traced by the run that collected it.
+    if (!replay) traceExporter?.trial(result, trial);
     try {
       await (started ??= checkpoint('partial'));
       await writeTrial(
@@ -2220,6 +2237,13 @@ async function evaluate(
       );
     }
   }
+
+  if (traceExporter && options.grade !== false)
+    for (const variant of variantResults) {
+      for (const caseResult of variant.result?.caseResults ?? [])
+        traceExporter.graded({ ...caseResult, variant: variant.name });
+      if (variant.pairwise) traceExporter.pairwise(variant.pairwise);
+    }
 
   // Graders are done with the artifacts' copies; a run that redacts its
   // traces doesn't keep them.
@@ -2484,6 +2508,7 @@ async function evaluate(
     (!regrade || (await regradeTakesLatest(evalDirectory, regrade)));
   if (takesLatest)
     await writeLatest(evalDirectory, executionId, summary.timestamp);
+  await traceExporter?.flush();
   // The store gets the run as it is on disk, report included. It becomes the
   // store's latest run when it became the local one.
   if (resultStore)

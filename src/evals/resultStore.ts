@@ -150,6 +150,9 @@ function stripTrace(trace: unknown): void {
   if (Array.isArray(trace.events))
     for (const event of trace.events)
       if (isJsonObject(event)) delete event.output;
+  if (Array.isArray(trace.modelCalls))
+    for (const call of trace.modelCalls)
+      if (isJsonObject(call)) delete call.text;
 }
 
 /**
@@ -190,8 +193,8 @@ function stripResponses(value: unknown): void {
  * The one redaction policy for stored results: returns a deep copy in which
  * every eval case result, wherever it is nested (runs, eval variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
- * `expect.response`, no `finalText` or event `output` in its traces, and no
- * judge score `metadata` (in it or its trials).
+ * `expect.response`, no `finalText`, event `output` or model call `text` in
+ * its traces, and no judge score `metadata` (in it or its trials).
  * These may hold data from the server under test. Everything else is kept,
  * including each trace's events, servers, arguments and usage.
  */

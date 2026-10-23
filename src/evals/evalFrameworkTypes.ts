@@ -151,11 +151,49 @@ export interface TraceEvent {
   simulatedWrite?: boolean;
 }
 
+/**
+ * One model request a client made in a trial, from the client's own record
+ * of it (a native session log, an SDK step). Clients report what they saw:
+ * every field is optional, and a client that can't see its model requests
+ * reports none. `usage` stays the trial's total.
+ */
+export interface ModelCall {
+  /** The model that answered, as the provider named it. */
+  model?: string;
+  /** The provider's ID for the request or its response. */
+  id?: string;
+  /** ISO 8601. */
+  startedAt?: string;
+  /** ISO 8601. */
+  completedAt?: string;
+  durationMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  reasoningOutputTokens?: number;
+  /** Why the model stopped (`end_turn`, `tool_use`, `stop`, ...). */
+  finishReason?: string;
+  /** The text the model returned. Stored results drop it, as `finalText`. */
+  text?: string;
+  /** The `TraceEvent.id`s of the tool calls the model asked for. */
+  toolCallIds?: string[];
+}
+
 /** One execution trace. Clients never return evaluation scores. */
 export interface ClientRunResult {
   diagnostics?: ClientDiagnostics;
   finalText: string;
   events: TraceEvent[];
+  /** The trial's model requests, in order (see `ModelCall`). */
+  modelCalls?: ModelCall[];
+  /**
+   * When the trial's task started and ended (ISO 8601), when the client
+   * knows: a batch client's requests can wait on one another, so MST's own
+   * clock can't say. MST times a `run` itself.
+   */
+  startedAt?: string;
+  completedAt?: string;
   error?: string;
   usage?: UsageMetrics;
   /** Native and driver observations remain separately scoped; UI actions are not LLM usage. */
@@ -210,7 +248,10 @@ export interface ClientArtifacts {
  * `server` label. Stored results drop `finalText` and event `output`, which
  * can hold data from the server under test.
  */
-export type Trace = Pick<ClientRunResult, 'events' | 'usage' | 'error'> & {
+export type Trace = Pick<
+  ClientRunResult,
+  'events' | 'modelCalls' | 'startedAt' | 'completedAt' | 'usage' | 'error'
+> & {
   finalText?: string;
   /** Declared evidence; absent for the legacy simulated client. */
   evidence?: TraceEvidence;

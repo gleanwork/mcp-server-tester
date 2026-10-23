@@ -1,5 +1,127 @@
-import type { TraceEvent } from './evalFrameworkTypes.js';
+import type { ModelCall, TraceEvent } from './evalFrameworkTypes.js';
 import type { LLMToolCall } from './mstClient/types.js';
+
+/**
+ * A Claude message event (Claude Code's stream-json, a Cowork session's
+ * audit log) as `claudeModelCalls` reads it, with when it was written or
+ * seen (epoch ms), if known.
+ */
+export interface ClaudeMessageEvent {
+  type?: string;
+  message?: {
+    id?: string;
+    model?: string;
+    stop_reason?: string | null;
+    usage?: Record<string, unknown>;
+    content?: unknown;
+  };
+  at?: number;
+}
+
+/**
+ * The model requests in a Claude session's events. Claude writes one
+ * `assistant` event per content block of a message, all with the message's
+ * ID and its usage so far, so a request is the events with one message ID
+ * (the API's response ID): its usage the last one's, its output tokens the
+ * most any reported. It started when the event before its first ended (the
+ * prompt, a tool's result) and ended at its last.
+ *
+ * Usage written as a message streams (stream-json, a Cowork audit log) is
+ * as of its start; `withFinalUsage` takes it from the session's transcript.
+ */
+export function claudeModelCalls(
+  events: readonly ClaudeMessageEvent[]
+): ModelCall[] {
+  const calls = new Map<string, ModelCall>();
+  let boundary: number | undefined;
+  for (const event of events) {
+    const id = event.message?.id;
+    if (event.type !== 'assistant' || !id) {
+      if (event.at !== undefined) boundary = event.at;
+      continue;
+    }
+    let call = calls.get(id);
+    if (!call) {
+      call = {
+        id,
+        ...(boundary !== undefined
+          ? { startedAt: new Date(boundary).toISOString() }
+          : {}),
+      };
+      calls.set(id, call);
+    }
+    const message = event.message!;
+    if (message.model) call.model = message.model;
+    if (message.stop_reason) call.finishReason = message.stop_reason;
+    const usage = message.usage ?? {};
+    const count = (key: string): number | undefined =>
+      typeof usage[key] === 'number' ? usage[key] : undefined;
+    const input = count('input_tokens');
+    if (input !== undefined) call.inputTokens = input;
+    const output = count('output_tokens');
+    if (output !== undefined)
+      call.outputTokens = Math.max(call.outputTokens ?? 0, output);
+    const cacheRead = count('cache_read_input_tokens');
+    if (cacheRead !== undefined) call.cacheReadInputTokens = cacheRead;
+    const cacheCreation = count('cache_creation_input_tokens');
+    if (cacheCreation !== undefined)
+      call.cacheCreationInputTokens = cacheCreation;
+    for (const block of Array.isArray(message.content) ? message.content : []) {
+      if (!block || typeof block !== 'object') continue;
+      const { type, text, id: blockId } = block as Record<string, unknown>;
+      if (type === 'text' && typeof text === 'string' && text)
+        call.text = (call.text ?? '') + text;
+      if (type === 'tool_use' && typeof blockId === 'string')
+        call.toolCallIds = [...(call.toolCallIds ?? []), blockId];
+    }
+    if (event.at !== undefined) {
+      call.completedAt = new Date(event.at).toISOString();
+      if (call.startedAt)
+        call.durationMs = Math.max(
+          0,
+          event.at - new Date(call.startedAt).getTime()
+        );
+    }
+  }
+  return [...calls.values()];
+}
+
+/**
+ * Times a Claude session's tool calls that have none: each from the event
+ * that asked for it (`tool_use`) to the one with its result (`tool_result`).
+ */
+export function timeClaudeToolCalls(
+  calls: LLMToolCall[],
+  events: readonly ClaudeMessageEvent[]
+): void {
+  const started = new Map<string, number>();
+  const ended = new Map<string, number>();
+  for (const event of events) {
+    if (event.at === undefined) continue;
+    const content = event.message?.content;
+    for (const block of Array.isArray(content) ? content : []) {
+      if (!block || typeof block !== 'object') continue;
+      const { type, id, tool_use_id } = block as Record<string, unknown>;
+      if (type === 'tool_use' && typeof id === 'string' && !started.has(id))
+        started.set(id, event.at);
+      if (
+        type === 'tool_result' &&
+        typeof tool_use_id === 'string' &&
+        !ended.has(tool_use_id)
+      )
+        ended.set(tool_use_id, event.at);
+    }
+  }
+  for (const call of calls) {
+    if (!call.id || call.startedAt) continue;
+    const start = started.get(call.id);
+    const end = ended.get(call.id);
+    if (start !== undefined) call.startedAt = new Date(start).toISOString();
+    if (end !== undefined) call.completedAt = new Date(end).toISOString();
+    if (start !== undefined && end !== undefined)
+      call.durationMs = Math.max(0, end - start);
+  }
+}
 
 /** A tool a client's tool search surfaced. */
 export type SurfacedTool = NonNullable<TraceEvent['results']>[number];
@@ -96,4 +218,35 @@ export function typeClaudeCodeCall(call: LLMToolCall): LLMToolCall {
     default:
       return call;
   }
+}
+
+/**
+ * Model requests with the usage a later record of them reports: Claude
+ * writes a message's usage as it starts (an output count of a token or two)
+ * in its stream and audit log, and once it's done in the session's
+ * transcript. Each request keeps its own times and text, and takes its usage
+ * from the record that saw more of its output.
+ */
+export function withFinalUsage(
+  calls: ModelCall[],
+  later: readonly ModelCall[]
+): ModelCall[] {
+  const byId = new Map(later.map((call) => [call.id, call]));
+  return calls.map((call) => {
+    const other = call.id ? byId.get(call.id) : undefined;
+    if (!other || (other.outputTokens ?? 0) <= (call.outputTokens ?? 0))
+      return call;
+    const usage = {
+      inputTokens: other.inputTokens,
+      outputTokens: other.outputTokens,
+      cacheReadInputTokens: other.cacheReadInputTokens,
+      cacheCreationInputTokens: other.cacheCreationInputTokens,
+    };
+    return {
+      ...call,
+      ...Object.fromEntries(
+        Object.entries(usage).filter(([, value]) => value !== undefined)
+      ),
+    };
+  });
 }

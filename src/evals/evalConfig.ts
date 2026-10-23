@@ -177,6 +177,8 @@ export interface EvalConfig {
   results?: {
     store: ExtensionConfig;
   };
+  /** Where to send the run's traces as they happen (docs/telemetry.md). */
+  telemetry?: { otlp?: OtlpTelemetryConfig };
   plugins?: string[];
   /**
    * Shared configs (`<namespace>/config/<name>`) from listed plugins, applied in order
@@ -421,6 +423,56 @@ export const RENAMED_CONFIG_KEYS = {
   arms: 'variants',
 } as const;
 
+/**
+ * Where MST sends a run's traces: OTLP over HTTP (JSON), one trace per trial
+ * (see docs/telemetry.md).
+ */
+const OtlpTelemetryConfigSchema = z
+  .object({
+    /**
+     * The collector: its base URL (MST posts to `<endpoint>/v1/traces`) or
+     * its traces URL. HTTPS, or HTTP to this machine.
+     */
+    endpoint: z
+      .string()
+      .url()
+      .refine((value) => {
+        const url = new URL(value);
+        return (
+          url.protocol === 'https:' ||
+          (url.protocol === 'http:' &&
+            ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+        );
+      }, 'must be HTTPS, or HTTP to localhost'),
+    /** Headers to send, such as a tenant. Not for secrets: see `bearerTokenEnv`. */
+    headers: z.record(z.string().min(1), z.string()).optional(),
+    /**
+     * The environment variable (or secrets-file key) holding a bearer token
+     * for the collector. The token is never written to results.
+     */
+    bearerTokenEnv: z
+      .string()
+      .regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+      .optional(),
+    /** Added to every trace's resource, as `service.namespace`. */
+    resourceAttributes: z.record(z.string().min(1), z.string()).optional(),
+    /**
+     * Send what the trial said, not just what it did: prompts, answers, model
+     * text, tool arguments and results, judges' reasoning. Off by default.
+     * They can hold data from the servers under test.
+     */
+    content: z.boolean().optional(),
+    /** The most characters of one content attribute (default 16384). */
+    maxAttributeChars: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type OtlpTelemetryConfig = z.infer<typeof OtlpTelemetryConfigSchema>;
+
+const TelemetryConfigSchema = z
+  .object({ otlp: OtlpTelemetryConfigSchema.optional() })
+  .strict();
+
 export const EvalConfigSchema = z
   .object({
     /** The editor schema an eval config file may point to. */
@@ -439,6 +491,7 @@ export const EvalConfigSchema = z
     pairwiseJudges: z.array(PairwiseJudgeConfigSchema).optional(),
     coworkSetup: CoworkSetupConfigSchema.optional(),
     results: z.object({ store: ResultStoreConfigSchema }).strict().optional(),
+    telemetry: TelemetryConfigSchema.optional(),
     plugins: z.array(z.string().min(1)).optional(),
     extends: z.array(z.string().min(1)).optional(),
     provider: z.string().optional(),
@@ -541,6 +594,7 @@ const PluginConfigSchema = EvalConfigSchema.pick({
   pairwiseJudges: true,
   coworkSetup: true,
   results: true,
+  telemetry: true,
   provider: true,
   concurrency: true,
   trials: true,

@@ -216,6 +216,111 @@ describe('Claude local-agent trace parsing', () => {
     ]);
   });
 
+  it("reads the task's model requests, tool times and start from its audit log's timestamps", async () => {
+    const trace = await parseNativeEvents([
+      {
+        type: 'user',
+        timestamp: '2026-09-17T00:00:00Z',
+        message: { content: [{ type: 'text', text: 'Add 1 and 2.' }] },
+      },
+      {
+        type: 'assistant',
+        timestamp: '2026-09-17T00:00:04Z',
+        request_id: 'req_1',
+        message: {
+          id: 'msg_1',
+          model: 'claude-x',
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 5, output_tokens: 9 },
+          content: [
+            { type: 'tool_use', id: 'toolu_1', name: 'mcp__math__add' },
+          ],
+        },
+      },
+      {
+        type: 'user',
+        timestamp: '2026-09-17T00:00:06Z',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_1', content: '3' },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        timestamp: '2026-09-17T00:00:07Z',
+        request_id: 'req_2',
+        message: {
+          id: 'msg_2',
+          model: 'claude-x',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 6, output_tokens: 1 },
+          content: [{ type: 'text', text: '3' }],
+        },
+      },
+      {
+        type: 'result',
+        timestamp: '2026-09-17T00:00:08Z',
+        result: '3',
+      },
+    ]);
+    expect(trace.startedAt).toBe('2026-09-17T00:00:00.000Z');
+    expect(trace.modelCalls).toEqual([
+      expect.objectContaining({
+        id: 'msg_1',
+        model: 'claude-x',
+        startedAt: '2026-09-17T00:00:00.000Z',
+        completedAt: '2026-09-17T00:00:04.000Z',
+        finishReason: 'tool_use',
+        toolCallIds: ['toolu_1'],
+      }),
+      expect.objectContaining({
+        id: 'msg_2',
+        startedAt: '2026-09-17T00:00:06.000Z',
+        completedAt: '2026-09-17T00:00:07.000Z',
+        text: '3',
+      }),
+    ]);
+    expect(trace.toolCalls[0]).toMatchObject({
+      id: 'toolu_1',
+      startedAt: '2026-09-17T00:00:04.000Z',
+      completedAt: '2026-09-17T00:00:06.000Z',
+      durationMs: 2_000,
+    });
+  });
+
+  it("takes each request's usage from the transcript, which has it once the message is done", async () => {
+    const message = (outputTokens: number, timestamp?: string) => ({
+      type: 'assistant',
+      ...(timestamp ? { timestamp } : {}),
+      requestId: 'req_1',
+      message: {
+        id: 'msg_1',
+        model: 'claude-x',
+        usage: {
+          input_tokens: 3,
+          output_tokens: outputTokens,
+          cache_read_input_tokens: 70,
+        },
+        content: [{ type: 'text', text: 'Done.' }],
+      },
+    });
+    const trace = await parseNativeEvents(
+      [message(1, '2026-09-17T00:00:04Z'), { type: 'result', result: 'Done.' }],
+      [message(321, '2026-09-17T00:00:09Z')]
+    );
+    expect(trace.modelCalls).toEqual([
+      expect.objectContaining({
+        id: 'msg_1',
+        // The audit log's time, the transcript's usage.
+        completedAt: '2026-09-17T00:00:04.000Z',
+        inputTokens: 3,
+        outputTokens: 321,
+        cacheReadInputTokens: 70,
+      }),
+    ]);
+  });
+
   it("records when the task last did something, from either source's latest event", async () => {
     const trace = await parseNativeEvents(
       [

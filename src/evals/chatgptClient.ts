@@ -254,8 +254,12 @@ async function runBatch(
           measurementError =
             'ChatGPT completed without calling a required evaluation MCP tool on the configured server selection.';
         if (measurementError) trace.error = measurementError;
+        const session = result.clientMetadata?.session;
         const caseResult: ClientRunResult = {
           ...trace,
+          // The native turn's own times, when it was bound.
+          ...(session?.startedAt ? { startedAt: session.startedAt } : {}),
+          ...(session?.completedAt ? { completedAt: session.completedAt } : {}),
           durationMs: Date.now() - started,
           ...(result.success ? { llmDurationMs: result.llmDurationMs } : {}),
           telemetry: {

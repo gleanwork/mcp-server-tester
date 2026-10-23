@@ -225,6 +225,49 @@
       },
       "additionalProperties": false
     },
+    "telemetry": {
+      "type": "object",
+      "description": "Where to send the run's traces as it goes: one OpenTelemetry trace per trial, with its model requests, tool calls and verdicts.",
+      "properties": {
+        "otlp": {
+          "type": "object",
+          "required": ["endpoint"],
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "format": "uri",
+              "description": "The OTLP collector: its base URL (MST posts OTLP/JSON to <endpoint>/v1/traces) or its traces URL. HTTPS, or HTTP to localhost."
+            },
+            "headers": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "Headers to send, such as a tenant. Not for secrets: use bearerTokenEnv."
+            },
+            "bearerTokenEnv": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "description": "The environment variable (or secrets-file key) holding a bearer token for the collector."
+            },
+            "resourceAttributes": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "Added to every trace's resource."
+            },
+            "content": {
+              "type": "boolean",
+              "description": "Also send prompts, answers, model text, tool arguments and results, and judges' reasoning. Off by default: they can hold data from the servers under test."
+            },
+            "maxAttributeChars": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "The most characters of one content attribute (default 16384)."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "plugins": {
       "type": "array",
       "items": {

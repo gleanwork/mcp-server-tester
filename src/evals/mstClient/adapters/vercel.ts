@@ -18,7 +18,7 @@ import type {
 import type { UsageMetrics } from '../../../types/index.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { extractText } from '../../../mcp/response.js';
-import type { TraceEvent } from '../../evalFrameworkTypes.js';
+import type { ModelCall, TraceEvent } from '../../evalFrameworkTypes.js';
 import {
   createClientSkillsSession,
   HOST_SKILL_TOOL_NAMES,
@@ -324,6 +324,8 @@ interface AgentLoopOptions {
   maxOutputTokens?: number;
   abortSignal: AbortSignal;
   providerOptions?: ProviderOptions;
+  /** Called as each step (a model request and its tool calls) ends. */
+  onStepFinish?: () => void;
 }
 
 /** The parts of a generateText/streamText result the simulator reads. */
@@ -372,6 +374,74 @@ async function runAgentLoop(
   } catch (err) {
     throw toError(streamError ?? err);
   }
+}
+
+/**
+ * Each step's model request. A step is a request and then its tool calls,
+ * so a request runs from the step's start to its first tool call (or the
+ * step's end): `stepEnds[i]` is when step `i` ended, `toolStarts` when each
+ * tool call started, all in epoch ms.
+ */
+export function stepModelCalls(
+  steps: ReadonlyArray<
+    Pick<
+      AI.StepResult<AI.ToolSet>,
+      'usage' | 'finishReason' | 'response' | 'text' | 'toolCalls'
+    >
+  >,
+  startedAt: number,
+  stepEnds: readonly number[],
+  toolStarts: readonly number[]
+): ModelCall[] {
+  return steps.map((step, index) => {
+    const start = index === 0 ? startedAt : stepEnds[index - 1];
+    const stepEnd = stepEnds[index];
+    const firstTool =
+      start !== undefined && stepEnd !== undefined
+        ? toolStarts
+            .filter((at) => at >= start && at <= stepEnd)
+            .reduce<
+              number | undefined
+            >((first, at) => (first === undefined ? at : Math.min(first, at)), undefined)
+        : undefined;
+    const end = firstTool ?? stepEnd;
+    const usage = step.usage;
+    const toolCallIds = (step.toolCalls ?? [])
+      .map((call) => call.toolCallId)
+      .filter((id): id is string => typeof id === 'string');
+    const call: ModelCall = {
+      ...(step.response?.modelId ? { model: step.response.modelId } : {}),
+      ...(step.response?.id ? { id: step.response.id } : {}),
+      ...(start !== undefined
+        ? { startedAt: new Date(start).toISOString() }
+        : {}),
+      ...(end !== undefined
+        ? { completedAt: new Date(end).toISOString() }
+        : {}),
+      ...(start !== undefined && end !== undefined
+        ? { durationMs: Math.max(0, end - start) }
+        : {}),
+      ...(usage?.inputTokens !== undefined
+        ? { inputTokens: usage.inputTokens }
+        : {}),
+      ...(usage?.outputTokens !== undefined
+        ? { outputTokens: usage.outputTokens }
+        : {}),
+      ...(usage?.inputTokenDetails?.cacheReadTokens !== undefined
+        ? { cacheReadInputTokens: usage.inputTokenDetails.cacheReadTokens }
+        : {}),
+      ...(usage?.inputTokenDetails?.cacheWriteTokens !== undefined
+        ? { cacheCreationInputTokens: usage.inputTokenDetails.cacheWriteTokens }
+        : {}),
+      ...(usage?.outputTokenDetails?.reasoningTokens !== undefined
+        ? { reasoningOutputTokens: usage.outputTokenDetails.reasoningTokens }
+        : {}),
+      ...(step.finishReason ? { finishReason: step.finishReason } : {}),
+      ...(step.text ? { text: step.text } : {}),
+      ...(toolCallIds.length ? { toolCallIds } : {}),
+    };
+    return call;
+  });
 }
 
 /** Errors thrown as-is; anything else (a streamed error part) wrapped. */
@@ -478,6 +548,9 @@ export function createVercelOrchestrator(): MstClientSimulator {
         const mcpTools = await withinDeadline(mcp.listTools());
         let mcpDurationMs = 0;
         let attemptedToolCalls = 0;
+        // For each model request's span: when steps end and tools start.
+        const stepEnds: number[] = [];
+        const toolStarts: number[] = [];
         let budgetError: Error | undefined;
 
         // Build tool definitions in Vercel AI SDK format.
@@ -514,6 +587,7 @@ export function createVercelOrchestrator(): MstClientSimulator {
               }
               attemptedToolCalls++;
               const mcpStart = Date.now();
+              toolStarts.push(mcpStart);
               const result = await withinDeadline(mcp.callTool(toolName, args));
               mcpDurationMs += Date.now() - mcpStart;
 
@@ -549,6 +623,7 @@ export function createVercelOrchestrator(): MstClientSimulator {
             execute: async (args: Record<string, unknown>) => {
               if (controller.signal.aborted) throw controller.signal.reason;
               const mcpStart = Date.now();
+              toolStarts.push(mcpStart);
               const output = await withinDeadline(clientTool.execute(args));
               mcpDurationMs += Date.now() - mcpStart;
               return output;
@@ -576,6 +651,7 @@ export function createVercelOrchestrator(): MstClientSimulator {
               maxOutputTokens: config.maxTokens,
               abortSignal: controller.signal,
               ...(providerOptions ? { providerOptions } : {}),
+              onStepFinish: () => stepEnds.push(Date.now()),
             },
             streams === true
           )
@@ -627,9 +703,16 @@ export function createVercelOrchestrator(): MstClientSimulator {
             : [];
         });
 
+        const modelCalls = stepModelCalls(
+          result.steps ?? [],
+          llmStart,
+          stepEnds,
+          toolStarts
+        );
         return {
           success: true,
           toolCalls: allToolCalls,
+          ...(modelCalls.length ? { modelCalls } : {}),
           response: result.text as string,
           input,
           llmDurationMs,

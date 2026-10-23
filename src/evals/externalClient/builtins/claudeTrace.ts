@@ -8,9 +8,14 @@ import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
 import type { LLMToolCall } from '../../mstClient/types.js';
 import type { UsageMetrics } from '../../../types/index.js';
+import type { ModelCall } from '../../evalFrameworkTypes.js';
 import {
+  claudeModelCalls,
   splitClaudeMcpName,
+  timeClaudeToolCalls,
   typeClaudeCodeCall,
+  withFinalUsage,
+  type ClaudeMessageEvent,
 } from '../../claudeCodeEvents.js';
 import { formatError } from './claudeCommon.js';
 import { findFile } from './claudeCommon.js';
@@ -91,7 +96,11 @@ export interface ClaudeTrace {
   toolCalls: LLMToolCall[];
   usage?: UsageMetrics;
   requestId?: string;
+  /** When the task's first event was written. */
+  startedAt?: string;
   completedAt?: string;
+  /** The task's model requests, from its native events. */
+  modelCalls?: ModelCall[];
   /**
    * When the task last did something: the latest timestamp among its native
    * events (ISO). A task that runs past its deadline is idle since then.
@@ -239,6 +248,32 @@ export async function parseClaudeTrace(
     (typeof resultEvent?.result === 'string' ? resultEvent.result : undefined);
   const usage = extractAggregatedUsage(resultEvents);
   const toolCalls = extractToolCalls(auditEventsForRun, transcriptEventsForRun);
+  const timed = (events: ClaudeAuditEvent[]): ClaudeMessageEvent[] =>
+    events.map((event) => {
+      const at = metadataTimestampMs(event.timestamp);
+      return {
+        ...(event as ClaudeMessageEvent),
+        ...(Number.isFinite(at) ? { at } : { at: undefined }),
+      };
+    });
+  // The audit log has the task's model requests when it has its assistant
+  // messages; otherwise the transcript.
+  const hasAuditMessages = auditEventsForRun.some(
+    (event) => event.type === 'assistant'
+  );
+  const messageEvents = timed(
+    hasAuditMessages ? auditEventsForRun : transcriptEventsForRun
+  );
+  const modelCalls = withFinalUsage(
+    claudeModelCalls(messageEvents),
+    hasAuditMessages ? claudeModelCalls(timed(transcriptEventsForRun)) : []
+  );
+  timeClaudeToolCalls(toolCalls, messageEvents);
+  const firstEventMs = Math.min(
+    ...combinedEventsForRun
+      .map((event) => metadataTimestampMs(event.timestamp))
+      .filter(Number.isFinite)
+  );
   const lastEventMs = Math.max(
     ...combinedEventsForRun
       .map((event) => metadataTimestampMs(event.timestamp))
@@ -265,7 +300,11 @@ export async function parseClaudeTrace(
     toolCalls,
     usage,
     requestId: resultEvent?.requestId ?? resultEvent?.request_id,
+    ...(Number.isFinite(firstEventMs)
+      ? { startedAt: new Date(firstEventMs).toISOString() }
+      : {}),
     completedAt: resultEvent?.timestamp,
+    ...(modelCalls.length ? { modelCalls } : {}),
     ...(Number.isFinite(lastEventMs)
       ? { lastEventAt: new Date(lastEventMs).toISOString() }
       : {}),

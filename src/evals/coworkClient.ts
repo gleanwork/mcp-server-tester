@@ -173,6 +173,17 @@ export interface DeadlineWait {
   idleMs?: number;
 }
 
+/** When a native task started and ended, from its session's events. */
+function taskTimes(
+  trace: Pick<ClaudeTrace, 'startedAt' | 'completedAt' | 'lastEventAt'>
+): { startedAt?: string; completedAt?: string } {
+  const completedAt = trace.completedAt ?? trace.lastEventAt;
+  return {
+    ...(trace.startedAt ? { startedAt: trace.startedAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
+  };
+}
+
 export function deadlineWait(
   trace: Pick<ClaudeTrace, 'toolCalls' | 'lastEventAt'>,
   now = Date.now()
@@ -672,6 +683,7 @@ async function runBatch(
               success: !trace.isError && trace.finalAnswer !== undefined,
               response: trace.finalAnswer,
               toolCalls: coworkOwnToolCalls(trace.toolCalls, servers),
+              ...(trace.modelCalls ? { modelCalls: trace.modelCalls } : {}),
               usage: trace.usage,
               error: trace.isError
                 ? 'Native Claude task failed.'
@@ -683,6 +695,7 @@ async function runBatch(
           );
           result = {
             ...nativeResult,
+            ...taskTimes(trace),
             // The session folder: audit log, spilled tool output, written files.
             ...(trace.candidate.sessionDir
               ? {
@@ -754,6 +767,9 @@ async function runBatch(
                     success: false,
                     response: partial.finalAnswer,
                     toolCalls: coworkOwnToolCalls(partial.toolCalls, servers),
+                    ...(partial.modelCalls
+                      ? { modelCalls: partial.modelCalls }
+                      : {}),
                     usage: partial.usage,
                     error: wait
                       ? `${result.error} ${describeDeadlineWait(wait)}`
@@ -761,6 +777,7 @@ async function runBatch(
                   },
                   servers
                 ),
+                ...taskTimes(partial),
                 artifacts: {
                   dir: partial.candidate.sessionDir,
                   include: COWORK_SESSION_EVIDENCE,

@@ -1,8 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseStreamJson, createJsonParser } from './parsers.js';
+import {
+  parseStreamJson,
+  createJsonParser,
+  LineClock,
+  claudeTranscriptModelCalls,
+} from './parsers.js';
+import { withFinalUsage } from '../../../claudeCodeEvents.js';
 
 describe('parseStreamJson and large tool results', () => {
   it('reads back a result Claude Code saved in the config directory MST made', () => {
@@ -467,5 +473,178 @@ describe('createJsonParser', () => {
 
     const result = parser(stdout);
     expect(result.toolCalls[0]!.arguments).toEqual({ key: 'value' });
+  });
+});
+
+describe('parseStreamJson with line times', () => {
+  // Claude Code writes one assistant event per content block of a message,
+  // each with the message's ID and its usage so far.
+  const lines = [
+    { type: 'system', subtype: 'init' },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg_1',
+        model: 'claude-x',
+        usage: { input_tokens: 10, output_tokens: 1 },
+        content: [{ type: 'text', text: 'Adding. ' }],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg_1',
+        model: 'claude-x',
+        stop_reason: 'tool_use',
+        usage: {
+          input_tokens: 10,
+          output_tokens: 7,
+          cache_read_input_tokens: 90,
+        },
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_1',
+            name: 'mcp__math__add',
+            input: { a: 1, b: 2 },
+          },
+        ],
+      },
+    },
+    {
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'toolu_1', content: '3' },
+        ],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        id: 'msg_2',
+        model: 'claude-x',
+        usage: { input_tokens: 12, output_tokens: 2 },
+        content: [{ type: 'text', text: '3' }],
+      },
+    },
+    { type: 'result', subtype: 'success', result: '3' },
+  ];
+  const stdout = lines.map((line) => JSON.stringify(line)).join('\n');
+  const at = (seconds: number) => Date.UTC(2026, 9, 22, 12, 0, seconds);
+  const iso = (seconds: number) => new Date(at(seconds)).toISOString();
+
+  it('times tool calls and model requests from when each line arrived', () => {
+    const result = parseStreamJson(stdout, [0, 2, 3, 5, 6, 6].map(at));
+    expect(result.toolCalls[0]).toMatchObject({
+      id: 'toolu_1',
+      startedAt: iso(3),
+      completedAt: iso(5),
+      durationMs: 2_000,
+    });
+    expect(result.modelCalls).toEqual([
+      {
+        id: 'msg_1',
+        model: 'claude-x',
+        startedAt: iso(0),
+        completedAt: iso(3),
+        durationMs: 3_000,
+        inputTokens: 10,
+        outputTokens: 7,
+        cacheReadInputTokens: 90,
+        finishReason: 'tool_use',
+        text: 'Adding. ',
+        toolCallIds: ['toolu_1'],
+      },
+      {
+        id: 'msg_2',
+        model: 'claude-x',
+        startedAt: iso(5),
+        completedAt: iso(6),
+        durationMs: 1_000,
+        inputTokens: 12,
+        outputTokens: 2,
+        text: '3',
+      },
+    ]);
+  });
+
+  it('reports model requests without times when it has none, or the wrong number', () => {
+    for (const times of [undefined, [at(0)]]) {
+      const result = parseStreamJson(stdout, times);
+      expect(result.toolCalls[0]!.startedAt).toBeUndefined();
+      expect(result.modelCalls?.map((call) => call.id)).toEqual([
+        'msg_1',
+        'msg_2',
+      ]);
+      expect(result.modelCalls?.[0]!.startedAt).toBeUndefined();
+    }
+  });
+});
+
+describe('LineClock', () => {
+  it('times each non-blank line when the chunk that ends it arrives', () => {
+    let now = 1_000;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const clock = new LineClock();
+      clock.push('{"a":');
+      now = 2_000;
+      clock.push(Buffer.from('1}\n\n{"b":2}\n{"c"'));
+      now = 3_000;
+      clock.push(':3}');
+      now = 4_000;
+      expect(clock.end()).toEqual([2_000, 2_000, 4_000]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("Claude Code's final usage", () => {
+  it('reads it from the session transcripts in the config directory, and keeps the stream times', () => {
+    const config = mkdtempSync(join(tmpdir(), 'mst-claude-'));
+    try {
+      const project = join(config, 'projects', '-tmp-work');
+      mkdirSync(project, { recursive: true });
+      writeFileSync(
+        join(project, 'session.jsonl'),
+        [
+          JSON.stringify({ type: 'user', message: { content: 'Hi' } }),
+          JSON.stringify({
+            type: 'assistant',
+            requestId: 'req_1',
+            message: {
+              id: 'msg_1',
+              usage: { input_tokens: 4, output_tokens: 250 },
+              content: [{ type: 'text', text: 'Hello' }],
+            },
+          }),
+          '{"type":"assistant","mess',
+        ].join('\n')
+      );
+      const final = claudeTranscriptModelCalls(config);
+      expect(final).toEqual([
+        { id: 'msg_1', inputTokens: 4, outputTokens: 250, text: 'Hello' },
+      ]);
+      const streamed = [
+        {
+          id: 'msg_1',
+          startedAt: '2026-10-22T12:00:00.000Z',
+          completedAt: '2026-10-22T12:00:02.000Z',
+          inputTokens: 4,
+          outputTokens: 1,
+          text: 'Hello',
+        },
+        { id: 'msg_2', outputTokens: 3 },
+      ];
+      expect(withFinalUsage(streamed, final)).toEqual([
+        { ...streamed[0], outputTokens: 250 },
+        streamed[1],
+      ]);
+      expect(claudeTranscriptModelCalls(join(config, 'missing'))).toEqual([]);
+    } finally {
+      rmSync(config, { recursive: true, force: true });
+    }
   });
 });

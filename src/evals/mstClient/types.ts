@@ -12,7 +12,7 @@ import type {
   SkillLoad,
   UsageMetrics,
 } from '../../types/index.js';
-import type { TraceEvent } from '../evalFrameworkTypes.js';
+import type { ModelCall, TraceEvent } from '../evalFrameworkTypes.js';
 
 /**
  * Client type for client simulation.
@@ -260,6 +260,9 @@ export interface MstClientSimulationResult {
 
   /** Tool calls made by the LLM */
   toolCalls: Array<LLMToolCall>;
+
+  /** The model requests, in order, when the simulator sees them. */
+  modelCalls?: ModelCall[];
 
   /** Final response from the LLM */
   response?: string;
