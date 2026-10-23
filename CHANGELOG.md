@@ -16,6 +16,35 @@
 
 
 
+
+## v2.0.0-beta.14 (2026-10-23)
+
+#### :rocket: Enhancement
+* [#481](https://github.com/gleanwork/mcp-server-tester/pull/481) feat(telemetry): each trial is sent as an OpenTelemetry trace over OTLP, for every client (telemetry.otlp) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#478](https://github.com/gleanwork/mcp-server-tester/pull/478) feat(plugins): plugins take settings from mst.config.json, checked by their schema and sent with the eval config (ADR 0008) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#464](https://github.com/gleanwork/mcp-server-tester/pull/464) feat(evals): detached runs (--detach, mst runs) move the coordinator to an environment's machine (ADR 0007) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#466](https://github.com/gleanwork/mcp-server-tester/pull/466) feat(judge): plugin judges call models through MST, OpenAI judges take a reasoning effort, and skipped results keep their metadata ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#463](https://github.com/gleanwork/mcp-server-tester/pull/463) feat(auth): plugins can provide credential stores (--store <namespace>/credential-store/<name>) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :bug: Bug Fix
+* [#483](https://github.com/gleanwork/mcp-server-tester/pull/483) fix(docker): a failed image build says why, with the build's last lines ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#482](https://github.com/gleanwork/mcp-server-tester/pull/482) fix(proxy): the dry-run proxy passes on the upstream server's instructions ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#480](https://github.com/gleanwork/mcp-server-tester/pull/480) fix(cowork): a failed desktop restart is retried, a stalled Cowork VM boot starts again, and the MCP preflight rechecks failed servers ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#479](https://github.com/gleanwork/mcp-server-tester/pull/479) fix(proxy): a connector can use the dry-run proxy only to renew its token (forwardWrites), with a longer request timeout (requestTimeoutMs) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#477](https://github.com/gleanwork/mcp-server-tester/pull/477) fix(grade): large runs are saved and graded, the coordinator parses results once, and `mst grade --resume` finishes a partial grading ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#472](https://github.com/gleanwork/mcp-server-tester/pull/472) fix(cowork): a Linux prompt too long for a deep link is pasted, and a truncated one fails as infrastructure ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#471](https://github.com/gleanwork/mcp-server-tester/pull/471) fix(cowork): a Linux reset stops the failed case's task before it opens the next one ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#470](https://github.com/gleanwork/mcp-server-tester/pull/470) fix(cowork): a timed-out task records what it was waiting on, and keeps its screenshot and logs ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#469](https://github.com/gleanwork/mcp-server-tester/pull/469) fix(cowork): Linux HITL denies a task's request for a folder of the user's computer ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#468](https://github.com/gleanwork/mcp-server-tester/pull/468) fix(cowork): Linux HITL doesn't fail on a large screen, keeps its error's cause, and an untouched failure doesn't fail a finished task ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#462](https://github.com/gleanwork/mcp-server-tester/pull/462) fix(evals): --resume keeps a run collected with --no-grade ungraded ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#434](https://github.com/gleanwork/mcp-server-tester/pull/434) [evals] Fix Codex trace attribution, transient reads and large result storage ([@nikhil-pitta-glean](https://github.com/nikhil-pitta-glean))
+
+#### Committers: 2
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Nikhil Pitta ([@nikhil-pitta-glean](https://github.com/nikhil-pitta-glean))
+
+
 ## v2.0.0-beta.13 (2026-10-19)
 
 #### :rocket: Enhancement
