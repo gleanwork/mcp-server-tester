@@ -339,6 +339,7 @@ async function runBatch(
         const readiness = await verifyCoworkMcpServers(checkServers, env, {
           plugins,
           paths: stdioPaths,
+          log: (message) => process.stderr.write(`${message}\n`),
         });
         process.stderr.write(
           `[mst:cowork] MCP preflight ready: ${readiness
