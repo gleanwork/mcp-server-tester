@@ -206,7 +206,7 @@ export async function collectInEnvironment(
         let reading = Promise.resolve();
         const seen = new Set<string>();
         // A read that fails doesn't stop the ones after it.
-        const read = (relative: string) =>
+        const read = (relative: string, final = false) =>
           (reading = reading
             .catch(() => {})
             .then(async () => {
@@ -216,7 +216,6 @@ export async function collectInEnvironment(
               const file = await readClientResult(
                 path.join(resultsDir, relative)
               );
-              seen.add(relative);
               const result = await placeArtifacts(
                 file.result as unknown as ClientRunResult,
                 resultsDir,
@@ -224,6 +223,13 @@ export async function collectInEnvironment(
                   ? () => options.artifactsDir!(file.key)
                   : undefined
               );
+              if (
+                file.result.artifacts &&
+                result.diagnostics?.failureKind === 'artifacts' &&
+                !final
+              )
+                return;
+              seen.add(relative);
               results.set(keyString(file.key), result);
               await options.onResult?.(file.key, result);
             }));
@@ -270,7 +276,7 @@ export async function collectInEnvironment(
         await reading.catch(() => {});
         // Anything copied back that no progress event announced.
         for (const relative of await resultFiles(resultsDir))
-          await read(relative).catch(() => {});
+          await read(relative, true).catch(() => {});
         await reading.catch(() => {});
         outcomes[index] = outcome;
         if (!outcome.ok)

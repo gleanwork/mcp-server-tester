@@ -34,7 +34,11 @@ function environment(
   };
 }
 
-async function collect(env: ResolvedEnvironment, caseIds: string[]) {
+async function collect(
+  env: ResolvedEnvironment,
+  caseIds: string[],
+  withArtifacts = false
+) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
   dirs.push(workDir);
   return collectInEnvironment({
@@ -54,6 +58,9 @@ async function collect(env: ResolvedEnvironment, caseIds: string[]) {
       },
     ],
     secrets: {},
+    ...(withArtifacts
+      ? { artifactsDir: async () => path.join(workDir, 'artifacts') }
+      : {}),
     workDir,
     signal: new AbortController().signal,
   });
@@ -102,6 +109,47 @@ describe('collectInEnvironment', () => {
     expect(
       gathered.result({ variant: 'baseline', caseId: 'a', trial: 0 })
     ).toMatchObject({ finalText: 'from the worker' });
+  });
+
+  it('retries a result when its artifact arrives after the result file', async () => {
+    const key = { variant: 'baseline', caseId: 'a', trial: 0 };
+    const gathered = await collect(
+      environment(async (shard, events) => {
+        const batch = path.join(shard.resultsDir, '0');
+        await fs.mkdir(batch, { recursive: true });
+        await fs.writeFile(
+          path.join(batch, '0.json'),
+          JSON.stringify({
+            format: SHARD_PROTOCOL,
+            kind: 'client-result',
+            key,
+            result: {
+              finalText: 'done',
+              events: [],
+              artifacts: { dir: '0/0.artifacts', include: ['trace.txt'] },
+            },
+          })
+        );
+        events.progress({
+          type: 'trial',
+          key,
+          status: 'collected',
+          path: '0/0.json',
+        });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const artifacts = path.join(batch, '0.artifacts');
+        await fs.mkdir(artifacts);
+        await fs.writeFile(path.join(artifacts, 'trace.txt'), 'trace');
+        return ok;
+      }),
+      ['a'],
+      true
+    );
+    const result = gathered.result(key);
+    expect(result.error).toBeUndefined();
+    expect(
+      await fs.readFile(path.join(result.artifacts!.dir, 'trace.txt'), 'utf8')
+    ).toBe('trace');
   });
 
   it("marks a failed shard's trials missing, with why", async () => {
