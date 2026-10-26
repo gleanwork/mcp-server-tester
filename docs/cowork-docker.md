@@ -36,6 +36,8 @@ npx mst run --config eval.json --env docker --env-option contexts=colima-mst-kvm
 
 The eval config needs nothing Docker-specific. A Cowork eval uses `clientOptions.computerUseProvider: "linux-desktop"`. Set `coworkSetup.approveWriteTools: true` unless every server's tools need no approval: no one is there to click **Allow**.
 
+Cowork can reach any public host: its web fetch, and the commands it runs in its VM. That's Claude Desktop's `coworkEgressAllowedHosts`, `["*"]` in the image. Set `coworkSetup.egressAllowedHosts` (in the eval or a variant) to name hosts instead, or `[]` for none. It's one list for both, by host, so it can't allow reads only: a host Cowork may fetch from, its commands may also send to. Private and local addresses are blocked whatever the list says. MCP servers aren't affected: they go through MST, and the dry-run proxy still blocks their writes. WebSearch runs on the model provider's side and needs no hosts.
+
 Options (`--env-option key=value`):
 
 | Option                 | Meaning                                                                                                    |

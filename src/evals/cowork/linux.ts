@@ -62,6 +62,14 @@ import {
 /** The most one UI submission may take, within the case deadline. */
 export const SUBMIT_TIMEOUT_MS = 10 * 60_000;
 
+/**
+ * Cowork's egress on MST's Linux desktop when neither the eval
+ * (`coworkSetup.egressAllowedHosts`) nor the image names hosts: any public
+ * host, as a user's Cowork reaches. Claude Desktop blocks private and local
+ * addresses whatever the list says.
+ */
+export const DEFAULT_EGRESS_HOSTS: readonly string[] = ['*'];
+
 const SESSION_ENV = [
   'PATH',
   'HOME',
@@ -160,6 +168,8 @@ function coworkLinuxOwnedSettings(
     helpers?: ReadonlyMap<string, string>;
     /** Desktop's `otlp*` keys (`telemetry.host`), which replace the image's own. */
     telemetry?: Record<string, unknown>;
+    /** `coworkSetup.egressAllowedHosts`, over the image's own list. */
+    egressAllowedHosts?: readonly string[];
   }
 ): Record<string, unknown> {
   const managed = coworkManagedPluginSettings(options);
@@ -214,8 +224,18 @@ function coworkLinuxOwnedSettings(
         (tool): tool is string => typeof tool === 'string'
       )
     : [];
+  const imageEgress = Array.isArray(base.coworkEgressAllowedHosts)
+    ? base.coworkEgressAllowedHosts.filter(
+        (host): host is string => typeof host === 'string'
+      )
+    : undefined;
   return {
     ...rest,
+    // Where Cowork's tools (web fetch) and its VM's commands may connect:
+    // one list for both, by host, so it can't allow reads only.
+    coworkEgressAllowedHosts: [
+      ...(options.egressAllowedHosts ?? imageEgress ?? DEFAULT_EGRESS_HOSTS),
+    ],
     // Headless: nobody can answer AskUserQuestion. The image's own
     // disabled tools stay disabled.
     disabledBuiltinTools: [...new Set([...disabled, ...HEADLESS_DISABLED])],
@@ -756,6 +776,9 @@ export const linuxCoworkPlatform: CoworkPlatform = {
           ...(model ? { model } : {}),
           helpers: headerFiles.helpers,
           ...(otlpSettings ? { telemetry: otlpSettings } : {}),
+          ...(evalConfig.coworkSetup?.egressAllowedHosts
+            ? { egressAllowedHosts: evalConfig.coworkSetup.egressAllowedHosts }
+            : {}),
         }),
         null,
         2

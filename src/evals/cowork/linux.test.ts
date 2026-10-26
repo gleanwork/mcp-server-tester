@@ -682,6 +682,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
       isLocalDevMcpEnabled: false,
       isDesktopExtensionEnabled: false,
       disabledBuiltinTools: ['AskUserQuestion'],
+      coworkEgressAllowedHosts: ['*'],
     });
     // The restart, then the usual probe.
     expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
@@ -692,6 +693,45 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
 
     await prepared.dispose();
     expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
+  it("lets Cowork reach public hosts unless the image or the eval names others; the eval's list wins", async () => {
+    const egressOf = async (
+      base: Record<string, unknown>,
+      hosts?: string[]
+    ): Promise<unknown> => {
+      const file = join(directory, 'settings.json');
+      await writeFile(file, `${JSON.stringify(base)}\n`);
+      const prepared = await linuxCoworkPlatform.prepare({
+        evalConfig: {
+          ...evalConfig,
+          ...(hosts ? { coworkSetup: { egressAllowedHosts: hosts } } : {}),
+        },
+        model: 'test-model',
+        env: {
+          ...session,
+          MST_COWORK_SETTINGS_FILE: file,
+          MST_DESKTOP_OWNED: '1',
+          MST_DESKTOP_RESTART: RESTART,
+        },
+      });
+      const written = JSON.parse(await readFile(file, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      await prepared.dispose();
+      return written.coworkEgressAllowedHosts;
+    };
+    expect(await egressOf(image)).toEqual(['*']);
+    expect(
+      await egressOf({ ...image, coworkEgressAllowedHosts: ['example.com'] })
+    ).toEqual(['example.com']);
+    expect(
+      await egressOf({ ...image, coworkEgressAllowedHosts: ['*'] }, [])
+    ).toEqual([]);
+    expect(await egressOf(image, ['docs.example.com'])).toEqual([
+      'docs.example.com',
+    ]);
   });
 
   it("keeps the image's own disabled built-in tools beside AskUserQuestion", async () => {
