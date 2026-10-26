@@ -58,6 +58,42 @@ describe('claudeModelCalls', () => {
       { id: 'msg_1', requestId: 'req_1', entryIds: ['u1', 'u2', 'u3'] },
     ]);
   });
+
+  it("keeps a call's thinking summaries, not a thinking block that is only a signature", () => {
+    const [call, signed] = claudeModelCalls([
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_1',
+          content: [
+            { type: 'thinking', thinking: 'Search first.', signature: 's1' },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_1',
+          content: [
+            { type: 'thinking', thinking: 'Then read.', signature: 's2' },
+            { type: 'text', text: 'Done.' },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_2',
+          content: [{ type: 'thinking', thinking: '', signature: 's3' }],
+        },
+      },
+    ]);
+    expect(call).toMatchObject({
+      reasoningText: 'Search first.\n\nThen read.',
+      text: 'Done.',
+    });
+    expect(signed).not.toHaveProperty('reasoningText');
+  });
 });
 
 describe('claudeThinkingTokens', () => {

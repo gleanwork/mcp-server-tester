@@ -186,6 +186,11 @@ export interface ModelCall {
   finishReason?: string;
   /** The text the model returned. Stored results drop it, as `finalText`. */
   text?: string;
+  /**
+   * The model's reasoning as the provider returned it (Claude's thinking
+   * summaries), when it returned any. Stored results drop it, as `text`.
+   */
+  reasoningText?: string;
   /** The `TraceEvent.id`s of the tool calls the model asked for. */
   toolCallIds?: string[];
 }
