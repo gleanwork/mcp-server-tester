@@ -45,6 +45,8 @@ async function setup(
     artifactsDir?: string;
     /** The eval config's `telemetry`. */
     telemetry?: Record<string, unknown>;
+    /** Report model requests, the host's own telemetry and the task's times. */
+    hostRecords?: boolean;
   } = {}
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-'));
@@ -103,6 +105,30 @@ async function setup(
           },
         ],
         usage: { inputTokens: 10, outputTokens: 5, durationMs: 1 },
+        ...(options.hostRecords
+          ? {
+              modelCalls: [
+                {
+                  model: 'm',
+                  requestId: `req_${variant}`,
+                  inputTokens: 10,
+                  outputTokens: 5,
+                },
+              ],
+              hostTelemetry: {
+                resource: { 'service.name': 'host' },
+                events: [
+                  {
+                    name: 'api_request',
+                    time: '2026-10-26T00:00:01.000Z',
+                    attributes: { request_id: `req_${variant}`, ttft_ms: 120 },
+                  },
+                ],
+              },
+              startedAt: '2026-10-26T00:00:00.000Z',
+              completedAt: '2026-10-26T00:00:02.000Z',
+            }
+          : {}),
       };
     }
   );
@@ -297,6 +323,41 @@ describe('mst run --no-grade and mst grade', () => {
     expect(regrade.summary.previousRun?.runId).toBe(
       path.basename(graded.outputDir)
     );
+  });
+
+  it("a regrade's traces keep the model requests, the host's own telemetry and the task's times", async () => {
+    const t = await setup({ keyword: '41 minutes', hostRecords: true });
+    const collected = await runEval({ ...t.base, grade: false });
+    const regrade = await gradeRun({
+      ...t.base,
+      run: path.basename(collected.outputDir).split('-').pop()!,
+    });
+    const traces = async (dir: string) =>
+      (
+        (await readJson(path.join(dir, 'results.json'))).cases as Array<{
+          id: string;
+          variant: string;
+          trace: Record<string, unknown>;
+        }>
+      )
+        .map(({ id, variant, trace }) => ({
+          id,
+          variant,
+          modelCalls: trace.modelCalls,
+          hostTelemetry: trace.hostTelemetry,
+          startedAt: trace.startedAt,
+          completedAt: trace.completedAt,
+        }))
+        .sort((a, b) =>
+          `${a.id}/${a.variant}`.localeCompare(`${b.id}/${b.variant}`)
+        );
+    const before = await traces(collected.outputDir);
+    expect(before).toHaveLength(4);
+    expect(before[0]).toMatchObject({
+      hostTelemetry: { events: [{ name: 'api_request' }] },
+      startedAt: '2026-10-26T00:00:00.000Z',
+    });
+    expect(await traces(regrade.outputDir)).toEqual(before);
   });
 
   it("a regrade of an older run doesn't take over latest.json, and compares with its own grading", async () => {

@@ -232,6 +232,13 @@ async function storedExecution(
     events: trace.events ?? [],
     finalText: trace.finalText ?? '',
     ...(trace.error !== undefined ? { error: trace.error } : {}),
+    // What the trace keeps beside its answer and tool calls: a regrade's
+    // trace is the one it grades, with the model requests, the host's own
+    // telemetry and the task's times it ran with.
+    ...(trace.modelCalls?.length ? { modelCalls: trace.modelCalls } : {}),
+    ...(trace.hostTelemetry ? { hostTelemetry: trace.hostTelemetry } : {}),
+    ...(trace.startedAt ? { startedAt: trace.startedAt } : {}),
+    ...(trace.completedAt ? { completedAt: trace.completedAt } : {}),
     ...((trial.clientUsage ?? trace.usage)
       ? {
           usage: (trial.clientUsage ?? trace.usage) as ClientRunResult['usage'],
