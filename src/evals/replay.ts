@@ -232,6 +232,12 @@ async function storedExecution(
     events: trace.events ?? [],
     finalText: trace.finalText ?? '',
     ...(trace.error !== undefined ? { error: trace.error } : {}),
+    // What the trial recorded beyond its events: a resume rewrites every
+    // stored trace from this run, so a field left out here is lost.
+    ...(trace.modelCalls?.length ? { modelCalls: trace.modelCalls } : {}),
+    ...(trace.hostTelemetry ? { hostTelemetry: trace.hostTelemetry } : {}),
+    ...(trace.startedAt ? { startedAt: trace.startedAt } : {}),
+    ...(trace.completedAt ? { completedAt: trace.completedAt } : {}),
     ...((trial.clientUsage ?? trace.usage)
       ? {
           usage: (trial.clientUsage ?? trace.usage) as ClientRunResult['usage'],

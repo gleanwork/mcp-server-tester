@@ -261,6 +261,9 @@ function modelCallSpan(
     fallback
   );
   const parts = [
+    ...(call.reasoningText
+      ? [{ type: 'reasoning', content: call.reasoningText }]
+      : []),
     ...(call.text ? [{ type: 'text', content: call.text }] : []),
     ...(call.toolCallIds ?? []).map((id) => ({
       type: 'tool_call',

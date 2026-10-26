@@ -153,7 +153,10 @@ function stripTrace(trace: unknown): void {
       if (isJsonObject(event)) delete event.output;
   if (Array.isArray(trace.modelCalls))
     for (const call of trace.modelCalls)
-      if (isJsonObject(call)) delete call.text;
+      if (isJsonObject(call)) {
+        delete call.text;
+        delete call.reasoningText;
+      }
   // The host's content attributes, kept with `telemetry.host.content`.
   const host = trace.hostTelemetry;
   if (isJsonObject(host)) {

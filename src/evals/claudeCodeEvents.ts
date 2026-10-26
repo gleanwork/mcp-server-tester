@@ -80,9 +80,20 @@ export function claudeModelCalls(
       call.cacheCreationInputTokens = cacheCreation;
     for (const block of Array.isArray(message.content) ? message.content : []) {
       if (!block || typeof block !== 'object') continue;
-      const { type, text, id: blockId } = block as Record<string, unknown>;
+      const {
+        type,
+        text,
+        thinking,
+        id: blockId,
+      } = block as Record<string, unknown>;
       if (type === 'text' && typeof text === 'string' && text)
         call.text = (call.text ?? '') + text;
+      // A thinking block has text only when the API returned a summary;
+      // otherwise it is only a signature.
+      if (type === 'thinking' && typeof thinking === 'string' && thinking)
+        call.reasoningText = call.reasoningText
+          ? `${call.reasoningText}\n\n${thinking}`
+          : thinking;
       if (type === 'tool_use' && typeof blockId === 'string')
         call.toolCallIds = [...(call.toolCallIds ?? []), blockId];
     }

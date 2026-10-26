@@ -51,6 +51,28 @@ async function probe(
   return {
     finalText: `${input.prompt}: ${first} then ${second}; key ${input.env?.API_KEY ?? 'unset'}`,
     events: [],
+    // What a native-trace client records beyond its events, which a
+    // resume must keep for the trials it doesn't run again.
+    startedAt: '2026-01-01T00:00:00.000Z',
+    completedAt: '2026-01-01T00:00:02.000Z',
+    modelCalls: [
+      {
+        model: 'claude-test',
+        requestId: `req-${input.prompt}`,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        completedAt: '2026-01-01T00:00:01.000Z',
+        outputTokens: 5,
+      },
+    ],
+    hostTelemetry: {
+      events: [
+        {
+          name: 'api_request',
+          time: '2026-01-01T00:00:01.000Z',
+          attributes: { request_id: `req-${input.prompt}`, ttft_ms: 400 },
+        },
+      ],
+    },
   };
 }
 

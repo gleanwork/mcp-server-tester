@@ -64,6 +64,24 @@ interface ClaudeNativeTelemetry {
   /** Observed tool_result errors; absent when no tool results were observed. */
   toolErrorCount?: number;
   /**
+   * The trial's first turn, as its result times it: to the first token
+   * (`ttft_ms`), and to the first token of the response stream
+   * (`ttft_stream_ms`). Each model call's own TTFT is in the host's
+   * telemetry (`telemetry.host`).
+   */
+  timeToFirstTokenMs?: number;
+  timeToFirstTokenStreamMs?: number;
+  /** When the trial's first model request was sent (ISO 8601). */
+  firstRequestAt?: string;
+  /** Tool approvals the host asked for, and how many it refused. */
+  permissionRequestCount?: number;
+  permissionDenialCount?: number;
+  /**
+   * Time spent waiting on those approvals: from each request to its answer.
+   * Part of `durationMs`; `durationMs` less this is the task's own time.
+   */
+  approvalWaitMs?: number;
+  /**
    * Where the answer came from: the last turn's last text block
    * (`final-message`), or its longest text block and the text after it
    * (`longest-text-onward`). Absent without assistant text.
@@ -71,6 +89,13 @@ interface ClaudeNativeTelemetry {
   answerSource?: 'final-message' | 'longest-text-onward';
   /** The last text block's length, what the native result holds. */
   finalMessageChars?: number;
+  /**
+   * The context the last model call read: its input, cache-read and
+   * cache-write tokens.
+   */
+  finalContextTokens?: number;
+  /** Server-side web searches the model ran, from the run's results. */
+  webSearchRequests?: number;
 }
 
 /**
@@ -155,9 +180,26 @@ interface ClaudeAuditEvent {
     id?: string;
     model?: string;
     content?: ClaudeContentBlock[] | string;
+    usage?: Record<string, unknown>;
   };
   timestamp?: string;
   terminal_reason?: string;
+  /** A result's latency: to its turn's first token, as Claude Code times it. */
+  ttft_ms?: number;
+  /** A result's latency: to the first token of the response stream. */
+  ttft_stream_ms?: number;
+  /** When a result's turn sent its first request (Unix ms). */
+  request_sent_wall_ms?: number;
+  /** The tool calls a result's turn was refused. */
+  permission_denials?: unknown[];
+  /** A `system` event's kind, such as `permission_request`. */
+  subtype?: string;
+  /** Pairs a `permission_request` with its `permission_response`. */
+  uuid?: string;
+  /** A `permission_response`'s answer. */
+  granted?: boolean;
+  /** When Cowork's audit log wrote the event. */
+  _audit_timestamp?: string;
 }
 
 export async function parseClaudeTrace(
@@ -855,6 +897,129 @@ function buildNativeTelemetry(
     durationApiMs: usage?.durationApiMs,
     toolCallCount: toolCalls.length,
     ...(toolResults.length > 0 ? { toolErrorCount: errorIds.size } : {}),
+    ...firstTurnLatency(resultEvents),
+    ...approvals(events, resultEvents),
+    ...contextAndSearch(events, resultEvents),
+  };
+}
+
+/**
+ * The final context size (the last assistant message's input, cache-read and
+ * cache-write tokens) and the web searches the results count: per model in
+ * `modelUsage`, else in `usage.server_tool_use`.
+ */
+function contextAndSearch(
+  events: ClaudeAuditEvent[],
+  resultEvents: ClaudeAuditEvent[]
+): Pick<ClaudeNativeTelemetry, 'finalContextTokens' | 'webSearchRequests'> {
+  const last = events
+    .map(nativeEvent)
+    .filter((event) => event.type === 'assistant' && event.message?.usage)
+    .at(-1)?.message?.usage;
+  const contextTokens = last
+    ? ['input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']
+        .map((field) => nonNegative(last[field]) ?? 0)
+        .reduce((sum, value) => sum + value, 0)
+    : undefined;
+  let searches: number | undefined;
+  for (const event of resultEvents) {
+    const perModel = Object.values(event.modelUsage ?? {})
+      .map((usage) =>
+        nonNegative((usage as Record<string, unknown>)?.webSearchRequests)
+      )
+      .filter((value): value is number => value !== undefined);
+    const count = perModel.length
+      ? perModel.reduce((sum, value) => sum + value, 0)
+      : nonNegative(
+          (event.usage?.server_tool_use as Record<string, unknown> | undefined)
+            ?.web_search_requests
+        );
+    if (count !== undefined) searches = (searches ?? 0) + count;
+  }
+  return {
+    ...(contextTokens !== undefined
+      ? { finalContextTokens: contextTokens }
+      : {}),
+    ...(searches !== undefined ? { webSearchRequests: searches } : {}),
+  };
+}
+
+function nonNegative(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/** The first turn's latency, from the earliest result that times it. */
+function firstTurnLatency(
+  resultEvents: ClaudeAuditEvent[]
+): Pick<
+  ClaudeNativeTelemetry,
+  'timeToFirstTokenMs' | 'timeToFirstTokenStreamMs' | 'firstRequestAt'
+> {
+  const first = resultEvents
+    .filter((event) => nonNegative(event.request_sent_wall_ms) !== undefined)
+    .sort((a, b) => a.request_sent_wall_ms! - b.request_sent_wall_ms!)[0];
+  const timed =
+    first ??
+    resultEvents.find((event) => nonNegative(event.ttft_ms) !== undefined);
+  if (!timed) return {};
+  const ttft = nonNegative(timed.ttft_ms);
+  const stream = nonNegative(timed.ttft_stream_ms);
+  const sent = nonNegative(timed.request_sent_wall_ms);
+  return {
+    ...(ttft !== undefined ? { timeToFirstTokenMs: ttft } : {}),
+    ...(stream !== undefined ? { timeToFirstTokenStreamMs: stream } : {}),
+    ...(sent !== undefined
+      ? { firstRequestAt: new Date(sent).toISOString() }
+      : {}),
+  };
+}
+
+/**
+ * The trial's tool approvals, from Cowork's audit log: each
+ * `permission_request`, its `permission_response`, and the denials its
+ * results report.
+ */
+function approvals(
+  events: ClaudeAuditEvent[],
+  resultEvents: ClaudeAuditEvent[]
+): Pick<
+  ClaudeNativeTelemetry,
+  'permissionRequestCount' | 'permissionDenialCount' | 'approvalWaitMs'
+> {
+  const requested = new Map<string, number>();
+  const answered = new Map<string, { at: number; granted: boolean }>();
+  for (const event of events) {
+    if (event.type !== 'system' || !event.uuid) continue;
+    const at = metadataTimestampMs(event._audit_timestamp ?? event.timestamp);
+    if (event.subtype === 'permission_request' && !requested.has(event.uuid))
+      requested.set(event.uuid, at);
+    else if (event.subtype === 'permission_response')
+      answered.set(event.uuid, { at, granted: event.granted === true });
+  }
+  const resultDenials = resultEvents.reduce(
+    (sum, event) =>
+      sum +
+      (Array.isArray(event.permission_denials)
+        ? event.permission_denials.length
+        : 0),
+    0
+  );
+  if (requested.size === 0 && resultDenials === 0) return {};
+  let waitMs = 0;
+  let denied = 0;
+  for (const [uuid, at] of requested) {
+    const answer = answered.get(uuid);
+    if (!answer) continue;
+    if (!answer.granted) denied += 1;
+    if (Number.isFinite(at) && Number.isFinite(answer.at) && answer.at >= at)
+      waitMs += answer.at - at;
+  }
+  return {
+    permissionRequestCount: requested.size,
+    permissionDenialCount: Math.max(denied, resultDenials),
+    ...(requested.size > 0 ? { approvalWaitMs: waitMs } : {}),
   };
 }
 

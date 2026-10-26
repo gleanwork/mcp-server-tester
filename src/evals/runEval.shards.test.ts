@@ -185,6 +185,28 @@ describe('a run in an environment with shards', () => {
       path.join(f.outputDir, 'latest.json')
     );
     expect(latest.runId).toBe(runId);
+    // Every stored trace, the ones collected before the resume too, keeps
+    // what the client recorded beyond its events.
+    const traces = (
+      await fs.readdir(path.join(resumed.outputDir, 'traces'), {
+        recursive: true,
+      })
+    ).filter((name) => name.endsWith('.json'));
+    expect(traces).toHaveLength(8);
+    for (const name of traces) {
+      const { caseId, trace } = await f.readJson<{
+        caseId: string;
+        trace: Record<string, unknown>;
+      }>(path.join(resumed.outputDir, 'traces', name));
+      expect(trace).toMatchObject({
+        startedAt: '2026-01-01T00:00:00.000Z',
+        completedAt: '2026-01-01T00:00:02.000Z',
+        modelCalls: [{ requestId: `req-${caseId}` }],
+        hostTelemetry: {
+          events: [{ attributes: { request_id: `req-${caseId}` } }],
+        },
+      });
+    }
 
     await expect(f.resume(runId)).rejects.toThrow(
       `Run ${runId} has no missing trials: there is nothing to resume.`
