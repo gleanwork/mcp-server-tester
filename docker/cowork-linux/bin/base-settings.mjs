@@ -20,5 +20,8 @@ const settings = {
   deploymentDisplayName: 'MST',
   ...(models.length ? { inferenceModels: models.map((name) => ({ name })) } : {}),
   disabledBuiltinTools: ['AskUserQuestion'],
+  // Any public host, for web fetch and the VM's commands (one list, by host).
+  // An eval's coworkSetup.egressAllowedHosts replaces it for each variant.
+  coworkEgressAllowedHosts: ['*'],
 };
 process.stdout.write(`${JSON.stringify(settings, null, 2)}\n`);
