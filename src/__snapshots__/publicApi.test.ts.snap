@@ -50,6 +50,7 @@ exports[`public API > ./evals 1`] = `
   "loadEvalConfigFromObject",
   "loadStoredEvalRunnerResult",
   "machineEnvironment",
+  "readRunDirectory",
   "resolveConfigExtends",
   "resolveDatasetPaths",
   "resolveEvalResultStore",
@@ -61,6 +62,7 @@ exports[`public API > ./evals 1`] = `
   "saveBaseline",
   "saveEvalRunComparison",
   "stagedPairwiseJudge",
+  "storedRunTraces",
   "validateEvalConfig",
   "variantToolMetadata",
 ]

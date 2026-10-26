@@ -34,6 +34,12 @@ The machine that runs `mst run` (or, for a [detached run](./adr/0007-detached-ru
 
 Sending never fails or slows the run. Requests are queued and sent in the background, retried on a network error, 429 or 5xx, and reported once if they still fail. At the end, the run waits up to 30 seconds for what's left, then says how many requests failed.
 
+### A finished run
+
+A run's directory has everything its traces are built from, so they can be sent after the run, to a collector it didn't send to. `storedRunTraces(await readRunDirectory(dir), options)` (from `./evals`) returns the OTLP/JSON requests the run would have sent with `telemetry.otlp`: each trial's trace, each case's verdicts, and each variant's pairwise verdicts, with the same IDs. `options` takes `content`, `maxAttributeChars` and `resourceAttributes`, as `telemetry.otlp` does, and `trialsOnly` to leave out the verdicts. Times the run didn't record are its `finishedAt`, so a run always gives the same traces. A regrade's directory gives its verdicts in the traces of the run it graded.
+
+MST doesn't send them itself: a plugin's command does, encoded and batched as its collector needs.
+
 ## What a trace holds
 
 Spans follow OpenTelemetry's [generative AI conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), plus `mst.*` attributes for the eval.

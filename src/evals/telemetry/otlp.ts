@@ -31,7 +31,7 @@ import type {
 import { isHostContentAttribute } from './hostContent.js';
 import type { PairwiseComparisonResult } from '../pairwiseComparison.js';
 
-const DEFAULT_MAX_ATTRIBUTE_CHARS = 16_384;
+export const DEFAULT_MAX_ATTRIBUTE_CHARS = 16_384;
 const SEND_TIMEOUT_MS = 10_000;
 const SEND_ATTEMPTS = 3;
 const SEND_CONCURRENCY = 4;
@@ -109,7 +109,7 @@ export interface RunAttributes {
   client?: string;
 }
 
-interface SpanOptions {
+export interface SpanOptions {
   content: boolean;
   maxChars: number;
 }
@@ -790,7 +790,7 @@ export function trialSpans(
 }
 
 /** The trials of a graded case, by trial index. */
-function caseTrials(
+export function caseTrials(
   result: EvalCaseResult
 ): Array<{ trial: number; result: EvalCaseResult | TrialResult }> {
   return result.trialResults?.length
@@ -919,7 +919,7 @@ export function pairwiseSpans(
   });
 }
 
-function traceRequest(
+export function traceRequest(
   spans: OtlpSpan[],
   run: RunAttributes,
   resource: Record<string, string>
