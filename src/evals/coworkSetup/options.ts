@@ -14,6 +14,13 @@ export const CoworkSetupConfigSchema = z
      * MST doesn't own.
      */
     egressAllowedHosts: z.array(z.string().min(1)).max(500).optional(),
+    /**
+     * Cowork built-in tools to turn off on MST's Linux desktop (Claude
+     * Desktop's `disabledBuiltinTools`), e.g. `["WebSearch"]` where the
+     * model's provider can't run it. Added to the image's own list and
+     * `AskUserQuestion`, which stay off. Not applied to a macOS desktop.
+     */
+    disabledBuiltinTools: z.array(z.string().min(1)).max(100).optional(),
   })
   .strict();
 
@@ -33,10 +40,13 @@ export function resolveCoworkSetupConfig(
     );
     const egressAllowedHosts =
       variant.egressAllowedHosts ?? base.egressAllowedHosts;
+    const disabledBuiltinTools =
+      variant.disabledBuiltinTools ?? base.disabledBuiltinTools;
     return {
       approveWriteTools:
         variant.approveWriteTools ?? base.approveWriteTools ?? false,
       ...(egressAllowedHosts ? { egressAllowedHosts } : {}),
+      ...(disabledBuiltinTools ? { disabledBuiltinTools } : {}),
     };
   } catch {
     throw new Error('Invalid Cowork setup options.');

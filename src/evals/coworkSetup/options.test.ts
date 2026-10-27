@@ -38,6 +38,21 @@ describe('Cowork setup approval options', () => {
     });
   });
 
+  it("takes a variant's disabled built-in tools over the eval's", () => {
+    expect(
+      resolveCoworkSetupConfig({ disabledBuiltinTools: ['WebSearch'] }, {})
+    ).toEqual({
+      approveWriteTools: false,
+      disabledBuiltinTools: ['WebSearch'],
+    });
+    expect(
+      resolveCoworkSetupConfig(
+        { disabledBuiltinTools: ['WebSearch'] },
+        { disabledBuiltinTools: [] }
+      )
+    ).toEqual({ approveWriteTools: false, disabledBuiltinTools: [] });
+  });
+
   it.each([
     null,
     true,
@@ -45,6 +60,8 @@ describe('Cowork setup approval options', () => {
     'all',
     { egressAllowedHosts: '*' },
     { egressAllowedHosts: [''] },
+    { disabledBuiltinTools: 'WebSearch' },
+    { disabledBuiltinTools: [''] },
     { approveWriteTools: 'true' },
     { approveWriteTools: 1 },
     { approveWriteTools: null },
