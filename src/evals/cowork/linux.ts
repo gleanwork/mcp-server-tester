@@ -170,6 +170,8 @@ function coworkLinuxOwnedSettings(
     telemetry?: Record<string, unknown>;
     /** `coworkSetup.egressAllowedHosts`, over the image's own list. */
     egressAllowedHosts?: readonly string[];
+    /** `coworkSetup.disabledBuiltinTools`, added to the image's own list. */
+    disabledBuiltinTools?: readonly string[];
   }
 ): Record<string, unknown> {
   const managed = coworkManagedPluginSettings(options);
@@ -237,8 +239,14 @@ function coworkLinuxOwnedSettings(
       ...(options.egressAllowedHosts ?? imageEgress ?? DEFAULT_EGRESS_HOSTS),
     ],
     // Headless: nobody can answer AskUserQuestion. The image's own
-    // disabled tools stay disabled.
-    disabledBuiltinTools: [...new Set([...disabled, ...HEADLESS_DISABLED])],
+    // disabled tools stay disabled; the eval's are added.
+    disabledBuiltinTools: [
+      ...new Set([
+        ...disabled,
+        ...HEADLESS_DISABLED,
+        ...(options.disabledBuiltinTools ?? []),
+      ]),
+    ],
     managedMcpServers: [...http, ...managed.managedMcpServers],
     ...COWORK_MANAGED_ONLY,
     ...(managed.allowedPluginMarketplaces
@@ -778,6 +786,12 @@ export const linuxCoworkPlatform: CoworkPlatform = {
           ...(otlpSettings ? { telemetry: otlpSettings } : {}),
           ...(evalConfig.coworkSetup?.egressAllowedHosts
             ? { egressAllowedHosts: evalConfig.coworkSetup.egressAllowedHosts }
+            : {}),
+          ...(evalConfig.coworkSetup?.disabledBuiltinTools
+            ? {
+                disabledBuiltinTools:
+                  evalConfig.coworkSetup.disabledBuiltinTools,
+              }
             : {}),
         }),
         null,

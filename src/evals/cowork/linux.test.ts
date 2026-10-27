@@ -746,6 +746,31 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await prepared.dispose();
   });
 
+  it("adds the eval's disabled built-in tools to the image's and AskUserQuestion", async () => {
+    const file = join(directory, 'settings.json');
+    await writeFile(
+      file,
+      `${JSON.stringify({ ...image, disabledBuiltinTools: ['WebFetch'] })}\n`
+    );
+    const prepared = await linuxCoworkPlatform.prepare({
+      evalConfig: {
+        ...evalConfig,
+        coworkSetup: { disabledBuiltinTools: ['WebSearch', 'WebFetch'] },
+      },
+      model: 'test-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+      },
+    });
+    expect(
+      JSON.parse(await readFile(file, 'utf8')).disabledBuiltinTools
+    ).toEqual(['WebFetch', 'AskUserQuestion', 'WebSearch']);
+    await prepared.dispose();
+  });
+
   it("points Claude Desktop's OpenTelemetry at MST's receiver, in place of the image's", async () => {
     const file = join(directory, 'settings.json');
     await writeFile(

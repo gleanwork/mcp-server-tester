@@ -38,6 +38,8 @@ The eval config needs nothing Docker-specific. A Cowork eval uses `clientOptions
 
 Cowork can reach any public host: its web fetch, and the commands it runs in its VM. That's Claude Desktop's `coworkEgressAllowedHosts`, `["*"]` in the image. Set `coworkSetup.egressAllowedHosts` (in the eval or a variant) to name hosts instead, or `[]` for none. It's one list for both, by host, so it can't allow reads only: a host Cowork may fetch from, its commands may also send to. Private and local addresses are blocked whatever the list says. MCP servers aren't affected: they go through MST, and the dry-run proxy still blocks their writes. WebSearch runs on the model provider's side and needs no hosts.
 
+To turn off Cowork built-in tools, set `coworkSetup.disabledBuiltinTools` (in the eval or a variant; a variant's list replaces the eval's), e.g. `["WebSearch"]` when the model's provider can't run Anthropic's server-side web search, as with an LLM gateway that serves Claude through Snowflake, Bedrock or Vertex: every search returns a 400 there. That's Claude Desktop's `disabledBuiltinTools`; the eval's tools are added to the image's own and `AskUserQuestion`, which stay off. Cowork's model doesn't see a disabled tool.
+
 Options (`--env-option key=value`):
 
 | Option                 | Meaning                                                                                                    |
