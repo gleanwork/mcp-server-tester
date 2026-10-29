@@ -918,7 +918,7 @@ npx mst runs logs e33763 --config ./eval.json --results gs://my-bucket/evals
 npx mst runs cancel e33763 --config ./eval.json --results gs://my-bucket/evals
 ```
 
-- **This machine loads the eval config, its plugins and its datasets**, and sends the coordinator machine the config and the loaded datasets. A dataset plugin's credentials stay here. `--detach` can't take `--plugins` or `--output-dir`: plugins come from the coordinator machine's installation, and the run goes to the result store.
+- **This machine loads the eval config, its plugins and its datasets**, and sends the coordinator machine the config and the loaded datasets. A dataset plugin's credentials stay here, and a `file` dataset's path (`./cases.json`) needn't exist on the coordinator machine. `--detach` can't take `--plugins` or `--output-dir`: plugins come from the coordinator machine's installation, and the run goes to the result store.
 - **The environment must support it**: its `coordinator` creates the machine, with this machine's MST and plugins and a cloud identity of its own. An environment without one refuses `--detach`.
 - **Secrets go only in `--secrets-file`.** Its values reach the coordinator over its channel, and are kept in memory-backed storage there until the run ends. This machine's own environment isn't sent, so put what the run needs (a model key, judge keys) in the file.
 - **Connector servers need a shared credential store** (`--store <namespace>/credential-store/<name>`, one whose definition is `shared`), since the coordinator machine refreshes the grants. Sign in to it with `mst auth --store`, and use it for local runs too, or a provider that rotates refresh tokens invalidates the local copy.

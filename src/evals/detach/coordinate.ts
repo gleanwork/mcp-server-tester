@@ -388,6 +388,9 @@ export async function runCoordinatorDaemon(options: {
     configPath: paths.config,
     rootDir: paths.workDir,
     ...(plan.results ? { results: plan.results } : {}),
+    // The bundle ships the datasets as loaded; a `file` dataset's relative
+    // path names a file on the machine the run started from.
+    skipDatasetValidation: true,
   });
   if (!store) throw new Error('A detached run needs a result store.');
   const log = (line: string) => process.stdout.write(`${line}\n`);
