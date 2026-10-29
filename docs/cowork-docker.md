@@ -2,7 +2,15 @@
 
 `mst run --env docker` runs Cowork evals in Linux containers instead of on your own desktop. Each shard gets a container with its own Claude Desktop, and Cowork's VM runs inside it. Your machine stays usable while the eval runs.
 
-For ChatGPT evals, see [ChatGPT in Docker](./chatgpt-docker.md).
+**Which image a shard runs.** The eval's client picks it:
+
+| Client                                                                  | Image                             | Container                                                                          |
+| ----------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
+| Cowork (the default)                                                    | `mst-cowork-linux:<MST version>`  | Claude Desktop and Cowork's VM, with Cowork inference (`ANTHROPIC_*`)              |
+| `chatgpt`                                                               | `mst-chatgpt-linux:<MST version>` | The ChatGPT desktop app; see [ChatGPT in Docker](./chatgpt-docker.md)              |
+| Headless: `codex`, `mst`, `claude-code`, plugin clients with `headless` | `mst-cowork-linux:<MST version>`  | No desktop, VM devices or Cowork inference ([Headless clients](#headless-clients)) |
+
+Grade shards run in the eval client's image, without a desktop.
 
 MST provides the image as a Dockerfile that you build yourself (`mst env setup docker`). It installs Claude Desktop from Anthropic's Linux package repository at build time; MST doesn't publish an image with Claude Desktop in it.
 
@@ -70,7 +78,7 @@ The image holds one set of plugins: setting it up for another eval replaces them
 
 ## Headless clients
 
-The image also runs clients that need no desktop: the [`codex` client](./codex.md), whose SDK and CLI the image installs, and plugin clients that declare `headless: true`. A shard whose clients are all headless starts as a grade container does, without a desktop, VM devices or Cowork inference, so `ANTHROPIC_*` settings aren't needed and several shards share one Docker context. The client's own credentials (for `codex`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for a gateway) reach the worker in the run's `--secrets-file`. The image sets `MST_JUDGE_SANDBOX=container`, so Codex runs its shell without its own sandbox, confined by the container.
+The image also runs clients that need no desktop: the [`codex` client](./codex.md), whose SDK and CLI the image installs, MST's `mst` and `claude-code` clients, and plugin clients that declare `headless: true` (a plugin that runs another app, such as an Electron app with no window, adds it to the image in its own environment's setup). A shard whose clients are all headless starts as a grade container does, without a desktop, VM devices or Cowork inference, so `ANTHROPIC_*` settings aren't needed and several shards share one Docker context. The client's own credentials (for `codex`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for a gateway) reach the worker in the run's `--secrets-file`. The image sets `MST_JUDGE_SANDBOX=container`, so Codex runs its shell without its own sandbox, confined by the container.
 
 ## What happens
 

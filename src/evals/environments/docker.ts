@@ -257,6 +257,10 @@ function headlessContainerRunArgs(options: {
     ...ownerLabelArgs(),
     '--tmpfs',
     '/run/mst:mode=0755',
+    // A headless client may run Chromium (an Electron app with no window),
+    // which needs more than Docker's 64 MB /dev/shm.
+    '--shm-size',
+    '1g',
     '--entrypoint',
     '/usr/bin/tini',
     options.image,
