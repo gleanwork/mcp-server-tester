@@ -338,6 +338,7 @@ export async function collectShard(
         );
       connectors = await expandWorkerConnectors([...declarations.values()], {
         tokenDirectory: path.join(tokensDir, 'connectors'),
+        runId: bundle.runId,
         ...(simulatedWritesDir
           ? { simulatedWritesDirectory: simulatedWritesDir }
           : {}),
