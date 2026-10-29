@@ -1372,10 +1372,12 @@ async function evaluate(
           `mst-simulated-writes-${randomUUID()}`
         )
       : undefined;
-  const connectors = await expandConnectorServers(
-    rawConfig,
-    simulatedWritesDirectory ? { simulatedWritesDirectory } : {}
-  );
+  // The run's ID, known before connectors launch so they can tag requests with it.
+  const executionId = replay?.runId ?? newRunId();
+  const connectors = await expandConnectorServers(rawConfig, {
+    runId: executionId,
+    ...(simulatedWritesDirectory ? { simulatedWritesDirectory } : {}),
+  });
   let evalConfig = connectors.evalConfig;
 
   evalConfig = validateEvalConfig(
@@ -1402,7 +1404,6 @@ async function evaluate(
   // What each shard ran on, for run.json.
   let shardRecords: ShardRecord[] | undefined;
 
-  const executionId = replay?.runId ?? newRunId();
   // Which run a host's own telemetry belongs to (`telemetry.host`).
   if (evalConfig.telemetry?.host) env.MST_RUN_ID ??= executionId;
   // The run's traces, sent as trials finish and grades come in. A regrade's
