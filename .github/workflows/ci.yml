@@ -8,7 +8,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: that is Ubuntu 26.04 now, and Playwright 1.57 can't
+    # install its browsers there. Move on with a Playwright that supports it.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
