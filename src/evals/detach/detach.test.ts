@@ -384,6 +384,8 @@ describe('--detach', () => {
     const state = detachTestState();
     expect(result.machine).toBe(`coordinator-${result.id}`);
     expect(state.coordinatorOptions).toEqual({ zone: 'us-central1-a' });
+    // So the machine can run the client's image (a ChatGPT eval's, say).
+    expect(state.coordinatorClient).toBe('mst');
     expect(state.remoteDir).toBe(`/opt/mst/detached/${result.id}`);
     expect(state.argv).toEqual([
       'node',

@@ -1,0 +1,50 @@
+#!/usr/bin/python3
+"""Downloads the ChatGPT package for this architecture from OpenAI's apt
+repository, checked against the repository index's SHA-256 and size.
+
+Usage: chatgpt-package <repository> <version or ""> <output>
+An empty version takes the newest the index lists.
+"""
+import hashlib
+import subprocess
+import sys
+import urllib.request
+
+repository, version, output = sys.argv[1].rstrip('/'), sys.argv[2], sys.argv[3]
+arch = subprocess.check_output(['dpkg', '--print-architecture'], text=True).strip()
+
+
+def fetch(url):
+    if not url.startswith('https://'):
+        sys.exit(f'Refusing a non-HTTPS URL: {url}')
+    # The CDN refuses Python's default User-Agent.
+    request = urllib.request.Request(url, headers={'User-Agent': 'mst-chatgpt-image/1'})
+    return urllib.request.urlopen(request, timeout=600)
+
+
+index = fetch(f'{repository}/dists/stable/main/binary-{arch}/Packages').read().decode()
+entries = []
+for stanza in index.split('\n\n'):
+    fields = dict(line.split(': ', 1) for line in stanza.splitlines() if ': ' in line)
+    if fields.get('Package') == 'chatgpt' and fields.get('Architecture') == arch:
+        entries.append(fields)
+if version:
+    entries = [entry for entry in entries if entry['Version'] == version]
+if not entries:
+    sys.exit(f'No chatgpt {version or "package"} for {arch} in {repository}.')
+
+
+def version_key(entry):
+    return [int(part) if part.isdigit() else part for part in entry['Version'].split('.')]
+
+
+entry = max(entries, key=version_key)
+digest, size = hashlib.sha256(), 0
+with fetch(f"{repository}/{entry['Filename']}") as response, open(output, 'wb') as file:
+    while chunk := response.read(1 << 20):
+        digest.update(chunk)
+        size += len(chunk)
+        file.write(chunk)
+if digest.hexdigest() != entry['SHA256'] or size != int(entry['Size']):
+    sys.exit(f"chatgpt {entry['Version']} didn't match the repository index's checksum.")
+print(f"chatgpt {entry['Version']} ({arch}), SHA-256 {entry['SHA256']}")

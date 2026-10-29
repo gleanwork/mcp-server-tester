@@ -7,9 +7,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   containerName,
   contextPool,
+  chatgptDockerRunArgs,
   coworkImageDirectory,
+  DEFAULT_CHATGPT_IMAGE,
   DEFAULT_COWORK_IMAGE,
+  dockerClient,
   dockerRunArgs,
+  gradeContainerPrepareArgs,
+  imageDirectory,
   npmPackArgs,
 } from './docker.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
@@ -155,6 +160,64 @@ describe('the docker environment', () => {
       )
     ).toBe(true);
     expect(DEFAULT_COWORK_IMAGE).toMatch(/^mst-cowork-linux:/);
+  });
+});
+
+describe('ChatGPT in the docker environment', () => {
+  it('picks the ChatGPT image only for a ChatGPT eval', () => {
+    expect(dockerClient('chatgpt')).toBe('chatgpt');
+    for (const client of ['cowork', undefined])
+      expect(dockerClient(client)).toBe('cowork');
+    expect(DEFAULT_CHATGPT_IMAGE).toMatch(/^mst-chatgpt-linux:/);
+  });
+
+  it('starts a container with no devices, no new privileges, and no secret', () => {
+    const args = chatgptDockerRunArgs({
+      name: 'mst-run-1',
+      image: 'mst-chatgpt-linux:test',
+      runId: 'run',
+      inference: {
+        MST_CHATGPT_INFERENCE_BASE_URL: 'https://gateway.example/openai/v1',
+        MST_CHATGPT_INFERENCE_TOKEN_FILE: '/run/mst/inference-token',
+      },
+    });
+    expect(args).not.toContain('--device');
+    expect(args.join(' ')).not.toContain('seccomp=');
+    expect(args).toContain('no-new-privileges');
+    expect(args).toContain(
+      'MST_CHATGPT_INFERENCE_BASE_URL=https://gateway.example/openai/v1'
+    );
+    expect(args).toContain('/run/mst:mode=0755');
+    expect(args.at(-1)).toBe('mst-chatgpt-linux:test');
+  });
+
+  it('ships the image beside the package', async () => {
+    const dir = imageDirectory('chatgpt');
+    for (const file of [
+      'Dockerfile',
+      'bin/desktop-session',
+      'bin/chatgpt-package',
+    ])
+      await expect(fs.stat(path.join(dir, file))).resolves.toBeTruthy();
+    const dockerfile = await fs.readFile(path.join(dir, 'Dockerfile'), 'utf8');
+    // The Linux client's contract, from the image's ENV.
+    for (const key of [
+      'AT_SPI_BUS_ADDRESS',
+      'GNOME_KEYRING_CONTROL',
+      'MST_CHATGPT_APP_PATH',
+      'MST_CHATGPT_CODEX_PATH',
+      'MST_CHATGPT_EVIDENCE_DIR',
+    ])
+      expect(dockerfile).toContain(`${key}=`);
+  });
+
+  it('takes chatgptVersion as a setup option', () => {
+    expect(() =>
+      resolveEnvironment('docker', { chatgptVersion: '26.1007.71326' })
+    ).not.toThrow();
+    expect(() =>
+      resolveEnvironment('docker', { chatgptVersion: 'latest; rm -rf' })
+    ).toThrow();
   });
 });
 
@@ -315,6 +378,41 @@ describe('a run in docker (a fake Docker CLI)', () => {
     ]);
   }, 120_000);
 
+  it("builds the ChatGPT image when the eval's shared config makes it a ChatGPT eval", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { root, project, configPath } = await fixture(
+      { MST_NPM: mock('fakeNpm.mjs') },
+      ['@acme/mst-dt']
+    );
+    await installPluginPackage(project, '1.2.3');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    delete config.client;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, extends: ['dt/config/chatgpt'] })
+    );
+    await setupEnvironment('docker', {
+      config: configPath,
+      envOption: ['contexts=ctx-a'],
+      rootDir: project,
+    });
+    const builds = (await fs.readFile(path.join(root, 'builds.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(builds).toEqual([
+      {
+        context: 'ctx-a',
+        tag: DEFAULT_CHATGPT_IMAGE,
+        plugins: ['acme-mst-dt-1.2.3.tgz'],
+        desktop: 'chatgpt',
+      },
+    ]);
+  }, 120_000);
+
   it("fails a build with the build's last lines, so the cause is in the error", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -445,6 +543,18 @@ describe('a run in docker (a fake Docker CLI)', () => {
       })),
     });
   }, 120_000);
+
+  it("makes a ChatGPT grade container's tmpfs HOME and TMPDIR before its worker, and nothing for Cowork", () => {
+    expect(gradeContainerPrepareArgs('mst-run-1', 'chatgpt')).toEqual([
+      'exec',
+      '-u',
+      'root',
+      'mst-run-1',
+      '/opt/mst/bin/desktop-session',
+      '--dirs-only',
+    ]);
+    expect(gradeContainerPrepareArgs('mst-run-1', 'cowork')).toBeUndefined();
+  });
 
   it('grades a stored run in containers without a desktop or inference, two to a context (ADR 0005)', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});

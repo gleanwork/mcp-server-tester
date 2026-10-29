@@ -28,4 +28,6 @@ export default {
       },
     },
   },
+  // A shared config that makes an eval a ChatGPT eval, for `extends`.
+  configs: { chatgpt: { client: 'chatgpt' } },
 } satisfies Plugin;

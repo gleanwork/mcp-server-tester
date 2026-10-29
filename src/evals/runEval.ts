@@ -1071,6 +1071,8 @@ function workerPluginsOf(
 export interface PreparedGrading {
   /** The eval config as its file has it, for the workers to load. */
   configFile: { name: string } & Record<string, unknown>;
+  /** Its client, as its shared configs (`extends`) set it: the environment runs that client's image. */
+  client?: string;
   /** The datasets, as loaded: one per eval config source, in order. */
   datasets: EvalDataset[];
   /** The stored run being graded. */
@@ -1608,6 +1610,7 @@ async function evaluate(
         ) as PreparedGrading['configFile']),
         ...(loadedConfig.settings ? { settings: loadedConfig.settings } : {}),
       },
+      ...(resolvedConfig.client ? { client: resolvedConfig.client } : {}),
       datasets: canonicalDatasets.map(({ dataset }) => dataset),
       replay: regrade,
       ...workerPluginsOf(loadedConfig, options.pluginPaths, {

@@ -492,6 +492,8 @@ export interface EnvironmentContext extends SettingsContext {
   /** How many shards the run has (`--env-option shards`). */
   readonly shards: number;
   readonly keep: EnvironmentKeep;
+  /** The eval's client (`client` in its config), for environments that run one kind. */
+  readonly client?: string;
 }
 
 /** One shard of a run, as the coordinator hands it to an environment. */
@@ -624,6 +626,8 @@ export interface CoordinatorContext extends SettingsContext {
   /** The detached run's id: `mst runs watch <id>`. */
   readonly id: string;
   readonly log: (line: string) => void;
+  /** The eval's client (`client` in its config), so the machine can run its image. */
+  readonly client?: string;
 }
 
 /**
@@ -683,6 +687,8 @@ export interface EnvironmentDefinition {
     options: Record<string, unknown>,
     context: SettingsContext & {
       log: (line: string) => void;
+      /** The eval's client (`mst env setup --config`), when one was given. */
+      client?: string;
       /**
        * The plugin packages an eval loads (`mst env setup --config`), as this
        * machine has them installed (`dir`): an environment that builds

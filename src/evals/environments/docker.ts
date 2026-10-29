@@ -1,6 +1,7 @@
 /**
  * The built-in `docker` environment (ADR 0004): each shard runs in a
- * container from MST's Linux Cowork image (docker/cowork-linux), on a Docker
+ * container from MST's Linux Cowork image (docker/cowork-linux), or, for a
+ * ChatGPT eval, its Linux ChatGPT image (docker/chatgpt-linux), on a Docker
  * context. The channel is the Docker CLI: `docker exec` runs `mst collect`
  * as the desktop user, and `docker cp` moves the bundle and results.
  *
@@ -38,9 +39,20 @@ import type {
 
 /** The image `mst env setup docker` builds for this MST version. */
 export const DEFAULT_COWORK_IMAGE = `mst-cowork-linux:${packageJson.version}`;
+/** The image `mst env setup docker` builds for a ChatGPT eval. */
+export const DEFAULT_CHATGPT_IMAGE = `mst-chatgpt-linux:${packageJson.version}`;
+
+/** Which desktop a container runs: the eval's client picks it. */
+export type DockerClient = 'cowork' | 'chatgpt';
+
+export function dockerClient(client: string | undefined): DockerClient {
+  return client === 'chatgpt' ? 'chatgpt' : 'cowork';
+}
 
 /** Inside the image (docker/cowork-linux/Dockerfile). */
 const USER = 'mst';
+/** docker/chatgpt-linux's entrypoint; `--dirs-only` makes its tmpfs directories. */
+const CHATGPT_SESSION = '/opt/mst/bin/desktop-session';
 const WORK_DIR = '/home/mst/work';
 const SESSION_DIR = '/run/mst/session';
 const TOKEN_FILE = '/run/mst/inference-token';
@@ -57,6 +69,11 @@ const DockerOptionsSchema = z
     readyTimeout: z.string().regex(/^\d+$/).optional(),
     /** `mst env setup docker` only: the Claude Desktop package to install. */
     claudeDesktopVersion: z.string().min(1).optional(),
+    /** `mst env setup docker` only, for ChatGPT: the app version to install. */
+    chatgptVersion: z
+      .string()
+      .regex(/^[0-9][0-9.]*$/)
+      .optional(),
   })
   .strict();
 type DockerOptions = z.infer<typeof DockerOptionsSchema>;
@@ -113,11 +130,50 @@ async function dockerOk(
 
 /** The image's directory in this package: the Dockerfile and its files. */
 export function coworkImageDirectory(): string {
+  return imageDirectory('cowork');
+}
+
+export function imageDirectory(client: DockerClient): string {
   return path.dirname(
     createRequire(
       typeof __filename === 'string' ? __filename : import.meta.url
-    ).resolve('@gleanwork/mcp-server-tester/cowork-linux-image')
+    ).resolve(`@gleanwork/mcp-server-tester/${client}-linux-image`)
   );
+}
+
+/**
+ * `docker run` arguments for a ChatGPT shard's container. ChatGPT runs no VM:
+ * no devices, Docker's default seccomp profile, and no new privileges.
+ * `inference` holds no secret: where the token file is and, for a gateway,
+ * its URL. The token arrives later, over `docker exec` stdin.
+ */
+export function chatgptDockerRunArgs(options: {
+  name: string;
+  image: string;
+  runId: string;
+  inference: Record<string, string>;
+}): string[] {
+  return [
+    'run',
+    '--detach',
+    '--name',
+    options.name,
+    '--label',
+    `${RUN_LABEL}=${options.runId}`,
+    ...ownerLabelArgs(),
+    '--security-opt',
+    'no-new-privileges',
+    // The session, profiles, the worker's tokens and the inference token: memory only.
+    '--tmpfs',
+    '/run/mst:mode=0755',
+    '--shm-size',
+    '1g',
+    ...Object.entries(options.inference).flatMap(([key, value]) => [
+      '--env',
+      `${key}=${value}`,
+    ]),
+    options.image,
+  ];
 }
 
 /** `docker run` arguments for a shard's container. */
@@ -200,6 +256,20 @@ function gradeContainerRunArgs(options: {
   ];
 }
 
+/**
+ * What a grade container runs as root before its worker, if anything. The
+ * ChatGPT image's HOME and TMPDIR are on the /run/mst tmpfs, which its desktop
+ * session makes; a grade container starts no session, so it makes only them.
+ */
+export function gradeContainerPrepareArgs(
+  name: string,
+  client: DockerClient
+): string[] | undefined {
+  return client === 'chatgpt'
+    ? ['exec', '-u', 'root', name, CHATGPT_SESSION, '--dirs-only']
+    : undefined;
+}
+
 /** A container name for a shard: Docker allows `[a-zA-Z0-9][a-zA-Z0-9_.-]`. */
 export function containerName(runId: string, index: number): string {
   return `mst-${runId}-${index + 1}`.replace(/[^a-zA-Z0-9_.-]/g, '-');
@@ -235,6 +305,32 @@ export function contextPool(contexts: readonly (string | undefined)[]) {
       if (next) next(context);
       else free.push(context);
     },
+  };
+}
+
+/**
+ * ChatGPT's inference: MST's OpenAI gateway settings (`OPENAI_BASE_URL` with
+ * `MST_LLM_AUTH_COMMAND` or a key), or `OPENAI_API_KEY` for the app to sign in
+ * with. Either way the secret goes to the same tmpfs file.
+ */
+async function chatgptInference(): Promise<{
+  environment: Record<string, string>;
+  token: string;
+}> {
+  const endpoint = await resolveLLMEndpoint('openai');
+  const token = endpoint.apiKey ?? endpoint.authToken;
+  if (!token)
+    throw new Error(
+      'ChatGPT in a container needs inference: set OPENAI_BASE_URL with MST_LLM_AUTH_COMMAND (an LLM gateway), or OPENAI_API_KEY. See docs/llm-gateways.md.'
+    );
+  return {
+    environment: endpoint.overridden
+      ? {
+          MST_CHATGPT_INFERENCE_BASE_URL: endpoint.baseURL,
+          MST_CHATGPT_INFERENCE_TOKEN_FILE: TOKEN_FILE,
+        }
+      : { MST_CHATGPT_API_KEY_FILE: TOKEN_FILE },
+    token,
   };
 }
 
@@ -412,10 +508,29 @@ function openDocker(
   options: DockerOptions,
   context: EnvironmentContext
 ): ReturnType<typeof machineEnvironment> {
-  const image = options.image ?? DEFAULT_COWORK_IMAGE;
+  const client = dockerClient(context.client);
+  const image =
+    options.image ??
+    (client === 'chatgpt' ? DEFAULT_CHATGPT_IMAGE : DEFAULT_COWORK_IMAGE);
   const readyTimeoutS = Number(options.readyTimeout ?? DEFAULT_READY_TIMEOUT_S);
-  const pool = contextPool(contextsOf(options));
+  // Cowork's VM takes a host-wide vsock port: one container per context.
+  // ChatGPT has no VM, so every shard can share a context.
+  const contexts = contextsOf(options);
+  const pool = contextPool(
+    client === 'chatgpt'
+      ? Array.from(
+          { length: Math.max(1, context.shards) },
+          () => contexts
+        ).flat()
+      : contexts
+  );
   const seccompProfile = path.join(coworkImageDirectory(), 'seccomp.json');
+  // Both clients keep their secret in the same tmpfs file, refreshed alike.
+  const credential = async () => {
+    if (client === 'chatgpt') return chatgptInference();
+    const cowork = await inference();
+    return { cowork, token: cowork.token };
+  };
   // Once per context: containers an earlier run on this machine left behind.
   const swept = new Map<string, Promise<void>>();
   const sweep = (dockerContext: string | undefined) => {
@@ -438,7 +553,6 @@ function openDocker(
       );
     return swept.get(id)!;
   };
-  const contexts = contextsOf(options);
   return machineEnvironment(
     context,
     async (shard, signal): Promise<Machine> => {
@@ -450,7 +564,8 @@ function openDocker(
           image,
           shard.runId,
           sweep,
-          signal
+          signal,
+          client
         );
       const dockerContext = await pool.acquire(signal);
       const name = containerName(shard.runId, shard.index);
@@ -462,7 +577,7 @@ function openDocker(
       };
       try {
         await sweep(dockerContext);
-        const credential = await inference();
+        const secret = await credential();
         const digest = await dockerOk(
           dockerContext,
           ['image', 'inspect', '--format', '{{.Id}}', image],
@@ -472,20 +587,27 @@ function openDocker(
         claimContainer(dockerContext, name);
         await dockerOk(
           dockerContext,
-          dockerRunArgs({
-            name,
-            image,
-            runId: shard.runId,
-            seccompProfile,
-            inference: credential,
-            warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
-          }),
+          'cowork' in secret
+            ? dockerRunArgs({
+                name,
+                image,
+                runId: shard.runId,
+                seccompProfile,
+                inference: secret.cowork,
+                warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
+              })
+            : chatgptDockerRunArgs({
+                name,
+                image,
+                runId: shard.runId,
+                inference: secret.environment,
+              }),
           `Starting container ${name}`,
           { signal }
         );
-        await deliverToken(dockerContext, name, credential.token);
+        await deliverToken(dockerContext, name, secret.token);
         refresh = setInterval(() => {
-          void inference()
+          void credential()
             .then((fresh) => deliverToken(dockerContext, name, fresh.token))
             .catch(() => {
               // The next refresh tries again; the token still has time.
@@ -541,7 +663,8 @@ async function gradeMachine(
   image: string,
   runId: string,
   sweep: (dockerContext: string | undefined) => Promise<void>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  client: DockerClient = 'cowork'
 ): Promise<Machine> {
   const remove = async () => {
     await docker(dockerContext, ['rm', '--force', name]);
@@ -561,6 +684,13 @@ async function gradeMachine(
       `Starting container ${name}`,
       { signal }
     );
+    const prepare = gradeContainerPrepareArgs(name, client);
+    if (prepare)
+      await dockerOk(
+        dockerContext,
+        prepare,
+        'Creating the private directories'
+      );
     await dockerOk(
       dockerContext,
       ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
@@ -627,11 +757,16 @@ async function npmPack(
 async function setupDocker(
   options: DockerOptions,
   log: (line: string) => void,
-  plugins: ReadonlyArray<{ name: string; version: string; dir: string }>
+  plugins: ReadonlyArray<{ name: string; version: string; dir: string }>,
+  client: DockerClient
 ): Promise<void> {
-  const image = options.image ?? DEFAULT_COWORK_IMAGE;
-  const source = coworkImageDirectory();
-  const build = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-cowork-image-'));
+  const image =
+    options.image ??
+    (client === 'chatgpt' ? DEFAULT_CHATGPT_IMAGE : DEFAULT_COWORK_IMAGE);
+  const source = imageDirectory(client);
+  const build = await fs.mkdtemp(
+    path.join(os.tmpdir(), `mst-${client}-image-`)
+  );
   try {
     await fs.cp(source, build, { recursive: true });
     const packages = path.join(build, 'mst-package');
@@ -660,11 +795,14 @@ async function setupDocker(
           'build',
           '--tag',
           image,
-          ...(options.claudeDesktopVersion
+          ...(client === 'cowork' && options.claudeDesktopVersion
             ? [
                 '--build-arg',
                 `CLAUDE_DESKTOP_VERSION=${options.claudeDesktopVersion}`,
               ]
+            : []),
+          ...(client === 'chatgpt' && options.chatgptVersion
+            ? ['--build-arg', `CHATGPT_VERSION=${options.chatgptVersion}`]
             : []),
           build,
         ],
@@ -693,11 +831,16 @@ async function setupDocker(
 export const dockerEnvironment: EnvironmentDefinition = {
   schema: DockerOptionsSchema,
   description:
-    "Run shards in containers from MST's Linux Cowork image, one per Docker context at a time.",
+    "Run shards in containers from MST's Linux Cowork image (one per Docker context at a time) or, for a ChatGPT eval, its Linux ChatGPT image.",
   async open(options, context) {
     return openDocker(options as DockerOptions, context);
   },
-  async setup(options, { log, plugins = [] }) {
-    await setupDocker(options as DockerOptions, log, plugins);
+  async setup(options, { log, plugins = [], client }) {
+    await setupDocker(
+      options as DockerOptions,
+      log,
+      plugins,
+      dockerClient(client)
+    );
   },
 };

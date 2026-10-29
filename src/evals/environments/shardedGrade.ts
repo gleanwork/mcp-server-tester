@@ -166,6 +166,8 @@ export async function gradeInEnvironment(
       prepared.configFile.settings as SettingsSections | undefined,
       environment.name
     ),
+    // The image grading runs in is the one its client's trials ran in.
+    ...(prepared.client ? { client: prepared.client } : {}),
   });
   const records = new Map<string, GradeRecord>();
   const outcomes = new Map<number, ShardOutcome>();

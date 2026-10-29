@@ -29,12 +29,9 @@ export function chatgptServers(
         );
       labels.add(label);
       // Codex cannot resolve client placeholders or write private files.
-      if (
-        server.transport === 'stdio' &&
-        (usesClientResolvedFields(server) || server.minTools !== undefined)
-      )
+      if (server.transport === 'stdio' && usesClientResolvedFields(server))
         throw new Error(
-          `ChatGPT does not support client-resolved stdio eval servers (${label}: url, auth, files, minTools, or \${...} placeholders). Use plugins[].mcp to point a plugin's own server at the eval endpoint.`
+          `ChatGPT does not support client-resolved stdio eval servers (${label}: url, auth, files, or \${...} placeholders). Use plugins[].mcp to point a plugin's own server at the eval endpoint.`
         );
       if (server.transport === 'stdio')
         return {
@@ -44,6 +41,11 @@ export function chatgptServers(
           args: server.args,
           cwd: server.cwd,
           env: server.env,
+          // MST's own readiness rule (as for a dry-run proxy): the direct
+          // preflight checks it; the app never sees it.
+          ...(server.minTools !== undefined
+            ? { minTools: server.minTools }
+            : {}),
         };
       if (
         server.transport !== 'http' ||
