@@ -384,6 +384,14 @@ export interface ClientDefinition {
   readonly serversPerBatch?: boolean;
   /** The most cases the client can run at once; `concurrency` above it is an error. */
   readonly maxConcurrency?: number;
+  /**
+   * The client is a process that needs no desktop session (a CLI or an
+   * SDK). An environment whose machines provide a desktop, such as MST's
+   * Linux image, then starts a shard whose clients are all headless
+   * without one: no desktop, no desktop app, and none of its inference.
+   * Without it, a client gets the desktop.
+   */
+  readonly headless?: boolean;
   /** Ordered traces for all selected trials. The framework owns scores. */
   runBatch?(
     requests: ClientBatchRequest[],

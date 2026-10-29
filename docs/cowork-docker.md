@@ -66,7 +66,11 @@ Each container's worker loads the eval's plugins, so the image must have them. `
 
 The image holds one set of plugins: setting it up for another eval replaces them.
 
-`mst grade --env docker` grades in these containers too ([Grading in an environment](./cli.md#grading-in-an-environment)). Its workers load the eval's judge plugins from the same `/opt/mst/plugins`, and need the SDK each judge runs, which the image doesn't have (`openai`, `@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`): add them in an image of your own, for example `FROM mst-cowork-linux:<tag>` with `RUN npm install -g openai`, and pass it with `--env-option image=<ref>`. Grade containers start without a desktop, VM devices or inference, so several share one Docker context.
+`mst grade --env docker` grades in these containers too ([Grading in an environment](./cli.md#grading-in-an-environment)). Its workers load the eval's judge plugins from the same `/opt/mst/plugins`, and need the SDK each judge runs. The image has `@openai/codex-sdk` (for the `codex` client, below), not `openai` or `@anthropic-ai/claude-agent-sdk`: add them in an image of your own, for example `FROM mst-cowork-linux:<tag>` with `RUN npm install -g openai`, and pass it with `--env-option image=<ref>`. Grade containers start without a desktop, VM devices or inference, so several share one Docker context.
+
+## Headless clients
+
+The image also runs clients that need no desktop: the [`codex` client](./codex.md), whose SDK and CLI the image installs, and plugin clients that declare `headless: true`. A shard whose clients are all headless starts as a grade container does, without a desktop, VM devices or Cowork inference, so `ANTHROPIC_*` settings aren't needed and several shards share one Docker context. The client's own credentials (for `codex`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for a gateway) reach the worker in the run's `--secrets-file`. The image sets `MST_JUDGE_SANDBOX=container`, so Codex runs its shell without its own sandbox, confined by the container.
 
 ## What happens
 

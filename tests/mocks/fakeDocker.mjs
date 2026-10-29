@@ -155,6 +155,9 @@ if (command === 'image') {
     ['chown', 'pkill', '/opt/mst/bin/desktop-session'].includes(argv[0])
   ) {
     // Ownership and processes aren't modelled.
+  } else if (argv[0] === 'install' && argv[1] === '-d') {
+    // `install -d [-o u -g g -m mode] dir`: the directory, without ownership.
+    fs.mkdirSync(inside(name, argv.at(-1)), { recursive: true });
   } else {
     const result = spawnSync(
       argv[0],

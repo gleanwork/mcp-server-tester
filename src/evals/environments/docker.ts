@@ -9,6 +9,11 @@
  * one container at a time; `contexts=a,b` spreads shards over several.
  * Cowork's inference token comes from MST's LLM gateway settings on this
  * machine and is kept fresh in the container's tmpfs, never in the image.
+ *
+ * A shard that needs no desktop, a grade shard or a collect shard whose
+ * clients are all headless (`ClientDefinition.headless`, such as `codex`),
+ * runs in a container of the same image with no desktop: no VM devices, no
+ * Cowork inference, and contexts shared, as nothing holds the vsock port.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -19,7 +24,9 @@ import path from 'node:path';
 import { z } from 'zod';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
+import { getClient } from '../builtinClients.js';
 import { machineEnvironment } from './channel.js';
+import { readShardBundle } from './protocol.js';
 import {
   KEPT_SUFFIX,
   RUN_LABEL,
@@ -54,6 +61,9 @@ const USER = 'mst';
 /** docker/chatgpt-linux's entrypoint; `--dirs-only` makes its tmpfs directories. */
 const CHATGPT_SESSION = '/opt/mst/bin/desktop-session';
 const WORK_DIR = '/home/mst/work';
+/** The container's tmpfs, and the worker's tokens directory on it (MST_TOKENS_DIR). */
+const RUN_DIR = '/run/mst';
+const TOKENS_DIR = `${RUN_DIR}/tokens`;
 const SESSION_DIR = '/run/mst/session';
 const TOKEN_FILE = '/run/mst/inference-token';
 const DEFAULT_READY_TIMEOUT_S = 1200;
@@ -227,12 +237,12 @@ export function dockerRunArgs(options: {
 }
 
 /**
- * `docker run` arguments for a grade shard's container (ADR 0005): the same
- * image, with no desktop. Grading starts no client, so it needs no VM
- * devices and no inference, and the entrypoint only keeps the container up
- * for `mst grade-shard`.
+ * `docker run` arguments for a shard's container with no desktop: a grade
+ * shard's (ADR 0005), which starts no client, or a collect shard's whose
+ * clients are headless. It needs no VM devices and no inference, and the
+ * entrypoint only keeps the container up for the worker.
  */
-function gradeContainerRunArgs(options: {
+function headlessContainerRunArgs(options: {
   name: string;
   image: string;
   runId: string;
@@ -264,10 +274,25 @@ function gradeContainerRunArgs(options: {
 export function gradeContainerPrepareArgs(
   name: string,
   client: DockerClient
-): string[] | undefined {
+): string[] {
   return client === 'chatgpt'
     ? ['exec', '-u', 'root', name, CHATGPT_SESSION, '--dirs-only']
-    : undefined;
+    : [
+        'exec',
+        '-u',
+        'root',
+        name,
+        'install',
+        '-d',
+        '-o',
+        USER,
+        '-g',
+        USER,
+        '-m',
+        '0700',
+        RUN_DIR,
+        TOKENS_DIR,
+      ];
 }
 
 /** A container name for a shard: Docker allows `[a-zA-Z0-9][a-zA-Z0-9_.-]`. */
@@ -556,9 +581,9 @@ function openDocker(
   return machineEnvironment(
     context,
     async (shard, signal): Promise<Machine> => {
-      if (shard.work === 'grade')
-        return gradeMachine(
-          // No VM, so no host-wide vsock port: grade shards share contexts.
+      if (shard.work === 'grade' || (await shardIsHeadless(shard.bundleDir)))
+        return headlessMachine(
+          // No VM, so no host-wide vsock port: these shards share contexts.
           contexts[shard.index % contexts.length],
           containerName(shard.runId, shard.index),
           image,
@@ -654,10 +679,35 @@ function openDocker(
 }
 
 /**
- * A grade shard's machine: a container of the image with no desktop, whose
- * worker runs `mst grade-shard` (ADR 0005).
+ * Whether every client a collect shard runs is headless, so its container
+ * needs no desktop. A client that can't be looked up gets the desktop, as
+ * before.
  */
-async function gradeMachine(
+export async function shardIsHeadless(bundleDir: string): Promise<boolean> {
+  let types: Set<string>;
+  try {
+    const bundle = await readShardBundle(bundleDir);
+    types = new Set(
+      bundle.batches.flatMap((batch) =>
+        batch.requests.map((request) => request.config.type)
+      )
+    );
+  } catch {
+    return false;
+  }
+  if (!types.size) return false;
+  try {
+    return [...types].every((type) => getClient(type).headless === true);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A shard's machine with no desktop: a container of the image whose worker
+ * runs `mst grade-shard` (ADR 0005) or a headless client's `mst collect`.
+ */
+async function headlessMachine(
   dockerContext: string | undefined,
   name: string,
   image: string,
@@ -680,17 +730,18 @@ async function gradeMachine(
     claimContainer(dockerContext, name);
     await dockerOk(
       dockerContext,
-      gradeContainerRunArgs({ name, image, runId }),
+      headlessContainerRunArgs({ name, image, runId }),
       `Starting container ${name}`,
       { signal }
     );
-    const prepare = gradeContainerPrepareArgs(name, client);
-    if (prepare)
-      await dockerOk(
-        dockerContext,
-        prepare,
-        'Creating the private directories'
-      );
+    // The desktop session gives the worker its private tmpfs directories;
+    // without one, they're made here, as root (the tmpfs itself too, so the
+    // worker can remove its tokens directory when it ends).
+    await dockerOk(
+      dockerContext,
+      gradeContainerPrepareArgs(name, client),
+      'Creating the private directories'
+    );
     await dockerOk(
       dockerContext,
       ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],

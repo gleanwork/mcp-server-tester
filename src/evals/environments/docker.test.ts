@@ -16,7 +16,9 @@ import {
   gradeContainerPrepareArgs,
   imageDirectory,
   npmPackArgs,
+  shardIsHeadless,
 } from './docker.js';
+import { writeShardBundle } from './protocol.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
 import { gradeRun, runEval } from '../runEval.js';
 import { readRunDirectory } from '../runFormat.js';
@@ -544,7 +546,7 @@ describe('a run in docker (a fake Docker CLI)', () => {
     });
   }, 120_000);
 
-  it("makes a ChatGPT grade container's tmpfs HOME and TMPDIR before its worker, and nothing for Cowork", () => {
+  it("makes a ChatGPT grade container's tmpfs HOME and TMPDIR before its worker, and the tmpfs and tokens directory for Cowork", () => {
     expect(gradeContainerPrepareArgs('mst-run-1', 'chatgpt')).toEqual([
       'exec',
       '-u',
@@ -553,7 +555,22 @@ describe('a run in docker (a fake Docker CLI)', () => {
       '/opt/mst/bin/desktop-session',
       '--dirs-only',
     ]);
-    expect(gradeContainerPrepareArgs('mst-run-1', 'cowork')).toBeUndefined();
+    expect(gradeContainerPrepareArgs('mst-run-1', 'cowork')).toEqual([
+      'exec',
+      '-u',
+      'root',
+      'mst-run-1',
+      'install',
+      '-d',
+      '-o',
+      'mst',
+      '-g',
+      'mst',
+      '-m',
+      '0700',
+      '/run/mst',
+      '/run/mst/tokens',
+    ]);
   });
 
   it('grades a stored run in containers without a desktop or inference, two to a context (ADR 0005)', async () => {
@@ -616,6 +633,97 @@ describe('a run in docker (a fake Docker CLI)', () => {
     ).toEqual([true, true]);
     expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
   }, 120_000);
+
+  it('collects a headless client in containers without a desktop or inference', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, root, configPath, calls } = await fixture({
+      // A headless client needs no Cowork inference.
+      ANTHROPIC_API_KEY: '',
+    });
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, client: 'dt/client/headless' })
+    );
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { shards: '2', contexts: 'ctx-a', image: 'mst-test:1' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    const all = await calls();
+    const runs = all.filter((call) => call.args[0] === 'run');
+    // No VM, so both shards share the one context.
+    expect(runs.map((call) => call.context)).toEqual(['ctx-a', 'ctx-a']);
+    for (const run of runs) {
+      expect(run.args).not.toContain('/dev/kvm');
+      expect(run.args.join(' ')).not.toContain('MST_INFERENCE');
+      expect(run.args.slice(-4)).toEqual([
+        'mst-test:1',
+        '--',
+        'sleep',
+        'infinity',
+      ]);
+    }
+    // Nobody waited for a desktop; each worker collected.
+    const execs = all.filter((call) => call.args[0] === 'exec');
+    expect(
+      execs.some((call) =>
+        call.args.join(' ').includes('/run/mst/session/ready')
+      )
+    ).toBe(false);
+    expect(execs.filter((call) => call.args.includes('collect'))).toHaveLength(
+      2
+    );
+    // Without the desktop session, MST makes the worker's tokens directory.
+    expect(
+      execs.filter(
+        (call) =>
+          call.args.includes('install') &&
+          call.args.includes('/run/mst') &&
+          call.args.at(-1) === '/run/mst/tokens' &&
+          call.args.includes('mst')
+      )
+    ).toHaveLength(2);
+    expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
+  }, 120_000);
+
+  it('gives a shard the desktop unless every client in it is headless', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-headless-'));
+    dirs.push(dir);
+    const bundle = (types: string[]) =>
+      writeShardBundle(dir, {
+        runId: 'r',
+        shard: { index: 0, count: 1 },
+        mst: packageJson.version,
+        plugins: [],
+        evalConfig: { name: 'e', datasets: [] } as never,
+        tokenServers: [],
+        batches: [
+          {
+            variant: { name: 'default' },
+            requests: types.map((type, index) => ({
+              caseId: `c${index}`,
+              trial: 0,
+              config: { type },
+              input: { prompt: 'x', servers: [] },
+            })),
+          },
+        ],
+      });
+    await bundle(['codex', 'mst']);
+    expect(await shardIsHeadless(dir)).toBe(true);
+    await bundle(['codex', 'cowork']);
+    expect(await shardIsHeadless(dir)).toBe(false);
+    await bundle(['acme/client/unknown']);
+    expect(await shardIsHeadless(dir)).toBe(false);
+    await bundle([]);
+    expect(await shardIsHeadless(dir)).toBe(false);
+    expect(await shardIsHeadless(path.join(dir, 'missing'))).toBe(false);
+  });
 
   it('removes the containers a dead run on this machine left, and only those', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});

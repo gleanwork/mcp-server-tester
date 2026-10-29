@@ -300,7 +300,7 @@ describe('mst CLI', () => {
       const result = await runBin('run', '--config', 'host.json', '--dry-run');
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toMatch(
-        /^mst: Client "sdk" is not available. Available: chatgpt, claude-code, cowork, mst./
+        /^mst: Client "sdk" is not available. Available: chatgpt, claude-code, codex, cowork, mst./
       );
       expect(result.stderr).not.toMatch(/\n\s+at /);
     });
