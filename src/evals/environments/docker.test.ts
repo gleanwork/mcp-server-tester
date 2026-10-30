@@ -11,6 +11,7 @@ import {
   coworkImageDirectory,
   DEFAULT_CHATGPT_IMAGE,
   DEFAULT_COWORK_IMAGE,
+  deliverToken,
   dockerClient,
   dockerRunArgs,
   gradeContainerPrepareArgs,
@@ -294,6 +295,64 @@ describe('ChatGPT in the docker environment', () => {
     expect(() =>
       resolveEnvironment('docker', { chatgptVersion: 'latest; rm -rf' })
     ).toThrow();
+  });
+});
+
+describe('delivering the inference token (a fake Docker CLI)', () => {
+  async function container(denials: number): Promise<string> {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-token-'));
+    await fs.mkdir(path.join(root, 'containers', 'mst-token-1', 'run/mst'), {
+      recursive: true,
+    });
+    vi.stubEnv('MST_DOCKER', mock('fakeDocker.mjs'));
+    vi.stubEnv('FAKE_DOCKER_ROOT', root);
+    vi.stubEnv('FAKE_DOCKER_TOKEN_DENIALS', String(denials));
+    return root;
+  }
+  async function calls(root: string): Promise<number> {
+    const log = await fs.readFile(path.join(root, 'calls.jsonl'), 'utf8');
+    return log.trim().split('\n').length;
+  }
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('retries a write the new container denies', async () => {
+    const root = await container(2);
+    await deliverToken(undefined, 'mst-token-1', 'synthetic-token');
+    expect(await calls(root)).toBe(3);
+    expect(
+      await fs.readFile(
+        path.join(root, 'containers/mst-token-1/run/mst/inference-token'),
+        'utf8'
+      )
+    ).toBe('synthetic-token');
+  });
+
+  it('fails at once when the container has gone', async () => {
+    const root = await container(0);
+    const started = Date.now();
+    await expect(
+      deliverToken(undefined, 'mst-gone-1', 'synthetic-token')
+    ).rejects.toThrow('No such container: mst-gone-1');
+    expect(await calls(root)).toBe(1);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
+  it('stops retrying when the run is cancelled', async () => {
+    await container(10_000);
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 700);
+    const started = Date.now();
+    await expect(
+      deliverToken(
+        undefined,
+        'mst-token-1',
+        'synthetic-token',
+        controller.signal
+      )
+    ).rejects.toThrow('The run was cancelled.');
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 });
 

@@ -22,6 +22,7 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
@@ -492,15 +493,19 @@ const TOKEN_DELIVERY_RETRY_MS = 500;
  * Writes the inference token where the image's credential helper reads it.
  * Right after `docker run`, the entrypoint may not yet have given /run/mst
  * to the desktop user, so a denied write is retried for a minute rather than
- * losing the shard.
+ * losing the shard. Any other failure, such as a container that has exited,
+ * is thrown at once, and `signal` stops the retries.
  */
-async function deliverToken(
+export async function deliverToken(
   context: string | undefined,
   name: string,
-  token: string
+  token: string,
+  signal?: AbortSignal
 ): Promise<void> {
   const deadline = Date.now() + TOKEN_DELIVERY_TIMEOUT_MS;
+  const cancelled = () => new Error('The run was cancelled.');
   for (;;) {
+    if (signal?.aborted) throw cancelled();
     try {
       await dockerOk(
         context,
@@ -515,14 +520,19 @@ async function deliverToken(
           `umask 077 && cat > ${TOKEN_FILE}.new && mv -f ${TOKEN_FILE}.new ${TOKEN_FILE}`,
         ],
         'Delivering the inference token',
-        { input: token }
+        { input: token, ...(signal ? { signal } : {}) }
       );
       return;
     } catch (error) {
-      if (Date.now() >= deadline) throw error;
-      await new Promise((resolve) =>
-        setTimeout(resolve, TOKEN_DELIVERY_RETRY_MS)
-      );
+      if (signal?.aborted) throw cancelled();
+      const denied =
+        error instanceof Error && /Permission denied/.test(error.message);
+      if (!denied || Date.now() >= deadline) throw error;
+      try {
+        await sleep(TOKEN_DELIVERY_RETRY_MS, undefined, { signal });
+      } catch {
+        throw cancelled();
+      }
     }
   }
 }
@@ -811,8 +821,14 @@ function openDocker(
       const dockerContext = await pool.acquire(signal);
       const name = containerName(shard.runId, shard.index);
       let refresh: NodeJS.Timeout | undefined;
-      const remove = async () => {
+      // Aborted when the container goes, so a refresh in flight stops too.
+      const container = new AbortController();
+      const stopRefresh = () => {
         clearInterval(refresh);
+        container.abort();
+      };
+      const remove = async () => {
+        stopRefresh();
         await docker(dockerContext, ['rm', '--force', name]);
         releaseContainer(dockerContext, name);
       };
@@ -854,10 +870,22 @@ function openDocker(
           `Starting container ${name}`,
           { signal }
         );
-        await deliverToken(dockerContext, name, secret.token);
+        await deliverToken(
+          dockerContext,
+          name,
+          secret.token,
+          AbortSignal.any([signal, container.signal])
+        );
         refresh = setInterval(() => {
           void credential()
-            .then((fresh) => deliverToken(dockerContext, name, fresh.token))
+            .then((fresh) =>
+              deliverToken(
+                dockerContext,
+                name,
+                fresh.token,
+                AbortSignal.any([signal, container.signal])
+              )
+            )
             .catch(() => {
               // The next refresh tries again; the token still has time.
             });
@@ -878,7 +906,7 @@ function openDocker(
           async dispose({ keep }) {
             try {
               if (keep) {
-                clearInterval(refresh);
+                stopRefresh();
                 // Renamed so no later run's sweep removes it.
                 const kept = `${name}${KEPT_SUFFIX}`;
                 const renamed =
