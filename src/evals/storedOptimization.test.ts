@@ -385,6 +385,8 @@ describe('stored tool optimization', () => {
     const optimization = await startToolOptimization({
       evalConfig: target(configPath),
     });
+    // Unchanged, the same judges (and their identities) let a round run.
+    await optimization.tryCandidates([concise]);
     await editJson(configPath, (config) => {
       config.judges = [
         { type: 'usecase/judge/keywords', keywords: ['incident'] },
