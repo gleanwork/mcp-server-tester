@@ -77,7 +77,10 @@ const DockerOptionsSchema = z
         message: 'memory must be a size such as 8g or 512m',
       })
       .optional(),
-    /** Each container's CPUs (`--cpus`). Default: no limit. */
+    /**
+     * Each container's CPUs (`--cpus`), capped at the context's CPU count.
+     * Default: no limit.
+     */
     cpus: z
       .string()
       .regex(/^\d+(\.\d+)?$/, 'cpus must be a number such as 2 or 1.5')

@@ -93,7 +93,9 @@ function spare(capacity: ContextCapacity): number {
  * context (Cowork's VM listens on a host-wide vsock port), so by default it
  * may use all the context can spare. Grade containers share the context: as
  * many run at once as their memory, and their CPUs when `cpus` is set, fit.
- * A context that can't hold one still runs one.
+ * A context that can't hold one still runs one. `cpus` above the context's
+ * CPU count is capped at it: Docker refuses to start a container that asks
+ * for more CPUs than its context has.
  */
 export function planContext(
   work: ShardWork,
@@ -103,9 +105,13 @@ export function planContext(
   const usable = capacity ? spare(capacity) : undefined;
   const memory =
     requested.memory ?? (work === 'grade' ? DEFAULT_GRADE_MEMORY : usable);
+  const cpus =
+    requested.cpus !== undefined && capacity
+      ? Math.min(requested.cpus, capacity.cpus)
+      : requested.cpus;
   const limits: ContainerLimits = {
     ...(memory !== undefined ? { memory } : {}),
-    ...(requested.cpus !== undefined ? { cpus: requested.cpus } : {}),
+    ...(cpus !== undefined ? { cpus } : {}),
   };
   const fit = capacity
     ? Math.min(
@@ -124,13 +130,19 @@ export function planContext(
     ? `${formatMemory(capacity.memory)} and ${capacity.cpus} CPUs`
     : "an unknown size (docker info didn't say)";
   const kind = work === 'collect' ? 'Cowork' : 'grade';
+  const short = [
+    ...(memory !== undefined && usable !== undefined && memory > usable
+      ? [`more memory than it can spare (${formatMemory(usable)})`]
+      : []),
+    ...(requested.cpus !== undefined && cpus! < requested.cpus
+      ? [`${requested.cpus} CPUs asked for, more than it has`]
+      : []),
+  ];
   return {
     limits,
     slots,
     note: `has ${has}: ${slots} ${kind} container${slots === 1 ? '' : 's'} at a time, ${each} each${
-      fit !== undefined && fit < 1
-        ? `, more than it can spare (${formatMemory(usable!)})`
-        : ''
+      short.length > 0 ? `; ${short.join('; ')}` : ''
     }`,
   };
 }

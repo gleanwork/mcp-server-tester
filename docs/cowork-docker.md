@@ -45,7 +45,7 @@ Options (`--env-option key=value`):
 | `image`                | Another image, such as one your organization builds. Default: `mst-cowork-linux:<MST version>`.                              |
 | `readyTimeout`         | Seconds a new container's desktop has to come up. Default: 1200.                                                             |
 | `memory`               | Each container's memory, in Docker's syntax (`8g`, `512m`). Default: all the context can spare for Cowork, `2g` for grading. |
-| `cpus`                 | Each container's CPUs (`1.5`, `4`). Default: no limit.                                                                       |
+| `cpus`                 | Each container's CPUs (`1.5`, `4`), at most the context's. Default: no limit.                                                |
 | `keep`                 | `never` (default), `failed` or `always`: keep containers to look at afterwards.                                              |
 | `claudeDesktopVersion` | `mst env setup` only: the Claude Desktop package to install.                                                                 |
 
@@ -59,9 +59,9 @@ Options (`--env-option key=value`):
 [mst] colima-mst-kvm has 11.7 GiB and 6 CPUs: 1 Cowork container at a time, 10.7 GiB each
 ```
 
-- **A Cowork container** is alone on its context, so it may use all the context can spare: its memory less 1 GiB for Docker itself. Claude Desktop gives Cowork's VM 4 GB, which it fills only as it needs: one shard with one remote server peaked at 2.5 GiB for the whole container, with about two CPUs busy.
+- **A Cowork container** is alone on its context, so it may use all the context can spare: its memory less 1 GiB for Docker itself, or half its memory on a context under 2 GiB. Claude Desktop gives Cowork's VM 4 GB, which it fills only as it needs: one shard with one remote server peaked at 2.5 GiB for the whole container, with about two CPUs busy.
 - **Grade containers** share a context: as many run at once as fit in 2 GiB each (or `memory`), and in `cpus` each when you set it. The rest wait. A grade shard whose judges run their own agents (Claude Code, Codex) at `concurrency` above 1 needs more: raise `memory`.
-- **Out of memory**, the kernel stops a process in that container, not the Docker daemon or another shard's. MST says so: a shard whose worker was stopped fails with `Container … ran out of memory`, and one whose desktop or VM was stopped ends `done, but Container … ran out of memory`, its trials failed as infrastructure.
+- **Out of memory**, the kernel stops a process in that container, not the Docker daemon or another shard's. MST says so: a shard whose worker was stopped fails with `Container … ran out of memory`, and so does one whose desktop ran out while it started (`Couldn't create a machine for shard …: Container … ran out of memory`). A shard whose desktop or VM was stopped later, mid-run, ends `done, but Container … ran out of memory`, its trials failed as infrastructure.
 
 A Docker context's memory is its VM's, not the machine's. Colima and Docker Desktop VMs take their memory from your Mac: two 12 GiB Colima VMs on a 16 GiB Mac can run out of memory however few shards you run. Size the VMs (`colima start --memory`) to fit beside what else the machine runs. The shard count never changes with a context's size: it decides which shard each case is on, and `--resume` relies on it.
 

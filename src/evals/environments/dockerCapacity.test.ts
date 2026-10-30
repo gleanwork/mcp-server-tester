@@ -64,10 +64,25 @@ describe('Docker context capacity', () => {
   it('runs one container on a context too small for one, and says so', () => {
     const plan = planContext('grade', colima, { memory: 16 * GIB });
     expect(plan.slots).toBe(1);
-    expect(plan.note).toContain('more than it can spare (10.7 GiB)');
+    expect(plan.note).toContain('; more memory than it can spare (10.7 GiB)');
     expect(planContext('collect', colima, { memory: 16 * GIB }).note).toContain(
-      'more than it can spare (10.7 GiB)'
+      '; more memory than it can spare (10.7 GiB)'
     );
+  });
+
+  it('caps cpus at what the context has, and blames the CPUs, not memory', () => {
+    // Docker refuses --cpus above the context's CPU count.
+    const plan = planContext('grade', colima, { cpus: 8 });
+    expect(plan).toMatchObject({
+      slots: 1,
+      limits: { memory: DEFAULT_GRADE_MEMORY, cpus: 6 },
+    });
+    expect(plan.note).toBe(
+      'has 11.7 GiB and 6 CPUs: 1 grade container at a time, 2 GiB and 6 CPUs each; 8 CPUs asked for, more than it has'
+    );
+    expect(planContext('collect', colima, { cpus: 8 }).limits.cpus).toBe(6);
+    // Without a known size, MST can't cap it: what was asked goes to Docker.
+    expect(planContext('grade', undefined, { cpus: 8 }).limits.cpus).toBe(8);
   });
 
   it("runs one at a time, unlimited, on a context whose size it can't read", () => {
