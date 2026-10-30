@@ -1,0 +1,287 @@
+{
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester/schema/run/v1/calibration.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "format": { "type": "string", "const": "mst.run/v1" },
+        "kind": { "type": "string", "const": "calibration" },
+        "judge": { "type": "string", "minLength": 1 },
+        "judgeIdentity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "unversioned": { "type": "boolean", "const": true },
+        "judgeModels": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string" },
+        "runs": { "type": "array", "items": { "type": "string" } },
+        "split": { "type": "string", "enum": ["test", "dev", "all"] },
+        "labels": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknown": {
+          "type": "object",
+          "properties": {
+            "k": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "value": { "type": ["number", "null"] },
+            "low": { "type": ["number", "null"] },
+            "high": { "type": ["number", "null"] }
+          },
+          "required": ["k", "n", "value", "low", "high"],
+          "additionalProperties": false
+        },
+        "judgeKind": { "type": "string", "const": "pointwise" },
+        "humanPass": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "humanFail": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "counts": {
+          "type": "object",
+          "properties": {
+            "truePositive": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "falseNegative": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "trueNegative": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "falsePositive": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "truePositive",
+            "falseNegative",
+            "trueNegative",
+            "falsePositive"
+          ],
+          "additionalProperties": false
+        },
+        "tpr": {
+          "type": "object",
+          "properties": {
+            "k": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "value": { "type": ["number", "null"] },
+            "low": { "type": ["number", "null"] },
+            "high": { "type": ["number", "null"] }
+          },
+          "required": ["k", "n", "value", "low", "high"],
+          "additionalProperties": false
+        },
+        "tnr": {
+          "type": "object",
+          "properties": {
+            "k": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "value": { "type": ["number", "null"] },
+            "low": { "type": ["number", "null"] },
+            "high": { "type": ["number", "null"] }
+          },
+          "required": ["k", "n", "value", "low", "high"],
+          "additionalProperties": false
+        },
+        "kappa": { "type": ["number", "null"] },
+        "gate": {
+          "type": "object",
+          "properties": {
+            "minPassLabels": { "type": "number" },
+            "minFailLabels": { "type": "number" },
+            "minRate": { "type": "number" },
+            "maxUnknownRate": { "type": "number" }
+          },
+          "required": [
+            "minPassLabels",
+            "minFailLabels",
+            "minRate",
+            "maxUnknownRate"
+          ],
+          "additionalProperties": false
+        },
+        "usable": { "type": "boolean" },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": [
+        "format",
+        "kind",
+        "judge",
+        "judgeIdentity",
+        "judgeModels",
+        "createdAt",
+        "runs",
+        "split",
+        "labels",
+        "unknown",
+        "judgeKind",
+        "humanPass",
+        "humanFail",
+        "counts",
+        "tpr",
+        "tnr",
+        "kappa",
+        "gate",
+        "usable",
+        "reasons"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "format": { "type": "string", "const": "mst.run/v1" },
+        "kind": { "type": "string", "const": "calibration" },
+        "judge": { "type": "string", "minLength": 1 },
+        "judgeIdentity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "unversioned": { "type": "boolean", "const": true },
+        "judgeModels": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string" },
+        "runs": { "type": "array", "items": { "type": "string" } },
+        "split": { "type": "string", "enum": ["test", "dev", "all"] },
+        "labels": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unknown": {
+          "type": "object",
+          "properties": {
+            "k": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "value": { "type": ["number", "null"] },
+            "low": { "type": ["number", "null"] },
+            "high": { "type": ["number", "null"] }
+          },
+          "required": ["k", "n", "value", "low", "high"],
+          "additionalProperties": false
+        },
+        "judgeKind": { "type": "string", "const": "pairwise" },
+        "agreement": {
+          "type": "object",
+          "properties": {
+            "k": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "value": { "type": ["number", "null"] },
+            "low": { "type": ["number", "null"] },
+            "high": { "type": ["number", "null"] }
+          },
+          "required": ["k", "n", "value", "low", "high"],
+          "additionalProperties": false
+        },
+        "judgeTies": {
+          "type": "object",
+          "properties": {
+            "k": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "value": { "type": ["number", "null"] },
+            "low": { "type": ["number", "null"] },
+            "high": { "type": ["number", "null"] }
+          },
+          "required": ["k", "n", "value", "low", "high"],
+          "additionalProperties": false
+        },
+        "humanTies": {
+          "type": "object",
+          "properties": {
+            "k": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "value": { "type": ["number", "null"] },
+            "low": { "type": ["number", "null"] },
+            "high": { "type": ["number", "null"] }
+          },
+          "required": ["k", "n", "value", "low", "high"],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "format",
+        "kind",
+        "judge",
+        "judgeIdentity",
+        "judgeModels",
+        "createdAt",
+        "runs",
+        "split",
+        "labels",
+        "unknown",
+        "judgeKind",
+        "agreement",
+        "judgeTies",
+        "humanTies"
+      ],
+      "additionalProperties": {}
+    }
+  ]
+}

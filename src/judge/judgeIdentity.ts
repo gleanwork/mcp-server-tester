@@ -40,6 +40,25 @@ export function sortKeys(value: unknown): unknown {
 }
 
 /**
+ * Whether MST can see the judge's version change: a built-in's, one the
+ * judge declares, or its plugin's package version. Without one, the judge's
+ * identity can stay the same while it grades differently, so a calibration
+ * of it can't tell when it goes stale (ADR 0009: unversioned).
+ */
+export function judgeIsVersioned(
+  reference: string,
+  definition: IdentifiedJudge
+): boolean {
+  const parsed = parseExtensionReference(reference);
+  if (parsed.namespace === undefined || parsed.namespace === BUILTIN_NAMESPACE)
+    return true;
+  return (
+    definition.version !== undefined ||
+    installedPlugin(parsed.namespace)?.meta.version !== undefined
+  );
+}
+
+/**
  * The identity of the judge `reference` names, run with `options` (before
  * its schema parses them). It covers:
  *

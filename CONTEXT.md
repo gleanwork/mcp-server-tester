@@ -116,6 +116,14 @@ _Avoid_: judge hash, judge fingerprint, judge version (the version is one part o
 A person's answer to a judge's question: pass or fail for one trial, or, for a pairwise judge, the side they prefer for one case. It belongs to the question (the judge's name in results), not to a judge identity, so a changed judge is measured against the same labels. Its split says whether it measures a judge (`test`) or may be read while changing one (`dev`).
 _Avoid_: annotation, ground truth, gold label, mark
 
+**Calibration**:
+What `mst judges check` measured for one judge identity against people's `test` labels: TPR and TNR with their intervals, kappa, the `unknown` rate, and whether the judge is usable. It applies only to that identity. An unversioned calibration is of a judge whose version MST can't see change, so it can't tell when it goes stale.
+_Avoid_: accuracy, validation, judge score
+
+**Usable**:
+A judge whose calibration passes the gate: enough failing and passing labels with a verdict, TPR and TNR lower bounds at or above the minimum, and few enough `unknown` answers.
+_Avoid_: calibrated (a judge is calibrated for a user's labels, not in general), trusted, valid
+
 **Pairwise judge**:
 A judge that compares two variants' trials of the same case and says which is better, instead of scoring one alone.
 _Avoid_: comparator, preference model

@@ -117,7 +117,8 @@
           "type": { "type": "string" },
           "level": { "type": "string" },
           "optionsHash": { "type": "string" },
-          "identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "unversioned": { "type": "boolean", "const": true }
         },
         "required": ["type", "level", "optionsHash"],
         "additionalProperties": {}

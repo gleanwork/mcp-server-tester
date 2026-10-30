@@ -161,6 +161,13 @@ export interface GraderScore {
    */
   judgeIdentity?: string;
 
+  /**
+   * The judge has no version MST can see change: it declares none and its
+   * plugin has no package version. Its identity can stay the same while it
+   * grades differently, so a calibration of it can't go stale visibly.
+   */
+  judgeUnversioned?: true;
+
   /** The judge could not grade this case. Not counted in pass/fail or score metrics. */
   skipped?: boolean;
 

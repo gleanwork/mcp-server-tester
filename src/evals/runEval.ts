@@ -92,7 +92,8 @@ import {
   preflightCaseJudges,
 } from './grading.js';
 import type { CaseJudge } from './datasetTypes.js';
-import { judgeIdentity } from '../judge/judgeIdentity.js';
+import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
+import { getJudge } from '../judge/builtinJudges.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -702,6 +703,26 @@ function entryIdentity(level: string, entry: unknown): string | undefined {
 }
 
 /**
+ * Whether an eval config entry's judge has no version MST can see change.
+ * Scores record it for pointwise judges; run.json records it for every
+ * level, so a pairwise judge's calibration can say so too.
+ */
+function entryUnversioned(level: string, entry: unknown): boolean {
+  const config = (typeof entry === 'string' ? { type: entry } : entry) as {
+    type: string;
+  } & Record<string, unknown>;
+  try {
+    if (level === 'pairwise') {
+      const { type } = pairwiseJudgeSpec(config);
+      return !judgeIsVersioned(type, getPairwiseJudge(type));
+    }
+    return !judgeIsVersioned(config.type, getJudge(config.type));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The judges run.json records. `evalConfig` has each judge's options as its
  * schema parsed them; `rawConfig` has them as written, which is what grading
  * parses (`mergeEvalJudges`), so each identity is the one the judge's scores
@@ -727,6 +748,9 @@ function judgeRecords(
           .update(JSON.stringify(options))
           .digest('hex'),
         ...(identity !== undefined ? { identity } : {}),
+        ...(entryUnversioned(level, entry)
+          ? { unversioned: true as const }
+          : {}),
       };
     };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);

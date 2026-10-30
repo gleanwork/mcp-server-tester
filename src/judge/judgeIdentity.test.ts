@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
-import { judgeIdentity } from './judgeIdentity.js';
+import { judgeIdentity, judgeIsVersioned } from './judgeIdentity.js';
 import { RUBRIC_JUDGE } from './rubricJudge.js';
 import type * as Rubrics from './rubrics.js';
 import {
@@ -169,5 +169,23 @@ describe('built-in and helper judges declare a version', () => {
       'p-2'
     );
     expect(agenticJudge(spec as never).version).toBeUndefined();
+  });
+});
+
+describe('judgeIsVersioned', () => {
+  it('is true for a built-in, a judge with a version, or a versioned plugin', () => {
+    expect(judgeIsVersioned('rubric', RUBRIC_JUDGE)).toBe(true);
+    expect(judgeIsVersioned('mst/judge/rubric', RUBRIC_JUDGE)).toBe(true);
+    expect(judgeIsVersioned('acme/judge/quality', install({}, 'q-1'))).toBe(
+      true
+    );
+    resetPluginsForTests();
+    expect(
+      judgeIsVersioned('acme/judge/quality', install({ version: '1.2.0' }))
+    ).toBe(true);
+  });
+
+  it('is false when neither the judge nor its plugin has a version', () => {
+    expect(judgeIsVersioned('acme/judge/quality', install({}))).toBe(false);
   });
 });

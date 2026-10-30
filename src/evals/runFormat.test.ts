@@ -246,24 +246,29 @@ describe('judges, pairwise judges and long case IDs', () => {
     expect(RUN_SCHEMAS.preference.safeParse(preference).success).toBe(true);
     const runRecord = await read(path.join(result.outputDir, 'run.json'));
     const identity = expect.stringMatching(/^[0-9a-f]{64}$/);
+    // The test plugin has no version, nor do its judges: MST can't see
+    // them change, so their calibrations would be unversioned.
     expect(runRecord.judges).toEqual([
       {
         type: 'rf/judge/a',
         level: 'config',
         optionsHash: expect.any(String),
         identity,
+        unversioned: true,
       },
       {
         type: 'rf/judge/b',
         level: 'config',
         optionsHash: expect.any(String),
         identity,
+        unversioned: true,
       },
       {
         type: 'rf/pairwise-judge/p',
         level: 'pairwise',
         optionsHash: expect.any(String),
         identity,
+        unversioned: true,
       },
     ]);
     expect(RUN_SCHEMAS.run.safeParse(runRecord).success).toBe(true);

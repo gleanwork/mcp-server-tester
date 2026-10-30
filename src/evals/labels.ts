@@ -117,6 +117,8 @@ export interface JudgedItem {
   /** Absent when the judge failed to run. */
   verdict?: JudgeVerdict;
   judgeIdentity?: string;
+  /** The judge has no version MST can see change. */
+  judgeUnversioned?: true;
   judgeProvider?: string;
   judgeModel?: string;
   reasoning?: string;
@@ -176,6 +178,7 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
             trial,
             ...(verdict !== undefined ? { verdict } : {}),
             ...optional('judgeIdentity', score.judgeIdentity),
+            ...optional('judgeUnversioned', score.judgeUnversioned),
             ...optional('judgeProvider', score.judgeProvider),
             ...optional('judgeModel', score.judgeModel),
             ...optional('reasoning', score.reasoning),

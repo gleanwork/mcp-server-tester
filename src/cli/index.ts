@@ -48,6 +48,10 @@ import {
 } from './commands/datasets/index.js';
 import { listJudgeCommand, showJudge } from './commands/judges/index.js';
 import {
+  checkJudgeCommand,
+  type JudgeCheckCommandOptions,
+} from './commands/judges/check.js';
+import {
   labelExport,
   labelImport,
   type LabelExportCommandOptions,
@@ -232,6 +236,45 @@ discoveryOptions(
 ).action((ref: string, _options: unknown, command: Command) =>
   showJudge(ref, command.optsWithGlobals<DiscoveryOptions>())
 );
+judgesCommand
+  .command('check')
+  .description(
+    "Measure a judge against people's labels: TPR, TNR, kappa, unknown rate, and whether it is usable"
+  )
+  .argument(
+    '<runs...>',
+    'Run directories, eval directories (their latest runs), or run IDs (7f3c2a)'
+  )
+  .requiredOption(
+    '--judge <name>',
+    "The judge's name in results: a rubric judge's rubric, else its reference"
+  )
+  .option(
+    '--split <split>',
+    'The labels to use: test (the default, and the only one recorded), dev or all'
+  )
+  .option(
+    '--min-labels <n>',
+    'Failing and passing labels a usable judge needs, each (default 15)'
+  )
+  .option(
+    '--min-rate <rate>',
+    'The lowest TPR and TNR lower bound a usable judge has (default 0.8)'
+  )
+  .option(
+    '--max-unknown <rate>',
+    'The largest share of unknown answers a usable judge gives (default 0.1)'
+  )
+  .option('--no-record', "Don't write the calibration record")
+  .option('--json', 'Print the checks as JSON')
+  .option(
+    '-d, --dir <directory>',
+    'Where runs are written, to find a run by ID',
+    '.mcp-test-results'
+  )
+  .action((runs: string[], options: JudgeCheckCommandOptions) =>
+    checkJudgeCommand(runs, options).then(() => undefined)
+  );
 
 // Label command: a person's labels for a run's judge verdicts (ADR 0009)
 const labelCommand = program

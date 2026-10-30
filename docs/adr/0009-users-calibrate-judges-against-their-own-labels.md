@@ -26,11 +26,11 @@ Three facts shape what MST should do instead:
   - Labeling needs the trial's answer, so a run stored with `redactStoredResponses` can't be labeled from its own files. `mst label export` says so, and `mst label` refuses such a run. Imported labels need no answers.
   - `mst label <run-id> --judge <ref>` serves a local page that shows one trial at a time, without the judge's verdict, and writes the labels. The run report stays a static file.
   - `mst label import` and `mst label export` read and write labels as CSV, JSONL or judgekeeper's records, so labels can come from another tool or go to one. An export has a row for every verdict, so a sheet filled in and imported back is a way to label without the page. An import checks every label against the run's verdicts and writes none if any fails.
-- **`mst judges check` measures a judge against labels.** It takes one or more runs and a judge reference, and reports on the `test` split only.
+- **`mst judges check` measures a judge against labels.** It takes one or more runs and the judge's name as its labels have it, and reports on the `test` split by default. `--split dev` or `--split all` is for reading while changing a judge, and isn't recorded.
   - For a pointwise judge, it reports the true positive rate (TPR: how many of the trials people failed the judge also failed), the true negative rate (TNR: how many of the trials people passed the judge also passed), Cohen's kappa, and how often the judge answered `unknown`. Each rate has a 95% Wilson interval.
-  - A judge is **usable** when it has at least 15 failing and 15 passing labels, and the lower bound of both TPR and TNR is at least 0.8. The gate follows judgekeeper's. Both numbers can be changed.
-  - For a pairwise judge, it reports agreement with people and how often each side called a tie.
-  - It writes a calibration record for the judge's identity, and shows the disagreements so that a person can read them.
+  - A judge is **usable** when it has at least 15 failing and 15 passing labels on which it gave a verdict, the lower bound of both TPR and TNR is at least 0.8, and it answered `unknown` on at most 10% of the labeled trials. The gate follows judgekeeper's, with the cap on `unknown` added so that a judge can't pass by declining the hard trials. Each number can be changed (`--min-labels`, `--min-rate`, `--max-unknown`).
+  - For a pairwise judge, it reports agreement with people and how often each side called a tie. A pairwise judge has no usable gate yet, because the report's corrected rate is for pointwise judges.
+  - It checks each judge identity in the runs on its own. For each, it writes a calibration record to `calibrations/<judge>/<identity>.json` in the eval's directory, replacing an earlier one, and shows the disagreements so that a person can read them.
 - **A judge's identity is a hash of everything that decides its verdict.** It covers the judge's reference, its `version`, and its options as its schema parses them, so the provider, the model and the model settings count whether they are written out or left to defaults.
   - A built-in judge's `version` covers its prompts (system prompt, template, and rubric or criteria text) and the defaults it falls back on, such as each provider's default model.
   - A plugin judge may declare a `version`. Without one, its plugin's package version takes its place.
@@ -66,7 +66,6 @@ Three facts shape what MST should do instead:
 ## Not decided here
 
 - Whether new built-in judges keep a default model, or the user must pick one the first time.
-- How many `unknown` answers a usable judge may give.
 - How agentic and staged judges are calibrated. Their verdicts fit the same labels, but a check costs minutes per trial.
 - The size of the published calibration set and which public servers it uses.
 

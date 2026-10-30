@@ -8,7 +8,7 @@ import type { TraceEvidence } from '../evals/evalFrameworkTypes.js';
 import { parseExtensionOptions } from '../plugins/plugin.js';
 import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 import { getJudge } from './builtinJudges.js';
-import { judgeIdentity } from './judgeIdentity.js';
+import { judgeIdentity, judgeIsVersioned } from './judgeIdentity.js';
 import {
   buildJudgeCase,
   buildJudgeTrial,
@@ -130,7 +130,13 @@ export async function evaluateJudge(
       trial: buildJudgeTrial(response, run),
     };
     const context = { settings: settingsFor(run.settings, request.judge) };
-    const identity = judgeIdentity(request.judge, judge, request.options);
+    // What every score records about the judge that gave it (ADR 0009).
+    const identity: JudgeIdentityDetails = {
+      judgeIdentity: judgeIdentity(request.judge, judge, request.options),
+      ...(judgeIsVersioned(request.judge, judge)
+        ? {}
+        : { judgeUnversioned: true as const }),
+    };
     const missing = missingRequirement(input, judge.requires);
     if (missing !== undefined)
       return judgeSkipped(label, identity, `no ${missing}`, undefined);
@@ -191,7 +197,7 @@ export async function evaluateJudge(
         : `Judge "${label}" failed with score ${score.toFixed(2)} (threshold: ${threshold})${repNote}. ${last.reasoning ?? ''}`,
       details: {
         judgeName: label,
-        judgeIdentity: identity,
+        ...identity,
         score,
         reasoning: last.reasoning,
         ...(last.provider !== undefined
@@ -223,9 +229,15 @@ export async function evaluateJudge(
  * metadata is kept, so a judge can say why it skipped in a form a script can
  * read (for example `{ noLinks: true }`); its score never is.
  */
+/** A judge's identity, and whether MST can see its version change. */
+interface JudgeIdentityDetails {
+  judgeIdentity: string;
+  judgeUnversioned?: true;
+}
+
 function judgeSkipped(
   label: string,
-  identity: string,
+  identity: JudgeIdentityDetails,
   reason: string | undefined,
   usage: ReturnType<typeof sumJudgeUsage>,
   metadata?: Record<string, unknown>
@@ -235,7 +247,7 @@ function judgeSkipped(
     message: `Judge "${label}" skipped${reason ? `: ${reason}` : ''}`,
     details: {
       judgeName: label,
-      judgeIdentity: identity,
+      ...identity,
       skipped: true,
       ...(reason !== undefined ? { reasoning: reason } : {}),
       ...(usage !== undefined ? { usage } : {}),
