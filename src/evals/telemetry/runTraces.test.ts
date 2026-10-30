@@ -100,12 +100,19 @@ describe('storedRunTraces', () => {
 
   it('gives the spans the run sent: each trial, its verdicts and the pairwise verdicts', async () => {
     const stored = storedRun();
-    // What the run's exporter sent, with its clock at the run's end.
+    // What the run's exporter sent, with its clock at the run's end. The
+    // eval's client is claude-code; the variant runs cowork, as runEval
+    // resolves it.
     vi.useFakeTimers({ now: Date.parse(finishedAt), toFake: ['Date'] });
     const sent: OtlpTraceRequest[] = [];
     const exporter = createTraceExporter(
       { endpoint: 'https://collector.example.com' },
-      { eval: 'cortex-hard', runId: stored.run.runId, client: 'cowork' },
+      {
+        eval: 'cortex-hard',
+        runId: stored.run.runId,
+        client: 'claude-code',
+        clientOf: (variant) => (variant === 'glean' ? 'cowork' : 'claude-code'),
+      },
       {},
       async (_url, init) => {
         sent.push(JSON.parse(init.body as string) as OtlpTraceRequest);
@@ -124,6 +131,13 @@ describe('storedRunTraces', () => {
     );
     // A trial's trace, then its case's verdicts, per case; then pairwise.
     expect(requests).toHaveLength(5);
+    // Each trial is named for its variant's client, not the eval's.
+    const roots = spansOf(requests).filter((span) => !span.parentSpanId);
+    expect(
+      roots
+        .filter((span) => span.name.startsWith('invoke_agent'))
+        .map((span) => span.name)
+    ).toEqual(['invoke_agent cowork', 'invoke_agent cowork']);
     expect(requests[0]!.resourceSpans[0]!.resource.attributes).toContainEqual({
       key: 'mst.eval',
       value: { stringValue: 'cortex-hard' },
@@ -144,12 +158,27 @@ describe('storedRunTraces', () => {
       caseId: 'case-a',
       trial: 0,
     });
-    expect(spans.filter((span) => span.traceId === traceId).length).toBe(6);
+    // Only the verdicts: the run it graded sent the trials' traces.
+    const inTrace = spans.filter((span) => span.traceId === traceId);
+    expect(inTrace.length).toBeGreaterThan(0);
+    expect(spans.every((span) => span.name.startsWith('evaluate'))).toBe(true);
     const verdict = spans.find((span) => span.name === 'evaluate mst.trial')!;
     expect(verdict.attributes).toContainEqual({
       key: 'mst.grading_run_id',
       value: { stringValue: '20261022T120000Z-abc123.g2' },
     });
+  });
+
+  it('gives no verdicts for a run collected with --no-grade', () => {
+    const spans = spansOf(
+      storedRunTraces(
+        storedRun({
+          phases: { collect: 'complete', grade: 'skipped' },
+        } as Partial<StoredRun['run']>)
+      )
+    );
+    expect(spans.some((span) => span.name.startsWith('evaluate'))).toBe(false);
+    expect(spans.filter((span) => !span.parentSpanId)).toHaveLength(2);
   });
 
   it("sends content only when asked, and only the trials' traces with trialsOnly", () => {

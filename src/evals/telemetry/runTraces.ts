@@ -35,7 +35,8 @@ export interface StoredRunTraceOptions {
  * and each variant's pairwise verdicts. One request per trial's trace, per
  * case's verdicts and per variant's pairwise verdicts, as the run sends them;
  * a collector with a limit on spans per request needs them split further.
- * A regrade's verdicts join the traces of the run it graded.
+ * A regrade's directory gives only its verdicts, which join the traces of the
+ * run it graded; a run collected with `--no-grade` gives no verdicts.
  */
 export function storedRunTraces(
   stored: StoredRun,
@@ -52,6 +53,10 @@ export function storedRunTraces(
   // Times the run didn't record (a verdict's, an untimed trial's): when it
   // finished, so the same run always gives the same traces.
   const now = Date.parse(run.finishedAt);
+  // As the run sent them: a regrade sends no trial traces (the run it graded
+  // did), and a run that wasn't graded sends no verdicts.
+  const sendTrials = run.gradedFrom === undefined;
+  const sendVerdicts = !options.trialsOnly && run.phases?.grade !== 'skipped';
   const requests: OtlpTraceRequest[] = [];
   for (const variant of summary.variants) {
     const attributes: RunAttributes = {
@@ -64,7 +69,7 @@ export function storedRunTraces(
     for (const caseResult of variant.result?.caseResults ?? []) {
       const result = { ...caseResult, variant: variant.name };
       const trials = caseTrials(result);
-      for (const { trial, result: trialResult } of trials) {
+      for (const { trial, result: trialResult } of sendTrials ? trials : []) {
         const identity = {
           runId,
           variant: variant.name,
@@ -90,7 +95,7 @@ export function storedRunTraces(
           )
         );
       }
-      if (options.trialsOnly) continue;
+      if (!sendVerdicts) continue;
       const verdicts = trials.flatMap(({ trial, result: trialResult }) =>
         gradingSpans(
           trialResult,
@@ -102,7 +107,7 @@ export function storedRunTraces(
       if (verdicts.length)
         requests.push(traceRequest(verdicts, attributes, resource));
     }
-    if (!options.trialsOnly && variant.pairwise) {
+    if (sendVerdicts && variant.pairwise) {
       const preferences = pairwiseSpans(variant.pairwise, runId, attributes, {
         ...spanOptions,
         gradingRunId: run.runId,

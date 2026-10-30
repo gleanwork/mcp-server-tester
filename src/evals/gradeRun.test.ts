@@ -14,7 +14,12 @@ import { printRunResult } from '../cli/commands/run/index.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { ClientRunResult } from './evalFrameworkTypes.js';
-import { findRunDirectory, nextRegradeId } from './runFormat.js';
+import {
+  findRunDirectory,
+  nextRegradeId,
+  readRunDirectory,
+} from './runFormat.js';
+import { storedRunTraces } from './telemetry/runTraces.js';
 import { withoutTrialArtifacts } from './trialArtifacts.js';
 
 const dirs: string[] = [];
@@ -570,9 +575,31 @@ describe('traces (telemetry.otlp)', () => {
           );
       }
 
+      // The stored run gives the spans it sent, with the same IDs: its
+      // trials and no verdicts, since it wasn't graded.
+      const shape = (
+        spans: Array<{ traceId: string; spanId: string; name: string }>
+      ) =>
+        spans
+          .map((span) => `${span.traceId}/${span.spanId} ${span.name}`)
+          .sort();
+      const fromStore = (directory: string) =>
+        readRunDirectory(directory).then((stored) =>
+          storedRunTraces(stored).flatMap((request) =>
+            request.resourceSpans.flatMap((resource) =>
+              resource.scopeSpans.flatMap((scope) => scope.spans)
+            )
+          )
+        );
+      expect(shape(await fromStore(collected.outputDir))).toEqual(
+        shape(received.spans())
+      );
+
       received.requests.length = 0;
       const regrade = await gradeRun({ ...t.base, run: collectedId });
       const spans = received.spans();
+      // A regrade's directory gives the verdicts it sent, and no trials.
+      expect(shape(await fromStore(regrade.outputDir))).toEqual(shape(spans));
       // A regrade replays trials: it traces their verdicts, not them again.
       expect(
         spans.filter((span) => span.name.startsWith('invoke_agent'))

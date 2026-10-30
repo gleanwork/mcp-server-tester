@@ -972,11 +972,16 @@ export interface TraceExporter {
  * Sends a run's traces as it goes. Sending never blocks or fails the run:
  * each request is queued, retried on a network error, 429 or 5xx, and
  * reported if it still fails. `runId` names the trials' traces (a regrade's
- * `gradedFrom`); `gradingRunId` the run grading them.
+ * `gradedFrom`); `gradingRunId` the run grading them. `clientOf` names the
+ * client each variant runs, which a variant can set for itself; without it,
+ * every trial gets `run.client`.
  */
 export function createTraceExporter(
   config: OtlpTelemetryConfig,
-  run: RunAttributes & { gradingRunId?: string },
+  run: RunAttributes & {
+    gradingRunId?: string;
+    clientOf?: (variant: string) => string;
+  },
   env: Record<string, string | undefined>,
   fetchImpl: (
     url: string,
@@ -1071,7 +1076,15 @@ export function createTraceExporter(
     trial(result, trial, input) {
       try {
         const key = identity(result, trial);
-        const spans = trialSpans(result, key, run, { ...options, input });
+        const attributes: RunAttributes = {
+          eval: run.eval,
+          runId: run.runId,
+          client: run.clientOf ? run.clientOf(key.variant) : run.client,
+        };
+        const spans = trialSpans(result, key, attributes, {
+          ...options,
+          input,
+        });
         // A trial saved again as it was (an environment's result, then the
         // case's) is sent once; one that changed is sent again, same IDs.
         const digest = createHash('sha256')
