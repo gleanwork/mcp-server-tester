@@ -23,11 +23,45 @@ describe('Cowork setup approval options', () => {
     });
   });
 
+  it("takes a variant's egress hosts over the eval's, and leaves them out when neither sets any", () => {
+    expect(
+      resolveCoworkSetupConfig({ egressAllowedHosts: ['*'] }, undefined)
+    ).toEqual({ approveWriteTools: false, egressAllowedHosts: ['*'] });
+    expect(
+      resolveCoworkSetupConfig(
+        { egressAllowedHosts: ['*'] },
+        { egressAllowedHosts: [] }
+      )
+    ).toEqual({ approveWriteTools: false, egressAllowedHosts: [] });
+    expect(resolveCoworkSetupConfig({}, {})).toEqual({
+      approveWriteTools: false,
+    });
+  });
+
+  it("takes a variant's disabled built-in tools over the eval's", () => {
+    expect(
+      resolveCoworkSetupConfig({ disabledBuiltinTools: ['WebSearch'] }, {})
+    ).toEqual({
+      approveWriteTools: false,
+      disabledBuiltinTools: ['WebSearch'],
+    });
+    expect(
+      resolveCoworkSetupConfig(
+        { disabledBuiltinTools: ['WebSearch'] },
+        { disabledBuiltinTools: [] }
+      )
+    ).toEqual({ approveWriteTools: false, disabledBuiltinTools: [] });
+  });
+
   it.each([
     null,
     true,
     [],
     'all',
+    { egressAllowedHosts: '*' },
+    { egressAllowedHosts: [''] },
+    { disabledBuiltinTools: 'WebSearch' },
+    { disabledBuiltinTools: [''] },
     { approveWriteTools: 'true' },
     { approveWriteTools: 1 },
     { approveWriteTools: null },

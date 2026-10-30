@@ -29,6 +29,11 @@ export interface CoworkPlatform {
     stdioPaths?: ClientStdioPaths;
     /** macOS: run exactly this Claude Desktop version instead of the installed one. */
     appVersion?: string;
+    /**
+     * Linux owned-desktop mode: Claude Desktop's managed `otlp*` settings,
+     * pointing its OpenTelemetry at MST's receiver (`telemetry.host`).
+     */
+    otlpSettings?: Record<string, unknown>;
   }): Promise<{
     /** macOS returns the installed, caller-owned or pinned application path. */
     appPath?: string;

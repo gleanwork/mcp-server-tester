@@ -6,7 +6,7 @@ import { fileToken, staticToken, type TokenSource } from './dryRunProxy.js';
 export const DRY_RUN_PROXY_USAGE = `Usage: dryRun --upstream-url <url> --name <label>
   [--token-file <path> | --token-env <NAME>]
   [--header NAME:VALUE]... [--read-only TOOL]... [--always-write TOOL]...
-  [--planned-write-alias KEY]...
+  [--planned-write-alias KEY]... [--forward-writes] [--request-timeout-ms <ms>]
   [--simulate-writes <file> [--write-replies <json>]]`;
 
 export function parseDryRunProxyArgs(
@@ -24,6 +24,8 @@ export function parseDryRunProxyArgs(
       'read-only': { type: 'string', multiple: true, default: [] },
       'always-write': { type: 'string', multiple: true, default: [] },
       'planned-write-alias': { type: 'string', multiple: true, default: [] },
+      'forward-writes': { type: 'boolean', default: false },
+      'request-timeout-ms': { type: 'string' },
       'simulate-writes': { type: 'string' },
       'write-replies': { type: 'string' },
     },
@@ -56,6 +58,14 @@ export function parseDryRunProxyArgs(
     headers[raw.slice(0, colon).trim()] = raw.slice(colon + 1).trim();
   }
   const writesFile = values['simulate-writes'];
+  if (values['forward-writes'] && writesFile)
+    throw new Error('Use --forward-writes or --simulate-writes, not both.');
+  let requestTimeoutMs: number | undefined;
+  if (values['request-timeout-ms'] !== undefined) {
+    requestTimeoutMs = Number(values['request-timeout-ms']);
+    if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs <= 0)
+      throw new Error('--request-timeout-ms takes a positive whole number.');
+  }
   if (values['write-replies'] !== undefined && !writesFile)
     throw new Error('--write-replies needs --simulate-writes.');
   if (writesFile !== undefined && !isAbsolute(writesFile))
@@ -80,6 +90,8 @@ export function parseDryRunProxyArgs(
     readOnlyTools: values['read-only'],
     alwaysWriteTools: values['always-write'],
     plannedWriteAliases: values['planned-write-alias'],
+    ...(values['forward-writes'] ? { forwardWrites: true } : {}),
+    ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
     ...(writesFile
       ? {
           simulateWrites: {

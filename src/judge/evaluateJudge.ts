@@ -6,6 +6,7 @@
 import type { ValidationResult } from '../assertions/validators/types.js';
 import type { TraceEvidence } from '../evals/evalFrameworkTypes.js';
 import { parseExtensionOptions } from '../plugins/plugin.js';
+import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 import { getJudge } from './builtinJudges.js';
 import {
   buildJudgeCase,
@@ -26,6 +27,8 @@ export interface JudgeRun {
   clientResponse?: unknown;
   /** How the client trace was observed. */
   evidence?: TraceEvidence;
+  /** The eval's plugin settings; the judge gets its plugin's (ADR 0008). */
+  settings?: SettingsSections;
 }
 
 /** Minimum judge score that passes when no threshold is given. */
@@ -73,7 +76,8 @@ export interface JudgeRequest {
  * naming the judge and what's wrong.
  */
 export async function preflightJudgeRequest(
-  request: JudgeRequest
+  request: JudgeRequest,
+  settings?: SettingsSections
 ): Promise<void> {
   try {
     const judge = getJudge(request.judge);
@@ -82,7 +86,9 @@ export async function preflightJudgeRequest(
       request.options,
       `judge options "${request.judge}"`
     );
-    await judge.preflight?.(options);
+    await judge.preflight?.(options, {
+      settings: settingsFor(settings, request.judge),
+    });
   } catch (error) {
     throw new Error(
       `Judge "${request.label}" can't run: ${error instanceof Error ? error.message : String(error)}`
@@ -122,6 +128,7 @@ export async function evaluateJudge(
       case: buildJudgeCase(run.evalCase, request.reference),
       trial: buildJudgeTrial(response, run),
     };
+    const context = { settings: settingsFor(run.settings, request.judge) };
     const missing = missingRequirement(input, judge.requires);
     if (missing !== undefined)
       return judgeSkipped(label, `no ${missing}`, undefined);
@@ -131,7 +138,7 @@ export async function evaluateJudge(
       let repScore: CheckedJudgeScore;
       try {
         repScore = checkJudgeScore(
-          await judge.evaluate(input, options),
+          await judge.evaluate(input, options, context),
           threshold
         );
       } catch (err) {

@@ -35,6 +35,7 @@ import {
 } from '../toolSurfaceProxy.js';
 import { startToolSurfaceProxy } from '../toolSurfaceProxyServer.js';
 import { installPlugins } from '../../plugins/extensions.js';
+import { settingsFor } from '../../plugins/settings.js';
 import {
   loadPlugins,
   resolvePluginPackage,
@@ -337,6 +338,7 @@ export async function collectShard(
         );
       connectors = await expandWorkerConnectors([...declarations.values()], {
         tokenDirectory: path.join(tokensDir, 'connectors'),
+        runId: bundle.runId,
         ...(simulatedWritesDir
           ? { simulatedWritesDirectory: simulatedWritesDir }
           : {}),
@@ -347,6 +349,8 @@ export async function collectShard(
       ...runEnv,
       ...connectorEnv,
       MST_TOKENS_DIR: tokensDir,
+      // Which run a host's own telemetry belongs to (`telemetry.host`).
+      MST_RUN_ID: bundle.runId,
     };
     // Servers arrive as declared; their secrets come from this machine's
     // environment and the coordinator's `tokens`.
@@ -390,6 +394,10 @@ export async function collectShard(
         evalConfig: bundle.evalConfig,
         variant: batch.variant,
         env: runtimeEnv,
+        settings: settingsFor(
+          bundle.evalConfig.settings,
+          batch.requests[0]!.config.type
+        ),
       };
       // A variant's tool metadata reaches a proxied client through a proxy
       // on this machine, as in a local run.

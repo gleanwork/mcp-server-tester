@@ -44,9 +44,12 @@ let dataRoot: string;
 beforeEach(async () => {
   dataRoot = await realpath(await mkdtemp(join(tmpdir(), 'mst-ready-')));
   process.env.FAKE_PARENT_SECRET = 'parent-secret';
+  // Failures here are deterministic: don't wait out the preflight retries.
+  process.env.MST_COWORK_MCP_PREFLIGHT_RETRY_S = '';
 });
 afterEach(async () => {
   delete process.env.FAKE_PARENT_SECRET;
+  delete process.env.MST_COWORK_MCP_PREFLIGHT_RETRY_S;
   await rm(dataRoot, { recursive: true, force: true });
 });
 async function ready(token: string, url?: string) {

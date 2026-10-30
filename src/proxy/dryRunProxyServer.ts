@@ -24,6 +24,17 @@ export interface DryRunProxyServerOptions {
   /** Extra keys for the planned-write result, for graders that read an older name. */
   plannedWriteAliases?: readonly string[];
   /**
+   * Forward writes too, for a server that handles writes itself: the proxy
+   * then only carries the token MST renews. Not with `simulateWrites`.
+   */
+  forwardWrites?: boolean;
+  /**
+   * How long a request may take, through the proxy and upstream. Default: 120
+   * seconds. Raise it for tools slower than that, so the client's own limit
+   * applies.
+   */
+  requestTimeoutMs?: number;
+  /**
    * Answer writes with a success reply and record them in `file` instead of
    * a planned-write result. Pass a connector's `launch` context
    * `simulateWrites` here, with the connector's reply templates.
@@ -74,6 +85,19 @@ export function dryRunProxyEntry(): string {
 export function dryRunProxyServer(
   options: DryRunProxyServerOptions
 ): StdioMCPConfig {
+  // Fail here, where the connector is defined, not when the proxy starts.
+  if (options.forwardWrites && options.simulateWrites)
+    throw new Error(
+      'dryRunProxyServer: forwardWrites and simulateWrites exclude each other.'
+    );
+  const { requestTimeoutMs } = options;
+  if (
+    requestTimeoutMs !== undefined &&
+    (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs <= 0)
+  )
+    throw new Error(
+      'dryRunProxyServer: requestTimeoutMs takes a positive whole number of milliseconds.'
+    );
   const args = [
     dryRunProxyEntry(),
     '--upstream-url',
@@ -90,6 +114,9 @@ export function dryRunProxyServer(
     args.push('--always-write', tool);
   for (const key of options.plannedWriteAliases ?? [])
     args.push('--planned-write-alias', key);
+  if (options.forwardWrites) args.push('--forward-writes');
+  if (options.requestTimeoutMs !== undefined)
+    args.push('--request-timeout-ms', String(options.requestTimeoutMs));
   if (options.simulateWrites) {
     args.push('--simulate-writes', options.simulateWrites.file);
     if (options.simulateWrites.replies)
@@ -106,8 +133,8 @@ export function dryRunProxyServer(
     // The proxy needs no ambient environment; a token never travels in env.
     inheritEnv: false,
     connectTimeoutMs: 120_000,
-    requestTimeoutMs: 120_000,
-    callTimeoutMs: 120_000,
+    requestTimeoutMs: options.requestTimeoutMs ?? 120_000,
+    callTimeoutMs: options.requestTimeoutMs ?? 120_000,
     ...(options.minTools !== undefined ? { minTools: options.minTools } : {}),
   };
 }

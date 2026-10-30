@@ -63,7 +63,9 @@ const TOOLS = [
 ];
 
 /** A fake vendor MCP server behind bearer auth, reachable through `fetch`. */
-function fakeVendor(options: { tools?: typeof TOOLS } = {}) {
+function fakeVendor(
+  options: { tools?: typeof TOOLS; instructions?: string } = {}
+) {
   const calls: string[] = [];
   const tokens: string[] = [];
   let validToken = 'token-1';
@@ -72,7 +74,12 @@ function fakeVendor(options: { tools?: typeof TOOLS } = {}) {
   function newServer() {
     const server = new Server(
       { name: 'vendor', version: '1' },
-      { capabilities: { tools: { listChanged: true } } }
+      {
+        capabilities: { tools: { listChanged: true } },
+        ...(options.instructions !== undefined
+          ? { instructions: options.instructions }
+          : {}),
+      }
     );
     server.setRequestHandler('tools/list', async () => ({
       tools: options.tools ?? TOOLS,
@@ -164,6 +171,21 @@ describe('dry-run proxy', () => {
     return connected;
   }
 
+  it("passes on the upstream server's instructions", async () => {
+    const instructions =
+      'Search company knowledge with search. Connected: Slack, Jira.';
+    const { client } = await start({
+      vendor: fakeVendor({ instructions }),
+      token: staticToken('token-1'),
+    });
+    expect(client.getInstructions()).toBe(instructions);
+    const plain = await start({
+      vendor: fakeVendor(),
+      token: staticToken('token-1'),
+    });
+    expect(plain.client.getInstructions()).toBeUndefined();
+  });
+
   it('lists the upstream tools unchanged', async () => {
     const vendor = fakeVendor();
     const { client } = await start({ vendor, token: staticToken('token-1') });
@@ -204,6 +226,32 @@ describe('dry-run proxy', () => {
       ).toHaveProperty(PLANNED_WRITE_KEY);
 
     expect(vendor.calls).toEqual(['search']);
+  });
+
+  it('forwards writes too with forwardWrites, even to tools the server does not list', async () => {
+    const vendor = fakeVendor();
+    const { client } = await start({
+      vendor,
+      token: staticToken('token-1'),
+      forwardWrites: true,
+      alwaysWriteTools: ['search'],
+    });
+    for (const name of ['search', 'send_message', 'purge'])
+      expect((await client.callTool({ name, arguments: {} })).content).toEqual([
+        { type: 'text', text: `ran ${name}` },
+      ]);
+    expect(vendor.calls).toEqual(['search', 'send_message', 'purge']);
+  });
+
+  it('refuses forwardWrites with simulateWrites', async () => {
+    await expect(
+      connect({
+        vendor: fakeVendor(),
+        token: staticToken('token-1'),
+        forwardWrites: true,
+        simulateWrites: { file: join(dir, 'w.jsonl') },
+      })
+    ).rejects.toThrow('exclude each other');
   });
 
   it('applies the read-only and always-write lists', async () => {
@@ -533,6 +581,38 @@ describe('parseDryRunProxyArgs', () => {
         '[1]',
       ])
     ).toThrow('--write-replies must be a JSON object.');
+  });
+
+  it('parses forwarded writes and a request timeout', () => {
+    const base = [
+      '--upstream-url',
+      'https://mcp.example/mcp',
+      '--name',
+      'glean',
+    ];
+    expect(
+      parseDryRunProxyArgs([
+        ...base,
+        '--forward-writes',
+        '--request-timeout-ms',
+        '300000',
+      ])
+    ).toMatchObject({ forwardWrites: true, requestTimeoutMs: 300_000 });
+    const plain = parseDryRunProxyArgs(base);
+    expect(plain.forwardWrites).toBeUndefined();
+    expect(plain.requestTimeoutMs).toBeUndefined();
+    for (const bad of ['0', '-5', '1.5', 'soon'])
+      expect(() =>
+        parseDryRunProxyArgs([...base, `--request-timeout-ms=${bad}`])
+      ).toThrow('positive whole number');
+    expect(() =>
+      parseDryRunProxyArgs([
+        ...base,
+        '--forward-writes',
+        '--simulate-writes',
+        '/tmp/w.jsonl',
+      ])
+    ).toThrow('not both');
   });
 
   it('rejects plaintext upstreams off loopback', () => {

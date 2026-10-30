@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { extensionLookup } from '../../plugins/extensions.js';
+import { settingsFor, type SettingsSections } from '../../plugins/settings.js';
 import { defaultGrantsDirectory, localCredentialStore } from './localStore.js';
 import type { CredentialStore, CredentialStoreDefinition } from './types.js';
 
@@ -23,12 +24,18 @@ export function getCredentialStore(
 /**
  * The store `--store` names: a plugin's (`<namespace>/credential-store/<name>`,
  * once its plugin is loaded) or a directory. Without one, MST's local
- * directory (`~/.mcp-server-tester/grants`).
+ * directory (`~/.mcp-server-tester/grants`). `settings` are the eval's plugin
+ * settings; a plugin's store gets its plugin's (ADR 0008).
  */
-export function credentialStoreFor(store: string | undefined): CredentialStore {
+export function credentialStoreFor(
+  store: string | undefined,
+  settings?: SettingsSections
+): CredentialStore {
   if (store === undefined)
     return localCredentialStore(defaultGrantsDirectory());
   if (isCredentialStoreReference(store))
-    return getCredentialStore(store).create();
+    return getCredentialStore(store).create({
+      settings: settingsFor(settings, store),
+    });
   return localCredentialStore(path.resolve(store));
 }

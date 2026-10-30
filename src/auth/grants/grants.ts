@@ -21,6 +21,7 @@ import {
   type TokenResponse,
 } from './oauthHttp.js';
 import { callbackServer } from './callbackServer.js';
+import type { SettingsContext } from '../../plugins/plugin.js';
 import type {
   ConnectorAuth,
   CredentialStore,
@@ -37,7 +38,7 @@ const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
  * One grant: the store key, the servers that share it, and how to sign in.
  * Built from one connector, or several with the same `grant`.
  */
-export interface GrantTarget {
+export interface GrantTarget extends SettingsContext {
   /** The credential store key, e.g. `acme.google`. */
   key: string;
   /** For messages, e.g. `acme/google`. */
@@ -65,6 +66,11 @@ export type GrantState =
   | { state: 'missing' }
   | { state: 'valid'; grant: StoredGrant; refreshable: boolean }
   | { state: 'plugin' };
+
+/** What a connector's auth functions get: its plugin's settings (ADR 0008). */
+function settingsOf(target: GrantTarget): SettingsContext {
+  return { settings: target.settings };
+}
 
 function base64url(bytes: Buffer): string {
   return bytes.toString('base64url');
@@ -140,7 +146,7 @@ async function authorizationCodeSignIn(
   );
   try {
     let client: OAuthClient;
-    if (auth.client) client = await auth.client();
+    if (auth.client) client = await auth.client(settingsOf(target));
     else if (server.registrationEndpoint)
       client = {
         clientId: await registerClient(
@@ -217,7 +223,7 @@ async function deviceSignIn(
     throw new OAuthHttpError(
       `${target.name}: device sign-in needs a registered client.`
     );
-  const client = await auth.client();
+  const client = await auth.client(settingsOf(target));
   const scopes = scopesOf(auth);
   const device = await postForm(
     server.deviceAuthorizationEndpoint,
@@ -328,8 +334,7 @@ export async function signIn(
   await store.withLock(target.key, async () => {
     const previous = await store.get(target.key);
     await store.put(target.key, grant);
-    if (previous)
-      await revokeStored(previous, target.auth, fetchFn).catch(() => {});
+    if (previous) await revokeStored(previous, target, fetchFn).catch(() => {});
   });
   return grant;
 }
@@ -372,13 +377,13 @@ export async function accessToken(
   const now = options.now ?? Date.now;
   if (auth.type === 'none') throw new Error(`${target.name} has no auth.`);
   if (auth.type === 'static') {
-    const token = (await auth.token()).trim();
+    const token = (await auth.token(settingsOf(target))).trim();
     if (!token)
       throw new Error(`${target.name}: the connector returned an empty token.`);
     return { accessToken: token };
   }
   if (auth.type === 'client-credentials') {
-    const client = await auth.client();
+    const client = await auth.client(settingsOf(target));
     const token = tokenResponse(
       await postForm(
         checkEndpoint(auth.tokenEndpoint, 'tokenEndpoint'),
@@ -415,7 +420,9 @@ export async function accessToken(
       return { accessToken: grant.accessToken, expiresAt: cachedUntil };
     if (grant.type === 'token' || !grant.refreshToken || !grant.tokenEndpoint)
       throw new MissingGrantError(target, 'expired');
-    const client = auth.client ? await auth.client() : undefined;
+    const client = auth.client
+      ? await auth.client(settingsOf(target))
+      : undefined;
     let token: TokenResponse;
     try {
       token = tokenResponse(
@@ -458,14 +465,17 @@ export async function accessToken(
 
 async function revokeStored(
   grant: StoredGrant,
-  auth: ConnectorAuth,
+  target: GrantTarget,
   fetchFn: FetchFn
 ): Promise<void> {
   if (!grant.revocationEndpoint) return;
   const token = grant.refreshToken ?? grant.accessToken;
   if (!token) return;
+  const auth = target.auth;
   const client =
-    auth.type === 'oauth' && auth.client ? await auth.client() : undefined;
+    auth.type === 'oauth' && auth.client
+      ? await auth.client(settingsOf(target))
+      : undefined;
   await postForm(
     grant.revocationEndpoint,
     {
@@ -487,9 +497,7 @@ export async function revokeGrant(
   return store.withLock(target.key, async () => {
     const grant = await store.get(target.key);
     if (!grant) return false;
-    await revokeStored(grant, target.auth, options.fetch ?? fetch).catch(
-      () => {}
-    );
+    await revokeStored(grant, target, options.fetch ?? fetch).catch(() => {});
     await store.delete(target.key);
     return true;
   });

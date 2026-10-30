@@ -682,6 +682,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
       isLocalDevMcpEnabled: false,
       isDesktopExtensionEnabled: false,
       disabledBuiltinTools: ['AskUserQuestion'],
+      coworkEgressAllowedHosts: ['*'],
     });
     // The restart, then the usual probe.
     expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
@@ -694,6 +695,45 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     expect(await readFile(file, 'utf8')).toBe(original);
   });
 
+  it("lets Cowork reach public hosts unless the image or the eval names others; the eval's list wins", async () => {
+    const egressOf = async (
+      base: Record<string, unknown>,
+      hosts?: string[]
+    ): Promise<unknown> => {
+      const file = join(directory, 'settings.json');
+      await writeFile(file, `${JSON.stringify(base)}\n`);
+      const prepared = await linuxCoworkPlatform.prepare({
+        evalConfig: {
+          ...evalConfig,
+          ...(hosts ? { coworkSetup: { egressAllowedHosts: hosts } } : {}),
+        },
+        model: 'test-model',
+        env: {
+          ...session,
+          MST_COWORK_SETTINGS_FILE: file,
+          MST_DESKTOP_OWNED: '1',
+          MST_DESKTOP_RESTART: RESTART,
+        },
+      });
+      const written = JSON.parse(await readFile(file, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      await prepared.dispose();
+      return written.coworkEgressAllowedHosts;
+    };
+    expect(await egressOf(image)).toEqual(['*']);
+    expect(
+      await egressOf({ ...image, coworkEgressAllowedHosts: ['example.com'] })
+    ).toEqual(['example.com']);
+    expect(
+      await egressOf({ ...image, coworkEgressAllowedHosts: ['*'] }, [])
+    ).toEqual([]);
+    expect(await egressOf(image, ['docs.example.com'])).toEqual([
+      'docs.example.com',
+    ]);
+  });
+
   it("keeps the image's own disabled built-in tools beside AskUserQuestion", async () => {
     const { file, lifecycle } = await prepareOwned(
       {},
@@ -704,6 +744,82 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
       JSON.parse(await readFile(file, 'utf8')).disabledBuiltinTools
     ).toEqual(['WebFetch', 'AskUserQuestion']);
     await prepared.dispose();
+  });
+
+  it("adds the eval's disabled built-in tools to the image's and AskUserQuestion", async () => {
+    const file = join(directory, 'settings.json');
+    await writeFile(
+      file,
+      `${JSON.stringify({ ...image, disabledBuiltinTools: ['WebFetch'] })}\n`
+    );
+    const prepared = await linuxCoworkPlatform.prepare({
+      evalConfig: {
+        ...evalConfig,
+        coworkSetup: { disabledBuiltinTools: ['WebSearch', 'WebFetch'] },
+      },
+      model: 'test-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+      },
+    });
+    expect(
+      JSON.parse(await readFile(file, 'utf8')).disabledBuiltinTools
+    ).toEqual(['WebFetch', 'AskUserQuestion', 'WebSearch']);
+    await prepared.dispose();
+  });
+
+  it("points Claude Desktop's OpenTelemetry at MST's receiver, in place of the image's", async () => {
+    const file = join(directory, 'settings.json');
+    await writeFile(
+      file,
+      `${JSON.stringify({
+        ...image,
+        otlpEndpoint: 'https://collector.example',
+        otlpHeadersHelper: '/opt/otel-headers.sh',
+        otlpContentCapture: ['userPrompts'],
+      })}\n`
+    );
+    const prepared = await linuxCoworkPlatform.prepare({
+      evalConfig,
+      model: 'test-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+      },
+      otlpSettings: {
+        otlpEndpoint: 'http://localhost:4318/secret',
+        otlpProtocol: 'http/json',
+      },
+    });
+    const written = JSON.parse(await readFile(file, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    expect(
+      Object.fromEntries(
+        Object.entries(written).filter(([key]) => key.startsWith('otlp'))
+      )
+    ).toEqual({
+      otlpEndpoint: 'http://localhost:4318/secret',
+      otlpProtocol: 'http/json',
+    });
+    await prepared.dispose();
+  });
+
+  it('records host telemetry only where MST owns the desktop', async () => {
+    await expect(
+      linuxCoworkPlatform.prepare({
+        evalConfig,
+        model: 'test-model',
+        env: { ...session },
+        otlpSettings: { otlpEndpoint: 'http://localhost:4318/secret' },
+      })
+    ).rejects.toThrow('needs owned-desktop mode');
   });
 
   it('needs a restart command, and touches nothing without one', async () => {
@@ -775,6 +891,47 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await prepared.dispose();
     await expect(stat(headers)).rejects.toThrow();
     await expect(stat(helper)).rejects.toThrow();
+  });
+
+  it('restarts the desktop again when a restart fails, before failing the variant', async () => {
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+    try {
+      child.responses.push({ failed: true });
+      const prepared = await (await prepareOwned()).lifecycle;
+      expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
+        RESTART,
+        RESTART,
+        'python3',
+      ]);
+      expect(String(stderr.mock.calls.at(-1)?.[0])).toContain(
+        'desktop restart failed'
+      );
+      await prepared.dispose();
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('fails the variant and restores the settings when both restarts fail', async () => {
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+    try {
+      child.responses.push({ failed: true }, { failed: true });
+      const { file, original, lifecycle } = await prepareOwned();
+      await expect(lifecycle).rejects.toThrow(
+        /failed after MST wrote the variant settings, 2 times/
+      );
+      expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
+        RESTART,
+        RESTART,
+      ]);
+      expect(await readFile(file, 'utf8')).toBe(original);
+    } finally {
+      stderr.mockRestore();
+    }
   });
 
   it('restores the settings when the desktop is not ready after them', async () => {

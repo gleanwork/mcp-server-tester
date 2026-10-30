@@ -13,6 +13,8 @@ export type CodexSetupErrorCode =
   | 'codex_path_invalid'
   | 'api_key_file_unsafe'
   | 'api_key_invalid'
+  | 'inference_token_unsafe'
+  | 'inference_unavailable'
   | 'login_failed'
   | 'login_timeout'
   | 'login_unverified'

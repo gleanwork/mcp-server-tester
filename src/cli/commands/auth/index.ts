@@ -75,7 +75,7 @@ async function context(
     uses = uses.filter((use) => wanted.has(use.label));
   }
   // A plugin's store resolves now that the eval's plugins are loaded.
-  const store = credentialStoreFor(options.store);
+  const store = credentialStoreFor(options.store, evalConfig.settings);
   return { targets: grantTargets(uses), store, print };
 }
 

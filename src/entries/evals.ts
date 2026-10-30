@@ -72,6 +72,11 @@ export type {
   ClientRunOptions,
   ClientBatchRequest,
   ClientRunResult,
+  HostTelemetry,
+  HostTelemetryEvent,
+  HostTelemetryMetric,
+  HostTelemetrySpan,
+  HostAttributeValue,
   ClientRunInput,
   ClientRunContext as EvaluationClientRunContext,
   MetricDefinition,
@@ -209,3 +214,16 @@ export type {
 // Agentic judges: an agent (Claude Agent SDK, or Codex) grades over a
 // workspace of the trial's evidence.
 export * from '../judge/agentic/index.js';
+
+// The host's own OpenTelemetry (`telemetry.host`): a plugin client points
+// its host at the process's receiver and collects each trial's records.
+export {
+  hostTelemetryReceiver,
+  claudeCodeOtelEnv,
+  claudeDesktopOtlpSettings,
+} from '../evals/telemetry/hostReceiver.js';
+export type {
+  CollectOptions as HostTelemetryCollectOptions,
+  HostTelemetryReceiver,
+} from '../evals/telemetry/hostReceiver.js';
+export type { HostTelemetryConfig } from '../evals/evalConfig.js';

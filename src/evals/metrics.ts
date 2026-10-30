@@ -5,6 +5,7 @@ import type { UsageMetrics } from '../types/index.js';
 import type { Trace } from './evalFrameworkTypes.js';
 import { isInfrastructureFailure } from './infrastructureFailure.js';
 import { extensionLookup } from '../plugins/extensions.js';
+import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 /**
  * Tagged options are passed to compute without routing keys (type/metric/name).
  * Legacy params are flattened for compatibility; keys may not also occur at the
@@ -722,8 +723,7 @@ function metricOptions(spec: MetricSpec): Record<string, unknown> {
 
 /** Resolve one config metric, including parameterized judge metrics. */
 export function resolveMetric(spec: MetricSpec): ResolvedMetric {
-  const name =
-    typeof spec === 'string' ? spec : (spec.metric ?? spec.type ?? spec.name);
+  const name = metricReference(spec);
   const params = metricOptions(spec);
   if (!name) throw new Error('Metric configuration requires a type or name.');
   const metric = metrics.get(name);
@@ -740,11 +740,30 @@ export function resolveMetric(spec: MetricSpec): ResolvedMetric {
   };
 }
 
+/** The metric a spec names: its `metric`, `type` or `name`. */
+function metricReference(spec: MetricSpec): string | undefined {
+  return typeof spec === 'string'
+    ? spec
+    : (spec.metric ?? spec.type ?? spec.name);
+}
+
+/**
+ * Compute each metric for every case, then aggregate. `settings` are the
+ * eval's plugin settings; a plugin metric gets its plugin's (ADR 0008).
+ */
 export function computeMetrics(
   specs: MetricSpec[],
-  cases: EvalCaseResult[]
+  cases: EvalCaseResult[],
+  settings?: SettingsSections
 ): MetricResult {
   const resolved = specs.map((spec) => resolveMetric(spec));
+  const contexts = specs.map((spec) => {
+    const reference = metricReference(spec);
+    return {
+      settings:
+        reference === undefined ? undefined : settingsFor(settings, reference),
+    };
+  });
   const perCase: MetricResult['perCase'] = Object.create(
     null
   ) as MetricResult['perCase'];
@@ -757,8 +776,12 @@ export function computeMetrics(
       string,
       MetricValue
     >;
-    for (const item of resolved)
-      values[item.outName] = item.metric.compute(caseResult, item.params);
+    for (const [index, item] of resolved.entries())
+      values[item.outName] = item.metric.compute(
+        caseResult,
+        item.params,
+        contexts[index]
+      );
     // Preserve legacy keys for unique IDs. Qualify collisions by dataset and
     // occurrence (also distinguishes repeated cases from different variants).
     let key = caseResult.id;
@@ -779,11 +802,11 @@ export function computeMetrics(
 
   const aggregated: Record<string, unknown> = {};
   const unavailable: string[] = [];
-  for (const item of resolved) {
+  for (const [index, item] of resolved.entries()) {
     // Aggregate rows directly, never via a potentially shared case ID.
     const values = rows.map((row) => row[item.outName] ?? null);
     const aggregate = item.metric.aggregate
-      ? item.metric.aggregate(values, item)
+      ? item.metric.aggregate(values, item, contexts[index])
       : item.metric.kind === 'binary'
         ? rateAggregation(values, item)
         : item.metric.kind === 'continuous'

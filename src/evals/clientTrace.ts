@@ -39,6 +39,7 @@ export function clientRunToExecution(
     kind: 'completed',
     trace: {
       events: trace.events,
+      ...timing(trace),
       finalText: trace.finalText,
       evidence,
       ...(trace.usage ? { usage: trace.usage } : {}),
@@ -86,6 +87,18 @@ export function clientRunToExecution(
   };
 }
 
+/** A client run's model requests, task times and host telemetry, for its trace. */
+function timing(
+  run: ClientRunResult
+): Pick<Trace, 'modelCalls' | 'hostTelemetry' | 'startedAt' | 'completedAt'> {
+  return {
+    ...(run.modelCalls?.length ? { modelCalls: run.modelCalls } : {}),
+    ...(run.hostTelemetry ? { hostTelemetry: run.hostTelemetry } : {}),
+    ...(run.startedAt ? { startedAt: run.startedAt } : {}),
+    ...(run.completedAt ? { completedAt: run.completedAt } : {}),
+  };
+}
+
 /** Compatibility shim for existing SDK/CLI simulators, not a second evaluator. */
 export function simulationToClientRun(
   result: MstClientSimulationResult,
@@ -128,6 +141,8 @@ export function simulationToClientRun(
       ? undefined
       : (result.error ?? 'Client execution failed.'),
     usage: result.usage,
+    ...(result.modelCalls?.length ? { modelCalls: result.modelCalls } : {}),
+    ...(result.hostTelemetry ? { hostTelemetry: result.hostTelemetry } : {}),
     ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
     // Skill loads by the simulated client become ordered `skill` events.
     events: result.skillLoads
@@ -165,6 +180,8 @@ export function simulationTrace(result: MstClientSimulationResult): Trace {
       : result.skillLoads
         ? withSkillEvents(events, result.skillLoads)
         : events,
+    ...(result.modelCalls?.length ? { modelCalls: result.modelCalls } : {}),
+    ...(result.hostTelemetry ? { hostTelemetry: result.hostTelemetry } : {}),
     ...(result.response !== undefined ? { finalText: result.response } : {}),
     ...(result.usage ? { usage: result.usage } : {}),
     ...(result.success === false

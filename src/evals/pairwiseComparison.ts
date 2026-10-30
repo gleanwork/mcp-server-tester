@@ -24,7 +24,11 @@ import type {
   PairwisePreference,
 } from '../judge/pairwiseContract.js';
 import { extensionLookup } from '../plugins/extensions.js';
-import { parseExtensionOptions } from '../plugins/plugin.js';
+import {
+  parseExtensionOptions,
+  type SettingsContext,
+} from '../plugins/plugin.js';
+import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 
 const pairwiseJudges = extensionLookup('pairwiseJudges', () => ({}));
 
@@ -43,7 +47,8 @@ export function listPairwiseJudges(): Array<[string, PairwiseJudgeDefinition]> {
  * once per judge and options, before anything is collected.
  */
 export async function preflightPairwiseJudges(
-  specs: readonly PairwiseJudgeSpec[]
+  specs: readonly PairwiseJudgeSpec[],
+  settings?: SettingsSections
 ): Promise<void> {
   const checked = new Set<string>();
   for (const spec of specs) {
@@ -56,7 +61,8 @@ export async function preflightPairwiseJudges(
           judge.schema,
           spec.options ?? {},
           `pairwise judge options "${spec.type}"`
-        )
+        ),
+        { settings: settingsFor(settings, spec.type) }
       );
     checked.add(key);
   }
@@ -82,17 +88,20 @@ export interface ComparePairwiseOptions {
   cases?: ReadonlyMap<string, JudgeCaseSource>;
   /** Cases compared at once. @default 4 */
   concurrency?: number;
+  /** The eval's plugin settings; each judge gets its plugin's (ADR 0008). */
+  settings?: SettingsSections;
   /**
    * Where each case is compared: called with the case's id, the pairwise
    * judges' names (one preference each, in order), and `judge`, which runs
-   * every pairwise judge on it here. Without it, every case is
-   * compared here. `mst grade --env` (ADR 0005) records what workers' judges
-   * preferred, and reads those records back on the coordinator.
+   * every pairwise judge on it here, or only those `only` names. Without it,
+   * every case is compared here. `mst grade --env` (ADR 0005) records what
+   * workers' judges preferred, and reads those records back on the
+   * coordinator; `mst grade --resume` runs only judges without a preference.
    */
   judgeCase?: (
     caseId: string,
     judges: readonly string[],
-    judge: () => Promise<PairwiseCasePreference[]>
+    judge: (only?: readonly string[]) => Promise<PairwiseCasePreference[]>
   ) => Promise<PairwiseCasePreference[]>;
 }
 
@@ -239,7 +248,8 @@ async function judgeCase(
   judge: PairwiseJudgeDefinition,
   options: Record<string, unknown>,
   reps: number,
-  input: PairwiseJudgeInput
+  input: PairwiseJudgeInput,
+  context: SettingsContext
 ): Promise<PairwiseCasePreference> {
   const missing = missingRequirement(input, judge.requires);
   if (missing !== undefined)
@@ -254,10 +264,14 @@ async function judgeCase(
   const reverse: PairwisePreference[] = [];
   try {
     for (let i = 0; i < reps; i++) {
-      forward.push(checkPreference(await judge.compare(input, options)));
+      forward.push(
+        checkPreference(await judge.compare(input, options, context))
+      );
       if (forward.at(-1)!.skipped) break;
       if (both) {
-        const r = checkPreference(await judge.compare(swapped, options));
+        const r = checkPreference(
+          await judge.compare(swapped, options, context)
+        );
         // Report the swapped preference from the original orientation.
         reverse.push({
           ...r,
@@ -413,6 +427,7 @@ export async function comparePairwise(
         `pairwise judge options "${spec.type}"`
       ),
       reps: Math.max(1, spec.reps ?? 1),
+      context: { settings: settingsFor(options.settings, spec.type) },
     };
   });
   const baseline = new Map(options.baseline.caseResults.map((r) => [r.id, r]));
@@ -431,12 +446,20 @@ export async function comparePairwise(
       baseline: trial(b),
       candidate: trial(c),
     };
-    const judge = async () => {
+    const judge = async (only?: readonly string[]) => {
       const preferences: PairwiseCasePreference[] = [];
       for (const r of resolved)
-        preferences.push(
-          await judgeCase(r.label, r.judge, r.options, r.reps, input)
-        );
+        if (!only || only.includes(r.label))
+          preferences.push(
+            await judgeCase(
+              r.label,
+              r.judge,
+              r.options,
+              r.reps,
+              input,
+              r.context
+            )
+          );
       return preferences;
     };
     const preferences = options.judgeCase

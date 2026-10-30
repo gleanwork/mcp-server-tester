@@ -8,6 +8,8 @@
  * Fail closed: a tool without annotations, or one the upstream server does
  * not list, is a write. `readOnlyTools` allows reads on servers that annotate
  * nothing; `alwaysWriteTools` intercepts tools that are annotated as reads.
+ * With `forwardWrites`, every call goes upstream: for a server that handles
+ * writes itself, which needs the proxy only for its renewed token.
  *
  * The token comes from a file MST rewrites when it renews the token. The
  * proxy re-reads the file when it changes, and after a 401 waits briefly for a
@@ -61,6 +63,13 @@ export interface DryRunProxyOptions {
   /** Extra keys for the planned-write result, for graders that read an older name. */
   plannedWriteAliases?: readonly string[];
   /**
+   * Forward every tool call, writes too: the upstream server handles writes
+   * itself (an eval endpoint, say). Not with `simulateWrites`.
+   */
+  forwardWrites?: boolean;
+  /** How long an upstream request may take. Default: 120 seconds. */
+  requestTimeoutMs?: number;
+  /**
    * Answer writes with a success reply instead of a planned-write result,
    * and record each in a file. The write still never reaches the server.
    */
@@ -89,6 +98,33 @@ export function staticToken(token: string): TokenSource {
   };
 }
 
+/** The token file is missing, not a file, or malformed. Its message names no token. */
+export class TokenFileError extends Error {
+  override name = 'TokenFileError';
+}
+
+/**
+ * Why the proxy couldn't start, safe to log: MST's own token-file error, or an
+ * error's class with a network error's code and an HTTP status. Never an
+ * upstream error's message, which can carry a token or a response body.
+ */
+export function describeStartupFailure(error: unknown): string {
+  if (error instanceof TokenFileError) return error.message;
+  if (!(error instanceof Error)) return typeof error;
+  const parts = [error.name];
+  const status =
+    (error as { code?: unknown; status?: unknown }).status ??
+    (error as { code?: unknown }).code;
+  if (typeof status === 'number') parts.push(`HTTP ${status}`);
+  else if (typeof status === 'string' && /^[A-Z_]+$/.test(status))
+    parts.push(status);
+  const cause = (error as { cause?: unknown }).cause;
+  const causeCode = (cause as { code?: unknown } | undefined)?.code;
+  if (typeof causeCode === 'string' && /^[A-Z_]+$/.test(causeCode))
+    parts.push(causeCode);
+  return parts.join(' ');
+}
+
 /**
  * The token in `path`, re-read whenever the file is replaced. MST replaces it
  * atomically (write, then rename), so a read never sees a partial file.
@@ -105,16 +141,17 @@ export function fileToken(
       info = lstatSync(path, { bigint: true });
     } catch {
       if (token) return token;
-      throw new Error('Cannot read the token file.');
+      throw new TokenFileError('Cannot read the token file.');
     }
     if (!info.isFile() || info.size > MAX_TOKEN_FILE_BYTES)
-      throw new Error('The token file is not a regular file.');
+      throw new TokenFileError('The token file is not a regular file.');
     const next = `${info.ino}:${info.mtimeNs}:${info.size}`;
     if (next !== stamp) {
       const parsed = TokenFileSchema.safeParse(
         JSON.parse(readFileSync(path, 'utf8'))
       );
-      if (!parsed.success) throw new Error('The token file is malformed.');
+      if (!parsed.success)
+        throw new TokenFileError('The token file is malformed.');
       token = parsed.data.accessToken;
       stamp = next;
     }
@@ -202,6 +239,9 @@ export async function createDryRunProxy(
   const readOnly = new Set(options.readOnlyTools ?? []);
   const alwaysWrite = new Set(options.alwaysWriteTools ?? []);
   const aliases = options.plannedWriteAliases ?? [];
+  if (options.forwardWrites && options.simulateWrites)
+    throw new Error('forwardWrites and simulateWrites exclude each other.');
+  const requestTimeout = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const tools = new Map<string, Tool>();
 
   const upstream = new Client({ name: 'mst-dry-run-proxy', version: '1.0' });
@@ -221,7 +261,7 @@ export async function createDryRunProxy(
     let cursor: string | undefined;
     do {
       const page = await upstream.listTools(cursor ? { cursor } : undefined, {
-        timeout: REQUEST_TIMEOUT_MS,
+        timeout: requestTimeout,
       });
       for (const tool of page.tools) tools.set(tool.name, tool);
       cursor = page.nextCursor;
@@ -229,14 +269,19 @@ export async function createDryRunProxy(
   }
 
   function isWrite(name: string): boolean {
+    if (options.forwardWrites) return false;
     if (alwaysWrite.has(name)) return true;
     if (readOnly.has(name)) return false;
     return !isReadOnlyTool(tools.get(name));
   }
 
+  // The upstream's instructions tell the client what the server is for (a
+  // search server's connected sources, say). Without them, a client uses the
+  // server less than it would without the proxy.
+  const instructions = upstream.getInstructions();
   const server = new Server(
     { name: options.name, version: '1.0' },
-    { capabilities }
+    { capabilities, ...(instructions ? { instructions } : {}) }
   );
 
   /**
@@ -282,7 +327,7 @@ export async function createDryRunProxy(
       return await upstream.request(
         { method, params } as Parameters<typeof upstream.request>[0],
         LooseResult,
-        { timeout: REQUEST_TIMEOUT_MS, signal }
+        { timeout: requestTimeout, signal }
       );
     } catch (error) {
       if (error instanceof ProtocolError) throw error;
@@ -310,7 +355,12 @@ export async function createDryRunProxy(
     });
     server.setRequestHandler('tools/call', async (request, context) => {
       const name = request.params.name;
-      if (!tools.has(name) && !alwaysWrite.has(name) && !readOnly.has(name))
+      if (
+        !options.forwardWrites &&
+        !tools.has(name) &&
+        !alwaysWrite.has(name) &&
+        !readOnly.has(name)
+      )
         await listAllTools().catch(() => {});
       if (isWrite(name)) {
         if (options.simulateWrites)

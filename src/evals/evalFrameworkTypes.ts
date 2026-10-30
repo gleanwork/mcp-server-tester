@@ -1,5 +1,5 @@
 import type { MCPToolOptimizationData } from '../types/reporter.js';
-import type { Plugin } from '../plugins/plugin.js';
+import type { Plugin, SettingsContext } from '../plugins/plugin.js';
 import type { RUN_FORMAT } from './resultFormat.js';
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
@@ -30,7 +30,7 @@ export interface DatasetRequest {
 }
 
 /** Context provided to a dataset source implementation. */
-export interface DatasetSourceContext {
+export interface DatasetSourceContext extends SettingsContext {
   rootDir: string;
   /** The eval config's directory; relative paths resolve here before `rootDir`. */
   configDir?: string;
@@ -72,7 +72,7 @@ export interface DatasetSource {
   ): Promise<EvalDataset>;
   /** A cheap summary for `mst datasets`, without loading cases. */
   describe?(
-    context: Pick<DatasetSourceContext, 'rootDir' | 'configDir'>
+    context: Pick<DatasetSourceContext, 'rootDir' | 'configDir' | 'settings'>
   ): Promise<DatasetSummary>;
 }
 
@@ -102,7 +102,7 @@ export interface ClientRunInput {
   env?: Record<string, string | undefined>;
 }
 
-export interface ClientRunContext {
+export interface ClientRunContext extends SettingsContext {
   evalConfig: EvalConfig;
   variant?: EvalVariant;
   /** Runtime-only environment isolated per eval. */
@@ -151,15 +151,137 @@ export interface TraceEvent {
   simulatedWrite?: boolean;
 }
 
+/**
+ * One model request a client made in a trial, from the client's own record
+ * of it (a native session log, an SDK step). Clients report what they saw:
+ * every field is optional, and a client that can't see its model requests
+ * reports none. `usage` stays the trial's total.
+ */
+export interface ModelCall {
+  /** The model that answered, as the provider named it. */
+  model?: string;
+  /** The provider's ID for the request or its response. */
+  id?: string;
+  /**
+   * The provider's request ID (Anthropic's `request-id`, `req_…`), when it
+   * differs from `id`: what a host's own telemetry names the request by.
+   */
+  requestId?: string;
+  /**
+   * The client's IDs for the records of this request's message (Claude's
+   * transcript entry `uuid`s): how a host's own telemetry can name it.
+   */
+  entryIds?: string[];
+  /** ISO 8601. */
+  startedAt?: string;
+  /** ISO 8601. */
+  completedAt?: string;
+  durationMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  reasoningOutputTokens?: number;
+  /** Why the model stopped (`end_turn`, `tool_use`, `stop`, ...). */
+  finishReason?: string;
+  /** The text the model returned. Stored results drop it, as `finalText`. */
+  text?: string;
+  /**
+   * The model's reasoning as the provider returned it (Claude's thinking
+   * summaries), when it returned any. Stored results drop it, as `text`.
+   */
+  reasoningText?: string;
+  /** The `TraceEvent.id`s of the tool calls the model asked for. */
+  toolCallIds?: string[];
+}
+
+/** An attribute of a host's telemetry record. */
+export type HostAttributeValue =
+  | string
+  | number
+  | boolean
+  | Array<string | number | boolean>;
+
+/** A host's log record: one of its events, such as `api_request`. */
+export interface HostTelemetryEvent {
+  /** The event's name (`event.name`), or else its body. */
+  name: string;
+  /** ISO 8601. */
+  time: string;
+  attributes: Record<string, HostAttributeValue>;
+}
+
+/** A span the host exported. */
+export interface HostTelemetrySpan {
+  name: string;
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  /** OTLP's span kind. */
+  kind?: number;
+  /** ISO 8601. */
+  startTime: string;
+  /** ISO 8601. */
+  endTime: string;
+  attributes: Record<string, HostAttributeValue>;
+  status?: { code: number; message?: string };
+  events?: Array<{
+    name: string;
+    time: string;
+    attributes: Record<string, HostAttributeValue>;
+  }>;
+}
+
+/** A metric's latest data point in the trial, per attribute set. */
+export interface HostTelemetryMetric {
+  name: string;
+  unit?: string;
+  /** ISO 8601. */
+  time: string;
+  value: number;
+  attributes: Record<string, HostAttributeValue>;
+}
+
+/**
+ * What the host itself reported about a trial over OpenTelemetry, as MST's
+ * receiver got it (`telemetry.host`, docs/telemetry.md): the host's events,
+ * spans and metrics for the trial's session. Content attributes (prompts,
+ * answers, tool input and output) are dropped unless `telemetry.host.content`.
+ */
+export interface HostTelemetry {
+  /** The host's resource attributes: its service, version, platform. */
+  resource?: Record<string, HostAttributeValue>;
+  events: HostTelemetryEvent[];
+  spans?: HostTelemetrySpan[];
+  metrics?: HostTelemetryMetric[];
+  /** Records past the per-trial cap, not kept. */
+  dropped?: number;
+}
+
 /** One execution trace. Clients never return evaluation scores. */
 export interface ClientRunResult {
   diagnostics?: ClientDiagnostics;
   finalText: string;
   events: TraceEvent[];
+  /** The trial's model requests, in order (see `ModelCall`). */
+  modelCalls?: ModelCall[];
+  /**
+   * When the trial's task started and ended (ISO 8601), when the client
+   * knows: a batch client's requests can wait on one another, so MST's own
+   * clock can't say. MST times a `run` itself.
+   */
+  startedAt?: string;
+  completedAt?: string;
   error?: string;
   usage?: UsageMetrics;
   /** Native and driver observations remain separately scoped; UI actions are not LLM usage. */
   telemetry?: Record<string, unknown>;
+  /**
+   * The host's own OpenTelemetry for the trial, from MST's receiver
+   * (`telemetry.host`). A plugin client can fill it with
+   * `hostTelemetryReceiver` (docs/telemetry.md).
+   */
+  hostTelemetry?: HostTelemetry;
   /** Per-request wall time, excluding shared batch setup and cleanup. */
   durationMs?: number;
   llmDurationMs?: number;
@@ -210,7 +332,16 @@ export interface ClientArtifacts {
  * `server` label. Stored results drop `finalText` and event `output`, which
  * can hold data from the server under test.
  */
-export type Trace = Pick<ClientRunResult, 'events' | 'usage' | 'error'> & {
+export type Trace = Pick<
+  ClientRunResult,
+  | 'events'
+  | 'modelCalls'
+  | 'hostTelemetry'
+  | 'startedAt'
+  | 'completedAt'
+  | 'usage'
+  | 'error'
+> & {
   finalText?: string;
   /** Declared evidence; absent for the legacy simulated client. */
   evidence?: TraceEvidence;
@@ -253,6 +384,14 @@ export interface ClientDefinition {
   readonly serversPerBatch?: boolean;
   /** The most cases the client can run at once; `concurrency` above it is an error. */
   readonly maxConcurrency?: number;
+  /**
+   * The client is a process that needs no desktop session (a CLI or an
+   * SDK). An environment whose machines provide a desktop, such as MST's
+   * Linux image, then starts a shard whose clients are all headless
+   * without one: no desktop, no desktop app, and none of its inference.
+   * Without it, a client gets the desktop.
+   */
+  readonly headless?: boolean;
   /** Ordered traces for all selected trials. The framework owns scores. */
   runBatch?(
     requests: ClientBatchRequest[],
@@ -288,11 +427,13 @@ export interface MetricDefinition {
   readonly unit?: string;
   compute(
     caseResult: EvalCaseResult,
-    params?: Record<string, unknown>
+    params?: Record<string, unknown>,
+    context?: SettingsContext
   ): MetricValue;
   aggregate?(
     values: MetricValue[],
-    metric: ResolvedMetric
+    metric: ResolvedMetric,
+    context?: SettingsContext
   ): { key: string; value: unknown } | undefined;
 }
 
@@ -321,7 +462,8 @@ export interface JudgeDefinition {
    */
   evaluate: (
     input: JudgeInput,
-    options: Record<string, unknown>
+    options: Record<string, unknown>,
+    context?: SettingsContext
   ) => Promise<JudgeScore>;
   /**
    * Checks, before a run collects or grades anything, that the judge can run
@@ -329,7 +471,10 @@ export interface JudgeDefinition {
    * Throws what's missing. Must not call a model. `options` is parsed by
    * `schema`.
    */
-  preflight?: (options: Record<string, unknown>) => Promise<void>;
+  preflight?: (
+    options: Record<string, unknown>,
+    context?: SettingsContext
+  ) => Promise<void>;
 }
 
 /**
@@ -340,7 +485,7 @@ export interface JudgeDefinition {
 export interface ResultStoreDefinition {
   readonly schema: ZodType;
   readonly description?: string;
-  create(config: ExtensionConfig): RunStore;
+  create(config: ExtensionConfig, context?: SettingsContext): RunStore;
 }
 
 /**
@@ -350,11 +495,13 @@ export interface ResultStoreDefinition {
 export type EnvironmentKeep = 'never' | 'failed' | 'always';
 
 /** What an environment's `open` is given, beside its own options. */
-export interface EnvironmentContext {
+export interface EnvironmentContext extends SettingsContext {
   readonly runId: string;
   /** How many shards the run has (`--env-option shards`). */
   readonly shards: number;
   readonly keep: EnvironmentKeep;
+  /** The eval's client (`client` in its config), for environments that run one kind. */
+  readonly client?: string;
 }
 
 /** One shard of a run, as the coordinator hands it to an environment. */
@@ -483,10 +630,12 @@ export interface CoordinatorMachine {
 }
 
 /** What an environment's `coordinator` is given, beside its own options. */
-export interface CoordinatorContext {
+export interface CoordinatorContext extends SettingsContext {
   /** The detached run's id: `mst runs watch <id>`. */
   readonly id: string;
   readonly log: (line: string) => void;
+  /** The eval's client (`client` in its config), so the machine can run its image. */
+  readonly client?: string;
 }
 
 /**
@@ -544,8 +693,10 @@ export interface EnvironmentDefinition {
    */
   setup?(
     options: Record<string, unknown>,
-    context: {
+    context: SettingsContext & {
       log: (line: string) => void;
+      /** The eval's client (`mst env setup --config`), when one was given. */
+      client?: string;
       /**
        * The plugin packages an eval loads (`mst env setup --config`), as this
        * machine has them installed (`dir`): an environment that builds

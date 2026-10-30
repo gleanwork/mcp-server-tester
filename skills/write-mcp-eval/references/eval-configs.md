@@ -4,30 +4,30 @@ An eval config is the JSON file that defines one eval: its datasets, the servers
 
 ## Keys
 
-| Key                                                               | Meaning                                                                                          |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `name`                                                            | Required. Identifies the eval; runs with the same name share a history                           |
-| `datasets`                                                        | Required. Paths (relative to the config) or tagged sources (below)                               |
-| `servers`                                                         | The MCP servers under test, a map keyed by label                                                 |
-| `client`                                                          | `mst`, `claude-code`, `cowork`, `chatgpt`, or `<namespace>/client/<name>`. Default `claude-code` |
-| `model`                                                           | The model the client runs. Without it, the client's default                                      |
-| `clientOptions`                                                   | The client's other options (below)                                                               |
-| `variants`                                                        | The setups to compare. Without any, one variant named `default` runs the config as written       |
-| `baseline`                                                        | The variant the others are compared with. Default: the first                                     |
-| `tools`                                                           | Tool metadata every variant shows its client, unless it sets its own                             |
-| `toolMap`                                                         | Canonical tool name to the native names a client reports, for assertions                         |
-| `inputTemplate`                                                   | Wraps each case's input: `{{input}}` is replaced by it                                           |
-| `judges`                                                          | Judges added to every case's own `judges`                                                        |
-| `pairwiseJudges`                                                  | Pairwise judges that compare each variant with the baseline, case by case (top level only)       |
-| `metrics`                                                         | Metrics to report beyond the defaults                                                            |
-| `trials`, `passThreshold`                                         | Defaults for cases that don't set their own                                                      |
-| `maxCases`, `concurrency`, `filterTags`                           | Run controls. All five run controls may also go under `run`: `"run": { "trials": 5 }`            |
-| `provider`, `maxToolCalls`, `timeout`, `temperature`, `maxTokens` | Defaults for the client option of the same name, for clients that take it                        |
-| `results`                                                         | Where runs are stored: `{ "store": { "type": "file", "dir": ".mcp-test-results" } }`             |
-| `plugins`                                                         | Plugin modules or packages to load                                                               |
-| `extends`                                                         | Shared configs from those plugins: `["acme/config/recommended"]`                                 |
-| `pricing`                                                         | USD per million tokens by model, to estimate cost for clients that report only tokens            |
-| `redactStoredResponses`                                           | Set `false` to keep answers and tool outputs in stored results (removed by default)              |
+| Key                                                               | Meaning                                                                                                   |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `name`                                                            | Required. Identifies the eval; runs with the same name share a history                                    |
+| `datasets`                                                        | Required. Paths (relative to the config) or tagged sources (below)                                        |
+| `servers`                                                         | The MCP servers under test, a map keyed by label                                                          |
+| `client`                                                          | `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`, or `<namespace>/client/<name>`. Default `claude-code` |
+| `model`                                                           | The model the client runs. Without it, the client's default                                               |
+| `clientOptions`                                                   | The client's other options (below)                                                                        |
+| `variants`                                                        | The setups to compare. Without any, one variant named `default` runs the config as written                |
+| `baseline`                                                        | The variant the others are compared with. Default: the first                                              |
+| `tools`                                                           | Tool metadata every variant shows its client, unless it sets its own                                      |
+| `toolMap`                                                         | Canonical tool name to the native names a client reports, for assertions                                  |
+| `inputTemplate`                                                   | Wraps each case's input: `{{input}}` is replaced by it                                                    |
+| `judges`                                                          | Judges added to every case's own `judges`                                                                 |
+| `pairwiseJudges`                                                  | Pairwise judges that compare each variant with the baseline, case by case (top level only)                |
+| `metrics`                                                         | Metrics to report beyond the defaults                                                                     |
+| `trials`, `passThreshold`                                         | Defaults for cases that don't set their own                                                               |
+| `maxCases`, `concurrency`, `filterTags`                           | Run controls. All five run controls may also go under `run`: `"run": { "trials": 5 }`                     |
+| `provider`, `maxToolCalls`, `timeout`, `temperature`, `maxTokens` | Defaults for the client option of the same name, for clients that take it                                 |
+| `results`                                                         | Where runs are stored: `{ "store": { "type": "file", "dir": ".mcp-test-results" } }`                      |
+| `plugins`                                                         | Plugin modules or packages to load                                                                        |
+| `extends`                                                         | Shared configs from those plugins: `["acme/config/recommended"]`                                          |
+| `pricing`                                                         | USD per million tokens by model, to estimate cost for clients that report only tokens                     |
+| `redactStoredResponses`                                           | Set `false` to keep answers and tool outputs in stored results (removed by default)                       |
 
 ## Datasets
 
@@ -73,6 +73,7 @@ Define each server once, keyed by its label. A variant lists the labels it uses.
 | --------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `mst`                       | MST's own client: the model gets the servers' tools and nothing else | Isolates the model and your tool metadata. Options below                                  |
 | `claude-code`               | Claude Code                                                          | Runs with an empty config directory, so your own skills and settings don't affect results |
+| `codex`                     | OpenAI's Codex agent, headless (`@openai/codex-sdk`)                 | Needs `OPENAI_API_KEY` (or a gateway). See `docs/codex.md`                                |
 | `cowork`                    | Claude Cowork in Claude Desktop                                      | macOS (run `npx mst cowork setup` once) or a prepared Linux desktop. See `docs/cowork.md` |
 | `chatgpt`                   | The ChatGPT desktop app                                              | Needs `model`. Can't show tool metadata (`tools`). See `docs/chatgpt-desktop.md`          |
 | `<namespace>/client/<name>` | A plugin's client                                                    | Options are the plugin's                                                                  |
@@ -104,7 +105,7 @@ A variant has a `name` and may set `description`, `servers` (labels), `client`, 
 
 - **Servers.** A variant that lists no servers uses every server; `[]` uses none.
 - **Client options.** A variant (or case) inherits the config's `clientOptions` only when it uses the same client. Its own `clientOptions` override the inherited options they name; the others carry over.
-- **Tool metadata.** `tools` is keyed by a tool's name on its server; with several servers, `"server.tool"` picks one. Each entry may set `name`, `description` and `inputSchema`. Calls are recorded under the tool's original name, so assertions read the same in every variant. `mst` applies tool metadata in-process; `claude-code`, `cowork` and plugin clients get it through a local MCP proxy. A key that matches no tool, or several, is an error.
+- **Tool metadata.** `tools` is keyed by a tool's name on its server; with several servers, `"server.tool"` picks one. Each entry may set `name`, `description` and `inputSchema`. Calls are recorded under the tool's original name, so assertions read the same in every variant. `mst` applies tool metadata in-process; `claude-code`, `codex`, `cowork` and plugin clients get it through a local MCP proxy. A key that matches no tool, or several, is an error.
 - **Comparisons.** Each variant is compared with the baseline: metric changes, and the cases that improved or regressed.
 
 ## Graders and metrics

@@ -1,4 +1,5 @@
 import { getSharedConfig } from '../plugins/extensions.js';
+import { evalSettings } from '../plugins/settings.js';
 import {
   BUILTIN_NAMESPACE,
   parseExtensionReference,
@@ -20,9 +21,29 @@ import {
  * replaces both, as a variant's settings replace the eval config's. An eval config that
  * extends nothing is returned as is, so its identity doesn't change.
  *
+ * Its plugin `settings` keep only the sections of the plugins it loads, each
+ * checked by its plugin's schema (ADR 0008).
+ *
  * Plugins must be installed first; `namespaces` are the ones the eval loads.
  */
 export function resolveConfigExtends(
+  evalConfig: EvalConfig,
+  namespaces: readonly string[]
+): EvalConfig {
+  return withEvalSettings(applyExtends(evalConfig, namespaces), namespaces);
+}
+
+function withEvalSettings(
+  evalConfig: EvalConfig,
+  namespaces: readonly string[]
+): EvalConfig {
+  const settings = evalSettings(evalConfig.settings, namespaces);
+  if (settings === evalConfig.settings) return evalConfig;
+  const { settings: _settings, ...rest } = evalConfig;
+  return settings ? { ...rest, settings } : rest;
+}
+
+function applyExtends(
   evalConfig: EvalConfig,
   namespaces: readonly string[]
 ): EvalConfig {

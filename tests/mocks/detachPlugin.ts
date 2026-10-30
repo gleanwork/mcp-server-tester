@@ -20,6 +20,8 @@ export interface DetachTestState {
   stdin: string[];
   disposed: number;
   coordinatorOptions?: Record<string, unknown>;
+  /** The eval's client, as the coordinator machine was told it. */
+  coordinatorClient?: string;
   /** What the coordinator prints: `{"type":"started"}` unless set. */
   reply?: string;
 }
@@ -114,6 +116,7 @@ export default {
       async coordinator(options, context) {
         const state = detachTestState();
         state.coordinatorOptions = options;
+        state.coordinatorClient = context.client;
         return {
           id: `coordinator-${context.id}`,
           workDir: '/opt/mst',

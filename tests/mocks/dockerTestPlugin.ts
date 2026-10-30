@@ -27,5 +27,16 @@ export default {
         };
       },
     },
+    /** A client that needs no desktop, as `codex`: its shards get none. */
+    headless: {
+      schema: z.object({ type: z.string() }).passthrough(),
+      evidence: 'structured',
+      headless: true,
+      async run(input): Promise<ClientRunResult> {
+        return { finalText: `answered: ${input.prompt}`, events: [] };
+      },
+    },
   },
+  // A shared config that makes an eval a ChatGPT eval, for `extends`.
+  configs: { chatgpt: { client: 'chatgpt' } },
 } satisfies Plugin;

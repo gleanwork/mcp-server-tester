@@ -187,7 +187,11 @@ describe('computeMetrics', () => {
       [result('one', true)]
     );
     expect(metrics.perCase.one?.weighted_alias).toBe(7);
-    expect(compute).toHaveBeenCalledWith(expect.anything(), { weight: 7 });
+    expect(compute).toHaveBeenCalledWith(
+      expect.anything(),
+      { weight: 7 },
+      { settings: undefined }
+    );
   });
 
   it('retains parsed top-level defaults and transforms without reparsing', () => {
