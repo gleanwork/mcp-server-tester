@@ -55,6 +55,12 @@ IDLE_POLLS = 20
 # with an empty new chat. Setup observes read-only for 5 seconds after its
 # hand-off so that its route lands first. Nothing is repeated.
 SETUP_SETTLE_POLLS = 50
+# A fresh profile can open a model announcement ("Introducing ...") over the
+# main window right after the first-run screens. It is modal: while it is open
+# the window's other controls, the mode switch among them, leave the AT-SPI
+# tree. Its keep-the-model button is the only one MST presses; it never picks
+# the announced model.
+ANNOUNCEMENT_KEEP = 'Continue with current model'
 
 
 def error_code(error, glib_error=()):
@@ -555,6 +561,15 @@ class Driver:
         self.click(item, {'select'})
         return self.wait(lambda ns: self.selected(ns, surface))
 
+    def dismiss_announcement(self, nodes):
+        # Only in a snapshot already taken, so it adds no polls; one click, never retried.
+        keep = controls(nodes, {ANNOUNCEMENT_KEEP})
+        if not keep:
+            return nodes
+        self.click(unique(keep, 'announcement_ambiguous'))
+        return self.wait(lambda ns: not controls(ns, {ANNOUNCEMENT_KEEP})
+                         and bool(controls(ns, set(MODE_LABELS.values()))))
+
     def ready(self, nodes, surface):
         if not self.selected(nodes, surface):
             return False
@@ -573,7 +588,8 @@ class Driver:
         self.phase = 'waiting-for-initial-ui'
         nodes = self.wait(lambda ns: bool(controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
                                           or controls(ns, {'Leave a note on my Desktop', 'Go to ChatGPT',
-                                                           *MODE_LABELS.values()})), polls=300)
+                                                           ANNOUNCEMENT_KEEP, *MODE_LABELS.values()})),
+                          polls=300)
         engineering = controls(nodes, {'Engineering'}, {'radio button', 'toggle button'})
         if engineering:
             self.phase = 'profession-selected'
@@ -590,7 +606,7 @@ class Driver:
             self.phase = 'intro-dismiss'
             nodes = self.wait(lambda ns: not controls(ns, {'Engineering'}, {'radio button', 'toggle button'})
                               and bool(controls(ns, {'Leave a note on my Desktop', 'Go to ChatGPT',
-                                                     *MODE_LABELS.values()})))
+                                                     ANNOUNCEMENT_KEEP, *MODE_LABELS.values()})))
         self.phase = 'intro-dismiss'
         # Only skip the observed, specific product-introduction screen.
         if (controls(nodes, {'Leave a note on my Desktop'})
@@ -599,7 +615,9 @@ class Driver:
             nodes = self.wait(lambda ns: bool(controls(ns, {'Go to ChatGPT'})))
         if controls(nodes, {'Go to ChatGPT'}) and controls(nodes, {'Keep setting up'}):
             self.click(unique(controls(nodes, {'Go to ChatGPT'}), 'intro_confirmation_ambiguous'))
-            nodes = self.wait(lambda ns: bool(controls(ns, set(MODE_LABELS.values()))))
+            nodes = self.wait(lambda ns: bool(controls(ns, {ANNOUNCEMENT_KEEP, *MODE_LABELS.values()})))
+        self.phase = 'announcement'
+        nodes = self.dismiss_announcement(nodes)
         self.phase = 'surface'
         self.select_surface(nodes, surface)
         self.phase = 'composer'
@@ -612,8 +630,10 @@ class Driver:
         self.settle(SETUP_SETTLE_POLLS)
         # Setup has no user prompt to match. A new chat can expose a visible
         # placeholder as Text; ready means controls/surface, not verified emptiness.
-        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES),
-                          polls=DRAFT_POLLS)
+        nodes = self.wait(lambda ns: any(self.ready(ns, candidate) for candidate in SURFACES)
+                          or bool(controls(ns, {ANNOUNCEMENT_KEEP})), polls=DRAFT_POLLS)
+        # The announcement can open late, over the draft: the settle has seen it by now.
+        nodes = self.dismiss_announcement(nodes)
         self.select_surface(nodes, surface)
         self.step = 'draft-readback'
         self.wait(lambda ns: self.ready(ns, surface))

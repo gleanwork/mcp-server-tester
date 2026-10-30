@@ -28,6 +28,8 @@ const CodexStdioServerSchema = z
     args: z.array(z.string()).optional(),
     cwd: z.string().optional(),
     env: z.record(z.string(), z.string()).optional(),
+    /** MST's readiness rule, checked by the direct preflight; not written to config.toml. */
+    minTools: z.number().int().min(1).max(10_000).optional(),
   })
   .strict();
 
@@ -206,6 +208,46 @@ export interface CodexConfigInstallOptions {
   executionPolicy?: CodexExecutionPolicy;
   /** Rendered as `[plugins."<id>"] enabled = false` and `web_search`. */
   builtinToolPolicy?: CodexBuiltinToolPolicy;
+  /**
+   * Send turns to an OpenAI-compatible gateway instead of a signed-in account:
+   * rendered as `model_provider` and `[model_providers.<id>]`. The token comes
+   * from `authCommand`, which the app runs again every `refreshIntervalMs`; the
+   * config holds no credential.
+   */
+  modelProvider?: CodexModelProvider;
+}
+
+export interface CodexModelProvider {
+  id: string;
+  name: string;
+  /** The gateway's OpenAI base, e.g. `https://gateway.example/openai/v1`. */
+  baseUrl: string;
+  /** An absolute path; prints the bearer token on stdout. */
+  authCommand: string;
+  authArgs?: readonly string[];
+  refreshIntervalMs?: number;
+}
+
+function validModelProvider(provider: CodexModelProvider): boolean {
+  let url: URL;
+  try {
+    url = new URL(provider.baseUrl);
+  } catch {
+    return false;
+  }
+  return (
+    /^[a-z][a-z0-9_]{0,63}$/.test(provider.id) &&
+    provider.name.length > 0 &&
+    provider.name.length <= 128 &&
+    url.protocol === 'https:' &&
+    !url.username &&
+    !url.password &&
+    isAbsolute(provider.authCommand) &&
+    (provider.authArgs ?? []).every((arg) => !/[\r\n\0]/.test(arg)) &&
+    (provider.refreshIntervalMs === undefined ||
+      (Number.isInteger(provider.refreshIntervalMs) &&
+        provider.refreshIntervalMs >= 10_000))
+  );
 }
 
 export async function installCodexConfig(
@@ -255,6 +297,9 @@ export async function installCodexConfig(
       ))
   )
     throw new Error('Invalid Codex built-in tool policy.');
+  const provider = options.modelProvider;
+  if (provider !== undefined && !validModelProvider(provider))
+    throw new Error('Invalid Codex model provider.');
   const resolved = resolveCodexSetup(setup, options.configName);
   const target = resolved.configPath;
   const lock = `${target}${LOCK_SUFFIX}`;
@@ -306,6 +351,25 @@ export async function installCodexConfig(
         for (const name of tools.disabledFeatures) features[name] = false;
         settings.features = features;
       }
+    }
+    if (provider !== undefined) {
+      settings.model_provider = provider.id;
+      const providers = isTable(settings.model_providers)
+        ? settings.model_providers
+        : {};
+      providers[provider.id] = {
+        name: provider.name,
+        base_url: provider.baseUrl,
+        wire_api: 'responses',
+        auth: {
+          command: provider.authCommand,
+          args: [...(provider.authArgs ?? [])],
+          ...(provider.refreshIntervalMs !== undefined
+            ? { refresh_interval_ms: provider.refreshIntervalMs }
+            : {}),
+        },
+      };
+      settings.model_providers = providers;
     }
     if (options.trustedProject !== undefined)
       settings.projects = {

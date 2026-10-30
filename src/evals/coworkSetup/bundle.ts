@@ -14,6 +14,7 @@ import {
   resolveCoworkMcpHeaders,
   toCoworkServers,
 } from './config.js';
+import { credentialHelperScript } from './credentialHelper.js';
 import { resolveCoworkSetupConfig, type CoworkSetupConfig } from './options.js';
 
 const ERROR_MESSAGE = 'Unable to prepare Cowork MCP bundle.';
@@ -47,92 +48,6 @@ function selectSetup(
       variant?.coworkSetup
     ),
   };
-}
-
-/**
- * A `headersHelper` for Claude Desktop: prints the headers in the JSON file
- * at `filePath`, which must be a private regular file with exactly `names`.
- * The generated executable contains metadata only, never credential values.
- */
-export function headersHelper(
-  filePath: string,
-  names: string[],
-  bearer: boolean
-): string {
-  // Config validation limits paths to shell-safe ASCII. JSON string/array
-  // literals here are also valid Python literals (no JSON booleans or null).
-  return `#!/bin/sh
-exec /usr/bin/python3 -I - <<'COWORK_HEADERS_PY'
-import json
-import os
-import re
-import stat
-import sys
-
-PATH = ${JSON.stringify(filePath)}
-NAMES = ${JSON.stringify(names)}
-BEARER = ${bearer ? 'True' : 'False'}
-LIMIT = 65536
-
-def reject():
-    raise ValueError()
-
-def unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            reject()
-        result[key] = value
-    return result
-
-def validate_file(info):
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
-            or info.st_mode & 0o077 or info.st_size > LIMIT):
-        reject()
-
-try:
-    fd = os.open(PATH, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    try:
-        before = os.fstat(fd)
-        validate_file(before)
-        content = bytearray()
-        while len(content) <= LIMIT:
-            chunk = os.read(fd, LIMIT + 1 - len(content))
-            if not chunk:
-                break
-            content.extend(chunk)
-        if len(content) > LIMIT:
-            reject()
-        after = os.fstat(fd)
-        validate_file(after)
-        if (after.st_size != len(content) or before.st_size != after.st_size
-                or before.st_mtime_ns != after.st_mtime_ns
-                or before.st_ctime_ns != after.st_ctime_ns):
-            reject()
-    finally:
-        os.close(fd)
-    headers = json.loads(content.decode('utf-8'), object_pairs_hook=unique_object)
-    if not isinstance(headers, dict) or set(headers) != set(NAMES):
-        reject()
-    normalized = set()
-    for name, value in headers.items():
-        if (not isinstance(name, str)
-                or re.fullmatch(r"[!#$%&'*+.^_\x60|~0-9A-Za-z-]+", name) is None
-                or name.lower() in normalized):
-            reject()
-        normalized.add(name.lower())
-        if (not isinstance(value, str)
-                or any(not (32 <= ord(c) <= 126 or 160 <= ord(c) <= 255) for c in value)):
-            reject()
-    if BEARER and re.fullmatch(r'Bearer [A-Za-z0-9._~+/-]+=*', headers['Authorization']) is None:
-        reject()
-    output = json.dumps(headers, ensure_ascii=True) + '\\n'
-except Exception:
-    sys.stderr.write('Unable to read Cowork MCP runtime headers.\\n')
-    sys.exit(1)
-sys.stdout.write(output)
-COWORK_HEADERS_PY
-`;
 }
 
 type BundlePlanOptions = {
@@ -256,11 +171,12 @@ export async function prepareCoworkMcpBundle(
           fileName,
           content,
           helperName: server.helperName,
-          helper: headersHelper(
-            posix.join(options.runtimeDirectory, 'credentials', fileName),
-            Object.keys(values),
-            bearer
-          ),
+          helper: credentialHelperScript({
+            kind: 'headers',
+            path: posix.join(options.runtimeDirectory, 'credentials', fileName),
+            names: Object.keys(values),
+            bearer,
+          }),
         },
       ];
     });

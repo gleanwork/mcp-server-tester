@@ -60,7 +60,8 @@
       "import": "./dist/reporters/mcpReporter.js",
       "require": "./dist/reporters/mcpReporter.cjs"
     },
-    "./cowork-linux-image": "./docker/cowork-linux/Dockerfile"
+    "./cowork-linux-image": "./docker/cowork-linux/Dockerfile",
+    "./chatgpt-linux-image": "./docker/chatgpt-linux/Dockerfile"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",

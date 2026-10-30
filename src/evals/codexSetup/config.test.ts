@@ -11,6 +11,14 @@ import {
 } from './config.js';
 
 const temporaryDirectories: string[] = [];
+const GATEWAY = {
+  id: 'mst_gateway',
+  name: 'LLM gateway',
+  baseUrl: 'https://gateway.example/openai/v1',
+  authCommand: '/bin/cat',
+  authArgs: ['/run/mst/token'],
+  refreshIntervalMs: 60_000,
+};
 
 afterEach(async () => {
   const { rm } = await import('node:fs/promises');
@@ -175,6 +183,32 @@ describe('Codex configuration lifecycle', () => {
     await installation.restore();
   });
 
+  it('renders a gateway model provider whose token comes from a command', async () => {
+    const { configPath } = await tempConfig();
+    const installation = await installCodexConfig(
+      { configPath, servers: [] },
+      { model: 'gpt-test', modelProvider: GATEWAY }
+    );
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed).toMatchObject({
+      model: 'gpt-test',
+      model_provider: 'mst_gateway',
+      model_providers: {
+        mst_gateway: {
+          name: 'LLM gateway',
+          base_url: 'https://gateway.example/openai/v1',
+          wire_api: 'responses',
+          auth: {
+            command: '/bin/cat',
+            args: ['/run/mst/token'],
+            refresh_interval_ms: 60000,
+          },
+        },
+      },
+    });
+    await installation.restore();
+  });
+
   const invalidPolicy = {
     approvalPolicy: 'on-request',
     sandboxMode: 'danger-full-access',
@@ -205,6 +239,13 @@ describe('Codex configuration lifecycle', () => {
       },
       'built-in tool policy',
     ],
+    [
+      'modelProvider',
+      { ...GATEWAY, baseUrl: 'http://gateway.example/openai/v1' },
+      'model provider',
+    ],
+    ['modelProvider', { ...GATEWAY, authCommand: 'cat' }, 'model provider'],
+    ['modelProvider', { ...GATEWAY, id: 'x]\nenabled' }, 'model provider'],
     ['trustedProject', 'relative/workspace', 'trusted project'],
     ['trustedProject', '/', 'trusted project'],
     ['trustedProject', '/tmp/../tmp/x', 'trusted project'],

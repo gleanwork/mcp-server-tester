@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import * as syncFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpMCPConfig, StdioMCPConfig } from '../../config/mcpConfig.js';
 import type { EvalConfig } from '../evalConfig.js';
 import { prepareCoworkMcpBundle } from './bundle.js';
+import {
+  credentialHelperScript,
+  readCredential,
+  type CredentialHelperSpec,
+} from './credentialHelper.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof fs>();
@@ -48,28 +53,24 @@ async function expectPrivate(file: string, mode: number): Promise<void> {
   const stat = await fs.stat(file);
   expect([stat.mode & 0o777, stat.uid]).toEqual([mode, process.getuid!()]);
 }
-function invokeHelper(label = 'Search_1'): ReturnType<typeof spawnSync> {
-  return spawnSync(path(`mcp-${label}-headers.sh`), [], {
-    encoding: 'utf8',
-    env: {},
-    timeout: 5000,
-    maxBuffer: 128 * 1024,
-  });
+/** The staged helper reads `runtime`'s credentials file (its behavior is credentialHelper.test.ts's). */
+async function expectHelper(
+  headers: object,
+  { label = 'Search_1', bearer = true, runtime = directory } = {}
+): Promise<CredentialHelperSpec> {
+  const spec: CredentialHelperSpec = {
+    kind: 'headers',
+    path: join(runtime, 'credentials', `${label}.json`),
+    names: Object.keys(headers),
+    bearer,
+  };
+  expect(await fs.readFile(path(`mcp-${label}-headers.sh`), 'utf8')).toBe(
+    credentialHelperScript(spec)
+  );
+  return spec;
 }
-function expectHelperFailure(): void {
-  const result = invokeHelper();
-  expect(result.error).toBeUndefined();
-  expect(result).toMatchObject({
-    status: 1,
-    stdout: '',
-    stderr: 'Unable to read Cowork MCP runtime headers.\n',
-  });
-}
-function expectHeaders(headers: object, label = 'Search_1'): void {
-  const result = invokeHelper(label);
-  expect(result.error).toBeUndefined();
-  expect(result).toMatchObject({ status: 0, stderr: '' });
-  expect(JSON.parse(String(result.stdout))).toEqual(headers);
+function expectHeaders(spec: CredentialHelperSpec, headers: object): void {
+  expect(JSON.parse(readCredential(spec, syncFs))).toEqual(headers);
 }
 async function expectRejected(overrides: Partial<Options> = {}): Promise<void> {
   const failure: unknown = await prepareCoworkMcpBundle(
@@ -302,21 +303,24 @@ describe('prepareCoworkMcpBundle', () => {
       await expectPrivate(file, 0o700);
     for (const file of [credential, path('credentials/Other.json')])
       await expectPrivate(file, 0o600);
-    expectHeaders(bearer);
-    expectHeaders(staticHeaders, 'Other');
+    expectHeaders(await expectHelper(bearer), bearer);
+    expectHeaders(
+      await expectHelper(staticHeaders, { label: 'Other', bearer: false }),
+      staticHeaders
+    );
   });
 
   it('uses runtime layout with no staging fallback', async () => {
     const runtimeDirectory = join(root, 'runtime_safe-2');
     await prepareCoworkMcpBundle(options({ runtimeDirectory }));
-    expectHelperFailure();
+    const bearer = { Authorization: `Bearer ${TOKEN}` };
+    // The helper reads the runtime path only, never the staged copy.
+    const spec = await expectHelper(bearer, { runtime: runtimeDirectory });
     await expect(fs.stat(runtimeDirectory)).rejects.toMatchObject({
       code: 'ENOENT',
     });
     await fs.cp(directory, runtimeDirectory, { recursive: true });
-    expectHeaders({ Authorization: `Bearer ${TOKEN}` });
-    await fs.rm(join(runtimeDirectory, 'credentials/Search_1.json'));
-    expectHelperFailure(); // Staging credential still exists.
+    expectHeaders(spec, bearer);
   });
 
   it.each([
@@ -487,42 +491,8 @@ describe('prepareCoworkMcpBundle', () => {
   );
 });
 
-describe('generated runtime helper', () => {
-  it.each(['missing', 'symlink', 'directory', 'public'])(
-    'rejects unsafe %s credential files',
-    async (kind) => {
-      await prepareCoworkMcpBundle(options());
-      if (kind === 'public') await fs.chmod(credential, 0o644);
-      else {
-        const target = join(root, 'synthetic-target');
-        await fs.rename(credential, target);
-        if (kind === 'symlink') await fs.symlink(target, credential);
-        if (kind === 'directory') await fs.mkdir(credential, { mode: 0o700 });
-      }
-      expectHelperFailure();
-    }
-  );
-  it.each([
-    `not-json-${TOKEN}`,
-    '[]',
-    '{}',
-    JSON.stringify({ Authorization: `Bearer ${TOKEN}`, 'X-Extra': TOKEN }),
-    '{"Authorization":"Bearer one","Authorization":"Bearer two"}',
-    ...['\r\nX-Injected: yes', '\t', '\u0085', '\u2603'].map((suffix) =>
-      JSON.stringify({ Authorization: `Bearer ${TOKEN}${suffix}` })
-    ),
-    '{"Authorization":42}',
-    '{"Authorization":"Basic synthetic"}',
-    JSON.stringify({ 'Authorization\r\nX-Injected': TOKEN }),
-  ])(
-    'rejects malformed runtime headers with empty stdout and fixed stderr (#%#)',
-    async (payload) => {
-      await prepareCoworkMcpBundle(options());
-      await fs.writeFile(credential, payload);
-      expectHelperFailure();
-    }
-  );
-  it('allows validated static header bytes/punctuation without Python interpolation', async () => {
+describe('staged headers helper', () => {
+  it('lists punctuated static header names for the helper to check', async () => {
     const headers = {
       "X-!#$%&'*+.^_`|~": 'synthetic "quote" \\ literal $HOME café',
       Authorization: 'Basic synthetic-static',
@@ -534,24 +504,6 @@ describe('generated runtime helper', () => {
         }),
       })
     );
-    expectHeaders(headers);
-  });
-  it('accepts exactly 64 KiB, rejects one byte more, and rereads rotated/deleted credentials', async () => {
-    await prepareCoworkMcpBundle(options());
-    const empty = JSON.stringify({ Authorization: 'Bearer ' });
-    const headers = {
-      Authorization: `Bearer ${'x'.repeat(65536 - empty.length)}`,
-    };
-    const content = JSON.stringify(headers);
-    expect(Buffer.byteLength(content)).toBe(65536);
-    await fs.writeFile(credential, content);
-    expectHeaders(headers);
-    await fs.appendFile(credential, ' ');
-    expectHelperFailure();
-    const rotated = { Authorization: 'Bearer rotated-synthetic' };
-    await fs.writeFile(credential, JSON.stringify(rotated));
-    expectHeaders(rotated);
-    await fs.rm(credential);
-    expectHelperFailure();
+    expectHeaders(await expectHelper(headers, { bearer: false }), headers);
   });
 });
