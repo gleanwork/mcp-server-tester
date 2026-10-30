@@ -269,9 +269,11 @@ and a staged judge uses its bundle's `version` or the bundle's hash. The
 built-in `rubric` judge's version covers its prompts, every built-in
 rubric's text and the defaults it falls back on.
 
-`mst grade --resume` refuses a run whose judges' identities changed since
-it was graded. A run graded before MST recorded identities resumes as
-before.
+`mst grade --resume` refuses a run whose eval config or pairwise judges'
+identities changed since it was graded. A case's own judges aren't in
+`run.json`, so each verdict's identity decides: a verdict whose judge
+changed is graded again. A run graded before MST recorded identities
+resumes as before.
 
 ### Pairwise judges
 

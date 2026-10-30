@@ -30,6 +30,11 @@ const plugin: Plugin = {
   judges: {
     a: { schema: z.object({}), evaluate: async () => ({ score: 1 }) },
     b: { schema: z.object({}), evaluate: async () => ({ score: 0.5 }) },
+    // Parsing changes the options: parsing them twice would change them again.
+    scaled: {
+      schema: z.object({ count: z.number().transform((n) => n * 3) }),
+      evaluate: async () => ({ score: 1 }),
+    },
   },
   pairwiseJudges: {
     p: {
@@ -262,6 +267,40 @@ describe('judges, pairwise judges and long case IDs', () => {
       },
     ]);
     expect(RUN_SCHEMAS.run.safeParse(runRecord).success).toBe(true);
+  });
+
+  it("record the same identity in run.json as on the judge's scores, when its schema transforms its options", async () => {
+    await fs.writeFile(
+      path.join(dir, 'eval.json'),
+      JSON.stringify({
+        name: 'run-format',
+        datasets: ['./cases.json'],
+        client: 'rf/client/echo',
+        servers: {},
+        judges: [{ type: 'rf/judge/scaled', count: 3 }],
+        variants: [
+          { name: 'base' },
+          { name: 'other', judges: [{ type: 'rf/judge/scaled', count: 4 }] },
+        ],
+      })
+    );
+    const result = await run();
+    const runRecord = await read(path.join(result.outputDir, 'run.json'));
+    const recorded = Object.fromEntries(
+      (runRecord.judges as Array<{ level: string; identity: string }>).map(
+        (judge) => [judge.level, judge.identity]
+      )
+    );
+    const scored = (variant: string) =>
+      new Set(
+        result.summary.results
+          .filter((r) => r.variant === variant)
+          // One judge's score is the judge score itself.
+          .map((r) => r.scores?.judge?.judgeIdentity)
+      );
+    expect(scored('base')).toEqual(new Set([recorded.config]));
+    expect(scored('other')).toEqual(new Set([recorded['variant:other']]));
+    expect(recorded.config).not.toBe(recorded['variant:other']);
   });
 });
 

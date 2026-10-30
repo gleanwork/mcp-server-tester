@@ -659,25 +659,37 @@ function entryIdentity(level: string, entry: unknown): string | undefined {
   }
 }
 
-function judgeRecords(evalConfig: EvalConfig): JudgeRecord[] {
-  const record = (level: string) => (entry: unknown) => {
-    const { type, ...options } =
-      typeof entry === 'string'
-        ? { type: entry }
-        : (entry as { type: string } & Record<string, unknown>);
-    const identity = entryIdentity(level, entry);
-    return {
-      type,
-      level,
-      optionsHash: createHash('sha256')
-        .update(JSON.stringify(options))
-        .digest('hex'),
-      ...(identity !== undefined ? { identity } : {}),
+/**
+ * The judges run.json records. `evalConfig` has each judge's options as its
+ * schema parsed them; `rawConfig` has them as written, which is what grading
+ * parses (`mergeEvalJudges`), so each identity is the one the judge's scores
+ * record. The options hash stays on the parsed options, as runs already
+ * recorded it.
+ */
+function judgeRecords(
+  evalConfig: EvalConfig,
+  rawConfig: EvalConfig
+): JudgeRecord[] {
+  const record =
+    (level: string, raw: readonly unknown[] | undefined) =>
+    (entry: unknown, index: number) => {
+      const { type, ...options } =
+        typeof entry === 'string'
+          ? { type: entry }
+          : (entry as { type: string } & Record<string, unknown>);
+      const identity = entryIdentity(level, raw?.[index] ?? entry);
+      return {
+        type,
+        level,
+        optionsHash: createHash('sha256')
+          .update(JSON.stringify(options))
+          .digest('hex'),
+        ...(identity !== undefined ? { identity } : {}),
+      };
     };
-  };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);
   return [
-    ...(evalConfig.judges ?? []).map(record('config')),
+    ...(evalConfig.judges ?? []).map(record('config', rawConfig.judges)),
     // A variant's judges, when they replace the config's.
     ...(evalConfig.variants ?? [])
       .filter(
@@ -686,9 +698,17 @@ function judgeRecords(evalConfig: EvalConfig): JudgeRecord[] {
           JSON.stringify(variant.judges) !== configJudges
       )
       .flatMap((variant) =>
-        variant.judges!.map(record(`variant:${variant.name}`))
+        variant.judges!.map(
+          record(
+            `variant:${variant.name}`,
+            rawConfig.variants?.find((raw) => raw.name === variant.name)?.judges
+          )
+        )
       ),
-    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(record('pairwise')),
+    // Kept as written: comparePairwise parses them itself.
+    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(
+      record('pairwise', undefined)
+    ),
   ];
 }
 
@@ -1603,7 +1623,7 @@ async function evaluate(
     if (!options.grading?.source)
       assertResumable(
         regrade,
-        judgeRecords(evalConfig),
+        judgeRecords(evalConfig, rawConfig),
         canonicalDatasets.map(({ dataset }) => dataset)
       );
     const pairwiseJudges = options.skipPairwise
@@ -2491,7 +2511,7 @@ async function evaluate(
         })),
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
-      judges: judgeRecords(evalConfig),
+      judges: judgeRecords(evalConfig, rawConfig),
       redactStoredResponses: redact,
       environment,
       ...(shardRecords?.length ? { machines: shardRecords } : {}),

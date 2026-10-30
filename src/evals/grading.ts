@@ -187,18 +187,33 @@ export function mergeEvalJudges(
   ];
 }
 
+/**
+ * Whether a stored verdict came from the judge `judge` runs now. A verdict
+ * from before MST recorded identities has none to compare, and a judge whose
+ * plugin isn't loaded here has no current identity (nor can it grade again):
+ * both keep their verdict.
+ */
+function sameJudge(verdict: GraderScore, judge: JudgeExpectConfig): boolean {
+  if (verdict.judgeIdentity === undefined) return true;
+  const current = judgeIdentityOf(judge);
+  return current === undefined || current === verdict.judgeIdentity;
+}
+
 async function evaluateJudges(
   response: unknown,
   judges: JudgeExpectConfig[],
   run: JudgeRun,
-  /** Verdicts an earlier grading gave, by judge name: those judges don't run again. */
+  /**
+   * Verdicts an earlier grading gave, by judge name: those judges don't run
+   * again, unless the judge changed since (its identity differs).
+   */
   verdicts: ReadonlyMap<string, GraderScore> = new Map()
 ): Promise<GraderScore> {
   const results = await Promise.all(
     judges.map(async (judge): Promise<GraderScore> => {
       const name = judgeNameOf(judge);
       const verdict = name !== undefined ? verdicts.get(name) : undefined;
-      if (verdict) return verdict;
+      if (verdict && sameJudge(verdict, judge)) return verdict;
       const validation = await validateJudge(response, judge, run);
       const details = validation.details ?? {};
       return {

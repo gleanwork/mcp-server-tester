@@ -212,6 +212,11 @@ describe('gradeTrial', () => {
             version: 'prompt-1',
             evaluate: async () => ({ score: 1 }),
           },
+          needsAnswer: {
+            schema: z.object({}).passthrough(),
+            requires: ['case.expected.answer'],
+            evaluate: async () => ({ score: 1 }),
+          },
         },
       },
     ]);
@@ -219,6 +224,15 @@ describe('gradeTrial', () => {
       { judges: [{ type: 'id/judge/j', model: 'a' }] },
       { response: 'x' }
     );
+    // A skipped score records the judge that skipped it, too.
+    const skipped = await gradeTrial(
+      { judges: ['id/judge/needsAnswer'] },
+      { response: 'x' }
+    );
+    expect(skipped.scores.judge).toMatchObject({
+      skipped: true,
+      judgeIdentity: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     const other = await gradeTrial(
       { judges: [{ type: 'id/judge/j', model: 'b' }] },
       { response: 'x' }
