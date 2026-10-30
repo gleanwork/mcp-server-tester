@@ -1556,6 +1556,13 @@ async function evaluate(
           runId: regrade?.gradedFrom ?? executionId,
           gradingRunId: executionId,
           client: evalConfig.client ?? DEFAULT_CLIENT,
+          // As run.json records it (variantSetup), so a stored run's
+          // traces (storedRunTraces) match what was sent.
+          clientOf: (name) =>
+            evalConfig.variants?.find((variant) => variant.name === name)
+              ?.client ??
+            evalConfig.client ??
+            DEFAULT_CLIENT,
         },
         env
       )

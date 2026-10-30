@@ -227,3 +227,11 @@ export type {
   HostTelemetryReceiver,
 } from '../evals/telemetry/hostReceiver.js';
 export type { HostTelemetryConfig } from '../evals/evalConfig.js';
+
+// A stored run's traces, as `telemetry.otlp` sends them: for sending a
+// finished run to a collector, re-encoded or re-batched as it needs.
+export { readRunDirectory } from '../evals/runFormat.js';
+export type { StoredRun } from '../evals/runFormat.js';
+export { storedRunTraces } from '../evals/telemetry/runTraces.js';
+export type { StoredRunTraceOptions } from '../evals/telemetry/runTraces.js';
+export type { OtlpSpan, OtlpTraceRequest } from '../evals/telemetry/otlp.js';
