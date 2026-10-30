@@ -249,6 +249,30 @@ last `{pass, score, reasoning}` object in the model's answer, so reasoning
 before the JSON is fine; an answer cut off at `maxTokens` (default 4096)
 fails saying so.
 
+#### Judge identity
+
+Every score records the identity of the judge that gave it, in
+`judgeIdentity`. `run.json` records the identity of each eval config,
+variant and pairwise judge, in `judges[].identity`. The identity is a
+SHA-256 of the judge's reference, its `version` and its options as its
+schema parses them, so an option left to its default hashes the same as the
+value written out. Two scores with the same identity came from a judge that
+grades the same way, which a calibration needs
+([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)).
+
+A judge or pairwise judge can declare a `version`: a non-empty string that
+changes whenever it could grade differently with the same options, such as
+a new prompt or a new default model. Without one, the identity uses the
+plugin's `meta.version`, so every new plugin version counts as a new judge.
+`agenticJudge` and `agenticPairwiseJudge` take `version` from their spec,
+and a staged judge uses its bundle's `version` or the bundle's hash. The
+built-in `rubric` judge's version covers its prompts, every built-in
+rubric's text and the defaults it falls back on.
+
+`mst grade --resume` refuses a run whose judges' identities changed since
+it was graded. A run graded before MST recorded identities resumes as
+before.
+
 ### Pairwise judges
 
 A pairwise judge compares two runs of the same case, a baseline and a

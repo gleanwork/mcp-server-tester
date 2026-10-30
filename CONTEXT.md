@@ -108,6 +108,10 @@ _Avoid_: expectation, check, validator
 A model grader: an LLM that scores a trial against the case's expected result or a rubric.
 _Avoid_: LLM grader, evaluator, rater
 
+**Judge identity**:
+A hash of what decides a judge's verdict besides the trial: the judge's reference, its `version` (or its plugin's), and its options as its schema parses them. Every score records it, and `run.json` records it for each eval config judge, so two scores with the same identity came from a judge that grades the same way.
+_Avoid_: judge hash, judge fingerprint, judge version (the version is one part of the identity)
+
 **Pairwise judge**:
 A judge that compares two variants' trials of the same case and says which is better, instead of scoring one alone.
 _Avoid_: comparator, preference model

@@ -39,6 +39,7 @@ import {
 } from '../assertions/validators/toolCalls.js';
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
 import {
+  judgeIdentityOf,
   judgeNameOf,
   preflightJudgeAssertion,
 } from '../assertions/validators/judge.js';
@@ -87,6 +88,14 @@ function caseAnswer(evalCase: Pick<EvalCase, 'expected'>): unknown {
 /** A case judge (`"acme/judge/x"` or `{ type, ...settings }`) with its settings. */
 function caseJudgeConfig(entry: CaseJudge): CaseJudgeConfig {
   return typeof entry === 'string' ? { type: entry } : entry;
+}
+
+/**
+ * The identity of the judge a case or eval config judge entry runs, as its
+ * scores record it. Undefined when its plugin isn't loaded here.
+ */
+export function judgeEntryIdentity(entry: CaseJudge): string | undefined {
+  return judgeIdentityOf(caseJudgeRequest(entry));
 }
 
 /** The judge request a case judge means: `type` names the judge. */
@@ -200,6 +209,9 @@ async function evaluateJudges(
         judgeName: details.judgeName as string | undefined,
         judgeProvider: details.judgeProvider as string | undefined,
         judgeModel: details.judgeModel as string | undefined,
+        ...(typeof details.judgeIdentity === 'string'
+          ? { judgeIdentity: details.judgeIdentity }
+          : {}),
         ...(details.skipped === true ? { skipped: true } : {}),
         ...(typeof details.error === 'string' ? { error: details.error } : {}),
         ...(details.subScores !== undefined

@@ -443,6 +443,14 @@ export interface JudgeDefinition {
   /** Parses the judge's options. */
   readonly schema: ZodType;
   /**
+   * Changes whenever the judge could grade differently with the same
+   * options: a new prompt, a new default model, new parsing. It is part of
+   * the judge's identity, which `run.json` and every score record. Without
+   * one, the identity uses the plugin's `meta.version`, so any new plugin
+   * version counts as a new judge.
+   */
+  readonly version?: string;
+  /**
    * Paths in the judge input this judge needs, such as `case.expected.answer`
    * or `case.expected.criteria`. When one is missing or empty, the judge is
    * not called and the result is recorded as skipped.

@@ -11,6 +11,7 @@ import {
   writeRun,
   writeTrial,
   type RunFacts,
+  type JudgeRecord,
   findRunDirectory,
   RUN_ID_PATTERN,
   type GradeShardRecord,
@@ -85,7 +86,13 @@ import {
   batchTraceExecution,
   createEvalCaseExecutor,
 } from './caseExecution.js';
-import { mergeEvalJudges, preflightCaseJudges } from './grading.js';
+import {
+  judgeEntryIdentity,
+  mergeEvalJudges,
+  preflightCaseJudges,
+} from './grading.js';
+import type { CaseJudge } from './datasetTypes.js';
+import { judgeIdentity } from '../judge/judgeIdentity.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -148,6 +155,7 @@ import {
 } from './configValidation.js';
 import {
   comparePairwise,
+  getPairwiseJudge,
   preflightPairwiseJudges,
 } from './pairwiseComparison.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
@@ -599,9 +607,26 @@ function assertResumable(
 ): void {
   const { run } = replay;
   const fullRegrade = `Grade it again in full, without --resume: \`mst grade ${run.runId}\`.`;
-  if (JSON.stringify(run.judges ?? []) !== JSON.stringify(judges))
+  const recorded = run.judges ?? [];
+  const withoutIdentity = (records: readonly JudgeRecord[]) =>
+    records.map(({ identity: _identity, ...record }) => record);
+  if (
+    JSON.stringify(withoutIdentity(recorded)) !==
+    JSON.stringify(withoutIdentity(judges))
+  )
     throw new Error(
       `The eval config's judges or their options changed since run ${run.runId} was graded, so its verdicts can't be kept. ${fullRegrade}`
+    );
+  // A run graded before MST recorded identities has none to compare.
+  if (
+    recorded.some(
+      (record, index) =>
+        record.identity !== undefined &&
+        record.identity !== judges[index]?.identity
+    )
+  )
+    throw new Error(
+      `A judge changed since run ${run.runId} was graded (its version, its plugin's version or its options' defaults), so its verdicts can't be kept. ${fullRegrade}`
     );
   for (const dataset of datasets) {
     const recorded = run.datasets.find((item) => item.name === dataset.name);
@@ -617,20 +642,37 @@ function assertResumable(
   }
 }
 
-function judgeRecords(
-  evalConfig: EvalConfig
-): Array<{ type: string; level: string; optionsHash: string }> {
+/**
+ * The identity of the judge an eval config entry runs, as its scores record
+ * it (ADR 0009). Undefined when the judge's plugin isn't loaded here.
+ */
+function entryIdentity(level: string, entry: unknown): string | undefined {
+  const config = (typeof entry === 'string' ? { type: entry } : entry) as {
+    type: string;
+  } & Record<string, unknown>;
+  if (level !== 'pairwise') return judgeEntryIdentity(config as CaseJudge);
+  try {
+    const { type, options } = pairwiseJudgeSpec(config);
+    return judgeIdentity(type, getPairwiseJudge(type), options);
+  } catch {
+    return undefined;
+  }
+}
+
+function judgeRecords(evalConfig: EvalConfig): JudgeRecord[] {
   const record = (level: string) => (entry: unknown) => {
     const { type, ...options } =
       typeof entry === 'string'
         ? { type: entry }
         : (entry as { type: string } & Record<string, unknown>);
+    const identity = entryIdentity(level, entry);
     return {
       type,
       level,
       optionsHash: createHash('sha256')
         .update(JSON.stringify(options))
         .digest('hex'),
+      ...(identity !== undefined ? { identity } : {}),
     };
   };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);

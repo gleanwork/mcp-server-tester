@@ -75,7 +75,20 @@
         "additionalProperties": {}
       }
     },
-    "judges": { "type": "array", "items": {} },
+    "judges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "level": { "type": "string" },
+          "optionsHash": { "type": "string" },
+          "identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "required": ["type", "level", "optionsHash"],
+        "additionalProperties": {}
+      }
+    },
     "partial": { "type": "boolean" },
     "selection": {
       "type": "object",

@@ -295,4 +295,39 @@ describe('mst grade --resume', () => {
       gradeRun({ ...f.base, run: graded, resume: true })
     ).rejects.toThrow(/Dataset "cases" changed since run .* was graded/);
   }, 60_000);
+
+  it("resumes a run graded before judges had an identity, and refuses when a judge's identity changed", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture();
+    vi.stubEnv('GRADE_TEST_KEY', KEY);
+    const graded = (await gradeRun({ ...f.base, run: f.collectedId }))
+      .outputDir;
+    const runFile = path.join(graded, 'run.json');
+    const run = JSON.parse(await fs.readFile(runFile, 'utf8'));
+    const judges = run.judges as Array<Record<string, unknown>>;
+    expect(judges.length).toBeGreaterThan(0);
+    for (const judge of judges)
+      expect(judge.identity).toMatch(/^[0-9a-f]{64}$/);
+
+    // A run that an earlier MST graded records no identities.
+    const withoutIdentity = judges.map(
+      ({ identity: _identity, ...rest }) => rest
+    );
+    await fs.writeFile(
+      runFile,
+      JSON.stringify({ ...run, judges: withoutIdentity })
+    );
+    await gradeRun({ ...f.base, run: path.basename(graded), resume: true });
+
+    // The same judges and options, but a judge that grades differently now.
+    const changed = judges.map((judge, index) =>
+      index === 0 ? { ...judge, identity: '0'.repeat(64) } : judge
+    );
+    await fs.writeFile(runFile, JSON.stringify({ ...run, judges: changed }));
+    await expect(
+      gradeRun({ ...f.base, run: path.basename(graded), resume: true })
+    ).rejects.toThrow(
+      /A judge changed since run .* was graded \(its version, its plugin's version or its options' defaults\).*without --resume/
+    );
+  }, 60_000);
 });
