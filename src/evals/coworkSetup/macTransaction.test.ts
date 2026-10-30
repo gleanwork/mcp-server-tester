@@ -1,9 +1,14 @@
-import { spawnSync } from 'node:child_process';
+import * as syncFs from 'node:fs';
 import * as fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EvalConfig } from '../evalConfig.js';
+import {
+  credentialHelperScript,
+  readCredential,
+  type CredentialHelperSpec,
+} from './credentialHelper.js';
 import type * as ManagedPreferencesModule from './macManagedPreferences.js';
 import {
   installMacCoworkSettings,
@@ -124,15 +129,16 @@ async function rejectInstall(overrides: Partial<Options> = {}): Promise<void> {
   expect((failure as Error).cause).toBeUndefined();
   expect((failure as Error).stack).not.toContain(TOKEN);
 }
-function invokeHelper(
-  file = stage('inference-helper.sh')
-): ReturnType<typeof spawnSync> {
-  return spawnSync(file, [], {
-    env: {},
-    encoding: 'utf8',
-    timeout: 5000,
-    maxBuffer: 128 * 1024,
-  });
+/**
+ * What the staged helper at `file` prints: it must be the script for `spec`
+ * (whose behavior credentialHelper.test.ts covers), run in-process.
+ */
+async function invokeHelper(
+  file: string,
+  spec: CredentialHelperSpec
+): Promise<string> {
+  expect(await text(file)).toBe(credentialHelperScript(spec));
+  return readCredential(spec, syncFs);
 }
 
 beforeEach(async () => {
@@ -443,9 +449,13 @@ describe('Mac Cowork settings transaction', () => {
       expect(configured).not.toHaveProperty('builtinToolPolicy');
       expect(configured).not.toHaveProperty('disableBypassPermissionsMode');
       for (const server of configured.managedMcpServers) {
-        const reply = invokeHelper(server.headersHelper);
-        expect(reply).toMatchObject({ status: 0, stderr: '' });
-        expect(JSON.parse(String(reply.stdout))).toEqual({
+        const reply = await invokeHelper(server.headersHelper, {
+          kind: 'headers',
+          path: stage(`credentials/${server.name}.json`),
+          names: ['Authorization'],
+          bearer: true,
+        });
+        expect(JSON.parse(reply)).toEqual({
           Authorization: `Bearer synthetic-${server.name}`,
         });
         expect(JSON.stringify(configured)).not.toContain(
@@ -455,7 +465,7 @@ describe('Mac Cowork settings transaction', () => {
       await installed.restore();
       await expectClean();
     }
-  }, 15_000); // Four filesystem transactions and nine real Python helper invocations.
+  });
 
   it('installs a private, secret-free flat profile and recovers exact original bytes', async () => {
     const result = await installMacCoworkSettings(options());
@@ -521,13 +531,12 @@ describe('Mac Cowork settings transaction', () => {
     expect(await readJson(stage('credentials/Search.json'))).toEqual({
       Authorization: `Bearer ${MCP_TOKEN}`,
     });
-    const invoked = invokeHelper();
-    expect(invoked.error).toBeUndefined();
-    expect(invoked).toMatchObject({
-      status: 0,
-      stdout: TOKEN + '\n',
-      stderr: '',
-    });
+    expect(
+      await invokeHelper(stage('inference-helper.sh'), {
+        kind: 'inference',
+        path: stage('credentials/inference.json'),
+      })
+    ).toBe(TOKEN + '\n');
     await restoreMacCoworkSettings(profileDirectory);
     await expectClean();
   });
@@ -892,51 +901,6 @@ describe('Mac Cowork settings transaction', () => {
       expect(await text(join(victim, 'keep'))).toBe('keep');
       expect((await readJson(meta)).appliedId).toBe(result.id);
       await fs.access(journal);
-    }
-  );
-
-  it.each([
-    'missing',
-    'malformed',
-    'duplicate',
-    'public',
-    'symlink',
-    'oversize',
-    'directory',
-    'fifo',
-    'invalid-token',
-  ])(
-    'helper rejects %s credentials with bounded generic output',
-    async (kind) => {
-      await installMacCoworkSettings(options());
-      const file = stage('credentials/inference.json');
-      if (['missing', 'symlink', 'directory', 'fifo'].includes(kind))
-        await fs.unlink(file);
-      if (kind === 'malformed') await fs.writeFile(file, TOKEN);
-      if (kind === 'duplicate')
-        await fs.writeFile(
-          file,
-          `{"ANTHROPIC_API_KEY":"${TOKEN}","ANTHROPIC_API_KEY":"other"}`
-        );
-      if (kind === 'invalid-token')
-        await fs.writeFile(file, '{"ANTHROPIC_API_KEY":"bad value"}');
-      if (kind === 'public') await fs.chmod(file, 0o644);
-      if (kind === 'symlink')
-        await fs.symlink(stage('credentials/Search.json'), file);
-      if (kind === 'oversize') await fs.writeFile(file, 'a'.repeat(65537));
-      if (kind === 'directory') await fs.mkdir(file, { mode: 0o700 });
-      if (kind === 'fifo')
-        expect(
-          spawnSync('/usr/bin/mkfifo', ['-m', '600', file], { timeout: 5000 })
-            .status
-        ).toBe(0);
-      const invoked = invokeHelper();
-      expect(invoked.error).toBeUndefined();
-      expect(invoked).toMatchObject({
-        status: 1,
-        stdout: '',
-        stderr: 'Unable to read Cowork inference credential.\n',
-      });
     }
   );
 });
