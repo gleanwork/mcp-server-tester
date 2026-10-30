@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import { compileSwiftHelper, type NativeHelper } from '../nativeHelper.js';
+import {
+  compileSwiftHelper,
+  NativeHelperBuildError,
+  type NativeHelper,
+} from '../nativeHelper.js';
 import {
   actionField,
   DesktopBlockedError,
@@ -218,6 +222,7 @@ function helper(): Promise<NativeHelper> {
     source: MAC_DESKTOP_HELPER_SOURCE,
   }).catch((error: unknown) => {
     compiled = undefined;
+    if (error instanceof NativeHelperBuildError) throw error;
     const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
     throw new Error(
       `Computer Use couldn't build its macOS helper (${code}). It needs the Xcode Command Line Tools: run \`xcode-select --install\`.`

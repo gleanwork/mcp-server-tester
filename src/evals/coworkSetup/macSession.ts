@@ -20,6 +20,7 @@ import {
   type ClientStdioPaths,
 } from '../clientPlugins.js';
 import { getMacCoworkController } from './macController.js';
+import { NativeHelperBuildError } from '../nativeHelper.js';
 import { configureMacToolDefaults } from './macToolPermissions.js';
 import { resolveCoworkSetupConfig } from './options.js';
 import { coworkManagedPluginSettings } from '../cowork/managedSettings.js';
@@ -48,12 +49,13 @@ const INSTALLED_APP = '/Applications/Claude.app';
 /** Setup errors that are safe to show and tell the operator what to change. */
 function actionable(error: unknown): error is Error {
   return (
-    error instanceof Error &&
-    (error.message.startsWith('Unable to acquire Claude Desktop ') ||
-      error.message === 'Unable to read the Claude Desktop version.' ||
-      error.message.startsWith('MST_COWORK_APP_VERSION was removed') ||
-      error.message.startsWith('Invalid clientOptions.appVersion') ||
-      error.message.startsWith('Set clientOptions.appVersion'))
+    error instanceof NativeHelperBuildError ||
+    (error instanceof Error &&
+      (error.message.startsWith('Unable to acquire Claude Desktop ') ||
+        error.message === 'Unable to read the Claude Desktop version.' ||
+        error.message.startsWith('MST_COWORK_APP_VERSION was removed') ||
+        error.message.startsWith('Invalid clientOptions.appVersion') ||
+        error.message.startsWith('Set clientOptions.appVersion')))
   );
 }
 

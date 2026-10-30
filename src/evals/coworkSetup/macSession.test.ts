@@ -556,6 +556,18 @@ describe('automatic Mac Cowork session (no native execution)', () => {
     expect(removeMacCoworkApp).toHaveBeenCalledTimes(1);
     await clean();
   });
+  it('shows a native helper build failure instead of the generic error', async () => {
+    const { NativeHelperBuildError } = await import('../nativeHelper.js');
+    vi.mocked(getMacCoworkController).mockRejectedValueOnce(
+      new NativeHelperBuildError(
+        "MST couldn't build its macOS helper. The Xcode license hasn't been accepted."
+      )
+    );
+    await expect(prepare()).rejects.toThrow(
+      "The Xcode license hasn't been accepted."
+    );
+    await clean();
+  });
   it('cleans a failed acquisition without touching the running installed app', async () => {
     vi.mocked(acquireMacCoworkApp).mockImplementationOnce(async (directory) => {
       await fs.mkdir(directory, { mode: 0o700 });
