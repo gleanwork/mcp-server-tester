@@ -144,6 +144,22 @@ if (command === 'image') {
   const name = rest[index];
   const argv = rest.slice(index + 1);
   if (!fs.existsSync(containerRoot(name))) fail(`No such container: ${name}`);
+  // FAKE_DOCKER_TOKEN_DENIALS=N: the first N token writes are denied, as on a
+  // container whose entrypoint hasn't yet given /run/mst to the desktop user.
+  const denials = Number(process.env.FAKE_DOCKER_TOKEN_DENIALS ?? 0);
+  if (denials && argv.join(' ').includes('/run/mst/inference-token')) {
+    const counter = path.join(containerRoot(name), 'token-denials');
+    const denied = fs.existsSync(counter)
+      ? Number(fs.readFileSync(counter, 'utf8'))
+      : 0;
+    if (denied < denials) {
+      fs.writeFileSync(counter, String(denied + 1));
+      process.stderr.write(
+        'sh: 1: cannot create /run/mst/inference-token.new: Permission denied\n'
+      );
+      process.exit(2);
+    }
+  }
   if (argv[0] === 'mst' && outOfMemory(name)) {
     // The kernel killed the worker: out of the container's memory.
     process.stderr.write('Killed\n');

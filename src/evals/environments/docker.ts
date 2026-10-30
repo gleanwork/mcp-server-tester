@@ -484,27 +484,47 @@ async function inference(): Promise<{
   };
 }
 
-/** Writes the inference token where the image's credential helper reads it. */
+/** How long a new container has to let the desktop user write its token. */
+const TOKEN_DELIVERY_TIMEOUT_MS = 60_000;
+const TOKEN_DELIVERY_RETRY_MS = 500;
+
+/**
+ * Writes the inference token where the image's credential helper reads it.
+ * Right after `docker run`, the entrypoint may not yet have given /run/mst
+ * to the desktop user, so a denied write is retried for a minute rather than
+ * losing the shard.
+ */
 async function deliverToken(
   context: string | undefined,
   name: string,
   token: string
 ): Promise<void> {
-  await dockerOk(
-    context,
-    [
-      'exec',
-      '-i',
-      '-u',
-      USER,
-      name,
-      'sh',
-      '-c',
-      `umask 077 && cat > ${TOKEN_FILE}.new && mv -f ${TOKEN_FILE}.new ${TOKEN_FILE}`,
-    ],
-    'Delivering the inference token',
-    { input: token }
-  );
+  const deadline = Date.now() + TOKEN_DELIVERY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await dockerOk(
+        context,
+        [
+          'exec',
+          '-i',
+          '-u',
+          USER,
+          name,
+          'sh',
+          '-c',
+          `umask 077 && cat > ${TOKEN_FILE}.new && mv -f ${TOKEN_FILE}.new ${TOKEN_FILE}`,
+        ],
+        'Delivering the inference token',
+        { input: token }
+      );
+      return;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) =>
+        setTimeout(resolve, TOKEN_DELIVERY_RETRY_MS)
+      );
+    }
+  }
 }
 
 /** Waits for the image's desktop session to say it's ready (or failed). */

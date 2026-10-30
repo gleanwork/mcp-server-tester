@@ -102,6 +102,13 @@ export interface DesktopClientAdapter<Session> {
    */
   reset?(session: Session, index: number): Promise<void>;
   /**
+   * How long to wait before each retry of a failed reset; none by default.
+   * A reset can fail transiently, e.g. an accessibility scan timing out on a
+   * slow desktop (Cowork uses `RESET_RETRY_DELAYS_MS`); only when every
+   * attempt fails does the batch stop submitting.
+   */
+  readonly resetRetryDelaysMs?: readonly number[];
+  /**
    * After a failed case that leaves the app in an unknown state, before the
    * reset: writes a failure diagnosis into `dir`, an empty directory made for
    * the case (what the desktop shows, its own logs). Read-only: it never acts
@@ -206,6 +213,25 @@ async function withDiagnosis<Session>(
   }
 }
 
+/** Two reset retries, after 10 s then 20 s, for clients that opt in. */
+export const RESET_RETRY_DELAYS_MS: readonly number[] = [10_000, 20_000];
+
+/** `reset`, retried after each delay; throws the last attempt's error. */
+async function withRetries(
+  reset: () => Promise<void>,
+  delays: readonly number[]
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await reset();
+      return;
+    } catch (error) {
+      if (attempt >= delays.length) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
 function notSubmitted(message: string): ClientRunResult {
   return {
     finalText: '',
@@ -262,7 +288,12 @@ export async function runDesktopBatch<Session>(
           blocked = `Not submitted because the ${adapter.name} app could not be ${adapter.resetVerb} after an earlier failed case: this ${adapter.name} platform cannot reset between cases`;
         else
           try {
-            await adapter.reset(session, index);
+            const reset = adapter.reset.bind(adapter);
+            const current = session;
+            await withRetries(
+              () => reset(current, index),
+              adapter.resetRetryDelaysMs ?? []
+            );
           } catch (error) {
             blocked = `Not submitted because the ${adapter.name} app could not be ${adapter.resetVerb} after an earlier failed case: ${redact(
               error,
