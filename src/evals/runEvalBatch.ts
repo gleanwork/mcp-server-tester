@@ -156,7 +156,8 @@ async function hasMatchingSavedResult(
       resolveStorePaths(config, {
         configDir: path.dirname(path.resolve(configPath)),
         rootDir,
-      })
+      }),
+      evalConfig.settings
     );
     const identity = configIdentity(evalConfig);
     const history = storeRunHistory(store, evalConfig.name);

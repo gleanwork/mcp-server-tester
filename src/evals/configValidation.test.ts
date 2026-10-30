@@ -15,7 +15,7 @@ import { clientPatchOf } from './clientFields.js';
 
 const schema = z.object({}).passthrough();
 
-type TestExtensions = Omit<Plugin, 'meta' | 'configs'>;
+type TestExtensions = Omit<Plugin, 'meta' | 'configs' | 'settings'>;
 
 function baseExtensions(): Required<TestExtensions> {
   const datasetSource: DatasetSource = {

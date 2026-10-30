@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { EvalDataset } from '../../../evals/datasetTypes.js';
 import { datasetContentHash } from '../../../evals/runFormat.js';
+import { trialGradeComplete } from '../../../evals/gradingSource.js';
 import { runReportPath } from '../../../evals/runReport.js';
 import {
   headlinePassRate,
@@ -378,6 +379,7 @@ export function printRunResult(
   }
   printVariantTable(result.summary.variants, graded);
   printPairwise(result.summary.variants);
+  if (graded) printUnfinishedGrading(result, runId, config);
   const { selection } = result.summary;
   if (result.summary.partial && selection) {
     console.log(
@@ -620,6 +622,34 @@ function rangeEnds(interval: {
 /** A 95% range in whole percents: "39%-100%". */
 function rangeText(interval: { lower: number; upper: number }): string {
   return rangeEnds(interval).join('-');
+}
+
+/**
+ * Trials and pairwise comparisons with a judge that gave no verdict (it
+ * timed out, or its grade shard was lost), and how to grade just those.
+ */
+function printUnfinishedGrading(
+  result: Awaited<ReturnType<typeof runEval>>,
+  runId: string,
+  config: string
+): void {
+  type Scored = { scores?: Parameters<typeof trialGradeComplete>[0]['scores'] };
+  const trials = result.summary.results
+    .flatMap((caseResult): Scored[] =>
+      caseResult.trialResults?.length ? caseResult.trialResults : [caseResult]
+    )
+    .filter(
+      (trial) => trial.scores && !trialGradeComplete({ scores: trial.scores })
+    ).length;
+  const comparisons = result.summary.variants
+    .flatMap((variant) => variant.pairwise?.cases ?? [])
+    .filter((compared) =>
+      compared.preferences.some((preference) => preference.error !== undefined)
+    ).length;
+  if (trials + comparisons === 0) return;
+  console.log(
+    `${trials} trials and ${comparisons} pairwise comparisons have a judge without a verdict. Grade only those with \`mst grade ${runId.split('-').pop()} --resume -c ${config}\`.`
+  );
 }
 
 /** Each pairwise judge's verdict on each variant against the baseline. */

@@ -90,7 +90,7 @@ permission the driver already uses.
 ## Linux runtime contract
 
 The caller (your eval harness) owns the VM/container, display, D-Bus, keyring,
-AT-SPI bus, the fresh HOME and API-key file (creation and deletion), the package
+AT-SPI bus, the fresh HOME and the inference credential file (creation and deletion), the package
 version check, the disposable no-new-privileges container, and uploading `MST_CHATGPT_EVIDENCE_DIR`. It runs MST as the
 unprivileged desktop user with this process environment. There is no controller
 helper, socket, opener, or attestation variable.
@@ -107,8 +107,10 @@ helper, socket, opener, or attestation variable.
 | `MST_CHATGPT_APP_PATH`                               | `/usr/bin/chatgpt`                     | Executable file.                                                                      |
 | `MST_CHATGPT_CODEX_PATH`                             | The package's bundled `codex` backend  | Executable file. Used for login and the app-server status probe.                      |
 | `MST_CHATGPT_API_KEY_FILE`                           | 0600 file containing only the API key  | Owned regular file, no group/other bits, no symlink, at most 8 KiB, printable ASCII.  |
+| `MST_CHATGPT_INFERENCE_BASE_URL`                     | An OpenAI-compatible gateway's base    | `https:`, no credentials. Instead of the API key file, with the token file.           |
+| `MST_CHATGPT_INFERENCE_TOKEN_FILE`                   | 0600 file the caller keeps fresh       | As the API key file. Read by the app's token command, never written to the config.    |
 | `MST_CHATGPT_MCP_TOKEN_<n>`                          | Set by MST from `mcpServers[].auth`    | Config uses `bearer_token_env_var`; never written to disk.                            |
-| `MST_CHATGPT_EVIDENCE_DIR`                           | Empty 0700 dir that the caller uploads | Owned, mode 0700, empty at start.                                                     |
+| `MST_CHATGPT_EVIDENCE_DIR`                           | 0700 dir that the caller uploads       | Owned, mode 0700. Each session writes to its own `session-*` subdirectory.            |
 | `MST_CHATGPT_PYTHON` (optional)                      | `/usr/bin/python3`                     | Absolute path. Needs PyGObject with `gi.repository.Atspi` 2.0.                        |
 | Process isolation (no variable)                      | Disposable no-new-privileges container | Not checked. Required: MST turns off the native sandbox (see below).                  |
 
@@ -123,7 +125,14 @@ MST then owns, in order:
    reasoning effort, MCP entries with `bearer_token_env_var`, and trust for only
    that workspace, `approval_policy = "never"`, and
    `sandbox_mode = "danger-full-access"`.
-3. `codex login --with-api-key` with the key on stdin only, then `codex login status`.
+3. Inference, one of two ways. With `MST_CHATGPT_API_KEY_FILE`: `codex login
+--with-api-key` with the key on stdin only, then `codex login status`. With
+   `MST_CHATGPT_INFERENCE_BASE_URL` and `MST_CHATGPT_INFERENCE_TOKEN_FILE`: no
+   sign-in. `config.toml` gets a `mst_gateway` model provider (`wire_api =
+"responses"`) whose token command reads the token file every minute, and
+   MST checks `GET <base>/models` with the token before the app starts
+   (`inference_unavailable` otherwise). `nativeReadiness.inference` records
+   which (`api-key` or `gateway`).
 4. Direct MCP preflight (connect and list tools for each configured server; the
    same readiness rule as the Cowork client), then a
    read-only `codex app-server` probe (`initialize`, `initialized`,
@@ -215,8 +224,11 @@ marketplace, version, ref, and overridden server names.
 
 ChatGPT Work and Codex support plain stdio `servers` entries on macOS and
 Linux: use `command`, optional `args`, `cwd`, and declared `env`. No URL or
-plugin is required. ChatGPT rejects two Cowork-only forms before the app starts:
-client-resolved stdio entries (`url`, `auth`, `files`, `minTools`, or
+plugin is required. An optional `minTools` is MST's own readiness rule: the
+direct preflight checks it before the app starts, and it is never written to
+`config.toml`. A [dry-run proxy](cowork.md#dry-run-proxy) entry is such a
+server, so connectors behind it work with ChatGPT too. ChatGPT rejects two Cowork-only forms before the app starts:
+client-resolved stdio entries (`url`, `auth`, `files`, or
 `${url}`/`${dataDir}`/`${pluginRoot:...}` placeholders) and
 `plugins[].blockMcpServers`. For plugin-specific endpoint and credential
 overrides, use the Linux `plugins[].mcp` setup above. See

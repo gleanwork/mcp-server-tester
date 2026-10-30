@@ -5,6 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { getClient } from './builtinClients.js';
 import type { ClientRunContext } from './evalFrameworkTypes.js';
+import type * as HostReceiver from './telemetry/hostReceiver.js';
+
+// No machine's managed settings keep the fake Claude Code's telemetry.
+vi.mock('./telemetry/hostReceiver.js', async (original) => ({
+  ...(await original<typeof HostReceiver>()),
+  claudeCodeTelemetryClaim: () => undefined,
+}));
 
 let directory: string;
 beforeEach(() => {
@@ -33,6 +40,60 @@ function isProcessAlive(pid: number): boolean {
 }
 
 describe('CLI client with a local process', () => {
+  it("records Claude Code's own telemetry for its session (telemetry.host)", async () => {
+    fs.writeFileSync(
+      path.join(directory, 'claude'),
+      `#!${process.execPath}
+const session = process.argv[process.argv.indexOf('--session-id') + 1];
+const event = (name, attrs) => ({
+  timeUnixNano: String(BigInt(Date.now()) * 1000000n),
+  attributes: [
+    { key: 'event.name', value: { stringValue: name } },
+    { key: 'session.id', value: { stringValue: session } },
+    ...Object.entries(attrs).map(([key, v]) => ({ key, value: { stringValue: String(v) } })),
+  ],
+});
+await fetch(process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ resourceLogs: [{ scopeLogs: [{ logRecords: [
+    event('api_request', { request_id: 'req_1', ttft_ms: 400 }),
+    event('user_prompt', { prompt: 'secret' }),
+  ] }] }] }),
+});
+console.log(JSON.stringify({ type: 'result', result: process.env.OTEL_LOG_USER_PROMPTS }));
+`,
+      { mode: 0o700 }
+    );
+    const result = await getClient('claude-code').run!(
+      { prompt: 'hello', servers: [], env: { PATH: directory } },
+      { type: 'claude-code' },
+      {
+        evalConfig: {
+          name: 'offline',
+          datasets: [],
+          telemetry: { host: {} },
+        },
+        env: {},
+      }
+    );
+    expect(result.error).toBeUndefined();
+    // Asked for no content.
+    expect(result.finalText).toBe('0');
+    expect(
+      result.hostTelemetry?.events.map((event) => [
+        event.name,
+        event.attributes,
+      ])
+    ).toEqual([
+      [
+        'api_request',
+        expect.objectContaining({ request_id: 'req_1', ttft_ms: '400' }),
+      ],
+      ['user_prompt', expect.not.objectContaining({ prompt: 'secret' })],
+    ]);
+  });
+
   it('preserves environment precedence in an actual CLI command without mutation', async () => {
     vi.stubEnv('CLIENT_ENV_SHARED', 'ambient');
     vi.stubEnv('CLIENT_ENV_REMOVED', 'ambient');

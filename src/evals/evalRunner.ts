@@ -8,6 +8,7 @@ import {
 import type { Trace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
+import type { SettingsSections } from '../plugins/settings.js';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { ClientOptions } from './clientFields.js';
 import {
@@ -222,13 +223,14 @@ export interface StoredEvalResultSaveOptions {
  * Options for running eval dataset
  */
 /**
- * Grades one trial of a case: `grade` grades it here; a grader elsewhere
- * returns what grading produced there.
+ * Grades one trial of a case: `grade` grades it here, reusing the judge
+ * verdicts of `previous` when given; a grader elsewhere returns what grading
+ * produced there.
  */
 export type TrialGrader = (
   evalCase: EvalCase,
   trial: number,
-  grade: () => Promise<GradingOutcome>
+  grade: (previous?: GradingOutcome) => Promise<GradingOutcome>
 ) => Promise<GradingOutcome>;
 
 export interface EvalRunnerOptions {
@@ -283,6 +285,9 @@ export interface EvalRunnerOptions {
    * produced, and reads those records back on the coordinator.
    */
   gradeTrial?: TrialGrader;
+
+  /** The eval's plugin settings, for its judges (ADR 0008). */
+  settings?: SettingsSections;
 
   /**
    * Whether to stop on first failure
@@ -453,6 +458,8 @@ export interface EvalCaseOptions {
    * produced, and reads those records back on the coordinator.
    */
   gradeTrial?: TrialGrader;
+  /** The eval's plugin settings, for its judges (ADR 0008). */
+  settings?: SettingsSections;
   /**
    * Dataset name for the result (defaults to 'single-case')
    */
@@ -815,13 +822,18 @@ async function runTrial(
       ...(executed.response as ClientResponse),
       ...(executed.artifacts ? { artifactsDir: executed.artifacts.dir } : {}),
     };
-    const grade = () =>
-      gradeTrial(evalCase, {
-        response: mapToolNames(clientResponse, options.toolMap),
-        clientResponse,
-        evidence: executed.traceEvidence,
-        clientMetadata: executed.clientMetadata,
-      });
+    const grade = (previous?: GradingOutcome) =>
+      gradeTrial(
+        evalCase,
+        {
+          response: mapToolNames(clientResponse, options.toolMap),
+          clientResponse,
+          evidence: executed.traceEvidence,
+          clientMetadata: executed.clientMetadata,
+          ...(options.settings ? { settings: options.settings } : {}),
+        },
+        previous
+      );
     outcome = options.gradeTrial
       ? await options.gradeTrial(evalCase, trial, grade)
       : await grade();
@@ -1205,6 +1217,7 @@ export async function runEvalDataset(
       executeCase: options.executeCase,
       ...(options.grade === false ? { grade: false } : {}),
       ...(options.gradeTrial ? { gradeTrial: options.gradeTrial } : {}),
+      ...(options.settings ? { settings: options.settings } : {}),
       toolMap: options.toolMap,
       datasetName: dataset.name,
       toolVariantId: toolOverrides?.id,

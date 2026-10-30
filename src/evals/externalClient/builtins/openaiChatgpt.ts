@@ -674,6 +674,7 @@ async function captureChatgptComputerUseResult({
               success: true,
               response: trace.response,
               toolCalls: trace.toolCalls,
+              ...(trace.modelCalls ? { modelCalls: trace.modelCalls } : {}),
               conversationHistory: trace.conversationHistory,
               usage: trace.usage,
               llmDurationMs: trace.llmDurationMs,
@@ -831,6 +832,7 @@ function partialFailure(
     success: false,
     error,
     toolCalls: trace.toolCalls,
+    ...(trace.modelCalls ? { modelCalls: trace.modelCalls } : {}),
     conversationHistory: trace.conversationHistory,
     usage: trace.usage,
     clientMetadata: {

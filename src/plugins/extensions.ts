@@ -91,6 +91,7 @@ function samePlugin(a: Plugin, b: Plugin): boolean {
   // Configs are data, so a rebuilt copy matches when they're equal.
   if (JSON.stringify(a.configs ?? {}) !== JSON.stringify(b.configs ?? {}))
     return false;
+  if (a.settings?.schema !== b.settings?.schema) return false;
   return EXTENSION_KINDS.every((kind) =>
     Object.entries(a[kind] ?? {}).every(
       ([name, definition]) => b[kind]?.[name] === definition
@@ -304,6 +305,11 @@ export function getSharedConfig(reference: string): unknown {
     );
   }
   return configs[name];
+}
+
+/** The installed plugin with `namespace`, if any. */
+export function installedPlugin(namespace: string): Plugin | undefined {
+  return state.plugins.get(namespace);
 }
 
 /** Namespaces of installed plugins, sorted. */

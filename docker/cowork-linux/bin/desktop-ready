@@ -25,6 +25,11 @@ only once it completes (Cowork starts its keepalive), after the last
 failure; another warm-up task retries the install on the connected VM. A
 task that finds the VM connected installs the SDK too, and its failure
 ("Post-connect setup failed") is retried the same way.
+
+A startup logs every few seconds while it boots. One that stops logging
+without a failure has stalled: after STALL_S of silence, another warm-up
+task starts it again rather than waiting out the deadline. If no startup
+completes, the error names the VM log's last line, where it stopped.
 """
 import os
 import subprocess
@@ -46,6 +51,8 @@ GATEWAY_NOTICE = "custom inference gateway"
 PROMPT = "write your prompt"
 VM_LOG = Path.home() / ".config/Claude-3p/logs/cowork_vm_node.log"
 OPEN_URL = "/opt/mst/bin/open-url"
+# Silence in the VM log, during a warm-up task, that counts as a stall.
+STALL_S = int(os.environ.get("MST_COWORK_WARM_VM_STALL_S", "120"))
 
 
 def claude():
@@ -151,6 +158,15 @@ STARTUP_COMPLETE = (b"[Keepalive] Starting", b"sdk_install completed")
 STARTUP_FAILED = (b"Startup failed", b"Post-connect setup failed")
 
 
+def last_line(log):
+    lines = [line for line in log.splitlines() if line.strip()]
+    return lines[-1].decode("utf-8", "replace").strip()[:200] if lines else ""
+
+
+def log_size():
+    return VM_LOG.stat().st_size if VM_LOG.exists() else 0
+
+
 def last_failure(log):
     return max(log.rfind(marker) for marker in STARTUP_FAILED)
 
@@ -166,11 +182,12 @@ def warm_vm():
     deadline = time.monotonic() + WARM_DEADLINE_S
     # The guest can become ready between two warm-up tasks, so readiness is
     # read from everything logged since the warm-up began.
-    began = VM_LOG.stat().st_size if VM_LOG.exists() else 0
+    began = log_size()
     while time.monotonic() < deadline:
-        offset = VM_LOG.stat().st_size if VM_LOG.exists() else 0
+        offset = log_size()
         if not start_task("Reply with OK."):
             return "the warm-up task couldn't be started"
+        size, grew = offset, time.monotonic()
         while time.monotonic() < deadline:
             seen = vm_log_since(offset)
             if vm_ready(vm_log_since(began)):
@@ -187,8 +204,16 @@ def warm_vm():
             ):
                 time.sleep(3)
                 break
+            if log_size() != size:
+                size, grew = log_size(), time.monotonic()
+            elif time.monotonic() - grew > STALL_S:
+                print(f"Cowork's VM log was silent for {STALL_S} s; starting another warm-up task",
+                      file=sys.stderr)
+                break
             time.sleep(2)
-    return f"Cowork's VM wasn't ready within {WARM_DEADLINE_S} s"
+    last = last_line(vm_log_since(began))
+    return f"Cowork's VM wasn't ready within {WARM_DEADLINE_S} s" + (
+        f" (its log last said: {last})" if last else " (its log said nothing)")
 
 
 if wait_for_prompt(DEADLINE_S) is None:

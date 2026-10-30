@@ -128,6 +128,7 @@ class FakeDesktop:
         self.nodes = ready() if nodes is None else nodes
         self.actions, self.stall, self.open_surface = [], None, None
         self.preserve_draft, self.uncertain_send, self.stale_checked = True, False, False
+        self.announcement = False
 
     def require_helpers(self): pass
     def snapshot(self): return self.nodes
@@ -155,6 +156,10 @@ class FakeDesktop:
         elif name == 'Skip':
             self.nodes = [node('Go to ChatGPT'), node('Keep setting up')]
         elif name == 'Go to ChatGPT':
+            # Modal: while it is open, the mode switch is not in the tree.
+            self.nodes = ([node('Continue with current model'), node('Try the new model now')]
+                          if self.announcement else ready(CODEX))
+        elif name == 'Continue with current model':
             self.nodes = ready(CODEX)
         elif name.startswith('Switch mode'):
             self.nodes += [node(WORK_ITEM, 'menu item'),
@@ -374,6 +379,31 @@ class DriverTest(unittest.TestCase):
                                                  SWITCH_CODEX, WORK_ITEM, 'open'])
         self.assertEqual(desktop.actions[-1], ('open', ''))
         self.assertEqual(result['action_count'], 7)
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_model_announcement_keeps_the_configured_model(self, _sleep):
+        desktop = FakeDesktop([node('Engineering', 'radio button'), node('Continue')])
+        desktop.stale_checked, desktop.announcement = True, True
+        self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual(self.actions(desktop), ['Engineering', 'Continue', 'Skip', 'Go to ChatGPT',
+                                                 'Continue with current model',
+                                                 SWITCH_CODEX, WORK_ITEM, 'open'])
+
+    @patch('chatgpt_linux.time.sleep')
+    def test_a_late_model_announcement_over_the_draft_is_dismissed_once(self, _sleep):
+        desktop = FakeDesktop(ready(WORK))
+        hook_open(desktop, lambda _v: desktop.nodes.__setitem__(
+            slice(None), [node('Continue with current model')]))
+        desktop.activate_original = desktop.activate
+        def activate(control, allowed):
+            if control['name'] == 'Continue with current model':
+                desktop.actions.append((control['name'], allowed))
+                desktop.nodes = ready(WORK)
+                return
+            desktop.activate_original(control, allowed)
+        desktop.activate = activate
+        self.driver(desktop).prepare('chatgpt-work')
+        self.assertEqual(self.actions(desktop), ['open', 'Continue with current model'])
 
     @patch('chatgpt_linux.time.sleep')
     def test_unknown_or_partial_intro_screens_are_never_skipped(self, _sleep):

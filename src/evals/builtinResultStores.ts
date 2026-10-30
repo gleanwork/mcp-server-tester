@@ -6,6 +6,7 @@ import type { ResultStoreDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { fileRunStore, gcsRunStore, isRunStore } from './runStore.js';
 import type { RunStore } from './runStore.js';
+import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 
 const FileResultStoreSchema = z
   .object({ type: z.literal('file'), dir: z.string().min(1) })
@@ -101,14 +102,18 @@ export function parseResultsFlag(value: string): ExtensionConfig {
 /**
  * Create a store from its definition, and check it holds runs. A store
  * written for MST before 2.0.0-beta.13 (`saveArtifact`) fails with what to
- * change.
+ * change. `settings` are the eval's plugin settings; a plugin's store gets
+ * its plugin's (ADR 0008).
  */
 export function createRunStore(
   reference: string,
   definition: ResultStoreDefinition,
-  config: ExtensionConfig
+  config: ExtensionConfig,
+  settings?: SettingsSections
 ): RunStore {
-  const store: unknown = definition.create(config);
+  const store: unknown = definition.create(config, {
+    settings: settingsFor(settings, reference),
+  });
   if (isRunStore(store)) return store;
   throw new Error(
     typeof store === 'object' && store !== null && 'saveArtifact' in store

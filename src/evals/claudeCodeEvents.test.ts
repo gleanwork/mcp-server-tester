@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { validateToolCalls } from '../assertions/validators/toolCalls.js';
 import {
+  claudeModelCalls,
+  claudeThinkingTokens,
   splitClaudeMcpName,
   surfacedTools,
   typeClaudeCodeCall,
+  withFinalUsage,
 } from './claudeCodeEvents.js';
 import { simulationTrace } from './clientTrace.js';
 import { parseStreamJson } from './mstClient/adapters/cli/parsers.js';
@@ -19,6 +22,103 @@ function host(name: string, input: Record<string, unknown>, output?: string) {
     ...(output !== undefined ? { output } : {}),
   } satisfies LLMToolCall;
 }
+
+describe('claudeModelCalls', () => {
+  it("keeps each call's request ID and record IDs, from the stream and the transcript", () => {
+    const streamed = claudeModelCalls([
+      {
+        type: 'assistant',
+        uuid: 'u1',
+        message: {
+          id: 'msg_1',
+          model: 'm',
+          content: [{ type: 'text', text: 'a' }],
+        },
+      },
+      {
+        type: 'assistant',
+        uuid: 'u2',
+        message: {
+          id: 'msg_1',
+          model: 'm',
+          content: [{ type: 'text', text: 'b' }],
+        },
+      },
+    ]);
+    expect(streamed).toMatchObject([{ id: 'msg_1', entryIds: ['u1', 'u2'] }]);
+    const transcript = claudeModelCalls([
+      {
+        type: 'assistant',
+        uuid: 'u3',
+        requestId: 'req_1',
+        message: { id: 'msg_1', model: 'm', content: [] },
+      },
+    ]);
+    expect(withFinalUsage(streamed, transcript)).toMatchObject([
+      { id: 'msg_1', requestId: 'req_1', entryIds: ['u1', 'u2', 'u3'] },
+    ]);
+  });
+
+  it("keeps a call's thinking summaries, not a thinking block that is only a signature", () => {
+    const [call, signed] = claudeModelCalls([
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_1',
+          content: [
+            { type: 'thinking', thinking: 'Search first.', signature: 's1' },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_1',
+          content: [
+            { type: 'thinking', thinking: 'Then read.', signature: 's2' },
+            { type: 'text', text: 'Done.' },
+          ],
+        },
+      },
+      {
+        type: 'assistant',
+        message: {
+          id: 'msg_2',
+          content: [{ type: 'thinking', thinking: '', signature: 's3' }],
+        },
+      },
+    ]);
+    expect(call).toMatchObject({
+      reasoningText: 'Search first.\n\nThen read.',
+      text: 'Done.',
+    });
+    expect(signed).not.toHaveProperty('reasoningText');
+  });
+});
+
+describe('claudeThinkingTokens', () => {
+  it("reads Anthropic's count, else every model's", () => {
+    expect(
+      claudeThinkingTokens({ output_tokens_details: { thinking_tokens: 12 } })
+    ).toBe(12);
+    expect(
+      claudeThinkingTokens(
+        {},
+        { a: { thinkingTokens: 3 }, b: { thinkingTokens: 4 } }
+      )
+    ).toBe(7);
+  });
+
+  it('is undefined when a model or the result does not say', () => {
+    expect(claudeThinkingTokens({ output_tokens: 5 })).toBeUndefined();
+    expect(
+      claudeThinkingTokens({}, { a: { thinkingTokens: 3 }, b: {} })
+    ).toBeUndefined();
+    expect(
+      claudeThinkingTokens({ output_tokens_details: { thinking_tokens: -1 } })
+    ).toBeUndefined();
+  });
+});
 
 describe('surfacedTools', () => {
   it('reads tool_reference blocks, strings, and MCP names in text', () => {

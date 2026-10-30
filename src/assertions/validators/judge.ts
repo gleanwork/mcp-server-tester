@@ -6,6 +6,7 @@
  */
 
 import { builtinShortName } from '../../plugins/extensions.js';
+import type { SettingsSections } from '../../plugins/settings.js';
 import type { ValidationResult } from './types.js';
 import type { ProviderKind } from '../../judge/judgeTypes.js';
 import type { RubricSpec } from '../../judge/rubrics.js';
@@ -108,11 +109,12 @@ export async function validateJudge(
  * (see `JudgeDefinition.preflight`). Throws naming what's missing.
  */
 export async function preflightJudgeAssertion(
-  config: JudgeValidatorConfig
+  config: JudgeValidatorConfig,
+  settings?: SettingsSections
 ): Promise<void> {
   const request = judgeRequest(config);
   if (typeof request === 'string') throw new Error(request);
-  await preflightJudgeRequest(request);
+  await preflightJudgeRequest(request, settings);
 }
 
 /**

@@ -2,6 +2,16 @@
 
 `mst run --env docker` runs Cowork evals in Linux containers instead of on your own desktop. Each shard gets a container with its own Claude Desktop, and Cowork's VM runs inside it. Your machine stays usable while the eval runs.
 
+**Which image a shard runs.** The eval's client picks it:
+
+| Client                                                                  | Image                             | Container                                                                          |
+| ----------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
+| Cowork (the default)                                                    | `mst-cowork-linux:<MST version>`  | Claude Desktop and Cowork's VM, with Cowork inference (`ANTHROPIC_*`)              |
+| `chatgpt`                                                               | `mst-chatgpt-linux:<MST version>` | The ChatGPT desktop app; see [ChatGPT in Docker](./chatgpt-docker.md)              |
+| Headless: `codex`, `mst`, `claude-code`, plugin clients with `headless` | `mst-cowork-linux:<MST version>`  | No desktop, VM devices or Cowork inference ([Headless clients](#headless-clients)) |
+
+Grade shards run in the eval client's image, without a desktop.
+
 MST provides the image as a Dockerfile that you build yourself (`mst env setup docker`). It installs Claude Desktop from Anthropic's Linux package repository at build time; MST doesn't publish an image with Claude Desktop in it.
 
 ## What you need
@@ -35,6 +45,10 @@ npx mst run --config eval.json --env docker --env-option contexts=colima-mst-kvm
 ```
 
 The eval config needs nothing Docker-specific. A Cowork eval uses `clientOptions.computerUseProvider: "linux-desktop"`. Set `coworkSetup.approveWriteTools: true` unless every server's tools need no approval: no one is there to click **Allow**.
+
+Cowork can reach any public host: its web fetch, and the commands it runs in its VM. That's Claude Desktop's `coworkEgressAllowedHosts`, `["*"]` in the image. Set `coworkSetup.egressAllowedHosts` (in the eval or a variant) to name hosts instead, or `[]` for none. It's one list for both, by host, so it can't allow reads only: a host Cowork may fetch from, its commands may also send to. Private and local addresses are blocked whatever the list says. MCP servers aren't affected: they go through MST, and the dry-run proxy still blocks their writes. WebSearch runs on the model provider's side and needs no hosts.
+
+To turn off Cowork built-in tools, set `coworkSetup.disabledBuiltinTools` (in the eval or a variant; a variant's list replaces the eval's), e.g. `["WebSearch"]` when the model's provider can't run Anthropic's server-side web search, as with an LLM gateway that serves Claude through Snowflake, Bedrock or Vertex: every search returns a 400 there. That's Claude Desktop's `disabledBuiltinTools`; the eval's tools are added to the image's own and `AskUserQuestion`, which stay off. Cowork's model doesn't see a disabled tool.
 
 Options (`--env-option key=value`):
 
@@ -76,7 +90,11 @@ Each container's worker loads the eval's plugins, so the image must have them. `
 
 The image holds one set of plugins: setting it up for another eval replaces them.
 
-`mst grade --env docker` grades in these containers too ([Grading in an environment](./cli.md#grading-in-an-environment)). Its workers load the eval's judge plugins from the same `/opt/mst/plugins`, and need the SDK each judge runs, which the image doesn't have (`openai`, `@openai/codex-sdk`, `@anthropic-ai/claude-agent-sdk`): add them in an image of your own, for example `FROM mst-cowork-linux:<tag>` with `RUN npm install -g openai`, and pass it with `--env-option image=<ref>`. Grade containers start without a desktop, VM devices or inference, so several share one Docker context: as many as its memory holds (see [Memory and CPUs](#memory-and-cpus)).
+`mst grade --env docker` grades in these containers too ([Grading in an environment](./cli.md#grading-in-an-environment)). Its workers load the eval's judge plugins from the same `/opt/mst/plugins`, and need the SDK each judge runs. The image has `@openai/codex-sdk` (for the `codex` client, below), not `openai` or `@anthropic-ai/claude-agent-sdk`: add them in an image of your own, for example `FROM mst-cowork-linux:<tag>` with `RUN npm install -g openai`, and pass it with `--env-option image=<ref>`. Grade containers start without a desktop, VM devices or inference, so several share one Docker context: as many as its memory holds (see [Memory and CPUs](#memory-and-cpus)).
+
+## Headless clients
+
+The image also runs clients that need no desktop: the [`codex` client](./codex.md), whose SDK and CLI the image installs, MST's `mst` and `claude-code` clients, and plugin clients that declare `headless: true` (a plugin that runs another app, such as an Electron app with no window, adds it to the image in its own environment's setup). A shard whose clients are all headless starts as a grade container does, without a desktop, VM devices or Cowork inference, so `ANTHROPIC_*` settings aren't needed and several shards share one Docker context. The client's own credentials (for `codex`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for a gateway) reach the worker in the run's `--secrets-file`. The image sets `MST_JUDGE_SANDBOX=container`, so Codex runs its shell without its own sandbox, confined by the container.
 
 ## What happens
 

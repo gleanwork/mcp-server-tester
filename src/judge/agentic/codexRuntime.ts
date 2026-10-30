@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { loadJudgeSdk } from '../adapterSupport.js';
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
+import { codexSandboxMode } from './codexSandbox.js';
 import {
   runtimeEnv,
   type AgentJudgeResult,
@@ -69,22 +70,6 @@ export interface CodexRuntimeOptions {
 }
 
 const DEFAULT_CODEX_JUDGE_MODEL = 'gpt-5.5';
-
-/**
- * Codex's sandbox mode from MST_JUDGE_SANDBOX: `os` (the default), its own
- * read-only OS sandbox; `container`, none, because the machine is a
- * disposable container that is the sandbox (see above).
- */
-export function codexSandboxMode(
-  env: NodeJS.ProcessEnv = process.env
-): 'read-only' | 'danger-full-access' {
-  const value = env.MST_JUDGE_SANDBOX?.trim() || 'os';
-  if (value === 'os') return 'read-only';
-  if (value === 'container') return 'danger-full-access';
-  throw new Error(
-    `MST_JUDGE_SANDBOX must be "os" or "container", not "${value}".`
-  );
-}
 
 function stepOf(
   item: Record<string, unknown> & { type: string }

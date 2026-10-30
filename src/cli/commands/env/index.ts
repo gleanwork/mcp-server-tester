@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { resolveConfigExtends } from '../../../evals/configExtends.js';
 import { loadEvalConfig } from '../../../evals/evalConfig.js';
 import { resolveEnvironment } from '../../../evals/environments/builtinEnvironments.js';
 import { installPlugins } from '../../../plugins/extensions.js';
@@ -8,6 +9,14 @@ import {
   type PluginPackage,
 } from '../../../plugins/loadPlugins.js';
 import { parseEnvOptions } from '../run/index.js';
+import {
+  settingsFor,
+  type SettingsSections,
+} from '../../../plugins/settings.js';
+import {
+  findSettingsFile,
+  readSettingsFile,
+} from '../../../plugins/settingsFile.js';
 
 export interface EnvSetupOptions {
   /** `--env-option key=value`, each time it was given. */
@@ -27,9 +36,18 @@ export async function setupEnvironment(
   const rootDir = path.resolve(options.rootDir ?? '.');
   if (options.plugins?.length)
     installPlugins(await loadPlugins(options.plugins, { baseDir: rootDir }));
-  const plugins = options.config
+  const fromConfig = options.config
     ? await evalPluginPackages(options.config, rootDir)
     : undefined;
+  const plugins = fromConfig?.packages;
+  // The eval config's settings, else the mst.config.json above rootDir's.
+  const settingsFile = fromConfig ? undefined : findSettingsFile(rootDir);
+  const settings: SettingsSections | undefined =
+    fromConfig?.settings ??
+    (settingsFile ? readSettingsFile(settingsFile) : undefined);
+  // The eval's client picks the image an environment builds (docker:
+  // Cowork's or ChatGPT's), as its shared configs (`extends`) set it.
+  const client = fromConfig?.client;
   const environment = resolveEnvironment(
     reference,
     parseEnvOptions(options.envOption ?? [])
@@ -40,26 +58,35 @@ export async function setupEnvironment(
   }
   await environment.definition.setup(environment.options, {
     log: (line) => console.error(`[mst] ${line}`),
+    settings: settingsFor(settings, environment.name),
     ...(plugins ? { plugins } : {}),
+    ...(client ? { client } : {}),
   });
 }
 
 /**
- * The eval config's plugins, as packages installed on this machine. Its
- * plugins are loaded too, in case one provides the environment.
+ * The eval config's plugins, as packages installed on this machine, and its
+ * settings. Its plugins are loaded too, in case one provides the environment.
  */
 async function evalPluginPackages(
   configPath: string,
   rootDir: string
-): Promise<PluginPackage[]> {
+): Promise<{
+  packages: PluginPackage[];
+  settings?: SettingsSections;
+  client?: string;
+}> {
   const config = loadEvalConfig(configPath, { rootDir });
   const options = {
     baseDir: path.dirname(path.resolve(configPath)),
     fallbackDir: rootDir,
   };
   const specifiers = config.plugins ?? [];
-  installPlugins(await loadPlugins(specifiers, options));
-  return specifiers.map((specifier) => {
+  const loaded = installPlugins(await loadPlugins(specifiers, options));
+  const { client } = resolveConfigExtends(config, [
+    ...new Set(loaded.map((plugin) => plugin.meta.namespace)),
+  ]);
+  const packages = specifiers.map((specifier) => {
     const found = resolvePluginPackage(specifier, options);
     if (!found)
       throw new Error(
@@ -67,4 +94,9 @@ async function evalPluginPackages(
       );
     return found;
   });
+  return {
+    packages,
+    ...(config.settings ? { settings: config.settings } : {}),
+    ...(client ? { client } : {}),
+  };
 }

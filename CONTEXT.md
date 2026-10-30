@@ -35,7 +35,7 @@ A case's ground truth that graders check against: an answer, rubric criteria, or
 _Avoid_: canonical answer, golden, target, reference
 
 **Client**:
-The MCP client application an eval tests, named canonically: `claude-code`, `cowork`, `chatgpt`, or `mst` (MST's own client, which gives the model the servers' tools and nothing else). How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. A client returns a trace, never a score.
+The MCP client application an eval tests, named canonically: `claude-code`, `codex`, `cowork`, `chatgpt`, or `mst` (MST's own client, which gives the model the servers' tools and nothing else). How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. A client returns a trace, never a score.
 _Avoid_: host, harness, agent, runner, solver, provider
 
 **Model**:
@@ -267,6 +267,10 @@ _Avoid_: mock server, write blocker, sandbox
 **Shared config**:
 A named, reusable fragment of an eval config that a plugin offers (for example `recommended`), which an eval opts into; a plugin cannot impose it.
 _Avoid_: preset, profile
+
+**Plugin settings**:
+Values a plugin takes from the repo that runs evals rather than from one extension's options (for example a cloud project), written per plugin namespace in `mst.config.json` or an eval config's `settings`, and checked by the plugin's settings schema. Every extension of the plugin receives them as `settings`.
+_Avoid_: plugin options, plugin config, factory options
 
 **Endpoint source**:
 (Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in source reads environment variables. Its name must not be `env`, which is the environment kind.
