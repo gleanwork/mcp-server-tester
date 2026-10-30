@@ -26,7 +26,7 @@ MST uses these terms in its API, config keys, CLI and reports. Use them, and not
 | case           | One input for a client to act on, with what is expected                                    | scenario, test     |
 | input          | The user's request, sent to the client as its prompt                                       | scenario           |
 | expected       | A case's ground truth: an answer, rubric criteria                                          | golden             |
-| client         | The MCP client application under test: `mst`, `claude-code`, `cowork`, `chatgpt`           | host               |
+| client         | The MCP client application under test: `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`  | host               |
 | model          | The LLM the client runs, set beside the client                                             | engine             |
 | variant        | One setup an eval tests: client, model and options, servers, tool metadata                 | arm                |
 | baseline       | The variant the others are compared with (the first, unless `baseline` names one)          | control            |
@@ -267,17 +267,18 @@ Options: `outputDir` (default `.mcp-test-results`), `name` (the eval's name, def
 
 ## CLI
 
-| Command                                                  | Does                                                                                                                           |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `npx @gleanwork/mcp-server-tester@beta init`             | Scaffold a project: Playwright config, a tool test, a dataset                                                                  |
-| `mst generate [-o tests/generated.spec.ts] [--snapshot]` | Call tools interactively and write the calls as a Playwright spec                                                              |
-| `mst login <server-url> [--scopes a,b] [--force]`        | OAuth login; the `mcp` fixture uses the stored tokens                                                                          |
-| `mst token <server-url> [--format env\|json\|gh]`        | Print stored tokens for CI                                                                                                     |
-| `mst run --config <path>`                                | Run an eval config. `--variant`, `--case <ids...>`, `--trials <n>`, `--plugins`, `--output-dir`, `--secrets-file`, `--dry-run` |
-| `mst batch --config-dir <dir>`                           | Run several eval configs. `--configs`, `--workers`, `--skip-existing`, `--dry-run`                                             |
-| `mst auth --config <path>`                               | Sign in to an eval config's connector servers (`status`, `revoke`)                                                             |
-| `mst open [run or eval dir]`                             | Open a run's report: the newest run, or the one named. `--print` prints its path                                               |
-| `mst cowork setup`                                       | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                               |
+| Command                                                     | Does                                                                                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `npx @gleanwork/mcp-server-tester@beta init`                | Scaffold a project: Playwright config, a tool test, a dataset                                                                  |
+| `mst generate [-o tests/generated.spec.ts] [--snapshot]`    | Call tools interactively and write the calls as a Playwright spec                                                              |
+| `mst login <server-url> [--scopes a,b] [--force]`           | OAuth login; the `mcp` fixture uses the stored tokens                                                                          |
+| `mst token <server-url> [--format env\|json\|gh]`           | Print stored tokens for CI                                                                                                     |
+| `mst run --config <path>`                                   | Run an eval config. `--variant`, `--case <ids...>`, `--trials <n>`, `--plugins`, `--output-dir`, `--secrets-file`, `--dry-run` |
+| `mst batch --config-dir <dir>`                              | Run several eval configs. `--configs`, `--workers`, `--skip-existing`, `--dry-run`                                             |
+| `mst auth --config <path>`                                  | Sign in to an eval config's connector servers (`status`, `revoke`)                                                             |
+| `mst optimize start\|evidence\|try\|finish --config <path>` | Improve tool metadata a round at a time, ending in a recommendation (see `optimize-mcp-tool-metadata`)                         |
+| `mst open [run or eval dir]`                                | Open a run's report: the newest run, or the one named. `--print` prints its path                                               |
+| `mst cowork setup`                                          | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                               |
 
 Inside a project, `npx mst` and `npx mcp-server-tester` run the same binary. Before installing, use `npx @gleanwork/mcp-server-tester@beta`: `npx mst` alone downloads an unrelated package.
 
@@ -316,4 +317,4 @@ Full list: `docs/migrations/migration-2.0.md`.
 - **A server array.** `servers` is a map keyed by label; variants list labels.
 - **Secrets in configs.** Use `accessTokenEnv`, the environment, or `--secrets-file`.
 - **`runEvalDataset(dataset, mcp)`.** It takes two objects: `runEvalDataset({ dataset, ... }, { mcp, testInfo })`.
-- **A non-mst client in Playwright.** `runEvalDataset` runs only `mst`. Run `claude-code`, `cowork`, `chatgpt` and plugin clients with `mst run`.
+- **A non-mst client in Playwright.** `runEvalDataset` runs only `mst`. Run `claude-code`, `codex`, `cowork`, `chatgpt` and plugin clients with `mst run`.

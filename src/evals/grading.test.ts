@@ -202,6 +202,48 @@ describe('gradeTrial', () => {
     });
   });
 
+  it('records the identity of the judge that gave each score, case judges included', async () => {
+    installPlugins([
+      {
+        meta: { name: 'id-judges', namespace: 'id' },
+        judges: {
+          j: {
+            schema: z.object({}).passthrough(),
+            version: 'prompt-1',
+            evaluate: async () => ({ score: 1 }),
+          },
+          needsAnswer: {
+            schema: z.object({}).passthrough(),
+            requires: ['case.expected.answer'],
+            evaluate: async () => ({ score: 1 }),
+          },
+        },
+      },
+    ]);
+    const outcome = await gradeTrial(
+      { judges: [{ type: 'id/judge/j', model: 'a' }] },
+      { response: 'x' }
+    );
+    // A skipped score records the judge that skipped it, too.
+    const skipped = await gradeTrial(
+      { judges: ['id/judge/needsAnswer'] },
+      { response: 'x' }
+    );
+    expect(skipped.scores.judge).toMatchObject({
+      skipped: true,
+      judgeIdentity: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    const other = await gradeTrial(
+      { judges: [{ type: 'id/judge/j', model: 'b' }] },
+      { response: 'x' }
+    );
+    expect(outcome.scores.judge?.judgeIdentity).toMatch(/^[0-9a-f]{64}$/);
+    expect(other.scores.judge?.judgeIdentity).toMatch(/^[0-9a-f]{64}$/);
+    expect(other.scores.judge?.judgeIdentity).not.toBe(
+      outcome.scores.judge?.judgeIdentity
+    );
+  });
+
   it('passes resolved judge settings to the judge', async () => {
     const seen: unknown[] = [];
     const plugin: Plugin = {

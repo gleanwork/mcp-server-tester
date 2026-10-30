@@ -154,6 +154,13 @@ export interface GraderScore {
    */
   judgeModel?: string;
 
+  /**
+   * The identity of the judge that gave this score: a hash of the judge,
+   * its version and its options (ADR 0009). Populated for judges that ran
+   * or skipped; scores from before MST recorded it have none.
+   */
+  judgeIdentity?: string;
+
   /** The judge could not grade this case. Not counted in pass/fail or score metrics. */
   skipped?: boolean;
 

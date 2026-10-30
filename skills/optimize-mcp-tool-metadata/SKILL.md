@@ -1,6 +1,6 @@
 ---
 name: optimize-mcp-tool-metadata
-description: Improve an MCP server's tool metadata (tool names, descriptions, input schema descriptions) with measured evidence, using runToolOptimization from @gleanwork/mcp-server-tester/evals or `mst run` with tool-metadata variants. Use when asked to improve tool descriptions, fix tools a model misses or over-uses, optimize tool discoverability, or compare description rewrites. Produces a recommendation with the exact metadata to apply; never edits the server or the dataset unless asked.
+description: Improve an MCP server's tool metadata (tool names, descriptions, input schema descriptions) with measured evidence, using `mst optimize` (start, evidence, try, finish), runToolOptimization from @gleanwork/mcp-server-tester/evals, or `mst run` with tool-metadata variants. Use when asked to improve tool descriptions, fix tools a model misses or over-uses, optimize tool discoverability, or compare description rewrites. Produces a recommendation with the exact metadata to apply; never edits the server or the dataset unless asked.
 metadata:
   author: gleanwork
   version: '2.0.0'
@@ -15,7 +15,8 @@ A tool optimization runs tool-metadata variants against a baseline and recommend
 1. **Don't edit the dataset.** It defines what good behaviour is. Variants are data passed to the run.
 2. **Don't edit the server source** unless the user asks. Deliver the proposal and the text to paste.
 3. **Respect the regression guard.** A variant that fixes two cases and breaks one isn't a win. Leave `allowRegressions` off unless the user accepts the trade.
-4. **Mind cost.** Every variant is a full run: cases × trials × a model conversation each. Try a few variants built on evidence, not many guesses.
+4. **Mind cost.** Every variant is a full run: cases × trials × a model conversation each. Try a few variants built on evidence, not many guesses. Set a variant budget (`--max-variants`) and say what it costs before you start.
+5. **Never look at held-out cases.** `mst optimize evidence` leaves them out. Don't read them from the dataset or the runs while writing candidates, or their result no longer shows whether the winner generalizes.
 
 ## What a variant can change
 
@@ -56,6 +57,28 @@ Run the baseline once (a `runEvalDataset` test, or `mst run`) and read each fail
 Each variant is a `ToolOverrideVariant`: a unique `id`, a `description` stating the hypothesis, and `tools`, keyed by the tool's name on its server (`"server.tool"` when several servers have it). The id and description appear in the report.
 
 ## Step 3: Run the optimization
+
+### As an agent, step by step: `mst optimize`
+
+This is the default for an agent with a terminal. It runs on the eval config's client, model and environment, needs no script, and you are the proposer: read the evidence, write the next round, run it. The optimization is stored with the eval's runs, so you can stop and continue later.
+
+```bash
+npx mst optimize start -c evals/eval.json --tool search --max-variants 6
+npx mst optimize evidence -c evals/eval.json         # tools, baseline cases, failed trials
+# write round-0.json from the evidence: 2 or 3 candidates, each a different idea
+npx mst optimize try round-0.json -c evals/eval.json
+npx mst optimize evidence -c evals/eval.json         # now with round 0's results
+# write round-1.json: build on the best candidate, drop what didn't help
+npx mst optimize try round-1.json -c evals/eval.json
+npx mst optimize finish -c evals/eval.json           # writes recommendation.md
+```
+
+- **`start`** runs the baseline and stores the tools the server serves. `--tool` limits what candidates may change; `--env docker` collects the trials in containers; `--trials` sets trials per case for every run.
+- **`evidence`** shows each case's input, what it expects, and each failed trial's tool calls. Use `--json` for each tool's full input schema, to copy when you rewrite parameter descriptions.
+- **`try`** takes a JSON array of candidates (`id`, `description`, `tools`). It refuses one that changes more than text, names a tool that doesn't exist, repeats an id, or doesn't fit the budget, and runs nothing. Fix it and try again.
+- **`finish`** ends it. Stop when the budget is spent, when a round doesn't beat the best so far, or when a candidate is clearly better and more rounds would only spend budget.
+
+If `try` says the server's tools changed, someone changed the server since `start`: the baseline no longer applies, so start again.
 
 ### On the `mst` client, in a Playwright test
 
@@ -189,7 +212,7 @@ npx mst run --config evals/search-descriptions.json
 
 ## Step 4: Read the result
 
-`result.proposal.recommendation`:
+`mst optimize finish` writes `recommendation.md` in the optimization's directory, with the same verdict as `result.proposal.recommendation`:
 
 - **`apply`**: the winner is clearly better than the baseline and broke no regression cases. "Clearly" means a paired per-case test passed at p < 0.025 divided by the number of variants tried, so trying many variants can't promote a lucky one. Report `delta`, `improvedCaseIds` and the exact `toolChanges`.
 - **`reject`**: no variant qualified, and the best one tried broke cases (`regressedCaseIds`, and `measurement.brokenCaseIds` on the candidate). Say what broke. Don't present it as a partial success.
@@ -199,7 +222,7 @@ Also read `result.reason`: `no-improvement` after a later round means the rewrit
 
 ## Step 5: Deliver the proposal
 
-Give the user the proposal:
+From `mst optimize`, give the user `recommendation.md`: it has the verdict, the case groups before and after, the metadata to paste, and every candidate tried. From `runToolOptimization`, give the user the proposal:
 
 ```json
 {
@@ -225,7 +248,8 @@ With it, a short summary: what changed, the hypothesis it tested and why it work
 - [ ] Regression cases tagged `regression`; some cases tagged `held-out`
 - [ ] Each variant has a unique `id` and a `description` stating its hypothesis
 - [ ] Variants change descriptive text or names only, never parameter names, types or `required`
-- [ ] 10 or more trials per case (`defaultTrials`, or `trials` in the eval config)
+- [ ] 10 or more trials per case (`defaultTrials`, `trials` in the eval config, or `mst optimize start --trials`)
+- [ ] A variant budget set before the first round, and held-out cases never read
 - [ ] Dataset and server source untouched
 - [ ] The answer includes the proposal, the trial count and the paste-ready text
 - [ ] `reject` and `inconclusive` reported plainly

@@ -135,6 +135,8 @@ export async function expandConnectorServers(
     platform?: NodeJS.Platform;
     /** With `simulateWrites`: the private directory proxies record writes in. */
     simulatedWritesDirectory?: string;
+    /** The run the servers' trials belong to: given to each `launch`. */
+    runId?: string;
   } = {}
 ): Promise<ConnectorExpansion> {
   const uses = connectorUses(evalConfig);
@@ -198,6 +200,7 @@ export async function expandConnectorServers(
         ...(tokenFile ? { tokenFile } : {}),
         platform: options.platform ?? process.platform,
         ...(writesFile ? { simulateWrites: { file: writesFile } } : {}),
+        ...(options.runId ? { runId: options.runId } : {}),
         settings: use.settings,
       });
       const entry = validateMCPConfig({ ...launched, label: use.label });
@@ -563,7 +566,11 @@ export interface WorkerConnectors {
  */
 export async function expandWorkerConnectors(
   declarations: readonly ConnectorServerConfig[],
-  options: { tokenDirectory: string; simulatedWritesDirectory?: string }
+  options: {
+    tokenDirectory: string;
+    simulatedWritesDirectory?: string;
+    runId?: string;
+  }
 ): Promise<WorkerConnectors> {
   const expansion = await expandConnectorServers(
     {

@@ -31,6 +31,7 @@ import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { z } from 'zod';
 import type { JudgeCase, JudgeTrial } from '../judgeContract.js';
+import { contentHash, sortKeys } from '../judgeIdentity.js';
 import type {
   PairwiseDimension,
   PairwiseJudgeDefinition,
@@ -291,17 +292,6 @@ function hasKey(value: unknown, keys: ReadonlySet<string>): boolean {
       ([k, v]) => keys.has(k) || hasKey(v, keys)
     );
   return false;
-}
-
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (value && typeof value === 'object')
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((k) => [k, sortKeys((value as Record<string, unknown>)[k])])
-    );
-  return value;
 }
 
 /** `json.dumps(value, sort_keys=True)` as Python prints it. */
@@ -577,11 +567,7 @@ export function stagedPairwiseJudge(
 ): PairwiseJudgeDefinition {
   const bundle = StagedJudgeBundleSchema.parse(input);
   const waves = plan(bundle);
-  const version =
-    bundle.version ??
-    createHash('sha256')
-      .update(JSON.stringify(sortKeys(input)))
-      .digest('hex');
+  const version = bundle.version ?? contentHash(input);
   const textFiles = new Map(
     bundle.files.flatMap((f) => ('content' in f ? [[f.path, f.content]] : []))
   );
@@ -752,6 +738,7 @@ export function stagedPairwiseJudge(
       description: bundle.description,
     }),
     schema: optionsSchema({}),
+    version,
     ...(bundle.requires.length > 0 && { requires: bundle.requires }),
     // A randomized bundle hides the order itself; one call per rep.
     swapPositions: bundle.order.mode !== 'randomized',

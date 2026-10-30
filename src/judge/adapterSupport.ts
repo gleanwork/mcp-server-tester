@@ -1,4 +1,5 @@
 /** Shared plumbing for judge completion adapters. */
+import type { ProviderKind } from './judgeTypes.js';
 import {
   hasLLMCredential,
   type LLMApiFamily,
@@ -14,6 +15,22 @@ export const DEFAULT_JUDGE_MAX_TOKENS = 4096;
 export const DEFAULT_JUDGE_TEMPERATURE = 0;
 /** The Claude model Anthropic-family judges use unless configured. */
 export const DEFAULT_CLAUDE_JUDGE_MODEL = 'claude-sonnet-4-6';
+/** The model the OpenAI judge uses unless configured. */
+export const DEFAULT_OPENAI_JUDGE_MODEL = 'gpt-4o';
+/** The model the Google judge uses unless configured. */
+export const DEFAULT_GOOGLE_JUDGE_MODEL = 'gemini-2.0-flash';
+
+/**
+ * Each provider's default model. A judge that relies on a default grades
+ * differently when the default changes, so its version covers these.
+ */
+export const DEFAULT_JUDGE_MODELS: Readonly<Record<ProviderKind, string>> = {
+  anthropic: DEFAULT_CLAUDE_JUDGE_MODEL,
+  'vertex-anthropic': DEFAULT_CLAUDE_JUDGE_MODEL,
+  'anthropic-agent-sdk': DEFAULT_CLAUDE_JUDGE_MODEL,
+  openai: DEFAULT_OPENAI_JUDGE_MODEL,
+  google: DEFAULT_GOOGLE_JUDGE_MODEL,
+};
 
 /**
  * Loads a judge's optional SDK. Pass the import as a thunk with a literal

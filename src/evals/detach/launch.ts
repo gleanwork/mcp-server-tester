@@ -28,6 +28,7 @@ import {
 import { DATASETS_FILE, PLAN_FILE } from './coordinate.js';
 import { newDetachId, writeStatus, type DetachPlan } from './status.js';
 import { parseEnvOptions } from '../environments/envOptions.js';
+import { loadedNamespaces } from '../../plugins/extensions.js';
 import { settingsFor } from '../../plugins/settings.js';
 
 export interface DetachOptions {
@@ -101,6 +102,11 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
   if (reason) throw new Error(reason);
   // Its plugins are loaded (`refusal`); the settings go with the eval config.
   const { settings } = loadEvalConfig(options.configPath, { rootDir });
+  // As its shared configs (`extends`) set it: the plugins are loaded.
+  const { client } = resolveConfigExtends(
+    loadEvalConfig(options.configPath, { rootDir }),
+    loadedNamespaces()
+  );
   const { evalName, store } = await evalResultStore({
     configPath: options.configPath,
     rootDir,
@@ -130,6 +136,7 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
     id,
     log,
     settings: settingsFor(settings, resolved.name),
+    ...(client ? { client } : {}),
   });
   const plan: DetachPlan = {
     format: 1,

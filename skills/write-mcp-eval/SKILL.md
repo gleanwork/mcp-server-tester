@@ -18,11 +18,11 @@ A check that calls a tool with fixed arguments has no client, so it is a test, n
 2. Read the server's tools: names, descriptions and input schemas (`await mcp.listTools()` in a test, or the server source). Every tool name in an assertion must exist.
 3. Choose where the cases run:
 
-|          | Playwright test with `runEvalDataset`    | `mst run` with an eval config                                   |
-| -------- | ---------------------------------------- | --------------------------------------------------------------- |
-| Client   | `mst` only, on the test's MCP connection | `mst`, `claude-code`, `cowork`, `chatgpt`, or a plugin's client |
-| Compares | one setup per call                       | several variants in one run, each compared with the baseline    |
-| Results  | the MCP Playwright reporter              | a run directory with its report, and a table per variant        |
+|          | Playwright test with `runEvalDataset`    | `mst run` with an eval config                                            |
+| -------- | ---------------------------------------- | ------------------------------------------------------------------------ |
+| Client   | `mst` only, on the test's MCP connection | `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`, or a plugin's client |
+| Compares | one setup per call                       | several variants in one run, each compared with the baseline             |
+| Results  | the MCP Playwright reporter              | a run directory with its report, and a table per variant                 |
 
 Start with a Playwright test on `mst` while you write cases. Use an eval config to run them on another client or to compare variants.
 

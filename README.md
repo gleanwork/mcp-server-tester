@@ -211,6 +211,7 @@ for client-specific fields, environment rules, and setup ownership.
 - [CLI Commands](./docs/cli.md) — init, generate, login, token, auth, datasets, judges, run, grade, batch, open, cowork
 - [Evaluation Framework](./docs/evaluation-framework.md) — eval configs, plugins and their extension kinds, the run format
 - [Cowork](./docs/cowork.md) and [ChatGPT Desktop](./docs/chatgpt-desktop.md) — running evals on desktop clients
+- [Codex](./docs/codex.md) — running evals on OpenAI's Codex agent, headless
 - [Design walkthrough](./docs/design/README.md) and [explainer](./docs/design/explainer.md) — how evals are meant to run end to end, and what is built so far
 - [Architecture decisions](./docs/adr/) — why MST is built as it is, including [detached runs](./docs/adr/0007-detached-runs-move-the-coordinator.md): a run on an environment that keeps going with the laptop off
 - [Glossary](./CONTEXT.md) — the terms MST uses
@@ -234,7 +235,7 @@ This installs skills globally so they're available across all your projects. Fou
 | `mcp-tester-guide`           | Reference: vocabulary, config, fixtures, matchers, eval configs, CLI, 1.x renames   |
 | `write-mcp-test`             | Write Playwright tests that call tools directly and check them with matchers        |
 | `write-mcp-eval`             | Write eval datasets and eval configs: cases a client and model act on, and variants |
-| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `runToolOptimization`         |
+| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `mst optimize`                |
 
 Compatible with Claude Code, Cursor, Windsurf, Copilot, and [40+ other AI agents](https://github.com/nicepkg/nice-skills).
 

@@ -316,6 +316,8 @@ The library owns the optimization mechanics; your `proposeVariants` callback own
 
 To run the optimization on a real client instead of the SDK client, give it an eval config: `runToolOptimization({ evalConfig: { configPath }, variants })`. See the [API reference](./api-reference.md#runtooloptimizationoptions-context--runtooloptimizationevaloptions).
 
+For an agent working in a terminal, `mst optimize` runs the same optimization one step at a time, with no script: `start` measures the current metadata, `evidence` prints what the next candidates can learn from, `try <file>` runs a round, and `finish` writes the recommendation. The agent reads and writes between steps, so it is the proposer. See [`optimize`](./cli.md#optimize---improve-tool-metadata).
+
 ```typescript snippet=snippets/tool-optimization.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import {
@@ -427,6 +429,7 @@ test('optimize search description (agent loop)', async ({ mcp }, testInfo) => {
 | `metric`           | `'passRate'`    | Ranking metric: `passRate` / `toolF1` / `toolPrecision` / `toolRecall`, without held-out cases. |
 | `maxRounds`        | `1`             | Maximum optimization rounds.                                                                    |
 | `minImprovement`   | `0`             | Stop when a round's best gain falls below this.                                                 |
+| `maxVariants`      | no limit        | Most candidates tried across rounds; the reason is `'max-variants'` once spent.                 |
 | `allowRegressions` | `false`         | Allow a winner that breaks cases.                                                               |
 | `regressionCheck`  | `'significant'` | How breakage is judged: `'significant'` or `'any-case'` (see below).                            |
 | `regressionTag`    | `'regression'`  | Tag that marks regression cases (see below).                                                    |

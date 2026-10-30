@@ -74,6 +74,29 @@ describe('shardOf', () => {
 });
 
 describe('collectInEnvironment', () => {
+  it("opens the environment with the eval's client, so it can pick that client's image", async () => {
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
+    dirs.push(workDir);
+    let client: string | undefined;
+    const env = environment(async () => ok);
+    const open = env.definition.open;
+    env.definition.open = async (options, context) => {
+      client = context.client;
+      return open(options, context);
+    };
+    await collectInEnvironment({
+      environment: env,
+      runId: 'run-1',
+      evalConfig: { name: 'gather', client: 'chatgpt' } as EvalConfig,
+      plugins: [],
+      groups: [],
+      secrets: {},
+      workDir,
+      signal: new AbortController().signal,
+    });
+    expect(client).toBe('chatgpt');
+  });
+
   it('finds a result announced before its file was copied back', async () => {
     const gathered = await collect(
       environment(async (shard, events) => {

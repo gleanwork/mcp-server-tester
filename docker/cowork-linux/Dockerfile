@@ -64,6 +64,15 @@ RUN set -e; \
   rm -rf /tmp/mst-package /root/.npm; \
   mst --version
 
+# The `codex` client's runtime: @openai/codex-sdk at the range MST supports,
+# with the Codex CLI for this architecture, beside MST so MST imports it.
+RUN set -e; \
+  mst_dir="$(npm root -g)/@gleanwork/mcp-server-tester"; \
+  range="$(node -p "require('${mst_dir}/package.json').peerDependencies['@openai/codex-sdk']")"; \
+  npm install -g --no-audit --no-fund "@openai/codex-sdk@${range}"; \
+  rm -rf /root/.npm; \
+  node -e "const r = require('module').createRequire('$(npm root -g)/@openai/codex-sdk/package.json'); require('child_process').execFileSync(process.execPath, [r.resolve('@openai/codex/bin/codex.js'), '--version'], { stdio: 'inherit' })"
+
 # The desktop user, uid 1000 (the node image's `node` user, renamed). Its
 # only sudo rule installs the settings it staged (see bin/install-settings).
 RUN usermod -l mst -d /home/mst -m node && groupmod -n mst node \

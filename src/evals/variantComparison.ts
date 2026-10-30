@@ -394,7 +394,8 @@ export type CaseGrouping =
   | { source: 'declared'; tag: string }
   | { source: 'grouping-run'; run: EvalRunnerResult };
 
-function grouper(
+/** Which group a case is in, under `grouping`. */
+export function caseGrouper(
   grouping: CaseGrouping
 ): (result: EvalCaseResult) => VariantCaseGroup {
   if (grouping.source === 'declared') {
@@ -551,7 +552,7 @@ export function measureAgainstBaseline(
   const pairs = pairCases(
     baseline,
     candidate,
-    grouper(options.grouping),
+    caseGrouper(options.grouping),
     options.heldOutTag ?? DEFAULT_HELD_OUT_TAG
   );
   const tried = options.variantsTried ?? 1;
@@ -601,7 +602,7 @@ function selfPairs(result: EvalRunnerResult): CaseRates[] {
   return pairCases(
     result,
     result,
-    grouper({ source: 'declared', tag: DEFAULT_REGRESSION_TAG }),
+    caseGrouper({ source: 'declared', tag: DEFAULT_REGRESSION_TAG }),
     DEFAULT_HELD_OUT_TAG
   );
 }
@@ -786,7 +787,7 @@ export function compareVariants(
   options: CompareVariantsOptions
 ): MCPComparisonData {
   const heldOutTag = options.heldOutTag ?? DEFAULT_HELD_OUT_TAG;
-  const groupOf = grouper(options.grouping);
+  const groupOf = caseGrouper(options.grouping);
   const variantsTried = options.variantsTried ?? options.candidates.length;
   const ids = new Set(options.candidates.map((c) => c.id));
   let baselineId = options.baselineName ?? BASELINE_ID;

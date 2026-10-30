@@ -34,7 +34,7 @@ describe('built-in client names', () => {
         client: 'sdk',
       })
     ).toThrow(
-      'Client "sdk" is not available. Available: chatgpt, claude-code, cowork, mst.'
+      'Client "sdk" is not available. Available: chatgpt, claude-code, codex, cowork, mst.'
     );
   });
 });
