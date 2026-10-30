@@ -84,6 +84,29 @@ describe('readCredential', () => {
     expect(read(headers())).toContain('rotated');
   });
 
+  it.each([
+    ['grows', () => write(JSON.stringify({ Authorization: 'Bearer longer' }))],
+    [
+      'keeps its size but gets a new mtime',
+      () => fs.utimesSync(file, new Date(0), new Date(1_000_000)),
+    ],
+  ] as const)('rejects a file that %s while it is read', (_, change) => {
+    write(JSON.stringify({ Authorization: 'Bearer first' }));
+    // Change the file between readCredential's first and last fstat.
+    let changed = false;
+    const readSync = ((...args: unknown[]) => {
+      if (!changed) {
+        changed = true;
+        change();
+      }
+      return (fs.readSync as (...a: unknown[]) => number)(...args);
+    }) as typeof fs.readSync;
+    expect(() => readCredential(headers(), { ...fs, readSync })).toThrow(
+      'Invalid credential file.'
+    );
+    expect(changed).toBe(true);
+  });
+
   it.each(['missing', 'symlink', 'directory', 'fifo', 'public', 'group'])(
     'rejects a %s file',
     (kind) => {
