@@ -6,6 +6,8 @@
  */
 
 import { builtinShortName } from '../../plugins/extensions.js';
+import { getJudge } from '../../judge/builtinJudges.js';
+import { judgeIdentity } from '../../judge/judgeIdentity.js';
 import type { SettingsSections } from '../../plugins/settings.js';
 import type { ValidationResult } from './types.js';
 import type { ProviderKind } from '../../judge/judgeTypes.js';
@@ -125,6 +127,27 @@ export async function preflightJudgeAssertion(
 export function judgeNameOf(config: JudgeValidatorConfig): string | undefined {
   const request = judgeRequest(config);
   return typeof request === 'string' ? undefined : request.label;
+}
+
+/**
+ * The identity of the judge an assertion runs, the same one its scores
+ * record. Undefined when the assertion names no judge, or the judge isn't
+ * available here (its plugin isn't loaded).
+ */
+export function judgeIdentityOf(
+  config: JudgeValidatorConfig
+): string | undefined {
+  const request = judgeRequest(config);
+  if (typeof request === 'string') return undefined;
+  try {
+    return judgeIdentity(
+      request.judge,
+      getJudge(request.judge),
+      request.options
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 /** The judge request an assertion means, or why it names no judge. */

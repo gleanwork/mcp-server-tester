@@ -11,6 +11,7 @@ import {
   writeRun,
   writeTrial,
   type RunFacts,
+  type JudgeRecord,
   findRunDirectory,
   RUN_ID_PATTERN,
   type GradeShardRecord,
@@ -85,7 +86,13 @@ import {
   batchTraceExecution,
   createEvalCaseExecutor,
 } from './caseExecution.js';
-import { mergeEvalJudges, preflightCaseJudges } from './grading.js';
+import {
+  judgeEntryIdentity,
+  mergeEvalJudges,
+  preflightCaseJudges,
+} from './grading.js';
+import type { CaseJudge } from './datasetTypes.js';
+import { judgeIdentity } from '../judge/judgeIdentity.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -155,6 +162,7 @@ import {
 } from './configValidation.js';
 import {
   comparePairwise,
+  getPairwiseJudge,
   preflightPairwiseJudges,
 } from './pairwiseComparison.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
@@ -640,9 +648,26 @@ function assertResumable(
 ): void {
   const { run } = replay;
   const fullRegrade = `Grade it again in full, without --resume: \`mst grade ${run.runId}\`.`;
-  if (JSON.stringify(run.judges ?? []) !== JSON.stringify(judges))
+  const recorded = run.judges ?? [];
+  const withoutIdentity = (records: readonly JudgeRecord[]) =>
+    records.map(({ identity: _identity, ...record }) => record);
+  if (
+    JSON.stringify(withoutIdentity(recorded)) !==
+    JSON.stringify(withoutIdentity(judges))
+  )
     throw new Error(
       `The eval config's judges or their options changed since run ${run.runId} was graded, so its verdicts can't be kept. ${fullRegrade}`
+    );
+  // A run graded before MST recorded identities has none to compare.
+  if (
+    recorded.some(
+      (record, index) =>
+        record.identity !== undefined &&
+        record.identity !== judges[index]?.identity
+    )
+  )
+    throw new Error(
+      `A judge changed since run ${run.runId} was graded (its version, its plugin's version or its options' defaults), so its verdicts can't be kept. ${fullRegrade}`
     );
   for (const dataset of datasets) {
     const recorded = run.datasets.find((item) => item.name === dataset.name);
@@ -658,25 +683,54 @@ function assertResumable(
   }
 }
 
+/**
+ * The identity of the judge an eval config entry runs, as its scores record
+ * it (ADR 0009). Undefined when the judge's plugin isn't loaded here.
+ */
+function entryIdentity(level: string, entry: unknown): string | undefined {
+  const config = (typeof entry === 'string' ? { type: entry } : entry) as {
+    type: string;
+  } & Record<string, unknown>;
+  if (level !== 'pairwise') return judgeEntryIdentity(config as CaseJudge);
+  try {
+    const { type, options } = pairwiseJudgeSpec(config);
+    return judgeIdentity(type, getPairwiseJudge(type), options);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The judges run.json records. `evalConfig` has each judge's options as its
+ * schema parsed them; `rawConfig` has them as written, which is what grading
+ * parses (`mergeEvalJudges`), so each identity is the one the judge's scores
+ * record. The options hash stays on the parsed options, as runs already
+ * recorded it.
+ */
 function judgeRecords(
-  evalConfig: EvalConfig
-): Array<{ type: string; level: string; optionsHash: string }> {
-  const record = (level: string) => (entry: unknown) => {
-    const { type, ...options } =
-      typeof entry === 'string'
-        ? { type: entry }
-        : (entry as { type: string } & Record<string, unknown>);
-    return {
-      type,
-      level,
-      optionsHash: createHash('sha256')
-        .update(JSON.stringify(options))
-        .digest('hex'),
+  evalConfig: EvalConfig,
+  rawConfig: EvalConfig
+): JudgeRecord[] {
+  const record =
+    (level: string, raw: readonly unknown[] | undefined) =>
+    (entry: unknown, index: number) => {
+      const { type, ...options } =
+        typeof entry === 'string'
+          ? { type: entry }
+          : (entry as { type: string } & Record<string, unknown>);
+      const identity = entryIdentity(level, raw?.[index] ?? entry);
+      return {
+        type,
+        level,
+        optionsHash: createHash('sha256')
+          .update(JSON.stringify(options))
+          .digest('hex'),
+        ...(identity !== undefined ? { identity } : {}),
+      };
     };
-  };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);
   return [
-    ...(evalConfig.judges ?? []).map(record('config')),
+    ...(evalConfig.judges ?? []).map(record('config', rawConfig.judges)),
     // A variant's judges, when they replace the config's.
     ...(evalConfig.variants ?? [])
       .filter(
@@ -685,9 +739,17 @@ function judgeRecords(
           JSON.stringify(variant.judges) !== configJudges
       )
       .flatMap((variant) =>
-        variant.judges!.map(record(`variant:${variant.name}`))
+        variant.judges!.map(
+          record(
+            `variant:${variant.name}`,
+            rawConfig.variants?.find((raw) => raw.name === variant.name)?.judges
+          )
+        )
       ),
-    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(record('pairwise')),
+    // Kept as written: comparePairwise parses them itself.
+    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(
+      record('pairwise', undefined)
+    ),
   ];
 }
 
@@ -1639,7 +1701,7 @@ async function evaluate(
     if (!options.grading?.source)
       assertResumable(
         regrade,
-        judgeRecords(evalConfig),
+        judgeRecords(evalConfig, rawConfig),
         canonicalDatasets.map(({ dataset }) => dataset)
       );
     const pairwiseJudges = options.skipPairwise
@@ -2020,7 +2082,7 @@ async function evaluate(
             name: dataset.name,
             contentHash: datasetContentHash(dataset),
           })),
-        judges: judgeRecords(evalConfig),
+        judges: judgeRecords(evalConfig, rawConfig),
         variants: variants.map((variant) => ({
           name: variant.name,
           ...variantSetup(evalConfig, variant, runKey),
@@ -2570,7 +2632,7 @@ async function evaluate(
         })),
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
-      judges: judgeRecords(evalConfig),
+      judges: judgeRecords(evalConfig, rawConfig),
       redactStoredResponses: redact,
       environment,
       ...(shardRecords?.length ? { machines: shardRecords } : {}),

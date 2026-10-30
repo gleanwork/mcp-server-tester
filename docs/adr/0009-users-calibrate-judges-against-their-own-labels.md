@@ -29,9 +29,11 @@ Three facts shape what MST should do instead:
   - A judge is **usable** when it has at least 15 failing and 15 passing labels, and the lower bound of both TPR and TNR is at least 0.8. The gate follows judgekeeper's. Both numbers can be changed.
   - For a pairwise judge, it reports agreement with people and how often each side called a tie.
   - It writes a calibration record for the judge's identity, and shows the disagreements so that a person can read them.
-- **A judge's identity is a hash of everything that decides its verdict.** For a built-in judge, that is the resolved prompt (system prompt, template, and rubric or criteria text), the provider, the model, and the model settings (effort, temperature). A plugin judge may declare a `version`. Without one, its identity is its plugin's package version plus its options hash.
+- **A judge's identity is a hash of everything that decides its verdict.** It covers the judge's reference, its `version`, and its options as its schema parses them, so the provider, the model and the model settings count whether they are written out or left to defaults.
+  - A built-in judge's `version` covers its prompts (system prompt, template, and rubric or criteria text) and the defaults it falls back on, such as each provider's default model.
+  - A plugin judge may declare a `version`. Without one, its plugin's package version takes its place.
   - A judge with neither, such as one in a plugin loaded from a path, has no version that MST can see change. `mst judges check` still measures it, but marks the calibration **unversioned**: the report can't tell when it goes stale, says so, and tells the user to set the judge's `version`. MST doesn't hash the plugin's files instead, because a judge's behavior also depends on the modules they import.
-  - `run.json` records each judge's identity beside its `optionsHash`.
+  - `run.json` records the identity of each eval config, variant and pairwise judge beside its `optionsHash`. Every score records the identity of the judge that gave it, so a case's own judges have one too.
   - A calibration record applies only to the identity it measured. When the identity changes, the report marks the calibration stale and the user runs `mst judges check` again.
 - **When a run's judge has a current calibration, the report shows a corrected pass rate beside the raw one.** The correction uses the judge's TPR and TNR (the Rogan-Gladen estimator, as Lee et al. describe for LLM judges). Its interval includes the uncertainty from both the run's sample and the calibration sample. The raw rate is always shown, and is never replaced.
 - **The new built-in judges ask yes-or-no questions, read the trace, and may answer `unknown`.**

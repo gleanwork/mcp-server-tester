@@ -451,6 +451,14 @@ export interface JudgeDefinition {
   /** Parses the judge's options. */
   readonly schema: ZodType;
   /**
+   * Changes whenever the judge could grade differently with the same
+   * options: a new prompt, a new default model, new parsing. It is part of
+   * the judge's identity, which `run.json` and every score record. Without
+   * one, the identity uses the plugin's `meta.version`, so any new plugin
+   * version counts as a new judge.
+   */
+  readonly version?: string;
+  /**
    * Paths in the judge input this judge needs, such as `case.expected.answer`
    * or `case.expected.criteria`. When one is missing or empty, the judge is
    * not called and the result is recorded as skipped.
@@ -564,6 +572,11 @@ export interface ShardOutcome {
   ok: boolean;
   /** Why it isn't ok. */
   reason?: string;
+  /**
+   * For a shard that finished with trials or grades that failed for want of
+   * infrastructure: what its machine knows about why (`Machine.diagnose`).
+   */
+  note?: string;
   collected: number;
   infra: number;
   /** A grade shard's trials and cases whose grading came back. */
@@ -602,6 +615,14 @@ export interface Machine {
   /** Where the shard's bundle and results go on the machine. Default `/mst`. */
   readonly workDir?: string;
   readonly channel: WorkerChannel;
+  /**
+   * Called before `dispose` when the shard fails, or finishes with trials or
+   * grades that failed for want of infrastructure: what the machine knows
+   * about why, such as a process it killed for memory. It goes before a
+   * failed shard's reason, or in a finished one's `note`. Undefined: nothing
+   * to add.
+   */
+  diagnose?(): Promise<string | undefined>;
   /** Deletes the machine, unless `keep` (`--env-option keep`). */
   dispose(options: { keep: boolean }): Promise<void>;
 }

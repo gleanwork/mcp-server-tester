@@ -128,7 +128,7 @@ export default plugin;
   An environment whose machines are Docker hosts, such as cloud VMs, can leave the containers to the built-in `docker` environment, `dockerEnvironment` (from `./evals`):
   - **`setup`** creates one host and a Docker context for it, and calls `dockerEnvironment.setup!({ contexts: '<context>', image }, { log, plugins })` with the `plugins` its own `setup` was given. (`setup` is optional on `EnvironmentDefinition`, hence the `!`.) It then saves that host as the image new hosts boot from. `dockerEnvironment.open` checks that each context already has the image, and never builds or pulls it, so a host without the image fails every shard.
   - **`open`** returns an environment with `work: ['collect', 'grade']`. Its `runShard` passes both kinds of shard on, and without `work` it would run collect shards only, so `mst grade --env` would refuse it.
-  - **`runShard`** creates a host for the shard and a Docker context for it. It opens `dockerEnvironment` with that context only and runs the shard on it, in a `try`: the docker environment can throw, for example when it can't copy the bundle, and a throw counts as an outcome that isn't `ok`. In the `finally` it closes the docker environment, then deletes the host and its context, unless `context.keep` keeps them: `'always'`, or `'failed'` when the outcome isn't `ok`. The docker environment keeps the container by the same rule, and prints a `docker --context <context> exec` command that works only while the host and its context exist.
+  - **`runShard`** creates a host for the shard and a Docker context for it. It opens `dockerEnvironment` with that context only and runs the shard on it, in a `try`. The docker environment limits each container to the host's memory (`docker info`): a Cowork container to all the host can spare, a grade container to 2 GiB. Pass `memory` (and `cpus`) on to `dockerEnvironment.open` to change that, for example when a grade shard runs agentic judges side by side. Inside the `try`: the docker environment can throw, for example when it can't copy the bundle, and a throw counts as an outcome that isn't `ok`. In the `finally` it closes the docker environment, then deletes the host and its context, unless `context.keep` keeps them: `'always'`, or `'failed'` when the outcome isn't `ok`. The docker environment keeps the container by the same rule, and prints a `docker --context <context> exec` command that works only while the host and its context exist.
   - **`close`** deletes the hosts and contexts of shards that are still running.
 
   A worker machine needs the same MST version as the coordinator (a mismatch fails the shard at `hello`), on `PATH` as `mst`, and the client's plugin. Access tokens reach it only over stdin; the worker writes them to `MST_TOKENS_DIR` (default `/run/mst/tokens`, which a worker image should mount as tmpfs), one file per server label, renews them before they expire, and removes them at the end. `MST_IMAGE` names the image in the worker's `hello`. A shard's failures (no machine, a silent or cancelled worker) are its outcome; `runShard` doesn't throw for them.
@@ -248,6 +248,32 @@ The built-in `rubric` judge reports its usage the same way. It reads the
 last `{pass, score, reasoning}` object in the model's answer, so reasoning
 before the JSON is fine; an answer cut off at `maxTokens` (default 4096)
 fails saying so.
+
+#### Judge identity
+
+Every score records the identity of the judge that gave it, in
+`judgeIdentity`. `run.json` records the identity of each eval config,
+variant and pairwise judge, in `judges[].identity`. The identity is a
+SHA-256 of the judge's reference, its `version` and its options as its
+schema parses them, so an option left to its default hashes the same as the
+value written out. Two scores with the same identity came from a judge that
+grades the same way, which a calibration needs
+([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)).
+
+A judge or pairwise judge can declare a `version`: a non-empty string that
+changes whenever it could grade differently with the same options, such as
+a new prompt or a new default model. Without one, the identity uses the
+plugin's `meta.version`, so every new plugin version counts as a new judge.
+`agenticJudge` and `agenticPairwiseJudge` take `version` from their spec,
+and a staged judge uses its bundle's `version` or the bundle's hash. The
+built-in `rubric` judge's version covers its prompts, every built-in
+rubric's text and the defaults it falls back on.
+
+`mst grade --resume` refuses a run whose eval config or pairwise judges'
+identities changed since it was graded. A case's own judges aren't in
+`run.json`, so each verdict's identity decides: a verdict whose judge
+changed is graded again. A run graded before MST recorded identities
+resumes as before.
 
 ### Pairwise judges
 
