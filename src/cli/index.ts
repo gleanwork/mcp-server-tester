@@ -48,6 +48,12 @@ import {
 } from './commands/datasets/index.js';
 import { listJudgeCommand, showJudge } from './commands/judges/index.js';
 import {
+  labelExport,
+  labelImport,
+  type LabelExportCommandOptions,
+  type LabelImportCommandOptions,
+} from './commands/label/index.js';
+import {
   setupEnvironment,
   type EnvSetupOptions,
 } from './commands/env/index.js';
@@ -226,6 +232,61 @@ discoveryOptions(
 ).action((ref: string, _options: unknown, command: Command) =>
   showJudge(ref, command.optsWithGlobals<DiscoveryOptions>())
 );
+
+// Label command: a person's labels for a run's judge verdicts (ADR 0009)
+const labelCommand = program
+  .command('label')
+  .description(
+    "A person's labels for a run's judge verdicts, which mst judges check measures judges against"
+  );
+const runArgumentHelp =
+  'A run directory, an eval directory (its latest run), or a run ID or its short form (7f3c2a)';
+labelCommand
+  .command('import')
+  .description(
+    "Add a file's labels to a run; a label for a verdict that has one replaces it"
+  )
+  .argument('<run>', runArgumentHelp)
+  .argument('<file>', 'CSV, JSONL, or judgekeeper records')
+  .option(
+    '--format <format>',
+    "csv, jsonl or judgekeeper (default: from the file's name and contents)"
+  )
+  .option(
+    '--labeler <name>',
+    "Who gave labels that don't say (default: your user name)"
+  )
+  .option(
+    '-d, --dir <directory>',
+    'Where runs are written, to find a run by ID',
+    '.mcp-test-results'
+  )
+  .action((run: string, file: string, options: LabelImportCommandOptions) =>
+    labelImport(run, file, options)
+  );
+labelCommand
+  .command('export')
+  .description(
+    'A row for each judge verdict in a run, with its label: fill in the label column and import it back'
+  )
+  .argument('<run>', runArgumentHelp)
+  .option(
+    '--judge <name...>',
+    "Only these judges, by their name in results (a rubric judge's rubric)"
+  )
+  .option(
+    '--format <format>',
+    "csv, jsonl or judgekeeper (default: from --output's name, else csv)"
+  )
+  .option('-o, --output <file>', 'Write to a file instead of stdout')
+  .option(
+    '-d, --dir <directory>',
+    'Where runs are written, to find a run by ID',
+    '.mcp-test-results'
+  )
+  .action((run: string, options: LabelExportCommandOptions) =>
+    labelExport(run, options)
+  );
 
 // Run command
 program

@@ -14,6 +14,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
 - [datasets - Find Plugin Datasets](#datasets---find-plugin-datasets)
 - [judges - Find Judges](#judges---find-judges)
+- [label - Label Judge Verdicts](#label---label-judge-verdicts)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
 - [run - Run an Eval Config](#run---run-an-eval-config)
 - [grade - Grade a Stored Run Again](#grade---grade-a-stored-run-again)
@@ -733,6 +734,33 @@ acme/pairwise-judge/preference  pairwise                                 Which a
 A `judge` scores each trial; a `pairwise` judge compares each variant's trial with the baseline's. `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options as JSON Schema: what an eval config's `judges` entry may set besides `type`. Plugins add `description` to a judge or pairwise judge for these commands.
 
 Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
+
+## `label` - Label Judge Verdicts
+
+A label is a person's answer to a judge's question for one trial: `pass` or `fail`. For a pairwise judge, it is their preference for one case: `baseline`, `candidate` or `tie`. Labels are kept in the run, so that a judge can be measured against them. See [ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md).
+
+### Usage
+
+```bash
+npx mst label export <run> -o labels.csv     # a row for each judge verdict, to fill in
+npx mst label import <run> labels.csv        # the filled-in labels, into the run
+npx mst label export <run> --format judgekeeper --judge correctness > records.jsonl
+```
+
+`<run>` is a run directory, an eval directory (its latest run), or a run ID or its short form (`7f3c2a`) under `--dir` (default `.mcp-test-results`).
+
+`export` writes a row for each verdict the run's judges gave. Each row has the judge's name in results (a `rubric` judge's rubric, else its reference), the variant, the case, the trial (from 0) or, for a pairwise judge, the `baseline` variant, the `split`, the judge's `verdict`, and the case's input and the trial's answer. Rows that already have a label carry it, with its `labeler`, `labeledAt` and `note`. Fill in the `label` column and import the file back. A run stored with `redactStoredResponses` has no answers to export, and the command says so: to label from answers, collect with `"redactStoredResponses": false`.
+
+`import` checks every label against the run before it writes any. Each label must name a verdict the run has, with a value its judge can give (`pass`/`fail`, or `true`/`false`, `yes`/`no`, `1`/`0`), and no two rows may label the same verdict. Rows without a label are skipped. A label replaces an earlier label for the same verdict and keeps its split, unless the row gives one. Labels are written to `labels/` in the run directory, and a regrade or resume of the run carries them over.
+
+The split says what a label is for: `test` labels measure a judge, and `dev` labels are the ones to read while changing it. A label that gives no split gets its case's: half the cases, chosen by a hash of the case ID, are `test`. All of a case's trials and variants share its split, so a case read while changing a judge never measures it.
+
+Formats (`--format`; the default comes from the file's name, else `csv`):
+
+- `csv` and `jsonl`: the columns above. CSV cells that a spreadsheet would run as a formula start with `'`, which `import` removes.
+- `judgekeeper`: [judgekeeper](https://github.com/judgekeeper/judgekeeper)'s records. Each pass or fail verdict is an `LLM` record, and each label a `HUMAN` record, with `target_id` `<variant>/<case-id>/<trial>`. `import` reads the `HUMAN` records. Pairwise verdicts are left out.
+
+Options: `--judge <name...>` (export only these judges), `-o, --output <file>`, `--labeler <name>` (import: who gave labels that don't say; the default is your user name), `-d, --dir <directory>`.
 
 ## `auth` - Sign In to Connector Servers
 

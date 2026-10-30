@@ -1,0 +1,70 @@
+{
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester/schema/run/v1/label.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "format": { "type": "string", "const": "mst.run/v1" },
+        "kind": { "type": "string", "const": "label" },
+        "judge": { "type": "string", "minLength": 1 },
+        "criterion": { "type": "string", "minLength": 1 },
+        "variant": { "type": "string" },
+        "caseId": { "type": "string" },
+        "split": { "type": "string", "enum": ["dev", "test"] },
+        "labeler": { "type": "string", "minLength": 1 },
+        "labeledAt": { "type": "string" },
+        "note": { "type": "string" },
+        "trial": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "label": { "type": "string", "enum": ["pass", "fail"] }
+      },
+      "required": [
+        "format",
+        "kind",
+        "judge",
+        "variant",
+        "caseId",
+        "split",
+        "labeler",
+        "labeledAt",
+        "trial",
+        "label"
+      ],
+      "additionalProperties": {}
+    },
+    {
+      "type": "object",
+      "properties": {
+        "format": { "type": "string", "const": "mst.run/v1" },
+        "kind": { "type": "string", "const": "label" },
+        "judge": { "type": "string", "minLength": 1 },
+        "criterion": { "type": "string", "minLength": 1 },
+        "variant": { "type": "string" },
+        "caseId": { "type": "string" },
+        "split": { "type": "string", "enum": ["dev", "test"] },
+        "labeler": { "type": "string", "minLength": 1 },
+        "labeledAt": { "type": "string" },
+        "note": { "type": "string" },
+        "baseline": { "type": "string" },
+        "label": { "type": "string", "enum": ["baseline", "candidate", "tie"] }
+      },
+      "required": [
+        "format",
+        "kind",
+        "judge",
+        "variant",
+        "caseId",
+        "split",
+        "labeler",
+        "labeledAt",
+        "baseline",
+        "label"
+      ],
+      "additionalProperties": {}
+    }
+  ]
+}

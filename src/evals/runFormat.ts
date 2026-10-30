@@ -22,6 +22,7 @@ import type { ListedServerTools } from './toolSurface.js';
  * <eval dir>/runs/<run-id>/run.json
  * <eval dir>/runs/<run-id>/traces/<variant>/<case-id>/<trial>.json
  * <eval dir>/runs/<run-id>/scores/<grader>/<variant>/<case-id>/<trial>.json
+ * <eval dir>/runs/<run-id>/labels/<question>/<variant>/<case-id>/<trial>.json
  * <eval dir>/runs/<run-id>/results.json
  * <eval dir>/runs/<run-id>/summary.json
  * ```
@@ -310,6 +311,86 @@ const PreferenceRecordSchema = z.looseObject({
   preference: z.looseObject({ judge: z.string() }),
 });
 
+/** What a person answered to a judge's question: pass or fail for a trial. */
+export const POINTWISE_LABELS = ['pass', 'fail'] as const;
+/** What a person answered to a pairwise judge's question for a case. */
+export const PAIRWISE_LABELS = ['baseline', 'candidate', 'tie'] as const;
+/**
+ * Which labels measure a judge (`test`) and which a person may read while
+ * changing it (`dev`).
+ */
+export const LABEL_SPLITS = ['dev', 'test'] as const;
+
+const LabelFields = {
+  ...Envelope('label'),
+  /** The judge's name in results: its rubric for a `rubric` judge, else its reference. */
+  judge: z.string().min(1),
+  /** One criterion of a judge that checks several. */
+  criterion: z.string().min(1).optional(),
+  variant: z.string(),
+  caseId: z.string(),
+  split: z.enum(LABEL_SPLITS),
+  /** Who gave the label. */
+  labeler: z.string().min(1),
+  labeledAt: z.string(),
+  note: z.string().optional(),
+};
+
+/**
+ * `labels/<question>/<variant>/<case-id>/<trial>.json`: a person's pass or
+ * fail for one trial, or `labels/<question>/<variant>/<case-id>.json`: their
+ * preference between the variant and `baseline` for one case. `<question>`
+ * is the judge's name, with `#<criterion>` for one criterion.
+ */
+const LabelRecordSchema = z.union([
+  z.looseObject({
+    ...LabelFields,
+    trial: z.number().int().nonnegative(),
+    label: z.enum(POINTWISE_LABELS),
+  }),
+  z.looseObject({
+    ...LabelFields,
+    baseline: z.string(),
+    label: z.enum(PAIRWISE_LABELS),
+  }),
+]);
+
+/** A label as a run stores it. */
+export type LabelRecord = z.infer<typeof LabelRecordSchema>;
+
+/** A label's question: the judge's name, with `#<criterion>` for one criterion. */
+export function labelQuestion(
+  label: Pick<LabelRecord, 'judge' | 'criterion'>
+): string {
+  return label.criterion === undefined
+    ? label.judge
+    : `${label.judge}#${label.criterion}`;
+}
+
+/** A label's file, relative to the run directory. */
+export function labelRecordPath(
+  label: Pick<LabelRecord, 'judge' | 'criterion' | 'variant' | 'caseId'> &
+    ({ trial: number } | { baseline: string })
+): string {
+  const base = path.join(
+    'labels',
+    segment(labelQuestion(label)),
+    segment(label.variant)
+  );
+  return 'trial' in label
+    ? path.join(base, segment(label.caseId), `${label.trial}.json`)
+    : path.join(base, `${segment(label.caseId)}.json`);
+}
+
+/** Parses a label file's contents; throws with the file's name when it isn't one. */
+export function parseLabelRecord(value: unknown, file: string): LabelRecord {
+  assertRunFormat(value, file);
+  const parsed = LabelRecordSchema.safeParse(value);
+  if (!parsed.success)
+    throw new Error(`${file} isn't a label: ${parsed.error.message}`);
+  return parsed.data;
+}
+
 /** `results.json`: every case result, traces and scores joined. */
 const ResultsRecordSchema = z.looseObject({
   ...Envelope('results'),
@@ -343,6 +424,7 @@ export const RUN_SCHEMAS = {
   trial: TrialRecordSchema,
   score: ScoreRecordSchema,
   preference: PreferenceRecordSchema,
+  label: LabelRecordSchema,
   results: ResultsRecordSchema,
   summary: SummaryRecordSchema,
   latest: LatestRecordSchema,
