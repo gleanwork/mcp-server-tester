@@ -80,6 +80,7 @@ interface LaunchContext {
   dataDir: string; // private per-server directory
   label: string; // the server's label in the eval config
   platform: 'darwin' | 'linux';
+  runId?: string; // the run the server's trials belong to; absent outside `mst run`
 }
 ```
 
@@ -88,6 +89,7 @@ The rules:
 - **Secrets stay in the plugin.** `client()` and `token()` run at call time. For example, a plugin can read a client secret from a cloud secret manager. MST never stores client secrets.
 - **Shared grants.** `mst auth` asks for consent once for each `grant`, using the union of every member's scopes. Gmail, Drive and Calendar can share one Google grant.
 - **`launch` is optional.** Without it, MST passes the client `url` and the current access token. With it, the plugin returns a server entry, for example a stdio proxy that reads `tokenFile`. This is where a plugin adds a dry-run proxy that blocks writes, with no MST interceptor kind needed.
+- **`runId` tags a run's requests.** `mst run` and each shard it starts launch connectors with the run's ID, so a connector can send it to a server that attributes eval traffic (for example, as a request header through `dryRunProxyServer`'s `headers`).
 - **Tool policy belongs to the connector.** MST doesn't know which tools are writes. A connector that wants writes blocked must launch a proxy that blocks them.
 
 ## Referencing connectors in an eval config

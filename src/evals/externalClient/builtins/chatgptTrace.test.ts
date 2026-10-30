@@ -726,6 +726,55 @@ describe('ChatGPT native telemetry', () => {
       'Malformed native MCP'
     );
   });
+  it('reads one model call per usage record, timed from what came before it', () => {
+    const records = turn();
+    // In order: the prompt, a response asking for a tool, the tool, the answer.
+    const [started, context, prompt, toolA, , first, second, ...rest] = records;
+    first!.timestamp = new Date(1500).toISOString();
+    second!.timestamp = new Date(2600).toISOString();
+    second!.payload.usage = {
+      input_tokens: 20,
+      cached_input_tokens: 8,
+      output_tokens: 3,
+      reasoning_output_tokens: 1,
+    };
+    const trace = parseChatgptTrace(
+      serialize([
+        started!,
+        context!,
+        prompt!,
+        first!,
+        toolA!,
+        second!,
+        ...rest,
+      ]),
+      marker
+    )!;
+    expect(trace.modelCalls).toEqual([
+      {
+        id: 'r1',
+        model: 'gpt-test',
+        startedAt: new Date(1000).toISOString(),
+        completedAt: new Date(1500).toISOString(),
+        durationMs: 500,
+        inputTokens: 10,
+        outputTokens: 2,
+      },
+      {
+        id: 'r2',
+        model: 'gpt-test',
+        // From the tool's completion, not its record's write.
+        startedAt: new Date(2200).toISOString(),
+        completedAt: new Date(2600).toISOString(),
+        durationMs: 400,
+        // Uncached, as MST counts input.
+        inputTokens: 12,
+        outputTokens: 3,
+        cacheReadInputTokens: 8,
+        reasoningOutputTokens: 1,
+      },
+    ]);
+  });
   it('extracts exact-turn tools, messages and usage without double counting parallel time', () => {
     const trace = parseChatgptTrace(serialize(), marker)!;
     expect(trace).toMatchObject({

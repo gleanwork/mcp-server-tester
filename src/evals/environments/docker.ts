@@ -1,13 +1,20 @@
 /**
  * The built-in `docker` environment (ADR 0004): each shard runs in a
- * container from MST's Linux Cowork image (docker/cowork-linux), on a Docker
+ * container from MST's Linux Cowork image (docker/cowork-linux), or, for a
+ * ChatGPT eval, its Linux ChatGPT image (docker/chatgpt-linux), on a Docker
  * context. The channel is the Docker CLI: `docker exec` runs `mst collect`
  * as the desktop user, and `docker cp` moves the bundle and results.
  *
  * Cowork's VM listens on a host-wide vsock port, so each Docker context runs
- * one container at a time; `contexts=a,b` spreads shards over several.
- * Cowork's inference token comes from MST's LLM gateway settings on this
+ * one Cowork container at a time; `contexts=a,b` spreads shards over several.
+ * Grade containers share a context, as many at once as its memory allows
+ * (dockerCapacity.ts). Cowork's inference token comes from MST's LLM gateway settings on this
  * machine and is kept fresh in the container's tmpfs, never in the image.
+ *
+ * A shard that needs no desktop, a grade shard or a collect shard whose
+ * clients are all headless (`ClientDefinition.headless`, such as `codex`),
+ * runs in a container of the same image with no desktop: no VM devices, no
+ * Cowork inference, and contexts shared, as nothing holds the vsock port.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -18,7 +25,19 @@ import path from 'node:path';
 import { z } from 'zod';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
+import { getClient } from '../builtinClients.js';
 import { machineEnvironment } from './channel.js';
+import { readShardBundle } from './protocol.js';
+import {
+  formatMemory,
+  memoryArg,
+  parseDockerInfo,
+  parseMemory,
+  planContext,
+  type ContainerLimits,
+  type ContextCapacity,
+  type ContextPlan,
+} from './dockerCapacity.js';
 import {
   KEPT_SUFFIX,
   RUN_LABEL,
@@ -33,15 +52,30 @@ import type {
   EnvironmentContext,
   EnvironmentDefinition,
   Machine,
+  ShardWork,
   WorkerChannel,
 } from '../evalFrameworkTypes.js';
 
 /** The image `mst env setup docker` builds for this MST version. */
 export const DEFAULT_COWORK_IMAGE = `mst-cowork-linux:${packageJson.version}`;
+/** The image `mst env setup docker` builds for a ChatGPT eval. */
+export const DEFAULT_CHATGPT_IMAGE = `mst-chatgpt-linux:${packageJson.version}`;
+
+/** Which desktop a container runs: the eval's client picks it. */
+export type DockerClient = 'cowork' | 'chatgpt';
+
+export function dockerClient(client: string | undefined): DockerClient {
+  return client === 'chatgpt' ? 'chatgpt' : 'cowork';
+}
 
 /** Inside the image (docker/cowork-linux/Dockerfile). */
 const USER = 'mst';
+/** docker/chatgpt-linux's entrypoint; `--dirs-only` makes its tmpfs directories. */
+const CHATGPT_SESSION = '/opt/mst/bin/desktop-session';
 const WORK_DIR = '/home/mst/work';
+/** The container's tmpfs, and the worker's tokens directory on it (MST_TOKENS_DIR). */
+const RUN_DIR = '/run/mst';
+const TOKENS_DIR = `${RUN_DIR}/tokens`;
 const SESSION_DIR = '/run/mst/session';
 const TOKEN_FILE = '/run/mst/inference-token';
 const DEFAULT_READY_TIMEOUT_S = 1200;
@@ -55,8 +89,32 @@ const DockerOptionsSchema = z
     contexts: z.string().min(1).optional(),
     /** How long a new container's desktop has to come up, in seconds. */
     readyTimeout: z.string().regex(/^\d+$/).optional(),
+    /**
+     * Each container's memory, in Docker's syntax (`8g`, `512m`). Default:
+     * all a context can spare for a Cowork container, 2g for a grade one.
+     */
+    memory: z
+      .string()
+      .refine((value) => parseMemory(value) !== undefined, {
+        message: 'memory must be a size such as 8g or 512m',
+      })
+      .optional(),
+    /**
+     * Each container's CPUs (`--cpus`), capped at the context's CPU count.
+     * Default: no limit.
+     */
+    cpus: z
+      .string()
+      .regex(/^\d+(\.\d+)?$/, 'cpus must be a number such as 2 or 1.5')
+      .refine((value) => Number(value) > 0, 'cpus must be more than 0')
+      .optional(),
     /** `mst env setup docker` only: the Claude Desktop package to install. */
     claudeDesktopVersion: z.string().min(1).optional(),
+    /** `mst env setup docker` only, for ChatGPT: the app version to install. */
+    chatgptVersion: z
+      .string()
+      .regex(/^[0-9][0-9.]*$/)
+      .optional(),
   })
   .strict();
 type DockerOptions = z.infer<typeof DockerOptionsSchema>;
@@ -113,11 +171,60 @@ async function dockerOk(
 
 /** The image's directory in this package: the Dockerfile and its files. */
 export function coworkImageDirectory(): string {
+  return imageDirectory('cowork');
+}
+
+export function imageDirectory(client: DockerClient): string {
   return path.dirname(
     createRequire(
       typeof __filename === 'string' ? __filename : import.meta.url
-    ).resolve('@gleanwork/mcp-server-tester/cowork-linux-image')
+    ).resolve(`@gleanwork/mcp-server-tester/${client}-linux-image`)
   );
+}
+
+/** `--memory` and `--cpus`, for the limits that are set. */
+function limitArgs(limits: ContainerLimits = {}): string[] {
+  return [
+    ...(limits.memory !== undefined
+      ? ['--memory', memoryArg(limits.memory)]
+      : []),
+    ...(limits.cpus !== undefined ? ['--cpus', String(limits.cpus)] : []),
+  ];
+}
+
+/**
+ * `docker run` arguments for a ChatGPT shard's container. ChatGPT runs no VM:
+ * no devices, Docker's default seccomp profile, and no new privileges.
+ * `inference` holds no secret: where the token file is and, for a gateway,
+ * its URL. The token arrives later, over `docker exec` stdin.
+ */
+export function chatgptDockerRunArgs(options: {
+  name: string;
+  image: string;
+  runId: string;
+  inference: Record<string, string>;
+}): string[] {
+  return [
+    'run',
+    '--detach',
+    '--name',
+    options.name,
+    '--label',
+    `${RUN_LABEL}=${options.runId}`,
+    ...ownerLabelArgs(),
+    '--security-opt',
+    'no-new-privileges',
+    // The session, profiles, the worker's tokens and the inference token: memory only.
+    '--tmpfs',
+    '/run/mst:mode=0755',
+    '--shm-size',
+    '1g',
+    ...Object.entries(options.inference).flatMap(([key, value]) => [
+      '--env',
+      `${key}=${value}`,
+    ]),
+    options.image,
+  ];
 }
 
 /** `docker run` arguments for a shard's container. */
@@ -129,6 +236,8 @@ export function dockerRunArgs(options: {
   inference: { baseURL: string; authScheme: 'bearer' | 'x-api-key' };
   /** Forwarded to the container's desktop-ready helper when set. */
   warmVmTimeoutS?: string;
+  /** The container's memory and CPUs. Default: no limits. */
+  limits?: ContainerLimits;
 }): string[] {
   const warm = options.warmVmTimeoutS;
   return [
@@ -166,20 +275,24 @@ export function dockerRunArgs(options: {
     ...(warm !== undefined && /^[1-9][0-9]*$/.test(warm)
       ? ['--env', `MST_COWORK_WARM_VM_TIMEOUT_S=${warm}`]
       : []),
+    // Out of memory, the kernel kills a process in this container, not the
+    // Docker daemon or another shard's.
+    ...limitArgs(options.limits),
     options.image,
   ];
 }
 
 /**
- * `docker run` arguments for a grade shard's container (ADR 0005): the same
- * image, with no desktop. Grading starts no client, so it needs no VM
- * devices and no inference, and the entrypoint only keeps the container up
- * for `mst grade-shard`.
+ * `docker run` arguments for a shard's container with no desktop: a grade
+ * shard's (ADR 0005), which starts no client, or a collect shard's whose
+ * clients are headless. It needs no VM devices and no inference, and the
+ * entrypoint only keeps the container up for the worker.
  */
-function gradeContainerRunArgs(options: {
+export function headlessContainerRunArgs(options: {
   name: string;
   image: string;
   runId: string;
+  limits?: ContainerLimits;
 }): string[] {
   return [
     'run',
@@ -191,6 +304,11 @@ function gradeContainerRunArgs(options: {
     ...ownerLabelArgs(),
     '--tmpfs',
     '/run/mst:mode=0755',
+    // A headless client may run Chromium (an Electron app with no window),
+    // which needs more than Docker's 64 MB /dev/shm.
+    '--shm-size',
+    '1g',
+    ...limitArgs(options.limits),
     '--entrypoint',
     '/usr/bin/tini',
     options.image,
@@ -200,21 +318,72 @@ function gradeContainerRunArgs(options: {
   ];
 }
 
+/**
+ * What a grade container runs as root before its worker, if anything. The
+ * ChatGPT image's HOME and TMPDIR are on the /run/mst tmpfs, which its desktop
+ * session makes; a grade container starts no session, so it makes only them.
+ */
+export function gradeContainerPrepareArgs(
+  name: string,
+  client: DockerClient
+): string[] {
+  return client === 'chatgpt'
+    ? ['exec', '-u', 'root', name, CHATGPT_SESSION, '--dirs-only']
+    : [
+        'exec',
+        '-u',
+        'root',
+        name,
+        'install',
+        '-d',
+        '-o',
+        USER,
+        '-g',
+        USER,
+        '-m',
+        '0700',
+        RUN_DIR,
+        TOKENS_DIR,
+      ];
+}
+
 /** A container name for a shard: Docker allows `[a-zA-Z0-9][a-zA-Z0-9_.-]`. */
 export function containerName(runId: string, index: number): string {
   return `mst-${runId}-${index + 1}`.replace(/[^a-zA-Z0-9_.-]/g, '-');
 }
 
 /**
- * Docker contexts, each running one container at a time: a shard waits for
- * a free one.
+ * Docker contexts, each running up to `slots(context)` containers at once
+ * (default one, and never fewer): a shard takes the context with the most
+ * room, or waits for room on any.
  */
-export function contextPool(contexts: readonly (string | undefined)[]) {
-  const free = [...contexts];
+export function contextPool(
+  contexts: readonly (string | undefined)[],
+  slots: (context: string | undefined) => Promise<number> = async () => 1
+) {
+  type Entry = { context: string | undefined; free: number };
+  let entries: Entry[] | undefined;
+  let loading: Promise<Entry[]> | undefined;
+  const load = () =>
+    (loading ??= Promise.all(
+      contexts.map(async (context) => ({
+        context,
+        free: Math.max(1, await slots(context).catch(() => 1)),
+      }))
+    ).then((loaded) => (entries = loaded)));
   const waiting: Array<(context: string | undefined) => void> = [];
   return {
-    acquire(signal: AbortSignal): Promise<string | undefined> {
-      if (free.length) return Promise.resolve(free.shift());
+    async acquire(signal: AbortSignal): Promise<string | undefined> {
+      const loaded = await load();
+      if (signal.aborted) throw new Error('The run was cancelled.');
+      const roomiest = loaded.reduce<Entry | undefined>(
+        (best, entry) => (entry.free > (best?.free ?? 0) ? entry : best),
+        undefined
+      );
+      if (roomiest) {
+        roomiest.free--;
+        return roomiest.context;
+      }
       return new Promise((resolve, reject) => {
         const onAbort = () => {
           const index = waiting.indexOf(take);
@@ -232,9 +401,67 @@ export function contextPool(contexts: readonly (string | undefined)[]) {
     },
     release(context: string | undefined) {
       const next = waiting.shift();
-      if (next) next(context);
-      else free.push(context);
+      if (next) return next(context);
+      const entry = entries?.find((candidate) => candidate.context === context);
+      if (entry) entry.free++;
     },
+  };
+}
+
+/**
+ * Why a failed shard's container failed, when Docker knows: the kernel
+ * killed one of its processes for memory.
+ */
+async function diagnoseContainer(
+  dockerContext: string | undefined,
+  name: string,
+  work: ShardWork,
+  limits: ContainerLimits,
+  memorySet: boolean
+): Promise<string | undefined> {
+  const result = await docker(dockerContext, [
+    'inspect',
+    '--format',
+    '{{.State.OOMKilled}}',
+    name,
+  ]);
+  if (result.code !== 0 || result.stdout.trim() !== 'true') return undefined;
+  const limit =
+    limits.memory !== undefined
+      ? ` (its limit: ${formatMemory(limits.memory)})`
+      : '';
+  const fix =
+    work === 'grade'
+      ? 'raise --env-option memory (fewer grade containers then share a context)'
+      : memorySet
+        ? 'raise --env-option memory, or give the Docker context more memory'
+        : 'give the Docker context more memory';
+  return `Container ${name} ran out of memory${limit}: ${fix}.`;
+}
+
+/**
+ * ChatGPT's inference: MST's OpenAI gateway settings (`OPENAI_BASE_URL` with
+ * `MST_LLM_AUTH_COMMAND` or a key), or `OPENAI_API_KEY` for the app to sign in
+ * with. Either way the secret goes to the same tmpfs file.
+ */
+async function chatgptInference(): Promise<{
+  environment: Record<string, string>;
+  token: string;
+}> {
+  const endpoint = await resolveLLMEndpoint('openai');
+  const token = endpoint.apiKey ?? endpoint.authToken;
+  if (!token)
+    throw new Error(
+      'ChatGPT in a container needs inference: set OPENAI_BASE_URL with MST_LLM_AUTH_COMMAND (an LLM gateway), or OPENAI_API_KEY. See docs/llm-gateways.md.'
+    );
+  return {
+    environment: endpoint.overridden
+      ? {
+          MST_CHATGPT_INFERENCE_BASE_URL: endpoint.baseURL,
+          MST_CHATGPT_INFERENCE_TOKEN_FILE: TOKEN_FILE,
+        }
+      : { MST_CHATGPT_API_KEY_FILE: TOKEN_FILE },
+    token,
   };
 }
 
@@ -412,10 +639,86 @@ function openDocker(
   options: DockerOptions,
   context: EnvironmentContext
 ): ReturnType<typeof machineEnvironment> {
-  const image = options.image ?? DEFAULT_COWORK_IMAGE;
+  const client = dockerClient(context.client);
+  const image =
+    options.image ??
+    (client === 'chatgpt' ? DEFAULT_CHATGPT_IMAGE : DEFAULT_COWORK_IMAGE);
   const readyTimeoutS = Number(options.readyTimeout ?? DEFAULT_READY_TIMEOUT_S);
-  const pool = contextPool(contextsOf(options));
+  const requested: ContainerLimits = {
+    ...(options.memory ? { memory: parseMemory(options.memory) } : {}),
+    ...(options.cpus ? { cpus: Number(options.cpus) } : {}),
+  };
+  // Once per context: its size. Once per context and work: the plan, logged.
+  const capacities = new Map<string, Promise<ContextCapacity | undefined>>();
+  const capacityOf = (dockerContext: string | undefined) => {
+    const id = dockerContext ?? '';
+    if (!capacities.has(id))
+      capacities.set(
+        id,
+        docker(dockerContext, [
+          'info',
+          '--format',
+          '{{.MemTotal}} {{.NCPU}}',
+        ]).then((result) =>
+          result.code === 0 ? parseDockerInfo(result.stdout) : undefined
+        )
+      );
+    return capacities.get(id)!;
+  };
+  const plans = new Map<string, Promise<ContextPlan>>();
+  const planOf = (work: ShardWork, dockerContext: string | undefined) => {
+    const id = `${work}:${dockerContext ?? ''}`;
+    if (!plans.has(id))
+      plans.set(
+        id,
+        capacityOf(dockerContext).then((capacity) => {
+          const plan = planContext(work, capacity, requested);
+          console.error(
+            `[mst] ${dockerContext ?? 'The current Docker context'} ${plan.note}`
+          );
+          return plan;
+        })
+      );
+    return plans.get(id)!;
+  };
+  const diagnose =
+    (
+      dockerContext: string | undefined,
+      name: string,
+      work: ShardWork,
+      limits: ContainerLimits
+    ) =>
+    () =>
+      diagnoseContainer(
+        dockerContext,
+        name,
+        work,
+        limits,
+        requested.memory !== undefined
+      );
+  // Cowork's VM takes a host-wide vsock port: one container per context.
+  // ChatGPT has no VM, so every shard can share a context.
+  const contexts = contextsOf(options);
+  const pool = contextPool(
+    client === 'chatgpt'
+      ? Array.from(
+          { length: Math.max(1, context.shards) },
+          () => contexts
+        ).flat()
+      : contexts
+  );
+  // Grade containers: as many as fit.
+  const gradePool = contextPool(
+    contexts,
+    async (dockerContext) => (await planOf('grade', dockerContext)).slots
+  );
   const seccompProfile = path.join(coworkImageDirectory(), 'seccomp.json');
+  // Both clients keep their secret in the same tmpfs file, refreshed alike.
+  const credential = async () => {
+    if (client === 'chatgpt') return chatgptInference();
+    const cowork = await inference();
+    return { cowork, token: cowork.token };
+  };
   // Once per context: containers an earlier run on this machine left behind.
   const swept = new Map<string, Promise<void>>();
   const sweep = (dockerContext: string | undefined) => {
@@ -438,19 +741,52 @@ function openDocker(
       );
     return swept.get(id)!;
   };
-  const contexts = contextsOf(options);
   return machineEnvironment(
     context,
     async (shard, signal): Promise<Machine> => {
-      if (shard.work === 'grade')
-        return gradeMachine(
-          // No VM, so no host-wide vsock port: grade shards share contexts.
+      if (shard.work === 'grade') {
+        // No VM, so no host-wide vsock port: grade shards share contexts.
+        const dockerContext = await gradePool.acquire(signal);
+        const name = containerName(shard.runId, shard.index);
+        try {
+          const { limits } = await planOf('grade', dockerContext);
+          const machine = await headlessMachine(
+            dockerContext,
+            name,
+            image,
+            shard.runId,
+            limits,
+            sweep,
+            signal,
+            client
+          );
+          return {
+            ...machine,
+            diagnose: diagnose(dockerContext, name, 'grade', limits),
+            async dispose(options) {
+              try {
+                await machine.dispose(options);
+              } finally {
+                gradePool.release(dockerContext);
+              }
+            },
+          };
+        } catch (error) {
+          gradePool.release(dockerContext);
+          throw error;
+        }
+      }
+      if (await shardIsHeadless(shard.bundleDir))
+        return headlessMachine(
+          // No VM, so no host-wide vsock port: these shards share contexts.
           contexts[shard.index % contexts.length],
           containerName(shard.runId, shard.index),
           image,
           shard.runId,
+          {},
           sweep,
-          signal
+          signal,
+          client
         );
       const dockerContext = await pool.acquire(signal);
       const name = containerName(shard.runId, shard.index);
@@ -460,9 +796,16 @@ function openDocker(
         await docker(dockerContext, ['rm', '--force', name]);
         releaseContainer(dockerContext, name);
       };
+      let limits: ContainerLimits | undefined;
       try {
         await sweep(dockerContext);
-        const credential = await inference();
+        // A Cowork container is alone on its context and sized to it; ChatGPT
+        // containers share one, unlimited.
+        limits =
+          client === 'chatgpt'
+            ? {}
+            : (await planOf('collect', dockerContext)).limits;
+        const secret = await credential();
         const digest = await dockerOk(
           dockerContext,
           ['image', 'inspect', '--format', '{{.Id}}', image],
@@ -472,20 +815,28 @@ function openDocker(
         claimContainer(dockerContext, name);
         await dockerOk(
           dockerContext,
-          dockerRunArgs({
-            name,
-            image,
-            runId: shard.runId,
-            seccompProfile,
-            inference: credential,
-            warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
-          }),
+          'cowork' in secret
+            ? dockerRunArgs({
+                name,
+                image,
+                runId: shard.runId,
+                seccompProfile,
+                inference: secret.cowork,
+                warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
+                limits,
+              })
+            : chatgptDockerRunArgs({
+                name,
+                image,
+                runId: shard.runId,
+                inference: secret.environment,
+              }),
           `Starting container ${name}`,
           { signal }
         );
-        await deliverToken(dockerContext, name, credential.token);
+        await deliverToken(dockerContext, name, secret.token);
         refresh = setInterval(() => {
-          void inference()
+          void credential()
             .then((fresh) => deliverToken(dockerContext, name, fresh.token))
             .catch(() => {
               // The next refresh tries again; the token still has time.
@@ -503,6 +854,7 @@ function openDocker(
           image: { ref: image, digest },
           workDir: WORK_DIR,
           channel: containerChannel(dockerContext, name),
+          diagnose: diagnose(dockerContext, name, 'collect', limits),
           async dispose({ keep }) {
             try {
               if (keep) {
@@ -523,25 +875,61 @@ function openDocker(
           },
         };
       } catch (error) {
+        // A desktop that didn't come up may have run out of memory.
+        const cause = limits
+          ? await diagnose(dockerContext, name, 'collect', limits)().catch(
+              () => undefined
+            )
+          : undefined;
         await remove();
         pool.release(dockerContext);
-        throw error;
+        if (!cause) throw error;
+        throw new Error(
+          `${cause} ${error instanceof Error ? error.message : String(error)}`
+        );
       }
     }
   );
 }
 
 /**
- * A grade shard's machine: a container of the image with no desktop, whose
- * worker runs `mst grade-shard` (ADR 0005).
+ * Whether every client a collect shard runs is headless, so its container
+ * needs no desktop. A client that can't be looked up gets the desktop, as
+ * before.
  */
-async function gradeMachine(
+export async function shardIsHeadless(bundleDir: string): Promise<boolean> {
+  let types: Set<string>;
+  try {
+    const bundle = await readShardBundle(bundleDir);
+    types = new Set(
+      bundle.batches.flatMap((batch) =>
+        batch.requests.map((request) => request.config.type)
+      )
+    );
+  } catch {
+    return false;
+  }
+  if (!types.size) return false;
+  try {
+    return [...types].every((type) => getClient(type).headless === true);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A shard's machine with no desktop: a container of the image whose worker
+ * runs `mst grade-shard` (ADR 0005) or a headless client's `mst collect`.
+ */
+async function headlessMachine(
   dockerContext: string | undefined,
   name: string,
   image: string,
   runId: string,
+  limits: ContainerLimits,
   sweep: (dockerContext: string | undefined) => Promise<void>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  client: DockerClient = 'cowork'
 ): Promise<Machine> {
   const remove = async () => {
     await docker(dockerContext, ['rm', '--force', name]);
@@ -557,9 +945,17 @@ async function gradeMachine(
     claimContainer(dockerContext, name);
     await dockerOk(
       dockerContext,
-      gradeContainerRunArgs({ name, image, runId }),
+      headlessContainerRunArgs({ name, image, runId, limits }),
       `Starting container ${name}`,
       { signal }
+    );
+    // The desktop session gives the worker its private tmpfs directories;
+    // without one, they're made here, as root (the tmpfs itself too, so the
+    // worker can remove its tokens directory when it ends).
+    await dockerOk(
+      dockerContext,
+      gradeContainerPrepareArgs(name, client),
+      'Creating the private directories'
     );
     await dockerOk(
       dockerContext,
@@ -627,11 +1023,16 @@ async function npmPack(
 async function setupDocker(
   options: DockerOptions,
   log: (line: string) => void,
-  plugins: ReadonlyArray<{ name: string; version: string; dir: string }>
+  plugins: ReadonlyArray<{ name: string; version: string; dir: string }>,
+  client: DockerClient
 ): Promise<void> {
-  const image = options.image ?? DEFAULT_COWORK_IMAGE;
-  const source = coworkImageDirectory();
-  const build = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-cowork-image-'));
+  const image =
+    options.image ??
+    (client === 'chatgpt' ? DEFAULT_CHATGPT_IMAGE : DEFAULT_COWORK_IMAGE);
+  const source = imageDirectory(client);
+  const build = await fs.mkdtemp(
+    path.join(os.tmpdir(), `mst-${client}-image-`)
+  );
   try {
     await fs.cp(source, build, { recursive: true });
     const packages = path.join(build, 'mst-package');
@@ -660,20 +1061,32 @@ async function setupDocker(
           'build',
           '--tag',
           image,
-          ...(options.claudeDesktopVersion
+          ...(client === 'cowork' && options.claudeDesktopVersion
             ? [
                 '--build-arg',
                 `CLAUDE_DESKTOP_VERSION=${options.claudeDesktopVersion}`,
               ]
             : []),
+          ...(client === 'chatgpt' && options.chatgptVersion
+            ? ['--build-arg', `CHATGPT_VERSION=${options.chatgptVersion}`]
+            : []),
           build,
         ],
         { echo: true }
       );
-      if (result.code !== 0)
+      // The build's last lines say why (a failed step, or the daemon
+      // connection dropping): a detached run or a plugin deciding whether to
+      // retry sees only this error, not the echoed output.
+      if (result.code !== 0) {
+        const cause = (result.stderr || result.stdout)
+          .trim()
+          .split('\n')
+          .slice(-3)
+          .join(' ');
         throw new Error(
-          `Building ${image}${dockerContext ? ` on ${dockerContext}` : ''} failed.`
+          `Building ${image}${dockerContext ? ` on ${dockerContext}` : ''} failed${cause ? `: ${cause}` : '.'}`
         );
+      }
     }
     log(`Built ${image}. Run with --env docker.`);
   } finally {
@@ -684,11 +1097,16 @@ async function setupDocker(
 export const dockerEnvironment: EnvironmentDefinition = {
   schema: DockerOptionsSchema,
   description:
-    "Run shards in containers from MST's Linux Cowork image, one per Docker context at a time.",
+    "Run shards in containers from MST's Linux Cowork image (one Cowork container per Docker context at a time, grade containers as many as fit) or, for a ChatGPT eval, its Linux ChatGPT image.",
   async open(options, context) {
     return openDocker(options as DockerOptions, context);
   },
-  async setup(options, { log, plugins = [] }) {
-    await setupDocker(options as DockerOptions, log, plugins);
+  async setup(options, { log, plugins = [], client }) {
+    await setupDocker(
+      options as DockerOptions,
+      log,
+      plugins,
+      dockerClient(client)
+    );
   },
 };

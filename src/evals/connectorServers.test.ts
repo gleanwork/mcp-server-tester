@@ -449,6 +449,38 @@ describe('connector servers on a shard (ADR 0004)', () => {
     // Expanding writes nothing.
     await expect(fs.stat(workerTokens)).rejects.toThrow();
   });
+
+  it("gives a worker's connectors the run's ID", async () => {
+    const contexts: Array<Record<string, unknown>> = [];
+    installPlugins([
+      {
+        meta: { name: 'run-id-plugin', namespace: 'r' },
+        connectors: {
+          tagged: {
+            url: 'https://tagged.example/mcp',
+            auth: { type: 'none' },
+            launch: (context) => {
+              contexts.push({ ...context });
+              return { transport: 'stdio', command: '/usr/bin/true' };
+            },
+          },
+        },
+      },
+    ]);
+    await expandWorkerConnectors(
+      [{ connector: 'r/connector/tagged', label: 'tagged' }],
+      { tokenDirectory: path.join(dir, 'worker'), runId: 'run-1' }
+    );
+    await expandWorkerConnectors(
+      [{ connector: 'r/connector/tagged', label: 'tagged' }],
+      { tokenDirectory: path.join(dir, 'worker') }
+    );
+    expect(contexts.map((context) => context.runId)).toEqual([
+      'run-1',
+      undefined,
+    ]);
+    expect('runId' in contexts[1]!).toBe(false);
+  });
 });
 
 describe('variant selection', () => {
@@ -620,6 +652,13 @@ describe('simulateWrites', () => {
     expect(warnings.join('\n')).toContain(
       'Connector server "legacy" doesn\'t pass simulateWrites to its dry-run proxy'
     );
+  });
+
+  it("launches connectors with the run's ID", async () => {
+    const { result } = await run();
+    expect(launches.length).toBeGreaterThan(0);
+    for (const context of launches)
+      expect(context.runId).toBe(result.summary.runId);
   });
 
   it('leaves writes planned without the flag', async () => {

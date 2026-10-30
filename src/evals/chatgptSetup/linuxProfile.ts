@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readdir,
   realpath,
+  rename,
   rm,
   stat,
 } from 'node:fs/promises';
@@ -22,7 +23,7 @@ import {
   probeAppServerStatus,
   type AppServerStatus,
 } from '../codexSetup/appServerStatus.js';
-import { loginWithApiKey } from '../codexSetup/auth.js';
+import { loginWithApiKey, readApiKeyFile } from '../codexSetup/auth.js';
 import type {
   CodexConfigInstallOptions,
   CodexExecutionPolicy,
@@ -58,9 +59,20 @@ const REQUIRED_PATHS = [
   'GNOME_KEYRING_CONTROL',
   'MST_CHATGPT_APP_PATH',
   'MST_CHATGPT_CODEX_PATH',
-  'MST_CHATGPT_API_KEY_FILE',
   'MST_CHATGPT_EVIDENCE_DIR',
 ] as const;
+/**
+ * Inference, one of two ways: an API key the app signs in with
+ * (`MST_CHATGPT_API_KEY_FILE`), or an OpenAI-compatible gateway
+ * (`MST_CHATGPT_INFERENCE_BASE_URL` with `MST_CHATGPT_INFERENCE_TOKEN_FILE`,
+ * a token file the caller keeps fresh).
+ */
+const INFERENCE_PATHS = [
+  'MST_CHATGPT_API_KEY_FILE',
+  'MST_CHATGPT_INFERENCE_TOKEN_FILE',
+] as const;
+const GATEWAY_PROVIDER_ID = 'mst_gateway';
+const GATEWAY_CHECK_TIMEOUT_MS = 15_000;
 const REQUIRED_BUSES = [
   'DBUS_SESSION_BUS_ADDRESS',
   'AT_SPI_BUS_ADDRESS',
@@ -90,7 +102,13 @@ const SESSION_KEYS = [
 export const LINUX_CHATGPT_ENVIRONMENT_CONTRACT = {
   required: [...REQUIRED_PATHS, ...REQUIRED_BUSES, 'DISPLAY'],
   optional: [...OPTIONAL_PATHS],
+  /** Exactly one: the API key file, or the gateway URL and its token file. */
+  inference: [...INFERENCE_PATHS, 'MST_CHATGPT_INFERENCE_BASE_URL'],
 } as const;
+
+export type LinuxChatgptInference =
+  | { mode: 'api-key'; apiKeyFile: string }
+  | { mode: 'gateway'; baseUrl: string; tokenFile: string };
 
 export interface LinuxChatgptEnvironment {
   home: string;
@@ -98,7 +116,7 @@ export interface LinuxChatgptEnvironment {
   tmpdir: string;
   appPath: string;
   codexPath: string;
-  apiKeyFile: string;
+  inference: LinuxChatgptInference;
   evidenceDir: string;
   python?: string;
   /** Only the allowlisted session variables, with CODEX_HOME. */
@@ -123,6 +141,30 @@ export function readLinuxChatgptEnvironment(
   };
   for (const key of REQUIRED_PATHS) path(key, true);
   for (const key of OPTIONAL_PATHS) path(key, false);
+  const apiKeyFile = path('MST_CHATGPT_API_KEY_FILE', false);
+  const tokenFile = path('MST_CHATGPT_INFERENCE_TOKEN_FILE', false);
+  const baseUrl = env.MST_CHATGPT_INFERENCE_BASE_URL || undefined;
+  let inference: LinuxChatgptInference;
+  if (apiKeyFile && !tokenFile && !baseUrl)
+    inference = { mode: 'api-key', apiKeyFile };
+  else if (!apiKeyFile && tokenFile && baseUrl) {
+    let url: URL | undefined;
+    try {
+      url = new URL(baseUrl);
+    } catch {
+      url = undefined;
+    }
+    if (url?.protocol !== 'https:' || url.username || url.password)
+      throw invalid('MST_CHATGPT_INFERENCE_BASE_URL');
+    inference = {
+      mode: 'gateway',
+      baseUrl: baseUrl.replace(/\/+$/, ''),
+      tokenFile,
+    };
+  } else
+    throw invalid(
+      apiKeyFile ? 'MST_CHATGPT_INFERENCE_BASE_URL' : 'MST_CHATGPT_API_KEY_FILE'
+    );
   for (const key of REQUIRED_BUSES)
     if (!env[key]?.startsWith('unix:') || /[\r\n\0]/.test(env[key]))
       throw invalid(key);
@@ -142,7 +184,7 @@ export function readLinuxChatgptEnvironment(
     tmpdir: env.TMPDIR!,
     appPath: env.MST_CHATGPT_APP_PATH!,
     codexPath: env.MST_CHATGPT_CODEX_PATH!,
-    apiKeyFile: env.MST_CHATGPT_API_KEY_FILE!,
+    inference,
     evidenceDir: env.MST_CHATGPT_EVIDENCE_DIR!,
     python: env.MST_CHATGPT_PYTHON,
     session,
@@ -212,6 +254,9 @@ export const LINUX_CHATGPT_BUILTIN_TOOL_POLICY: CodexBuiltinToolPolicy = {
 export interface LinuxChatgptReadiness {
   executionPolicy: CodexExecutionPolicy;
   builtinToolPolicy: CodexBuiltinToolPolicy;
+  /** How the app gets inference: its own API-key sign-in, or a gateway. */
+  inference: LinuxChatgptInference['mode'];
+  /** API-key sign-in, or the gateway check. */
   login: 'not-run' | 'verified' | 'failed';
   mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
@@ -228,6 +273,7 @@ export interface ChatgptPlatformProfile {
     | 'trustedProject'
     | 'executionPolicy'
     | 'builtinToolPolicy'
+    | 'modelProvider'
   >;
   readonly controller: ChatgptApplicationController;
   readonly evidenceDir?: string;
@@ -256,8 +302,6 @@ export async function createLinuxChatgptProfile(
     'XDG_RUNTIME_DIR'
   );
   await privateDirectory(environment.evidenceDir, 'evidence_dir_unsafe');
-  if ((await readdir(environment.evidenceDir)).length)
-    throw new CodexSetupError('evidence_dir_unsafe');
   await executable(environment.appPath, 'app_path_invalid');
   await executable(environment.codexPath, 'codex_path_invalid');
   // Exclusive, non-recursive create proves the native profile is fresh.
@@ -267,6 +311,10 @@ export async function createLinuxChatgptProfile(
     throw new CodexSetupError('home_not_fresh');
   }
   await chmod(environment.codexHome, 0o700);
+  // One subdirectory per session: a worker runs several sessions (variants)
+  // under one evidence directory, which the caller uploads.
+  const evidenceDir = await mkdtemp(join(environment.evidenceDir, 'session-'));
+  await chmod(evidenceDir, 0o700);
   const workspace = await mkdtemp(
     join(environment.tmpdir, 'mst-chatgpt-workspace-')
   );
@@ -280,9 +328,11 @@ export async function createLinuxChatgptProfile(
         ...LINUX_CHATGPT_BUILTIN_TOOL_POLICY.disabledFeatures!,
       ],
     },
+    inference: environment.inference.mode,
     login: 'not-run',
     mcpPreflight: [],
   };
+  const { inference } = environment;
   const fail = (code: CodexSetupErrorCode) => {
     readiness.error = code;
     return new CodexSetupError(code);
@@ -294,14 +344,27 @@ export async function createLinuxChatgptProfile(
       trustedProject: workspace,
       executionPolicy: LINUX_CHATGPT_EXECUTION_POLICY,
       builtinToolPolicy: LINUX_CHATGPT_BUILTIN_TOOL_POLICY,
+      ...(inference.mode === 'gateway'
+        ? {
+            modelProvider: {
+              id: GATEWAY_PROVIDER_ID,
+              name: 'LLM gateway',
+              baseUrl: inference.baseUrl,
+              // Reads the file the caller keeps fresh; the config holds no token.
+              authCommand: '/bin/cat',
+              authArgs: [inference.tokenFile],
+              refreshIntervalMs: 60_000,
+            },
+          }
+        : {}),
     },
     controller: createLinuxChatgptApp({
       appPath: environment.appPath,
       environment: environment.session,
       workspace,
-      logFile: join(environment.evidenceDir, 'chatgpt-app.log'),
+      logFile: join(evidenceDir, 'chatgpt-app.log'),
     }),
-    evidenceDir: environment.evidenceDir,
+    evidenceDir,
     readiness,
     async beforeStart(setup, launch, plugins = [], credentials = {}) {
       const native = {
@@ -310,11 +373,13 @@ export async function createLinuxChatgptProfile(
         LANG: 'C.UTF-8',
       };
       try {
-        await loginWithApiKey(
-          environment.codexPath,
-          native,
-          environment.apiKeyFile
-        );
+        if (inference.mode === 'api-key')
+          await loginWithApiKey(
+            environment.codexPath,
+            native,
+            inference.apiKeyFile
+          );
+        else await checkGateway(inference.baseUrl, inference.tokenFile);
         readiness.login = 'verified';
       } catch (error) {
         readiness.login = 'failed';
@@ -376,12 +441,51 @@ export async function createLinuxChatgptProfile(
       }
     },
     async dispose() {
-      // Owner-checked: remove only the workspace MST created. The caller owns HOME.
-      const info = await lstat(workspace).catch(() => undefined);
-      if (info?.isDirectory() && info.uid === process.getuid?.())
-        await rm(workspace, { recursive: true, force: true });
+      // The runtime config the app left (restore archives it beside the
+      // config) is evidence: keep it with the session's, not in the profile.
+      for (const name of await readdir(environment.codexHome).catch(() => []))
+        if (name.startsWith('config.toml.mst-runtime-'))
+          await rename(
+            join(environment.codexHome, name),
+            join(evidenceDir, name)
+          ).catch(() => undefined);
+      // Owner-checked: remove only what MST created, the workspace and the
+      // profile, so the next session finds HOME fresh. The caller owns HOME.
+      for (const dir of [workspace, environment.codexHome]) {
+        const info = await lstat(dir).catch(() => undefined);
+        if (info?.isDirectory() && info.uid === process.getuid?.())
+          await rm(dir, { recursive: true, force: true });
+      }
     },
   };
+}
+
+/**
+ * The gateway answers before the app starts: `GET <base>/models` with the
+ * token. Only the status is kept; the token never leaves this call.
+ */
+async function checkGateway(baseUrl: string, tokenFile: string): Promise<void> {
+  let token: Buffer;
+  try {
+    token = await readApiKeyFile(tokenFile);
+  } catch {
+    throw new CodexSetupError('inference_token_unsafe');
+  }
+  let ok = false;
+  try {
+    const response = await fetch(`${baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${token.toString('utf8')}` },
+      signal: AbortSignal.timeout(GATEWAY_CHECK_TIMEOUT_MS),
+      redirect: 'error',
+    });
+    ok = response.ok;
+    await response.body?.cancel();
+  } catch {
+    ok = false;
+  } finally {
+    token.fill(0);
+  }
+  if (!ok) throw new CodexSetupError('inference_unavailable');
 }
 
 async function privateDirectory(

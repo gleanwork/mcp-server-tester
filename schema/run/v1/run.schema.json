@@ -109,7 +109,20 @@
         "additionalProperties": {}
       }
     },
-    "judges": { "type": "array", "items": {} },
+    "judges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string" },
+          "level": { "type": "string" },
+          "optionsHash": { "type": "string" },
+          "identity": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        "required": ["type", "level", "optionsHash"],
+        "additionalProperties": {}
+      }
+    },
     "partial": { "type": "boolean" },
     "selection": {
       "type": "object",
@@ -120,6 +133,43 @@
     "gradedFrom": {
       "type": "string",
       "pattern": "^\\d{8}T\\d{6}Z-[0-9a-f]{6}(\\.g\\d+)?$"
+    },
+    "resumedGrading": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^\\d{8}T\\d{6}Z-[0-9a-f]{6}(\\.g\\d+)?$"
+        },
+        "reusedTrials": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "gradedTrials": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "reusedComparisons": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "gradedComparisons": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "from",
+        "reusedTrials",
+        "gradedTrials",
+        "reusedComparisons",
+        "gradedComparisons"
+      ],
+      "additionalProperties": {}
     },
     "environment": {
       "type": "object",

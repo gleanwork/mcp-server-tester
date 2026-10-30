@@ -588,7 +588,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L125-L207
+```typescript snippet=src/evals/evalRunner.ts#L126-L208
 /**
  * Overall result of running an eval dataset
  */
@@ -739,7 +739,7 @@ const result = await runToolOptimization({
 - `editableTools` - The tools candidates may change (names, or `server.tool`). Default: every tool.
 - `selection` - `{ cases, filterTags, maxCases, trials }`, narrowing every run as `mst run`'s flags do.
 
-On an eval config, the optimization is stored, as `mst optimize` stores it (see [`optimize`](./cli.md#optimize---improve-tool-metadata)): the baseline, the grouping run and each round are runs of the eval, marked as the optimization's, and `<eval dir>/optimizations/<id>/` holds the record and `recommendation.md`. Its runs never become the eval's latest. Candidates are checked before their round runs: unique ids that differ from the base variant's name, a tool key that names one served tool, and no change to an input schema beyond its `description` and `title` text. A round stops before any client starts when the servers serve different tool metadata than they did for the baseline, or when its datasets, the eval config's judges or the base variant's client, model or options differ from the baseline's. The optimization's runs aren't resumed with `mst run --resume`: a round whose run is missing trials runs again. On this form, `proposeVariants` gets its `history` from the stored runs, so with the default `redactStoredResponses` its trials have no tool responses or final answers.
+On an eval config, the optimization is stored, as `mst optimize` stores it (see [`optimize`](./cli.md#optimize---improve-tool-metadata)): the baseline, the grouping run and each round are runs of the eval, marked as the optimization's, and `<eval dir>/optimizations/<id>/` holds the record and `recommendation.md`. Its runs never become the eval's latest. Candidates are checked before their round runs: unique ids that differ from the base variant's name, a tool key that names one served tool, and no change to an input schema beyond its `description` and `title` text. A round stops before any client starts when the servers serve different tool metadata than they did for the baseline, or when its datasets, the eval config's judges or the base variant's client, model, options, input template or judges differ from the baseline's. Pairwise judges don't count: a round doesn't run them. The optimization's runs aren't resumed with `mst run --resume`: a round whose run is missing trials runs again. On this form, `proposeVariants` gets its `history` from the stored runs, so with the default `redactStoredResponses` its trials have no tool responses or final answers.
 
 A candidate that breaks cases that work today is disqualified from winning unless `allowRegressions: true`; the best candidate tried is still surfaced in `proposal` with `recommendation: 'reject'` so an agent can see what broke. See [MCP Client Simulation](./mst-client.md#driving-it-from-an-agent-runtooloptimization) for the full agent-loop example.
 

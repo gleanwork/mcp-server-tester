@@ -9,6 +9,7 @@ import type {
   DatasetSourceContext,
 } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
+import { settingsFor } from '../plugins/settings.js';
 import {
   BUILTIN_NAMESPACE,
   parseExtensionReference,
@@ -226,6 +227,7 @@ export async function loadDataset(
     : undefined;
   const dataset = await source.load(withoutRequest(config), {
     ...context,
+    settings: settingsFor(context.evalConfig.settings, config.type),
     ...(request ? { request } : {}),
   });
   if (request) {

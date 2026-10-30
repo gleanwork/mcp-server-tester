@@ -567,15 +567,17 @@ describe('eval review regressions', () => {
       result.summary.variants.map((variant) => variant.result?.passed)
     ).toEqual([0, 0]);
     expect(evaluate).toHaveBeenCalledTimes(2);
-    expect(evaluate).toHaveBeenNthCalledWith(1, expectedAnswer('config-gold'), {
-      count: 6,
-    });
+    expect(evaluate).toHaveBeenNthCalledWith(
+      1,
+      expectedAnswer('config-gold'),
+      { count: 6 },
+      { settings: undefined }
+    );
     expect(evaluate).toHaveBeenNthCalledWith(
       2,
       expectedAnswer('variant-gold'),
-      {
-        count: 12,
-      }
+      { count: 12 },
+      { settings: undefined }
     );
   });
 
@@ -645,12 +647,14 @@ describe('eval review regressions', () => {
       expect(evaluate).toHaveBeenNthCalledWith(
         1,
         expectedAnswer('config-gold'),
-        expect.objectContaining({ count: 6, retained: 'config-policy' })
+        expect.objectContaining({ count: 6, retained: 'config-policy' }),
+        { settings: undefined }
       );
       expect(evaluate).toHaveBeenNthCalledWith(
         2,
         expectedAnswer('case-gold'),
-        expect.objectContaining({ count: 12, retained: 'config-policy' })
+        expect.objectContaining({ count: 12, retained: 'config-policy' }),
+        { settings: undefined }
       );
     }
   );

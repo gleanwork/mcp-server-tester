@@ -15,6 +15,7 @@
  */
 
 import type { ZodType } from 'zod';
+import type { SettingsContext } from '../plugins/plugin.js';
 import type { UsageMetrics } from './judgeTypes.js';
 import type { JudgeCase, JudgeSubScore, JudgeTrial } from './judgeContract.js';
 
@@ -71,6 +72,12 @@ export interface PairwiseJudgeDefinition {
   /** Parses the judge's options. */
   readonly schema: ZodType;
   /**
+   * Changes whenever the judge could compare differently with the same
+   * options, as for `JudgeDefinition.version`. It is part of the judge's
+   * identity in `run.json`.
+   */
+  readonly version?: string;
+  /**
    * Paths in the input this judge needs, such as `case.expected.answer`.
    * When one is missing or empty, the comparison is recorded as skipped.
    * Paths start with `case.`, `baseline.` or `candidate.`.
@@ -86,9 +93,13 @@ export interface PairwiseJudgeDefinition {
    * Fails, naming what to install or set, when the judge can't run (a missing
    * SDK or credential). Called once before a run collects anything.
    */
-  preflight?: (options: Record<string, unknown>) => Promise<void>;
+  preflight?: (
+    options: Record<string, unknown>,
+    context?: SettingsContext
+  ) => Promise<void>;
   compare: (
     input: PairwiseJudgeInput,
-    options: Record<string, unknown>
+    options: Record<string, unknown>,
+    context?: SettingsContext
   ) => Promise<PairwisePreference>;
 }

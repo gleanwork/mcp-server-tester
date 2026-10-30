@@ -7,6 +7,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { settingsFor, type SettingsSections } from '../../plugins/settings.js';
 import packageJson from '../../../package.json' with { type: 'json' };
 import type { EvalDataset } from '../datasetTypes.js';
 import type { ShardOutcome } from '../evalFrameworkTypes.js';
@@ -26,6 +27,7 @@ import {
   type GradeShardBundle,
 } from './protocol.js';
 import { shardOf } from './shardedCollect.js';
+import { readJsonFile, writeJsonFile } from '../../utils/jsonFile.js';
 
 export interface GradeInEnvironmentOptions {
   environment: ResolvedEnvironment;
@@ -36,7 +38,34 @@ export interface GradeInEnvironmentOptions {
   log?: (line: string) => void;
 }
 
-/** The run files the shard's worker needs, beside its bundle. */
+/**
+ * Each shard's cases' results, as the shard's `results.json`: a run's holds
+ * every case. The run's is parsed once, here, and each shard's written in
+ * turn, so the coordinator holds one copy of the run's traces, not one per
+ * shard: a 278 MB results.json is about 450 MB of heap, and 20 shards parsing
+ * it at once ran a coordinator out of memory. Read and written in chunks: it
+ * can pass V8's string limit.
+ */
+async function stageResults(
+  prepared: PreparedGrading,
+  shards: ReadonlyArray<{ cases: ReadonlySet<string>; target: string }>
+): Promise<void> {
+  const source = prepared.replay.directory;
+  const results = (await readJsonFile(path.join(source, 'results.json'))) as {
+    cases?: Array<{ id?: string }>;
+  };
+  for (const { cases, target } of shards) {
+    await fs.mkdir(target, { recursive: true });
+    await writeJsonFile(path.join(target, 'results.json'), {
+      ...results,
+      cases: (results.cases ?? []).filter(
+        (result) => result.id !== undefined && cases.has(result.id)
+      ),
+    });
+  }
+}
+
+/** The rest of the run files the shard's worker needs, beside its bundle. */
 async function stageRun(
   prepared: PreparedGrading,
   caseIds: ReadonlySet<string>,
@@ -46,19 +75,6 @@ async function stageRun(
   await fs.mkdir(target, { recursive: true });
   for (const file of ['run.json', 'summary.json'])
     await fs.copyFile(path.join(source, file), path.join(target, file));
-  // The shard's cases' results only: a run's results.json holds every case.
-  const results = JSON.parse(
-    await fs.readFile(path.join(source, 'results.json'), 'utf8')
-  ) as { cases?: Array<{ id?: string }> };
-  await fs.writeFile(
-    path.join(target, 'results.json'),
-    `${JSON.stringify({
-      ...results,
-      cases: (results.cases ?? []).filter(
-        (result) => result.id !== undefined && caseIds.has(result.id)
-      ),
-    })}\n`
-  );
   for (const variant of prepared.replay.trials.keys())
     for (const caseId of caseIds)
       for (const relative of caseRunPaths(variant, caseId)) {
@@ -105,19 +121,53 @@ export async function gradeInEnvironment(
   const stored = new Set(
     [...prepared.replay.trials.values()].flatMap((cases) => [...cases.keys()])
   );
+  // A resumed grading (`mst grade --resume`) sends only the cases with
+  // something its earlier grading has no verdict for.
+  const toGrade = prepared.resume?.cases;
   const shards = Array.from({ length: count }, (_, index) => ({
     index,
     cases: new Set(
       [...stored].filter(
-        (id) => datasetCases.has(id) && shardOf(id, count) === index
+        (id) =>
+          datasetCases.has(id) &&
+          (!toGrade || toGrade.has(id)) &&
+          shardOf(id, count) === index
       )
     ),
   })).filter((shard) => shard.cases.size > 0);
+  const { definition: _definition, ...environmentRecord } = environment;
+  if (shards.length === 0) {
+    log('nothing to grade: every verdict is kept');
+    return {
+      source: gatheredGrading(
+        new Map(),
+        (key) => `Missing: no grade shard graded ${key.caseId}.`
+      ),
+      environment: environmentRecord,
+      machines: [],
+    };
+  }
+
+  const bundleDirOf = (index: number) =>
+    path.join(options.workDir, `shard-${index}`, 'bundle');
+  await stageResults(
+    prepared,
+    shards.map(({ index, cases }) => ({
+      cases,
+      target: bundledRunDir(bundleDirOf(index), runId),
+    }))
+  );
 
   const opened = await environment.definition.open(environment.options, {
     runId: prepared.replay.runId,
     shards: count,
     keep: environment.keep,
+    settings: settingsFor(
+      prepared.configFile.settings as SettingsSections | undefined,
+      environment.name
+    ),
+    // The image grading runs in is the one its client's trials ran in.
+    ...(prepared.client ? { client: prepared.client } : {}),
   });
   const records = new Map<string, GradeRecord>();
   const outcomes = new Map<number, ShardOutcome>();
@@ -130,7 +180,7 @@ export async function gradeInEnvironment(
     await Promise.all(
       shards.map(async ({ index, cases }) => {
         const root = path.join(options.workDir, `shard-${index}`);
-        const bundleDir = path.join(root, 'bundle');
+        const bundleDir = bundleDirOf(index);
         const resultsDir = path.join(root, 'results');
         await writeGradeShardBundle(bundleDir, {
           runId,
@@ -147,6 +197,7 @@ export async function gradeInEnvironment(
               cases: dataset.cases.filter((c) => cases.has(c.id)),
             })
           ),
+          ...(prepared.resume ? { resume: true } : {}),
         });
         await stageRun(prepared, cases, bundledRunDir(bundleDir, runId));
         // Results are read as they arrive, one at a time, once each.
@@ -206,7 +257,7 @@ export async function gradeInEnvironment(
         await reading.catch(() => {});
         outcomes.set(index, outcome);
         log(
-          `grade shard ${index + 1}/${count}: ${outcome.ok ? 'done' : `stopped: ${outcome.reason}`}`
+          `grade shard ${index + 1}/${count}: ${outcome.ok ? `done${outcome.note ? `, but ${outcome.note}` : ''}` : `stopped: ${outcome.reason}`}`
         );
       })
     );
@@ -234,10 +285,9 @@ export async function gradeInEnvironment(
         : {}),
     };
   });
-  const { definition: _definition, ...recorded } = environment;
   return {
     source: gatheredGrading(records, missing),
-    environment: recorded,
+    environment: environmentRecord,
     machines,
   };
 }

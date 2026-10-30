@@ -21,6 +21,7 @@ import type { ClientResponse } from './caseExecution.js';
 import type { TraceEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import type { ClientMetadata } from './externalClient/types.js';
+import type { SettingsSections } from '../plugins/settings.js';
 import type { GraderScore } from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
@@ -38,6 +39,7 @@ import {
 } from '../assertions/validators/toolCalls.js';
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
 import {
+  judgeIdentityOf,
   judgeNameOf,
   preflightJudgeAssertion,
 } from '../assertions/validators/judge.js';
@@ -52,6 +54,8 @@ export interface GradedExecution {
   evidence?: TraceEvidence;
   /** External client metadata, whose trace source decides tool-evidence quality. */
   clientMetadata?: ClientMetadata;
+  /** The eval's plugin settings, for its judges (ADR 0008). */
+  settings?: SettingsSections;
 }
 
 export interface GradingOutcome {
@@ -86,6 +90,14 @@ function caseJudgeConfig(entry: CaseJudge): CaseJudgeConfig {
   return typeof entry === 'string' ? { type: entry } : entry;
 }
 
+/**
+ * The identity of the judge a case or eval config judge entry runs, as its
+ * scores record it. Undefined when its plugin isn't loaded here.
+ */
+export function judgeEntryIdentity(entry: CaseJudge): string | undefined {
+  return judgeIdentityOf(caseJudgeRequest(entry));
+}
+
 /** The judge request a case judge means: `type` names the judge. */
 function caseJudgeRequest(entry: CaseJudge): JudgeExpectConfig {
   const { type, ...settings } = caseJudgeConfig(entry);
@@ -115,13 +127,14 @@ export function resolveJudges(
  */
 export async function preflightCaseJudges(
   cases: ReadonlyArray<Pick<EvalCase, 'judges' | 'judgeReps' | 'expected'>>,
-  checked: Set<string>
+  checked: Set<string>,
+  settings?: SettingsSections
 ): Promise<void> {
   for (const evalCase of cases)
     for (const { reference: _reference, ...judge } of resolveJudges(evalCase)) {
       const key = JSON.stringify(judge);
       if (checked.has(key)) continue;
-      await preflightJudgeAssertion(judge);
+      await preflightJudgeAssertion(judge, settings);
       checked.add(key);
     }
 }
@@ -174,13 +187,33 @@ export function mergeEvalJudges(
   ];
 }
 
+/**
+ * Whether a stored verdict came from the judge `judge` runs now. A verdict
+ * from before MST recorded identities has none to compare, and a judge whose
+ * plugin isn't loaded here has no current identity (nor can it grade again):
+ * both keep their verdict.
+ */
+function sameJudge(verdict: GraderScore, judge: JudgeExpectConfig): boolean {
+  if (verdict.judgeIdentity === undefined) return true;
+  const current = judgeIdentityOf(judge);
+  return current === undefined || current === verdict.judgeIdentity;
+}
+
 async function evaluateJudges(
   response: unknown,
   judges: JudgeExpectConfig[],
-  run: JudgeRun
+  run: JudgeRun,
+  /**
+   * Verdicts an earlier grading gave, by judge name: those judges don't run
+   * again, unless the judge changed since (its identity differs).
+   */
+  verdicts: ReadonlyMap<string, GraderScore> = new Map()
 ): Promise<GraderScore> {
   const results = await Promise.all(
-    judges.map(async (judge) => {
+    judges.map(async (judge): Promise<GraderScore> => {
+      const name = judgeNameOf(judge);
+      const verdict = name !== undefined ? verdicts.get(name) : undefined;
+      if (verdict && sameJudge(verdict, judge)) return verdict;
       const validation = await validateJudge(response, judge, run);
       const details = validation.details ?? {};
       return {
@@ -191,6 +224,9 @@ async function evaluateJudges(
         judgeName: details.judgeName as string | undefined,
         judgeProvider: details.judgeProvider as string | undefined,
         judgeModel: details.judgeModel as string | undefined,
+        ...(typeof details.judgeIdentity === 'string'
+          ? { judgeIdentity: details.judgeIdentity }
+          : {}),
         ...(details.skipped === true ? { skipped: true } : {}),
         ...(typeof details.error === 'string' ? { error: details.error } : {}),
         ...(details.subScores !== undefined
@@ -291,7 +327,12 @@ function toolTraceView(
 export async function gradeTrial(
   evalCase: Pick<EvalCase, 'assertions' | 'judges' | 'judgeReps'> &
     JudgeCaseSource,
-  graded: GradedExecution
+  graded: GradedExecution,
+  /**
+   * An earlier grading of the same trace (`mst grade --resume`): each judge
+   * that gave a verdict there isn't run again. Assertions always run.
+   */
+  previous?: GradingOutcome
 ): Promise<GradingOutcome> {
   const expectBlock: EvalAssertions = evalCase.assertions ?? {};
   const { response } = graded;
@@ -355,11 +396,36 @@ export async function gradeTrial(
   }
 
   if (evalCase.judges?.length)
-    results.judge = await evaluateJudges(response, resolveJudges(evalCase), {
-      evalCase,
-      clientResponse: graded.clientResponse,
-      evidence: graded.evidence,
-    });
+    results.judge = await evaluateJudges(
+      response,
+      resolveJudges(evalCase),
+      {
+        evalCase,
+        clientResponse: graded.clientResponse,
+        evidence: graded.evidence,
+        settings: graded.settings,
+      },
+      judgeVerdicts(previous?.scores.judge)
+    );
 
   return outcome;
+}
+
+/** The judge results in a trial's `judge` score that gave a verdict, by judge name. */
+function judgeVerdicts(
+  score: GraderScore | undefined
+): ReadonlyMap<string, GraderScore> {
+  const results = score?.judgeResults?.length
+    ? score.judgeResults
+    : score
+      ? [score]
+      : [];
+  return new Map(
+    results
+      .filter(
+        (result): result is GraderScore & { judgeName: string } =>
+          result.judgeName !== undefined && result.error === undefined
+      )
+      .map((result) => [result.judgeName, result])
+  );
 }

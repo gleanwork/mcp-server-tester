@@ -333,7 +333,11 @@ describe('validateJudge', () => {
 
       const result = await validateJudge('some response', { judge });
 
-      expect(evaluate).toHaveBeenCalledWith(matcherInput('some response'), {});
+      expect(evaluate).toHaveBeenCalledWith(
+        matcherInput('some response'),
+        {},
+        { settings: undefined }
+      );
       expect(result.pass).toBe(true);
       expect(result.message).toContain('test/judge/my-custom-judge');
       expect(result.message).toContain('0.95');
@@ -350,7 +354,8 @@ describe('validateJudge', () => {
 
       expect(evaluate).toHaveBeenCalledWith(
         matcherInput('candidate', 'expected answer'),
-        {}
+        {},
+        { settings: undefined }
       );
     });
 
@@ -363,7 +368,11 @@ describe('validateJudge', () => {
         options: {},
       });
       expect(result.pass).toBe(true);
-      expect(evaluate).toHaveBeenCalledWith(matcherInput('candidate'), {});
+      expect(evaluate).toHaveBeenCalledWith(
+        matcherInput('candidate'),
+        {},
+        { settings: undefined }
+      );
     });
 
     it('applies threshold to the judge score', async () => {
@@ -526,9 +535,11 @@ describe('validateJudge', () => {
         reference: 'gold',
       });
 
-      expect(evaluate).toHaveBeenCalledWith(matcherInput('response', 'gold'), {
-        model: 'their-model',
-      });
+      expect(evaluate).toHaveBeenCalledWith(
+        matcherInput('response', 'gold'),
+        { model: 'their-model' },
+        { settings: undefined }
+      );
       expect(result.details?.judgeModel).toBe('their-model');
     });
   });

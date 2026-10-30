@@ -11,6 +11,7 @@ import {
   writeRun,
   writeTrial,
   type RunFacts,
+  type JudgeRecord,
   findRunDirectory,
   RUN_ID_PATTERN,
   type GradeShardRecord,
@@ -85,7 +86,13 @@ import {
   batchTraceExecution,
   createEvalCaseExecutor,
 } from './caseExecution.js';
-import { mergeEvalJudges, preflightCaseJudges } from './grading.js';
+import {
+  judgeEntryIdentity,
+  mergeEvalJudges,
+  preflightCaseJudges,
+} from './grading.js';
+import type { CaseJudge } from './datasetTypes.js';
+import { judgeIdentity } from '../judge/judgeIdentity.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -129,7 +136,14 @@ import {
   parseResultsFlag,
   resolveStorePaths,
 } from './builtinResultStores.js';
-import { LOCAL_GRADING, type GradingSource } from './gradingSource.js';
+import {
+  LOCAL_GRADING,
+  gradingToResume,
+  previousGrades,
+  resumedGrading,
+  type GradingSource,
+  type PreviousGrades,
+} from './gradingSource.js';
 import {
   fetchRun,
   storedRunIds,
@@ -148,6 +162,7 @@ import {
 } from './configValidation.js';
 import {
   comparePairwise,
+  getPairwiseJudge,
   preflightPairwiseJudges,
 } from './pairwiseComparison.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
@@ -162,6 +177,7 @@ import {
   REDACT_STORED_RESPONSES_BY_DEFAULT,
   redactStoredResponses,
 } from './resultStore.js';
+import { createTraceExporter } from './telemetry/otlp.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import {
   connectorDeclarations,
@@ -187,6 +203,12 @@ export interface RunEvalOptions {
   pluginPaths?: string[];
   /** Plugin objects, added to the eval config's `plugins`. */
   plugins?: readonly Plugin[];
+  /**
+   * The `mst.config.json` the eval config's settings replace (ADR 0008).
+   * Default: the nearest at or above the eval config. `false` reads none: a
+   * worker's eval config came with its settings in it.
+   */
+  settingsFile?: string | false;
   outputDir?: string;
   secretsFile?: string;
   mcpConfig?: MCPConfig;
@@ -520,6 +542,7 @@ async function comparePairwiseVariants(
       judges,
       cases: byId,
       concurrency: evalConfig.concurrency,
+      ...(evalConfig.settings ? { settings: evalConfig.settings } : {}),
       ...(grading !== LOCAL_GRADING
         ? {
             judgeCase: (caseId, judges, judge) =>
@@ -612,25 +635,102 @@ export function recordableOptions(
 }
 
 /** The judges a run used, by name and level, each with a hash of its options. */
+/**
+ * `mst grade --resume` keeps a run's verdicts, so it grades with what gave
+ * them: the same judges and pairwise judges, with the same options, and the
+ * same cases (whose own judges, references and thresholds are in their
+ * datasets). Throws, saying what changed, when anything did.
+ */
+function assertResumable(
+  replay: RunReplay,
+  judges: ReturnType<typeof judgeRecords>,
+  datasets: readonly EvalDataset[]
+): void {
+  const { run } = replay;
+  const fullRegrade = `Grade it again in full, without --resume: \`mst grade ${run.runId}\`.`;
+  const recorded = run.judges ?? [];
+  const withoutIdentity = (records: readonly JudgeRecord[]) =>
+    records.map(({ identity: _identity, ...record }) => record);
+  if (
+    JSON.stringify(withoutIdentity(recorded)) !==
+    JSON.stringify(withoutIdentity(judges))
+  )
+    throw new Error(
+      `The eval config's judges or their options changed since run ${run.runId} was graded, so its verdicts can't be kept. ${fullRegrade}`
+    );
+  // A run graded before MST recorded identities has none to compare.
+  if (
+    recorded.some(
+      (record, index) =>
+        record.identity !== undefined &&
+        record.identity !== judges[index]?.identity
+    )
+  )
+    throw new Error(
+      `A judge changed since run ${run.runId} was graded (its version, its plugin's version or its options' defaults), so its verdicts can't be kept. ${fullRegrade}`
+    );
+  for (const dataset of datasets) {
+    const recorded = run.datasets.find((item) => item.name === dataset.name);
+    if (!recorded) continue;
+    // run.json records a dataset as the first variant that ran it selected it.
+    const hashes = [...replay.trials.keys()].map((variant) =>
+      datasetContentHash(replayedCases(dataset, replay, variant))
+    );
+    if (!hashes.includes(recorded.contentHash))
+      throw new Error(
+        `Dataset "${dataset.name}" changed since run ${run.runId} was graded (a case's input, expected answer or judges), so its verdicts can't be kept. ${fullRegrade}`
+      );
+  }
+}
+
+/**
+ * The identity of the judge an eval config entry runs, as its scores record
+ * it (ADR 0009). Undefined when the judge's plugin isn't loaded here.
+ */
+function entryIdentity(level: string, entry: unknown): string | undefined {
+  const config = (typeof entry === 'string' ? { type: entry } : entry) as {
+    type: string;
+  } & Record<string, unknown>;
+  if (level !== 'pairwise') return judgeEntryIdentity(config as CaseJudge);
+  try {
+    const { type, options } = pairwiseJudgeSpec(config);
+    return judgeIdentity(type, getPairwiseJudge(type), options);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The judges run.json records. `evalConfig` has each judge's options as its
+ * schema parsed them; `rawConfig` has them as written, which is what grading
+ * parses (`mergeEvalJudges`), so each identity is the one the judge's scores
+ * record. The options hash stays on the parsed options, as runs already
+ * recorded it.
+ */
 function judgeRecords(
-  evalConfig: EvalConfig
-): Array<{ type: string; level: string; optionsHash: string }> {
-  const record = (level: string) => (entry: unknown) => {
-    const { type, ...options } =
-      typeof entry === 'string'
-        ? { type: entry }
-        : (entry as { type: string } & Record<string, unknown>);
-    return {
-      type,
-      level,
-      optionsHash: createHash('sha256')
-        .update(JSON.stringify(options))
-        .digest('hex'),
+  evalConfig: EvalConfig,
+  rawConfig: EvalConfig
+): JudgeRecord[] {
+  const record =
+    (level: string, raw: readonly unknown[] | undefined) =>
+    (entry: unknown, index: number) => {
+      const { type, ...options } =
+        typeof entry === 'string'
+          ? { type: entry }
+          : (entry as { type: string } & Record<string, unknown>);
+      const identity = entryIdentity(level, raw?.[index] ?? entry);
+      return {
+        type,
+        level,
+        optionsHash: createHash('sha256')
+          .update(JSON.stringify(options))
+          .digest('hex'),
+        ...(identity !== undefined ? { identity } : {}),
+      };
     };
-  };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);
   return [
-    ...(evalConfig.judges ?? []).map(record('config')),
+    ...(evalConfig.judges ?? []).map(record('config', rawConfig.judges)),
     // A variant's judges, when they replace the config's.
     ...(evalConfig.variants ?? [])
       .filter(
@@ -639,9 +739,17 @@ function judgeRecords(
           JSON.stringify(variant.judges) !== configJudges
       )
       .flatMap((variant) =>
-        variant.judges!.map(record(`variant:${variant.name}`))
+        variant.judges!.map(
+          record(
+            `variant:${variant.name}`,
+            rawConfig.variants?.find((raw) => raw.name === variant.name)?.judges
+          )
+        )
       ),
-    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(record('pairwise')),
+    // Kept as written: comparePairwise parses them itself.
+    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(
+      record('pairwise', undefined)
+    ),
   ];
 }
 
@@ -711,6 +819,7 @@ export interface GradeRunOptions extends Pick<
   | 'rootDir'
   | 'pluginPaths'
   | 'plugins'
+  | 'settingsFile'
   | 'outputDir'
   | 'secretsFile'
   | 'report'
@@ -729,6 +838,11 @@ export interface GradeRunOptions extends Pick<
   env?: string;
   /** `--env-option`s: `shards`, `keep`, and the environment's own. */
   envOptions?: Readonly<Record<string, string>>;
+  /**
+   * `--resume`: keep every verdict the run's grading has, and grade only the
+   * judges and pairwise judges that failed to run (or never ran).
+   */
+  resume?: boolean;
 }
 
 /**
@@ -795,6 +909,13 @@ export async function gradeStoredRun(
     throw new Error(
       `Run ${run.runId} is a run of eval "${run.evalName}", not of "${name}" (${options.configPath}).`
     );
+  if (options.resume) {
+    if (run.phases.grade === 'skipped')
+      throw new Error(
+        `Run ${run.runId} was never graded, so there is no grading to resume. Grade it with \`mst grade ${run.runId}\`, without --resume.`
+      );
+    plan = { ...plan, previous: previousGrades(run.runId, stored) };
+  }
   const replay = runReplay(
     run,
     directory,
@@ -836,13 +957,14 @@ function openResultStore(
       parseResultsFlag(results),
       { namespaces }
     );
-    return createRunStore(config.type, definition, config);
+    return createRunStore(config.type, definition, config, evalConfig.settings);
   }
   return evalConfig.results?.store
     ? createRunStore(
         evalConfig.results.store.type,
         getResultStore(evalConfig.results.store.type),
-        resolveStorePaths(evalConfig.results.store, dirs)
+        resolveStorePaths(evalConfig.results.store, dirs),
+        evalConfig.settings
       )
     : undefined;
 }
@@ -891,9 +1013,18 @@ export async function evalResultStore(options: {
   rootDir?: string;
   pluginPaths?: string[];
   results?: string;
+  /**
+   * The datasets were loaded elsewhere (a detached run's coordinator): a
+   * `file` dataset's path isn't checked, as it needn't exist here.
+   */
+  skipDatasetValidation?: boolean;
 }): Promise<{ evalName: string; store: RunStore | undefined }> {
   const rootDir = options.rootDir ?? process.cwd();
-  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  const skipDatasetValidation = options.skipDatasetValidation === true;
+  const { name } = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation,
+  });
   const store = await gradeResultStore(
     {
       configPath: options.configPath,
@@ -901,7 +1032,8 @@ export async function evalResultStore(options: {
       ...(options.pluginPaths ? { pluginPaths: options.pluginPaths } : {}),
       ...(options.results ? { results: options.results } : {}),
     },
-    rootDir
+    rootDir,
+    skipDatasetValidation
   );
   return { evalName: name, store };
 }
@@ -915,6 +1047,9 @@ async function gradeResultStore(
   const loaded = loadEvalConfig(options.configPath, {
     rootDir,
     skipDatasetValidation,
+    ...(options.settingsFile !== undefined
+      ? { settingsFile: options.settingsFile }
+      : {}),
   });
   const namespaces = await loadEvalPlugins({
     configPath: options.configPath,
@@ -1049,6 +1184,8 @@ function workerPluginsOf(
 export interface PreparedGrading {
   /** The eval config as its file has it, for the workers to load. */
   configFile: { name: string } & Record<string, unknown>;
+  /** Its client, as its shared configs (`extends`) set it: the environment runs that client's image. */
+  client?: string;
   /** The datasets, as loaded: one per eval config source, in order. */
   datasets: EvalDataset[];
   /** The stored run being graded. */
@@ -1058,6 +1195,11 @@ export interface PreparedGrading {
   pluginPackages: Array<{ specifier: string; name: string; version: string }>;
   /** The run's secrets (`--secrets-file`): what workers are sent. */
   secrets: Record<string, string>;
+  /**
+   * `mst grade --resume`: the earlier grading the workers reuse, and the
+   * cases with something it has no verdict for, the only ones to send.
+   */
+  resume?: { previous: PreviousGrades; cases: ReadonlySet<string> };
 }
 
 /** Where a regrade's grading came from, when not this process. */
@@ -1074,6 +1216,11 @@ export interface GradedElsewhere {
 export interface GradingPlan {
   /** Where each trial and case is graded. Default: here. */
   source?: GradingSource;
+  /**
+   * `mst grade --resume`: the stored run's own grading, whose verdicts are
+   * kept; only what has none is graded.
+   */
+  previous?: PreviousGrades;
   /**
    * The datasets as already loaded, one per eval config source, in order:
    * none is loaded again (a worker's, from its bundle).
@@ -1099,7 +1246,7 @@ async function gradeInShards(
   const onInterrupt = () => {
     if (++interrupts > 1) process.exit(130);
     console.error(
-      "[mst] Stopping the grade shards; the grading that came back is kept, and what didn't is graded by the next mst grade (Ctrl-C again to quit now)."
+      "[mst] Stopping the grade shards; the grading that came back is kept, and `mst grade <regrade> --resume` grades what didn't (Ctrl-C again to quit now)."
     );
     controller.abort();
   };
@@ -1140,7 +1287,12 @@ export async function resumeRun(
   options: ResumeRunOptions
 ): Promise<RunEvalResult> {
   const rootDir = options.rootDir ?? process.cwd();
-  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  // Datasets loaded where a detached run started: their paths aren't here.
+  const loadedElsewhere = options.loadedDatasets !== undefined;
+  const { name } = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation: loadedElsewhere,
+  });
   const evalDirectory =
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
   const directory = await locateRun(
@@ -1148,7 +1300,7 @@ export async function resumeRun(
     name,
     evalDirectory,
     rootDir,
-    await gradeResultStore(options, rootDir)
+    await gradeResultStore(options, rootDir, loadedElsewhere)
   );
   const { run, summary: stored } = await readRunDirectory(directory);
   if (run.evalName !== name)
@@ -1277,6 +1429,9 @@ async function evaluate(
     rootDir,
     // Datasets given as loaded aren't read from the config's paths.
     ...(givenDatasets ? { skipDatasetValidation: true } : {}),
+    ...(options.settingsFile !== undefined
+      ? { settingsFile: options.settingsFile }
+      : {}),
   });
   // Whether judges run in this process: then their preflight runs here.
   const judgesRunHere =
@@ -1347,10 +1502,12 @@ async function evaluate(
           `mst-simulated-writes-${randomUUID()}`
         )
       : undefined;
-  const connectors = await expandConnectorServers(
-    rawConfig,
-    simulatedWritesDirectory ? { simulatedWritesDirectory } : {}
-  );
+  // The run's ID, known before connectors launch so they can tag requests with it.
+  const executionId = replay?.runId ?? newRunId();
+  const connectors = await expandConnectorServers(rawConfig, {
+    runId: executionId,
+    ...(simulatedWritesDirectory ? { simulatedWritesDirectory } : {}),
+  });
   let evalConfig = connectors.evalConfig;
 
   evalConfig = validateEvalConfig(
@@ -1387,7 +1544,22 @@ async function evaluate(
       );
   const optimization = options.optimization ?? replay?.run.optimization;
 
-  const executionId = replay?.runId ?? newRunId();
+  // Which run a host's own telemetry belongs to (`telemetry.host`).
+  if (evalConfig.telemetry?.host) env.MST_RUN_ID ??= executionId;
+  // The run's traces, sent as trials finish and grades come in. A regrade's
+  // verdicts join the traces of the run it grades.
+  const traceExporter = evalConfig.telemetry?.otlp
+    ? createTraceExporter(
+        evalConfig.telemetry.otlp,
+        {
+          eval: evalConfig.name,
+          runId: regrade?.gradedFrom ?? executionId,
+          gradingRunId: executionId,
+          client: evalConfig.client ?? DEFAULT_CLIENT,
+        },
+        env
+      )
+    : undefined;
   // The eval's directory holds its runs (runs/<run-id>/) and latest.json.
   const evalDirectory =
     options.outputDir ??
@@ -1480,7 +1652,8 @@ async function evaluate(
   // credential) fails the run now, not after every trial is collected.
   if (!options.skipPairwise && options.grade !== false && judgesRunHere)
     await preflightPairwiseJudges(
-      (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec)
+      (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec),
+      evalConfig.settings
     );
   const allDatasets: RunEvalResult['datasets'] = [];
   const allResults: EvalCaseResult[] = [];
@@ -1518,16 +1691,64 @@ async function evaluate(
       replay,
       canonicalDatasets.map(({ dataset }) => dataset)
     );
+  // `mst grade --resume`: what the run's grading has no verdict for.
+  const previous = options.grading?.previous;
+  let toResume: ReturnType<typeof gradingToResume> | undefined;
+  if (previous) {
+    if (!regrade)
+      throw new Error('Only a regrade of a stored run resumes its grading.');
+    // A grade worker has its shard's cases only: its coordinator checked.
+    if (!options.grading?.source)
+      assertResumable(
+        regrade,
+        judgeRecords(evalConfig, rawConfig),
+        canonicalDatasets.map(({ dataset }) => dataset)
+      );
+    const pairwiseJudges = options.skipPairwise
+      ? []
+      : (evalConfig.pairwiseJudges ?? []).map(
+          (entry) => pairwiseJudgeSpec(entry).type
+        );
+    toResume = gradingToResume(
+      previous,
+      new Map(
+        [...regrade.trials].map(([variant, byCase]) => [
+          variant,
+          new Map(
+            [...byCase].map(([caseId, trials]) => [
+              caseId,
+              trials.map((trial) => ({
+                clientFailed:
+                  trial.error !== undefined && trial.gradingError === undefined,
+              })),
+            ])
+          ),
+        ])
+      ),
+      {
+        baseline: evalConfig.variants?.[0]?.name ?? 'default',
+        judges: pairwiseJudges,
+      }
+    );
+    console.error(
+      `[mst] Resuming the grading of ${previous.runId}: ${toResume.trials} trials and ${toResume.comparisons} pairwise comparisons have a judge without a verdict, in ${toResume.cases.size} cases. Every other verdict is kept.`
+    );
+  }
   // `mst grade --env`: the shards grade with these datasets, and the regrade
   // below reads what they brought back (ADR 0005).
   if (options.grading?.elsewhere) {
     if (!regrade)
       throw new Error('Only a regrade of a stored run grades elsewhere.');
     gradedElsewhere = await options.grading.elsewhere({
-      // As written, not as loaded: a worker loads it as this process did.
-      configFile: JSON.parse(
-        await fs.readFile(path.resolve(options.configPath), 'utf8')
-      ) as PreparedGrading['configFile'],
+      // As written, not as loaded: a worker loads it as this process did,
+      // with the settings this process merged in (ADR 0008).
+      configFile: {
+        ...(JSON.parse(
+          await fs.readFile(path.resolve(options.configPath), 'utf8')
+        ) as PreparedGrading['configFile']),
+        ...(loadedConfig.settings ? { settings: loadedConfig.settings } : {}),
+      },
+      ...(resolvedConfig.client ? { client: resolvedConfig.client } : {}),
       datasets: canonicalDatasets.map(({ dataset }) => dataset),
       replay: regrade,
       ...workerPluginsOf(loadedConfig, options.pluginPaths, {
@@ -1535,9 +1756,14 @@ async function evaluate(
         rootDir,
       }),
       secrets: fileSecrets,
+      ...(previous && toResume
+        ? { resume: { previous, cases: toResume.cases } }
+        : {}),
     });
     grading = gradedElsewhere.source;
   }
+  const resumed = previous ? resumedGrading(previous, grading) : undefined;
+  if (resumed) grading = resumed;
   const narrowing: CaseNarrowing = {
     cases: options.cases,
     filterTags: options.filterTags,
@@ -1551,7 +1777,8 @@ async function evaluate(
     ? { env: {}, secrets: () => [], stop: async () => {} }
     : await startConnectorCredentials(
         connectors,
-        options.credentialStore ?? credentialStoreFor(options.store),
+        options.credentialStore ??
+          credentialStoreFor(options.store, evalConfig.settings),
         {
           configPath: options.configPath,
           variants: variants.map((variant) => variant.name),
@@ -1712,7 +1939,8 @@ async function evaluate(
           if (options.grade !== false && judgesRunHere)
             await preflightCaseJudges(
               prepared.effectiveDataset.cases,
-              checkedJudges
+              checkedJudges,
+              evalConfig.settings
             );
           for (const evalCase of prepared.effectiveDataset.cases)
             trialCases.set(`${variant.name}\u0000${evalCase.id}`, {
@@ -1772,7 +2000,8 @@ async function evaluate(
             ? {
                 connectorTokens: connectorTokenSource(
                   connectors,
-                  options.credentialStore ?? credentialStoreFor(options.store)
+                  options.credentialStore ??
+                    credentialStoreFor(options.store, evalConfig.settings)
                 ),
               }
             : {}),
@@ -1853,7 +2082,7 @@ async function evaluate(
             name: dataset.name,
             contentHash: datasetContentHash(dataset),
           })),
-        judges: judgeRecords(evalConfig),
+        judges: judgeRecords(evalConfig, rawConfig),
         variants: variants.map((variant) => ({
           name: variant.name,
           ...variantSetup(evalConfig, variant, runKey),
@@ -1917,7 +2146,11 @@ async function evaluate(
             // Before this variant's client starts: a judge that can't run
             // (no SDK, no credential) fails the run, not every trial.
             if (options.grade !== false && judgesRunHere)
-              await preflightCaseJudges(effectiveDataset.cases, checkedJudges);
+              await preflightCaseJudges(
+                effectiveDataset.cases,
+                checkedJudges,
+                evalConfig.settings
+              );
             const sourceConfig = source;
             const runClient =
               typeof clientConfig.definition.run === 'function' ||
@@ -2007,6 +2240,9 @@ async function evaluate(
                 defaultPassThreshold: evalConfig.passThreshold,
                 toolOverrides: toolMetadata,
                 toolMap: variant.toolMap ?? evalConfig.toolMap,
+                ...(evalConfig.settings
+                  ? { settings: evalConfig.settings }
+                  : {}),
                 ...(options.grade === false ? { grade: false } : {}),
                 ...(grading !== LOCAL_GRADING
                   ? {
@@ -2179,6 +2415,8 @@ async function evaluate(
     result: EvalCaseResult,
     trial: number
   ): Promise<void> {
+    // A replayed trial was traced by the run that collected it.
+    if (!replay) traceExporter?.trial(result, trial);
     try {
       await (started ??= checkpoint('partial'));
       await writeTrial(
@@ -2212,6 +2450,13 @@ async function evaluate(
     }
   }
 
+  if (traceExporter && options.grade !== false)
+    for (const variant of variantResults) {
+      for (const caseResult of variant.result?.caseResults ?? [])
+        traceExporter.graded({ ...caseResult, variant: variant.name });
+      if (variant.pairwise) traceExporter.pairwise(variant.pairwise);
+    }
+
   // Graders are done with the artifacts' copies; a run that redacts its
   // traces doesn't keep them.
   await removeArtifacts();
@@ -2233,7 +2478,11 @@ async function evaluate(
         ...CORE_METRICS.filter((core) => !listedNames.has(core)),
         ...listed,
       ];
-      return computeMetrics(specs, variant.result?.caseResults ?? []);
+      return computeMetrics(
+        specs,
+        variant.result?.caseResults ?? [],
+        evalConfig.settings
+      );
     });
     variantResults.forEach((variant, index) => {
       const caseResults = variant.result?.caseResults ?? [];
@@ -2383,7 +2632,7 @@ async function evaluate(
         })),
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
-      judges: judgeRecords(evalConfig),
+      judges: judgeRecords(evalConfig, rawConfig),
       redactStoredResponses: redact,
       environment,
       ...(shardRecords?.length ? { machines: shardRecords } : {}),
@@ -2399,6 +2648,9 @@ async function evaluate(
       phases:
         options.grade === false ? { ...phases, grade: 'skipped' } : phases,
       ...(regrade ? { gradedFrom: regrade.gradedFrom } : {}),
+      ...(previous && resumed
+        ? { resumedGrading: { from: previous.runId, ...resumed.counts } }
+        : {}),
     };
   }
   // The comparison is a convenience: it must never cost the run its results.
@@ -2477,6 +2729,7 @@ async function evaluate(
     (!regrade || (await regradeTakesLatest(evalDirectory, regrade)));
   if (takesLatest)
     await writeLatest(evalDirectory, executionId, summary.timestamp);
+  await traceExporter?.flush();
   // The store gets the run as it is on disk, report included. It becomes the
   // store's latest run when it became the local one.
   if (resultStore)

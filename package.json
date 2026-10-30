@@ -1,6 +1,6 @@
 {
   "name": "@gleanwork/mcp-server-tester",
-  "version": "2.0.0-beta.13",
+  "version": "2.0.0-beta.14",
   "description": "Playwright-based testing and evaluation framework for MCP servers",
   "keywords": [
     "playwright",
@@ -60,7 +60,8 @@
       "import": "./dist/reporters/mcpReporter.js",
       "require": "./dist/reporters/mcpReporter.cjs"
     },
-    "./cowork-linux-image": "./docker/cowork-linux/Dockerfile"
+    "./cowork-linux-image": "./docker/cowork-linux/Dockerfile",
+    "./chatgpt-linux-image": "./docker/chatgpt-linux/Dockerfile"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",

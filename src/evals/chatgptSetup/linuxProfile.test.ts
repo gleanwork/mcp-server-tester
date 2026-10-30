@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loginWithApiKey } from '../codexSetup/auth.js';
+import type * as AuthModule from '../codexSetup/auth.js';
 import { probeAppServerStatus } from '../codexSetup/appServerStatus.js';
 import type * as AppServerModule from '../codexSetup/appServerStatus.js';
 import type * as PluginsModule from '../codexSetup/plugins.js';
@@ -27,7 +28,10 @@ import {
 } from './linuxProfile.js';
 import type { ResolvedCodexSetup } from '../codexSetup/config.js';
 
-vi.mock('../codexSetup/auth.js', () => ({ loginWithApiKey: vi.fn() }));
+vi.mock('../codexSetup/auth.js', async (original) => ({
+  ...(await original<typeof AuthModule>()),
+  loginWithApiKey: vi.fn(),
+}));
 vi.mock('../codexSetup/appServerStatus.js', async (original) => ({
   ...(await original<typeof AppServerModule>()),
   probeAppServerStatus: vi.fn(),
@@ -148,6 +152,113 @@ describe('Linux ChatGPT environment contract', () => {
       `environment_invalid: ${key}`
     );
   });
+
+  const gateway = () => {
+    const { MST_CHATGPT_API_KEY_FILE: _key, ...rest } = env;
+    return {
+      ...rest,
+      MST_CHATGPT_INFERENCE_BASE_URL: 'https://gateway.example/openai/v1/',
+      MST_CHATGPT_INFERENCE_TOKEN_FILE: join(home, 'run/token'),
+    };
+  };
+
+  it('accepts a gateway instead of an API key', () => {
+    expect(readLinuxChatgptEnvironment(gateway()).inference).toEqual({
+      mode: 'gateway',
+      baseUrl: 'https://gateway.example/openai/v1',
+      tokenFile: join(home, 'run/token'),
+    });
+  });
+
+  it.each([
+    ['both an API key and a gateway', { MST_CHATGPT_API_KEY_FILE: '/k' }],
+    [
+      'a gateway without its token file',
+      { MST_CHATGPT_INFERENCE_TOKEN_FILE: '' },
+    ],
+    [
+      'a plain-HTTP gateway',
+      { MST_CHATGPT_INFERENCE_BASE_URL: 'http://gateway.example/v1' },
+    ],
+    [
+      'a gateway URL with credentials',
+      { MST_CHATGPT_INFERENCE_BASE_URL: 'https://u:p@gateway.example/v1' },
+    ],
+  ])('rejects %s', (_kind, change) => {
+    expect(() =>
+      readLinuxChatgptEnvironment({ ...gateway(), ...change })
+    ).toThrow('environment_invalid');
+  });
+});
+
+describe('gateway inference', () => {
+  async function gatewayProfile(status: number) {
+    const tokenFile = join(env.XDG_RUNTIME_DIR!, 'token');
+    await writeFile(tokenFile, 'gateway-token-sentinel\n', { mode: 0o600 });
+    const { MST_CHATGPT_API_KEY_FILE: _key, ...rest } = env;
+    env = {
+      ...rest,
+      MST_CHATGPT_INFERENCE_BASE_URL: 'https://gateway.example/openai/v1',
+      MST_CHATGPT_INFERENCE_TOKEN_FILE: tokenFile,
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status }));
+    return { profile: await createProfile(), fetchMock, tokenFile };
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it('writes the provider, with a token command and no token, and checks the gateway instead of signing in', async () => {
+    const { profile, fetchMock, tokenFile } = await gatewayProfile(200);
+    expect(profile.install.modelProvider).toEqual({
+      id: 'mst_gateway',
+      name: 'LLM gateway',
+      baseUrl: 'https://gateway.example/openai/v1',
+      authCommand: '/bin/cat',
+      authArgs: [tokenFile],
+      refreshIntervalMs: 60_000,
+    });
+    expect(JSON.stringify(profile.install)).not.toContain('sentinel');
+    await profile.beforeStart(
+      {
+        configPath: profile.configPath,
+        configName: 'default',
+        content: '',
+        servers: [],
+      },
+      {}
+    );
+    expect(loginWithApiKey).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://gateway.example/openai/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer gateway-token-sentinel' },
+      })
+    );
+    expect(profile.readiness).toMatchObject({
+      inference: 'gateway',
+      login: 'verified',
+    });
+    expect(JSON.stringify(profile.readiness)).not.toContain('sentinel');
+    await profile.dispose();
+  });
+
+  it('fails before the app starts when the gateway refuses', async () => {
+    const { profile } = await gatewayProfile(401);
+    await expect(
+      profile.beforeStart(
+        {
+          configPath: profile.configPath,
+          configName: 'default',
+          content: '',
+          servers: [],
+        },
+        {}
+      )
+    ).rejects.toThrow('inference_unavailable');
+    expect(profile.readiness.login).toBe('failed');
+    await profile.dispose();
+  });
 });
 
 describe('fresh MST-owned Linux profile', () => {
@@ -168,15 +279,29 @@ describe('fresh MST-owned Linux profile', () => {
         },
       },
       readiness: {
+        inference: 'api-key',
         builtinToolPolicy: {
           disabledPlugins: ['unified-computer-use@openai-bundled'],
           webSearch: 'disabled',
         },
       },
-      evidenceDir: join(home, 'evidence'),
     });
+    // Its own evidence subdirectory, inside the caller's.
+    expect(profile.evidenceDir).toMatch(join(home, 'evidence', 'session-'));
     await profile.dispose();
     await expect(stat(workspace)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(stat(join(home, '.codex'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('runs one session after another in the same HOME, as a worker runs variants', async () => {
+    const first = await createProfile();
+    await first.dispose();
+    const second = await createProfile();
+    expect(second.evidenceDir).not.toBe(first.evidenceDir);
+    expect(await readdir(join(home, 'evidence'))).toHaveLength(2);
+    await second.dispose();
   });
 
   it.each([
@@ -184,9 +309,9 @@ describe('fresh MST-owned Linux profile', () => {
     ['existing .codex', 'home_not_fresh', () => mkdir(join(home, '.codex'))],
     ['group-readable HOME', 'home_unsafe', () => chmod(home, 0o750)],
     [
-      'non-empty evidence',
+      'group-readable evidence',
       'evidence_dir_unsafe',
-      () => writeFile(join(env.MST_CHATGPT_EVIDENCE_DIR!, 'x'), ''),
+      () => chmod(env.MST_CHATGPT_EVIDENCE_DIR!, 0o750),
     ],
     [
       'non-executable app',

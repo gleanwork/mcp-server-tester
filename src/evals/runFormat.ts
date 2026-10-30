@@ -136,12 +136,37 @@ const RunRecordSchema = z.looseObject({
       snapshot: z.string().optional(),
     })
   ),
-  judges: z.array(z.unknown()).optional(),
+  judges: z
+    .array(
+      z.looseObject({
+        type: z.string(),
+        level: z.string(),
+        optionsHash: z.string(),
+        identity: z
+          .string()
+          .regex(/^[0-9a-f]{64}$/)
+          .optional(),
+      })
+    )
+    .optional(),
   partial: z.boolean(),
   selection: z.looseObject({}).optional(),
   redactStoredResponses: z.boolean(),
   /** A regrade's run: the run whose traces it graded (`mst grade`). */
   gradedFrom: z.string().regex(RUN_ID_PATTERN).optional(),
+  /**
+   * `mst grade --resume`: the regrade whose verdicts this one kept, and how
+   * many trials and pairwise comparisons it kept and graded.
+   */
+  resumedGrading: z
+    .looseObject({
+      from: z.string().regex(RUN_ID_PATTERN),
+      reusedTrials: z.number().int().nonnegative(),
+      gradedTrials: z.number().int().nonnegative(),
+      reusedComparisons: z.number().int().nonnegative(),
+      gradedComparisons: z.number().int().nonnegative(),
+    })
+    .optional(),
   /** Where the trials were collected, and the machine `mst run` ran on. */
   environment: z.looseObject({
     /** `local`, or a plugin environment (`<namespace>/env/<name>`). */
@@ -361,6 +386,21 @@ export function assertUniqueVariantNames(names: readonly string[]): void {
   }
 }
 
+/**
+ * An eval config judge as `run.json` records it: by name and level, with a
+ * hash of its options (which can hold settings that shouldn't be stored),
+ * and its identity: a hash of the judge, its version and its parsed options,
+ * which every score it gives also records (ADR 0009). `identity` is absent
+ * for runs from before MST recorded it, and when the judge's plugin wasn't
+ * loaded.
+ */
+export interface JudgeRecord {
+  type: string;
+  level: string;
+  optionsHash: string;
+  identity?: string;
+}
+
 /** The facts `run.json` records, beyond what the summary has. */
 export interface RunFacts {
   evalName: string;
@@ -385,7 +425,7 @@ export interface RunFacts {
     source?: 'snapshot' | 'live';
     snapshot?: string;
   }>;
-  judges?: Array<{ type: string; level: string; optionsHash: string }>;
+  judges?: JudgeRecord[];
   redactStoredResponses: boolean;
   /** Where the trials were collected (`--env`). Default: `local`. */
   environment?: RunEnvironment;
@@ -400,6 +440,18 @@ export interface RunFacts {
   phases?: RunPhases;
   /** The run a regrade graded the traces of. */
   gradedFrom?: string;
+  /** `mst grade --resume`: the grading it kept the verdicts of, and how many. */
+  resumedGrading?: ResumedGradingRecord;
+}
+
+/** `run.json`'s `resumedGrading`. */
+interface ResumedGradingRecord {
+  /** The run whose grading was resumed. */
+  from: string;
+  reusedTrials: number;
+  gradedTrials: number;
+  reusedComparisons: number;
+  gradedComparisons: number;
 }
 
 /** `run.json`'s `optimization`: which tool optimization a run was made for, and as what. */
@@ -598,6 +650,7 @@ export async function writeRun(
     redactStoredResponses: facts.redactStoredResponses,
     ...(facts.gradedFrom ? { gradedFrom: facts.gradedFrom } : {}),
     ...(facts.optimization ? { optimization: facts.optimization } : {}),
+    ...(facts.resumedGrading ? { resumedGrading: facts.resumedGrading } : {}),
     environment: {
       name: facts.environment?.name ?? 'local',
       shards: facts.environment?.shards ?? 1,

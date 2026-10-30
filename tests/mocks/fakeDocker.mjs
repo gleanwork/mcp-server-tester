@@ -37,10 +37,34 @@ function fail(message) {
   process.exit(1);
 }
 
+/** FAKE_DOCKER_OOM: containers out of memory, comma-separated, or `*`. */
+const outOfMemory = (name) => {
+  const names = (process.env.FAKE_DOCKER_OOM ?? '').split(',');
+  return names.includes('*') || names.includes(name);
+};
+
 const [command, ...rest] = args;
 if (command === 'image') {
   process.stdout.write('sha256:fake-image\n');
+} else if (command === 'info') {
+  // `info --format '{{.MemTotal}} {{.NCPU}}'`: the context's size, as the
+  // test sets it (FAKE_DOCKER_INFO, `<bytes> <cpus>`), or 8 GiB and 4 CPUs.
+  // FAKE_DOCKER_INFO=fail: a daemon that doesn't answer.
+  const info = process.env.FAKE_DOCKER_INFO ?? `${8 * 1024 ** 3} 4`;
+  if (info === 'fail') fail('Cannot connect to the Docker daemon');
+  process.stdout.write(`${info}\n`);
+} else if (command === 'inspect') {
+  // `inspect --format '{{.State.OOMKilled}}' <name>`.
+  const name = rest.at(-1);
+  if (!fs.existsSync(containerRoot(name))) fail(`No such container: ${name}`);
+  process.stdout.write(`${outOfMemory(name)}\n`);
 } else if (command === 'build') {
+  if (process.env.FAKE_DOCKER_BUILD_ERROR) {
+    process.stderr.write(
+      `#12 [5/9] RUN npm install\n${process.env.FAKE_DOCKER_BUILD_ERROR}\n`
+    );
+    process.exit(1);
+  }
   // What the image would install: the plugin packages in the context.
   const plugins = path.join(rest.at(-1), 'plugins');
   fs.appendFileSync(
@@ -49,6 +73,12 @@ if (command === 'image') {
       context,
       tag: rest[rest.indexOf('--tag') + 1],
       plugins: fs.existsSync(plugins) ? fs.readdirSync(plugins).sort() : null,
+      // Which of MST's images: only ChatGPT's is recorded, so Cowork's builds read as before.
+      ...(/ChatGPT/.test(
+        fs.readFileSync(path.join(rest.at(-1), 'Dockerfile'), 'utf8')
+      )
+        ? { desktop: 'chatgpt' }
+        : {}),
     })}\n`
   );
 } else if (command === 'run') {
@@ -114,7 +144,11 @@ if (command === 'image') {
   const name = rest[index];
   const argv = rest.slice(index + 1);
   if (!fs.existsSync(containerRoot(name))) fail(`No such container: ${name}`);
-  if (argv[0] === 'mst') {
+  if (argv[0] === 'mst' && outOfMemory(name)) {
+    // The kernel killed the worker: out of the container's memory.
+    process.stderr.write('Killed\n');
+    process.exit(137);
+  } else if (argv[0] === 'mst') {
     const child = spawn(
       process.execPath,
       [
@@ -139,8 +173,13 @@ if (command === 'image') {
       }
     );
     child.on('close', (code) => process.exit(code ?? 1));
-  } else if (['chown', 'pkill'].includes(argv[0])) {
+  } else if (
+    ['chown', 'pkill', '/opt/mst/bin/desktop-session'].includes(argv[0])
+  ) {
     // Ownership and processes aren't modelled.
+  } else if (argv[0] === 'install' && argv[1] === '-d') {
+    // `install -d [-o u -g g -m mode] dir`: the directory, without ownership.
+    fs.mkdirSync(inside(name, argv.at(-1)), { recursive: true });
   } else {
     const result = spawnSync(
       argv[0],

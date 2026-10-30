@@ -25,12 +25,43 @@ export interface PluginMeta {
 }
 
 /**
+ * The settings a plugin takes: values that belong to the repo that runs
+ * evals, not to one extension (a project ID, an endpoint), as in ESLint's
+ * `settings`. They are written in `mst.config.json` or an eval config's
+ * `settings`, under the plugin's namespace (ADR 0008).
+ */
+export interface PluginSettingsDefinition {
+  /**
+   * Parses the plugin's section. It is parsed even when the section is
+   * absent (as `{}`), so required settings fail before a run starts. It must
+   * produce an object: that object is what every extension of the plugin
+   * receives as `settings`.
+   */
+  readonly schema: ZodType;
+}
+
+/**
+ * What every extension is given beside its own options: its plugin's
+ * settings, parsed by the plugin's `settings.schema` (ADR 0008). Undefined
+ * for a built-in, a plugin that takes no settings, or a call made without an
+ * eval config (such as `mst runs` reading a result store by `--results`).
+ */
+export interface SettingsContext {
+  readonly settings?: Readonly<Record<string, unknown>>;
+}
+
+/**
  * An MST plugin: a plain object, the default export of its module, in the
  * shape ESLint uses. MST reads it; a plugin never calls into MST to register.
  * Each map key is the extension's name within the plugin's namespace.
  */
 export interface Plugin {
   readonly meta: PluginMeta;
+  /**
+   * The settings the plugin takes. A plugin without them can't be given a
+   * settings section.
+   */
+  readonly settings?: PluginSettingsDefinition;
   readonly datasetSources?: Readonly<Record<string, DatasetSource>>;
   readonly clients?: Readonly<Record<string, ClientDefinition>>;
   readonly judges?: Readonly<Record<string, JudgeDefinition>>;
@@ -118,7 +149,12 @@ export interface ExtensionsByKind {
 
 const NAMESPACE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 const EXTENSION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const TOP_LEVEL_KEYS = new Set<string>(['meta', 'configs', ...EXTENSION_KINDS]);
+const TOP_LEVEL_KEYS = new Set<string>([
+  'meta',
+  'settings',
+  'configs',
+  ...EXTENSION_KINDS,
+]);
 
 /** The functions an extension of each kind must provide (any one of them). */
 const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
@@ -201,6 +237,12 @@ function extensionProblem(
     typeof definition.description !== 'string'
   )
     return `${label}: description must be a string`;
+  if (
+    (kind === 'judges' || kind === 'pairwiseJudges') &&
+    definition.version !== undefined &&
+    (typeof definition.version !== 'string' || definition.version === '')
+  )
+    return `${label}: version must be a non-empty string`;
   if (kind === 'clients' && 'toolOverrides' in definition)
     return `${label}: \`toolOverrides\` is now \`toolMetadata\``;
   if (
@@ -316,6 +358,15 @@ export function assertPlugin(value: unknown, source: string): Plugin {
   for (const key of Object.keys(value)) {
     if (key === 'hosts') fail('`hosts` is now `clients`');
     if (!TOP_LEVEL_KEYS.has(key)) fail(`unknown key "${key}"`);
+  }
+  if (value.settings !== undefined) {
+    const schema = isRecord(value.settings)
+      ? (value.settings.schema as { safeParse?: unknown } | undefined)
+      : undefined;
+    if (typeof schema?.safeParse !== 'function')
+      fail('settings needs a Zod schema: settings: { schema }');
+    for (const key of Object.keys(value.settings as object))
+      if (key !== 'schema') fail(`settings: unknown key "${key}"`);
   }
   if (value.configs !== undefined) {
     if (!isRecord(value.configs)) fail('configs must be an object');

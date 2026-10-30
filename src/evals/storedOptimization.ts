@@ -331,7 +331,11 @@ function setupOf(variant: Record<string, unknown>): string {
 /**
  * How a run about to start differs from the baseline in what it measures
  * with, besides tool metadata: its datasets, the eval config's judges, and
- * the base variant's client, model and options. Undefined when it doesn't.
+ * the base variant's client, model, options, input template and judges.
+ * Undefined when it doesn't. Only the config-level judge records count: a
+ * round's candidates carry the base variant's own judges under their own
+ * names (compared through `setupOf` instead), and a round skips pairwise
+ * judges.
  */
 function setupChange(
   baseline: RunRecord,
@@ -343,12 +347,18 @@ function setupChange(
     return 'its datasets changed (different cases or case content)';
   // Each judge with a hash of its options, so a changed rubric or threshold
   // shows even when the judge's type doesn't.
-  if (JSON.stringify(baseline.judges ?? []) !== JSON.stringify(planned.judges))
+  const configJudges = (judges: readonly unknown[] | undefined) =>
+    JSON.stringify(
+      (judges ?? []).filter(
+        (judge) => (judge as { level?: unknown }).level === 'config'
+      )
+    );
+  if (configJudges(baseline.judges) !== configJudges(planned.judges))
     return "the eval config's judges or their options changed";
   const base = setupOf(baseline.variants[0]!);
   const changed = planned.variants.find((variant) => setupOf(variant) !== base);
   return changed
-    ? `the base variant's client, model, options or judges changed (seen on "${changed.name}")`
+    ? `the base variant's client, model, options, input template or judges changed (seen on "${changed.name}")`
     : undefined;
 }
 

@@ -130,9 +130,22 @@ servers through Claude's supported local Developer MCP surface instead:
 - Cleanup tolerates Claude's JSON whitespace rewrite, but rejects semantic edits
   made concurrently. `cowork recover` also restores the developer configuration.
 
+A server that fails the preflight is checked again after 10 seconds and then
+after 30 more; only failed servers are rechecked, and the batch fails if one is
+still not ready. `MST_COWORK_MCP_PREFLIGHT_RETRY_S` sets other delays as
+comma-separated seconds (`5,20`); an empty value turns retries off.
+
 Use actual tool-call assertions: successful endpoint preflight alone is not proof
 that the Cowork session received the server. A live pinned run has passed with
 an eval-endpoint search tool and a login-backed GitHub `get_me` call.
+
+### Cloud sessions
+
+Claude Desktop builds signed in to claude.ai (not an `inferenceProvider`
+gateway) run Cowork tasks as remote `cse_…` sessions that write no session
+folder on the host. MST does not read them: on such a macOS desktop it finds
+no session to bind. The prepared Linux desktop runs Desktop through a gateway,
+which runs local sessions, so it is unaffected.
 
 ## Run on macOS from a source checkout
 
@@ -254,7 +267,8 @@ change its launch policy, or manage its lifecycle.
 `MST_DESKTOP_OWNED=1`, makes the settings file writable by the desktop user, and
 sets `MST_DESKTOP_RESTART` to the absolute path of a command that restarts Claude
 Desktop and returns once it's back, within 5 minutes
-(`MST_DESKTOP_RESTART_TIMEOUT_S` sets another limit, up to 3600 seconds). Claude Desktop reads
+(`MST_DESKTOP_RESTART_TIMEOUT_S` sets another limit, up to 3600 seconds). If the
+command fails, MST runs it once more before the variant fails. Claude Desktop reads
 `/etc/claude-desktop/managed-settings.json` only when root owns it and no one
 else can write it, so an image points `MST_COWORK_SETTINGS_FILE` at a staging
 file the desktop user owns, and its restart command installs a root-owned copy
@@ -540,6 +554,24 @@ to …/tool-results/mcp-<server>-<tool>-<time>.txt`) isn't read back yet.
 Results include `clientUsage`, `clientTelemetry`, and `telemetry.totalClientUsage`.
 These describe native Claude execution, not the separate Computer Use planner's
 API cost. A test assertion or judge failure is distinct from a driver failure.
+`clientTelemetry` also has, from Cowork's results and audit log:
+
+- `timeToFirstTokenMs` and `timeToFirstTokenStreamMs`: the trial's first turn,
+  to its first token and to the first token of the response stream, with
+  `firstRequestAt`. Each model call's own TTFT is in the host's telemetry
+  (`telemetry.host`, docs/telemetry.md).
+- `permissionRequestCount`, `permissionDenialCount` and `approvalWaitMs`: the
+  tool approvals Cowork asked for, the ones refused, and the time from each
+  request to its answer. The wait is part of `durationMs`.
+- `finalContextTokens`: the context the last model call read (its input,
+  cache-read and cache-write tokens).
+- `webSearchRequests`: the server-side web searches the results count.
+
+A model call's `reasoningText` is its thinking summaries, when the transcript
+has them. Cowork on MST's Linux image has none: its thinking blocks carry only
+a signature, and Claude Code's `showThinkingSummaries` in the desktop user's
+`~/.claude/settings.json` doesn't reach the agent in Cowork's VM. Each
+result's thinking-token count (`reasoningOutputTokens`) is still recorded.
 
 The shared orchestration is OS-neutral and tested with injected platform doubles.
 macOS is live-qualified. Linux has separate qualification requirements described
@@ -715,6 +747,19 @@ It fails closed. A tool is read-only only when it is annotated
 annotations, or one the server does not list, is a write. `readOnlyTools`
 allows reads on a server that annotates nothing; `alwaysWriteTools` intercepts
 tools annotated as reads.
+
+A server that handles writes itself, such as an eval endpoint that never
+changes real data, can still use the proxy for its token: with
+`forwardWrites: true`, every call goes upstream. Use it for any connector whose
+session can outlast its access token. A token in an environment variable is
+read once, when the client starts, and is never renewed. `requestTimeoutMs`
+(default 120 seconds) bounds each request; raise it for tools slower than that,
+so the client's own tool limit applies instead.
+
+The proxy connects to the upstream server before it serves its client. If
+that fails, or its token file isn't there yet, it tries again after 2 and 5
+seconds, then exits; each failure goes to stderr with its kind (an error
+class, a network code or an HTTP status), never a token or response body.
 
 `dryRunProxyServer()` (from `@gleanwork/mcp-server-tester/evals`) returns the
 stdio server entry. It holds the path of a token file, never a token:

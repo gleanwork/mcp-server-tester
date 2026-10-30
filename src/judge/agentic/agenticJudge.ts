@@ -94,7 +94,10 @@ interface AgenticBase<Input> {
   outputSchema?: Record<string, unknown>;
   /** Plugin-specific options, merged with the runtime settings. */
   schema?: z.ZodObject;
-  /** A version recorded with every score or preference, such as a frozen prompt hash. */
+  /**
+   * A version recorded with every score or preference, such as a frozen
+   * prompt hash. It is also the judge's `version`, part of its identity.
+   */
   version?: string;
 }
 
@@ -235,6 +238,7 @@ async function runAgent<Input>(
 export function agenticJudge(spec: AgenticJudgeSpec): JudgeDefinition {
   return {
     schema: optionsSchema(spec),
+    ...(spec.version !== undefined && { version: spec.version }),
     ...(spec.requires !== undefined && { requires: spec.requires }),
     preflight: (options) => preflightRuntime(settings(spec, options).runtime),
     evaluate: (input, options) =>
@@ -260,6 +264,7 @@ export function agenticPairwiseJudge(
 ): PairwiseJudgeDefinition {
   return {
     schema: optionsSchema(spec),
+    ...(spec.version !== undefined && { version: spec.version }),
     ...(spec.requires !== undefined && { requires: spec.requires }),
     ...(spec.swapPositions !== undefined && {
       swapPositions: spec.swapPositions,

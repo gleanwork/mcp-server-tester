@@ -43,6 +43,8 @@ async function setup(
     artifacts?: boolean;
     /** Report this directory instead of the session folder. */
     artifactsDir?: string;
+    /** The eval config's `telemetry`. */
+    telemetry?: Record<string, unknown>;
   } = {}
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-'));
@@ -197,6 +199,7 @@ async function setup(
           { name: 'baseline', servers: ['docs'] },
           { name: 'better', servers: ['docs'] },
         ],
+        ...(options.telemetry ? { telemetry: options.telemetry } : {}),
       })
     );
   await writeConfig(options.keyword ?? 'certificate');
@@ -461,6 +464,161 @@ describe('mst run --no-grade and mst grade', () => {
     await expect(
       gradeRun({ ...t.base, run: collected.outputDir })
     ).rejects.toThrow(/ran case "duration", which the eval's datasets/);
+  });
+});
+
+describe('traces (telemetry.otlp)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** What a stubbed collector received: each request's spans. */
+  function collector() {
+    const requests: Array<{
+      url: string;
+      headers: Record<string, string>;
+      spans: Array<{
+        traceId: string;
+        spanId: string;
+        parentSpanId?: string;
+        name: string;
+        attributes: Array<{
+          key: string;
+          value: { stringValue?: string; intValue?: string };
+        }>;
+      }>;
+    }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        const body = JSON.parse(init.body as string);
+        requests.push({
+          url,
+          headers: init.headers as Record<string, string>,
+          spans: body.resourceSpans.flatMap(
+            (resource: { scopeSpans: Array<{ spans: unknown[] }> }) =>
+              resource.scopeSpans.flatMap((scope) => scope.spans)
+          ),
+        });
+        return new Response(null, { status: 200 });
+      })
+    );
+    const spans = () => requests.flatMap((request) => request.spans);
+    const attribute = (span: ReturnType<typeof spans>[number], key: string) => {
+      const value = span.attributes.find((entry) => entry.key === key)?.value;
+      return value?.stringValue ?? value?.intValue;
+    };
+    return { requests, spans, attribute };
+  }
+
+  it("sends each trial's trace as it runs, and a regrade's verdicts into the same traces", async () => {
+    const received = collector();
+    const t = await setup({
+      telemetry: {
+        otlp: {
+          endpoint: 'https://collector.example.com',
+          bearerTokenEnv: 'MST_TEST_COLLECTOR_TOKEN',
+        },
+      },
+    });
+    process.env.MST_TEST_COLLECTOR_TOKEN = 'collector-secret';
+    try {
+      const collected = await runEval({ ...t.base, grade: false });
+      const collectedId = path.basename(collected.outputDir);
+      const roots = received
+        .spans()
+        .filter((span) => span.name.startsWith('invoke_agent'));
+      // Two variants by two cases, one trial each.
+      expect(roots).toHaveLength(4);
+      expect(
+        received.spans().filter((span) => span.name.startsWith('evaluate'))
+      ).toEqual([]);
+      expect(received.requests[0]!.url).toBe(
+        'https://collector.example.com/v1/traces'
+      );
+      expect(received.requests[0]!.headers.authorization).toBe(
+        'Bearer collector-secret'
+      );
+      expect(
+        roots.map((root) => [
+          received.attribute(root, 'mst.variant'),
+          received.attribute(root, 'mst.case_id'),
+          received.attribute(root, 'mst.run_id'),
+        ])
+      ).toEqual(
+        expect.arrayContaining([
+          ['baseline', 'cause', collectedId],
+          ['baseline', 'duration', collectedId],
+          ['better', 'cause', collectedId],
+          ['better', 'duration', collectedId],
+        ])
+      );
+      const tools = received
+        .spans()
+        .filter((span) => span.name === 'execute_tool search');
+      expect(tools).toHaveLength(4);
+      // Content is off by default: no prompts, answers or tool results.
+      expect(JSON.stringify(received.requests)).not.toContain('certificate');
+      expect(JSON.stringify(received.requests)).not.toContain(
+        'the incident report'
+      );
+      // The token is never written to the run.
+      const stored = await fs.readdir(collected.outputDir, { recursive: true });
+      for (const file of stored) {
+        const full = path.join(collected.outputDir, file);
+        if ((await fs.stat(full)).isFile())
+          expect(await fs.readFile(full, 'utf8')).not.toContain(
+            'collector-secret'
+          );
+      }
+
+      received.requests.length = 0;
+      const regrade = await gradeRun({ ...t.base, run: collectedId });
+      const spans = received.spans();
+      // A regrade replays trials: it traces their verdicts, not them again.
+      expect(
+        spans.filter((span) => span.name.startsWith('invoke_agent'))
+      ).toEqual([]);
+      const rootIds = new Map(roots.map((root) => [root.traceId, root.spanId]));
+      const trialVerdicts = spans.filter(
+        (span) => span.name === 'evaluate mst.trial'
+      );
+      expect(trialVerdicts).toHaveLength(4);
+      for (const span of [...trialVerdicts]) {
+        expect(rootIds.get(span.traceId)).toBe(span.parentSpanId);
+        expect(received.attribute(span, 'mst.grading_run_id')).toBe(
+          path.basename(regrade.outputDir)
+        );
+      }
+      expect(
+        spans.filter((span) => span.name === 'evaluate gr/judge/keyword')
+      ).toHaveLength(4);
+      const pairwise = spans.filter(
+        (span) => span.name === 'evaluate gr/pairwise-judge/longer'
+      );
+      expect(pairwise).toHaveLength(2);
+      for (const span of pairwise) {
+        expect(received.attribute(span, 'mst.variant')).toBe('better');
+        expect(rootIds.get(span.traceId)).toBe(span.parentSpanId);
+      }
+    } finally {
+      delete process.env.MST_TEST_COLLECTOR_TOKEN;
+    }
+  });
+
+  it("doesn't fail the run when the collector does", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 403 }))
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const t = await setup({
+      telemetry: { otlp: { endpoint: 'https://collector.example.com' } },
+    });
+    const result = await runEval(t.base);
+    expect(result.summary.results).toHaveLength(4);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Couldn't send traces")
+    );
+    warn.mockRestore();
   });
 });
 
@@ -833,5 +991,19 @@ describe('withoutTrialArtifacts', () => {
     // Other fields named "artifacts" stay.
     expect(stored.results[0]!.response).toEqual({ artifacts: ['report.md'] });
     expect(result.artifacts.dir).toBe('/tmp/session');
+  });
+
+  it('copies without one string of the whole summary, which large tool outputs can push past V8’s limit', () => {
+    const stringify = vi.spyOn(JSON, 'stringify');
+    const stored = withoutTrialArtifacts({
+      results: [
+        { id: 'big', artifacts: { dir: '/tmp/x' }, output: 'x'.repeat(1024) },
+      ],
+    });
+    expect(stringify).not.toHaveBeenCalled();
+    stringify.mockRestore();
+    expect(stored).toEqual({
+      results: [{ id: 'big', output: 'x'.repeat(1024) }],
+    });
   });
 });

@@ -8,6 +8,11 @@ import { loadEvalPlugins } from '../../evals/evalPlugins.js';
 import { installPlugins } from '../../plugins/extensions.js';
 import { loadPlugins } from '../../plugins/loadPlugins.js';
 import { parseExtensionReference } from '../../plugins/plugin.js';
+import { evalSettings, type SettingsSections } from '../../plugins/settings.js';
+import {
+  findSettingsFile,
+  readSettingsFile,
+} from '../../plugins/settingsFile.js';
 
 export interface DiscoveryOptions {
   config?: string;
@@ -16,10 +21,17 @@ export interface DiscoveryOptions {
   json?: boolean;
 }
 
-/** Load the plugins and return their namespaces, sorted. */
-export async function loadDiscoveryPlugins(
-  options: DiscoveryOptions
-): Promise<{ namespaces: string[]; rootDir: string; configDir?: string }> {
+/**
+ * Load the plugins and return their namespaces, sorted, with their settings:
+ * the eval config's, or with `--plugins` alone, those of the `mst.config.json`
+ * at or above `rootDir`.
+ */
+export async function loadDiscoveryPlugins(options: DiscoveryOptions): Promise<{
+  namespaces: string[];
+  rootDir: string;
+  configDir?: string;
+  settings?: SettingsSections;
+}> {
   const rootDir = path.resolve(options.rootDir ?? '.');
   if (options.config) {
     const evalConfig = loadEvalConfig(options.config, {
@@ -32,10 +44,12 @@ export async function loadDiscoveryPlugins(
       rootDir,
       pluginPaths: options.plugins,
     });
+    const settings = evalSettings(evalConfig.settings, namespaces);
     return {
       namespaces,
       rootDir,
       configDir: path.dirname(path.resolve(options.config)),
+      ...(settings ? { settings } : {}),
     };
   }
   if (!options.plugins?.length)
@@ -45,12 +59,15 @@ export async function loadDiscoveryPlugins(
   const plugins = installPlugins(
     await loadPlugins(options.plugins, { baseDir: rootDir })
   );
-  return {
-    namespaces: [
-      ...new Set(plugins.map((plugin) => plugin.meta.namespace)),
-    ].sort(),
-    rootDir,
-  };
+  const namespaces = [
+    ...new Set(plugins.map((plugin) => plugin.meta.namespace)),
+  ].sort();
+  const settingsFile = findSettingsFile(rootDir);
+  const settings = evalSettings(
+    settingsFile ? readSettingsFile(settingsFile) : undefined,
+    namespaces
+  );
+  return { namespaces, rootDir, ...(settings ? { settings } : {}) };
 }
 
 /** Whether `reference` belongs to one of `namespaces` (bare names are built-ins). */

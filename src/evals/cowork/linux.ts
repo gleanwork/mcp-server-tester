@@ -21,7 +21,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
 import { transportServers } from '../evalConfig.js';
-import { headersHelper } from '../coworkSetup/bundle.js';
+import { credentialHelperScript } from '../coworkSetup/credentialHelper.js';
 import { resolveCoworkMcpHeaders } from '../coworkSetup/config.js';
 import {
   clientStdioFileContents,
@@ -61,6 +61,14 @@ import {
 
 /** The most one UI submission may take, within the case deadline. */
 export const SUBMIT_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Cowork's egress on MST's Linux desktop when neither the eval
+ * (`coworkSetup.egressAllowedHosts`) nor the image names hosts: any public
+ * host, as a user's Cowork reaches. Claude Desktop blocks private and local
+ * addresses whatever the list says.
+ */
+export const DEFAULT_EGRESS_HOSTS: readonly string[] = ['*'];
 
 const SESSION_ENV = [
   'PATH',
@@ -158,6 +166,12 @@ function coworkLinuxOwnedSettings(
     approveWriteTools?: boolean;
     model?: string;
     helpers?: ReadonlyMap<string, string>;
+    /** Desktop's `otlp*` keys (`telemetry.host`), which replace the image's own. */
+    telemetry?: Record<string, unknown>;
+    /** `coworkSetup.egressAllowedHosts`, over the image's own list. */
+    egressAllowedHosts?: readonly string[];
+    /** `coworkSetup.disabledBuiltinTools`, added to the image's own list. */
+    disabledBuiltinTools?: readonly string[];
   }
 ): Record<string, unknown> {
   const managed = coworkManagedPluginSettings(options);
@@ -196,18 +210,43 @@ function coworkLinuxOwnedSettings(
     allowedPluginMarketplaces: _previous,
     allowedMcpServers: _allowed,
     allowManagedMcpServersOnly: _only,
-    ...rest
+    ...kept
   } = base;
+  // An image's own `otlp*` keys are replaced, never merged.
+  const rest = options.telemetry
+    ? {
+        ...Object.fromEntries(
+          Object.entries(kept).filter(([key]) => !/^otlp[A-Z]/.test(key))
+        ),
+        ...options.telemetry,
+      }
+    : kept;
   const disabled = Array.isArray(base.disabledBuiltinTools)
     ? base.disabledBuiltinTools.filter(
         (tool): tool is string => typeof tool === 'string'
       )
     : [];
+  const imageEgress = Array.isArray(base.coworkEgressAllowedHosts)
+    ? base.coworkEgressAllowedHosts.filter(
+        (host): host is string => typeof host === 'string'
+      )
+    : undefined;
   return {
     ...rest,
+    // Where Cowork's tools (web fetch) and its VM's commands may connect:
+    // one list for both, by host, so it can't allow reads only.
+    coworkEgressAllowedHosts: [
+      ...(options.egressAllowedHosts ?? imageEgress ?? DEFAULT_EGRESS_HOSTS),
+    ],
     // Headless: nobody can answer AskUserQuestion. The image's own
-    // disabled tools stay disabled.
-    disabledBuiltinTools: [...new Set([...disabled, ...HEADLESS_DISABLED])],
+    // disabled tools stay disabled; the eval's are added.
+    disabledBuiltinTools: [
+      ...new Set([
+        ...disabled,
+        ...HEADLESS_DISABLED,
+        ...(options.disabledBuiltinTools ?? []),
+      ]),
+    ],
     managedMcpServers: [...http, ...managed.managedMcpServers],
     ...COWORK_MANAGED_ONLY,
     ...(managed.allowedPluginMarketplaces
@@ -331,11 +370,12 @@ async function writeServerHeaders(
     await rename(temporary, file);
     await writeFile(
       helper,
-      headersHelper(
-        file,
-        Object.keys(headers),
-        Object.keys(server.auth ?? {}).length > 0
-      ),
+      credentialHelperScript({
+        kind: 'headers',
+        path: file,
+        names: Object.keys(headers),
+        bearer: Object.keys(server.auth ?? {}).length > 0,
+      }),
       { mode: 0o700 }
     );
     helpers.set(name, helper);
@@ -349,13 +389,40 @@ async function writeServerHeaders(
   };
 }
 
+/**
+ * How many times MST runs the restart command before the variant fails. A
+ * restart that fails costs the shard every case it has left, and a second one
+ * starts Claude and its VM from scratch.
+ */
+const DESKTOP_RESTART_ATTEMPTS = 2;
+
 /** Runs the image's desktop restart command; it returns once Claude is back. */
 async function restartDesktop(
   command: string,
   env: Record<string, string | undefined>
 ): Promise<void> {
+  const failures: string[] = [];
+  for (let attempt = 1; attempt <= DESKTOP_RESTART_ATTEMPTS; attempt++) {
+    const failure = await runRestartCommand(command, env);
+    if (failure === undefined) return;
+    failures.push(failure);
+    if (attempt < DESKTOP_RESTART_ATTEMPTS)
+      process.stderr.write(
+        `[mst:cowork] desktop restart failed (${failure}); restarting it again\n`
+      );
+  }
+  throw new Error(
+    `The desktop restart command (MST_DESKTOP_RESTART) failed after MST wrote the variant settings, ${failures.length} times: ${failures.join('; then ')}`
+  );
+}
+
+/** One run of the restart command: why it failed, or undefined. */
+function runRestartCommand(
+  command: string,
+  env: Record<string, string | undefined>
+): Promise<string | undefined> {
   const timeout = desktopRestartTimeoutMs(env);
-  const failure = await new Promise<string | undefined>((resolve) => {
+  return new Promise<string | undefined>((resolve) => {
     const child = execFile(
       command,
       [],
@@ -373,17 +440,17 @@ async function restartDesktop(
             ? undefined
             : error.killed
               ? `it didn't return within ${timeout / 1000} s`
-              : String(stderr).trim().split('\n').at(-1)?.slice(0, 300) ||
+              : String(stderr ?? '')
+                  .trim()
+                  .split('\n')
+                  .at(-1)
+                  ?.slice(0, 300) ||
                 `it exited with ${error.code ?? 'an error'}`
         )
     );
     child.stdin?.on('error', () => {});
     child.stdin?.end();
   });
-  if (failure !== undefined)
-    throw new Error(
-      `The desktop restart command (MST_DESKTOP_RESTART) failed after MST wrote the variant settings: ${failure}`
-    );
 }
 
 function telemetry(
@@ -665,7 +732,14 @@ export const linuxCoworkPlatform: CoworkPlatform = {
       'Claude-3p',
       'local-agent-mode-sessions'
     ),
-  async prepare({ evalConfig, env, model, plugins = [], stdioPaths = {} }) {
+  async prepare({
+    evalConfig,
+    env,
+    model,
+    plugins = [],
+    stdioPaths = {},
+    otlpSettings,
+  }) {
     const settingsFile =
       env.MST_COWORK_SETTINGS_FILE ??
       '/etc/claude-desktop/managed-settings.json';
@@ -677,6 +751,10 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     let original: string | undefined;
     let ownedText: string | undefined;
     let headerFiles: ServerHeaderFiles | undefined;
+    if (otlpSettings && !owned)
+      throw new Error(
+        "telemetry.host on Cowork needs owned-desktop mode (MST_DESKTOP_OWNED=1, MST's Linux image), where MST writes Claude Desktop's settings."
+      );
     if (owned) {
       const restart = env.MST_DESKTOP_RESTART;
       if (!restart || !isAbsolute(restart))
@@ -706,6 +784,16 @@ export const linuxCoworkPlatform: CoworkPlatform = {
           approveWriteTools: evalConfig.coworkSetup?.approveWriteTools === true,
           ...(model ? { model } : {}),
           helpers: headerFiles.helpers,
+          ...(otlpSettings ? { telemetry: otlpSettings } : {}),
+          ...(evalConfig.coworkSetup?.egressAllowedHosts
+            ? { egressAllowedHosts: evalConfig.coworkSetup.egressAllowedHosts }
+            : {}),
+          ...(evalConfig.coworkSetup?.disabledBuiltinTools
+            ? {
+                disabledBuiltinTools:
+                  evalConfig.coworkSetup.disabledBuiltinTools,
+              }
+            : {}),
         }),
         null,
         2

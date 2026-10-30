@@ -6,7 +6,9 @@
 import type { ValidationResult } from '../assertions/validators/types.js';
 import type { TraceEvidence } from '../evals/evalFrameworkTypes.js';
 import { parseExtensionOptions } from '../plugins/plugin.js';
+import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 import { getJudge } from './builtinJudges.js';
+import { judgeIdentity } from './judgeIdentity.js';
 import {
   buildJudgeCase,
   buildJudgeTrial,
@@ -26,6 +28,8 @@ export interface JudgeRun {
   clientResponse?: unknown;
   /** How the client trace was observed. */
   evidence?: TraceEvidence;
+  /** The eval's plugin settings; the judge gets its plugin's (ADR 0008). */
+  settings?: SettingsSections;
 }
 
 /** Minimum judge score that passes when no threshold is given. */
@@ -73,7 +77,8 @@ export interface JudgeRequest {
  * naming the judge and what's wrong.
  */
 export async function preflightJudgeRequest(
-  request: JudgeRequest
+  request: JudgeRequest,
+  settings?: SettingsSections
 ): Promise<void> {
   try {
     const judge = getJudge(request.judge);
@@ -82,7 +87,9 @@ export async function preflightJudgeRequest(
       request.options,
       `judge options "${request.judge}"`
     );
-    await judge.preflight?.(options);
+    await judge.preflight?.(options, {
+      settings: settingsFor(settings, request.judge),
+    });
   } catch (error) {
     throw new Error(
       `Judge "${request.label}" can't run: ${error instanceof Error ? error.message : String(error)}`
@@ -122,16 +129,18 @@ export async function evaluateJudge(
       case: buildJudgeCase(run.evalCase, request.reference),
       trial: buildJudgeTrial(response, run),
     };
+    const context = { settings: settingsFor(run.settings, request.judge) };
+    const identity = judgeIdentity(request.judge, judge, request.options);
     const missing = missingRequirement(input, judge.requires);
     if (missing !== undefined)
-      return judgeSkipped(label, `no ${missing}`, undefined);
+      return judgeSkipped(label, identity, `no ${missing}`, undefined);
 
     const repScores: CheckedJudgeScore[] = [];
     for (let i = 0; i < reps; i++) {
       let repScore: CheckedJudgeScore;
       try {
         repScore = checkJudgeScore(
-          await judge.evaluate(input, options),
+          await judge.evaluate(input, options, context),
           threshold
         );
       } catch (err) {
@@ -144,6 +153,7 @@ export async function evaluateJudge(
       if (repScore.skipped)
         return judgeSkipped(
           label,
+          identity,
           repScore.reasoning,
           sumJudgeUsage(repScores.map((v) => v.usage)),
           repScore.metadata
@@ -181,6 +191,7 @@ export async function evaluateJudge(
         : `Judge "${label}" failed with score ${score.toFixed(2)} (threshold: ${threshold})${repNote}. ${last.reasoning ?? ''}`,
       details: {
         judgeName: label,
+        judgeIdentity: identity,
         score,
         reasoning: last.reasoning,
         ...(last.provider !== undefined
@@ -214,6 +225,7 @@ export async function evaluateJudge(
  */
 function judgeSkipped(
   label: string,
+  identity: string,
   reason: string | undefined,
   usage: ReturnType<typeof sumJudgeUsage>,
   metadata?: Record<string, unknown>
@@ -223,6 +235,7 @@ function judgeSkipped(
     message: `Judge "${label}" skipped${reason ? `: ${reason}` : ''}`,
     details: {
       judgeName: label,
+      judgeIdentity: identity,
       skipped: true,
       ...(reason !== undefined ? { reasoning: reason } : {}),
       ...(usage !== undefined ? { usage } : {}),

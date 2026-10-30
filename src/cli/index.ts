@@ -346,6 +346,10 @@ program
     '--detach',
     'Grade from a coordinator machine the environment creates, and return (the run must be in the result store)'
   )
+  .option(
+    '--resume',
+    "Finish a graded run's grading: keep every verdict it has, and run only the judges and pairwise judges that failed to run (a timeout, a lost grade shard). Give the regrade (<run-id>.g<n>) to finish"
+  )
   .addOption(
     new Option(
       '--loaded-datasets <file>',

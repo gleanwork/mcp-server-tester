@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createVercelOrchestrator } from './vercel.js';
+import { createVercelOrchestrator, stepModelCalls } from './vercel.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../../../mcp/fixtures/fixtureExtensions.js';
 
@@ -496,5 +496,63 @@ describe('createVercelOrchestrator', () => {
       // Hint points at the real causes (model id / base-URL override).
       expect(result.error).toContain('ANTHROPIC_BASE_URL');
     });
+  });
+});
+
+describe('stepModelCalls', () => {
+  const at = (seconds: number) => Date.UTC(2026, 9, 22, 12, 0, seconds);
+  const iso = (seconds: number) => new Date(at(seconds)).toISOString();
+
+  it("reads each step's request: its usage, and its time until its first tool call", () => {
+    const calls = stepModelCalls(
+      [
+        {
+          usage: {
+            inputTokens: 100,
+            outputTokens: 8,
+            inputTokenDetails: { cacheReadTokens: 40 },
+          },
+          finishReason: 'tool-calls',
+          response: { id: 'resp-1', modelId: 'model-x' },
+          text: '',
+          toolCalls: [{ toolCallId: 'call-1' }, { toolCallId: 'call-2' }],
+        },
+        {
+          usage: { inputTokens: 130, outputTokens: 3 },
+          finishReason: 'stop',
+          response: { id: 'resp-2', modelId: 'model-x' },
+          text: 'Done.',
+          toolCalls: [],
+        },
+      ] as unknown as Parameters<typeof stepModelCalls>[0],
+      at(0),
+      [at(5), at(8)],
+      [at(3), at(2)]
+    );
+    expect(calls).toEqual([
+      {
+        id: 'resp-1',
+        model: 'model-x',
+        startedAt: iso(0),
+        completedAt: iso(2),
+        durationMs: 2_000,
+        inputTokens: 100,
+        outputTokens: 8,
+        cacheReadInputTokens: 40,
+        finishReason: 'tool-calls',
+        toolCallIds: ['call-1', 'call-2'],
+      },
+      {
+        id: 'resp-2',
+        model: 'model-x',
+        startedAt: iso(5),
+        completedAt: iso(8),
+        durationMs: 3_000,
+        inputTokens: 130,
+        outputTokens: 3,
+        finishReason: 'stop',
+        text: 'Done.',
+      },
+    ]);
   });
 });

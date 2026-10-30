@@ -367,6 +367,7 @@ describe('redactStoredResponses', () => {
       { kind: 'skill', source: 'builtin', name: 'summarize' },
     ],
     finalText: 'private answer',
+    modelCalls: [{ id: 'req-1', text: 'private draft', outputTokens: 2 }],
     evidence: 'structured',
     usage: { inputTokens: 10, outputTokens: 2, durationMs: 5 },
   });
@@ -381,11 +382,12 @@ describe('redactStoredResponses', () => {
       },
       { kind: 'skill', source: 'builtin', name: 'summarize' },
     ],
+    modelCalls: [{ id: 'req-1', outputTokens: 2 }],
     evidence: 'structured',
     usage: { inputTokens: 10, outputTokens: 2, durationMs: 5 },
   };
 
-  it("keeps a trace's events, servers, arguments and usage, without its answer or outputs", () => {
+  it("keeps a trace's events, servers, arguments and usage, without its answer, outputs or model text", () => {
     const result = {
       id: 'one',
       pass: true,

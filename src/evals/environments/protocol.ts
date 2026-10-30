@@ -308,6 +308,11 @@ export interface GradeShardBundle {
    * order, with the shard's cases only: the worker loads none itself.
    */
   datasets: EvalDataset[];
+  /**
+   * `mst grade --resume`: keep the verdicts the bundled run's grading has,
+   * and grade only what has none.
+   */
+  resume?: boolean;
 }
 
 const GradeShardBundleSchema = z.object({
@@ -332,6 +337,7 @@ const GradeShardBundleSchema = z.object({
       cases: z.array(z.looseObject({ id: z.string() })),
     })
   ),
+  resume: z.boolean().optional(),
 });
 
 /**

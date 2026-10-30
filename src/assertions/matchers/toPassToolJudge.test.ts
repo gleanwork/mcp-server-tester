@@ -529,7 +529,8 @@ describe('toPassToolJudge', () => {
 
       expect(executor).toHaveBeenCalledWith(
         matcherInput('candidate', 'expected answer'),
-        {}
+        {},
+        { settings: undefined }
       );
     });
 

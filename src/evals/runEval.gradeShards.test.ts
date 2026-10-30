@@ -9,6 +9,20 @@ import { readRunDirectory } from './runFormat.js';
 import { buildRunReport } from './runReport.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { resetPluginsForTests } from '../plugins/extensions.js';
+import { readJsonFile } from '../utils/jsonFile.js';
+import type * as JsonFile from '../utils/jsonFile.js';
+
+// Passes through, so a test can count this process's reads of results.json.
+vi.mock('../utils/jsonFile.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof JsonFile>();
+  return { ...actual, readJsonFile: vi.fn(actual.readJsonFile) };
+});
+const resultsReads = (runId: string) =>
+  vi
+    .mocked(readJsonFile)
+    .mock.calls.filter(([file]) =>
+      String(file).endsWith(path.join(runId, 'results.json'))
+    ).length;
 
 const mock = (name: string) =>
   fileURLToPath(new URL(`../../tests/mocks/${name}`, import.meta.url));
@@ -105,6 +119,27 @@ function judgePids(result: Awaited<ReturnType<typeof gradeRun>>): Set<string> {
 }
 
 describe('mst grade --env (ADR 0005)', () => {
+  it("parses the run's results.json once for every shard's bundle, not once per shard", async () => {
+    // It can be hundreds of MB: 20 shards parsing it at once ran a
+    // coordinator out of memory.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture();
+    const reads = async (shards: string) => {
+      const before = resultsReads(f.runId);
+      await gradeRun({
+        ...f.base,
+        run: f.runId,
+        secretsFile: f.secretsFile,
+        env: 'fork/env/children',
+        envOptions: { shards },
+      });
+      return resultsReads(f.runId) - before;
+    };
+    // The collected run's, for grading and then for the shards' bundles.
+    expect(await reads('2')).toBe(2);
+    expect(await reads('8')).toBe(2);
+  }, 90_000);
+
   it('grades in shards as a local regrade does, with judges and their keys only on the workers', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture();

@@ -108,6 +108,16 @@ describe('assertPlugin', () => {
       { evaluate: async () => ({ score: 1 }) },
       'judges.x needs a Zod schema',
     ],
+    [
+      'judges',
+      { schema, evaluate: async () => ({ score: 1 }), version: 2 },
+      'judges.x: version must be a non-empty string',
+    ],
+    [
+      'pairwiseJudges',
+      { schema, compare: async () => ({}), version: '' },
+      'pairwiseJudges.x: version must be a non-empty string',
+    ],
   ])('checks the %s contract', (kind, definition, message) => {
     expect(() =>
       assertPlugin(plugin({ [kind]: { x: definition } }), './x.js')

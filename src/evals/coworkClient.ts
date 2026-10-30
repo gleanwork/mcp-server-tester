@@ -32,6 +32,11 @@ import {
 import { COWORK_WORKSPACE_UNAVAILABLE_MESSAGE } from './infrastructureFailure.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
+  claudeDesktopOtlpSettings,
+  hostTelemetryReceiver,
+  withHostRequestIds,
+} from './telemetry/hostReceiver.js';
+import {
   MarketplacePluginError,
   MarketplacePluginsSchema,
   assertCoworkClientPlugins,
@@ -151,6 +156,14 @@ export const COWORK_STDIO_PLATFORMS = ['darwin', 'linux'] as const;
  * How the trace was bound to its case, for its telemetry: an exact initial
  * prompt, or the only new session, with how its stored prompt differs.
  */
+/** The IDs a task's own telemetry names it by: Cowork's and Claude Code's. */
+function sessionIdsOf(trace: ClaudeTrace | undefined): string[] {
+  if (!trace) return [];
+  return [trace.candidate.id, trace.candidate.metadata?.cliSessionId].filter(
+    (id): id is string => typeof id === 'string' && id.length > 0
+  );
+}
+
 function correlationTelemetry(trace: ClaudeTrace): Record<string, unknown> {
   const binding = trace.binding ?? { kind: 'exact-initial-prompt' };
   return binding.kind === 'only-new-session'
@@ -171,6 +184,17 @@ export interface DeadlineWait {
   tool?: string;
   /** Since the task's last native event. */
   idleMs?: number;
+}
+
+/** When a native task started and ended, from its session's events. */
+function taskTimes(
+  trace: Pick<ClaudeTrace, 'startedAt' | 'completedAt' | 'lastEventAt'>
+): { startedAt?: string; completedAt?: string } {
+  const completedAt = trace.completedAt ?? trace.lastEventAt;
+  return {
+    ...(trace.startedAt ? { startedAt: trace.startedAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
+  };
 }
 
 export function deadlineWait(
@@ -301,6 +325,27 @@ async function runBatch(
   const { variants: _variants, ...evalConfig } = context.evalConfig;
   const managedConfig = { ...evalConfig, coworkSetup, servers };
   type Session = Awaited<ReturnType<CoworkPlatform['prepare']>> | undefined;
+  // `telemetry.host`: Claude Desktop exports to MST's receiver, which Cowork's
+  // VM reaches through its host's address (so not on loopback alone). Only
+  // in MST's Linux image, where MST writes Desktop's settings.
+  const hostConfig = context.evalConfig.telemetry?.host;
+  const hostReceiver =
+    hostConfig && config.computerUseProvider === 'linux-desktop'
+      ? await hostTelemetryReceiver(hostConfig, { host: '0.0.0.0', env })
+      : undefined;
+  if (hostConfig && !hostReceiver)
+    console.warn(
+      "[mst] cowork: telemetry.host is for Cowork on Linux (MST's image); this run records no host telemetry."
+    );
+  const otlpSettings = hostReceiver
+    ? claudeDesktopOtlpSettings(hostReceiver, {
+        'mst.eval': context.evalConfig.name,
+        ...(context.variant?.name
+          ? { 'mst.variant': context.variant.name }
+          : {}),
+        ...(env.MST_RUN_ID ? { 'mst.run_id': env.MST_RUN_ID } : {}),
+      })
+    : undefined;
   const secrets = clientSecretValues(env, servers);
   const safeError = (error: unknown): string =>
     redactClientError(error, secrets, 'Cowork operation failed.');
@@ -325,6 +370,7 @@ async function runBatch(
           model: config.model,
           ...(config.appVersion ? { appVersion: config.appVersion } : {}),
           ...(plugins.length ? { plugins } : {}),
+          ...(otlpSettings ? { otlpSettings } : {}),
           ...(stdioServers.length &&
           config.computerUseProvider === 'linux-desktop'
             ? { stdioPaths }
@@ -339,6 +385,7 @@ async function runBatch(
         const readiness = await verifyCoworkMcpServers(checkServers, env, {
           plugins,
           paths: stdioPaths,
+          log: (message) => process.stderr.write(`${message}\n`),
         });
         process.stderr.write(
           `[mst:cowork] MCP preflight ready: ${readiness
@@ -398,9 +445,28 @@ async function runBatch(
           'Cowork submission was not attempted.'
         );
         let continuation: DesktopContinuation = 'allowed';
-        const finishCase = (): DesktopCaseOutcome => {
+        // The sessions the task's own telemetry names, once bound.
+        let hostSessions: string[] = [];
+        const finishCase = async (): Promise<DesktopCaseOutcome> => {
+          const hostTelemetry =
+            hostReceiver && hostSessions.length
+              ? await hostReceiver.collect(hostSessions).catch(() => undefined)
+              : undefined;
           result = {
             ...result,
+            ...(hostTelemetry
+              ? {
+                  hostTelemetry,
+                  ...(result.modelCalls
+                    ? {
+                        modelCalls: withHostRequestIds(
+                          result.modelCalls,
+                          hostTelemetry
+                        ),
+                      }
+                    : {}),
+                }
+              : {}),
             durationMs: Date.now() - caseStartedAt,
             telemetry: {
               ...result.telemetry,
@@ -565,6 +631,7 @@ async function runBatch(
             ...match,
             sessionPath,
           }).catch(() => []);
+          hostSessions = sessionIdsOf(pending);
           result = {
             ...failure(hitlError ?? 'Cowork is waiting for an answer.'),
             ...(pending
@@ -658,6 +725,7 @@ async function runBatch(
             throw new Error(
               'Native session identity changed; refusing attribution.'
             );
+          hostSessions = sessionIdsOf(trace);
           process.stderr.write(
             `[mst:cowork] case ${index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
           );
@@ -671,6 +739,7 @@ async function runBatch(
               success: !trace.isError && trace.finalAnswer !== undefined,
               response: trace.finalAnswer,
               toolCalls: coworkOwnToolCalls(trace.toolCalls, servers),
+              ...(trace.modelCalls ? { modelCalls: trace.modelCalls } : {}),
               usage: trace.usage,
               error: trace.isError
                 ? 'Native Claude task failed.'
@@ -682,6 +751,7 @@ async function runBatch(
           );
           result = {
             ...nativeResult,
+            ...taskTimes(trace),
             // The session folder: audit log, spilled tool output, written files.
             ...(trace.candidate.sessionDir
               ? {
@@ -747,12 +817,17 @@ async function runBatch(
                 ? deadlineWait(partial)
                 : undefined;
             if (partial?.candidate.metadataPath === sessionPath)
+              hostSessions = sessionIdsOf(partial);
+            if (partial?.candidate.metadataPath === sessionPath)
               result = {
                 ...simulationToClientRun(
                   {
                     success: false,
                     response: partial.finalAnswer,
                     toolCalls: coworkOwnToolCalls(partial.toolCalls, servers),
+                    ...(partial.modelCalls
+                      ? { modelCalls: partial.modelCalls }
+                      : {}),
                     usage: partial.usage,
                     error: wait
                       ? `${result.error} ${describeDeadlineWait(wait)}`
@@ -760,6 +835,7 @@ async function runBatch(
                   },
                   servers
                 ),
+                ...taskTimes(partial),
                 artifacts: {
                   dir: partial.candidate.sessionDir,
                   include: COWORK_SESSION_EVIDENCE,
