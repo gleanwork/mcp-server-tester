@@ -21,7 +21,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkPlatform } from './platform.js';
 import { transportServers } from '../evalConfig.js';
-import { headersHelper } from '../coworkSetup/bundle.js';
+import { credentialHelperScript } from '../coworkSetup/credentialHelper.js';
 import { resolveCoworkMcpHeaders } from '../coworkSetup/config.js';
 import {
   clientStdioFileContents,
@@ -370,11 +370,12 @@ async function writeServerHeaders(
     await rename(temporary, file);
     await writeFile(
       helper,
-      headersHelper(
-        file,
-        Object.keys(headers),
-        Object.keys(server.auth ?? {}).length > 0
-      ),
+      credentialHelperScript({
+        kind: 'headers',
+        path: file,
+        names: Object.keys(headers),
+        bearer: Object.keys(server.auth ?? {}).length > 0,
+      }),
       { mode: 0o700 }
     );
     helpers.set(name, helper);
