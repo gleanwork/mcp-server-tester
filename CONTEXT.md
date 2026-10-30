@@ -112,6 +112,10 @@ _Avoid_: LLM grader, evaluator, rater
 A hash of what decides a judge's verdict besides the trial: the judge's reference, its `version` (or its plugin's), and its options as its schema parses them. Every score records it, and `run.json` records it for each eval config judge, so two scores with the same identity came from a judge that grades the same way.
 _Avoid_: judge hash, judge fingerprint, judge version (the version is one part of the identity)
 
+**Label**:
+A person's answer to a judge's question: pass or fail for one trial, or, for a pairwise judge, the side they prefer for one case. It belongs to the question (the judge's name in results), not to a judge identity, so a changed judge is measured against the same labels. Its split says whether it measures a judge (`test`) or may be read while changing one (`dev`).
+_Avoid_: annotation, ground truth, gold label, mark
+
 **Pairwise judge**:
 A judge that compares two variants' trials of the same case and says which is better, instead of scoring one alone.
 _Avoid_: comparator, preference model

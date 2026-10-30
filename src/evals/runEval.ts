@@ -122,6 +122,7 @@ import {
 } from './servedTools.js';
 import type { ListedServerTools } from './toolSurface.js';
 import type { RunOptimization } from './runFormat.js';
+import { carryLabels } from './labels.js';
 import {
   collectInEnvironment,
   gatheredQueues,
@@ -2703,6 +2704,8 @@ async function evaluate(
 
   const storedSummary = storedSummaryOf(summary);
   await fs.mkdir(outputDir, { recursive: true });
+  // A regrade or a resume is measured against its source run's labels.
+  if (replay) await carryLabels(replay.directory, outputDir);
   await writeRun(
     outputDir,
     executionId,
