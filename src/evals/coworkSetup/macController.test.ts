@@ -70,6 +70,20 @@ describe('bundled Mac native controller (all execution mocked)', () => {
     expect(execute).not.toHaveBeenCalled();
     expect(await fs.readdir(root)).toEqual([]);
   });
+  it('reports what to fix when the controller does not build', async () => {
+    execute.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('Command failed: xcrun'), {
+        code: 69,
+        stderr: 'You have not agreed to the Xcode license agreements.\n',
+      });
+    });
+    const { getMacCoworkController } = await import('./macController.js');
+    await expect(getMacCoworkController()).rejects.toThrow(
+      "MST couldn't build its macOS helper. The Xcode license hasn't been accepted."
+    );
+    // A later call builds again rather than repeating the failure.
+    await expect(getMacCoworkController()).resolves.toBeDefined();
+  });
   it('uses a validated local app bundle override when configured', async () => {
     const appPath = join(root, 'Claude-MST.app');
     vi.stubEnv('MST_COWORK_APP_PATH', appPath);
@@ -153,9 +167,13 @@ describe('bundled Mac native controller (all execution mocked)', () => {
     execute.mockRejectedValueOnce(
       new Error('synthetic-secret compiler stderr')
     );
-    await expect(getMacCoworkController()).rejects.toThrow(
-      'Unable to control the Mac Cowork application safely.'
+    const error = (await getMacCoworkController().catch(
+      (caught: unknown) => caught
+    )) as Error;
+    expect(error.message).toBe(
+      "MST couldn't build its macOS helper. swiftc failed (exit unknown)."
     );
+    expect(error.message).not.toContain('synthetic-secret');
     expect(await fs.readdir(root)).toEqual([]);
     await getMacCoworkController();
     expect(execute).toHaveBeenCalledTimes(2);

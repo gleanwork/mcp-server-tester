@@ -41,6 +41,7 @@ import { simulationToClientRun } from './clientTrace.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT } from './coworkClient.js';
 import { CHATGPT_CLIENT, CHATGPT_LINUX_CLIENT } from './chatgptClient.js';
+import { CODEX_CLIENT, assertCodexServers } from './codexClient.js';
 import {
   claudeCodeOtelEnv,
   claudeCodeTelemetryClaim,
@@ -440,6 +441,7 @@ function builtinClientDefinitions(): Readonly<
     clients[name] = {
       schema: name === 'mst' ? SdkClientSchema : CliClientSchema,
       evidence: 'structured',
+      headless: true,
       // The SDK client presents tool variants; the CLI only sees its servers.
       ...(name === 'mst' ? { toolMetadata: true } : {}),
       run: (input, config, context) =>
@@ -451,6 +453,7 @@ function builtinClientDefinitions(): Readonly<
     // One ChatGPT client; the desktop driver follows the platform, as Cowork's does.
     chatgpt:
       process.platform === 'linux' ? CHATGPT_LINUX_CLIENT : CHATGPT_CLIENT,
+    codex: CODEX_CLIENT,
     cowork: COWORK_CLIENT,
   });
 }
@@ -602,6 +605,11 @@ export function assertClientSupports(
   }
   if (clientConfig.type === 'claude-code')
     assertClaudeCliServers(options.servers, false, options.context);
+  if (clientConfig.type === 'codex')
+    assertCodexServers(options.servers, {
+      resolved: false,
+      context: options.context,
+    });
 }
 
 /**

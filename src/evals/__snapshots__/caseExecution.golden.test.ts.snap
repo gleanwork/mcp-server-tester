@@ -930,6 +930,7 @@ exports[`golden: judges > judges a client response 1`] = `
     "scores": {
       "judge": {
         "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
+        "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
         "judgeName": "test/judge/golden-case-judge",
         "pass": true,
         "reasoning": "looks right",
@@ -1080,6 +1081,7 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     "scores": {
       "judge": {
         "details": "Judge "test/judge/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
+        "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
         "judgeName": "test/judge/golden-case-judge",
         "pass": true,
         "reasoning": "looks right",
@@ -1294,6 +1296,7 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         "judgeResults": [
           {
             "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
+            "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
             "judgeName": "test/judge/golden-case-judge",
             "pass": true,
             "reasoning": "looks right",
@@ -1301,6 +1304,7 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
           },
           {
             "details": "Judge "test/judge/golden-strict-judge" failed with score 0.20 (threshold: 0.5) (mean of 3 reps: [0.20, 0.20, 0.20]). too vague",
+            "judgeIdentity": "1781ff07a242d3b2a67a8ec64dfc6306e78989f57a3cc075fbb4ea7c3a4153f3",
             "judgeName": "test/judge/golden-strict-judge",
             "pass": false,
             "reasoning": "too vague",
@@ -1429,6 +1433,7 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
     "scores": {
       "judge": {
         "details": "Judge "correctness" passed with score 0.80",
+        "judgeIdentity": "652b8ebebe67345da00585dab4d6b7913b02b4ce6afe6a86ae0c31e7f27fefd7",
         "judgeName": "correctness",
         "judgeProvider": "anthropic",
         "pass": true,
@@ -1572,6 +1577,7 @@ Answer carefully.",
     "scores": {
       "judge": {
         "details": "Judge "rubric" failed with score 0.60 (threshold: 0.9). Partly.",
+        "judgeIdentity": "763d35e65f4aab9c6c56485051dee0b94dc2abc29579d73471ba5d25c8741081",
         "judgeModel": "gpt-test",
         "judgeName": "rubric",
         "judgeProvider": "openai",
@@ -1921,6 +1927,7 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
         "judgeResults": [
           {
             "details": "Judge "conciseness" passed with score 0.80 (mean of 2 reps: [0.70, 0.90])",
+            "judgeIdentity": "dd7112fe042e00d052db7a8ffca4868259d2789c3318960a889ed3c50c455ece",
             "judgeName": "conciseness",
             "judgeProvider": "anthropic",
             "pass": true,
@@ -1928,6 +1935,7 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
           },
           {
             "details": "Judge "test/judge/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
+            "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
             "judgeName": "test/judge/golden-case-judge",
             "pass": true,
             "reasoning": "looks right",
@@ -2122,6 +2130,7 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     "scores": {
       "judge": {
         "details": "Judge "completeness" failed with score 0.53 (threshold: 0.7) (mean of 3 reps: [0.20, 0.90, 0.50]). third",
+        "judgeIdentity": "f396598a6c10d48dd9d2e907523736ad6682d9e6db8c165701db00c9cb8e10d0",
         "judgeName": "completeness",
         "judgeProvider": "anthropic",
         "pass": false,
@@ -2383,6 +2392,7 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
           "judgeResults": [
             {
               "details": "Judge "correctness" failed with score 0.60 (threshold: 0.9). Says sunny.",
+              "judgeIdentity": "652b8ebebe67345da00585dab4d6b7913b02b4ce6afe6a86ae0c31e7f27fefd7",
               "judgeName": "correctness",
               "judgeProvider": "anthropic",
               "pass": false,
@@ -2391,6 +2401,7 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
             },
             {
               "details": "Judge "conciseness" passed with score 0.80",
+              "judgeIdentity": "dd7112fe042e00d052db7a8ffca4868259d2789c3318960a889ed3c50c455ece",
               "judgeName": "conciseness",
               "judgeProvider": "anthropic",
               "pass": true,
@@ -2657,6 +2668,7 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
           "judgeResults": [
             {
               "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
+              "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
               "judgeName": "test/judge/golden-case-judge",
               "pass": true,
               "reasoning": "looks right",
@@ -2664,6 +2676,7 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
             },
             {
               "details": "Judge "test/judge/golden-config-judge" failed with score 0.00 (threshold: 0.7). eval config judge",
+              "judgeIdentity": "e9d77224698ffdbaa5b8c9de35e0afa4f929417e755c7ba94bedf672dbcb60c1",
               "judgeName": "test/judge/golden-config-judge",
               "pass": false,
               "reasoning": "eval config judge",

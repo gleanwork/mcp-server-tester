@@ -47,13 +47,17 @@ export interface RunReplay {
   resume?: boolean;
 }
 
-/** A trial whose shard ended without it (ADR 0004): what `--resume` collects. */
+/**
+ * What `--resume` collects: a trial whose shard ended without it (ADR 0004),
+ * or one the client never submitted, an infrastructure failure such as a
+ * batch blocked after a failed reset. A case the client ran and failed is
+ * kept: that is the trial's result.
+ */
 export function isMissingTrial(trial: TrialRecord | undefined): boolean {
-  return (
-    trial === undefined ||
-    (trial.clientDiagnostics as { failureKind?: unknown } | undefined)
-      ?.failureKind === 'missing'
-  );
+  const kind = (
+    trial?.clientDiagnostics as { failureKind?: unknown } | undefined
+  )?.failureKind;
+  return trial === undefined || kind === 'missing' || kind === 'not-submitted';
 }
 
 /**
@@ -232,6 +236,12 @@ async function storedExecution(
     events: trace.events ?? [],
     finalText: trace.finalText ?? '',
     ...(trace.error !== undefined ? { error: trace.error } : {}),
+    // What the trial recorded beyond its events: a resume rewrites every
+    // stored trace from this run, so a field left out here is lost.
+    ...(trace.modelCalls?.length ? { modelCalls: trace.modelCalls } : {}),
+    ...(trace.hostTelemetry ? { hostTelemetry: trace.hostTelemetry } : {}),
+    ...(trace.startedAt ? { startedAt: trace.startedAt } : {}),
+    ...(trace.completedAt ? { completedAt: trace.completedAt } : {}),
     ...((trial.clientUsage ?? trace.usage)
       ? {
           usage: (trial.clientUsage ?? trace.usage) as ClientRunResult['usage'],

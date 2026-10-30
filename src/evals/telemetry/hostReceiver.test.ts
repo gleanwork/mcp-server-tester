@@ -122,6 +122,21 @@ describe('parseOtlpJson', () => {
     ).toBe('xxxxxxxxxx…[40 more characters]');
   });
 
+  it("names an event by its event.name, over the record's own name (Codex's source location)", () => {
+    const payload = logs('thread-1', [
+      { name: 'codex.api_request', time: '2026-10-22T12:00:00.000Z' },
+    ]);
+    const record = payload.resourceLogs[0]!.scopeLogs[0]!.logRecords[0]!;
+    Object.assign(record, {
+      eventName: 'event otel/src/events/session_telemetry.rs:756',
+    });
+    const [parsed] = parseOtlpJson('logs', payload);
+    expect(parsed).toMatchObject({
+      session: 'thread-1',
+      event: { name: 'codex.api_request' },
+    });
+  });
+
   it('reads spans, with base64 IDs, and metrics', () => {
     const traceId = Buffer.from('0123456789abcdef0123456789abcdef', 'hex');
     const spans = parseOtlpJson('traces', {

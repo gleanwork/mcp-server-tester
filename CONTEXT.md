@@ -35,7 +35,7 @@ A case's ground truth that graders check against: an answer, rubric criteria, or
 _Avoid_: canonical answer, golden, target, reference
 
 **Client**:
-The MCP client application an eval tests, named canonically: `claude-code`, `cowork`, `chatgpt`, or `mst` (MST's own client, which gives the model the servers' tools and nothing else). How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. A client returns a trace, never a score.
+The MCP client application an eval tests, named canonically: `claude-code`, `codex`, `cowork`, `chatgpt`, or `mst` (MST's own client, which gives the model the servers' tools and nothing else). How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. A client returns a trace, never a score.
 _Avoid_: host, harness, agent, runner, solver, provider
 
 **Model**:
@@ -107,6 +107,10 @@ _Avoid_: expectation, check, validator
 **Judge**:
 A model grader: an LLM that scores a trial against the case's expected result or a rubric.
 _Avoid_: LLM grader, evaluator, rater
+
+**Judge identity**:
+A hash of what decides a judge's verdict besides the trial: the judge's reference, its `version` (or its plugin's), and its options as its schema parses them. Every score records it, and `run.json` records it for each eval config judge, so two scores with the same identity came from a judge that grades the same way.
+_Avoid_: judge hash, judge fingerprint, judge version (the version is one part of the identity)
 
 **Pairwise judge**:
 A judge that compares two variants' trials of the same case and says which is better, instead of scoring one alone.
@@ -191,8 +195,20 @@ A case tagged `held-out`, kept out of view while a variant was written, so its r
 _Avoid_: unseen case, test split
 
 **Tool optimization**:
-A run of tool-metadata variants, proposed up front or round by round, compared with the baseline, ending in a recommendation to apply one or none.
+Tool-metadata variants, proposed up front or round by round, compared with the baseline, ending in a recommendation to apply one or none. On an eval it is stored: a record in the eval's `optimizations/<id>/` naming the runs that measured its baseline and each round, so it continues from any process (`mst optimize`, [ADR 0008](docs/adr/0008-a-tool-optimization-is-a-stored-experiment.md)). Its runs never become the eval's latest run.
 _Avoid_: variant experiment, tool experiment
+
+**Candidate**:
+One tool-metadata variant an optimization tries: an id, the idea it tests, and the metadata it gives editable tools. It may change a tool's name, its description, and the description and title text in its input schema, nothing a call depends on, and is checked against the tools the servers serve before it runs.
+_Avoid_: proposal (that is the recommendation), arm
+
+**Round**:
+The candidates an optimization runs together, in one run, after reading what earlier rounds showed.
+_Avoid_: iteration, generation
+
+**Variant budget**:
+The most candidates an optimization runs across its rounds (`--max-variants`). It caps cost, and the significance test divides its threshold by the number tried, so more candidates also need stronger evidence.
+_Avoid_: max candidates, cap
 
 ### Where a run happens
 

@@ -70,6 +70,13 @@ export interface ConnectorLaunchContext extends SettingsContext {
    * a success reply and are recorded in `file` for MST to read.
    */
   simulateWrites?: { file: string };
+  /**
+   * The run the server's trials belong to, when `mst run` (or a shard it
+   * started) launches it. Absent elsewhere, e.g. `mst auth`. Lets a connector
+   * tag its requests with the run, as a server that attributes eval traffic
+   * asks for.
+   */
+  runId?: string;
 }
 
 /**

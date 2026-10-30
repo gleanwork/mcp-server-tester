@@ -7,11 +7,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   containerName,
   contextPool,
+  chatgptDockerRunArgs,
   coworkImageDirectory,
+  DEFAULT_CHATGPT_IMAGE,
   DEFAULT_COWORK_IMAGE,
+  dockerClient,
   dockerRunArgs,
+  gradeContainerPrepareArgs,
+  headlessContainerRunArgs,
+  imageDirectory,
   npmPackArgs,
+  shardIsHeadless,
 } from './docker.js';
+import { writeShardBundle } from './protocol.js';
 import { resolveEnvironment } from './builtinEnvironments.js';
 import { gradeRun, runEval } from '../runEval.js';
 import { readRunDirectory } from '../runFormat.js';
@@ -99,6 +107,42 @@ describe('the docker environment', () => {
     expect(args.at(-1)).toBe('mst-cowork-linux:test');
   });
 
+  it('limits a container to its memory and CPUs, when they are set', () => {
+    const base = {
+      name: 'mst-run-1',
+      image: 'mst-cowork-linux:test',
+      runId: 'run',
+      seccompProfile: '/pkg/docker/cowork-linux/seccomp.json',
+      inference: {
+        baseURL: 'https://gateway.example/anthropic',
+        authScheme: 'bearer' as const,
+      },
+    };
+    const args = dockerRunArgs({
+      ...base,
+      limits: { memory: 8 * 1024 ** 3, cpus: 2 },
+    });
+    expect(args.slice(-5)).toEqual([
+      '--memory',
+      '8192m',
+      '--cpus',
+      '2',
+      'mst-cowork-linux:test',
+    ]);
+    expect(dockerRunArgs({ ...base, limits: {} })).not.toContain('--memory');
+    expect(dockerRunArgs(base)).not.toContain('--cpus');
+    const grade = headlessContainerRunArgs({
+      name: 'mst-run-1',
+      image: 'mst-cowork-linux:test',
+      runId: 'run',
+      limits: { memory: 2 * 1024 ** 3 },
+    });
+    expect(grade[grade.indexOf('--memory') + 1]).toBe('2048m');
+    expect(grade.indexOf('--memory')).toBeLessThan(
+      grade.indexOf('--entrypoint')
+    );
+  });
+
   it('names containers by run and shard, as Docker allows', () => {
     expect(containerName('20261011T020624Z-51a866', 0)).toBe(
       'mst-20261011T020624Z-51a866-1'
@@ -125,6 +169,34 @@ describe('the docker environment', () => {
     await expect(cancelled).rejects.toThrow('cancelled');
   });
 
+  it('runs as many containers on a context as it has slots, roomiest first', async () => {
+    const sizes: Record<string, number> = { a: 2, b: 1, c: 0 };
+    const pool = contextPool(['a', 'b', 'c'], async (context) =>
+      context === 'c'
+        ? Promise.reject(new Error('no answer'))
+        : sizes[context!]!
+    );
+    const signal = new AbortController().signal;
+    // c's size is unknown: one slot, like a context that can't say.
+    const taken = [
+      await pool.acquire(signal),
+      await pool.acquire(signal),
+      await pool.acquire(signal),
+      await pool.acquire(signal),
+    ];
+    expect(taken).toEqual(['a', 'a', 'b', 'c']);
+    let fifth: string | undefined = 'waiting';
+    const waiting = pool.acquire(signal).then((context) => (fifth = context));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fifth).toBe('waiting');
+    pool.release('a');
+    await waiting;
+    expect(fifth).toBe('a');
+    // A released slot with no one waiting is taken again.
+    pool.release('b');
+    expect(await pool.acquire(signal)).toBe('b');
+  });
+
   it('checks its options', () => {
     expect(
       resolveEnvironment('docker', { contexts: 'a,b', shards: '2' })
@@ -137,6 +209,15 @@ describe('the docker environment', () => {
     expect(() =>
       resolveEnvironment('docker', { readyTimeout: 'soon' })
     ).toThrow();
+    expect(
+      resolveEnvironment('docker', { memory: '8g', cpus: '1.5' }).options
+    ).toEqual({ memory: '8g', cpus: '1.5' });
+    expect(() => resolveEnvironment('docker', { memory: 'lots' })).toThrow(
+      'memory must be a size such as 8g or 512m'
+    );
+    expect(() => resolveEnvironment('docker', { cpus: '0' })).toThrow(
+      'cpus must be more than 0'
+    );
   });
 
   it('ships the image beside the package', async () => {
@@ -155,6 +236,64 @@ describe('the docker environment', () => {
       )
     ).toBe(true);
     expect(DEFAULT_COWORK_IMAGE).toMatch(/^mst-cowork-linux:/);
+  });
+});
+
+describe('ChatGPT in the docker environment', () => {
+  it('picks the ChatGPT image only for a ChatGPT eval', () => {
+    expect(dockerClient('chatgpt')).toBe('chatgpt');
+    for (const client of ['cowork', undefined])
+      expect(dockerClient(client)).toBe('cowork');
+    expect(DEFAULT_CHATGPT_IMAGE).toMatch(/^mst-chatgpt-linux:/);
+  });
+
+  it('starts a container with no devices, no new privileges, and no secret', () => {
+    const args = chatgptDockerRunArgs({
+      name: 'mst-run-1',
+      image: 'mst-chatgpt-linux:test',
+      runId: 'run',
+      inference: {
+        MST_CHATGPT_INFERENCE_BASE_URL: 'https://gateway.example/openai/v1',
+        MST_CHATGPT_INFERENCE_TOKEN_FILE: '/run/mst/inference-token',
+      },
+    });
+    expect(args).not.toContain('--device');
+    expect(args.join(' ')).not.toContain('seccomp=');
+    expect(args).toContain('no-new-privileges');
+    expect(args).toContain(
+      'MST_CHATGPT_INFERENCE_BASE_URL=https://gateway.example/openai/v1'
+    );
+    expect(args).toContain('/run/mst:mode=0755');
+    expect(args.at(-1)).toBe('mst-chatgpt-linux:test');
+  });
+
+  it('ships the image beside the package', async () => {
+    const dir = imageDirectory('chatgpt');
+    for (const file of [
+      'Dockerfile',
+      'bin/desktop-session',
+      'bin/chatgpt-package',
+    ])
+      await expect(fs.stat(path.join(dir, file))).resolves.toBeTruthy();
+    const dockerfile = await fs.readFile(path.join(dir, 'Dockerfile'), 'utf8');
+    // The Linux client's contract, from the image's ENV.
+    for (const key of [
+      'AT_SPI_BUS_ADDRESS',
+      'GNOME_KEYRING_CONTROL',
+      'MST_CHATGPT_APP_PATH',
+      'MST_CHATGPT_CODEX_PATH',
+      'MST_CHATGPT_EVIDENCE_DIR',
+    ])
+      expect(dockerfile).toContain(`${key}=`);
+  });
+
+  it('takes chatgptVersion as a setup option', () => {
+    expect(() =>
+      resolveEnvironment('docker', { chatgptVersion: '26.1007.71326' })
+    ).not.toThrow();
+    expect(() =>
+      resolveEnvironment('docker', { chatgptVersion: 'latest; rm -rf' })
+    ).toThrow();
   });
 });
 
@@ -315,6 +454,41 @@ describe('a run in docker (a fake Docker CLI)', () => {
     ]);
   }, 120_000);
 
+  it("builds the ChatGPT image when the eval's shared config makes it a ChatGPT eval", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { root, project, configPath } = await fixture(
+      { MST_NPM: mock('fakeNpm.mjs') },
+      ['@acme/mst-dt']
+    );
+    await installPluginPackage(project, '1.2.3');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    delete config.client;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, extends: ['dt/config/chatgpt'] })
+    );
+    await setupEnvironment('docker', {
+      config: configPath,
+      envOption: ['contexts=ctx-a'],
+      rootDir: project,
+    });
+    const builds = (await fs.readFile(path.join(root, 'builds.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(builds).toEqual([
+      {
+        context: 'ctx-a',
+        tag: DEFAULT_CHATGPT_IMAGE,
+        plugins: ['acme-mst-dt-1.2.3.tgz'],
+        desktop: 'chatgpt',
+      },
+    ]);
+  }, 120_000);
+
   it("fails a build with the build's last lines, so the cause is in the error", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
@@ -407,6 +581,13 @@ describe('a run in docker (a fake Docker CLI)', () => {
         call.args.includes('MST_INFERENCE_AUTH_SCHEME=x-api-key')
       )
     ).toBe(true);
+    // Each Cowork container may use all its context can spare: the fake's
+    // 8 GiB, less 1 GiB for the daemon.
+    for (const run of runs)
+      expect(run.args[run.args.indexOf('--memory') + 1]).toBe('7168m');
+    expect(lines).toContain(
+      '[mst] ctx-a has 8 GiB and 4 CPUs: 1 Cowork container at a time, 7 GiB each'
+    );
     // Every trial's artifacts are in the run, copied from the worker.
     for (const id of ['alpha', 'bravo', 'charlie'])
       expect(
@@ -446,6 +627,33 @@ describe('a run in docker (a fake Docker CLI)', () => {
     });
   }, 120_000);
 
+  it("makes a ChatGPT grade container's tmpfs HOME and TMPDIR before its worker, and the tmpfs and tokens directory for Cowork", () => {
+    expect(gradeContainerPrepareArgs('mst-run-1', 'chatgpt')).toEqual([
+      'exec',
+      '-u',
+      'root',
+      'mst-run-1',
+      '/opt/mst/bin/desktop-session',
+      '--dirs-only',
+    ]);
+    expect(gradeContainerPrepareArgs('mst-run-1', 'cowork')).toEqual([
+      'exec',
+      '-u',
+      'root',
+      'mst-run-1',
+      'install',
+      '-d',
+      '-o',
+      'mst',
+      '-g',
+      'mst',
+      '-m',
+      '0700',
+      '/run/mst',
+      '/run/mst/tokens',
+    ]);
+  });
+
   it('grades a stored run in containers without a desktop or inference, two to a context (ADR 0005)', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { dir, root, configPath, calls } = await fixture();
@@ -480,6 +688,7 @@ describe('a run in docker (a fake Docker CLI)', () => {
     for (const run of runs) {
       expect(run.args).not.toContain('/dev/kvm');
       expect(run.args.join(' ')).not.toContain('MST_INFERENCE');
+      expect(run.args[run.args.indexOf('--memory') + 1]).toBe('2048m');
       expect(run.args.slice(-4)).toEqual([
         'mst-test:1',
         '--',
@@ -506,6 +715,178 @@ describe('a run in docker (a fake Docker CLI)', () => {
     ).toEqual([true, true]);
     expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
   }, 120_000);
+
+  it('grades one container at a time on a context with room for one', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath, calls } = await fixture();
+    const outputDir = path.join(dir, 'out');
+    const collected = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir,
+      env: 'docker',
+      envOptions: { contexts: 'ctx-a', image: 'mst-test:1' },
+      grade: false,
+      report: false,
+    });
+    const before = (await calls()).length;
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+    // 4 GiB, so 3 GiB to spare: one 3g grade container fits.
+    vi.stubEnv('FAKE_DOCKER_INFO', `${4 * 1024 ** 3} 4`);
+    const graded = await gradeRun({
+      configPath,
+      rootDir: dir,
+      outputDir,
+      run: path.basename(collected.outputDir),
+      env: 'docker',
+      envOptions: {
+        shards: '2',
+        contexts: 'ctx-a',
+        image: 'mst-test:1',
+        memory: '3g',
+      },
+      report: false,
+    });
+    expect(graded.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    // Every container is removed before the next one starts.
+    const lifecycle = (await calls())
+      .slice(before)
+      .filter((call) => call.args[0] === 'run' || call.args[0] === 'rm')
+      .map((call) => call.args[0]);
+    expect(lifecycle).toEqual(['run', 'rm', 'run', 'rm']);
+    expect(log.mock.calls.map((call) => String(call[0]))).toContain(
+      '[mst] ctx-a has 4 GiB and 4 CPUs: 1 grade container at a time, 3 GiB each'
+    );
+  }, 120_000);
+
+  it('says a shard ran out of memory when Docker killed its worker for it', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath } = await fixture({ FAKE_DOCKER_OOM: '*' });
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { image: 'mst-test:1', memory: '6g' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 0 });
+    expect(log.mock.calls.map((call) => String(call[0])).join('\n')).toMatch(
+      /Container mst-\S+-1 ran out of memory \(its limit: 6 GiB\): raise --env-option memory, or give the Docker context more memory\. The worker exited \(code 137\)/
+    );
+  }, 60_000);
+
+  it('says a desktop that ran out of memory starting up did', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath, root } = await fixture({
+      FAKE_DOCKER_OOM: '*',
+      FAKE_DOCKER_DESKTOP: 'failed',
+    });
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { image: 'mst-test:1' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 0 });
+    expect(log.mock.calls.map((call) => String(call[0])).join('\n')).toMatch(
+      /Couldn't create a machine for shard 1: Container mst-\S+-1 ran out of memory \(its limit: 7 GiB\): give the Docker context more memory\. The desktop in container mst-\S+-1 didn't come up/
+    );
+    expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
+  }, 60_000);
+
+  it('collects a headless client in containers without a desktop or inference', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, root, configPath, calls } = await fixture({
+      // A headless client needs no Cowork inference.
+      ANTHROPIC_API_KEY: '',
+    });
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, client: 'dt/client/headless' })
+    );
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { shards: '2', contexts: 'ctx-a', image: 'mst-test:1' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+    const all = await calls();
+    const runs = all.filter((call) => call.args[0] === 'run');
+    // No VM, so both shards share the one context.
+    expect(runs.map((call) => call.context)).toEqual(['ctx-a', 'ctx-a']);
+    for (const run of runs) {
+      expect(run.args).not.toContain('/dev/kvm');
+      expect(run.args.join(' ')).not.toContain('MST_INFERENCE');
+      expect(run.args.slice(-4)).toEqual([
+        'mst-test:1',
+        '--',
+        'sleep',
+        'infinity',
+      ]);
+    }
+    // Nobody waited for a desktop; each worker collected.
+    const execs = all.filter((call) => call.args[0] === 'exec');
+    expect(
+      execs.some((call) =>
+        call.args.join(' ').includes('/run/mst/session/ready')
+      )
+    ).toBe(false);
+    expect(execs.filter((call) => call.args.includes('collect'))).toHaveLength(
+      2
+    );
+    // Without the desktop session, MST makes the worker's tokens directory.
+    expect(
+      execs.filter(
+        (call) =>
+          call.args.includes('install') &&
+          call.args.includes('/run/mst') &&
+          call.args.at(-1) === '/run/mst/tokens' &&
+          call.args.includes('mst')
+      )
+    ).toHaveLength(2);
+    expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
+  }, 120_000);
+
+  it('gives a shard the desktop unless every client in it is headless', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-headless-'));
+    dirs.push(dir);
+    const bundle = (types: string[]) =>
+      writeShardBundle(dir, {
+        runId: 'r',
+        shard: { index: 0, count: 1 },
+        mst: packageJson.version,
+        plugins: [],
+        evalConfig: { name: 'e', datasets: [] } as never,
+        tokenServers: [],
+        batches: [
+          {
+            variant: { name: 'default' },
+            requests: types.map((type, index) => ({
+              caseId: `c${index}`,
+              trial: 0,
+              config: { type },
+              input: { prompt: 'x', servers: [] },
+            })),
+          },
+        ],
+      });
+    await bundle(['codex', 'mst']);
+    expect(await shardIsHeadless(dir)).toBe(true);
+    await bundle(['codex', 'cowork']);
+    expect(await shardIsHeadless(dir)).toBe(false);
+    await bundle(['acme/client/unknown']);
+    expect(await shardIsHeadless(dir)).toBe(false);
+    await bundle([]);
+    expect(await shardIsHeadless(dir)).toBe(false);
+    expect(await shardIsHeadless(path.join(dir, 'missing'))).toBe(false);
+  });
 
   it('removes the containers a dead run on this machine left, and only those', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -550,6 +931,24 @@ describe('a run in docker (a fake Docker CLI)', () => {
     expect(log.mock.calls.map((call) => String(call[0]))).toContain(
       '[mst] removed container mst-orphan-1: the run that started it is gone'
     );
+  }, 120_000);
+
+  it('retries the token until the new container lets the desktop user write it', async () => {
+    // On a slow machine, MST can write the token before the entrypoint has
+    // given /run/mst to the desktop user; that used to lose the shard.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath } = await fixture({
+      FAKE_DOCKER_TOKEN_DENIALS: '2',
+    });
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { image: 'mst-test:1' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
   }, 120_000);
 
   it("fails a shard whose desktop doesn't come up, with the image's reason", async () => {

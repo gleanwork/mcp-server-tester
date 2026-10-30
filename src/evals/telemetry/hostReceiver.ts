@@ -229,11 +229,13 @@ export function parseOtlpJson(
             opts
           );
           const bodyText = plain(record.body as OtlpAnyValue);
+          // The `event.name` attribute first: Codex's records name their
+          // source location as the record's event name, and the event there.
           const named =
-            (typeof record.eventName === 'string' && record.eventName) ||
             (typeof attributes['event.name'] === 'string'
               ? attributes['event.name']
               : undefined) ||
+            (typeof record.eventName === 'string' && record.eventName) ||
             (typeof bodyText === 'string' ? bodyText : undefined) ||
             'log';
           out.push({

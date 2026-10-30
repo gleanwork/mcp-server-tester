@@ -11,6 +11,7 @@ import type { EvalDataset } from './datasetTypes.js';
 import { isInfrastructureFailure } from './infrastructureFailure.js';
 import type { RunEnvironment } from './environments/builtinEnvironments.js';
 import type { ShardRecord } from './environments/shardedCollect.js';
+import type { ListedServerTools } from './toolSurface.js';
 
 /**
  * The run format, `mst.run/v1`: what a run leaves behind, one directory per
@@ -96,8 +97,32 @@ const RunRecordSchema = z.looseObject({
       tools: z.record(z.string(), z.unknown()).optional(),
       inputTemplate: z.string().optional(),
       judges: z.array(z.string()).optional(),
+      /**
+       * The tools the variant's servers served before its tool metadata,
+       * listed once before any client started. Only when the run was asked
+       * to record them (a tool optimization's runs).
+       */
+      servedTools: z
+        .array(
+          z.looseObject({
+            server: z.string().optional(),
+            tools: z.array(z.looseObject({ name: z.string() })),
+          })
+        )
+        .optional(),
     })
   ),
+  /**
+   * The tool optimization the run was made for: its baseline, its grouping
+   * run, or a round of candidates. Such a run never becomes the latest.
+   */
+  optimization: z
+    .looseObject({
+      id: z.string(),
+      role: z.enum(['baseline', 'grouping', 'round']),
+      round: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
   datasets: z.array(
     z.looseObject({
       name: z.string(),
@@ -111,7 +136,19 @@ const RunRecordSchema = z.looseObject({
       snapshot: z.string().optional(),
     })
   ),
-  judges: z.array(z.unknown()).optional(),
+  judges: z
+    .array(
+      z.looseObject({
+        type: z.string(),
+        level: z.string(),
+        optionsHash: z.string(),
+        identity: z
+          .string()
+          .regex(/^[0-9a-f]{64}$/)
+          .optional(),
+      })
+    )
+    .optional(),
   partial: z.boolean(),
   selection: z.looseObject({}).optional(),
   redactStoredResponses: z.boolean(),
@@ -349,6 +386,21 @@ export function assertUniqueVariantNames(names: readonly string[]): void {
   }
 }
 
+/**
+ * An eval config judge as `run.json` records it: by name and level, with a
+ * hash of its options (which can hold settings that shouldn't be stored),
+ * and its identity: a hash of the judge, its version and its parsed options,
+ * which every score it gives also records (ADR 0009). `identity` is absent
+ * for runs from before MST recorded it, and when the judge's plugin wasn't
+ * loaded.
+ */
+export interface JudgeRecord {
+  type: string;
+  level: string;
+  optionsHash: string;
+  identity?: string;
+}
+
 /** The facts `run.json` records, beyond what the summary has. */
 export interface RunFacts {
   evalName: string;
@@ -361,7 +413,10 @@ export interface RunFacts {
     servers?: unknown[];
     client?: string;
     model?: string;
+    servedTools?: ListedServerTools[];
   }>;
+  /** The tool optimization the run was made for. */
+  optimization?: RunOptimization;
   datasets: Array<{
     name: string;
     caseCount: number;
@@ -370,7 +425,7 @@ export interface RunFacts {
     source?: 'snapshot' | 'live';
     snapshot?: string;
   }>;
-  judges?: Array<{ type: string; level: string; optionsHash: string }>;
+  judges?: JudgeRecord[];
   redactStoredResponses: boolean;
   /** Where the trials were collected (`--env`). Default: `local`. */
   environment?: RunEnvironment;
@@ -398,6 +453,11 @@ interface ResumedGradingRecord {
   reusedComparisons: number;
   gradedComparisons: number;
 }
+
+/** `run.json`'s `optimization`: which tool optimization a run was made for, and as what. */
+export type RunOptimization = NonNullable<
+  z.infer<typeof RunRecordSchema>['optimization']
+>;
 
 /** `run.json`'s `phases`: how far collecting traces and grading them got. */
 type RunPhases = Pick<
@@ -589,6 +649,7 @@ export async function writeRun(
     ...(summary.selection ? { selection: summary.selection } : {}),
     redactStoredResponses: facts.redactStoredResponses,
     ...(facts.gradedFrom ? { gradedFrom: facts.gradedFrom } : {}),
+    ...(facts.optimization ? { optimization: facts.optimization } : {}),
     ...(facts.resumedGrading ? { resumedGrading: facts.resumedGrading } : {}),
     environment: {
       name: facts.environment?.name ?? 'local',

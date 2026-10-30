@@ -186,6 +186,11 @@ export interface ModelCall {
   finishReason?: string;
   /** The text the model returned. Stored results drop it, as `finalText`. */
   text?: string;
+  /**
+   * The model's reasoning as the provider returned it (Claude's thinking
+   * summaries), when it returned any. Stored results drop it, as `text`.
+   */
+  reasoningText?: string;
   /** The `TraceEvent.id`s of the tool calls the model asked for. */
   toolCallIds?: string[];
 }
@@ -379,6 +384,14 @@ export interface ClientDefinition {
   readonly serversPerBatch?: boolean;
   /** The most cases the client can run at once; `concurrency` above it is an error. */
   readonly maxConcurrency?: number;
+  /**
+   * The client is a process that needs no desktop session (a CLI or an
+   * SDK). An environment whose machines provide a desktop, such as MST's
+   * Linux image, then starts a shard whose clients are all headless
+   * without one: no desktop, no desktop app, and none of its inference.
+   * Without it, a client gets the desktop.
+   */
+  readonly headless?: boolean;
   /** Ordered traces for all selected trials. The framework owns scores. */
   runBatch?(
     requests: ClientBatchRequest[],
@@ -438,6 +451,14 @@ export interface JudgeDefinition {
   /** Parses the judge's options. */
   readonly schema: ZodType;
   /**
+   * Changes whenever the judge could grade differently with the same
+   * options: a new prompt, a new default model, new parsing. It is part of
+   * the judge's identity, which `run.json` and every score record. Without
+   * one, the identity uses the plugin's `meta.version`, so any new plugin
+   * version counts as a new judge.
+   */
+  readonly version?: string;
+  /**
    * Paths in the judge input this judge needs, such as `case.expected.answer`
    * or `case.expected.criteria`. When one is missing or empty, the judge is
    * not called and the result is recorded as skipped.
@@ -487,6 +508,8 @@ export interface EnvironmentContext extends SettingsContext {
   /** How many shards the run has (`--env-option shards`). */
   readonly shards: number;
   readonly keep: EnvironmentKeep;
+  /** The eval's client (`client` in its config), for environments that run one kind. */
+  readonly client?: string;
 }
 
 /** One shard of a run, as the coordinator hands it to an environment. */
@@ -549,6 +572,11 @@ export interface ShardOutcome {
   ok: boolean;
   /** Why it isn't ok. */
   reason?: string;
+  /**
+   * For a shard that finished with trials or grades that failed for want of
+   * infrastructure: what its machine knows about why (`Machine.diagnose`).
+   */
+  note?: string;
   collected: number;
   infra: number;
   /** A grade shard's trials and cases whose grading came back. */
@@ -587,6 +615,14 @@ export interface Machine {
   /** Where the shard's bundle and results go on the machine. Default `/mst`. */
   readonly workDir?: string;
   readonly channel: WorkerChannel;
+  /**
+   * Called before `dispose` when the shard fails, or finishes with trials or
+   * grades that failed for want of infrastructure: what the machine knows
+   * about why, such as a process it killed for memory. It goes before a
+   * failed shard's reason, or in a finished one's `note`. Undefined: nothing
+   * to add.
+   */
+  diagnose?(): Promise<string | undefined>;
   /** Deletes the machine, unless `keep` (`--env-option keep`). */
   dispose(options: { keep: boolean }): Promise<void>;
 }
@@ -619,6 +655,8 @@ export interface CoordinatorContext extends SettingsContext {
   /** The detached run's id: `mst runs watch <id>`. */
   readonly id: string;
   readonly log: (line: string) => void;
+  /** The eval's client (`client` in its config), so the machine can run its image. */
+  readonly client?: string;
 }
 
 /**
@@ -678,6 +716,8 @@ export interface EnvironmentDefinition {
     options: Record<string, unknown>,
     context: SettingsContext & {
       log: (line: string) => void;
+      /** The eval's client (`mst env setup --config`), when one was given. */
+      client?: string;
       /**
        * The plugin packages an eval loads (`mst env setup --config`), as this
        * machine has them installed (`dir`): an environment that builds

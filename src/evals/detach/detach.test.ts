@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resetPluginsForTests } from '../../plugins/extensions.js';
 import { fileRunStore } from '../runStore.js';
+import { evalResultStore } from '../runEval.js';
 import { detach } from './launch.js';
 import {
   coordinatorPaths,
@@ -384,6 +385,8 @@ describe('--detach', () => {
     const state = detachTestState();
     expect(result.machine).toBe(`coordinator-${result.id}`);
     expect(state.coordinatorOptions).toEqual({ zone: 'us-central1-a' });
+    // So the machine can run the client's image (a ChatGPT eval's, say).
+    expect(state.coordinatorClient).toBe('mst');
     expect(state.remoteDir).toBe(`/opt/mst/detached/${result.id}`);
     expect(state.argv).toEqual([
       'node',
@@ -426,6 +429,28 @@ describe('--detach', () => {
       state: 'starting',
       machine: result.machine,
     });
+  });
+
+  it("finds a coordinator's result store though a file dataset's relative path isn't on its machine", async () => {
+    const f = await evalConfig();
+    // The bundle's copy of the eval config, away from its ./cases.json.
+    const bundle = await tempDir();
+    const copied = path.join(bundle, 'eval.json');
+    await fs.copyFile(f.configPath, copied);
+    const options = {
+      configPath: copied,
+      rootDir: bundle,
+      results: 'detach/result-store/memory',
+    };
+    await expect(evalResultStore(options)).rejects.toThrow(
+      /Dataset path not found/
+    );
+    const { evalName, store } = await evalResultStore({
+      ...options,
+      skipDatasetValidation: true,
+    });
+    expect(evalName).toBe('detached');
+    expect(store).toBeDefined();
   });
 
   it('deletes the coordinator machine when the coordinator never starts', async () => {

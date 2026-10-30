@@ -635,6 +635,114 @@ describe('Claude local-agent trace parsing', () => {
     expect(partial.knownUsageFields).not.toContain('reasoningOutputTokens');
   });
 
+  it("records the first turn's TTFT and the tool approvals, with their wait", async () => {
+    const permission = (
+      subtype: 'permission_request' | 'permission_response',
+      uuid: string,
+      at: string,
+      granted?: boolean
+    ) => ({
+      type: 'system',
+      subtype,
+      uuid,
+      tool_name: 'mcp__glean__search',
+      ...(granted !== undefined ? { granted } : {}),
+      _audit_timestamp: at,
+    });
+    const events = [
+      permission('permission_request', 'a', '2026-01-01T00:00:01.000Z'),
+      permission('permission_response', 'a', '2026-01-01T00:00:01.050Z', true),
+      permission('permission_request', 'b', '2026-01-01T00:00:02.000Z'),
+      permission('permission_response', 'b', '2026-01-01T00:00:04.000Z', false),
+      // Never answered: counted, with no wait.
+      permission('permission_request', 'c', '2026-01-01T00:00:05.000Z'),
+      {
+        type: 'result',
+        requestId: 'turn-2',
+        result: 'second',
+        ttft_ms: 900,
+        ttft_stream_ms: 300,
+        request_sent_wall_ms: Date.parse('2026-01-01T00:00:10.000Z'),
+        permission_denials: [],
+      },
+      {
+        type: 'result',
+        requestId: 'turn-1',
+        result: 'first',
+        ttft_ms: 3500,
+        ttft_stream_ms: 1200,
+        request_sent_wall_ms: Date.parse('2026-01-01T00:00:00.500Z'),
+        permission_denials: [{ tool_name: 'AskUserQuestion' }],
+      },
+    ];
+    const trace = await parseNativeEvents(events, events);
+    expect(trace.telemetry).toMatchObject({
+      timeToFirstTokenMs: 3500,
+      timeToFirstTokenStreamMs: 1200,
+      firstRequestAt: '2026-01-01T00:00:00.500Z',
+      permissionRequestCount: 3,
+      permissionDenialCount: 1,
+      approvalWaitMs: 2050,
+    });
+
+    const quiet = [{ type: 'result', requestId: 'only', result: 'answer' }];
+    const untimed = await parseNativeEvents(quiet, quiet);
+    for (const key of [
+      'timeToFirstTokenMs',
+      'permissionRequestCount',
+      'approvalWaitMs',
+    ])
+      expect(untimed.telemetry).not.toHaveProperty(key);
+  });
+
+  it('records the final context size and the web searches, as ACE does', async () => {
+    const assistant = (id: string, usage: Record<string, number>) => ({
+      type: 'assistant',
+      message: {
+        id,
+        model: 'claude-opus-4-5',
+        content: [{ type: 'text', text: id }],
+        usage,
+      },
+    });
+    const events = [
+      assistant('msg_1', { input_tokens: 10, output_tokens: 5 }),
+      assistant('msg_2', {
+        input_tokens: 30,
+        cache_read_input_tokens: 400,
+        cache_creation_input_tokens: 50,
+        output_tokens: 12,
+      }),
+      {
+        type: 'result',
+        requestId: 'turn-1',
+        result: 'msg_2',
+        usage: { server_tool_use: { web_search_requests: 1 } },
+        // Per-model counts win over the aggregate.
+        modelUsage: {
+          'claude-opus-4-5': { webSearchRequests: 2 },
+          'claude-haiku-4-5': { webSearchRequests: 1 },
+        },
+      },
+      {
+        type: 'result',
+        requestId: 'turn-2',
+        result: 'msg_2',
+        usage: { server_tool_use: { web_search_requests: 4 } },
+      },
+    ];
+    const trace = await parseNativeEvents(events, events);
+    expect(trace.telemetry).toMatchObject({
+      finalContextTokens: 480,
+      webSearchRequests: 7,
+    });
+
+    const quiet = [{ type: 'result', requestId: 'only', result: 'answer' }];
+    const bare = await parseNativeEvents(quiet, quiet);
+    expect(bare.telemetry).not.toHaveProperty('finalContextTokens');
+    expect(bare.telemetry).not.toHaveProperty('webSearchRequests');
+  });
+
   it('omits unknown identity and error counts even when a terminal result has usage', async () => {
     const trace = await parseNativeEvents([
       {

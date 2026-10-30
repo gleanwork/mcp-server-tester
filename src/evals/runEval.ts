@@ -11,6 +11,7 @@ import {
   writeRun,
   writeTrial,
   type RunFacts,
+  type JudgeRecord,
   findRunDirectory,
   RUN_ID_PATTERN,
   type GradeShardRecord,
@@ -85,7 +86,13 @@ import {
   batchTraceExecution,
   createEvalCaseExecutor,
 } from './caseExecution.js';
-import { mergeEvalJudges, preflightCaseJudges } from './grading.js';
+import {
+  judgeEntryIdentity,
+  mergeEvalJudges,
+  preflightCaseJudges,
+} from './grading.js';
+import type { CaseJudge } from './datasetTypes.js';
+import { judgeIdentity } from '../judge/judgeIdentity.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -108,6 +115,13 @@ import {
 } from './builtinClients.js';
 import type { ToolSurfaceProxy } from './toolSurfaceProxy.js';
 import { startToolSurfaceProxy } from './toolSurfaceProxyServer.js';
+import {
+  ServedToolsChangedError,
+  listServedTools,
+  servedToolsChange,
+} from './servedTools.js';
+import type { ListedServerTools } from './toolSurface.js';
+import type { RunOptimization } from './runFormat.js';
 import {
   collectInEnvironment,
   gatheredQueues,
@@ -148,6 +162,7 @@ import {
 } from './configValidation.js';
 import {
   comparePairwise,
+  getPairwiseJudge,
   preflightPairwiseJudges,
 } from './pairwiseComparison.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
@@ -229,6 +244,30 @@ export interface RunEvalOptions {
   /** Skip the eval config's pairwise judges (tool optimization ranks variants itself). */
   skipPairwise?: boolean;
   /**
+   * List each variant's servers' tools once, before any client starts, and
+   * keep them in the run (`servedTools` on each of run.json's variants, and
+   * on the result). A tool optimization compares them across its runs.
+   */
+  recordServedTools?: boolean;
+  /**
+   * With `recordServedTools`: what every variant's servers must serve. The
+   * run fails before any client starts when they serve other tool metadata
+   * (a tool optimization's rounds must see its baseline's tools).
+   */
+  expectedServedTools?: readonly ListedServerTools[];
+  /**
+   * Called once before any client starts, with what run.json will record
+   * about the run's datasets, judges and variants. Throwing stops the run
+   * there, before it costs anything (a tool optimization's round refuses a
+   * setup that differs from its baseline's).
+   */
+  beforeCollect?: (planned: PlannedRun) => void;
+  /**
+   * The tool optimization this run is for, recorded in run.json. Such a run
+   * never becomes the eval's latest run.
+   */
+  optimization?: RunOptimization;
+  /**
    * Write the run's report (`report/`, about 650 KB of reporter UI plus the
    * run's data). `mst open` writes a missing report when it opens a run.
    * @default true
@@ -263,6 +302,14 @@ export interface RunEvalOptions {
   results?: string;
 }
 
+/** What a run will record about its setup, before any client starts (`beforeCollect`). */
+export interface PlannedRun {
+  datasets: Array<{ name: string; contentHash: string }>;
+  judges: Array<{ type: string; level: string; optionsHash: string }>;
+  /** Each variant's setup, as run.json's variants record it. */
+  variants: Array<{ name: string } & Record<string, unknown>>;
+}
+
 export interface RunEvalResult {
   evalConfig: EvalConfig;
   outputDir: string;
@@ -278,6 +325,8 @@ export interface RunEvalResult {
   summary: EvaluationSummary;
   /** A regrade's source: the run whose traces it graded. */
   gradedFrom?: string;
+  /** Each variant's servers' tools, by variant name, with `recordServedTools`. */
+  servedTools?: Record<string, ListedServerTools[]>;
 }
 
 /** A secrets file's values: JSON, or dotenv-style `KEY=value` lines. */
@@ -599,9 +648,26 @@ function assertResumable(
 ): void {
   const { run } = replay;
   const fullRegrade = `Grade it again in full, without --resume: \`mst grade ${run.runId}\`.`;
-  if (JSON.stringify(run.judges ?? []) !== JSON.stringify(judges))
+  const recorded = run.judges ?? [];
+  const withoutIdentity = (records: readonly JudgeRecord[]) =>
+    records.map(({ identity: _identity, ...record }) => record);
+  if (
+    JSON.stringify(withoutIdentity(recorded)) !==
+    JSON.stringify(withoutIdentity(judges))
+  )
     throw new Error(
       `The eval config's judges or their options changed since run ${run.runId} was graded, so its verdicts can't be kept. ${fullRegrade}`
+    );
+  // A run graded before MST recorded identities has none to compare.
+  if (
+    recorded.some(
+      (record, index) =>
+        record.identity !== undefined &&
+        record.identity !== judges[index]?.identity
+    )
+  )
+    throw new Error(
+      `A judge changed since run ${run.runId} was graded (its version, its plugin's version or its options' defaults), so its verdicts can't be kept. ${fullRegrade}`
     );
   for (const dataset of datasets) {
     const recorded = run.datasets.find((item) => item.name === dataset.name);
@@ -617,25 +683,54 @@ function assertResumable(
   }
 }
 
+/**
+ * The identity of the judge an eval config entry runs, as its scores record
+ * it (ADR 0009). Undefined when the judge's plugin isn't loaded here.
+ */
+function entryIdentity(level: string, entry: unknown): string | undefined {
+  const config = (typeof entry === 'string' ? { type: entry } : entry) as {
+    type: string;
+  } & Record<string, unknown>;
+  if (level !== 'pairwise') return judgeEntryIdentity(config as CaseJudge);
+  try {
+    const { type, options } = pairwiseJudgeSpec(config);
+    return judgeIdentity(type, getPairwiseJudge(type), options);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The judges run.json records. `evalConfig` has each judge's options as its
+ * schema parsed them; `rawConfig` has them as written, which is what grading
+ * parses (`mergeEvalJudges`), so each identity is the one the judge's scores
+ * record. The options hash stays on the parsed options, as runs already
+ * recorded it.
+ */
 function judgeRecords(
-  evalConfig: EvalConfig
-): Array<{ type: string; level: string; optionsHash: string }> {
-  const record = (level: string) => (entry: unknown) => {
-    const { type, ...options } =
-      typeof entry === 'string'
-        ? { type: entry }
-        : (entry as { type: string } & Record<string, unknown>);
-    return {
-      type,
-      level,
-      optionsHash: createHash('sha256')
-        .update(JSON.stringify(options))
-        .digest('hex'),
+  evalConfig: EvalConfig,
+  rawConfig: EvalConfig
+): JudgeRecord[] {
+  const record =
+    (level: string, raw: readonly unknown[] | undefined) =>
+    (entry: unknown, index: number) => {
+      const { type, ...options } =
+        typeof entry === 'string'
+          ? { type: entry }
+          : (entry as { type: string } & Record<string, unknown>);
+      const identity = entryIdentity(level, raw?.[index] ?? entry);
+      return {
+        type,
+        level,
+        optionsHash: createHash('sha256')
+          .update(JSON.stringify(options))
+          .digest('hex'),
+        ...(identity !== undefined ? { identity } : {}),
+      };
     };
-  };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);
   return [
-    ...(evalConfig.judges ?? []).map(record('config')),
+    ...(evalConfig.judges ?? []).map(record('config', rawConfig.judges)),
     // A variant's judges, when they replace the config's.
     ...(evalConfig.variants ?? [])
       .filter(
@@ -644,9 +739,17 @@ function judgeRecords(
           JSON.stringify(variant.judges) !== configJudges
       )
       .flatMap((variant) =>
-        variant.judges!.map(record(`variant:${variant.name}`))
+        variant.judges!.map(
+          record(
+            `variant:${variant.name}`,
+            rawConfig.variants?.find((raw) => raw.name === variant.name)?.judges
+          )
+        )
       ),
-    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(record('pairwise')),
+    // Kept as written: comparePairwise parses them itself.
+    ...((evalConfig.pairwiseJudges ?? []) as unknown[]).map(
+      record('pairwise', undefined)
+    ),
   ];
 }
 
@@ -910,9 +1013,18 @@ export async function evalResultStore(options: {
   rootDir?: string;
   pluginPaths?: string[];
   results?: string;
+  /**
+   * The datasets were loaded elsewhere (a detached run's coordinator): a
+   * `file` dataset's path isn't checked, as it needn't exist here.
+   */
+  skipDatasetValidation?: boolean;
 }): Promise<{ evalName: string; store: RunStore | undefined }> {
   const rootDir = options.rootDir ?? process.cwd();
-  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  const skipDatasetValidation = options.skipDatasetValidation === true;
+  const { name } = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation,
+  });
   const store = await gradeResultStore(
     {
       configPath: options.configPath,
@@ -920,7 +1032,8 @@ export async function evalResultStore(options: {
       ...(options.pluginPaths ? { pluginPaths: options.pluginPaths } : {}),
       ...(options.results ? { results: options.results } : {}),
     },
-    rootDir
+    rootDir,
+    skipDatasetValidation
   );
   return { evalName: name, store };
 }
@@ -1071,6 +1184,8 @@ function workerPluginsOf(
 export interface PreparedGrading {
   /** The eval config as its file has it, for the workers to load. */
   configFile: { name: string } & Record<string, unknown>;
+  /** Its client, as its shared configs (`extends`) set it: the environment runs that client's image. */
+  client?: string;
   /** The datasets, as loaded: one per eval config source, in order. */
   datasets: EvalDataset[];
   /** The stored run being graded. */
@@ -1172,7 +1287,12 @@ export async function resumeRun(
   options: ResumeRunOptions
 ): Promise<RunEvalResult> {
   const rootDir = options.rootDir ?? process.cwd();
-  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  // Datasets loaded where a detached run started: their paths aren't here.
+  const loadedElsewhere = options.loadedDatasets !== undefined;
+  const { name } = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation: loadedElsewhere,
+  });
   const evalDirectory =
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
   const directory = await locateRun(
@@ -1180,7 +1300,7 @@ export async function resumeRun(
     name,
     evalDirectory,
     rootDir,
-    await gradeResultStore(options, rootDir)
+    await gradeResultStore(options, rootDir, loadedElsewhere)
   );
   const { run, summary: stored } = await readRunDirectory(directory);
   if (run.evalName !== name)
@@ -1190,6 +1310,16 @@ export async function resumeRun(
   if (run.gradedFrom)
     throw new Error(
       `Run ${run.runId} is a regrade of ${run.gradedFrom}: resume ${run.gradedFrom} instead.`
+    );
+  // Resumed trials would run against whatever the servers serve now,
+  // unchecked against the optimization's baseline.
+  if (run.optimization)
+    throw new Error(
+      `Run ${run.runId} is the ${run.optimization.role} of tool optimization ${run.optimization.id}, so it isn't resumed: its servers' tools must be checked again. ${
+        run.optimization.role === 'round'
+          ? 'Run the round again with mst optimize try --retry.'
+          : 'Start the optimization again with mst optimize start.'
+      }`
     );
   const trials = await readRunTrials(directory);
   const missing = trials.filter(isMissingTrial).length;
@@ -1372,10 +1502,12 @@ async function evaluate(
           `mst-simulated-writes-${randomUUID()}`
         )
       : undefined;
-  const connectors = await expandConnectorServers(
-    rawConfig,
-    simulatedWritesDirectory ? { simulatedWritesDirectory } : {}
-  );
+  // The run's ID, known before connectors launch so they can tag requests with it.
+  const executionId = replay?.runId ?? newRunId();
+  const connectors = await expandConnectorServers(rawConfig, {
+    runId: executionId,
+    ...(simulatedWritesDirectory ? { simulatedWritesDirectory } : {}),
+  });
   let evalConfig = connectors.evalConfig;
 
   evalConfig = validateEvalConfig(
@@ -1401,8 +1533,17 @@ async function evaluate(
   const recordedDeclarations = connectorDeclarations(connectors);
   // What each shard ran on, for run.json.
   let shardRecords: ShardRecord[] | undefined;
+  // What each variant's servers served, with `recordServedTools`: listed
+  // here, or kept from the run a resume or regrade continues.
+  const servedTools = new Map<string, ListedServerTools[]>();
+  for (const variant of replay?.run.variants ?? [])
+    if (variant.servedTools)
+      servedTools.set(
+        variant.name,
+        variant.servedTools as unknown as ListedServerTools[]
+      );
+  const optimization = options.optimization ?? replay?.run.optimization;
 
-  const executionId = replay?.runId ?? newRunId();
   // Which run a host's own telemetry belongs to (`telemetry.host`).
   if (evalConfig.telemetry?.host) env.MST_RUN_ID ??= executionId;
   // The run's traces, sent as trials finish and grades come in. A regrade's
@@ -1560,7 +1701,7 @@ async function evaluate(
     if (!options.grading?.source)
       assertResumable(
         regrade,
-        judgeRecords(evalConfig),
+        judgeRecords(evalConfig, rawConfig),
         canonicalDatasets.map(({ dataset }) => dataset)
       );
     const pairwiseJudges = options.skipPairwise
@@ -1607,6 +1748,7 @@ async function evaluate(
         ) as PreparedGrading['configFile']),
         ...(loadedConfig.settings ? { settings: loadedConfig.settings } : {}),
       },
+      ...(resolvedConfig.client ? { client: resolvedConfig.client } : {}),
       datasets: canonicalDatasets.map(({ dataset }) => dataset),
       replay: regrade,
       ...workerPluginsOf(loadedConfig, options.pluginPaths, {
@@ -1908,6 +2050,44 @@ async function evaluate(
         await fs.rm(workDir, { recursive: true, force: true });
       }
     };
+
+    // Listed before any client starts, once per set of servers.
+    if (options.recordServedTools && !replay) {
+      const listings = new Map<string, Promise<ListedServerTools[]>>();
+      for (const variant of variants) {
+        const { servers, resolvedServers } = setupVariant(variant);
+        const key = JSON.stringify(servers);
+        let listing = listings.get(key);
+        if (!listing)
+          listings.set(key, (listing = listServedTools(resolvedServers)));
+        const listed = await listing;
+        const change = options.expectedServedTools
+          ? servedToolsChange(options.expectedServedTools, listed)
+          : undefined;
+        if (change)
+          throw new ServedToolsChangedError(
+            `Variant "${variant.name}"'s servers serve different tool metadata from what was expected: ${change}.`
+          );
+        servedTools.set(variant.name, listed);
+      }
+    }
+
+    if (options.beforeCollect && !replay)
+      options.beforeCollect({
+        // As run.json records them: the narrowed cases, once per dataset.
+        datasets: canonicalDatasets
+          .map(({ dataset }) => narrowEvalCases(dataset, evalConfig, narrowing))
+          .filter((dataset) => dataset.cases.length > 0)
+          .map((dataset) => ({
+            name: dataset.name,
+            contentHash: datasetContentHash(dataset),
+          })),
+        judges: judgeRecords(evalConfig, rawConfig),
+        variants: variants.map((variant) => ({
+          name: variant.name,
+          ...variantSetup(evalConfig, variant, runKey),
+        })),
+      });
 
     // In an environment, every variant's trials are collected first, on
     // shards that each hold whole cases (ADR 0004); the loop below grades them.
@@ -2429,8 +2609,12 @@ async function evaluate(
               )
             : variant.servers,
           ...variantSetup(evalConfig, declared, runKey),
+          ...(servedTools.has(variant.name)
+            ? { servedTools: servedTools.get(variant.name) }
+            : {}),
         };
       }),
+      ...(optimization ? { optimization } : {}),
       // The cases each dataset ran (the first variant's selection).
       datasets: allDatasets
         .map((item) => item.dataset)
@@ -2448,7 +2632,7 @@ async function evaluate(
         })),
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
-      judges: judgeRecords(evalConfig),
+      judges: judgeRecords(evalConfig, rawConfig),
       redactStoredResponses: redact,
       environment,
       ...(shardRecords?.length ? { machines: shardRecords } : {}),
@@ -2536,9 +2720,10 @@ async function evaluate(
   }
   // Last, so a crash leaves latest.json at the previous run; a partial or
   // ungraded run never becomes the latest, nor does a regrade of an older
-  // run, nor a run with missing trials.
+  // run, nor a run with missing trials, nor a tool optimization's run.
   const takesLatest =
     !summary.partial &&
+    !optimization &&
     missingTrials === 0 &&
     options.grade !== false &&
     (!regrade || (await regradeTakesLatest(evalDirectory, regrade)));
@@ -2569,5 +2754,8 @@ async function evaluate(
     datasets: allDatasets,
     summary,
     ...(regrade ? { gradedFrom: regrade.gradedFrom } : {}),
+    ...(servedTools.size
+      ? { servedTools: Object.fromEntries(servedTools) }
+      : {}),
   };
 }

@@ -424,7 +424,7 @@ For custom criteria, provide `{ "text": "..." }` with explicit score-level descr
 ### Best Practices
 
 - Use low temperature (0.0) for consistency
-- Prefer built-in rubrics when they fit — they have calibrated 5-point descriptions
+- Built-in rubrics give consistent 5-point descriptions, but no one has measured them against human labels. Check any judge on your own labeled cases before you trust its pass rate ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md) plans tools for this)
 - When writing custom rubrics, include score-level descriptions (e.g., "Score 0.75 for...")
 - Test rubrics with known good/bad examples
 - Set appropriate passing thresholds based on your quality standards

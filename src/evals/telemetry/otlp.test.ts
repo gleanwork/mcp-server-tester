@@ -57,6 +57,7 @@ function trial(overrides: Partial<EvalCaseResult> = {}): EvalCaseResult {
           model: 'claude-x',
           startedAt: t(5),
           completedAt: t(8),
+          reasoningText: 'Add them.',
           text: 'It is 42.',
           finishReason: 'end_turn',
         },
@@ -185,7 +186,9 @@ describe('trialSpans', () => {
     expect(root!['gen_ai.input.messages']).toMatch(
       /^\[\{"role":"user","parts":\[\{"type":"text",.*…\[\d+ more characters\]$/
     );
-    expect(second!['gen_ai.output.messages']).toContain('It is 42.');
+    expect(second!['gen_ai.output.messages']).toContain(
+      '{"type":"reasoning","content":"Add them."},{"type":"text","content":"It is 42."}'
+    );
     expect(tool).toMatchObject({
       'gen_ai.tool.call.arguments': '{"a":17,"b":25}',
       'gen_ai.tool.call.result': '42',

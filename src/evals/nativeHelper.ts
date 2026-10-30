@@ -45,6 +45,69 @@ interface NativeHelperRunOptions {
   stdin?: string;
 }
 
+/**
+ * A helper failed to build. The message says what to fix on the machine. It
+ * comes from the compiler's output, which sees no caller credentials, so
+ * callers may show it as is.
+ */
+export class NativeHelperBuildError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'NativeHelperBuildError';
+  }
+}
+
+const COMMAND_LINE_TOOLS = '/Library/Developer/CommandLineTools';
+
+/** Turns a failed `xcrun swiftc` into a message that says what to fix. */
+function buildError(error: unknown): NativeHelperBuildError {
+  const failure = error as {
+    code?: unknown;
+    killed?: unknown;
+    signal?: unknown;
+    stderr?: unknown;
+  };
+  const stderr = typeof failure?.stderr === 'string' ? failure.stderr : '';
+  const prefix = "MST couldn't build its macOS helper.";
+  let reason: string;
+  if (/agreed to the Xcode .*license/i.test(stderr)) {
+    reason =
+      "The Xcode license hasn't been accepted. Run `sudo xcodebuild -license accept`, " +
+      `or build with the Command Line Tools: set DEVELOPER_DIR=${COMMAND_LINE_TOOLS}.`;
+  } else if (
+    failure?.code === 'ENOENT' ||
+    /invalid active developer path|unable to find utility "swiftc"/i.test(
+      stderr
+    )
+  ) {
+    reason =
+      "The Xcode Command Line Tools aren't installed. Run `xcode-select --install`.";
+  } else if (failure?.killed === true || typeof failure?.signal === 'string') {
+    reason = `The build stopped after ${BUILD_TIMEOUT_MS / 1000} s or was killed.`;
+  } else {
+    const code =
+      typeof failure?.code === 'string' || typeof failure?.code === 'number'
+        ? String(failure.code)
+        : 'unknown';
+    const line = stderr
+      .split('\n')
+      .map((text) => text.trim())
+      .filter(Boolean)
+      .pop();
+    reason = `swiftc failed (exit ${code})${line ? `: ${line.slice(0, 500)}` : '.'}`;
+  }
+  return new NativeHelperBuildError(`${prefix} ${reason}`, { cause: error });
+}
+
+/**
+ * The toolchain `xcrun` uses, when the caller chose one. It selects Xcode or the
+ * Command Line Tools and carries no credential.
+ */
+function developerDirectory(): { DEVELOPER_DIR?: string } {
+  const value = process.env.DEVELOPER_DIR;
+  return value && value.startsWith('/') ? { DEVELOPER_DIR: value } : {};
+}
+
 export interface NativeHelper {
   /**
    * Runs the helper and returns its parsed JSON receipt. Rejects with the raw
@@ -56,8 +119,9 @@ export interface NativeHelper {
 
 /**
  * Compiles a Swift helper into a private, owner-only scratch directory that is
- * removed when the process exits. The build sees no caller credentials. Rejects
- * with the raw build error after removing the scratch.
+ * removed when the process exits. The build sees no caller credentials, only
+ * `DEVELOPER_DIR` when it is set. A failed build rejects with a
+ * {@link NativeHelperBuildError} after removing the scratch.
  */
 export async function compileSwiftHelper(options: {
   /** A short name for the scratch directory (`mst-<name>-...`). */
@@ -78,23 +142,27 @@ export async function compileSwiftHelper(options: {
     const binary = join(directory, 'controller');
     await writeFile(source, options.source, { mode: 0o600, flag: 'wx' });
     const minimal = { PATH: SYSTEM_PATH, TMPDIR: directory };
-    await exec(
-      '/usr/bin/xcrun',
-      [
-        'swiftc',
-        source,
-        '-o',
-        binary,
-        '-module-cache-path',
-        join(directory, 'module-cache'),
-      ],
-      {
-        env: minimal,
-        cwd: directory,
-        timeout: BUILD_TIMEOUT_MS,
-        maxBuffer: BUILD_OUTPUT_LIMIT,
-      }
-    );
+    try {
+      await exec(
+        '/usr/bin/xcrun',
+        [
+          'swiftc',
+          source,
+          '-o',
+          binary,
+          '-module-cache-path',
+          join(directory, 'module-cache'),
+        ],
+        {
+          env: { ...minimal, ...developerDirectory() },
+          cwd: directory,
+          timeout: BUILD_TIMEOUT_MS,
+          maxBuffer: BUILD_OUTPUT_LIMIT,
+        }
+      );
+    } catch (error) {
+      throw buildError(error);
+    }
     await chmod(binary, 0o700);
     const ownedDirectory = directory;
     // The private, noncredential scratch is removed on normal process exit;

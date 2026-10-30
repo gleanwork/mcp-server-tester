@@ -175,7 +175,7 @@ describe('ChatGPT macOS application controller (all execution mocked)', () => {
     );
   });
 
-  it('names the compile stage and permits a later retry', async () => {
+  it('says what to fix when the build fails and permits a later retry', async () => {
     const { getChatgptApplicationController } =
       await import('./macController.js');
     execute.mockRejectedValueOnce(
@@ -183,9 +183,13 @@ describe('ChatGPT macOS application controller (all execution mocked)', () => {
         code: 'ENOENT',
       })
     );
-    await expect(getChatgptApplicationController()).rejects.toThrow(
-      'Unable to control the ChatGPT desktop application safely. Stage: compile; code: ENOENT; signal: none'
+    const error = (await getChatgptApplicationController().catch(
+      (caught: unknown) => caught
+    )) as Error;
+    expect(error.message).toBe(
+      "MST couldn't build its macOS helper. The Xcode Command Line Tools aren't installed. Run `xcode-select --install`."
     );
+    expect(error.message).not.toContain('synthetic-secret');
     expect(await fs.readdir(root)).toEqual([]);
     await getChatgptApplicationController();
     expect(execute).toHaveBeenCalledTimes(2);

@@ -139,6 +139,14 @@ Use actual tool-call assertions: successful endpoint preflight alone is not proo
 that the Cowork session received the server. A live pinned run has passed with
 an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 
+### Cloud sessions
+
+Claude Desktop builds signed in to claude.ai (not an `inferenceProvider`
+gateway) run Cowork tasks as remote `cse_…` sessions that write no session
+folder on the host. MST does not read them: on such a macOS desktop it finds
+no session to bind. The prepared Linux desktop runs Desktop through a gateway,
+which runs local sessions, so it is unaffected.
+
 ## Run on macOS from a source checkout
 
 ```bash
@@ -212,7 +220,11 @@ For several eval configs, use `batch --configs <files...> --workers 1`.
 
 The Computer Use driver runs in the MST process. For mouse and keyboard input it
 compiles a small Swift helper, once per process, which needs the Xcode Command
-Line Tools (`xcode-select --install`). Screenshots use macOS's `screencapture`
+Line Tools (`xcode-select --install`). If Xcode is installed but its license
+hasn't been accepted, `xcrun` refuses to build, and MST says so. Run
+`sudo xcodebuild -license accept`, or build with the Command Line Tools by
+setting `DEVELOPER_DIR=/Library/Developer/CommandLineTools`. The build sees no
+other variable from your environment. Screenshots use macOS's `screencapture`
 and `sips`. The terminal that runs MST needs Accessibility and Screen Recording
 permission. Nothing else is installed. The source-checkout wrapper is a
 convenience, not required by `run` or `batch`.
@@ -546,6 +558,24 @@ to …/tool-results/mcp-<server>-<tool>-<time>.txt`) isn't read back yet.
 Results include `clientUsage`, `clientTelemetry`, and `telemetry.totalClientUsage`.
 These describe native Claude execution, not the separate Computer Use planner's
 API cost. A test assertion or judge failure is distinct from a driver failure.
+`clientTelemetry` also has, from Cowork's results and audit log:
+
+- `timeToFirstTokenMs` and `timeToFirstTokenStreamMs`: the trial's first turn,
+  to its first token and to the first token of the response stream, with
+  `firstRequestAt`. Each model call's own TTFT is in the host's telemetry
+  (`telemetry.host`, docs/telemetry.md).
+- `permissionRequestCount`, `permissionDenialCount` and `approvalWaitMs`: the
+  tool approvals Cowork asked for, the ones refused, and the time from each
+  request to its answer. The wait is part of `durationMs`.
+- `finalContextTokens`: the context the last model call read (its input,
+  cache-read and cache-write tokens).
+- `webSearchRequests`: the server-side web searches the results count.
+
+A model call's `reasoningText` is its thinking summaries, when the transcript
+has them. Cowork on MST's Linux image has none: its thinking blocks carry only
+a signature, and Claude Code's `showThinkingSummaries` in the desktop user's
+`~/.claude/settings.json` doesn't reach the agent in Cowork's VM. Each
+result's thinking-token count (`reasoningOutputTokens`) is still recorded.
 
 The shared orchestration is OS-neutral and tested with injected platform doubles.
 macOS is live-qualified. Linux has separate qualification requirements described
@@ -729,6 +759,11 @@ session can outlast its access token. A token in an environment variable is
 read once, when the client starts, and is never renewed. `requestTimeoutMs`
 (default 120 seconds) bounds each request; raise it for tools slower than that,
 so the client's own tool limit applies instead.
+
+The proxy connects to the upstream server before it serves its client. If
+that fails, or its token file isn't there yet, it tries again after 2 and 5
+seconds, then exits; each failure goes to stderr with its kind (an error
+class, a network code or an HTTP status), never a token or response body.
 
 `dryRunProxyServer()` (from `@gleanwork/mcp-server-tester/evals`) returns the
 stdio server entry. It holds the path of a token file, never a token:

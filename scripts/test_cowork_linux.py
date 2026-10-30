@@ -5,7 +5,7 @@ import subprocess
 import time
 import unittest
 from urllib.parse import parse_qs, urlsplit
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 spec = importlib.util.spec_from_file_location("cowork_linux", Path(__file__).with_name("cowork_linux.py"))
 module = importlib.util.module_from_spec(spec)
@@ -352,6 +352,50 @@ class LinuxDriverTests(unittest.TestCase):
         with patch.object(module.subprocess, "Popen", side_effect=FileNotFoundError):
             with self.assertRaisesRegex(module.DriverFailure, "clipboard_unavailable"):
                 desktop.paste_prompt("prompt", 1)
+
+    def test_the_composer_reads_in_order_with_a_link_in_place(self):
+        entry = AtspiNode("Write your prompt to Claude", "entry", children=[
+            AtspiNode("", "paragraph", children=[
+                AtspiNode("see ", "static"),
+                AtspiNode("https://example.com", "link",
+                          children=[AtspiNode("https://example.com", "static")]),
+                AtspiNode(" and", "static")]),
+            AtspiNode("/Writing Style", "static")])
+        self.assertEqual(real_desktop(FakeAtspi(entry)).composer_text(entry),
+                         "see \nhttps://example.com\n and\n/Writing Style")
+
+    def test_a_paste_lands_once_the_composer_ends_with_the_prompt(self):
+        # The composer as its accessibility tree reads after a long paste:
+        # a link split out of its paragraph, and the prompt's start scrolled
+        # out of the tree. Its end shows the paste landed.
+        prompt = "draft a note " * 1200 + "see https://example.com/a/b and\n\n/Writing Style"
+        entry = AtspiNode("Write your prompt to Claude", "entry")
+        api = FakeAtspi(entry)
+        clipboard = MagicMock()
+        clipboard.poll.return_value = None
+        api.Component = MagicMock()
+        api.Component.grab_focus.return_value = True
+        api.KeySynthType = MagicMock()
+        pasted = [AtspiNode("draft a note " * 40 + "see ", "static"),
+                  AtspiNode("https://example.com/a/b", "link",
+                            children=[AtspiNode("https://example.com/a/b", "static")]),
+                  AtspiNode(" and", "static"), AtspiNode("/Writing Style", "static")]
+
+        def key(keyval, _string, _kind):
+            if keyval == 0x76:  # Ctrl+V's V
+                entry.children = list(composer)
+        api.generate_keyboard_event = key
+        desktop = real_desktop(api)
+        with patch.object(module.subprocess, "Popen", return_value=clipboard), \
+                patch.object(module.time, "sleep"):
+            composer = pasted
+            desktop.paste_prompt(prompt, 5)
+            # A composer missing the prompt's end: the paste didn't land.
+            entry.children = []
+            composer = pasted[:-1]
+            with self.assertRaisesRegex(module.DriverFailure, "prompt_not_pasted"):
+                desktop.paste_prompt(prompt, 0)
+        clipboard.kill.assert_called()
 
     def test_long_prompt_scrolls_start_task_into_view_once_then_submits(self):
         class LongPrompt(Desktop):

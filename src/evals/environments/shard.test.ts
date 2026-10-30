@@ -454,4 +454,70 @@ describe('machineEnvironment', () => {
       cancelled: false,
     });
   });
+
+  it("puts what a failed shard's machine knows before the shard's reason", async () => {
+    const diagnosed: string[] = [];
+    const run = (diagnose: () => Promise<string | undefined>) =>
+      machineEnvironment(
+        context(),
+        async () => ({
+          id: 'machine-1',
+          channel: scriptedChannel([]).channel,
+          async diagnose() {
+            diagnosed.push('asked');
+            return diagnose();
+          },
+          async dispose() {
+            diagnosed.push('disposed');
+          },
+        }),
+        { silenceMs: 50 }
+      ).runShard(spec, quiet, new AbortController().signal);
+    const outcome = await run(async () => 'It ran out of memory.');
+    expect(outcome.reason).toMatch(
+      /^It ran out of memory\. The worker sent nothing for 0 s/
+    );
+    // Asked while the machine is still there to ask.
+    expect(diagnosed).toEqual(['asked', 'disposed']);
+    // Nothing known, or no answer: the shard's own reason.
+    for (const diagnose of [
+      async () => undefined,
+      async () => Promise.reject(new Error('gone')),
+    ])
+      expect((await run(diagnose)).reason).toMatch(/^The worker sent nothing/);
+  });
+
+  it('notes what the machine knows about a finished shard with infrastructure failures', async () => {
+    let asked = 0;
+    const finish = (infra: number) =>
+      machineEnvironment(
+        context(),
+        async () => ({
+          id: 'machine-1',
+          channel: scriptedChannel([
+            JSON.stringify({
+              type: 'done',
+              collected: 2,
+              infra,
+              cancelled: false,
+              cleanup: 'ok',
+            }),
+          ]).channel,
+          async diagnose() {
+            asked++;
+            return 'It ran out of memory.';
+          },
+          async dispose() {},
+        }),
+        { cancelGraceMs: 10 }
+      ).runShard(spec, quiet, new AbortController().signal);
+    expect(await finish(1)).toMatchObject({
+      ok: true,
+      note: 'It ran out of memory.',
+    });
+    expect(asked).toBe(1);
+    // A clean shard isn't asked.
+    expect(await finish(0)).not.toHaveProperty('note');
+    expect(asked).toBe(1);
+  });
 });

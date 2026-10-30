@@ -3,6 +3,7 @@ import type { JudgeCompletion, JudgeCompletionAdapter } from './llmJudge.js';
 import {
   DEFAULT_JUDGE_MAX_TOKENS,
   DEFAULT_JUDGE_TEMPERATURE,
+  DEFAULT_OPENAI_JUDGE_MODEL,
   loadJudgeSdk,
   requireJudgeCredential,
 } from './adapterSupport.js';
@@ -73,7 +74,7 @@ export function openaiCompletion(
       apiKey: endpoint.apiKey ?? '',
       baseURL: endpoint.baseURL,
     });
-    const model = config.model ?? 'gpt-4o';
+    const model = config.model ?? DEFAULT_OPENAI_JUDGE_MODEL;
     const maxTokens = config.maxTokens ?? DEFAULT_JUDGE_MAX_TOKENS;
     if (config.effort !== undefined)
       return responsesCompletion(client, {

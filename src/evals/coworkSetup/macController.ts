@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { compileSwiftHelper, type NativeHelper } from '../nativeHelper.js';
+import {
+  compileSwiftHelper,
+  NativeHelperBuildError,
+  type NativeHelper,
+} from '../nativeHelper.js';
 import { macCoworkControllerSource } from './macControllerSource.js';
 
 const ERROR = 'Unable to control the Mac Cowork application safely.';
@@ -41,6 +45,8 @@ async function compile(appPath: string): Promise<MacCoworkController> {
       source: macCoworkControllerSource(appPath),
     });
   } catch (error) {
+    // A build failure says what to fix on the machine, so it reaches the user.
+    if (error instanceof NativeHelperBuildError) throw error;
     const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
     throw new Error(`${ERROR} Native controller build failed (${code}).`);
   }
@@ -100,9 +106,9 @@ export async function getMacCoworkController(
   const path = configuredAppPath(appPath);
   let controller = compiled.get(path);
   if (!controller) {
-    controller = compile(path).catch(() => {
+    controller = compile(path).catch((error: unknown) => {
       compiled.delete(path);
-      throw new Error(ERROR);
+      throw error instanceof NativeHelperBuildError ? error : new Error(ERROR);
     });
     compiled.set(path, controller);
   }

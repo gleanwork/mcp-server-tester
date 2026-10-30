@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { resolveConfigExtends } from '../../../evals/configExtends.js';
 import { loadEvalConfig } from '../../../evals/evalConfig.js';
 import { resolveEnvironment } from '../../../evals/environments/builtinEnvironments.js';
 import { installPlugins } from '../../../plugins/extensions.js';
@@ -44,6 +45,9 @@ export async function setupEnvironment(
   const settings: SettingsSections | undefined =
     fromConfig?.settings ??
     (settingsFile ? readSettingsFile(settingsFile) : undefined);
+  // The eval's client picks the image an environment builds (docker:
+  // Cowork's or ChatGPT's), as its shared configs (`extends`) set it.
+  const client = fromConfig?.client;
   const environment = resolveEnvironment(
     reference,
     parseEnvOptions(options.envOption ?? [])
@@ -56,6 +60,7 @@ export async function setupEnvironment(
     log: (line) => console.error(`[mst] ${line}`),
     settings: settingsFor(settings, environment.name),
     ...(plugins ? { plugins } : {}),
+    ...(client ? { client } : {}),
   });
 }
 
@@ -66,14 +71,21 @@ export async function setupEnvironment(
 async function evalPluginPackages(
   configPath: string,
   rootDir: string
-): Promise<{ packages: PluginPackage[]; settings?: SettingsSections }> {
+): Promise<{
+  packages: PluginPackage[];
+  settings?: SettingsSections;
+  client?: string;
+}> {
   const config = loadEvalConfig(configPath, { rootDir });
   const options = {
     baseDir: path.dirname(path.resolve(configPath)),
     fallbackDir: rootDir,
   };
   const specifiers = config.plugins ?? [];
-  installPlugins(await loadPlugins(specifiers, options));
+  const loaded = installPlugins(await loadPlugins(specifiers, options));
+  const { client } = resolveConfigExtends(config, [
+    ...new Set(loaded.map((plugin) => plugin.meta.namespace)),
+  ]);
   const packages = specifiers.map((specifier) => {
     const found = resolvePluginPackage(specifier, options);
     if (!found)
@@ -85,5 +97,6 @@ async function evalPluginPackages(
   return {
     packages,
     ...(config.settings ? { settings: config.settings } : {}),
+    ...(client ? { client } : {}),
   };
 }

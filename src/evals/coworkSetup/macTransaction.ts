@@ -28,6 +28,7 @@ import {
 } from './bundle.js';
 import { coworkHeadlessSettings } from '../cowork/managedSettings.js';
 import { createCoworkMcpPlan } from './config.js';
+import { credentialHelperScript } from './credentialHelper.js';
 import { checkManagedInferencePreferences } from './macManagedPreferences.js';
 
 const ERROR = 'Unable to change Cowork configuration safely.';
@@ -290,65 +291,10 @@ async function replaceMeta(
 
 /** This script contains only a path; neither the script nor settings contain a key. */
 function inferenceHelper(directory: string): string {
-  return `#!/bin/sh
-exec /usr/bin/python3 -I - <<'MST_INFERENCE_PY'
-import json
-import os
-import re
-import stat
-import sys
-
-PATH = ${JSON.stringify(join(directory, 'credentials', 'inference.json'))}
-LIMIT = 65536
-
-def reject():
-    raise ValueError()
-
-def unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            reject()
-        result[key] = value
-    return result
-
-def validate(info):
-    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
-            or info.st_mode & 0o077 or info.st_size > LIMIT):
-        reject()
-
-try:
-    fd = os.open(PATH, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    try:
-        before = os.fstat(fd)
-        validate(before)
-        content = bytearray()
-        while len(content) <= LIMIT:
-            chunk = os.read(fd, LIMIT + 1 - len(content))
-            if not chunk:
-                break
-            content.extend(chunk)
-        after = os.fstat(fd)
-        validate(after)
-        if (len(content) > LIMIT or len(content) != after.st_size
-                or before.st_size != after.st_size
-                or before.st_mtime_ns != after.st_mtime_ns
-                or before.st_ctime_ns != after.st_ctime_ns):
-            reject()
-    finally:
-        os.close(fd)
-    data = json.loads(content.decode('utf-8'), object_pairs_hook=unique_object)
-    if not isinstance(data, dict) or set(data) != {'ANTHROPIC_API_KEY'}:
-        reject()
-    token = data['ANTHROPIC_API_KEY']
-    if not isinstance(token, str) or re.fullmatch(r'[A-Za-z0-9._~+/-]+=*', token) is None:
-        reject()
-except Exception:
-    sys.stderr.write('Unable to read Cowork inference credential.\\n')
-    sys.exit(1)
-sys.stdout.write(token + '\\n')
-MST_INFERENCE_PY
-`;
+  return credentialHelperScript({
+    kind: 'inference',
+    path: join(directory, 'credentials', 'inference.json'),
+  });
 }
 
 function allowedFile(name: string): boolean {

@@ -128,7 +128,7 @@ export default plugin;
   An environment whose machines are Docker hosts, such as cloud VMs, can leave the containers to the built-in `docker` environment, `dockerEnvironment` (from `./evals`):
   - **`setup`** creates one host and a Docker context for it, and calls `dockerEnvironment.setup!({ contexts: '<context>', image }, { log, plugins })` with the `plugins` its own `setup` was given. (`setup` is optional on `EnvironmentDefinition`, hence the `!`.) It then saves that host as the image new hosts boot from. `dockerEnvironment.open` checks that each context already has the image, and never builds or pulls it, so a host without the image fails every shard.
   - **`open`** returns an environment with `work: ['collect', 'grade']`. Its `runShard` passes both kinds of shard on, and without `work` it would run collect shards only, so `mst grade --env` would refuse it.
-  - **`runShard`** creates a host for the shard and a Docker context for it. It opens `dockerEnvironment` with that context only and runs the shard on it, in a `try`: the docker environment can throw, for example when it can't copy the bundle, and a throw counts as an outcome that isn't `ok`. In the `finally` it closes the docker environment, then deletes the host and its context, unless `context.keep` keeps them: `'always'`, or `'failed'` when the outcome isn't `ok`. The docker environment keeps the container by the same rule, and prints a `docker --context <context> exec` command that works only while the host and its context exist.
+  - **`runShard`** creates a host for the shard and a Docker context for it. It opens `dockerEnvironment` with that context only and runs the shard on it, in a `try`. The docker environment limits each container to the host's memory (`docker info`): a Cowork container to all the host can spare, a grade container to 2 GiB. Pass `memory` (and `cpus`) on to `dockerEnvironment.open` to change that, for example when a grade shard runs agentic judges side by side. Inside the `try`: the docker environment can throw, for example when it can't copy the bundle, and a throw counts as an outcome that isn't `ok`. In the `finally` it closes the docker environment, then deletes the host and its context, unless `context.keep` keeps them: `'always'`, or `'failed'` when the outcome isn't `ok`. The docker environment keeps the container by the same rule, and prints a `docker --context <context> exec` command that works only while the host and its context exist.
   - **`close`** deletes the hosts and contexts of shards that are still running.
 
   A worker machine needs the same MST version as the coordinator (a mismatch fails the shard at `hello`), on `PATH` as `mst`, and the client's plugin. Access tokens reach it only over stdin; the worker writes them to `MST_TOKENS_DIR` (default `/run/mst/tokens`, which a worker image should mount as tmpfs), one file per server label, renews them before they expire, and removes them at the end. `MST_IMAGE` names the image in the worker's `hello`. A shard's failures (no machine, a silent or cancelled worker) are its outcome; `runShard` doesn't throw for them.
@@ -248,6 +248,32 @@ The built-in `rubric` judge reports its usage the same way. It reads the
 last `{pass, score, reasoning}` object in the model's answer, so reasoning
 before the JSON is fine; an answer cut off at `maxTokens` (default 4096)
 fails saying so.
+
+#### Judge identity
+
+Every score records the identity of the judge that gave it, in
+`judgeIdentity`. `run.json` records the identity of each eval config,
+variant and pairwise judge, in `judges[].identity`. The identity is a
+SHA-256 of the judge's reference, its `version` and its options as its
+schema parses them, so an option left to its default hashes the same as the
+value written out. Two scores with the same identity came from a judge that
+grades the same way, which a calibration needs
+([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)).
+
+A judge or pairwise judge can declare a `version`: a non-empty string that
+changes whenever it could grade differently with the same options, such as
+a new prompt or a new default model. Without one, the identity uses the
+plugin's `meta.version`, so every new plugin version counts as a new judge.
+`agenticJudge` and `agenticPairwiseJudge` take `version` from their spec,
+and a staged judge uses its bundle's `version` or the bundle's hash. The
+built-in `rubric` judge's version covers its prompts, every built-in
+rubric's text and the defaults it falls back on.
+
+`mst grade --resume` refuses a run whose eval config or pairwise judges'
+identities changed since it was graded. A case's own judges aren't in
+`run.json`, so each verdict's identity decides: a verdict whose judge
+changed is graded again. A run graded before MST recorded identities
+resumes as before.
 
 ### Pairwise judges
 
@@ -638,6 +664,7 @@ The client is the MCP client application an eval tests. Built-in clients have ca
 | Client        | What it is                                                                                                            |
 | ------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `claude-code` | Claude Code                                                                                                           |
+| `codex`       | OpenAI's Codex agent, headless ([codex.md](./codex.md))                                                               |
 | `cowork`      | Claude Cowork, in Claude Desktop (macOS, or a prepared Linux desktop)                                                 |
 | `chatgpt`     | ChatGPT desktop; macOS or Linux follows the platform                                                                  |
 | `mst`         | MST's own client: the model gets the servers' tools and nothing else, which isolates the model and your tool metadata |
@@ -674,6 +701,7 @@ An eval config that loads the plugin selects the client with `"client": "my/clie
 - **Batches.** A client with `runBatch` gets one request per trial of each client case in the dataset, and returns one trace per request, in order. A batch client can't mix client types, and its cases need unique IDs. To have each trial saved as it finishes rather than when the batch returns, a batch client calls `context.reportResult(index, result)` after each request, with the request's index; it never throws. The Cowork and ChatGPT clients do.
 - **Tool metadata.** A client that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the run gives it `http` server configs for a local MCP proxy that applies the variant, so the client must speak Streamable HTTP (see [Tool metadata on every client](#tool-metadata-on-every-client)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's clients do. A batch client that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the client's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A client that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
 - **What it honours.** `maxConcurrency` caps the eval config's `concurrency`.
+- **Headless.** A client that runs as a process with no desktop session (a CLI or an SDK, as `mst`, `claude-code` and `codex` do) sets `headless: true`. An environment whose machines come with a desktop, such as `docker` with MST's Linux image, then runs a shard whose clients are all headless in a container without one: no desktop app, no VM and no Cowork inference. Without it, a client gets the desktop.
 
 ### Claude Code client-native events
 
@@ -701,6 +729,7 @@ A search's `results` come from `tool_reference` blocks in its result, or, withou
 
 - **`mst`** puts it in the model's system prompt, ahead of the skills catalog when `skills` is on.
 - **`claude-code`** passes it with `--append-system-prompt`, so Claude Code's own system prompt stays.
+- **`codex`** sets it as Codex's `developer_instructions`, so Codex's own instructions stay.
 - **Cowork and ChatGPT** take organisation instructions from the app, not from MST, so `systemPrompt` is a validation error for them.
 
 A plugin client that can apply one declares `systemPrompt` in its schema. A case's own `clientOptions.systemPrompt` replaces the one it inherits, and is a validation error for a client that can't apply one.
@@ -710,7 +739,7 @@ A plugin client that can apply one declares `systemPrompt` in its schema. A case
 A variant's tool metadata (`tools`: descriptions, input schemas, renames) reaches every client:
 
 - **`mst`** applies the variant in-process.
-- **Clients that connect to their servers** (plugin clients, `claude-code`, `cowork`) get them through a local MCP proxy. The run starts it on first use and gives each client request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels. The proxy applies each server's timeouts to its own calls to that server, so an endpoint carries none of a server's connection options, and a stdio server (such as a connector's dry-run proxy) works behind it. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
+- **Clients that connect to their servers** (plugin clients, `claude-code`, `codex`, `cowork`) get them through a local MCP proxy. The run starts it on first use and gives each client request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels. The proxy applies each server's timeouts to its own calls to that server, so an endpoint carries none of a server's connection options, and a stdio server (such as a connector's dry-run proxy) works behind it. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
 - **One connection per server for the variant.** The proxy connects to each server once and shares that connection across the variant's cases, where a client without tool metadata may connect per case. A server that keeps per-connection state sees one connection for a variant with tool metadata.
 - **A request whose client never lists the proxied tools fails.** Otherwise the run would report results for a variant the model never saw. Cowork sets up its servers once per batch, so it lists them once: the batch shares one endpoint, and the check is for the batch. MST's own readiness probe uses a separate endpoint and doesn't count.
 - **Calls are recorded under the tools' original names**, so a dataset's assertions read the same in every variant, with the model's name in `rawName`.
