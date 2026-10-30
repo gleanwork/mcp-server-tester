@@ -59,13 +59,14 @@ async function fixture({
   return {
     outputDir,
     readJson,
-    resume: (run: string, envOptions?: Record<string, string>) =>
+    resume: (run: string, envOptions?: Record<string, string>, env?: string) =>
       resumeRun({
         configPath,
         rootDir: dir,
         outputDir,
         run,
         ...(envOptions ? { envOptions } : {}),
+        ...(env ? { env } : {}),
       }),
     run: (envOptions: Record<string, string>, grade = true) =>
       runEval({
@@ -211,6 +212,22 @@ describe('a run in an environment with shards', () => {
     await expect(f.resume(runId)).rejects.toThrow(
       `Run ${runId} has no missing trials: there is nothing to resume.`
     );
+  }, 90_000);
+
+  it('--resume refuses to collect in the local environment', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture({ redact: false });
+    const partial = await f.run({ shards: '2', fail: '1' });
+    const runId = path.basename(partial.outputDir);
+
+    await expect(f.resume(runId, undefined, 'local')).rejects.toThrow(
+      /^Run \S+ has \d+ trials? to collect, but a resume collects trials only in an environment, and this one would run locally\. Name one with --env, or run those cases again with mst run --case\.$/
+    );
+    // The partial run is left as it was.
+    const run = await f.readJson<{ phases: unknown }>(
+      path.join(partial.outputDir, 'run.json')
+    );
+    expect(run.phases).toMatchObject({ collect: 'partial' });
   }, 90_000);
 
   it('--resume leaves a run collected with --no-grade ungraded', async () => {

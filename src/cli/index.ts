@@ -264,7 +264,7 @@ program
   )
   .option(
     '--resume <run>',
-    'Collect only the trials a run is missing (its shards ended early, or the client never submitted them), in its environment, and grade it again'
+    'Collect only the trials a run is missing (its shards ended early, or the client never submitted them), in its environment (not local; use --env), and grade it again'
   )
   .option(
     '--no-report',
