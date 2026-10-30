@@ -64,14 +64,22 @@ export async function readLabels(directory: string): Promise<LabelRecord[]> {
   return labels;
 }
 
-/** Writes labels into a run, replacing any label with the same key. */
+/**
+ * Writes labels into a run, replacing any label with the same key. Every
+ * label's file is worked out before any is written.
+ */
 export async function writeLabels(
   directory: string,
   labels: readonly LabelRecord[]
 ): Promise<void> {
-  for (const label of labels)
-    await writeJsonFile(path.join(directory, labelRecordPath(label)), label);
+  const files = labels.map((label) =>
+    path.join(directory, labelRecordPath(keyOf(label) as LabelPathFields))
+  );
+  for (const [i, label] of labels.entries())
+    await writeJsonFile(files[i]!, label);
 }
+
+type LabelPathFields = Parameters<typeof labelRecordPath>[0];
 
 /**
  * Copies a run's labels into a run made from it (a regrade or a resume), so
@@ -151,7 +159,9 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
     for (const caseResult of variant.result?.caseResults ?? []) {
       const input = caseResult.request?.input;
       for (const { trial, result } of caseTrials(caseResult)) {
-        if (isInfraTrial(result)) continue;
+        // A trial the client couldn't run has no verdicts. One a grader
+        // failed on keeps the other judges' verdicts.
+        if (isInfraTrial(result) && result.gradingError === undefined) continue;
         const answer =
           'trace' in result && result.trace?.finalText !== undefined
             ? result.trace.finalText
@@ -430,7 +440,15 @@ export function parseLabels(
   file: string
 ): ImportedLabel[] {
   if (format === 'csv') {
-    const [header, ...rows] = parseCsv(text);
+    let table: string[][];
+    try {
+      table = parseCsv(text);
+    } catch (error) {
+      throw new Error(
+        `${file}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    const [header, ...rows] = table;
     if (!header) return [];
     const columns = header.map((name) => name.trim());
     return rows.flatMap((cells, index) => {
@@ -461,6 +479,20 @@ export function parseLabels(
   });
 }
 
+/**
+ * A name as written: the judge, criterion, variant, case or baseline, which
+ * may have spaces at either end. Empty is missing.
+ */
+function exact(value: unknown): string | undefined {
+  const string =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number'
+        ? String(value)
+        : '';
+  return string === '' ? undefined : string;
+}
+
 /** A cell or field as text: strings, numbers and booleans; anything else is missing. */
 function text(value: unknown): string | undefined {
   const string =
@@ -479,12 +511,12 @@ function importedRow(
   const label = text(row.label);
   if (label === undefined) return [];
   const required = (name: string): string => {
-    const value = text(row[name]);
+    const value = exact(row[name]);
     if (value === undefined) throw new Error(`${source} has no ${name}.`);
     return value;
   };
   const trial = text(row.trial);
-  const baseline = text(row.baseline);
+  const baseline = exact(row.baseline);
   if (trial === undefined && baseline === undefined)
     throw new Error(
       `${source} has neither a trial (a judge's label) nor a baseline (a pairwise judge's).`
@@ -492,7 +524,7 @@ function importedRow(
   return [
     {
       judge: required('judge'),
-      ...optional('criterion', text(row.criterion)),
+      ...optional('criterion', exact(row.criterion)),
       variant: required('variant'),
       caseId: required('caseId'),
       ...(trial !== undefined ? { trial: trialNumber(trial, source) } : {}),
@@ -526,8 +558,8 @@ function judgekeeperLabel(
   if (label === undefined) return [];
   const metadata = (record.metadata ?? {}) as Record<string, unknown>;
   const mst = (metadata.mst ?? {}) as Record<string, unknown>;
-  let variant = text(mst.variant);
-  let caseId = text(mst.caseId);
+  let variant = exact(mst.variant);
+  let caseId = exact(mst.caseId);
   let trial = text(mst.trial);
   if (variant === undefined || caseId === undefined || trial === undefined) {
     const target = text(record.target_id) ?? '';
@@ -538,10 +570,10 @@ function judgekeeperLabel(
       );
     [variant, caseId, trial] = parts.map((part) => decodeURIComponent(part));
   }
-  const name = text(record.name) ?? 'judge';
+  const name = exact(record.name) ?? 'judge';
   const hash = name.lastIndexOf('#');
   const criterion =
-    text(mst.criterion) ?? (hash > 0 ? name.slice(hash + 1) : undefined);
+    exact(mst.criterion) ?? (hash > 0 ? name.slice(hash + 1) : undefined);
   const judge =
     criterion !== undefined && name.endsWith(`#${criterion}`)
       ? name.slice(0, -(criterion.length + 1))
@@ -563,16 +595,16 @@ function judgekeeperLabel(
   ];
 }
 
-const POINTWISE_SPELLINGS: Record<string, PointwiseLabel> = {
-  pass: 'pass',
-  fail: 'fail',
-  true: 'pass',
-  false: 'fail',
-  yes: 'pass',
-  no: 'fail',
-  '1': 'pass',
-  '0': 'fail',
-};
+const POINTWISE_SPELLINGS = new Map<string, PointwiseLabel>([
+  ['pass', 'pass'],
+  ['fail', 'fail'],
+  ['true', 'pass'],
+  ['false', 'fail'],
+  ['yes', 'pass'],
+  ['no', 'fail'],
+  ['1', 'pass'],
+  ['0', 'fail'],
+]);
 
 /** The options of `checkImportedLabels`. */
 export interface LabelImportOptions {
@@ -594,7 +626,11 @@ export function checkImportedLabels(
   existing: readonly LabelRecord[],
   options: LabelImportOptions = {}
 ): LabelRecord[] {
-  const known = new Set(items.map((item) => labelKey(item)));
+  const known = new Set(
+    items
+      .filter((item) => item.verdict !== undefined)
+      .map((item) => labelKey(item))
+  );
   const judges = [...new Set(items.map((item) => labelQuestion(item)))].sort();
   const previous = new Map(existing.map((label) => [labelKey(label), label]));
   const labeler = options.labeler ?? os.userInfo().username;
@@ -604,13 +640,7 @@ export function checkImportedLabels(
   const seen = new Map<string, string>();
   for (const label of imported) {
     const key = labelKey(label);
-    // A criterion's labels can't be checked against verdicts until its
-    // judge reports criteria; the judge itself must have given verdicts.
-    const judged =
-      known.has(key) ||
-      (label.criterion !== undefined &&
-        known.has(labelKey({ ...label, criterion: undefined })));
-    if (!judged) {
+    if (!known.has(key)) {
       problems.push(
         `${label.source}: the run has no verdict from "${labelQuestion(label)}" for ${describe(label)}${judges.length ? ` (its judges: ${judges.join(', ')})` : ''}.`
       );
@@ -641,15 +671,16 @@ export function checkImportedLabels(
       labeledAt: label.labeledAt ?? labeledAt,
       ...optional('note', label.note),
     };
+    let record: LabelRecord;
     if (label.trial !== undefined) {
-      const value = POINTWISE_SPELLINGS[label.label.toLowerCase()];
+      const value = POINTWISE_SPELLINGS.get(label.label.toLowerCase());
       if (value === undefined) {
         problems.push(
           `${label.source}: label "${label.label}" isn't pass or fail.`
         );
         continue;
       }
-      labels.push({ ...fields, trial: label.trial, label: value });
+      record = { ...fields, trial: label.trial, label: value };
     } else {
       const value = label.label.toLowerCase();
       if (!PAIRWISE_LABELS.includes(value as PairwiseLabel)) {
@@ -658,12 +689,23 @@ export function checkImportedLabels(
         );
         continue;
       }
-      labels.push({
+      record = {
         ...fields,
         baseline: label.baseline!,
         label: value as PairwiseLabel,
-      });
+      };
     }
+    // What the run will store, and where: both checked before any is written.
+    try {
+      parseLabelRecord(record, label.source);
+      labelRecordPath(keyOf(record) as LabelPathFields);
+    } catch (error) {
+      problems.push(
+        `${label.source} can't be stored: ${error instanceof Error ? error.message : String(error)}`
+      );
+      continue;
+    }
+    labels.push(record);
   }
   if (problems.length) {
     const shown = problems.slice(0, 10);
@@ -731,15 +773,23 @@ export function parseCsv(input: string): string[][] {
     cell = '';
     wasQuoted = false;
   };
+  let line = 1;
   for (let i = 0; i < text.length; i++) {
     const char = text[i]!;
+    if (char === '\n') line++;
     if (quoted) {
       if (char === '"' && text[i + 1] === '"') {
         cell += '"';
         i++;
-      } else if (char === '"') quoted = false;
-      else cell += char;
-    } else if (char === '"' && cell === '') {
+      } else if (char === '"') {
+        quoted = false;
+        const next = text[i + 1];
+        if (next !== undefined && !/[,\r\n]/.test(next))
+          throw new Error(
+            `CSV line ${line}: a quoted cell must end at a comma or line break.`
+          );
+      } else cell += char;
+    } else if (char === '"' && cell === '' && !wasQuoted) {
       quoted = true;
       wasQuoted = true;
     } else if (char === ',') endCell();
@@ -750,6 +800,10 @@ export function parseCsv(input: string): string[][] {
       row = [];
     } else cell += char;
   }
+  if (quoted)
+    throw new Error(
+      `CSV line ${line}: a quoted cell has no closing quote, so the rows after it would be lost.`
+    );
   if (cell !== '' || wasQuoted || row.length) {
     endCell();
     rows.push(row);

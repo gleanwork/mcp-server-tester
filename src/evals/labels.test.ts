@@ -16,7 +16,11 @@ import {
   readLabels,
   writeLabels,
 } from './labels.js';
-import { labelRecordPath, readRunDirectory } from './runFormat.js';
+import {
+  labelRecordPath,
+  parseLabelRecord,
+  readRunDirectory,
+} from './runFormat.js';
 import { labelExport, labelImport } from '../cli/commands/label/index.js';
 import { resolveRunArgument } from '../cli/runArgument.js';
 
@@ -34,7 +38,13 @@ afterEach(async () => {
  * keyword judge (it passes answers that name the certificate) and a pairwise
  * judge that prefers the longer answer.
  */
-async function storedRun(options: { redact?: boolean } = {}) {
+async function storedRun(
+  options: {
+    redact?: boolean;
+    /** Add a second judge, which fails on every trial. */
+    brokenJudge?: boolean;
+  } = {}
+) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-labels-'));
   dirs.push(dir);
   const plugin: Plugin = {
@@ -63,6 +73,12 @@ async function storedRun(options: { redact?: boolean } = {}) {
             score: trial.text?.includes(String(judgeOptions.keyword)) ? 1 : 0,
             reasoning: `looked for ${String(judgeOptions.keyword)}`,
           };
+        },
+      },
+      broken: {
+        schema: z.object({}).strict(),
+        async evaluate() {
+          throw new Error('the judge model is down');
         },
       },
     },
@@ -99,7 +115,10 @@ async function storedRun(options: { redact?: boolean } = {}) {
       trials: 2,
       redactStoredResponses: options.redact ?? false,
       servers: { docs: { transport: 'stdio', command: 'docs-server' } },
-      judges: [{ type: 'lb/judge/keyword', keyword: 'certificate' }],
+      judges: [
+        { type: 'lb/judge/keyword', keyword: 'certificate' },
+        ...(options.brokenJudge ? [{ type: 'lb/judge/broken' }] : []),
+      ],
       pairwiseJudges: ['lb/pairwise-judge/longer'],
       variants: [
         { name: 'baseline', servers: ['docs'] },
@@ -246,7 +265,9 @@ describe('labels', () => {
           'labels',
           'lb%2Fpairwise-judge%2Flonger',
           'better',
-          'cause.json'
+          'cause',
+          'vs',
+          'baseline.json'
         )
       )
     ).resolves.toBeDefined();
@@ -522,6 +543,107 @@ describe('labels', () => {
   });
 });
 
+describe('label checks', () => {
+  it("keeps other judges' verdicts when one judge fails, and can't label the failed one", async () => {
+    const t = await storedRun({ brokenJudge: true });
+    const items = judgedItems(await readRunDirectory(t.directory));
+    expect(
+      items.filter((item) => item.judge === 'lb/judge/keyword' && item.verdict)
+    ).toHaveLength(8);
+    expect(
+      items.filter((item) => item.judge === 'lb/judge/broken' && item.verdict)
+    ).toEqual([]);
+    const label = {
+      variant: 'better',
+      caseId: 'cause',
+      trial: 0,
+      label: 'pass',
+      source: 'test',
+    };
+    expect(() =>
+      checkImportedLabels([{ ...label, judge: 'lb/judge/broken' }], items, [])
+    ).toThrow('the run has no verdict from "lb/judge/broken"');
+    expect(
+      checkImportedLabels([{ ...label, judge: 'lb/judge/keyword' }], items, [])
+    ).toHaveLength(1);
+  });
+
+  it('rejects a criterion its judge never reported, and names that look like object keys', async () => {
+    const t = await storedRun();
+    const items = judgedItems(await readRunDirectory(t.directory));
+    const label = {
+      judge: 'lb/judge/keyword',
+      variant: 'better',
+      caseId: 'cause',
+      trial: 0,
+      source: 'test',
+    };
+    expect(() =>
+      checkImportedLabels(
+        [{ ...label, criterion: 'cites-source', label: 'pass' }],
+        items,
+        []
+      )
+    ).toThrow('no verdict from "lb/judge/keyword#cites-source"');
+    for (const value of ['constructor', '__proto__', 'toString'])
+      expect(() =>
+        checkImportedLabels([{ ...label, label: value }], items, [])
+      ).toThrow(`label "${value}" isn't pass or fail.`);
+  });
+
+  it("keeps a name's spaces, so it matches the verdict it labels", () => {
+    expect(
+      parseLabels(
+        'jsonl',
+        JSON.stringify({
+          judge: 'j',
+          variant: ' v ',
+          caseId: ' c',
+          trial: ' 1 ',
+          label: ' pass ',
+        }),
+        'labels.jsonl'
+      )
+    ).toEqual([
+      expect.objectContaining({
+        variant: ' v ',
+        caseId: ' c',
+        trial: 1,
+        label: 'pass',
+      }),
+    ]);
+  });
+
+  it("stores a preference for each baseline, and refuses a record that's both kinds", () => {
+    const fields = {
+      format: 'mst.run/v1',
+      kind: 'label',
+      judge: 'p',
+      variant: 'b',
+      caseId: 'c',
+      split: 'test',
+      labeler: 'ana',
+      labeledAt: '2026-10-30T00:00:00Z',
+      label: 'tie',
+    };
+    const a = parseLabelRecord({ ...fields, baseline: 'a' }, 'a.json');
+    const c = parseLabelRecord({ ...fields, baseline: 'c' }, 'c.json');
+    expect(labelRecordPath(a as never)).not.toBe(labelRecordPath(c as never));
+    expect(() =>
+      parseLabelRecord(
+        { ...fields, baseline: 'a', trial: '../../escaped' },
+        'bad.json'
+      )
+    ).toThrow("bad.json isn't a label");
+    expect(() =>
+      parseLabelRecord(
+        { ...fields, label: 'pass', trial: 0, baseline: 'a' },
+        'both.json'
+      )
+    ).toThrow("both.json isn't a label");
+  });
+});
+
 describe('parseCsv', () => {
   it('reads quoted cells with commas, quotes and line breaks', () => {
     expect(parseCsv('a,b\r\n"x, ""y""","line\nbreak"\r\n,\n')).toEqual([
@@ -529,5 +651,14 @@ describe('parseCsv', () => {
       ['x, "y"', 'line\nbreak'],
       ['', ''],
     ]);
+  });
+
+  it('refuses a quote left open, which would swallow the rows after it', () => {
+    expect(() => parseCsv('a,note\n1,"open\n2,lost\n')).toThrow(
+      'CSV line 4: a quoted cell has no closing quote'
+    );
+    expect(() => parseCsv('a\n"x"y\n')).toThrow(
+      'CSV line 2: a quoted cell must end at a comma or line break.'
+    );
   });
 });

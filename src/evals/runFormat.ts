@@ -338,19 +338,21 @@ const LabelFields = {
 
 /**
  * `labels/<question>/<variant>/<case-id>/<trial>.json`: a person's pass or
- * fail for one trial, or `labels/<question>/<variant>/<case-id>.json`: their
- * preference between the variant and `baseline` for one case. `<question>`
- * is the judge's name, with `#<criterion>` for one criterion.
+ * fail for one trial, or `labels/<question>/<variant>/<case-id>/vs/<baseline>.json`:
+ * their preference between the variant and `baseline` for one case.
+ * `<question>` is the judge's name, with `#<criterion>` for one criterion.
  */
 const LabelRecordSchema = z.union([
   z.looseObject({
     ...LabelFields,
     trial: z.number().int().nonnegative(),
+    baseline: z.never().optional(),
     label: z.enum(POINTWISE_LABELS),
   }),
   z.looseObject({
     ...LabelFields,
     baseline: z.string(),
+    trial: z.never().optional(),
     label: z.enum(PAIRWISE_LABELS),
   }),
 ]);
@@ -375,11 +377,17 @@ export function labelRecordPath(
   const base = path.join(
     'labels',
     segment(labelQuestion(label)),
-    segment(label.variant)
+    segment(label.variant),
+    segment(label.caseId)
   );
-  return 'trial' in label
-    ? path.join(base, segment(label.caseId), `${label.trial}.json`)
-    : path.join(base, `${segment(label.caseId)}.json`);
+  if ('trial' in label) {
+    if (!Number.isInteger(label.trial) || label.trial < 0)
+      throw new Error(`A label's trial must be 0 or more, not ${label.trial}.`);
+    return path.join(base, `${label.trial}.json`);
+  }
+  // A preference names its baseline: a candidate compared with two
+  // baselines (in two runs, say) has a label for each.
+  return path.join(base, 'vs', `${segment(label.baseline)}.json`);
 }
 
 /** Parses a label file's contents; throws with the file's name when it isn't one. */

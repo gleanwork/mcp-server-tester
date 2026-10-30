@@ -20,6 +20,7 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "baseline": { "not": {} },
         "label": { "type": "string", "enum": ["pass", "fail"] }
       },
       "required": [
@@ -50,6 +51,7 @@
         "labeledAt": { "type": "string" },
         "note": { "type": "string" },
         "baseline": { "type": "string" },
+        "trial": { "not": {} },
         "label": { "type": "string", "enum": ["baseline", "candidate", "tie"] }
       },
       "required": [
