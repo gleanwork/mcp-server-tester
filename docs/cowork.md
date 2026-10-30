@@ -220,7 +220,11 @@ For several eval configs, use `batch --configs <files...> --workers 1`.
 
 The Computer Use driver runs in the MST process. For mouse and keyboard input it
 compiles a small Swift helper, once per process, which needs the Xcode Command
-Line Tools (`xcode-select --install`). Screenshots use macOS's `screencapture`
+Line Tools (`xcode-select --install`). If Xcode is installed but its license
+hasn't been accepted, `xcrun` refuses to build, and MST says so. Run
+`sudo xcodebuild -license accept`, or build with the Command Line Tools by
+setting `DEVELOPER_DIR=/Library/Developer/CommandLineTools`. The build sees no
+other variable from your environment. Screenshots use macOS's `screencapture`
 and `sips`. The terminal that runs MST needs Accessibility and Screen Recording
 permission. Nothing else is installed. The source-checkout wrapper is a
 convenience, not required by `run` or `batch`.

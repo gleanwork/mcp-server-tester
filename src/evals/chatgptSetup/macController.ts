@@ -2,7 +2,11 @@ import type { ChatgptApplicationController } from '../chatgpt/driver.js';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
-import { compileSwiftHelper, type NativeHelper } from '../nativeHelper.js';
+import {
+  compileSwiftHelper,
+  NativeHelperBuildError,
+  type NativeHelper,
+} from '../nativeHelper.js';
 import { CHATGPT_CONTROLLER_SOURCE } from './macControllerSource.js';
 
 const ERROR = 'Unable to control the ChatGPT desktop application safely.';
@@ -47,6 +51,8 @@ async function compile(
       source: CHATGPT_CONTROLLER_SOURCE,
     });
   } catch (error) {
+    // A build failure says what to fix on the machine, so it reaches the user.
+    if (error instanceof NativeHelperBuildError) throw error;
     throw controllerError('compile', error);
   }
   const invoke = async (
