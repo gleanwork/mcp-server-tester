@@ -237,6 +237,12 @@ function extensionProblem(
     typeof definition.description !== 'string'
   )
     return `${label}: description must be a string`;
+  if (
+    (kind === 'judges' || kind === 'pairwiseJudges') &&
+    definition.version !== undefined &&
+    (typeof definition.version !== 'string' || definition.version === '')
+  )
+    return `${label}: version must be a non-empty string`;
   if (kind === 'clients' && 'toolOverrides' in definition)
     return `${label}: \`toolOverrides\` is now \`toolMetadata\``;
   if (

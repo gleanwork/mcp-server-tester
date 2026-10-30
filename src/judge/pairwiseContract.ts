@@ -72,6 +72,12 @@ export interface PairwiseJudgeDefinition {
   /** Parses the judge's options. */
   readonly schema: ZodType;
   /**
+   * Changes whenever the judge could compare differently with the same
+   * options, as for `JudgeDefinition.version`. It is part of the judge's
+   * identity in `run.json`.
+   */
+  readonly version?: string;
+  /**
    * Paths in the input this judge needs, such as `case.expected.answer`.
    * When one is missing or empty, the comparison is recorded as skipped.
    * Paths start with `case.`, `baseline.` or `candidate.`.

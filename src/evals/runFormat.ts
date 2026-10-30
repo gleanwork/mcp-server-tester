@@ -111,7 +111,19 @@ const RunRecordSchema = z.looseObject({
       snapshot: z.string().optional(),
     })
   ),
-  judges: z.array(z.unknown()).optional(),
+  judges: z
+    .array(
+      z.looseObject({
+        type: z.string(),
+        level: z.string(),
+        optionsHash: z.string(),
+        identity: z
+          .string()
+          .regex(/^[0-9a-f]{64}$/)
+          .optional(),
+      })
+    )
+    .optional(),
   partial: z.boolean(),
   selection: z.looseObject({}).optional(),
   redactStoredResponses: z.boolean(),
@@ -349,6 +361,21 @@ export function assertUniqueVariantNames(names: readonly string[]): void {
   }
 }
 
+/**
+ * An eval config judge as `run.json` records it: by name and level, with a
+ * hash of its options (which can hold settings that shouldn't be stored),
+ * and its identity: a hash of the judge, its version and its parsed options,
+ * which every score it gives also records (ADR 0009). `identity` is absent
+ * for runs from before MST recorded it, and when the judge's plugin wasn't
+ * loaded.
+ */
+export interface JudgeRecord {
+  type: string;
+  level: string;
+  optionsHash: string;
+  identity?: string;
+}
+
 /** The facts `run.json` records, beyond what the summary has. */
 export interface RunFacts {
   evalName: string;
@@ -370,7 +397,7 @@ export interface RunFacts {
     source?: 'snapshot' | 'live';
     snapshot?: string;
   }>;
-  judges?: Array<{ type: string; level: string; optionsHash: string }>;
+  judges?: JudgeRecord[];
   redactStoredResponses: boolean;
   /** Where the trials were collected (`--env`). Default: `local`. */
   environment?: RunEnvironment;

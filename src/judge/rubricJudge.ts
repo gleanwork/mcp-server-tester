@@ -6,8 +6,15 @@
  */
 import { z } from 'zod';
 import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
+import {
+  DEFAULT_JUDGE_MAX_TOKENS,
+  DEFAULT_JUDGE_MODELS,
+  DEFAULT_JUDGE_TEMPERATURE,
+} from './adapterSupport.js';
 import { createJudge, preflightJudge } from './judgeClient.js';
+import { contentHash } from './judgeIdentity.js';
 import { DEFAULT_JUDGE_PROVIDER, JUDGE_PROVIDER_KINDS } from './judgeTypes.js';
+import { buildJudgePrompt, JUDGE_SYSTEM_PROMPT } from './llmJudge.js';
 import {
   BUILT_IN_RUBRICS,
   resolveRubric,
@@ -41,10 +48,31 @@ const RubricJudgeOptionsSchema = RubricJudgeLLMSchema.extend({
   rubric: RubricSpecSchema,
 }).strict();
 
+/**
+ * The rubric judge's version: what decides its verdict besides its options.
+ * Its prompts, every built-in rubric's text and the defaults it falls back
+ * on, so a change to any of them makes it a different judge. A change to
+ * one rubric changes the version for all of them, which is coarser than it
+ * needs to be but never misses a change.
+ */
+const RUBRIC_JUDGE_VERSION = contentHash({
+  system: JUDGE_SYSTEM_PROMPT,
+  prompt: buildJudgePrompt('{candidate}', '{reference}', '{rubric}'),
+  promptWithoutReference: buildJudgePrompt('{candidate}', null, '{rubric}'),
+  rubrics: BUILT_IN_RUBRICS,
+  defaults: {
+    provider: DEFAULT_JUDGE_PROVIDER,
+    models: DEFAULT_JUDGE_MODELS,
+    maxTokens: DEFAULT_JUDGE_MAX_TOKENS,
+    temperature: DEFAULT_JUDGE_TEMPERATURE,
+  },
+});
+
 export const RUBRIC_JUDGE: JudgeDefinition = {
   description:
     "An LLM grades the answer against a rubric: a built-in one or your own text, with the case's expected answer as reference.",
   schema: RubricJudgeOptionsSchema,
+  version: RUBRIC_JUDGE_VERSION,
   async evaluate({ case: evalCase, trial }, options) {
     const { rubric, ...config } = RubricJudgeOptionsSchema.parse(options);
     const result = await createJudge(config).evaluate(

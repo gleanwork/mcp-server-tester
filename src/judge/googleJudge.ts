@@ -1,6 +1,7 @@
 import type { JudgeConfig } from './judgeTypes.js';
 import type { JudgeCompletionAdapter } from './llmJudge.js';
 import {
+  DEFAULT_GOOGLE_JUDGE_MODEL,
   DEFAULT_JUDGE_MAX_TOKENS,
   DEFAULT_JUDGE_TEMPERATURE,
   loadJudgeSdk,
@@ -51,7 +52,7 @@ export function googleCompletion(
   return async ({ system, prompt }) => {
     const sdk = await loadGoogleSdk();
     const gemini = new sdk.GoogleGenerativeAI(apiKey).getGenerativeModel({
-      model: config.model ?? 'gemini-2.0-flash',
+      model: config.model ?? DEFAULT_GOOGLE_JUDGE_MODEL,
       generationConfig: {
         maxOutputTokens: config.maxTokens ?? DEFAULT_JUDGE_MAX_TOKENS,
         temperature: config.temperature ?? DEFAULT_JUDGE_TEMPERATURE,
