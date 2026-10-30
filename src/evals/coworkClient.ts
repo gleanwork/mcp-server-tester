@@ -10,6 +10,7 @@ import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
 import { verifyCoworkMcpServers } from './cowork/mcpReadiness.js';
 import { clientSecretValues, redactClientError } from './clientSecrets.js';
 import {
+  RESET_RETRY_DELAYS_MS,
   requireIdenticalClientSettings,
   runDesktopBatch,
   type DesktopCaseOutcome,
@@ -362,6 +363,12 @@ async function runBatch(
       },
       secrets,
       resetVerb: 'reset',
+      // On Linux, a reset that fails once (accessibility_scan_timeout on a
+      // slow desktop) would otherwise skip every later case in the batch.
+      // macOS already falls back to restarting the app.
+      ...(config.computerUseProvider === 'linux-desktop'
+        ? { resetRetryDelaysMs: RESET_RETRY_DELAYS_MS }
+        : {}),
       async prepare() {
         if (env.MST_COWORK_RECOVER === '1') await platform.recover();
         const session = await platform.prepare({

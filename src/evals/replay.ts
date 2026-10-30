@@ -47,13 +47,17 @@ export interface RunReplay {
   resume?: boolean;
 }
 
-/** A trial whose shard ended without it (ADR 0004): what `--resume` collects. */
+/**
+ * What `--resume` collects: a trial whose shard ended without it (ADR 0004),
+ * or one the client never submitted, an infrastructure failure such as a
+ * batch blocked after a failed reset. A case the client ran and failed is
+ * kept: that is the trial's result.
+ */
 export function isMissingTrial(trial: TrialRecord | undefined): boolean {
-  return (
-    trial === undefined ||
-    (trial.clientDiagnostics as { failureKind?: unknown } | undefined)
-      ?.failureKind === 'missing'
-  );
+  const kind = (
+    trial?.clientDiagnostics as { failureKind?: unknown } | undefined
+  )?.failureKind;
+  return trial === undefined || kind === 'missing' || kind === 'not-submitted';
 }
 
 /**

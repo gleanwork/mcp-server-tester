@@ -50,6 +50,7 @@ function fakeClient(
     lease: { directory: leaseDirectory, file: 'fake-desktop.lock' },
     secrets: [SECRET],
     resetVerb: 'reset',
+    resetRetryDelaysMs: [0, 0],
     async prepare() {
       events.push('prepare');
       return { id: 'session' };
@@ -314,7 +315,43 @@ describe('runDesktopBatch', () => {
     });
   });
 
+  it('retries a failed reset before giving up on the rest of the batch', async () => {
+    let resets = 0;
+    const client = fakeClient({
+      async runCase(_session, request, index) {
+        client.events.push(`case ${index + 1}`);
+        return index === 0
+          ? {
+              result: { finalText: '', events: [], error: 'boom' },
+              continuation: 'reset',
+            }
+          : ok(request.caseId);
+      },
+      async reset(_session, index) {
+        resets += 1;
+        client.events.push(`reset before ${index + 1}`);
+        if (resets < 3) throw new Error('accessibility_scan_timeout');
+      },
+    });
+    const results = await runDesktopBatch(client, requests(3));
+    expect(client.events).toEqual([
+      'prepare',
+      'case 1',
+      'reset before 2',
+      'reset before 2',
+      'reset before 2',
+      'case 2',
+      'case 3',
+      'dispose session',
+    ]);
+    expect(results.slice(1).map((r) => r.error)).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('submits nothing more when the app cannot be reset', async () => {
+    let resets = 0;
     const client = fakeClient({
       async runCase(_session, _request, index) {
         client.events.push(`case ${index + 1}`);
@@ -324,11 +361,14 @@ describe('runDesktopBatch', () => {
         };
       },
       async reset() {
+        resets += 1;
         throw new Error(`reset refused with ${SECRET}`);
       },
     });
     const results = await runDesktopBatch(client, requests(3));
     expect(client.events).toEqual(['prepare', 'case 1', 'dispose session']);
+    // The first reset and both retries.
+    expect(resets).toBe(3);
     for (const result of results.slice(1)) {
       expect(result.error).toMatch(
         /^Not submitted because the Fake app could not be reset after an earlier failed case: /

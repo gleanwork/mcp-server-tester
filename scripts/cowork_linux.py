@@ -43,6 +43,15 @@ SKIPPED_ROLES = {"table", "tree table"}
 # measured, in about a second).
 DEEP_LINK_PROMPT_CHARS = 14_336
 
+# How much of a pasted prompt's end the composer must show for the paste to
+# have landed.
+PASTE_CHECK_CHARS = 200
+
+# How long a paste may take to land: well past the second a long one takes,
+# well short of the submit's whole budget, which a paste that never lands
+# would otherwise spend.
+PASTE_TIMEOUT_SECONDS = 30
+
 # X's ControlMask: AT-SPI locks it around a key, as a held Ctrl.
 CONTROL_MASK = 1 << 2
 
@@ -124,15 +133,18 @@ class Desktop:
             raise DriverFailure("action_acknowledgement_uncertain")
 
     def composer_text(self, entry) -> str:
-        """The composer's text: its paragraphs' names, one per line."""
-        lines, pending = [], [entry]
+        """The composer's text: its text nodes' names in reading order, one per line."""
+        def children(node):
+            return [node.get_child_at_index(index) for index in range(node.get_child_count())]
+
+        # Depth first, each node before its children and those before its
+        # next sibling: a link's text sits where the link does.
+        lines, pending = [], children(entry)[::-1]
         while pending:
             node = pending.pop()
-            for index in reversed(range(node.get_child_count())):
-                child = node.get_child_at_index(index)
-                if child.get_role_name() in ("static", "text") and child.get_name():
-                    lines.append(child.get_name())
-                pending.append(child)
+            if node.get_role_name() in ("static", "text") and node.get_name():
+                lines.append(node.get_name())
+            pending.extend(children(node)[::-1])
         return "\n".join(lines)
 
     def paste_prompt(self, prompt: str, timeout: float) -> None:
@@ -165,12 +177,16 @@ class Desktop:
                 self.api.generate_keyboard_event(0x76, None, self.api.KeySynthType.SYM)
             finally:
                 self.api.generate_keyboard_event(CONTROL_MASK, None, self.api.KeySynthType.UNLOCKMODIFIERS)
-            # The pasted text, up to whitespace: the composer's paragraphs
-            # don't keep blank lines. Claude records the exact prompt, which
-            # MST checks against the case's.
-            expected = " ".join(prompt.split())
+            # The paste has landed once the composer ends with the prompt's
+            # last characters, up to whitespace (the composer's paragraphs
+            # don't keep blank lines). Not the whole text: the composer
+            # renders a pasted prompt (links, a slash command) and its
+            # accessibility tree needn't spell it out verbatim, and a false
+            # "not pasted" loses the case. Claude records the exact prompt,
+            # and MST binds the task by it, reporting any difference.
+            tail = " ".join(prompt.split())[-PASTE_CHECK_CHARS:]
             deadline = time.monotonic() + timeout
-            while " ".join(self.composer_text(entry).split()) != expected:
+            while not " ".join(self.composer_text(entry).split()).endswith(tail):
                 if time.monotonic() > deadline:
                     raise DriverFailure("prompt_not_pasted")
                 time.sleep(0.2)
@@ -404,7 +420,8 @@ class Driver:
             # Too long for the link: an empty task, then the prompt pasted.
             self.action(lambda: self.desktop.open_prompt("", self.remaining()))
             self.wait_for_empty_composer()
-            self.action(lambda: self.desktop.paste_prompt(prompt, self.remaining()))
+            self.action(lambda: self.desktop.paste_prompt(
+                prompt, min(self.remaining(), PASTE_TIMEOUT_SECONDS)))
         revealed = False
         while True:
             self.remaining()

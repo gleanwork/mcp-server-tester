@@ -933,6 +933,24 @@ describe('a run in docker (a fake Docker CLI)', () => {
     );
   }, 120_000);
 
+  it('retries the token until the new container lets the desktop user write it', async () => {
+    // On a slow machine, MST can write the token before the entrypoint has
+    // given /run/mst to the desktop user; that used to lose the shard.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { dir, configPath } = await fixture({
+      FAKE_DOCKER_TOKEN_DENIALS: '2',
+    });
+    const result = await runEval({
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      env: 'docker',
+      envOptions: { image: 'mst-test:1' },
+      report: false,
+    });
+    expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
+  }, 120_000);
+
   it("fails a shard whose desktop doesn't come up, with the image's reason", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { dir, configPath, root } = await fixture({
