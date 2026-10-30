@@ -23,6 +23,7 @@ import {
   startToolOptimization,
 } from './storedOptimization.js';
 import { runToolOptimization } from './toolOptimization.js';
+import type { ProposeVariantsContext } from './toolOptimization.js';
 
 const FIXTURES = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -394,6 +395,67 @@ describe('stored tool optimization', () => {
       /judges or their options changed/
     );
     expect(await runIds(optimization.evalDirectory)).toEqual(before);
+  }, 120_000);
+
+  it("refuses a round when the base variant's setup changed, not for its own judges", async () => {
+    const { configPath } = await evalDir();
+    // The base variant's own judges: a round's candidates have them too,
+    // under the candidates' names.
+    await editJson(configPath, (config) => {
+      config.variants = [
+        {
+          name: 'base',
+          judges: [{ type: 'usecase/judge/keywords', keywords: ['outage'] }],
+        },
+        { name: 'other' },
+      ];
+    });
+    const optimization = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    const { round } = await optimization.tryCandidates([verbose]);
+    expect(round.candidates.map((c) => c.variant.id)).toEqual(['verbose']);
+
+    await editJson(configPath, (config) => {
+      (config.variants as Array<Record<string, unknown>>)[0]!.inputTemplate =
+        'Please: {{input}}';
+    });
+    const before = await runIds(optimization.evalDirectory);
+    await expect(optimization.tryCandidates([concise])).rejects.toThrow(
+      /base variant's client, model, options, input template or judges changed/
+    );
+    expect(await runIds(optimization.evalDirectory)).toEqual(before);
+  }, 120_000);
+
+  it('gives proposeVariants the stored, redacted history', async () => {
+    const { configPath } = await evalDir();
+    const seen: ProposeVariantsContext[] = [];
+    await runToolOptimization({
+      evalConfig: target(configPath),
+      variants: [verbose],
+      maxRounds: 2,
+      proposeVariants: async (context) => {
+        seen.push(context);
+        return [];
+      },
+    });
+    expect(seen).toHaveLength(1);
+    const [context] = seen;
+    expect(context!.round).toBe(1);
+    expect(
+      context!.history.map((r) => r.candidates.map((c) => c.variant.id))
+    ).toEqual([['verbose']]);
+    const baselineCases = context!.baseline.caseResults;
+    // Without the held-out case, and as stored: traces without answers or
+    // tool outputs.
+    expect(baselineCases.map((c) => c.id)).not.toContain('case-6');
+    const trace = baselineCases[0]!.trace;
+    expect(trace).toBeDefined();
+    expect(trace!.finalText).toBeUndefined();
+    const candidate = context!.history[0]!.candidates[0]!.result.caseResults;
+    const events = candidate.flatMap((c) => c.trace?.events ?? []);
+    expect(events.some((event) => event.kind === 'tool_call')).toBe(true);
+    expect(events.every((event) => !('output' in event))).toBe(true);
   }, 120_000);
 
   it('runs a round that did not finish again, and nothing else until then', async () => {
