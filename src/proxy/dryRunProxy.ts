@@ -98,6 +98,33 @@ export function staticToken(token: string): TokenSource {
   };
 }
 
+/** The token file is missing, not a file, or malformed. Its message names no token. */
+export class TokenFileError extends Error {
+  override name = 'TokenFileError';
+}
+
+/**
+ * Why the proxy couldn't start, safe to log: MST's own token-file error, or an
+ * error's class with a network error's code and an HTTP status. Never an
+ * upstream error's message, which can carry a token or a response body.
+ */
+export function describeStartupFailure(error: unknown): string {
+  if (error instanceof TokenFileError) return error.message;
+  if (!(error instanceof Error)) return typeof error;
+  const parts = [error.name];
+  const status =
+    (error as { code?: unknown; status?: unknown }).status ??
+    (error as { code?: unknown }).code;
+  if (typeof status === 'number') parts.push(`HTTP ${status}`);
+  else if (typeof status === 'string' && /^[A-Z_]+$/.test(status))
+    parts.push(status);
+  const cause = (error as { cause?: unknown }).cause;
+  const causeCode = (cause as { code?: unknown } | undefined)?.code;
+  if (typeof causeCode === 'string' && /^[A-Z_]+$/.test(causeCode))
+    parts.push(causeCode);
+  return parts.join(' ');
+}
+
 /**
  * The token in `path`, re-read whenever the file is replaced. MST replaces it
  * atomically (write, then rename), so a read never sees a partial file.
@@ -114,16 +141,17 @@ export function fileToken(
       info = lstatSync(path, { bigint: true });
     } catch {
       if (token) return token;
-      throw new Error('Cannot read the token file.');
+      throw new TokenFileError('Cannot read the token file.');
     }
     if (!info.isFile() || info.size > MAX_TOKEN_FILE_BYTES)
-      throw new Error('The token file is not a regular file.');
+      throw new TokenFileError('The token file is not a regular file.');
     const next = `${info.ino}:${info.mtimeNs}:${info.size}`;
     if (next !== stamp) {
       const parsed = TokenFileSchema.safeParse(
         JSON.parse(readFileSync(path, 'utf8'))
       );
-      if (!parsed.success) throw new Error('The token file is malformed.');
+      if (!parsed.success)
+        throw new TokenFileError('The token file is malformed.');
       token = parsed.data.accessToken;
       stamp = next;
     }
