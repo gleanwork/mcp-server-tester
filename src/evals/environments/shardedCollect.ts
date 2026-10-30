@@ -279,7 +279,7 @@ export async function collectInEnvironment(
         if (!outcome.ok)
           reasons.set(index, outcome.reason ?? 'it did not finish');
         log(
-          `shard ${index + 1}/${count}: ${outcome.ok ? 'done' : `stopped: ${outcome.reason}`}`
+          `shard ${index + 1}/${count}: ${outcome.ok ? `done${outcome.note ? `, but ${outcome.note}` : ''}` : `stopped: ${outcome.reason}`}`
         );
       })
     );
