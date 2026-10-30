@@ -29,6 +29,39 @@ function nextCommand(stdout: unknown): string[] {
   return line!.trim().split(' ');
 }
 
+/**
+ * Splits a printed command into words as a POSIX shell does, for the quoting
+ * `mst` prints: '...', and \' between quoted parts.
+ */
+function shellWords(command: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let quoted = false;
+  let escaped = false;
+  let started = false;
+  for (const char of command) {
+    if (escaped) {
+      word += char;
+      escaped = false;
+    } else if (quoted) {
+      if (char === "'") quoted = false;
+      else word += char;
+    } else if (char === "'") {
+      quoted = true;
+      started = true;
+    } else if (char === '\\') {
+      escaped = true;
+      started = true;
+    } else if (char === ' ') {
+      if (started || word) words.push(word);
+      word = '';
+      started = false;
+    } else word += char;
+  }
+  if (started || word) words.push(word);
+  return words;
+}
+
 describe('mst optimize', () => {
   let project: BintasticProject;
   let files: Record<string, string>;
@@ -244,6 +277,92 @@ describe('mst optimize', () => {
       'utf8'
     );
     expect(markdown).toContain('It ended when the variant budget ran out');
+  }, 120_000);
+
+  it('prints Next: commands that keep every store flag, quoted, and records the proposer', async () => {
+    // A secrets file is found from --root-dir.
+    await project.write({
+      'my evals': { ...files, "it's secret.json": '{}' },
+    });
+    const start = await runBin(
+      'optimize',
+      'start',
+      '-c',
+      'my evals/eval.json',
+      '--root-dir',
+      'my evals',
+      '--output-dir',
+      'my out',
+      '--results',
+      'file:my store',
+      '--store',
+      'my creds',
+      '--secrets-file',
+      "it's secret.json",
+      '--max-variants',
+      '2'
+    );
+    expect(start.stderr).not.toMatch(/error/i);
+    expect(start.exitCode).toBe(0);
+    const line = String(start.stdout).match(
+      /Next: mst (optimize evidence [^\n]+)/
+    )?.[1];
+    expect(line).toBeDefined();
+    const next = shellWords(line!);
+    const id = next[next.indexOf('--id') + 1];
+    expect(next).toEqual([
+      'optimize',
+      'evidence',
+      '-c',
+      'my evals/eval.json',
+      '--output-dir',
+      'my out',
+      '--root-dir',
+      'my evals',
+      '--secrets-file',
+      "it's secret.json",
+      '--store',
+      'my creds',
+      '--results',
+      'file:my store',
+      '--id',
+      id,
+    ]);
+
+    // The command as an agent copies it reopens the same optimization.
+    const evidence = await runBin(...next);
+    expect(evidence.stderr).not.toMatch(/error/i);
+    expect(evidence.exitCode).toBe(0);
+    expect(evidence.stdout).toContain('### search');
+
+    const tried = await runBin(
+      'optimize',
+      'try',
+      'round-0.json',
+      ...next.slice(2),
+      '--proposer',
+      'Ada'
+    );
+    expect(tried.stderr).not.toMatch(/error/i);
+    expect(tried.exitCode).toBe(0);
+    const record = JSON.parse(
+      await fs.readFile(
+        path.join(
+          project.baseDir,
+          'my out',
+          'optimizations',
+          id!,
+          'optimization.json'
+        ),
+        'utf8'
+      )
+    ) as { rounds: Array<{ proposer: string }> };
+    expect(record.rounds.map((round) => round.proposer)).toEqual(['Ada']);
+    // --results reached every run, the round's too.
+    const stored = await fs.readdir(path.join(project.baseDir, 'my store'), {
+      recursive: true,
+    });
+    expect(stored.length).toBeGreaterThan(0);
   }, 120_000);
 
   it('refuses bad flags and input, and finishes with nothing tried', async () => {
