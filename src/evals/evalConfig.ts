@@ -150,7 +150,7 @@ export interface EvalConfig {
    */
   servers?: EvalServerConfig[];
   /**
-   * The client under test: `mst`, `claude-code`, `cowork`, `chatgpt`, or a
+   * The client under test: `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`, or a
    * plugin's `<namespace>/client/<name>`. @default 'claude-code'
    */
   client?: string;

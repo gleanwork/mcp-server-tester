@@ -237,6 +237,7 @@ beforeEach(() => {
       readiness: {
         executionPolicy: POLICY,
         builtinToolPolicy: { disabledPlugins: [], webSearch: 'disabled' },
+        inference: 'api-key',
         login: 'verified',
         mcpPreflight: [],
       },

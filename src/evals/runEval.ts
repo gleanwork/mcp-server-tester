@@ -910,9 +910,18 @@ export async function evalResultStore(options: {
   rootDir?: string;
   pluginPaths?: string[];
   results?: string;
+  /**
+   * The datasets were loaded elsewhere (a detached run's coordinator): a
+   * `file` dataset's path isn't checked, as it needn't exist here.
+   */
+  skipDatasetValidation?: boolean;
 }): Promise<{ evalName: string; store: RunStore | undefined }> {
   const rootDir = options.rootDir ?? process.cwd();
-  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  const skipDatasetValidation = options.skipDatasetValidation === true;
+  const { name } = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation,
+  });
   const store = await gradeResultStore(
     {
       configPath: options.configPath,
@@ -920,7 +929,8 @@ export async function evalResultStore(options: {
       ...(options.pluginPaths ? { pluginPaths: options.pluginPaths } : {}),
       ...(options.results ? { results: options.results } : {}),
     },
-    rootDir
+    rootDir,
+    skipDatasetValidation
   );
   return { evalName: name, store };
 }
@@ -1071,6 +1081,8 @@ function workerPluginsOf(
 export interface PreparedGrading {
   /** The eval config as its file has it, for the workers to load. */
   configFile: { name: string } & Record<string, unknown>;
+  /** Its client, as its shared configs (`extends`) set it: the environment runs that client's image. */
+  client?: string;
   /** The datasets, as loaded: one per eval config source, in order. */
   datasets: EvalDataset[];
   /** The stored run being graded. */
@@ -1172,7 +1184,12 @@ export async function resumeRun(
   options: ResumeRunOptions
 ): Promise<RunEvalResult> {
   const rootDir = options.rootDir ?? process.cwd();
-  const { name } = loadEvalConfig(options.configPath, { rootDir });
+  // Datasets loaded where a detached run started: their paths aren't here.
+  const loadedElsewhere = options.loadedDatasets !== undefined;
+  const { name } = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation: loadedElsewhere,
+  });
   const evalDirectory =
     options.outputDir ?? path.join(rootDir, '.mcp-test-results', name);
   const directory = await locateRun(
@@ -1180,7 +1197,7 @@ export async function resumeRun(
     name,
     evalDirectory,
     rootDir,
-    await gradeResultStore(options, rootDir)
+    await gradeResultStore(options, rootDir, loadedElsewhere)
   );
   const { run, summary: stored } = await readRunDirectory(directory);
   if (run.evalName !== name)
@@ -1608,6 +1625,7 @@ async function evaluate(
         ) as PreparedGrading['configFile']),
         ...(loadedConfig.settings ? { settings: loadedConfig.settings } : {}),
       },
+      ...(resolvedConfig.client ? { client: resolvedConfig.client } : {}),
       datasets: canonicalDatasets.map(({ dataset }) => dataset),
       replay: regrade,
       ...workerPluginsOf(loadedConfig, options.pluginPaths, {

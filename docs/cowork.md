@@ -756,6 +756,11 @@ read once, when the client starts, and is never renewed. `requestTimeoutMs`
 (default 120 seconds) bounds each request; raise it for tools slower than that,
 so the client's own tool limit applies instead.
 
+The proxy connects to the upstream server before it serves its client. If
+that fails, or its token file isn't there yet, it tries again after 2 and 5
+seconds, then exits; each failure goes to stderr with its kind (an error
+class, a network code or an HTTP status), never a token or response body.
+
 `dryRunProxyServer()` (from `@gleanwork/mcp-server-tester/evals`) returns the
 stdio server entry. It holds the path of a token file, never a token:
 

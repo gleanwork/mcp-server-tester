@@ -55,6 +55,12 @@ if (command === 'image') {
       context,
       tag: rest[rest.indexOf('--tag') + 1],
       plugins: fs.existsSync(plugins) ? fs.readdirSync(plugins).sort() : null,
+      // Which of MST's images: only ChatGPT's is recorded, so Cowork's builds read as before.
+      ...(/ChatGPT/.test(
+        fs.readFileSync(path.join(rest.at(-1), 'Dockerfile'), 'utf8')
+      )
+        ? { desktop: 'chatgpt' }
+        : {}),
     })}\n`
   );
 } else if (command === 'run') {
@@ -145,8 +151,13 @@ if (command === 'image') {
       }
     );
     child.on('close', (code) => process.exit(code ?? 1));
-  } else if (['chown', 'pkill'].includes(argv[0])) {
+  } else if (
+    ['chown', 'pkill', '/opt/mst/bin/desktop-session'].includes(argv[0])
+  ) {
     // Ownership and processes aren't modelled.
+  } else if (argv[0] === 'install' && argv[1] === '-d') {
+    // `install -d [-o u -g g -m mode] dir`: the directory, without ownership.
+    fs.mkdirSync(inside(name, argv.at(-1)), { recursive: true });
   } else {
     const result = spawnSync(
       argv[0],

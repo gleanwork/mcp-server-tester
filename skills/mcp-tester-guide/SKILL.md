@@ -26,7 +26,7 @@ MST uses these terms in its API, config keys, CLI and reports. Use them, and not
 | case           | One input for a client to act on, with what is expected                                    | scenario, test     |
 | input          | The user's request, sent to the client as its prompt                                       | scenario           |
 | expected       | A case's ground truth: an answer, rubric criteria                                          | golden             |
-| client         | The MCP client application under test: `mst`, `claude-code`, `cowork`, `chatgpt`           | host               |
+| client         | The MCP client application under test: `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`  | host               |
 | model          | The LLM the client runs, set beside the client                                             | engine             |
 | variant        | One setup an eval tests: client, model and options, servers, tool metadata                 | arm                |
 | baseline       | The variant the others are compared with (the first, unless `baseline` names one)          | control            |
@@ -316,4 +316,4 @@ Full list: `docs/migrations/migration-2.0.md`.
 - **A server array.** `servers` is a map keyed by label; variants list labels.
 - **Secrets in configs.** Use `accessTokenEnv`, the environment, or `--secrets-file`.
 - **`runEvalDataset(dataset, mcp)`.** It takes two objects: `runEvalDataset({ dataset, ... }, { mcp, testInfo })`.
-- **A non-mst client in Playwright.** `runEvalDataset` runs only `mst`. Run `claude-code`, `cowork`, `chatgpt` and plugin clients with `mst run`.
+- **A non-mst client in Playwright.** `runEvalDataset` runs only `mst`. Run `claude-code`, `codex`, `cowork`, `chatgpt` and plugin clients with `mst run`.

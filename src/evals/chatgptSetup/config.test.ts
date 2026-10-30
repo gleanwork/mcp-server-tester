@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import { chatgptServers } from './config.js';
+import { renderCodexConfig } from '../codexSetup/config.js';
 
 const servers: MCPConfig[] = [
   {
@@ -46,7 +47,6 @@ describe('ChatGPT server translation', () => {
     ['a data dir placeholder', { env: { DATA: '${dataDir}' } }],
     ['files', { files: { 'a.json': {} } }],
     ['auth', { auth: { accessTokenEnv: 'TOKEN' } }],
-    ['minTools', { minTools: 4 }],
   ])('rejects a client-resolved stdio eval server with %s', (_kind, change) => {
     expect(() =>
       chatgptServers(
@@ -54,6 +54,23 @@ describe('ChatGPT server translation', () => {
         {}
       )
     ).toThrow('ChatGPT does not support client-resolved stdio eval servers');
+  });
+  it("keeps a plain stdio server's minTools for the preflight, as for a dry-run proxy", () => {
+    const mapped = chatgptServers(
+      [
+        {
+          transport: 'stdio',
+          label: 'slack',
+          command: 'node',
+          args: ['proxy.js', '--token-file', '/private/slack.json'],
+          minTools: 4,
+        },
+      ],
+      {}
+    );
+    expect(mapped.servers[0]).toMatchObject({ label: 'slack', minTools: 4 });
+    // MST's readiness rule only: never written for the app.
+    expect(renderCodexConfig(mapped.servers)).not.toContain('minTools');
   });
   it.each(['cua_repl', 'codex'])(
     'rejects configured servers impersonating built-in namespace %s',

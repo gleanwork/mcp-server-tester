@@ -152,6 +152,7 @@ export async function collectInEnvironment(
     shards: count,
     keep: environment.keep,
     settings: settingsFor(options.evalConfig.settings, environment.name),
+    ...(options.evalConfig.client ? { client: options.evalConfig.client } : {}),
   });
   const reasons = new Map<number, string>();
   const outcomes: ShardOutcome[] = [];

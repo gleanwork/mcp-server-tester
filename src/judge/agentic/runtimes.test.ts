@@ -326,8 +326,8 @@ describe('codexRuntime', () => {
     clearLLMEnv();
     vi.stubEnv('OPENAI_API_KEY', 'sk-test');
     vi.stubEnv('MST_JUDGE_SANDBOX', 'container');
-    const { codexRuntime, codexSandboxMode } =
-      await import('./codexRuntime.js');
+    const { codexRuntime } = await import('./codexRuntime.js');
+    const { codexSandboxMode } = await import('./codexSandbox.js');
     await codexRuntime().run({
       workspace: root,
       prompt: 'P',
