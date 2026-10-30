@@ -316,6 +316,8 @@ The library owns the optimization mechanics; your `proposeVariants` callback own
 
 To run the optimization on a real client instead of the SDK client, give it an eval config: `runToolOptimization({ evalConfig: { configPath }, variants })`. See the [API reference](./api-reference.md#runtooloptimizationoptions-context--runtooloptimizationevaloptions).
 
+For an agent working in a terminal, `mst optimize` runs the same optimization one step at a time, with no script: `start` measures the current metadata, `evidence` prints what the next candidates can learn from, `try <file>` runs a round, and `finish` writes the recommendation. The agent reads and writes between steps, so it is the proposer. See [`optimize`](./cli.md#optimize---improve-tool-metadata).
+
 ```typescript snippet=snippets/tool-optimization.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
 import {

@@ -235,7 +235,7 @@ This installs skills globally so they're available across all your projects. Fou
 | `mcp-tester-guide`           | Reference: vocabulary, config, fixtures, matchers, eval configs, CLI, 1.x renames   |
 | `write-mcp-test`             | Write Playwright tests that call tools directly and check them with matchers        |
 | `write-mcp-eval`             | Write eval datasets and eval configs: cases a client and model act on, and variants |
-| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `runToolOptimization`         |
+| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `mst optimize`                |
 
 Compatible with Claude Code, Cursor, Windsurf, Copilot, and [40+ other AI agents](https://github.com/nicepkg/nice-skills).
 
