@@ -1334,6 +1334,13 @@ export async function resumeRun(
     options?: Record<string, unknown>;
   };
   const env = options.env ?? recorded.name ?? LOCAL_ENVIRONMENT;
+  // Only an environment collects a run's trials (ADR 0004). In the local
+  // environment a resume would grade the stored failures again and collect
+  // nothing.
+  if (env === LOCAL_ENVIRONMENT)
+    throw new Error(
+      `Run ${run.runId} has ${missing} trial${missing === 1 ? '' : 's'} to collect, but a resume collects trials only in an environment, and this one would run locally. Name one with --env, or run those cases again with mst run --case.`
+    );
   const envOptions =
     options.envOptions ??
     Object.fromEntries(
