@@ -650,12 +650,19 @@ describe('label checks', () => {
     ).rejects.toThrow('the run has no verdict from "lb/judge/keyword"');
   });
 
-  it('says when the judge asked for failed on every trial', async () => {
-    const failed = await storedRun({ keyword: { down: true } });
+  it('says which judges asked for failed every time they ran', async () => {
+    const failed = await storedRun({
+      keyword: { down: true },
+      brokenJudge: true,
+    });
     await expect(
-      labelExport(failed.directory, { judge: ['lb/judge/keyword'] }, () => {})
+      labelExport(
+        failed.directory,
+        { judge: ['lb/judge/keyword', 'lb/judge/broken', 'lb/judge/typo'] },
+        () => {}
+      )
     ).rejects.toThrow(
-      'has no verdicts from lb/judge/keyword (it failed on all 8 trials it judged); its judges are lb/pairwise-judge/longer.'
+      'has no verdicts from lb/judge/keyword, lb/judge/broken, lb/judge/typo (lb/judge/keyword failed all 8 times it ran; lb/judge/broken failed all 8 times it ran); its judges are lb/pairwise-judge/longer.'
     );
   });
 

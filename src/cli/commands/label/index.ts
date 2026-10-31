@@ -191,9 +191,15 @@ export async function labelExport(
           .map((item) => labelQuestion(item))
       ),
     ].sort();
-    const failed = all.filter(wanted).length;
+    // Each judge asked for that ran, but failed every time.
+    const failed = [...judges].flatMap((name) => {
+      const runs = all.filter(
+        (item) => item.judge === name || labelQuestion(item) === name
+      ).length;
+      return runs ? [`${name} failed all ${runs} times it ran`] : [];
+    });
     throw new Error(
-      `Run ${stored.run.runId} has no verdicts from ${[...judges].join(', ')}${failed ? ` (it failed on all ${failed} trials it judged)` : ''}${names.length ? `; its judges are ${names.join(', ')}` : ''}.`
+      `Run ${stored.run.runId} has no verdicts from ${[...judges].join(', ')}${failed.length ? ` (${failed.join('; ')})` : ''}${names.length ? `; its judges are ${names.join(', ')}` : ''}.`
     );
   }
   if (stored.run.redactStoredResponses)
