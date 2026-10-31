@@ -75,27 +75,28 @@ const VERDICT_FIRST =
  * A model sometimes quotes words in its reasoning without escaping the
  * quotes, so its answer isn't JSON, though its verdict is plain. This reads
  * an answer that is exactly the two fields, in either order, with one
- * `"verdict":` key in all its text. Anything else isn't read: a second
- * `"verdict":` may be the reasoning quoting one, or a second object, and
- * the verdict must be the model's own.
+ * `"verdict":` key in all its text and nothing shaped like a key (`"name":`)
+ * in its reasoning. Anything else isn't read: a second `"verdict":` may be
+ * the reasoning quoting one, or a second object; a key in the reasoning may
+ * be another field, or quoted JSON with a verdict of its own; and the
+ * verdict must be the model's own.
  */
 function malformedAnswer(
   text: string
 ): { verdict: QuestionVerdict; reasoning: string } | null {
   if ((text.match(/"verdict"\s*:/g) ?? []).length !== 1) return null;
   const first = REASONING_FIRST.exec(text);
-  if (first)
-    return {
-      reasoning: first[1]!,
-      verdict: first[2]!.toLowerCase() as QuestionVerdict,
-    };
-  const last = VERDICT_FIRST.exec(text);
-  return last
-    ? {
-        verdict: last[1]!.toLowerCase() as QuestionVerdict,
-        reasoning: last[2]!,
-      }
-    : null;
+  const last = first ? null : VERDICT_FIRST.exec(text);
+  const answer = first
+    ? { reasoning: first[1]!, verdict: first[2]! }
+    : last
+      ? { verdict: last[1]!, reasoning: last[2]! }
+      : null;
+  if (!answer || /"[^"\s]+"\s*:/.test(answer.reasoning)) return null;
+  return {
+    verdict: answer.verdict.toLowerCase() as QuestionVerdict,
+    reasoning: answer.reasoning,
+  };
 }
 
 /**
@@ -132,8 +133,9 @@ export function parseQuestionAnswer(
     const parsed = AnswerSchema.safeParse(normalized);
     if (parsed.success) return parsed.data;
   }
-  // Valid JSON was the model's answer, right or wrong.
-  const malformed = json ? null : malformedAnswer(cleaned);
+  // Valid JSON was the model's answer, right or wrong, and a cut-off answer
+  // has no verdict of its own yet.
+  const malformed = json || truncated ? null : malformedAnswer(cleaned);
   if (malformed) return malformed;
   throw new Error(
     truncated

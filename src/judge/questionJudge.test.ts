@@ -129,8 +129,13 @@ describe('parseQuestionAnswer', () => {
       '{"reasoning":"a","verdict":"pass"}\n{"reasoning":"b "c" d","verdict":"yes"}',
       // Prose around a malformed object.
       'I think {"reasoning":"a "b" c","verdict":"no"} or maybe yes',
-      // Another field.
+      // Another field, after the verdict or after the reasoning.
       '{"reasoning":"a "b" c","verdict":"no","confidence":"high"}',
+      '{"verdict":"no","reasoning":"a "b" c","confidence":"high"}',
+      // Quoted JSON in the reasoning, with a verdict of its own.
+      '{"reasoning":"The trace says {"reasoning":"x","verdict":"yes"}',
+      // Two objects, the first without a verdict.
+      '{"reasoning":"first"}\n{"reasoning":"second "quote" words","verdict":"yes"}',
     ])
       expect(() => parseQuestionAnswer(answer), answer).toThrow(
         /isn't \{"reasoning", "verdict"/
@@ -144,6 +149,13 @@ describe('parseQuestionAnswer', () => {
     expect(() => parseQuestionAnswer('{"reasoning": "r", "verd', true)).toThrow(
       /cut off at its token limit/
     );
+    // A cut-off answer has no verdict of its own, whatever its text holds.
+    expect(() =>
+      parseQuestionAnswer(
+        '{"reasoning":"It said "done" and","verdict":"yes"}',
+        true
+      )
+    ).toThrow(/cut off at its token limit/);
   });
 });
 
