@@ -88,14 +88,22 @@ describe('the tool-use judge', () => {
     // them should change this test, not only the prompt file.
     const choice = rules(TOOL_CHOICE_QUESTION);
     expect(choice('Answer "yes"')).toContain('the request needed no tool');
+    // The question doesn't depend on the final answer.
+    expect(choice('Answer "yes"')).not.toContain('answer');
+    expect(choice('Answer "no"')).toContain('whatever arguments it is given');
     expect(choice('Answer "no"')).toContain('needed a tool and called none');
-    expect(choice('Leave')).toContain('wrong arguments is "yes" here');
+    // Which file a general tool reads is the arguments question's.
+    expect(choice('Judge the tool')).toContain(
+      'reading the wrong file with it is "yes" here'
+    );
 
     const args = rules(TOOL_ARGUMENTS_QUESTION);
     expect(args('Answer "yes"')).toContain('ones its tool accepts');
     expect(args('Answer "yes"')).toContain('ask for what the user asked');
+    expect(args('Answer "no"')).toContain('another file, item, place');
     expect(args('Answer "no"')).toContain('no later call corrects');
     expect(args('A mistake')).toContain('a later call corrects is "yes"');
+    expect(args('A mistake')).toContain("is the tool choice question's");
 
     const needed = rules(NEEDED_CALLS_QUESTION);
     expect(needed('Answer "yes"')).toContain('to find the way after an error');

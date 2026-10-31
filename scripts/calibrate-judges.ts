@@ -392,7 +392,7 @@ ${rows.join('\n')}
 
 \`grounded-in-tools\` reads the trace and asks whether every claim in the answer comes from a tool result. It doesn't see the reference answer. A \`wrong-tool\` answer is true to what the wrong tool returned, so it passes; a \`gave-up\` answer reports the error the trace shows, so it passes too.
 
-\`tool-use\` asks four questions about the calls, one model call each, and fails when any answer is no: did the assistant call the tools the request needed, pass arguments that fit, avoid calls it didn't need, and recover from errors? It ignores the answer, so \`wrong-fact\` and \`unsupported-claim\` traces pass. A \`recovered\` trace passes, because the assistant corrected its mistake; \`false-success\` and \`gave-up\` traces fail, because it didn't.
+\`tool-use\` asks four questions about the calls, one model call each, and fails when any answer is no: did the assistant call the tools the request needed, pass arguments that fit, avoid calls it didn't need, and recover from errors? It doesn't grade the answer, so \`wrong-fact\` and \`unsupported-claim\` traces pass. A \`recovered\` trace passes, because the assistant corrected its mistake; \`false-success\` and \`gave-up\` traces fail, because it didn't.
 
 ## Disagreements
 

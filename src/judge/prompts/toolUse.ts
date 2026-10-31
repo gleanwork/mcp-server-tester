@@ -5,26 +5,29 @@
  * shared prompt in `question.ts`, and fails when any answer is no. Any
  * change here changes the judge's version, so its calibrations go stale.
  *
- * Each question leaves the others' ground alone, so one mistake fails the
- * question it belongs to and not every one. None of them judges the final
- * answer: whether it is right or grounded is other judges' question.
+ * Each question leaves the others' ground alone: which tool is
+ * `tool-choice`'s, and what a call asks it for (which file, item or
+ * operation) is `arguments`'. None of them grades the final answer: whether
+ * it is right or grounded is other judges' question. `error-recovery` reads
+ * it only to see whether the user was told of an error the assistant
+ * couldn't fix.
  */
 
 export const TOOL_CHOICE_QUESTION = `Did the assistant call the tools the request needed?
 
-Answer "yes" when the calls the answer rests on are to tools that can give what the user asked for, or the request needed no tool and the assistant called none.
+Answer "yes" when the assistant called a tool that can give what the user asked for, given the right arguments, or the request needed no tool and the assistant called none.
 
-Answer "no" when the assistant relied on a tool that can't give what was asked, such as one that returns a different kind of information or another source for it; or when it needed a tool and called none.
+Answer "no" when every tool it called gives a different kind of information or does a different thing than the request needs, whatever arguments it is given (a city-information tool for the weather, say), or when it needed a tool and called none.
 
-Leave the calls' arguments, extra calls and errors to other questions: a call to the right tool with wrong arguments is "yes" here.`;
+Judge the tool, not what a call asked it for: a general tool, such as one that reads any file, is the right tool when some arguments would give what was asked, and reading the wrong file with it is "yes" here. Leave arguments, extra calls and errors to other questions.`;
 
 export const TOOL_ARGUMENTS_QUESTION = `Did the assistant pass arguments that are valid for each tool and fit the request?
 
 Answer "yes" when each call's arguments are ones its tool accepts, and they ask for what the user asked about: the right file, item, place, operation and values.
 
-Answer "no" when a call's arguments are invalid for its tool (an argument it doesn't take, a value it rejects, a path that doesn't exist), or valid but for something other than the request, and no later call corrects the mistake.
+Answer "no" when a call's arguments are invalid for its tool (an argument it doesn't take, a value it rejects, a path that doesn't exist), or valid but for something other than the request (another file, item, place or operation), and no later call corrects the mistake.
 
-A mistake that a later call corrects is "yes" here: the assistant fixed it, and whether it recovered well is another question. So is a call to a tool that can't give what was asked: this question is only about arguments.`;
+A mistake that a later call corrects is "yes" here: the assistant fixed it, and whether it recovered well is another question. A call to a tool that can't give what was asked is the tool choice question's: judge its arguments against what that tool takes and what the user asked about.`;
 
 export const NEEDED_CALLS_QUESTION = `Did the assistant avoid calls it didn't need?
 
