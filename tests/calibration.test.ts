@@ -8,9 +8,12 @@ import {
   calibrationCases,
   LABELS,
   TRACE_KINDS,
+  type CalibrationCase,
   type CalibrationQuestion,
+  type TraceKind,
 } from '../scripts/calibration/cases.js';
 import plugin from '../scripts/calibration/plugin.js';
+import { missingVerdicts } from '../scripts/calibration/verdicts.js';
 
 const CALIBRATION = fileURLToPath(
   new URL('../scripts/calibration/', import.meta.url)
@@ -56,12 +59,70 @@ describe('the calibration set', () => {
       expect(existsSync(file), file).toBe(false);
   });
 
-  it('runs a case on the mock server, and records a failed call as an error', async () => {
+  it('builds each kind of trace from its task as the kind says', () => {
+    const byTemplate = new Map<string, CalibrationCase[]>();
+    for (const c of calibrationCases())
+      byTemplate.set(c.metadata.template, [
+        ...(byTemplate.get(c.metadata.template) ?? []),
+        c,
+      ]);
+    expect(byTemplate.size).toBe(16);
+    for (const [template, cases] of byTemplate) {
+      const of = (kind: string) =>
+        cases.find((c) => c.metadata.kind === kind)!.clientOptions;
+      const sound = of('sound');
+      const [right] = sound.steps;
+      const failing = of('false-success').steps;
+      const at = `${template}: `;
+      expect(sound.steps, at + 'sound').toHaveLength(1);
+      // The recovered trace starts with the call false-success makes, and
+      // ends with the right one.
+      const recovered = of('recovered');
+      expect(recovered.steps.length, at + 'recovered').toBeGreaterThan(1);
+      expect(recovered.steps[0], at + 'recovered').toEqual(failing[0]);
+      expect(recovered.steps.at(-1), at + 'recovered').toEqual(right);
+      expect(recovered.answer, at + 'recovered').toBe(sound.answer);
+      expect(of('wrong-fact').steps, at + 'wrong-fact').toEqual([right]);
+      expect(of('wrong-fact').answer, at + 'wrong-fact').not.toBe(sound.answer);
+      expect(of('unsupported-claim').steps).toEqual([right]);
+      expect(
+        of('unsupported-claim').answer.startsWith(`${sound.answer} `)
+      ).toBe(true);
+      expect(failing, at + 'false-success').toHaveLength(1);
+      expect(failing[0], at + 'false-success').not.toEqual(right);
+      expect(of('false-success').answer, at + 'false-success').toBe(
+        sound.answer
+      );
+      const wrongTool = of('wrong-tool');
+      expect(wrongTool.steps, at + 'wrong-tool').toHaveLength(1);
+      expect(wrongTool.steps[0], at + 'wrong-tool').not.toEqual(right);
+      expect(wrongTool.answer, at + 'wrong-tool').not.toBe(sound.answer);
+      const extra = of('extra-calls');
+      expect(extra.steps[0], at + 'extra-calls').toEqual(right);
+      expect(extra.steps.length, at + 'extra-calls').toBeGreaterThan(1);
+      expect(extra.answer, at + 'extra-calls').toBe(sound.answer);
+      expect(of('gave-up').steps, at + 'gave-up').toEqual(failing);
+      expect(of('gave-up').answer, at + 'gave-up').not.toBe(sound.answer);
+    }
+  });
+
+  it('refuses a run where a judge has no verdict on some trace, and counts unknown as one', () => {
+    const rows = [
+      { judge: 'correctness', verdict: 'pass' },
+      { judge: 'correctness', verdict: 'unknown' },
+      { judge: 'tool-use', verdict: 'fail' },
+      { judge: 'tool-use' },
+    ];
+    expect(missingVerdicts(rows, ['correctness', 'tool-use'], 2)).toEqual([
+      'tool-use has verdicts on 1 of 2 traces',
+    ]);
+    expect(missingVerdicts(rows, ['correctness'], 2)).toEqual([]);
+  });
+
+  it('runs every kind of trace on the mock server, recording failed calls as errors', async () => {
     const client = plugin.clients!.scripted!;
     const cases = calibrationCases().filter(
-      (c) =>
-        c.metadata.template === 'multiply-37-12' &&
-        ['sound', 'false-success'].includes(c.metadata.kind)
+      (c) => c.metadata.template === 'multiply-37-12'
     );
     const server = {
       label: 'mock',
@@ -83,10 +144,27 @@ describe('the calibration set', () => {
         ...c.clientOptions,
       },
     }));
-    const [sound, falseSuccess] = await client.runBatch!(
+    const results = await client.runBatch!(
       requests,
       {} as Parameters<NonNullable<typeof client.runBatch>>[1]
     );
+    const trace = new Map(
+      cases.map((c, index) => [c.metadata.kind, results[index]!])
+    );
+    const sound = trace.get('sound');
+    const falseSuccess = trace.get('false-success');
+    const errors = (kind: TraceKind) =>
+      trace.get(kind)!.events.map((event) => event.isError);
+    expect(errors('recovered').at(0)).toBe(true);
+    expect(errors('recovered').at(-1)).toBe(false);
+    expect(trace.get('recovered')!.events.at(-1)!.output).toBe('Result: 444');
+    expect(errors('wrong-fact')).toEqual([false]);
+    expect(trace.get('wrong-fact')!.finalText).not.toContain('444');
+    expect(errors('unsupported-claim')).toEqual([false]);
+    expect(errors('wrong-tool')).toEqual([false]);
+    expect(trace.get('wrong-tool')!.events[0]!.output).not.toBe('Result: 444');
+    expect(errors('extra-calls')).toEqual([false, false, false]);
+    expect(errors('gave-up')).toEqual([true]);
     expect(sound).toEqual({
       finalText: 'The answer is 444.',
       events: [

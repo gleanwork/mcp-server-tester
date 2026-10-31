@@ -34,6 +34,7 @@ import {
   type CalibrationQuestion,
   type TraceKind,
 } from './calibration/cases.js';
+import { missingVerdicts } from './calibration/verdicts.js';
 
 const run = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -226,12 +227,7 @@ async function labelRun(directory: string, kinds: Map<string, TraceKind>) {
     .filter(Boolean)
     .map((line) => ExportRow.parse(JSON.parse(line)))
     .filter((row) => row.verdict !== undefined);
-  const missing = Object.keys(JUDGES).flatMap((judge) => {
-    const judged = rows.filter((row) => row.judge === judge).length;
-    return judged < kinds.size
-      ? [`${judge} has verdicts on ${judged} of ${kinds.size} traces`]
-      : [];
-  });
+  const missing = missingVerdicts(rows, Object.keys(JUDGES), kinds.size);
   if (missing.length)
     throw new Error(
       `${missing.join('; ')} in ${directory}: its judge failed on the rest (see the run's report), so the set isn't measured. Fix the cause and run again.`
