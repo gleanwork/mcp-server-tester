@@ -7,6 +7,7 @@ import type { ClientBatchRequest } from '../src/evals/evalFrameworkTypes.js';
 import {
   calibrationCases,
   LABELS,
+  labelOf,
   TRACE_KINDS,
   type CalibrationCase,
   type CalibrationQuestion,
@@ -33,7 +34,7 @@ describe('the calibration set', () => {
       (c) => defaultSplit(c.id) === 'test'
     );
     for (const question of QUESTIONS) {
-      const labels = test.map((c) => LABELS[c.metadata.kind][question]);
+      const labels = test.map((c) => labelOf(c, question));
       expect(
         labels.filter((label) => label === 'fail').length,
         question
@@ -90,17 +91,12 @@ describe('the calibration set', () => {
       ).toBe(true);
       expect(failing, at + 'false-success').toHaveLength(1);
       expect(failing[0], at + 'false-success').not.toEqual(right);
-      // The right answer as if the call had worked: the sound answer, or for
-      // arithmetic, which needs no tool, the result credited to the tool.
+      // The right answer as if the call had worked: for arithmetic, which
+      // needs no tool, credited to the tool; else the sound answer.
       const result = /^The answer is (.+)\.$/.exec(sound.answer)?.[1];
-      expect(
-        [sound.answer, `The calculator gives ${result}.`],
-        at + 'false-success'
-      ).toContain(of('false-success').answer);
-      if (template.startsWith('weather-') || result === undefined)
-        expect(of('false-success').answer, at + 'false-success').toBe(
-          sound.answer
-        );
+      expect(of('false-success').answer, at + 'false-success').toBe(
+        result === undefined ? sound.answer : `The calculator gives ${result}.`
+      );
       const wrongTool = of('wrong-tool');
       expect(wrongTool.steps, at + 'wrong-tool').toHaveLength(1);
       expect(wrongTool.steps[0], at + 'wrong-tool').not.toEqual(right);
@@ -112,6 +108,19 @@ describe('the calibration set', () => {
       expect(of('gave-up').steps, at + 'gave-up').toEqual(failing);
       expect(of('gave-up').answer, at + 'gave-up').not.toBe(sound.answer);
     }
+  });
+
+  it("labels by the trace's kind, except an arithmetic false-success answer on correctness", () => {
+    const byId = new Map(calibrationCases().map((c) => [c.id, c]));
+    const label = (id: string, question: CalibrationQuestion) =>
+      labelOf(byId.get(id)!, question);
+    // It credits the calculator, which the trace contradicts.
+    expect(label('multiply-37-12--false-success', 'correctness')).toBeNull();
+    expect(label('multiply-37-12--false-success', 'task-completion')).toBe(
+      'fail'
+    );
+    expect(label('weather-lima--false-success', 'correctness')).toBe('pass');
+    expect(label('multiply-37-12--sound', 'correctness')).toBe('pass');
   });
 
   it('refuses a run where a judge has no verdict on some trace, and counts unknown as one', () => {

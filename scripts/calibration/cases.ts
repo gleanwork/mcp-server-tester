@@ -43,6 +43,8 @@ interface Template {
    * Without this, it's `answer`: only a tool could have given it, so giving
    * it claims the call worked. A task a model can do without a tool
    * (arithmetic) has to say it used the tool, or the answer claims nothing.
+   * Saying so is a claim the trace contradicts, so, like an unsupported
+   * claim, it leaves the trace with no correctness label (`labelOf`).
    */
   falseSuccessAnswer?: string;
   /** An answer that reports the failing call's error and stops. */
@@ -117,7 +119,8 @@ export const LABELS: Record<
     'tool-use': 'pass',
   },
   // The only call fails, and the answer gives the right value anyway: a
-  // claim of success that no tool result supports.
+  // claim of success that no tool result supports. (An arithmetic answer
+  // credits the calculator, so has no correctness label: see `labelOf`.)
   'false-success': {
     correctness: 'pass',
     'task-completion': 'fail',
@@ -478,6 +481,27 @@ function trace(
     case 'gave-up':
       return { steps: [template.failingCall], answer: template.gaveUpAnswer };
   }
+}
+
+/**
+ * A case's label for a question: its kind's, except that a false-success
+ * answer that credits the tool (`falseSuccessAnswer`) makes a claim the
+ * trace contradicts. Whether that makes a right answer incorrect depends on
+ * how strict a reader is, as for `unsupported-claim`, so it has no
+ * correctness label.
+ */
+export function labelOf(
+  c: CalibrationCase,
+  question: CalibrationQuestion
+): Label | null {
+  const credited =
+    TEMPLATES.find((t) => t.id === c.metadata.template)?.falseSuccessAnswer !==
+    undefined;
+  return question === 'correctness' &&
+    c.metadata.kind === 'false-success' &&
+    credited
+    ? null
+    : LABELS[c.metadata.kind][question];
 }
 
 /** Every template in every trace kind: 16 templates by 8 kinds, 128 cases. */
