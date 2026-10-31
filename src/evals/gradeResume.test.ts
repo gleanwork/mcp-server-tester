@@ -127,6 +127,36 @@ function verdicts(result: Graded) {
 }
 
 describe('mst grade --resume', () => {
+  it('resumes a run graded as it ran, whose cases set no trial count', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture();
+    vi.stubEnv('GRADE_TEST_KEY', KEY);
+    await f.flaky(true);
+    const graded = await runEval(f.base);
+    expect((await f.readRun(graded.outputDir)).phases).toEqual({
+      collect: 'complete',
+      grade: 'partial',
+    });
+    await f.takeCalls();
+
+    await f.flaky(false);
+    const resume = () =>
+      gradeRun({
+        ...f.base,
+        run: path.basename(graded.outputDir),
+        resume: true,
+      });
+    // A changed case is still refused.
+    await f.writeCases([JUDGES[0]!]);
+    await expect(resume()).rejects.toThrow(/Dataset "cases" changed/);
+    await f.writeCases(JUDGES);
+
+    const resumed = await resume();
+    // Only the judges that timed out ran again.
+    expect(await f.takeCalls()).toEqual({ flaky: 8, 'flaky-pairwise': 8 });
+    expect(resumed.summary.results.every((r) => r.pass)).toBe(true);
+  });
+
   it('runs only the judges and pairwise judges that failed, and keeps every other verdict', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture();
