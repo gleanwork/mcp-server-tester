@@ -125,6 +125,8 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
           baseline: pairwise.baseline,
           caseId: comparison.id,
           ...(verdict !== undefined ? { verdict } : {}),
+          ...optional('judgeIdentity', preference.judgeIdentity),
+          ...optional('judgeUnversioned', preference.judgeUnversioned),
           ...optional('judgeProvider', preference.provider),
           ...optional('judgeModel', preference.model),
           ...optional('reasoning', preference.reasoning),
