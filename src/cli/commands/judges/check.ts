@@ -6,7 +6,8 @@
  *     [--no-record] [--json] [-d <dir>]
  */
 
-import { judgedItems, readLabels } from '../../../evals/labels.js';
+import { readLabels } from '../../../evals/labels.js';
+import { judgedItems } from '../../../evals/judgedItems.js';
 import {
   calibrationRecord,
   checkJudge,
@@ -16,7 +17,9 @@ import {
   type Rate,
   type UsableGate,
 } from '../../../evals/judgeCheck.js';
+import { existsSync } from 'node:fs';
 import { readRunDirectory } from '../../../evals/runFormat.js';
+import { runReportPath, writeRunReport } from '../../../evals/runReport.js';
 import { resolveRunArgument } from '../../runArgument.js';
 
 export interface JudgeCheckCommandOptions {
@@ -130,6 +133,10 @@ export async function checkJudgeCommand(
     }
     written.push(files);
   }
+  // A report shows its judges' calibrations, so rebuild the ones that exist.
+  if (written.some((files) => files.length))
+    for (const directory of directories)
+      if (existsSync(runReportPath(directory))) await writeRunReport(directory);
   if (options.json) {
     print(
       `${JSON.stringify(

@@ -7,6 +7,10 @@ import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { runReportPath, writeRunReport } from '../../../evals/runReport.js';
+import {
+  evalDirectoryOf,
+  newestCalibrationTime,
+} from '../../../evals/judgeCheck.js';
 
 export interface OpenOptions {
   /** Where runs are written. @default '.mcp-test-results' */
@@ -83,8 +87,20 @@ export async function open(
     process.exit(1);
   }
   let reportPath = runReportPath(run);
-  if (!existsSync(reportPath)) reportPath = await writeRunReport(run);
+  if (!existsSync(reportPath) || (await calibratedSince(run)))
+    reportPath = await writeRunReport(run);
   await show(reportPath, options);
+}
+
+/**
+ * Whether a judge was checked (`mst judges check`) after the run's report
+ * was built, so the report doesn't show its calibration yet.
+ */
+async function calibratedSince(run: string): Promise<boolean> {
+  const newest = await newestCalibrationTime(evalDirectoryOf(run));
+  if (newest === undefined) return false;
+  const built = await fs.stat(join(run, 'report', 'data.js')).catch(() => null);
+  return !built || newest > built.mtimeMs;
 }
 
 async function show(reportPath: string, options: OpenOptions): Promise<void> {
