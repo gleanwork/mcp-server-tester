@@ -568,6 +568,33 @@ describe('label checks', () => {
     ).toHaveLength(1);
   });
 
+  it('exports no row for a trial the judge failed on, so the filled-in sheet imports', async () => {
+    const t = await storedRun({ brokenJudge: true });
+    const out = capture();
+    await labelExport(t.directory, { format: 'jsonl' }, out.write, () => {});
+    const rows = out.out
+      .join('')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(rows.filter((row) => row.judge === 'lb/judge/broken')).toEqual([]);
+    expect(rows.every((row) => row.verdict !== undefined)).toBe(true);
+    const file = path.join(t.dir, 'filled.jsonl');
+    await fs.writeFile(
+      file,
+      rows
+        .filter((row) => row.trial !== undefined)
+        .map((row) => JSON.stringify({ ...row, label: 'pass' }))
+        .join('\n')
+    );
+    await labelImport(t.directory, file, { labeler: 'test' }, () => {});
+    expect(await readLabels(t.directory)).toHaveLength(8);
+    // Asked for by name, the failed judge has nothing to export.
+    await expect(
+      labelExport(t.directory, { judge: ['lb/judge/broken'] }, () => {})
+    ).rejects.toThrow('has no verdicts from lb/judge/broken');
+  });
+
   it('rejects a criterion its judge never reported, and names that look like object keys', async () => {
     const t = await storedRun();
     const items = judgedItems(await readRunDirectory(t.directory));

@@ -171,7 +171,11 @@ export async function labelExport(
   const judges = options.judge?.length ? new Set(options.judge) : undefined;
   const wanted = (item: { judge: string; criterion?: string }) =>
     !judges || judges.has(item.judge) || judges.has(labelQuestion(item));
-  const items = judgedItems(stored).filter(wanted);
+  // A judge that failed on a trial gave no verdict, and import takes no
+  // label for one, so the sheet has no row for it.
+  const items = judgedItems(stored).filter(
+    (item) => item.verdict !== undefined && wanted(item)
+  );
   const labels = (await readLabels(directory)).filter(wanted);
   if (judges && items.length === 0 && labels.length === 0) {
     const names = [
