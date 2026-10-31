@@ -678,10 +678,20 @@ function assertResumable(
   for (const dataset of datasets) {
     const recorded = run.datasets.find((item) => item.name === dataset.name);
     if (!recorded) continue;
-    // run.json records a dataset as the first variant that ran it selected it.
-    const hashes = [...replay.trials.keys()].map((variant) =>
-      datasetContentHash(replayedCases(dataset, replay, variant))
-    );
+    // run.json records a dataset as the first variant that ran it selected
+    // it: a regrade with each case's trial count, a run graded as it ran
+    // with its cases as the dataset has them.
+    const hashes = [...replay.trials.keys()].flatMap((variant) => {
+      const replayed = replayedCases(dataset, replay, variant);
+      const ids = new Set(replayed.cases.map((evalCase) => evalCase.id));
+      return [
+        datasetContentHash(replayed),
+        datasetContentHash({
+          ...dataset,
+          cases: dataset.cases.filter((evalCase) => ids.has(evalCase.id)),
+        }),
+      ];
+    });
     if (!hashes.includes(recorded.contentHash))
       throw new Error(
         `Dataset "${dataset.name}" changed since run ${run.runId} was graded (a case's input, expected answer or judges), so its verdicts can't be kept. ${fullRegrade}`
