@@ -12,6 +12,7 @@ import type * as JudgeClientModule from '../judge/judgeClient.js';
 import { createJudge, createJudgeCompletion } from '../judge/judgeClient.js';
 import { GROUNDED_IN_TOOLS_QUESTION } from '../judge/prompts/groundedInTools.js';
 import { TASK_COMPLETION_QUESTION } from '../judge/prompts/taskCompletion.js';
+import { TOOL_USE_LABEL_QUESTION } from '../judge/prompts/toolUse.js';
 import { BUILT_IN_RUBRICS } from '../judge/rubrics.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -101,6 +102,7 @@ async function storedRun(): Promise<string> {
         { type: 'rubric', rubric: 'correctness', ...judge },
         { type: 'task-completion', ...judge },
         { type: 'grounded-in-tools', ...judge },
+        { type: 'tool-use', ...judge },
         'lq/judge/always',
       ],
       variants: [{ name: 'only', servers: ['docs'] }],
@@ -138,6 +140,7 @@ describe("the label page's question", () => {
     expect(await question(directory, 'grounded-in-tools')).toBe(
       GROUNDED_IN_TOOLS_QUESTION
     );
+    expect(await question(directory, 'tool-use')).toBe(TOOL_USE_LABEL_QUESTION);
     expect(await question(directory, 'correctness')).toBe(
       BUILT_IN_RUBRICS.correctness
     );
