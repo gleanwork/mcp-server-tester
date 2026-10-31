@@ -251,13 +251,15 @@ fails saying so.
 
 #### Judge identity
 
-Every score records the identity of the judge that gave it, in
-`judgeIdentity`. `run.json` records the identity of each eval config,
-variant and pairwise judge, in `judges[].identity`. The identity is a
-SHA-256 of the judge's reference, its `version` and its options as its
-schema parses them, so an option left to its default hashes the same as the
-value written out. Two scores with the same identity came from a judge that
-grades the same way, which a calibration needs
+Every score and pairwise preference records the identity of the judge that
+gave it, in `judgeIdentity`. `run.json` records the identity of each eval
+config, variant and pairwise judge, in `judges[].identity`. The identity is
+a SHA-256 of the judge's reference, its `version`, its options as its
+schema parses them (so an option left to its default hashes the same as the
+value written out), and how its answers become a verdict: a judge's
+`threshold` and `reps`, a pairwise judge's `reps`. Two scores with the same
+identity came from a judge that grades the same way, which a calibration
+needs
 ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)).
 
 A judge or pairwise judge can declare a `version`: a non-empty string that

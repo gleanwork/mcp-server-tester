@@ -23,6 +23,7 @@ import type {
   PreferredSide,
   PairwisePreference,
 } from '../judge/pairwiseContract.js';
+import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import {
   parseExtensionOptions,
@@ -121,6 +122,14 @@ export interface PairwiseCasePreference {
   provider?: string;
   model?: string;
   version?: string;
+  /**
+   * The identity of the judge that gave this preference (ADR 0009). A
+   * preference kept from a run graded before MST recorded identities has
+   * none.
+   */
+  judgeIdentity?: string;
+  /** The judge has no version MST can see change. */
+  judgeUnversioned?: true;
   metadata?: Record<string, unknown>;
 }
 
@@ -418,6 +427,7 @@ export async function comparePairwise(
 ): Promise<PairwiseComparisonResult> {
   const resolved = options.judges.map((spec) => {
     const judge = getPairwiseJudge(spec.type);
+    const reps = Math.max(1, spec.reps ?? 1);
     return {
       label: spec.type,
       judge,
@@ -426,8 +436,16 @@ export async function comparePairwise(
         spec.options ?? {},
         `pairwise judge options "${spec.type}"`
       ),
-      reps: Math.max(1, spec.reps ?? 1),
+      reps,
       context: { settings: settingsFor(options.settings, spec.type) },
+      identity: {
+        judgeIdentity: judgeIdentity(spec.type, judge, spec.options ?? {}, {
+          reps,
+        }),
+        ...(judgeIsVersioned(spec.type, judge)
+          ? {}
+          : { judgeUnversioned: true as const }),
+      },
     };
   });
   const baseline = new Map(options.baseline.caseResults.map((r) => [r.id, r]));
@@ -450,16 +468,17 @@ export async function comparePairwise(
       const preferences: PairwiseCasePreference[] = [];
       for (const r of resolved)
         if (!only || only.includes(r.label))
-          preferences.push(
-            await judgeCase(
+          preferences.push({
+            ...(await judgeCase(
               r.label,
               r.judge,
               r.options,
               r.reps,
               input,
               r.context
-            )
-          );
+            )),
+            ...r.identity,
+          });
       return preferences;
     };
     const preferences = options.judgeCase

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { runEval } from './runEval.js';
+import { gradeRun, runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import {
@@ -13,7 +13,7 @@ import {
   type PairwiseCheck,
   type PointwiseCheck,
 } from './judgeCheck.js';
-import { parseCalibrationRecord } from './runFormat.js';
+import { parseCalibrationRecord, readRunDirectory } from './runFormat.js';
 import { labelExport, labelImport } from '../cli/commands/label/index.js';
 import { checkJudgeCommand } from '../cli/commands/judges/check.js';
 
@@ -68,7 +68,12 @@ describe('the statistics', () => {
  * cases.
  */
 async function evalDirectory(
-  options: { version?: string; odd?: number; keyword?: string } = {}
+  options: {
+    version?: string;
+    odd?: number;
+    keyword?: string;
+    threshold?: number;
+  } = {}
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-check-'));
   dirs.push(dir);
@@ -140,7 +145,13 @@ async function evalDirectory(
       redactStoredResponses: false,
       servers: { docs: { transport: 'stdio', command: 'docs-server' } },
       judges: [
-        { type: 'ck/judge/keyword', keyword: options.keyword ?? 'certificate' },
+        {
+          type: 'ck/judge/keyword',
+          keyword: options.keyword ?? 'certificate',
+          ...(options.threshold !== undefined
+            ? { threshold: options.threshold }
+            : {}),
+        },
       ],
       pairwiseJudges: ['ck/pairwise-judge/longer'],
       variants: [
@@ -209,6 +220,22 @@ function missedFailures(n: number) {
     Number(row.caseId.slice(5)) < n
       ? 'fail'
       : undefined;
+}
+
+/** The first score from `judge` anywhere under `value`. */
+function firstScore(
+  value: unknown,
+  judge: string
+): { judgeIdentity?: string } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.judgeName === judge && typeof record.judgeIdentity === 'string')
+    return record as { judgeIdentity?: string };
+  for (const child of Object.values(record)) {
+    const found = firstScore(child, judge);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 async function check(
@@ -382,6 +409,11 @@ describe('mst judges check', () => {
     expect(checks[0]!.runs).toEqual([path.basename(second)]);
     expect(checks[1]!.runs).toEqual([path.basename(first)]);
     expect(checks.map((c) => c.unversioned)).toEqual([false, false]);
+    // Newest by when the run was made, not by where it is in the arguments.
+    const reversed = await check([second, first]);
+    expect(reversed.checks.map((c) => c.runs)).toEqual(
+      checks.map((c) => c.runs)
+    );
     for (const result of checks) {
       const recorded = await readCalibration(
         results,
@@ -391,6 +423,121 @@ describe('mst judges check', () => {
       expect(recorded?.runs).toEqual(result.runs);
       expect(recorded?.unversioned).toBeUndefined();
     }
+  });
+
+  it('counts each label once: a run given twice, or graded again with the same judge', async () => {
+    const { base } = await evalDirectory({ version: '1.0.0' });
+    const directory = await run(base);
+    await label(directory, 'ck/judge/keyword', missedFailures(2));
+    const once = (await check([directory])).checks[0] as PointwiseCheck;
+    expect(once.labels).toBe(80);
+
+    const regraded = (
+      await gradeRun({ ...base, run: path.basename(directory) })
+    ).outputDir;
+    await label(regraded, 'ck/judge/keyword', missedFailures(2));
+    const { checks } = await check([directory, directory, regraded]);
+    expect(checks).toHaveLength(1);
+    expect(checks[0]).toMatchObject({
+      labels: 80,
+      counts: once.counts,
+      // The regrade's verdicts replace the run's: they grade the same trials.
+      runs: [path.basename(regraded)],
+    });
+  });
+
+  it('gives the identity run.json records, which changes with the pass threshold', async () => {
+    const identities = async (threshold?: number) => {
+      const { base } = await evalDirectory({
+        version: '1.0.0',
+        ...(threshold !== undefined ? { threshold } : {}),
+      });
+      const directory = await run(base);
+      const stored = await readRunDirectory(directory);
+      const recorded = new Map(
+        (stored.run.judges ?? []).map((r) => [r.type, r.identity])
+      );
+      const score = firstScore(stored.summary, 'ck/judge/keyword');
+      const preference = stored.summary.variants.find((v) => v.pairwise)
+        ?.pairwise?.cases[0]?.preferences[0];
+      // Scores and preferences record the identity run.json does.
+      expect(score?.judgeIdentity).toBe(recorded.get('ck/judge/keyword'));
+      expect(preference?.judgeIdentity).toBe(
+        recorded.get('ck/pairwise-judge/longer')
+      );
+      return {
+        pointwise: score?.judgeIdentity,
+        pairwise: preference?.judgeIdentity,
+      };
+    };
+    const standard = await identities();
+    resetPluginsForTests();
+    const strict = await identities(0.9);
+    expect(strict.pointwise).not.toBe(standard.pointwise);
+    expect(strict.pairwise).toBe(standard.pairwise);
+  });
+
+  it('attributes a kept pairwise preference to the judge that gave it, or to none', async () => {
+    const { base } = await evalDirectory();
+    const directory = await run(base);
+    // A run graded before preferences recorded their judge's identity.
+    const scores = path.join(
+      directory,
+      'scores',
+      'ck%2Fpairwise-judge%2Flonger'
+    );
+    const files = (await fs.readdir(scores, { recursive: true }))
+      .filter((file) => file.endsWith('.json'))
+      .map((file) => path.join(scores, file));
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const record = JSON.parse(await fs.readFile(file, 'utf8')) as {
+        preference: Record<string, unknown>;
+      };
+      expect(record.preference.judgeIdentity).toBeDefined();
+      delete record.preference.judgeIdentity;
+      await fs.writeFile(file, JSON.stringify(record));
+    }
+    const summaryFile = path.join(directory, 'summary.json');
+    const summary = JSON.parse(await fs.readFile(summaryFile, 'utf8')) as {
+      variants: Array<{
+        pairwise?: {
+          cases: Array<{ preferences: Array<Record<string, unknown>> }>;
+        };
+      }>;
+    };
+    for (const variant of summary.variants)
+      for (const comparison of variant.pairwise?.cases ?? [])
+        for (const preference of comparison.preferences)
+          delete preference.judgeIdentity;
+    await fs.writeFile(summaryFile, JSON.stringify(summary));
+    await label(directory, 'ck/pairwise-judge/longer', () => undefined);
+
+    const { checks, text } = await check([directory], {
+      judge: 'ck/pairwise-judge/longer',
+    });
+    // Not the identity of the judge the run's header names now.
+    expect(checks[0]!.judgeIdentity).toBeUndefined();
+    expect(text).toContain('not recorded');
+  });
+
+  it('resumes grading a run recorded before judges said whether they were versioned', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { base } = await evalDirectory();
+    const collected = await run(base);
+    const directory = (
+      await gradeRun({ ...base, run: path.basename(collected) })
+    ).outputDir;
+    const runFile = path.join(directory, 'run.json');
+    const header = JSON.parse(await fs.readFile(runFile, 'utf8')) as {
+      judges: Array<Record<string, unknown>>;
+    };
+    expect(header.judges.some((judge) => judge.unversioned)).toBe(true);
+    for (const judge of header.judges) delete judge.unversioned;
+    await fs.writeFile(runFile, JSON.stringify(header));
+    await expect(
+      gradeRun({ ...base, run: path.basename(directory), resume: true })
+    ).resolves.toBeDefined();
   });
 
   it('measures a pairwise judge by its agreement and ties', async () => {

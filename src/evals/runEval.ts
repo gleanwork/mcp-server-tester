@@ -652,7 +652,11 @@ function assertResumable(
   const fullRegrade = `Grade it again in full, without --resume: \`mst grade ${run.runId}\`.`;
   const recorded = run.judges ?? [];
   const withoutIdentity = (records: readonly JudgeRecord[]) =>
-    records.map(({ identity: _identity, ...record }) => record);
+    // What older runs don't record: a run graded before MST recorded them
+    // can still be resumed.
+    records.map(
+      ({ identity: _identity, unversioned: _unversioned, ...record }) => record
+    );
   if (
     JSON.stringify(withoutIdentity(recorded)) !==
     JSON.stringify(withoutIdentity(judges))
@@ -695,8 +699,10 @@ function entryIdentity(level: string, entry: unknown): string | undefined {
   } & Record<string, unknown>;
   if (level !== 'pairwise') return judgeEntryIdentity(config as CaseJudge);
   try {
-    const { type, options } = pairwiseJudgeSpec(config);
-    return judgeIdentity(type, getPairwiseJudge(type), options);
+    const { type, options, reps } = pairwiseJudgeSpec(config);
+    return judgeIdentity(type, getPairwiseJudge(type), options, {
+      reps: Math.max(1, reps ?? 1),
+    });
   } catch {
     return undefined;
   }

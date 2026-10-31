@@ -65,12 +65,15 @@ export function judgeIsVersioned(
  * - the judge, with a built-in named the same with or without `mst/judge/`;
  * - its `version`, or, when it declares none, its plugin's package version;
  * - its options as its schema parses them, so a default counts the same as
- *   the value written out. Options the schema rejects are hashed as given.
+ *   the value written out. Options the schema rejects are hashed as given;
+ * - how MST turns its answers into a verdict (`policy`): a pointwise judge's
+ *   pass threshold and repetitions, a pairwise judge's repetitions.
  */
 export function judgeIdentity(
   reference: string,
   definition: IdentifiedJudge,
-  options: Record<string, unknown>
+  options: Record<string, unknown>,
+  policy: JudgeVerdictPolicy
 ): string {
   const parsed = parseExtensionReference(reference);
   const builtin =
@@ -85,5 +88,15 @@ export function judgeIdentity(
     version: definition.version ?? null,
     pluginVersion: plugin ?? null,
     options: result.success ? result.data : options,
+    policy,
   });
+}
+
+/**
+ * What decides a verdict outside the judge: the score a pointwise judge's
+ * answer must reach to pass, and how many times a judge runs per verdict.
+ */
+export interface JudgeVerdictPolicy {
+  threshold?: number;
+  reps: number;
 }

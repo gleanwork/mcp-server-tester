@@ -143,7 +143,8 @@ export function judgeIdentityOf(
     return judgeIdentity(
       request.judge,
       getJudge(request.judge),
-      request.options
+      request.options,
+      { threshold: request.threshold, reps: request.reps }
     );
   } catch {
     return undefined;
