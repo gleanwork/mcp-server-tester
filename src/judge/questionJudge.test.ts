@@ -264,6 +264,79 @@ describe('defineQuestionJudge', () => {
     });
   });
 
+  it("asks again once when an answer can't be read, but not when it was cut off", async () => {
+    // The model's first answer has unescaped JSON in its reasoning.
+    const unreadable =
+      '{"reasoning": "It passed {"city":"Lima"}.", "verdict": "no"}';
+    function replies(
+      ...answers: Array<{ text: string; truncated?: boolean }>
+    ): JudgeCompletionRequest[] {
+      const requests: JudgeCompletionRequest[] = [];
+      vi.mocked(createJudgeCompletion).mockImplementation(
+        () => async (request) => {
+          requests.push(request);
+          const answer =
+            answers[Math.min(requests.length, answers.length) - 1]!;
+          return { ...answer, usage: { inputTokens: 10, outputTokens: 2 } };
+        }
+      );
+      return requests;
+    }
+    const judge = defineQuestionJudge({
+      ...spec,
+      questions: () => [{ id: 'one', text: 'Is the first thing right?' }],
+    });
+
+    let requests = replies(
+      { text: unreadable },
+      { text: '{"reasoning": "Event 1.", "verdict": "no"}' }
+    );
+    const score = await judge.evaluate(INPUT, {});
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual(requests[0]);
+    // Both calls count toward the judge's usage.
+    expect(score).toMatchObject({
+      pass: false,
+      reasoning: 'Event 1.',
+      usage: { inputTokens: 20, outputTokens: 4 },
+    });
+
+    requests = replies({ text: unreadable });
+    await expect(judge.evaluate(INPUT, {})).rejects.toThrow(
+      /The judge's answer isn't/
+    );
+    expect(requests).toHaveLength(2);
+
+    requests = replies({ text: '{"reasoning": "Event', truncated: true });
+    await expect(judge.evaluate(INPUT, {})).rejects.toThrow(/cut off/);
+    expect(requests).toHaveLength(1);
+
+    // A call that fails is the adapter's error, not an unreadable answer.
+    let calls = 0;
+    vi.mocked(createJudgeCompletion).mockImplementation(() => async () => {
+      calls++;
+      throw new Error('rate limited');
+    });
+    await expect(judge.evaluate(INPUT, {})).rejects.toThrow('rate limited');
+    expect(calls).toBe(1);
+
+    // Cost and an adapter's own duration add up across the calls.
+    let attempt = 0;
+    vi.mocked(createJudgeCompletion).mockImplementation(() => async () => ({
+      text:
+        attempt++ === 0
+          ? unreadable
+          : '{"reasoning": "Event 1.", "verdict": "yes"}',
+      usage: { inputTokens: 5, totalCostUsd: 0.25, durationMs: 100 },
+    }));
+    expect((await judge.evaluate(INPUT, {})).usage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 0,
+      totalCostUsd: 0.5,
+      durationMs: 200,
+    });
+  });
+
   it('shows the reference answer to a judge that asks for it', async () => {
     const requests = model({
       'Is the first thing right?': '{"reasoning": "r", "verdict": "yes"}',
