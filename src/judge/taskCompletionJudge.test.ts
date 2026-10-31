@@ -59,6 +59,29 @@ describe('the task-completion judge', () => {
     expect(TASK_COMPLETION_JUDGE.version).toMatch(/^[0-9a-f]{16,}$/);
   });
 
+  it('asks the rules ADR 0009 gives the judge', () => {
+    // These pin the question's rules on their own: a change to one of them
+    // should change this test, not only the prompt file.
+    const rules = TASK_COMPLETION_QUESTION.split('\n\n');
+    const rule = (answer: string) =>
+      rules.find((r) => r.startsWith(`Answer "${answer}"`))!;
+    expect(rules[0]).toBe('Did the assistant do what the user asked?');
+    // A claim of success that no tool result supports fails.
+    expect(rule('no')).toContain('reports a success that no tool result shows');
+    expect(rule('no')).toContain('the only call failed');
+    // A request that needs no tool can still pass.
+    expect(rule('yes')).toContain('the request needed no tool');
+    // A result the trace can't show is unknown, not no.
+    expect(rule('unknown')).toContain('observed="false"');
+    expect(rule('unknown')).toContain('complete="false"');
+    // A reference wins over the answer, unless the trace shows it's stale.
+    expect(
+      rules.find((r) => r.startsWith('When there is a reference answer'))
+    ).toContain('out of date');
+    // Grounding of side claims is another judge's question.
+    expect(rules.at(-1)).toContain('an extra claim beside it');
+  });
+
   it('asks its one question about the trace, with the reference answer', async () => {
     const requests = model('no');
     const score = await TASK_COMPLETION_JUDGE.evaluate(FALSE_SUCCESS, {});
