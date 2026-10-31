@@ -16,7 +16,12 @@ import {
   DEFAULT_JUDGE_MODELS,
   DEFAULT_JUDGE_TEMPERATURE,
 } from './adapterSupport.js';
-import type { JudgeInput, JudgeScore, JudgeSubScore } from './judgeContract.js';
+import {
+  missingRequirement,
+  type JudgeInput,
+  type JudgeScore,
+  type JudgeSubScore,
+} from './judgeContract.js';
 import { createJudgeCompletion, preflightJudge } from './judgeClient.js';
 import { contentHash } from './judgeIdentity.js';
 import {
@@ -287,6 +292,38 @@ export interface QuestionJudgeSpec<Options extends z.ZodRawShape> {
   ) => JudgeQuestion[];
 }
 
+/**
+ * The questions a judge asks of the sample with its default options, and
+ * whether each is required, for its version. A judge whose questions come
+ * from the case (criteria) asks none of the sample, and one whose `requires`
+ * the sample doesn't meet isn't asked: evaluate() never calls `questions`
+ * on such an input.
+ */
+function sampleQuestions<Options extends z.ZodRawShape>(
+  spec: QuestionJudgeSpec<Options>,
+  schema: z.ZodType
+): Array<{ id: string; text: string; required: boolean }> | null {
+  const sample = sampleInput({});
+  const defaults = schema.safeParse({});
+  if (!defaults.success || missingRequirement(sample, spec.requires))
+    return null;
+  try {
+    return spec
+      .questions(
+        sample,
+        defaults.data as z.infer<z.ZodObject<Options>> & JudgeLLMOptions
+      )
+      .map(({ id, text, required }) => ({
+        id,
+        text,
+        required: required !== false,
+      }));
+  } catch {
+    // The questions don't suit the sample; their text is in `prompts`.
+    return null;
+  }
+}
+
 /** A yes-or-no judge from its questions. */
 export function defineQuestionJudge<
   Options extends z.ZodRawShape = Record<never, never>,
@@ -294,27 +331,12 @@ export function defineQuestionJudge<
   const schema = JudgeLLMSchema.extend(
     spec.options ?? ({} as Options)
   ).strict();
-  // The questions it asks with its default options, and whether each is
-  // required. A judge whose questions come from the case (criteria) asks
-  // none of the sample.
-  const defaults = schema.safeParse({});
   const version = contentHash({
     system: QUESTION_SYSTEM_PROMPT,
     prompt: questionPrompt('{trace}', '{question}'),
     traces: sampleTraces(spec.reference),
     prompts: spec.prompts,
-    questions: defaults.success
-      ? spec
-          .questions(
-            sampleInput({}),
-            defaults.data as z.infer<z.ZodObject<Options>> & JudgeLLMOptions
-          )
-          .map(({ id, text, required }) => ({
-            id,
-            text,
-            required: required !== false,
-          }))
-      : null,
+    questions: sampleQuestions(spec, schema),
     needsTrace: spec.needsTrace !== false,
     defaults: {
       provider: DEFAULT_JUDGE_PROVIDER,

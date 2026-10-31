@@ -301,6 +301,29 @@ describe('defineQuestionJudge', () => {
     );
   });
 
+  it("defines a judge whose questions need what the sample doesn't have", () => {
+    // A criteria-style judge: its questions come from the case, and
+    // `requires` keeps evaluate() from calling them without criteria.
+    const criteria = {
+      ...spec,
+      requires: ['case.expected.criteria'],
+      questions: (input: JudgeInput) =>
+        Object.entries(
+          input.case.expected.criteria as Record<string, string>
+        ).map(([id, text]) => ({ id, text })),
+    };
+    expect(defineQuestionJudge(criteria).version).toMatch(/^[0-9a-f]+$/);
+    // One whose questions throw on the sample is defined too.
+    expect(
+      defineQuestionJudge({
+        ...spec,
+        questions: () => {
+          throw new Error('needs a real case');
+        },
+      }).version
+    ).toMatch(/^[0-9a-f]+$/);
+  });
+
   it('has a version that changes with the questions it asks, whether each is required, and whether it needs the trace', () => {
     const version = defineQuestionJudge(spec).version;
     expect(

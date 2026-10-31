@@ -95,9 +95,10 @@ function eventView(event: TraceEvent, index: number, max: number): string {
 }
 
 /**
- * Whether the client recorded the trial's tool calls. A trial with no
- * evidence level (a tool result, or a client that doesn't declare one)
- * counts as unrecorded.
+ * Whether the client recorded the trial's tool calls. Only a bare tool
+ * result (toPassToolJudge) has no evidence level, and it counts as
+ * unrecorded; a client trial whose client declares none is `structured`
+ * (see `buildJudgeTrial`).
  */
 export function traceRecorded(trial: JudgeInput['trial']): boolean {
   return (trial.evidence ?? 'none') !== 'none';
