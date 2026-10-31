@@ -883,12 +883,13 @@ How far to trust a judge is measured, not assumed: label some trials and run [`m
 
 ### Built-in judges
 
-| Judge             | Asks                                                                                                                                                                                       |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `rubric`          | An LLM scores the answer from 0 to 1 against a rubric: a built-in one (`correctness`, `completeness`, ...) or your own text.                                                               |
-| `task-completion` | Did the assistant do what the user asked, as the trace shows? A success that no tool result supports fails; a result the trace can't show is `unknown`. Uses the reference answer, if any. |
+| Judge               | Asks                                                                                                                                                                                          |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rubric`            | An LLM scores the answer from 0 to 1 against a rubric: a built-in one (`correctness`, `completeness`, ...) or your own text.                                                                  |
+| `task-completion`   | Did the assistant do what the user asked, as the trace shows? A success that no tool result supports fails; a result the trace can't show is `unknown`. Uses the reference answer, if any.    |
+| `grounded-in-tools` | Is every claim in the answer supported by a tool result in the trace? Claims about what the assistant did count; general knowledge doesn't support a claim. Doesn't see the reference answer. |
 
-`task-completion` is a yes-or-no judge ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)). It reads the trace: the request, each tool call with its arguments and result (cut to `maxToolOutputSize`), and the final answer. It answers yes (score 1), no (score 0) or `unknown`, when the trace can't settle the question; `unknown` doesn't count as a pass, and the pass rate leaves it out. It answers `unknown` without a model call when the client didn't report its tool calls (evidence `none`). It takes the `rubric` judge's LLM settings (`provider`, `model`, `effort`, ...); its question is in [`src/judge/prompts/taskCompletion.ts`](../src/judge/prompts/taskCompletion.ts), and `mst label` shows it.
+`task-completion` and `grounded-in-tools` are yes-or-no judges ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)). Each reads the trace: the request, each tool call with its arguments and result (cut to `maxToolOutputSize`), and the final answer. It answers yes (score 1), no (score 0) or `unknown`, when the trace can't settle the question; `unknown` doesn't count as a pass, and the pass rate leaves it out. It answers `unknown` without a model call when the client didn't report its tool calls (evidence `none`). It takes the `rubric` judge's LLM settings (`provider`, `model`, `effort`, ...). Their questions are in [`src/judge/prompts/`](../src/judge/prompts/) (`taskCompletion.ts`, `groundedInTools.ts`), and `mst label` shows them. The two ask different things: an answer true to the wrong tool's result is grounded but doesn't do the task, and a right answer with one invented detail does the task but isn't grounded.
 
 ```json
 {
