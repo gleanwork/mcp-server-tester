@@ -17,7 +17,7 @@ export const TOOL_CHOICE_QUESTION = `Did the assistant call the tools the reques
 
 Answer "yes" when the assistant called a tool that can give what the user asked for, given the right arguments, or the request needed no tool and the assistant called none.
 
-Answer "no" when every tool it called gives a different kind of information or does a different thing than the request needs, whatever arguments it is given (a city-information tool for the weather, say), or when it needed a tool and called none.
+Answer "no" when every tool it called gives a different kind of information or does a different thing than the request needs, whatever arguments it is given (a search tool when the user asked to send a message, say), or when it needed a tool and called none.
 
 Judge the tool, not what a call asked it for: a general tool, such as one that reads any file, is the right tool when some arguments would give what was asked, and reading the wrong file with it is "yes" here. Leave arguments, extra calls and errors to other questions.`;
 
@@ -27,7 +27,7 @@ Answer "yes" when each call's arguments are ones its tool accepts, and they ask 
 
 Answer "no" when a call's arguments are invalid for its tool (an argument it doesn't take, a value it rejects, a path that doesn't exist), or valid but for something other than the request (another file, item, place or operation), and no later call corrects the mistake.
 
-A mistake that a later call corrects is "yes" here: the assistant fixed it, and whether it recovered well is another question. A call to a tool that can't give what was asked is the tool choice question's: judge its arguments against what that tool takes and what the user asked about.`;
+A mistake that a later call corrects is "yes" here: the assistant fixed it, and whether it recovered well is another question. A call to a tool that can't give what was asked is the tool choice question's: judge its arguments against what that tool takes and what the user asked about. A call made beside the ones that answer the request, for something the request doesn't need, is the needed calls question's: leave it out here.`;
 
 export const NEEDED_CALLS_QUESTION = `Did the assistant avoid calls it didn't need?
 
@@ -35,7 +35,7 @@ Answer "yes" when every call helped answer the request. A call that failed, and 
 
 Answer "no" when the assistant made a call that didn't help: the same call again with the same arguments when the first worked, a call to a tool or for information the request doesn't need, or a check of a result the trace already shows.
 
-Leave the choice of tool to another question: a single call to the wrong tool is "yes" here.`;
+Leave the choice of tool and arguments to other questions: when the assistant made one call to answer the request, that call is "yes" here even if it went to the wrong tool or asked for the wrong thing.`;
 
 export const ERROR_RECOVERY_QUESTION = `When a call failed, did the assistant recover?
 

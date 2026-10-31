@@ -104,11 +104,14 @@ describe('the tool-use judge', () => {
     expect(args('Answer "no"')).toContain('no later call corrects');
     expect(args('A mistake')).toContain('a later call corrects is "yes"');
     expect(args('A mistake')).toContain("is the tool choice question's");
+    expect(args('A mistake')).toContain("is the needed calls question's");
 
     const needed = rules(NEEDED_CALLS_QUESTION);
     expect(needed('Answer "yes"')).toContain('to find the way after an error');
     expect(needed('Answer "no"')).toContain('the same call again');
-    expect(needed('Leave')).toContain('the wrong tool is "yes" here');
+    expect(needed('Leave')).toContain(
+      'even if it went to the wrong tool or asked for the wrong thing'
+    );
 
     const recovery = rules(ERROR_RECOVERY_QUESTION);
     expect(recovery('Answer "yes"')).toContain('no call failed');
