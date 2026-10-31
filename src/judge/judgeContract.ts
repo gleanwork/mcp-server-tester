@@ -313,13 +313,14 @@ export function checkJudgeScore(
   if (result.unknown !== undefined && typeof result.unknown !== 'boolean') {
     throw new Error('returned an `unknown` that is not a boolean');
   }
+  // A skip keeps the criteria it lists, as unknown, so they must be valid.
+  checkCriteria(result.criteria);
   if (result.skipped) {
     return { ...result, pass: true };
   }
-  // An unknown verdict has no score, but the sub-scores and criteria it
-  // keeps must be valid.
+  // An unknown verdict has no score, but the sub-scores it keeps must be
+  // valid.
   checkSubScores(result.subScores);
-  checkCriteria(result.criteria);
   if (result.unknown) {
     const { pass: _pass, score: _score, ...rest } = result;
     return { ...rest, score: 0, unknown: true, pass: false };

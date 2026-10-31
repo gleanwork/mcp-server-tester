@@ -86,7 +86,12 @@ async function grade(
     request(criteria, extra),
     RUN
   );
-  return { pass: result.pass, ...(result.details as object) } as GraderScore;
+  // As grading records it: the message is the score's `details`.
+  return {
+    pass: result.pass,
+    ...(result.details as object),
+    details: result.message,
+  } as GraderScore;
 }
 
 describe('the criteria judge', () => {
@@ -200,8 +205,91 @@ describe('the criteria judge', () => {
     });
     const score = await grade([CITES, BRIEF], { reps: 3 });
     expect(score.criteria?.map((c) => c.verdict)).toEqual(['pass', 'pass']);
-    expect(score.pass).toBe(true);
+    // The score, reasoning and sub-scores are the criteria's, not a rep's.
+    expect(score).toMatchObject({
+      pass: true,
+      score: 1,
+      reasoning: 'cites-source: cites-source yes\nbrief: brief yes',
+      subScores: {
+        'cites-source': { score: 1, pass: true },
+        brief: { score: 1, pass: true },
+      },
+    });
     expect(score.unknown).toBeUndefined();
+    // A failure gives the share of required criteria that passed, and why.
+    model({ 'cites-source': ['yes', 'no', 'no'] });
+    const failed = await grade([CITES, BRIEF], { reps: 3 });
+    expect(failed).toMatchObject({
+      pass: false,
+      score: 0.5,
+      reasoning: 'cites-source: cites-source no',
+    });
+    expect(failed.details).toContain('cites-source failed');
+    expect(failed.details).not.toContain('threshold');
+  });
+
+  describe('on a plugin judge', () => {
+    function install(evaluate: (rep: number) => Record<string, unknown>): void {
+      let rep = 0;
+      installPlugins([
+        {
+          meta: { name: 'listed', namespace: 'listed' },
+          judges: {
+            checks: {
+              schema: z.object({}),
+              evaluate: async () => evaluate(rep++) as never,
+            },
+          },
+        },
+      ]);
+    }
+    async function judged(reps = 1): Promise<Record<string, unknown>> {
+      const result = await evaluateJudge(
+        'x',
+        {
+          judge: 'listed/judge/checks',
+          options: {},
+          label: 'listed/judge/checks',
+          threshold: 0.5,
+          reps,
+        },
+        RUN
+      );
+      return { pass: result.pass, ...result.details };
+    }
+
+    it('keeps its own verdict when no criterion is required', async () => {
+      install(() => ({
+        score: 0.1,
+        pass: false,
+        criteria: [{ id: 'note', required: false, verdict: 'pass' }],
+      }));
+      expect(await judged()).toMatchObject({ pass: false, score: 0.1 });
+    });
+
+    it('keeps the criteria of the reps before one that skips', async () => {
+      install((rep) =>
+        rep === 0
+          ? { score: 1, criteria: [{ id: 'supported', verdict: 'pass' }] }
+          : { score: 0, skipped: true }
+      );
+      expect(await judged(2)).toMatchObject({
+        skipped: true,
+        criteria: [{ id: 'supported', verdict: 'unknown' }],
+      });
+    });
+
+    it('checks the criteria a skip lists', async () => {
+      install(() => ({
+        score: 0,
+        skipped: true,
+        criteria: [{ id: 'a#b', verdict: 'pass' }],
+      }));
+      expect(await judged()).toMatchObject({
+        pass: false,
+        error: expect.stringContaining('whose id has a "#"'),
+      });
+    });
   });
 
   it("keeps a skipping judge's criteria, each unknown", async () => {
