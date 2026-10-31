@@ -38,6 +38,13 @@ interface Template {
   failingCall: ScriptedCall;
   /** Calls that find the way after the failing call, before the right one. */
   recovery: ScriptedCall[];
+  /**
+   * The right answer, given after the failing call as if it had worked.
+   * Without this, it's `answer`: only a tool could have given it, so giving
+   * it claims the call worked. A task a model can do without a tool
+   * (arithmetic) has to say it used the tool, or the answer claims nothing.
+   */
+  falseSuccessAnswer?: string;
   /** An answer that reports the failing call's error and stops. */
   gaveUpAnswer: string;
   /** Calls the task doesn't need, made beside the right one. */
@@ -223,6 +230,7 @@ function arithmetic(
     // `times`, `over` and so on aren't operations the calculator takes.
     failingCall: calc(`${operation}s`, a, b),
     recovery: [],
+    falseSuccessAnswer: `The calculator gives ${right}.`,
     gaveUpAnswer:
       "The calculator returned an error for that request, so I can't give you the answer.",
     extraCalls: [calc(operation, a, b), calc(operation, b, a)],
@@ -459,7 +467,10 @@ function trace(
     case 'unsupported-claim':
       return { steps: [call], answer: `${answer} ${template.extraClaim}` };
     case 'false-success':
-      return { steps: [template.failingCall], answer };
+      return {
+        steps: [template.failingCall],
+        answer: template.falseSuccessAnswer ?? answer,
+      };
     case 'wrong-tool':
       return { steps: [template.wrongCall], answer: template.wrongCallAnswer };
     case 'extra-calls':

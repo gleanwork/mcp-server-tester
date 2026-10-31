@@ -25,21 +25,33 @@ A label is `pass` or `fail` for the judge's question. "No label" means the kind 
 
 ## Results
 
-Measured on 2026-10-31. TPR is the share of the failing traces the judge failed; TNR is the share of the passing traces it passed. Each has a 95% Wilson interval. A judge is usable when it gave a verdict on at least 15 failing and 15 passing labels, the lower bound of both TPR and TNR is at least 80%, and it answered `unknown` on at most 10% of them. The identity changes when the judge's prompt, version, model or settings do; a different identity needs measuring again.
+Measured on 2026-10-31. TPR is the share of the failing traces the judge failed; TNR is the share of the passing traces it passed. Each has a 95% Wilson interval. A judge is usable when it gave a verdict on at least 15 failing and 15 passing labels, the lower bound of both TPR and TNR is at least 80%, and it answered `unknown` on at most 10% of them. The identity changes when the judge's prompt, version, model or settings do; a different identity needs measuring again. Each judge graded each trace once, so another run can differ by a trace or two, and a judge near the 80% bound can change from usable to not.
 
-| Judge         | Model                   | Identity       | Labels (fail / pass) | TPR             | TNR             | Kappa | Unknown | Usable                                  |
-| ------------- | ----------------------- | -------------- | -------------------- | --------------- | --------------- | ----- | ------- | --------------------------------------- |
-| `correctness` | claude-sonnet-4-6       | `5af9f52b7848` | 18 / 30              | 100% (82%–100%) | 93% (79%–98%)   | 0.91  | 0%      | no: TNR's lower bound 0.79 is below 0.8 |
-| `correctness` | claude-haiku-4-5        | `bc7efe8d92c6` | 18 / 30              | 100% (82%–100%) | 93% (79%–98%)   | 0.91  | 0%      | no: TNR's lower bound 0.79 is below 0.8 |
-| `correctness` | gpt-5-mini (effort low) | `76a53d312c37` | 18 / 30              | 100% (82%–100%) | 100% (89%–100%) | 1.00  | 0%      | yes                                     |
+| Judge             | Model                   | Identity       | Labels (fail / pass) | TPR             | TNR             | Kappa | Unknown | Usable                                  |
+| ----------------- | ----------------------- | -------------- | -------------------- | --------------- | --------------- | ----- | ------- | --------------------------------------- |
+| `correctness`     | claude-sonnet-4-6       | `5af9f52b7848` | 18 / 30              | 100% (82%–100%) | 87% (70%–95%)   | 0.83  | 0%      | no: TNR's lower bound 0.70 is below 0.8 |
+| `task-completion` | claude-sonnet-4-6       | `0b5e9007515a` | 28 / 27              | 100% (88%–100%) | 100% (88%–100%) | 1.00  | 0%      | yes                                     |
+| `correctness`     | claude-haiku-4-5        | `bc7efe8d92c6` | 18 / 30              | 100% (82%–100%) | 80% (63%–90%)   | 0.75  | 0%      | no: TNR's lower bound 0.63 is below 0.8 |
+| `task-completion` | claude-haiku-4-5        | `6453609e4d0c` | 28 / 27              | 100% (88%–100%) | 100% (88%–100%) | 1.00  | 0%      | yes                                     |
+| `correctness`     | gpt-5-mini (effort low) | `76a53d312c37` | 18 / 30              | 100% (82%–100%) | 100% (89%–100%) | 1.00  | 0%      | yes                                     |
+| `task-completion` | gpt-5-mini (effort low) | `ca5c4eafb495` | 28 / 27              | 96% (82%–99%)   | 100% (88%–100%) | 0.96  | 0%      | yes                                     |
 
 `correctness` is the `rubric` judge with its built-in `correctness` rubric, which asks whether the answer is correct against the reference. It gets the trial's response as JSON, tool calls included, so it can fail a right answer because a tool call failed: that is a disagreement with the `false-success` labels, which pass a right answer on this question.
+
+`task-completion` reads the trace and asks whether the assistant did what the user asked. A `false-success` trace's answer claims a result that no tool result shows. For arithmetic, which needs no tool, the answer credits the calculator ("The calculator gives 444."), since a bare right number after a failed call claims nothing.
 
 ## Disagreements
 
 The `test` traces where a judge's verdict and the label differ. Read a case's trace in `scripts/calibration/cases.ts` to see why.
 
+- `correctness` on claude-sonnet-4-6: `divide-1296-54--false-success`, judged fail, labeled pass.
+- `correctness` on claude-sonnet-4-6: `multiply-37-12--false-success`, judged fail, labeled pass.
 - `correctness` on claude-sonnet-4-6: `weather-lima--false-success`, judged fail, labeled pass.
 - `correctness` on claude-sonnet-4-6: `weather-oslo--false-success`, judged fail, labeled pass.
+- `correctness` on claude-haiku-4-5: `add-46-789--false-success`, judged fail, labeled pass.
+- `correctness` on claude-haiku-4-5: `changelog-dead-letter--false-success`, judged fail, labeled pass.
+- `correctness` on claude-haiku-4-5: `multiply-37-12--false-success`, judged fail, labeled pass.
+- `correctness` on claude-haiku-4-5: `subtract-815-297--false-success`, judged fail, labeled pass.
 - `correctness` on claude-haiku-4-5: `weather-lima--false-success`, judged fail, labeled pass.
 - `correctness` on claude-haiku-4-5: `weather-oslo--false-success`, judged fail, labeled pass.
+- `task-completion` on gpt-5-mini (effort low): `config-workers--wrong-tool`, judged pass, labeled fail.

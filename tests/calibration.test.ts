@@ -90,9 +90,17 @@ describe('the calibration set', () => {
       ).toBe(true);
       expect(failing, at + 'false-success').toHaveLength(1);
       expect(failing[0], at + 'false-success').not.toEqual(right);
-      expect(of('false-success').answer, at + 'false-success').toBe(
-        sound.answer
-      );
+      // The right answer as if the call had worked: the sound answer, or for
+      // arithmetic, which needs no tool, the result credited to the tool.
+      const result = /^The answer is (.+)\.$/.exec(sound.answer)?.[1];
+      expect(
+        [sound.answer, `The calculator gives ${result}.`],
+        at + 'false-success'
+      ).toContain(of('false-success').answer);
+      if (template.startsWith('weather-') || result === undefined)
+        expect(of('false-success').answer, at + 'false-success').toBe(
+          sound.answer
+        );
       const wrongTool = of('wrong-tool');
       expect(wrongTool.steps, at + 'wrong-tool').toHaveLength(1);
       expect(wrongTool.steps[0], at + 'wrong-tool').not.toEqual(right);
@@ -179,7 +187,7 @@ describe('the calibration set', () => {
         },
       ],
     });
-    expect(falseSuccess!.finalText).toBe('The answer is 444.');
+    expect(falseSuccess!.finalText).toBe('The calculator gives 444.');
     expect(falseSuccess!.events).toEqual([
       expect.objectContaining({
         arguments: { operation: 'multiplys', a: 37, b: 12 },

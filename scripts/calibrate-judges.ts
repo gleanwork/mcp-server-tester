@@ -54,6 +54,12 @@ const JUDGES: Partial<
     provider: model.provider,
     model: model.model,
   }),
+  'task-completion': (model) => ({
+    type: 'task-completion',
+    ...model.options,
+    provider: model.provider,
+    model: model.model,
+  }),
 };
 
 interface JudgeModel {
@@ -358,13 +364,15 @@ A label is \`pass\` or \`fail\` for the judge's question. "No label" means the k
 
 ## Results
 
-Measured on ${date}. TPR is the share of the failing traces the judge failed; TNR is the share of the passing traces it passed. Each has a 95% Wilson interval. A judge is usable when it gave a verdict on at least 15 failing and 15 passing labels, the lower bound of both TPR and TNR is at least 80%, and it answered \`unknown\` on at most 10% of them. The identity changes when the judge's prompt, version, model or settings do; a different identity needs measuring again.
+Measured on ${date}. TPR is the share of the failing traces the judge failed; TNR is the share of the passing traces it passed. Each has a 95% Wilson interval. A judge is usable when it gave a verdict on at least 15 failing and 15 passing labels, the lower bound of both TPR and TNR is at least 80%, and it answered \`unknown\` on at most 10% of them. The identity changes when the judge's prompt, version, model or settings do; a different identity needs measuring again. Each judge graded each trace once, so another run can differ by a trace or two, and a judge near the 80% bound can change from usable to not.
 
 | Judge | Model | Identity | Labels (fail / pass) | TPR | TNR | Kappa | Unknown | Usable |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 ${rows.join('\n')}
 
 \`correctness\` is the \`rubric\` judge with its built-in \`correctness\` rubric, which asks whether the answer is correct against the reference. It gets the trial's response as JSON, tool calls included, so it can fail a right answer because a tool call failed: that is a disagreement with the \`false-success\` labels, which pass a right answer on this question.
+
+\`task-completion\` reads the trace and asks whether the assistant did what the user asked. A \`false-success\` trace's answer claims a result that no tool result shows. For arithmetic, which needs no tool, the answer credits the calculator ("The calculator gives 444."), since a bare right number after a failed call claims nothing.
 
 ## Disagreements
 
