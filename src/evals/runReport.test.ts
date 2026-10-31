@@ -59,6 +59,14 @@ const plugin: Plugin = {
         score: trial.text.length > 9 ? 1 : 0,
       }),
     },
+    // Can't tell on case two.
+    unsure: {
+      schema: z.object({}),
+      evaluate: async ({ case: judged }) =>
+        judged.id === 'two'
+          ? { score: 0, unknown: true, reasoning: 'cannot tell' }
+          : { score: 1 },
+    },
   },
   pairwiseJudges: {
     longer: {
@@ -318,6 +326,44 @@ describe('the run report', () => {
     expect(report.run.clientApps).toEqual(['Claude 2.31226.1']);
     expect(report.run.datasets[0]!.contentHash).toMatch(/^[0-9a-f]{64}$/);
     expect(report.run.environment).toEqual({ name: 'local', shards: 1 });
+  });
+
+  it("shows a judge's unknown answers, and leaves them out of its pass rate", async () => {
+    const configPath = path.join(dir, 'eval.json');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, judges: ['rr/judge/unsure'] })
+    );
+    const result = await run();
+    const report = await readReport(result.outputDir);
+    const [trial] = report.trials.base!.two!;
+    expect(trial!.pass).toBe(false);
+    expect(trial!.scores).toContainEqual(
+      expect.objectContaining({
+        grader: 'rr/judge/unsure',
+        judge: true,
+        pass: false,
+        unknown: true,
+        reasoning: 'cannot tell',
+      })
+    );
+    const judges = report.variants.find(
+      (v) => v.name === 'base'
+    )!.judgeCalibration;
+    // Two trials of case one passed; case two's two trials are unknown.
+    expect(judges).toEqual([
+      expect.objectContaining({
+        judge: 'rr/judge/unsure',
+        judged: 2,
+        passed: 2,
+        unknown: 2,
+        passRate: 1,
+      }),
+    ]);
   });
 
   it('says what graded the trials, and which graders read the answer', async () => {

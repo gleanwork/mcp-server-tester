@@ -26,7 +26,16 @@ export function useTrialLookup(): TrialLookup | null {
   return useContext(TrialLookupContext);
 }
 
-function Badge({ pass }: { pass: boolean }) {
+function Badge({ pass, unknown }: { pass: boolean; unknown?: boolean }) {
+  if (unknown)
+    return (
+      <span
+        className={`rounded px-1.5 text-xs font-bold ${TONE.warn}`}
+        title="The judge couldn't tell from the trace. The trial doesn't pass, and the judge's pass rate leaves it out."
+      >
+        UNKNOWN
+      </span>
+    );
   return (
     <span
       className={`rounded px-1.5 text-xs font-bold ${pass ? TONE.good : TONE.bad}`}
@@ -164,7 +173,7 @@ export function TrialView({
               className="grid grid-cols-[minmax(0,1fr)] gap-0.5 text-xs"
             >
               <span className="flex flex-wrap items-baseline gap-2">
-                <Badge pass={score.pass} />
+                <Badge pass={score.pass} unknown={score.unknown === true} />
                 <span className="font-mono font-semibold">
                   {score.judge ? score.grader : graderName(score.grader)}
                 </span>

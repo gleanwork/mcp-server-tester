@@ -89,7 +89,7 @@ export interface JudgeSubScore {
 
 /** What a judge returns for one rep. Only `score` is required. */
 export interface JudgeScore {
-  /** Score from 0 to 1. Ignored when `skipped` is true. */
+  /** Score from 0 to 1. Ignored when `skipped` or `unknown` is true. */
   score: number;
   reasoning?: string;
   /**
@@ -103,6 +103,13 @@ export interface JudgeScore {
    * `metadata` are kept; its `score` is not.
    */
   skipped?: boolean;
+  /**
+   * The trial's trace can't support a verdict: the judge read it and can't
+   * tell. Unlike a skip, it doesn't pass the trial. It is recorded, left
+   * out of the judge's pass rate and score metrics, and counted by
+   * `mst judges check`. Its `score` and `pass` are ignored.
+   */
+  unknown?: boolean;
   /** Named sub-scores, such as one per rubric criterion. */
   subScores?: Record<string, JudgeSubScore>;
   /** Token usage and cost of the judge's own model calls. */
@@ -257,8 +264,9 @@ function checkScore(value: unknown, label: string): number {
 /**
  * Checks a judge output and resolves pass/fail.
  *
- * A skipped output passes and keeps no score requirement. Otherwise `score`
- * and every sub-score must be between 0 and 1, and `pass` defaults to
+ * A skipped output passes and keeps no score requirement. An unknown one
+ * doesn't pass, and needs no score either. Otherwise `score` and every
+ * sub-score must be between 0 and 1, and `pass` defaults to
  * `score >= threshold`.
  */
 export function checkJudgeScore(
@@ -275,8 +283,15 @@ export function checkJudgeScore(
   if (result.skipped !== undefined && typeof result.skipped !== 'boolean') {
     throw new Error('returned a `skipped` that is not a boolean');
   }
+  if (result.unknown !== undefined && typeof result.unknown !== 'boolean') {
+    throw new Error('returned an `unknown` that is not a boolean');
+  }
   if (result.skipped) {
     return { ...result, pass: true };
+  }
+  if (result.unknown) {
+    const { pass: _pass, score: _score, ...rest } = result;
+    return { ...rest, score: 0, unknown: true, pass: false };
   }
   const score = checkScore(result.score, 'score');
   if (result.subScores !== undefined) {

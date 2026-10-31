@@ -64,7 +64,7 @@ function judgeResults(score: GraderScore | undefined): GraderScore[] {
 
 function pointwiseVerdict(score: GraderScore): JudgeVerdict | undefined {
   if (score.error !== undefined) return undefined;
-  if (score.skipped) return 'unknown';
+  if (score.skipped || score.unknown) return 'unknown';
   return score.pass ? 'pass' : 'fail';
 }
 

@@ -105,9 +105,11 @@ const HIGH_VARIANCE = 0.2;
  *
  * The judge gets `{ case, trial }` built from `run` and the response. When a
  * path in its `requires` is missing, it is not called and the result is
- * skipped. A rep that skips ends the run as skipped. Otherwise the mean score
- * is reported; pass is the mean score against the threshold, or the majority
- * of the reps' pass/fail when the judge returns its own `pass`.
+ * skipped. A rep that skips ends the run as skipped. A rep that answers
+ * `unknown` is left out; when every rep does, the result is unknown: not a
+ * pass, and not a score. Otherwise the mean score of the reps that answered
+ * is reported; pass is that mean against the threshold, or the majority of
+ * their pass/fail when the judge returns its own `pass`.
  *
  * A judge that can't score (unknown judge, bad options, a throw, an invalid
  * score) is an error, marked with `details.error`, not a score.
@@ -168,23 +170,29 @@ export async function evaluateJudge(
           repScore.metadata
         );
     }
-    const last = repScores.at(-1);
-    if (!last)
-      return judgeError(`Judge "${label}" error: no scores collected`, label);
+    const usage = sumJudgeUsage(repScores.map((v) => v.usage));
+    const answered = repScores.filter((v) => v.unknown !== true);
+    const last = answered.at(-1);
+    if (!last) {
+      const final = repScores.at(-1);
+      if (!final)
+        return judgeError(`Judge "${label}" error: no scores collected`, label);
+      return judgeUnknown(label, identity, final, usage);
+    }
 
-    const scores = repScores.map((v) => v.score);
+    const scores = answered.map((v) => v.score);
     const score = mean(scores);
     // A judge that decides pass/fail itself wins by majority over the reps;
     // otherwise the mean score meets the threshold or not.
-    const judgeDecides = repScores.some((v) => v.judgePass !== undefined);
+    const judgeDecides = answered.some((v) => v.judgePass !== undefined);
     const passed = judgeDecides
-      ? repScores.filter((v) => v.pass).length * 2 > repScores.length
+      ? answered.filter((v) => v.pass).length * 2 > answered.length
       : score >= threshold;
-    const usage = sumJudgeUsage(repScores.map((v) => v.usage));
-    const spread = reps > 1 ? scoreSpread(scores, score) : undefined;
+    const spread = answered.length > 1 ? scoreSpread(scores, score) : undefined;
+    const unknownReps = repScores.length - answered.length;
     const repNote =
       reps > 1
-        ? ` (mean of ${reps} reps: [${scores.map((s) => s.toFixed(2)).join(', ')}])`
+        ? ` (mean of ${answered.length} reps: [${scores.map((s) => s.toFixed(2)).join(', ')}]${unknownReps > 0 ? `; ${unknownReps} unknown` : ''})`
         : '';
     if (spread !== undefined && spread > HIGH_VARIANCE)
       console.warn(
@@ -227,17 +235,46 @@ export async function evaluateJudge(
   }
 }
 
-/**
- * A judge that could not grade this case: recorded, passed, not scored. Its
- * metadata is kept, so a judge can say why it skipped in a form a script can
- * read (for example `{ noLinks: true }`); its score never is.
- */
 /** A judge's identity, and whether MST can see its version change. */
 interface JudgeIdentityDetails {
   judgeIdentity: string;
   judgeUnversioned?: true;
 }
 
+/**
+ * A judge that read the trial and can't tell: not a pass, and no score.
+ * `details.unknown` keeps it out of the judge's pass rate.
+ */
+function judgeUnknown(
+  label: string,
+  identity: JudgeIdentityDetails,
+  final: CheckedJudgeScore,
+  usage: ReturnType<typeof sumJudgeUsage>
+): ValidationResult {
+  return {
+    pass: false,
+    message: `Judge "${label}" answered unknown${final.reasoning ? `: ${final.reasoning}` : ''}`,
+    details: {
+      judgeName: label,
+      ...identity,
+      unknown: true,
+      ...(final.reasoning !== undefined ? { reasoning: final.reasoning } : {}),
+      ...(final.provider !== undefined
+        ? { judgeProvider: final.provider }
+        : {}),
+      ...(final.model !== undefined ? { judgeModel: final.model } : {}),
+      ...(final.subScores !== undefined ? { subScores: final.subScores } : {}),
+      ...(usage !== undefined ? { usage } : {}),
+      ...(final.metadata !== undefined ? { metadata: final.metadata } : {}),
+    },
+  };
+}
+
+/**
+ * A judge that could not grade this case: recorded, passed, not scored. Its
+ * metadata is kept, so a judge can say why it skipped in a form a script can
+ * read (for example `{ noLinks: true }`); its score never is.
+ */
 function judgeSkipped(
   label: string,
   identity: JudgeIdentityDetails,

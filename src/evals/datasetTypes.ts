@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { kindCheckedReferenceSchema } from './referenceSchemas.js';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
-import type { BuiltInRubric, ProviderKind } from '../judge/judgeTypes.js';
-import type { TraceEvent } from './evalFrameworkTypes.js';
 import {
-  RubricJudgeLLMSchema,
-  RubricSpecSchema,
-} from '../judge/rubricJudge.js';
+  JudgeLLMSchema,
+  type BuiltInRubric,
+  type ProviderKind,
+} from '../judge/judgeTypes.js';
+import type { TraceEvent } from './evalFrameworkTypes.js';
+import { RubricSpecSchema } from '../judge/rubricJudge.js';
 import { removedKeys, renamedKeys } from './renamedKeys.js';
 
 /**
@@ -278,8 +279,8 @@ const CaseJudgeFieldsSchema = z.object({
   reference: z.unknown().optional(),
   threshold: z.number().min(0).max(1).optional(),
   reps: z.number().int().min(1).optional(),
-  // The rubric judge's LLM settings, which a case may set flat.
-  ...RubricJudgeLLMSchema.shape,
+  // A built-in judge's LLM settings, which a case may set flat.
+  ...JudgeLLMSchema.shape,
 });
 
 const RUBRIC_JUDGE_FIELDS = new Set(Object.keys(CaseJudgeFieldsSchema.shape));

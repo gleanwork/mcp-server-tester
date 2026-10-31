@@ -1420,7 +1420,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L179-L233
+```typescript snippet=src/evals/datasetTypes.ts#L180-L234
 /**
  * A case's assertions
  *
@@ -1482,7 +1482,7 @@ export interface EvalAssertions {
 
 A case's `judges` entries, written like an eval config's `judges`.
 
-```typescript snippet=src/evals/datasetTypes.ts#L120-L164
+```typescript snippet=src/evals/datasetTypes.ts#L121-L165
 /**
  * One of a case's judges, written like an eval config's: a reference
  * (`acme/judge/completeness`) or `{ "type": <reference>, ...options }`.
@@ -1532,7 +1532,7 @@ export interface CaseJudgeConfig extends JudgeSettings {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L12-L118
+````typescript snippet=src/evals/datasetTypes.ts#L13-L119
 /**
  * A single eval case: an input the client under test acts on, and what to
  * assert about what it did. The case runs on the `client`, `model` and

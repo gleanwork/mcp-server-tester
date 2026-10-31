@@ -66,7 +66,7 @@ export interface UsageMetrics {
 }
 
 /** Every LLM judge provider. The type, the dataset schema and the provider table derive from this list. */
-export const JUDGE_PROVIDER_KINDS = [
+const JUDGE_PROVIDER_KINDS = [
   'anthropic',
   'vertex-anthropic',
   'anthropic-agent-sdk',
@@ -76,6 +76,26 @@ export const JUDGE_PROVIDER_KINDS = [
 
 /** Valid LLM judge provider kinds. */
 export type ProviderKind = (typeof JUDGE_PROVIDER_KINDS)[number];
+
+/**
+ * The LLM settings every built-in LLM judge takes, which a case or an
+ * assertion may also set flat next to the judge.
+ */
+export const JudgeLLMSchema = z.object({
+  provider: z.enum(JUDGE_PROVIDER_KINDS).optional(),
+  model: z.string().optional(),
+  apiKeyEnvVar: z.string().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  temperature: z.number().min(0).max(1).optional(),
+  maxBudgetUsd: z.number().positive().optional(),
+  effort: z.string().min(1).optional(),
+  /**
+   * For the `rubric` judge, the largest answer it grades (bytes): a larger
+   * one fails without a model call. For a yes-or-no judge, the size each
+   * tool result in the trace is cut to.
+   */
+  maxToolOutputSize: z.number().int().positive().optional(),
+});
 
 /** The provider a judge uses when its config names none. */
 export const DEFAULT_JUDGE_PROVIDER: ProviderKind = 'anthropic';

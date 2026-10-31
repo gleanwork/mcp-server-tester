@@ -231,6 +231,7 @@ async function evaluateJudges(
           ? { judgeUnversioned: true as const }
           : {}),
         ...(details.skipped === true ? { skipped: true } : {}),
+        ...(details.unknown === true ? { unknown: true as const } : {}),
         ...(typeof details.error === 'string' ? { error: details.error } : {}),
         ...(details.subScores !== undefined
           ? {
@@ -247,16 +248,22 @@ async function evaluateJudges(
     })
   );
   if (results.length === 1) return results[0]!;
-  // Several judges must all pass. Skipped judges neither pass nor fail.
+  // Several judges must all pass. Skipped judges neither pass nor fail; an
+  // unknown one doesn't pass.
   const graded = results.filter((result) => !result.skipped);
   const passCount = graded.filter((result) => result.pass).length;
   const skipped = results.length - graded.length;
+  const unknown = graded.filter((result) => result.unknown).length;
   const failedToRun = results.find((result) => result.error !== undefined);
+  const notes = [
+    ...(unknown > 0 ? [`${unknown} unknown`] : []),
+    ...(skipped > 0 ? [`${skipped} skipped`] : []),
+  ];
   return {
     pass: passCount === graded.length,
     details:
       `${passCount}/${graded.length} judges passed` +
-      (skipped > 0 ? ` (${skipped} skipped)` : ''),
+      (notes.length > 0 ? ` (${notes.join(', ')})` : ''),
     ...(failedToRun ? { error: failedToRun.error } : {}),
     judgeResults: results,
   };
@@ -266,7 +273,12 @@ async function evaluateJudges(
 function failedOutright(score: GraderScore): boolean {
   if (score.judgeResults?.length)
     return score.judgeResults.some(failedOutright);
-  return !score.pass && score.error === undefined && score.skipped !== true;
+  return (
+    !score.pass &&
+    score.error === undefined &&
+    score.skipped !== true &&
+    score.unknown !== true
+  );
 }
 
 /**
