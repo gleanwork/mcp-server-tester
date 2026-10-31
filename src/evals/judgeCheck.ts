@@ -450,9 +450,15 @@ export interface CorrectedRate {
 /**
  * The share of trials that would pass by people's labels, from the share the
  * judge passed and its calibration: the Rogan-Gladen estimator, with failing
- * as the positive class. The interval is the delta method's over the run's
- * sample and the calibration's two samples, as Lee et al. give it for LLM
- * judges, cut to [0, 1].
+ * as the positive class, cut to [0, 1].
+ *
+ * The 95% interval is Lang and Reiczigel's (2014), which accounts for the
+ * run's sample and the calibration's two: the delta method's, on rates
+ * adjusted as Agresti and Coull adjust a proportion (adding z²/2 failures
+ * and z²/2 passes to the run, and one of each to TPR's and TNR's labels),
+ * with their bias correction. The plain delta method gives a zero-width
+ * interval when a rate is 0 or 1, as it is for a judge that agrees with
+ * every label on a run that passes every trial.
  *
  * Undefined when the judge does no better than chance (TPR + TNR <= 1),
  * since nothing then separates passes from failures.
@@ -469,18 +475,40 @@ export function correctedPassRate(
   const youden = tpr.value + tnr.value - 1;
   if (youden <= 0) return undefined;
   const failed = 1 - passed / judged;
-  const fail = Math.min(1, Math.max(0, (failed + tnr.value - 1) / youden));
+  const fail = clip((failed + tnr.value - 1) / youden);
+
+  // Lang and Reiczigel's adjusted rates (their eqs 6 and 7).
+  const z2 = z * z;
+  const nTpr = tpr.n + 2;
+  const nTnr = tnr.n + 2;
+  const adjTpr = (tpr.k + 1) / nTpr;
+  const adjTnr = (tnr.k + 1) / nTnr;
+  const nRun = judged + z2;
+  const adjFailed = (judged * failed + z2 / 2) / nRun;
+  const adjYouden = adjTpr + adjTnr - 1;
+  if (adjYouden <= 0) return undefined;
+  const adjFail = (adjFailed + adjTnr - 1) / adjYouden;
+  // Their bias correction (eq 17) and variance (eq 4, on adjusted rates).
+  const shift =
+    2 *
+    z2 *
+    ((adjFail * adjTpr * (1 - adjTpr)) / nTpr -
+      ((1 - adjFail) * adjTnr * (1 - adjTnr)) / nTnr);
   const variance =
-    ((failed * (1 - failed)) / judged +
-      (fail * fail * tpr.value * (1 - tpr.value)) / tpr.n +
-      ((1 - fail) * (1 - fail) * tnr.value * (1 - tnr.value)) / tnr.n) /
-    (youden * youden);
+    ((adjFailed * (1 - adjFailed)) / nRun +
+      (adjFail * adjFail * adjTpr * (1 - adjTpr)) / nTpr +
+      ((1 - adjFail) * (1 - adjFail) * adjTnr * (1 - adjTnr)) / nTnr) /
+    (adjYouden * adjYouden);
   const half = z * Math.sqrt(variance);
   return {
     value: 1 - fail,
-    low: Math.max(0, 1 - fail - half),
-    high: Math.min(1, 1 - fail + half),
+    low: 1 - clip(adjFail + shift + half),
+    high: 1 - clip(adjFail + shift - half),
   };
+}
+
+function clip(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 /** An eval's directory, from one of its run directories (`<eval>/runs/<run-id>`). */

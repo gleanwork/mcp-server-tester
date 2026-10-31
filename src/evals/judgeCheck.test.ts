@@ -54,10 +54,25 @@ describe('the statistics', () => {
     const calibration = { tpr: wilson(45, 50), tnr: wilson(40, 50) };
     // The judge passed 60 of 100: it fails 90% of failures and passes 80% of
     // passes, so 40% judged failing is 28.6% failing.
+    // The interval is Lang and Reiczigel's; these values are asht::prevSeSp's
+    // (fail as the positive class).
     const corrected = correctedPassRate(60, 100, calibration)!;
     expect(corrected.value).toBeCloseTo(0.714286, 5);
-    expect(corrected.low).toBeCloseTo(0.533268, 4);
-    expect(corrected.high).toBeCloseTo(0.895304, 4);
+    expect(corrected.low).toBeCloseTo(0.540994, 5);
+    expect(corrected.high).toBeCloseTo(0.914618, 5);
+    // A judge that agreed with every label, on a run that passed every
+    // trial, still has an interval: neither sample is certain.
+    const perfect = { tpr: wilson(44, 44), tnr: wilson(48, 48) };
+    expect(correctedPassRate(100, 100, perfect)).toEqual({
+      value: 1,
+      low: expect.closeTo(0.955842, 5),
+      high: 1,
+    });
+    expect(correctedPassRate(7, 50, perfect)).toEqual({
+      value: expect.closeTo(0.14, 10),
+      low: expect.closeTo(0.037313, 5),
+      high: expect.closeTo(0.257987, 5),
+    });
     // A perfect judge changes nothing.
     expect(
       correctedPassRate(60, 100, { tpr: wilson(30, 30), tnr: wilson(30, 30) })!
