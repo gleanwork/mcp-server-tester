@@ -33,10 +33,13 @@ const plugin: Plugin = {
       evidence: 'structured',
       async run(input, _config, context) {
         const better = context.variant?.name === 'better';
+        const long = context.variant?.name === 'long';
         return {
-          finalText: better
-            ? `${input.prompt}: the certificate expired`
-            : `${input.prompt}: a deploy failed`,
+          finalText: long
+            ? `${input.prompt}: ${'the certificate expired. '.repeat(250)}`
+            : better
+              ? `${input.prompt}: the certificate expired`
+              : `${input.prompt}: a deploy failed`,
           events: [
             {
               kind: 'tool_call',
@@ -83,7 +86,15 @@ const plugin: Plugin = {
  * A stored run: two variants and two cases, two trials each, graded by the
  * keyword judge and the pairwise judge.
  */
-async function storedRun(options: { redact?: boolean } = {}) {
+async function storedRun(
+  options: {
+    redact?: boolean;
+    /** List the keyword judge twice, so each trial has two of its verdicts. */
+    twice?: boolean;
+    /** The candidate variant's answers are longer than the report shows. */
+    long?: boolean;
+  } = {}
+) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-label-page-'));
   dirs.push(dir);
   await fs.writeFile(
@@ -109,11 +120,16 @@ async function storedRun(options: { redact?: boolean } = {}) {
       trials: 2,
       redactStoredResponses: options.redact ?? false,
       servers: { docs: { transport: 'stdio', command: 'docs-server' } },
-      judges: [{ type: 'lp/judge/keyword', keyword: 'certificate' }],
+      judges: [
+        { type: 'lp/judge/keyword', keyword: 'certificate' },
+        ...(options.twice
+          ? [{ type: 'lp/judge/keyword', keyword: 'expired' }]
+          : []),
+      ],
       pairwiseJudges: ['lp/pairwise-judge/longer'],
       variants: [
         { name: 'baseline', servers: ['docs'] },
-        { name: 'better', servers: ['docs'] },
+        { name: options.long ? 'long' : 'better', servers: ['docs'] },
       ],
     })
   );
@@ -299,6 +315,27 @@ describe('the label page', () => {
       "default-src 'none'"
     );
     expect(await page.text()).toContain('<script>');
+  });
+
+  it('shows a trial once when its judge gave it two verdicts, which share one label', async () => {
+    const t = await storedRun({ twice: true });
+    const server = await start(t.directory);
+    expect(server.data.items).toHaveLength(8);
+    const keys = server.data.items.map((item) => [item.caseId, item.trial]);
+    // Two variants, so each case and trial comes twice: once per variant.
+    expect(new Set(keys.map((key) => key.join('/'))).size).toBe(4);
+  });
+
+  it('shows both sides of a pairwise case with their whole answers', async () => {
+    const t = await storedRun({ long: true });
+    const server = await start(t.directory, 'lp/pairwise-judge/longer');
+    const answers = server.data.items[0]!.sides!.flatMap((side) =>
+      side.trials.map((trial) => trial.answer ?? '')
+    );
+    expect(Math.max(...answers.map((answer) => answer.length))).toBeGreaterThan(
+      6000
+    );
+    expect(answers.join('')).not.toContain('more characters');
   });
 
   it('labels a pairwise judge: both sides, as A and B, with baseline, candidate or tie', async () => {

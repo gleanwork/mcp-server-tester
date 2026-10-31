@@ -93,10 +93,7 @@ program
     'MST (MCP Server Tester): CLI tools for MCP server evaluation and testing.\n' +
       'Also available as `mcp-server-tester`.'
   )
-  .version(packageJson.version)
-  // mst's own options come before a command, so a command's options all
-  // reach it (mst label's --judge isn't taken from mst label export's).
-  .enablePositionalOptions();
+  .version(packageJson.version);
 
 // Init command
 program
@@ -287,11 +284,16 @@ const runArgumentHelp =
 const labelCommand = program
   .command('label')
   .description(
-    "A person's labels for a run's judge verdicts, which mst judges check measures judges against. With a run, serves a page that shows one trial at a time, without the judge's verdict, and stores your labels"
+    "A person's labels for a run's judge verdicts, which mst judges check measures judges against"
+  );
+// The default, so `mst label <run> --judge <name>` serves the page. Its
+// options are its own, not `label`'s, so they never take export's --judge.
+labelCommand
+  .command('page', { isDefault: true })
+  .description(
+    "Serve a page that shows one trial at a time, without the judge's verdict, and stores your labels (the default: mst label <run> --judge <name>)"
   )
-  // Its options stop at import and export, which take their own --judge.
-  .enablePositionalOptions()
-  .argument('[run]', runArgumentHelp)
+  .argument('<run>', runArgumentHelp)
   .option(
     '--judge <name>',
     "The judge whose verdicts to label, by its name in results (a rubric judge's rubric)"
@@ -308,11 +310,7 @@ const labelCommand = program
     'Where runs are written, to find a run by ID',
     '.mcp-test-results'
   )
-  .action(async (run: string | undefined, options: LabelPageCommandOptions) => {
-    if (run === undefined) {
-      labelCommand.help();
-      return;
-    }
+  .action(async (run: string, options: LabelPageCommandOptions) => {
     const server = await labelPage(run, options);
     await new Promise<void>((resolve) => {
       process.once('SIGINT', resolve);

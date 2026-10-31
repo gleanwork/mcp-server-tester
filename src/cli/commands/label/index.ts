@@ -64,10 +64,6 @@ export async function labelPage(
     return openBrowser(url);
   }
 ): Promise<LabelPageServer> {
-  if (options.judge === undefined)
-    throw new Error(
-      'Give --judge <name>: the judge whose verdicts to label, by its name in results.'
-    );
   const split = options.split;
   if (
     split !== undefined &&
@@ -80,7 +76,12 @@ export async function labelPage(
     !(Number.isInteger(port) && port >= 0 && port < 65536)
   )
     throw new Error(`--port ${options.port} isn't a port number.`);
+  // The run first: a mistyped command (mst label exprot) is taken as a run.
   const directory = await resolveRunArgument(run, options.dir);
+  if (options.judge === undefined)
+    throw new Error(
+      'Give --judge <name>: the judge whose verdicts to label, by its name in results.'
+    );
   const server = await startLabelPage({
     directory,
     judge: options.judge,

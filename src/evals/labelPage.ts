@@ -36,7 +36,7 @@ import {
 } from './runFormat.js';
 
 /** What a trial did, as the page shows it: never its scores. */
-export interface LabelPageTrial {
+interface LabelPageTrial {
   answer?: string;
   /** Whether the client recorded what it called. */
   traced: boolean;
@@ -44,7 +44,7 @@ export interface LabelPageTrial {
 }
 
 /** One of a pairwise comparison's two sides, shown as A or B. */
-export interface LabelPageSide {
+interface LabelPageSide {
   /** The label that prefers this side. */
   label: 'baseline' | 'candidate';
   trials: LabelPageTrial[];
@@ -54,7 +54,7 @@ export interface LabelPageSide {
  * One verdict to label. It names neither the variant nor the judge's
  * verdict, so neither sways the person.
  */
-export interface LabelPageItem {
+interface LabelPageItem {
   id: number;
   caseId: string;
   /** Pointwise: the trial's index. */
@@ -73,7 +73,7 @@ export interface LabelPageItem {
 }
 
 /** What the page loads. */
-export interface LabelPageData {
+interface LabelPageData {
   runId: string;
   judge: string;
   kind: 'pointwise' | 'pairwise';
@@ -121,10 +121,17 @@ export async function startLabelPage(
       `Run ${stored.run.runId} redacts stored responses, so it has no answers to label. Collect it again with "redactStoredResponses": false in the eval config, or label from another tool with mst label import.`
     );
   const all = judgedItems(stored);
-  const items = all.filter(
-    (item) =>
-      labelQuestion(item) === options.judge && item.verdict !== undefined
-  );
+  // One item per label: a question judged twice (by two models, say) gave
+  // two verdicts that share one label.
+  const keys = new Set<string>();
+  const items = all.filter((item) => {
+    if (labelQuestion(item) !== options.judge || item.verdict === undefined)
+      return false;
+    const key = labelKey(item);
+    if (keys.has(key)) return false;
+    keys.add(key);
+    return true;
+  });
   if (items.length === 0) {
     const names = [...new Set(all.map((item) => labelQuestion(item)))].sort();
     throw new Error(
@@ -344,12 +351,7 @@ function pageData(
         return {
           ...base,
           trial: item.trial ?? 0,
-          trace: trial
-            ? {
-                ...trial,
-                ...(item.answer !== undefined ? { answer: item.answer } : {}),
-              }
-            : { traced: false, events: [] },
+          trace: trial ?? { traced: false, events: [] },
         };
       }
       const baseline: LabelPageSide = {
@@ -382,9 +384,11 @@ function pageData(
 }
 
 function pageTrial(trial: TrialResult | EvalCaseResult): LabelPageTrial {
-  const { finalText, traced, events } = trialTrace(trial);
+  const { traced, events } = trialTrace(trial);
+  // The whole answer, as the judge read it; the report shortens it.
+  const answer = (trial as { trace?: { finalText?: string } }).trace?.finalText;
   return {
-    ...(finalText !== undefined ? { answer: finalText } : {}),
+    ...(answer ? { answer } : {}),
     traced: traced ?? false,
     events,
   };

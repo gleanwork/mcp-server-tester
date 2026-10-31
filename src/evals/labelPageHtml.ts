@@ -31,7 +31,7 @@ const STYLE = `
 `;
 
 const SCRIPT = `
-const state = { data: null, index: 0 };
+const state = { data: null, index: 0, saving: false };
 const $ = (id) => document.getElementById(id);
 function el(tag, props, ...children) {
   const node = document.createElement(tag);
@@ -68,6 +68,12 @@ function choices(item) {
     return [['pass', 'Pass', 'p'], ['fail', 'Fail', 'f']];
   return [[item.sides[0].label, 'A is better', 'a'], ['tie', 'Tie', 't'], [item.sides[1].label, 'B is better', 'b']];
 }
+// A label as its button names it: a pairwise label says A or B, never
+// which side is the baseline.
+function labelText(item, label) {
+  const choice = choices(item).find(([value]) => value === label);
+  return choice ? choice[1] : label;
+}
 function progress() {
   const items = state.data.items;
   const done = items.filter((item) => item.label !== undefined);
@@ -83,7 +89,7 @@ function render() {
   main.append(el('p', { class: 'muted', text:
     (state.index + 1) + ' of ' + state.data.items.length + ' · case ' + item.caseId +
     (item.trial !== undefined ? ' · trial ' + (item.trial + 1) : '') + ' · ' + item.split + ' split' +
-    (item.label !== undefined ? ' · labeled ' + item.label : '') }));
+    (item.label !== undefined ? ' · labeled ' + labelText(item, item.label) : '') }));
   main.append(textBlock('Input', item.input));
   main.append(textBlock('Reference answer', item.reference));
   if (item.trace) main.append(trialView(item.trace));
@@ -106,7 +112,11 @@ function render() {
   $('note').value = item.note ?? '';
 }
 async function save(label) {
-  const item = state.data.items[state.index];
+  // One save at a time, so a second key press can't label an item unseen.
+  if (state.saving) return;
+  state.saving = true;
+  const index = state.index;
+  const item = state.data.items[index];
   const note = $('note').value.trim();
   $('status').textContent = 'Saving…';
   $('status').className = '';
@@ -121,11 +131,14 @@ async function save(label) {
     item.label = body.label;
     item.split = body.split;
     if (note) item.note = note; else delete item.note;
-    $('status').textContent = 'Saved ' + body.label + '.';
-    next(true);
+    $('status').textContent = 'Saved ' + labelText(item, body.label) + '.';
+    // Move on only from the item just labeled, not one the person went to.
+    if (state.index === index) next(true); else render();
   } catch (error) {
     $('status').textContent = String(error.message ?? error);
     $('status').className = 'error';
+  } finally {
+    state.saving = false;
   }
 }
 function next(unlabeled) {
@@ -147,7 +160,7 @@ function previous() {
   render();
 }
 document.addEventListener('keydown', (event) => {
-  if (event.target instanceof HTMLTextAreaElement || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.repeat || event.target instanceof HTMLTextAreaElement || event.metaKey || event.ctrlKey || event.altKey) return;
   const item = state.data?.items[state.index];
   if (!item) return;
   const choice = choices(item).find(([, , key]) => key === event.key.toLowerCase());

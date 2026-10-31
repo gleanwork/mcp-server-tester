@@ -389,6 +389,49 @@ describe('mst CLI', () => {
     });
   });
 
+  describe('label command', () => {
+    it('serves the page by default, and gives each command its own options', async () => {
+      const none = await runBin('label');
+      expect(none.exitCode).toBe(1);
+      expect(none.stderr).toContain("missing required argument 'run'");
+
+      const help = await runBin('label', '--help');
+      expect(help.exitCode).toBe(0);
+      expect(help.stdout).toMatch(/page \[options\] <run>/);
+      expect(help.stdout).toMatch(/import \[options\] <run> <file>/);
+
+      // The page's options reach it, after the run.
+      const port = await runBin(
+        'label',
+        'r1',
+        '--judge',
+        'x',
+        '--port',
+        '99999'
+      );
+      expect(port.exitCode).toBe(1);
+      expect(port.stderr).toContain("--port 99999 isn't a port number");
+
+      // A mistyped command is taken as a run, and says there is no such run.
+      const typo = await runBin('label', 'exprot', '--judge', 'x');
+      expect(typo.exitCode).toBe(1);
+      expect(typo.stderr).toContain('"exprot" isn\'t a run directory');
+
+      // export keeps its own --judge, and doesn't take the page's options.
+      const exported = await runBin('label', 'export', 'r1', '--judge', 'x');
+      expect(exported.stderr).toContain('"r1" isn\'t a run directory');
+      const wrong = await runBin('label', 'export', 'r1', '--port', '1');
+      expect(wrong.exitCode).toBe(1);
+      expect(wrong.stderr).toContain("unknown option '--port'");
+    });
+
+    it("still takes mst's --version after a command", async () => {
+      const result = await runBin('run', '--version');
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe(packageJson.version);
+    });
+  });
+
   describe('open command', () => {
     it('exits with code 1 when there is no run in the default directory', async () => {
       const result = await runBin('open');
