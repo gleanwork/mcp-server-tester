@@ -214,8 +214,14 @@ test.describe('the label page', () => {
           baseline: 'baseline',
           variant: 'better',
         });
-      expect(['baseline', 'candidate']).toContain(labels[0]!.label);
-      expect(labels.map((label) => label.label)).toContain('tie');
+      // One preference and one tie, in either order: labels are read in
+      // file order, not the order the page showed the cases.
+      const answers = labels.map((label) => label.label);
+      expect(answers).toHaveLength(2);
+      expect(answers).toContain('tie');
+      expect(['baseline', 'candidate']).toContain(
+        answers.find((answer) => answer !== 'tie')
+      );
     } finally {
       await server.close();
     }
