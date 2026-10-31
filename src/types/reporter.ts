@@ -874,6 +874,44 @@ export interface RunReportDifference {
   variant?: string;
 }
 
+/**
+ * One pointwise judge's verdicts on a variant, against the calibration of
+ * the judge identity that gave them.
+ *
+ * - `calibrated`: a usable calibration of this identity; `corrected` is set
+ *   unless the judge does no better than chance.
+ * - `not-usable`: a calibration of this identity that failed the gate.
+ * - `stale`: calibrations of this judge, none of this identity.
+ * - `uncalibrated`: no calibration of this judge, or no identity recorded.
+ * - `mixed`: the variant's verdicts came from more than one identity.
+ */
+export interface RunReportJudgeCalibration {
+  /** The judge's name in results, as its labels and calibrations name it. */
+  judge: string;
+  status: 'calibrated' | 'not-usable' | 'stale' | 'uncalibrated' | 'mixed';
+  /** Trials the judge passed or failed. */
+  judged: number;
+  passed: number;
+  /** Trials the judge couldn't decide, left out of its pass rate. */
+  unknown: number;
+  /** `passed / judged`; absent when it judged none. */
+  passRate?: number;
+  /** The share that would pass by people's labels, with its 95% interval. */
+  corrected?: { value: number; low: number; high: number };
+  /** MST can't see the judge's version change, so staleness can't be told. */
+  unversioned?: true;
+  /** The calibration of this identity, or, when stale, the newest one of the judge. */
+  calibration?: {
+    judgeIdentity: string;
+    createdAt: string;
+    labels: number;
+    tpr: number | null;
+    tnr: number | null;
+    usable: boolean;
+    reasons: string[];
+  };
+}
+
 /** One variant's row in the run report. */
 export interface RunReportVariant {
   /** The variant's ID in `comparison`. */
@@ -891,6 +929,12 @@ export interface RunReportVariant {
   trialPassRate?: number;
   /** Each judge's mean score over the trials it scored (judges use their own scales). */
   judgeScores: Array<{ judge: string; mean: number }>;
+  /**
+   * Each pointwise judge's pass rate, how well it is calibrated, and, with a
+   * usable calibration of its identity, the pass rate corrected for its
+   * errors (ADR 0009). Absent in older reports.
+   */
+  judgeCalibration?: RunReportJudgeCalibration[];
   costPerCase?: number;
   medianDurationMs?: number;
   /** Share of tool calls per tool, or per server when the run has several. */

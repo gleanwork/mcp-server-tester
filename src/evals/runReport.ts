@@ -15,6 +15,7 @@ import type {
   RunReportDifference,
   RunReportEnvironment,
   RunReportEvidence,
+  RunReportJudgeCalibration,
   RunReportPreference,
   RunReportScore,
   RunReportTrial,
@@ -30,10 +31,18 @@ import type {
 import { RUN_FORMAT } from './resultFormat.js';
 import {
   isInfraTrial,
+  labelQuestion,
   readRunDirectory,
+  type CalibrationRecord,
   type RunRecord,
   type StoredRun,
 } from './runFormat.js';
+import { judgedItems, type JudgedItem } from './judgedItems.js';
+import {
+  correctedPassRate,
+  evalDirectoryOf,
+  readCalibrations,
+} from './judgeCheck.js';
 import {
   compareVariants,
   headlineGroup,
@@ -315,8 +324,14 @@ function clientApps(variants: EvaluationSummary['variants']): string[] {
   return [...apps].sort();
 }
 
-export function buildRunReport(stored: StoredRun): MCPRunReportData {
+export function buildRunReport(
+  stored: StoredRun,
+  calibrations: readonly CalibrationRecord[] = []
+): MCPRunReportData {
   const { run, summary } = stored;
+  const judged = judgedItems(stored).filter(
+    (item) => item.trial !== undefined && item.verdict !== undefined
+  );
   const ran = summary.variants;
   const baselineName = run.baseline ?? ran[0]?.name ?? 'default';
   const baseline = ran.find((v) => v.name === baselineName) ?? ran[0];
@@ -439,6 +454,10 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
         judge,
         mean: mean(scores)!,
       })),
+      judgeCalibration: judgeCalibrationOf(
+        judged.filter((item) => item.variant === variant.name),
+        calibrations
+      ),
       ...(numberMetric(variant, 'cost_usd_mean') !== undefined
         ? { costPerCase: numberMetric(variant, 'cost_usd_mean') }
         : {}),
@@ -541,6 +560,77 @@ export function buildRunReport(stored: StoredRun): MCPRunReportData {
         }
       : {}),
   };
+}
+
+/**
+ * Each pointwise judge's verdicts on one variant, against the calibrations
+ * the eval keeps (ADR 0009). Infrastructure failures have no verdicts.
+ */
+function judgeCalibrationOf(
+  items: readonly JudgedItem[],
+  calibrations: readonly CalibrationRecord[]
+): RunReportJudgeCalibration[] {
+  const byJudge = new Map<string, JudgedItem[]>();
+  for (const item of items) {
+    const question = labelQuestion(item);
+    byJudge.set(question, [...(byJudge.get(question) ?? []), item]);
+  }
+  return [...byJudge].map(([judge, verdicts]) => {
+    const passed = verdicts.filter((item) => item.verdict === 'pass').length;
+    const failed = verdicts.filter((item) => item.verdict === 'fail').length;
+    const judgedCount = passed + failed;
+    const identities = new Set(verdicts.map((item) => item.judgeIdentity));
+    const identity = identities.size === 1 ? [...identities][0] : undefined;
+    const records = calibrations
+      .filter(
+        (record) => record.judge === judge && record.judgeKind === 'pointwise'
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const current =
+      identity === undefined
+        ? undefined
+        : records.find((record) => record.judgeIdentity === identity);
+    const shown = current ?? (identity === undefined ? undefined : records[0]);
+    const status: RunReportJudgeCalibration['status'] =
+      identities.size > 1
+        ? 'mixed'
+        : current
+          ? current.judgeKind === 'pointwise' && current.usable
+            ? 'calibrated'
+            : 'not-usable'
+          : identity !== undefined && records.length
+            ? 'stale'
+            : 'uncalibrated';
+    const corrected =
+      status === 'calibrated' && current?.judgeKind === 'pointwise'
+        ? correctedPassRate(passed, judgedCount, current)
+        : undefined;
+    return {
+      judge,
+      status,
+      judged: judgedCount,
+      passed,
+      unknown: verdicts.length - judgedCount,
+      ...(judgedCount ? { passRate: passed / judgedCount } : {}),
+      ...(corrected ? { corrected } : {}),
+      ...(verdicts.some((item) => item.judgeUnversioned)
+        ? { unversioned: true as const }
+        : {}),
+      ...(shown?.judgeKind === 'pointwise'
+        ? {
+            calibration: {
+              judgeIdentity: shown.judgeIdentity,
+              createdAt: shown.createdAt,
+              labels: shown.labels,
+              tpr: shown.tpr.value,
+              tnr: shown.tnr.value,
+              usable: shown.usable,
+              reasons: shown.reasons,
+            },
+          }
+        : {}),
+    };
+  });
 }
 
 /**
@@ -692,7 +782,12 @@ export async function writeRunReport(
   runDirectory: string,
   data?: MCPRunReportData
 ): Promise<string> {
-  const report = data ?? buildRunReport(await readRunDirectory(runDirectory));
+  const report =
+    data ??
+    buildRunReport(
+      await readRunDirectory(runDirectory),
+      await readCalibrations(evalDirectoryOf(runDirectory))
+    );
   const target = path.join(runDirectory, 'report');
   await fs.mkdir(target, { recursive: true });
   await fs.cp(reporterUiDirectory(), target, { recursive: true, force: true });

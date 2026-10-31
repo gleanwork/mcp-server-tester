@@ -10,12 +10,12 @@ import {
   checkImportedLabels,
   defaultSplit,
   formatLabels,
-  judgedItems,
   parseCsv,
   parseLabels,
   readLabels,
   writeLabels,
 } from './labels.js';
+import { judgedItems } from './judgedItems.js';
 import {
   labelRecordPath,
   parseLabelRecord,

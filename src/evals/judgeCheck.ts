@@ -14,6 +14,7 @@
  * identity; a changed judge is checked again.
  */
 
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { readJsonFile, writeJsonFile } from '../utils/jsonFile.js';
 import { RUN_FORMAT } from './resultFormat.js';
@@ -25,7 +26,7 @@ import {
   type LabelRecord,
   type StoredRun,
 } from './runFormat.js';
-import { labelKey, type JudgedItem } from './labels.js';
+import { labelKey, type JudgedItem } from './judgedItems.js';
 
 /** What `checkJudge` needs of one run. */
 export interface CheckedRun {
@@ -439,6 +440,49 @@ export function calibrationRecord(
       };
 }
 
+/** A corrected pass rate and its 95% interval. */
+export interface CorrectedRate {
+  value: number;
+  low: number;
+  high: number;
+}
+
+/**
+ * The share of trials that would pass by people's labels, from the share the
+ * judge passed and its calibration: the Rogan-Gladen estimator, with failing
+ * as the positive class. The interval is the delta method's over the run's
+ * sample and the calibration's two samples, as Lee et al. give it for LLM
+ * judges, cut to [0, 1].
+ *
+ * Undefined when the judge does no better than chance (TPR + TNR <= 1),
+ * since nothing then separates passes from failures.
+ */
+export function correctedPassRate(
+  passed: number,
+  judged: number,
+  calibration: { tpr: Rate; tnr: Rate },
+  z = Z95
+): CorrectedRate | undefined {
+  const { tpr, tnr } = calibration;
+  if (judged === 0 || tpr.value === null || tnr.value === null)
+    return undefined;
+  const youden = tpr.value + tnr.value - 1;
+  if (youden <= 0) return undefined;
+  const failed = 1 - passed / judged;
+  const fail = Math.min(1, Math.max(0, (failed + tnr.value - 1) / youden));
+  const variance =
+    ((failed * (1 - failed)) / judged +
+      (fail * fail * tpr.value * (1 - tpr.value)) / tpr.n +
+      ((1 - fail) * (1 - fail) * tnr.value * (1 - tnr.value)) / tnr.n) /
+    (youden * youden);
+  const half = z * Math.sqrt(variance);
+  return {
+    value: 1 - fail,
+    low: Math.max(0, 1 - fail - half),
+    high: Math.min(1, 1 - fail + half),
+  };
+}
+
 /** An eval's directory, from one of its run directories (`<eval>/runs/<run-id>`). */
 export function evalDirectoryOf(runDirectory: string): string {
   return path.dirname(path.dirname(path.resolve(runDirectory)));
@@ -452,6 +496,65 @@ export async function writeCalibration(
   const file = path.join(evalDirectory, calibrationRecordPath(record));
   await writeJsonFile(file, record);
   return file;
+}
+
+/**
+ * When an eval's newest calibration was written, in ms since the epoch: a
+ * report built before it doesn't show it. Undefined without calibrations.
+ */
+export async function newestCalibrationTime(
+  evalDirectory: string
+): Promise<number | undefined> {
+  const root = path.join(evalDirectory, 'calibrations');
+  const judges = await fs.readdir(root).catch(() => [] as string[]);
+  let newest: number | undefined;
+  for (const judge of judges) {
+    const directory = path.join(root, judge);
+    for (const name of await fs
+      .readdir(directory)
+      .catch(() => [] as string[])) {
+      if (!name.endsWith('.json')) continue;
+      const info = await fs.stat(path.join(directory, name)).catch(() => null);
+      if (info && (newest === undefined || info.mtimeMs > newest))
+        newest = info.mtimeMs;
+    }
+  }
+  return newest;
+}
+
+/**
+ * Every calibration an eval keeps, for the report. A file that isn't one is
+ * left out with a warning, so one bad file doesn't stop a report.
+ */
+export async function readCalibrations(
+  evalDirectory: string,
+  warn: (message: string) => void = (message) => console.warn(message)
+): Promise<CalibrationRecord[]> {
+  const root = path.join(evalDirectory, 'calibrations');
+  let judges: string[];
+  try {
+    judges = await fs.readdir(root);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  const records: CalibrationRecord[] = [];
+  for (const judge of judges.sort()) {
+    const directory = path.join(root, judge);
+    const files = await fs.readdir(directory).catch(() => [] as string[]);
+    for (const name of files.sort()) {
+      if (!name.endsWith('.json')) continue;
+      const file = path.join(directory, name);
+      try {
+        records.push(parseCalibrationRecord(await readJsonFile(file), file));
+      } catch (error) {
+        warn(
+          `[mcp-server-tester] Skipping ${file}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+  }
+  return records;
 }
 
 /**

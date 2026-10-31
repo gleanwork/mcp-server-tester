@@ -22,6 +22,7 @@ export type {
   MCPRunReportData,
   RunReportDifference,
   RunReportEvent,
+  RunReportJudgeCalibration,
   RunReportPreference,
   RunReportTrial,
   RunReportVariant,

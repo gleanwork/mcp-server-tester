@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,14 +8,22 @@ import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import {
   cohensKappa,
+  correctedPassRate,
   readCalibration,
+  readCalibrations,
   wilson,
   type PairwiseCheck,
   type PointwiseCheck,
 } from './judgeCheck.js';
-import { parseCalibrationRecord } from './runFormat.js';
+import { parseCalibrationRecord, readRunDirectory } from './runFormat.js';
+import { buildRunReport, writeRunReport } from './runReport.js';
+import type {
+  MCPRunReportData,
+  RunReportJudgeCalibration,
+} from '../types/reporter.js';
 import { labelExport, labelImport } from '../cli/commands/label/index.js';
 import { checkJudgeCommand } from '../cli/commands/judges/check.js';
+import { open } from '../cli/commands/open/index.js';
 
 const dirs: string[] = [];
 
@@ -40,6 +48,28 @@ describe('the statistics', () => {
       low: null,
       high: null,
     });
+  });
+
+  it("corrects a pass rate for the judge's errors, with both samples in its interval", () => {
+    const calibration = { tpr: wilson(45, 50), tnr: wilson(40, 50) };
+    // The judge passed 60 of 100: it fails 90% of failures and passes 80% of
+    // passes, so 40% judged failing is 28.6% failing.
+    const corrected = correctedPassRate(60, 100, calibration)!;
+    expect(corrected.value).toBeCloseTo(0.714286, 5);
+    expect(corrected.low).toBeCloseTo(0.533268, 4);
+    expect(corrected.high).toBeCloseTo(0.895304, 4);
+    // A perfect judge changes nothing.
+    expect(
+      correctedPassRate(60, 100, { tpr: wilson(30, 30), tnr: wilson(30, 30) })!
+        .value
+    ).toBeCloseTo(0.6, 10);
+    // Cut to [0, 1].
+    expect(correctedPassRate(100, 100, calibration)!.value).toBe(1);
+    // No better than chance: nothing to correct with.
+    expect(
+      correctedPassRate(60, 100, { tpr: wilson(25, 50), tnr: wilson(25, 50) })
+    ).toBeUndefined();
+    expect(correctedPassRate(0, 0, calibration)).toBeUndefined();
   });
 
   it("gives Cohen's kappa, and null when chance explains every answer", () => {
@@ -209,6 +239,42 @@ function missedFailures(n: number) {
     Number(row.caseId.slice(5)) < n
       ? 'fail'
       : undefined;
+}
+
+/** The first score from `judge` anywhere under `value`. */
+function firstScore(
+  value: unknown,
+  judge: string
+): { judgeIdentity?: string } | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.judgeName === judge && typeof record.judgeIdentity === 'string')
+    return record as { judgeIdentity?: string };
+  for (const child of Object.values(record)) {
+    const found = firstScore(child, judge);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** The report data `writeRunReport` wrote for a run. */
+async function reportOf(directory: string): Promise<MCPRunReportData> {
+  const file = path.join(directory, 'report', 'data.js');
+  if (!(await fs.stat(file).catch(() => undefined)))
+    await writeRunReport(directory);
+  const text = await fs.readFile(file, 'utf8');
+  return JSON.parse(
+    text.replace(/^window\.MST_RUN_REPORT = /, '').replace(/;\s*$/, '')
+  ) as MCPRunReportData;
+}
+
+function calibrationOf(
+  report: MCPRunReportData,
+  variant: string
+): RunReportJudgeCalibration | undefined {
+  return report.variants
+    .find((v) => v.name === variant)
+    ?.judgeCalibration?.find((judge) => judge.judge === 'ck/judge/keyword');
 }
 
 async function check(
@@ -449,6 +515,119 @@ describe('mst judges check', () => {
     await expect(check([directory], { minRate: '2' })).rejects.toThrow(
       "--min-rate 2 isn't a number from 0 to 1."
     );
+  });
+
+  it("shows each judge's calibration and corrected pass rate in the run's report", async () => {
+    const { dir, base, results } = await evalDirectory({ version: '1.0.0' });
+    const first = await run(base);
+    const before = await reportOf(first);
+    expect(calibrationOf(before, 'baseline')).toEqual({
+      judge: 'ck/judge/keyword',
+      status: 'uncalibrated',
+      judged: 40,
+      passed: 20,
+      unknown: 0,
+      passRate: 0.5,
+    });
+
+    // People fail 2 of the baseline's 20 good trials, which the judge passed.
+    await label(first, 'ck/judge/keyword', missedFailures(2));
+    const [checked] = (await check([first])).checks as PointwiseCheck[];
+    const after = await reportOf(first);
+    const baseline = calibrationOf(after, 'baseline')!;
+    expect(baseline).toMatchObject({
+      status: 'calibrated',
+      passRate: 0.5,
+      calibration: {
+        judgeIdentity: checked!.judgeIdentity,
+        labels: 80,
+        usable: true,
+        reasons: [],
+      },
+    });
+    expect(baseline.unversioned).toBeUndefined();
+    expect(baseline.corrected).toEqual(correctedPassRate(20, 40, checked!));
+    // The judge misses failures, so fewer trials truly pass than it says.
+    expect(baseline.corrected!.value).toBeLessThan(0.5);
+
+    // A failed gate shows the reason and no correction.
+    await check([first], { minLabels: '50' });
+    const strict = calibrationOf(await reportOf(first), 'baseline')!;
+    expect(strict.status).toBe('not-usable');
+    expect(strict.corrected).toBeUndefined();
+    expect(strict.calibration?.reasons[0]).toMatch(/needs 50/);
+
+    // A changed judge's run finds only the old identity's calibration.
+    await fs.writeFile(
+      path.join(dir, 'eval.json'),
+      (await fs.readFile(path.join(dir, 'eval.json'), 'utf8')).replace(
+        '"keyword":"certificate"',
+        '"keyword":"expired"'
+      )
+    );
+    const second = await run(base);
+    const stale = calibrationOf(await reportOf(second), 'baseline')!;
+    expect(stale.status).toBe('stale');
+    expect(stale.corrected).toBeUndefined();
+    expect(stale.calibration?.judgeIdentity).toBe(checked!.judgeIdentity);
+
+    // The second run's report predates a new check: mst open rebuilds it,
+    // and leaves it alone when nothing changed since.
+    const data = path.join(second, 'report', 'data.js');
+    const old = new Date(Date.now() - 60_000);
+    await fs.utimes(data, old, old);
+    await check([first], { minLabels: '10' });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await open(second, { print: true });
+    const rebuilt = (await fs.stat(data)).mtimeMs;
+    expect(rebuilt).toBeGreaterThan(old.getTime());
+    await open(second, { print: true });
+    expect((await fs.stat(data)).mtimeMs).toBe(rebuilt);
+    log.mockRestore();
+
+    // A bad calibration file is skipped, not fatal.
+    await fs.writeFile(
+      path.join(
+        results,
+        'calibrations',
+        'ck%2Fjudge%2Fkeyword',
+        `${'0'.repeat(64)}.json`
+      ),
+      '{"format":"mst.run/v1","kind":"calibration"}'
+    );
+    const warnings: string[] = [];
+    expect(
+      await readCalibrations(results, (message) => warnings.push(message))
+    ).toHaveLength(1);
+    expect(warnings[0]).toMatch(/isn't a calibration/);
+  });
+
+  it('marks an unversioned judge, and a variant graded by two identities', async () => {
+    const { base, results } = await evalDirectory();
+    const directory = await run(base);
+    await label(directory, 'ck/judge/keyword', () => undefined);
+    await check([directory]);
+    const stored = await readRunDirectory(directory);
+    const report = buildRunReport(stored, await readCalibrations(results));
+    expect(calibrationOf(report, 'better')).toMatchObject({
+      status: 'calibrated',
+      unversioned: true,
+      corrected: { value: 0.5 },
+    });
+
+    // Two identities' verdicts in one variant: no calibration applies.
+    const mixed = JSON.parse(JSON.stringify(stored)) as typeof stored;
+    const better = mixed.summary.variants.find((v) => v.name === 'better');
+    const score = firstScore(better, 'ck/judge/keyword');
+    expect(score).toBeDefined();
+    score!.judgeIdentity = 'f'.repeat(64);
+    const mixedReport = buildRunReport(mixed, await readCalibrations(results));
+    expect(calibrationOf(mixedReport, 'better')).toMatchObject({
+      status: 'mixed',
+      judged: 40,
+    });
+    expect(calibrationOf(mixedReport, 'better')?.corrected).toBeUndefined();
+    expect(calibrationOf(mixedReport, 'baseline')?.status).toBe('calibrated');
   });
 
   it('refuses a calibration file that is not one', () => {

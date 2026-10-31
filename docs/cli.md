@@ -769,6 +769,8 @@ For a pairwise judge, it reports the share of labels its preference matches, and
 
 The check uses `test` labels unless `--split dev` or `--split all` says otherwise. Each judge identity in the runs is checked on its own, newest first, because a changed judge must be measured again. For a `test` check, it writes the calibration record `calibrations/<judge>/<identity>.json` in each eval's directory, replacing an earlier one (`--no-record` doesn't). A judge without a version MST can see change (one that declares none, in a plugin that has none) is marked **unversioned**: its calibration can't tell when it goes stale, so set the judge's `version`. Verdicts from before MST recorded judge identities can be checked but not recorded: grade the run again (`mst grade`).
 
+A run's report shows each pointwise judge's pass rate per variant in its _Judges_ table, with the calibration of the identity that graded it: _calibrated_, _not usable_, _stale_ (the judge changed since it was checked), _not calibrated_, or _mixed versions_. With a usable calibration, it also shows the pass rate corrected for the judge's errors (Rogan-Gladen, with a 95% interval over both the run's trials and the calibration's labels). The raw rate is always shown. `judges check` rebuilds the reports of the runs it read, and `mst open` rebuilds a report built before the eval's newest calibration.
+
 Options: `--judge <name>` (required), `--split <test|dev|all>`, `--min-labels <n>`, `--min-rate <rate>`, `--max-unknown <rate>`, `--no-record`, `--json`, `-d, --dir <directory>`.
 
 ## `label` - Label Judge Verdicts

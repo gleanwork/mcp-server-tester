@@ -11,14 +11,13 @@ import {
   checkImportedLabels,
   formatLabels,
   formatOfFile,
-  judgedItems,
-  labelKey,
   looksLikeJudgekeeper,
   parseLabels,
   readLabels,
   writeLabels,
   type LabelFormat,
 } from '../../../evals/labels.js';
+import { judgedItems, labelKey } from '../../../evals/judgedItems.js';
 import { labelQuestion, readRunDirectory } from '../../../evals/runFormat.js';
 import { resolveRunArgument } from '../../runArgument.js';
 
