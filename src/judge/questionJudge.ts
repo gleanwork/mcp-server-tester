@@ -29,7 +29,11 @@ import {
   embeddedJsonObjects,
   type JudgeCompletionAdapter,
 } from './llmJudge.js';
-import { renderJudgeTrace, traceRecorded } from './judgeTrace.js';
+import {
+  DEFAULT_TRACE_OUTPUT_BYTES,
+  renderJudgeTrace,
+  traceRecorded,
+} from './judgeTrace.js';
 import { QUESTION_SYSTEM_PROMPT, questionPrompt } from './prompts/question.js';
 
 export type QuestionVerdict = 'yes' | 'no' | 'unknown';
@@ -178,32 +182,84 @@ export function combineAnswers(
 
 type JudgeLLMOptions = z.infer<typeof JudgeLLMSchema>;
 
-/** A trace with one of every part, so a change to how traces render changes the version. */
-const SAMPLE_INPUT: JudgeInput = {
-  case: {
-    input: { prompt: '{request}' },
-    expected: { answer: '{reference}' },
-    tags: [],
-    metadata: {},
+const SAMPLE_EVENTS: JudgeInput['trial']['events'] = [
+  {
+    kind: 'tool_call',
+    source: 'mcp',
+    name: '{tool}',
+    server: '{server}',
+    arguments: { '{argument}': '{value}' },
+    output: '{result}',
+    isError: true,
   },
-  trial: {
-    response: '{answer}',
-    text: '{answer}',
-    events: [
-      {
-        kind: 'tool_call',
-        source: 'mcp',
-        name: '{tool}',
-        server: '{server}',
-        arguments: { '{argument}': '{value}' },
-        output: '{result}',
-        isError: true,
-      },
-      { kind: 'skill', source: 'builtin', name: '{skill}' },
-    ],
-    evidence: 'structured',
+  {
+    kind: 'tool_call',
+    source: 'mcp',
+    name: '{write}',
+    output: '{result}',
+    simulatedWrite: true,
   },
-};
+  { kind: 'tool_call', source: 'builtin', name: '{unrecorded result}' },
+  {
+    kind: 'tool_search',
+    source: 'builtin',
+    name: '{search}',
+    results: [{ name: '{found}', server: '{server}' }, { name: '{found}' }],
+  },
+  { kind: 'skill', source: 'builtin', name: '{skill}' },
+];
+
+/** A trial for the version's sample traces. */
+function sampleInput(trial: Partial<JudgeInput['trial']>): JudgeInput {
+  return {
+    case: {
+      input: { prompt: '{request}' },
+      expected: { answer: '{reference}' },
+      tags: [],
+      metadata: {},
+    },
+    trial: {
+      response: '{answer}',
+      text: '{answer}',
+      events: SAMPLE_EVENTS,
+      evidence: 'structured',
+      ...trial,
+    },
+  };
+}
+
+/**
+ * Traces that reach every part of the trace format (each evidence level,
+ * empty traces, a cut result), so a change to how traces render changes the
+ * version.
+ */
+function sampleTraces(reference: boolean | undefined): string[] {
+  const options = { reference };
+  return [
+    renderJudgeTrace(sampleInput({}), options),
+    renderJudgeTrace(sampleInput({ events: [] }), options),
+    renderJudgeTrace(sampleInput({ evidence: 'observed' }), options),
+    renderJudgeTrace(
+      sampleInput({ evidence: 'observed', events: [] }),
+      options
+    ),
+    renderJudgeTrace(sampleInput({ evidence: 'none', events: [] }), options),
+    renderJudgeTrace(sampleInput({ evidence: undefined, events: [] }), options),
+    renderJudgeTrace(
+      sampleInput({
+        events: [
+          {
+            kind: 'tool_call',
+            source: 'mcp',
+            name: '{tool}',
+            output: '{long result}',
+          },
+        ],
+      }),
+      { ...options, maxToolOutputSize: 4 }
+    ),
+  ];
+}
 
 export interface QuestionJudgeSpec<Options extends z.ZodRawShape> {
   description: string;
@@ -238,16 +294,34 @@ export function defineQuestionJudge<
   const schema = JudgeLLMSchema.extend(
     spec.options ?? ({} as Options)
   ).strict();
+  // The questions it asks with its default options, and whether each is
+  // required. A judge whose questions come from the case (criteria) asks
+  // none of the sample.
+  const defaults = schema.safeParse({});
   const version = contentHash({
     system: QUESTION_SYSTEM_PROMPT,
     prompt: questionPrompt('{trace}', '{question}'),
-    trace: renderJudgeTrace(SAMPLE_INPUT, { reference: spec.reference }),
+    traces: sampleTraces(spec.reference),
     prompts: spec.prompts,
+    questions: defaults.success
+      ? spec
+          .questions(
+            sampleInput({}),
+            defaults.data as z.infer<z.ZodObject<Options>> & JudgeLLMOptions
+          )
+          .map(({ id, text, required }) => ({
+            id,
+            text,
+            required: required !== false,
+          }))
+      : null,
+    needsTrace: spec.needsTrace !== false,
     defaults: {
       provider: DEFAULT_JUDGE_PROVIDER,
       models: DEFAULT_JUDGE_MODELS,
       maxTokens: DEFAULT_JUDGE_MAX_TOKENS,
       temperature: DEFAULT_JUDGE_TEMPERATURE,
+      maxToolOutputSize: DEFAULT_TRACE_OUTPUT_BYTES,
     },
   });
   function llmConfig(options: JudgeLLMOptions): JudgeConfig {

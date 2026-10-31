@@ -761,7 +761,7 @@ correctness  (identity 3f2a9c1be0d4, claude-sonnet-4-5)
 
 `--judge` is the judge's name as its labels have it: a `rubric` judge's rubric, else its reference. `<run...>` takes what [`label`](#label---label-judge-verdicts) does.
 
-For a pointwise judge, a failing trial is the positive class. TPR is the share of the trials people failed that the judge also failed; TNR is the share of the trials people passed that it also passed. Each has a 95% Wilson interval. Kappa is Cohen's. `unknown` counts the labeled trials the judge couldn't decide (it skipped them).
+For a pointwise judge, a failing trial is the positive class. TPR is the share of the trials people failed that the judge also failed; TNR is the share of the trials people passed that it also passed. Each has a 95% Wilson interval. Kappa is Cohen's. `unknown` counts the labeled trials the judge couldn't decide: it answered unknown, or skipped them.
 
 A judge is **usable** when it gave a verdict on at least 15 failing and 15 passing labels (`--min-labels`), the lower bound of both TPR and TNR is at least 0.8 (`--min-rate`), and it answered `unknown` on at most 10% of the labeled trials (`--max-unknown`). The output says which part fails.
 

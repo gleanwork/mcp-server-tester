@@ -61,7 +61,11 @@ export interface JudgeTrial {
   events: TraceEvent[];
   /** Conversation turns, when the client reports them. */
   messages?: JudgeMessage[];
-  /** How the trace was observed. Absent for a tool result. */
+  /**
+   * How the trace was observed. Absent for a tool result. A client trial
+   * whose client declares none is `structured`, as tool-call assertions
+   * treat it.
+   */
   evidence?: TraceEvidence;
   /**
    * A local directory with the client's own record of the trial (for
@@ -215,7 +219,9 @@ export function buildJudgeTrial(
     ...(clientResponse?.conversationHistory !== undefined && {
       messages: clientResponse.conversationHistory,
     }),
-    ...(client?.evidence !== undefined && { evidence: client.evidence }),
+    ...(client?.evidence !== undefined
+      ? { evidence: client.evidence }
+      : clientResponse !== undefined && { evidence: 'structured' as const }),
     ...(clientResponse?.usage !== undefined && { usage: clientResponse.usage }),
     ...(typeof clientResponse?.artifactsDir === 'string' && {
       artifactsDir: clientResponse.artifactsDir,

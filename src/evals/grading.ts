@@ -261,6 +261,10 @@ async function evaluateJudges(
   ];
   return {
     pass: passCount === graded.length,
+    // No judge failed, and one couldn't tell: the verdict is unknown.
+    ...(unknown > 0 && passCount + unknown === graded.length && !failedToRun
+      ? { unknown: true as const }
+      : {}),
     details:
       `${passCount}/${graded.length} judges passed` +
       (notes.length > 0 ? ` (${notes.join(', ')})` : ''),

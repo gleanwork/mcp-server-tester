@@ -930,7 +930,7 @@ const result = validateToolCallCount(simulationResult, { min: 1, max: 3 });
 
 ### `validateJudge(response, config, run?)` (async)
 
-Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin judge. Returns a `Promise<ValidationResult>`. A judge that can't score the response (an unknown judge, invalid options, an API error, a score outside 0 to 1) fails with `details.error` set. A judge that skips passes with `details.skipped` set.
+Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin judge. Returns a `Promise<ValidationResult>`. A judge that can't score the response (an unknown judge, invalid options, an API error, a score outside 0 to 1) fails with `details.error` set. A judge that skips passes with `details.skipped` set. A judge that answers unknown (the trace can't tell) doesn't pass: `details.unknown` is set, and `details.score` is not.
 
 **Parameters:**
 

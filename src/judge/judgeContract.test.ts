@@ -139,9 +139,27 @@ describe('buildJudgeTrial', () => {
   });
 
   it('reads a direct result as text with no events', () => {
+    const trial = buildJudgeTrial({
+      content: [{ type: 'text', text: 'tool text' }],
+    });
+    expect(trial).toMatchObject({ text: 'tool text', events: [] });
+    // A tool result has no trace, so it has no evidence level.
+    expect(trial.evidence).toBeUndefined();
+  });
+
+  it('counts a client trial without an evidence level as structured, as tool-call assertions do', () => {
+    // The mst client in a Playwright test declares no evidence.
+    const clientResponse = {
+      response: 't',
+      toolCalls: [{ name: 'search', arguments: {}, output: 'hit' }],
+    };
+    expect(buildJudgeTrial(clientResponse, { clientResponse }).evidence).toBe(
+      'structured'
+    );
     expect(
-      buildJudgeTrial({ content: [{ type: 'text', text: 'tool text' }] })
-    ).toMatchObject({ text: 'tool text', events: [] });
+      buildJudgeTrial(clientResponse, { clientResponse, evidence: 'observed' })
+        .evidence
+    ).toBe('observed');
   });
 });
 
@@ -467,6 +485,7 @@ describe('judge output', () => {
           }
     );
     judge('always', async () => ({ score: 1 }));
+    judge('never', async () => ({ score: 0 }));
     const result = await run([
       { id: 'alone', input: 'cannot tell', judges: ['unsure/judge/judge'] },
       {
@@ -475,8 +494,16 @@ describe('judge output', () => {
         judges: ['always/judge/judge', 'unsure/judge/judge'],
       },
       { id: 'told', input: 'can tell', judges: ['unsure/judge/judge'] },
+      {
+        id: 'with-a-fail',
+        input: 'cannot tell',
+        judges: ['never/judge/judge', 'unsure/judge/judge'],
+      },
     ]);
-    const [alone, withAnother, told] = result.caseResults;
+    const [alone, withAnother, told, withAFail] = result.caseResults;
+    // A judge that failed makes the judges together a fail.
+    expect(withAFail!.scores.judge?.unknown).toBeUndefined();
+    expect(withAFail!.scores.judge?.pass).toBe(false);
     // Unlike a skip, unknown doesn't pass the trial; nor is it a grading
     // error, which would make the trial an infrastructure failure.
     expect(alone!.pass).toBe(false);
@@ -491,8 +518,10 @@ describe('judge output', () => {
     expect(alone!.scores.judge?.score).toBeUndefined();
     expect(alone!.judgeUsage).toEqual({ inputTokens: 4, outputTokens: 1 });
     expect(withAnother!.pass).toBe(false);
+    // No judge failed, so the judges together are unknown, not failed.
     expect(withAnother!.scores.judge).toMatchObject({
       pass: false,
+      unknown: true,
       details: '1/2 judges passed (1 unknown)',
     });
     expect(told!.pass).toBe(true);

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type * as JudgeClientModule from './judgeClient.js';
 import { createJudgeCompletion, preflightJudge } from './judgeClient.js';
-import type { JudgeInput } from './judgeContract.js';
+import { buildJudgeTrial, type JudgeInput } from './judgeContract.js';
 import type { JudgeCompletionRequest } from './llmJudge.js';
 import { QUESTION_SYSTEM_PROMPT } from './prompts/question.js';
 import {
@@ -238,6 +238,26 @@ describe('defineQuestionJudge', () => {
       )
     ).toMatchObject({ unknown: true });
     expect(requests).toHaveLength(0);
+    // A client trial whose client declares no evidence (the mst client in a
+    // Playwright test) has its trace, and is asked about it.
+    const clientResponse = {
+      response: 'An expired certificate.',
+      toolCalls: [{ name: 'search', arguments: {}, output: 'expired' }],
+    };
+    expect(
+      await defineQuestionJudge(spec).evaluate(
+        {
+          case: INPUT.case,
+          trial: buildJudgeTrial(clientResponse, { clientResponse }),
+        },
+        {}
+      )
+    ).toMatchObject({ pass: true });
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.prompt).toContain(
+      '<event n="1" kind="tool_call" name="search">'
+    );
+    requests.length = 0;
     // A judge whose questions don't need the trace still asks them.
     expect(
       await defineQuestionJudge({ ...spec, needsTrace: false }).evaluate(
@@ -279,5 +299,32 @@ describe('defineQuestionJudge', () => {
     expect(defineQuestionJudge({ ...spec, reference: true }).version).not.toBe(
       version
     );
+  });
+
+  it('has a version that changes with the questions it asks, whether each is required, and whether it needs the trace', () => {
+    const version = defineQuestionJudge(spec).version;
+    expect(
+      defineQuestionJudge({ ...spec, needsTrace: false }).version
+    ).not.toBe(version);
+    expect(
+      defineQuestionJudge({
+        ...spec,
+        questions: () => [
+          { id: 'first', text: 'Is the first thing right?' },
+          { id: 'second', text: 'Is the second thing right?', required: true },
+        ],
+      }).version
+    ).not.toBe(version);
+    // The same questions, written another way, are the same judge: a
+    // question is required unless it says otherwise.
+    expect(
+      defineQuestionJudge({
+        ...spec,
+        questions: () => [
+          { id: 'first', text: 'Is the first thing right?', required: true },
+          { id: 'second', text: 'Is the second thing right?', required: false },
+        ],
+      }).version
+    ).toBe(version);
   });
 });
