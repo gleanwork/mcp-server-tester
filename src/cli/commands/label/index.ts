@@ -171,18 +171,29 @@ export async function labelExport(
   const judges = options.judge?.length ? new Set(options.judge) : undefined;
   const wanted = (item: { judge: string; criterion?: string }) =>
     !judges || judges.has(item.judge) || judges.has(labelQuestion(item));
-  // A judge that failed on a trial gave no verdict, and import takes no
-  // label for one, so the sheet has no row for it.
-  const items = judgedItems(stored).filter(
-    (item) => item.verdict !== undefined && wanted(item)
-  );
   const labels = (await readLabels(directory)).filter(wanted);
+  const labeled = new Set(labels.map((label) => labelKey(label)));
+  // A judge that failed on a trial gave no verdict, and import takes no
+  // label for one, so the sheet has no row for it, unless the run keeps a
+  // label for the trial from before (a regrade the judge then failed):
+  // that row keeps the trial's input and answer.
+  const all = judgedItems(stored);
+  const items = all.filter(
+    (item) =>
+      wanted(item) &&
+      (item.verdict !== undefined || labeled.has(labelKey(item)))
+  );
   if (judges && items.length === 0 && labels.length === 0) {
     const names = [
-      ...new Set(judgedItems(stored).map((item) => labelQuestion(item))),
+      ...new Set(
+        all
+          .filter((item) => item.verdict !== undefined)
+          .map((item) => labelQuestion(item))
+      ),
     ].sort();
+    const failed = all.filter(wanted).length;
     throw new Error(
-      `Run ${stored.run.runId} has no verdicts from ${[...judges].join(', ')}${names.length ? `; its judges are ${names.join(', ')}` : ''}.`
+      `Run ${stored.run.runId} has no verdicts from ${[...judges].join(', ')}${failed ? ` (it failed on all ${failed} trials it judged)` : ''}${names.length ? `; its judges are ${names.join(', ')}` : ''}.`
     );
   }
   if (stored.run.redactStoredResponses)

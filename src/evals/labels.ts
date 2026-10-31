@@ -458,9 +458,23 @@ export interface LabelImportOptions {
   now?: Date;
 }
 
+/** Whether an imported row gives a stored label's value, split and note again. */
+function repeatsLabel(label: ImportedLabel, kept: LabelRecord): boolean {
+  const value =
+    label.trial !== undefined
+      ? POINTWISE_SPELLINGS.get(label.label.toLowerCase())
+      : label.label.toLowerCase();
+  return (
+    value === kept.label &&
+    (label.split ?? kept.split) === kept.split &&
+    (label.note ?? kept.note) === kept.note
+  );
+}
+
 /**
  * Checks imported labels against the run: each one must label a verdict the
- * run has, with a value its judge can give. Returns them as the run stores
+ * run has, with a value its judge can give. A row that repeats a label the
+ * run keeps for a verdict it no longer has is skipped. Returns them as the run stores
  * them. A label that replaces one keeps its split unless it gives its own.
  * Throws, importing none, when any label can't be imported.
  */
@@ -485,6 +499,10 @@ export function checkImportedLabels(
   for (const label of imported) {
     const key = labelKey(label);
     if (!known.has(key)) {
+      // An exported row for a label the run keeps, on a verdict it no
+      // longer has (a regrade the judge failed): unchanged, so skipped.
+      const kept = previous.get(key);
+      if (kept !== undefined && repeatsLabel(label, kept)) continue;
       problems.push(
         `${label.source}: the run has no verdict from "${labelQuestion(label)}" for ${describe(label)}${judges.length ? ` (its judges: ${judges.join(', ')})` : ''}.`
       );
