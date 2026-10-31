@@ -11,6 +11,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { BUILT_IN_JUDGE_QUESTIONS } from '../judge/builtinQuestions.js';
 import { BUILT_IN_RUBRICS } from '../judge/rubrics.js';
 import type {
   EvalCaseResult,
@@ -344,11 +345,14 @@ export function isLabelPageHost(
 }
 
 /**
- * The question a judge answers, when the run says: a built-in rubric's
- * text, or a custom rubric's. A custom rubric (`{ text }`) is named
- * `rubric`, so it has a question only when every case's text is the same.
+ * The question a judge answers, when MST or the run says: a built-in
+ * yes-or-no judge's, a built-in rubric's text, or a custom rubric's. A
+ * custom rubric (`{ text }`) is named `rubric`, so it has a question only
+ * when every case's text is the same.
  */
 function questionOf(stored: StoredRun, judge: string): string | undefined {
+  if (Object.hasOwn(BUILT_IN_JUDGE_QUESTIONS, judge))
+    return BUILT_IN_JUDGE_QUESTIONS[judge];
   if (judge in BUILT_IN_RUBRICS)
     return BUILT_IN_RUBRICS[judge as keyof typeof BUILT_IN_RUBRICS];
   const texts = new Set<string>();

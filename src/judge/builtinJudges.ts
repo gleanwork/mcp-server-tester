@@ -1,10 +1,11 @@
 import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { RUBRIC_JUDGE } from './rubricJudge.js';
+import { TASK_COMPLETION_JUDGE } from './taskCompletionJudge.js';
 
 /** Built-in judges by name. */
 function builtinJudges(): Readonly<Record<string, JudgeDefinition>> {
-  return { rubric: RUBRIC_JUDGE };
+  return { rubric: RUBRIC_JUDGE, 'task-completion': TASK_COMPLETION_JUDGE };
 }
 
 const judges = extensionLookup('judges', builtinJudges);

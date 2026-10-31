@@ -879,7 +879,28 @@ Which judges a case runs:
 
 Every judge a case runs must pass. Scores are reported under the case's `judge` grader, with one entry per judge when there are several.
 
-How far to trust a judge is measured, not assumed: label some trials and run [`mst judges check`](./cli.md#judges-check---measure-a-judge-against-labels). [Built-in judges](./judges.md) has the built-in judges' numbers on MST's calibration set, which are not a calibration for your data.
+How far to trust a judge is measured, not assumed: label some trials and run [`mst judges check`](./cli.md#judges-check---measure-a-judge-against-labels). [Built-in judges on the calibration set](./judges.md) has the built-in judges' numbers on MST's calibration set, which are not a calibration for your data.
+
+### Built-in judges
+
+| Judge             | Asks                                                                                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rubric`          | An LLM scores the answer from 0 to 1 against a rubric: a built-in one (`correctness`, `completeness`, ...) or your own text.                    |
+| `task-completion` | Did the assistant do what the user asked, as the trace shows? A success that no tool result supports fails. Shows the reference answer, if any. |
+
+`task-completion` is a yes-or-no judge ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)). It reads the trace: the request, each tool call with its arguments and result (cut to `maxToolOutputSize`), and the final answer. It answers yes (score 1), no (score 0) or `unknown`, when the trace can't settle the question; `unknown` doesn't count as a pass, and the pass rate leaves it out. It answers `unknown` without a model call when the client didn't report its tool calls (evidence `none`). It takes the `rubric` judge's LLM settings (`provider`, `model`, `effort`, ...); its question is in [`src/judge/prompts/taskCompletion.ts`](../src/judge/prompts/taskCompletion.ts), and `mst label` shows it.
+
+```json
+{
+  "judges": [
+    {
+      "type": "task-completion",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6"
+    }
+  ]
+}
+```
 
 ### Pairwise judges in an eval config
 
