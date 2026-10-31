@@ -64,27 +64,38 @@ const AnswerSchema = z.object({
   reasoning: z.string(),
 });
 
+/** `{"reasoning": "...", "verdict": "..."}`, the reasoning taken whole. */
+const REASONING_FIRST =
+  /^\{\s*"reasoning"\s*:\s*"([\s\S]*)"\s*,\s*"verdict"\s*:\s*"(yes|no|unknown)"\s*\}$/i;
+/** `{"verdict": "...", "reasoning": "..."}`, the reasoning taken whole. */
+const VERDICT_FIRST =
+  /^\{\s*"verdict"\s*:\s*"(yes|no|unknown)"\s*,\s*"reasoning"\s*:\s*"([\s\S]*)"\s*\}$/i;
+
 /**
  * A model sometimes quotes words in its reasoning without escaping the
- * quotes, so its answer isn't JSON, though its verdict is plain. When the
- * whole answer is one object with exactly one `"verdict": "yes" | "no" |
- * "unknown"`, that's the verdict. Two would be ambiguous (the reasoning may
- * quote one), and prose around the object may be anything, so neither is
- * read.
+ * quotes, so its answer isn't JSON, though its verdict is plain. This reads
+ * an answer that is exactly the two fields, in either order, with one
+ * `"verdict":` key in all its text. Anything else isn't read: a second
+ * `"verdict":` may be the reasoning quoting one, or a second object, and
+ * the verdict must be the model's own.
  */
 function malformedAnswer(
   text: string
 ): { verdict: QuestionVerdict; reasoning: string } | null {
-  if (!text.startsWith('{') || !text.endsWith('}')) return null;
-  const verdicts = [...text.matchAll(/"verdict"\s*:\s*"(yes|no|unknown)"/gi)];
-  if (verdicts.length !== 1) return null;
-  const reasoning =
-    /"reasoning"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"verdict"|}$)/.exec(text)?.[1];
-  if (reasoning === undefined) return null;
-  return {
-    verdict: verdicts[0]![1]!.toLowerCase() as QuestionVerdict,
-    reasoning,
-  };
+  if ((text.match(/"verdict"\s*:/g) ?? []).length !== 1) return null;
+  const first = REASONING_FIRST.exec(text);
+  if (first)
+    return {
+      reasoning: first[1]!,
+      verdict: first[2]!.toLowerCase() as QuestionVerdict,
+    };
+  const last = VERDICT_FIRST.exec(text);
+  return last
+    ? {
+        verdict: last[1]!.toLowerCase() as QuestionVerdict,
+        reasoning: last[2]!,
+      }
+    : null;
 }
 
 /**
@@ -102,9 +113,11 @@ export function parseQuestionAnswer(
     .replace(/\s*```$/, '')
     .trim();
   let candidates: unknown[];
+  let json = true;
   try {
     candidates = [JSON.parse(cleaned)];
   } catch {
+    json = false;
     candidates = embeddedJsonObjects(cleaned).reverse();
   }
   for (const candidate of candidates) {
@@ -119,7 +132,8 @@ export function parseQuestionAnswer(
     const parsed = AnswerSchema.safeParse(normalized);
     if (parsed.success) return parsed.data;
   }
-  const malformed = malformedAnswer(cleaned);
+  // Valid JSON was the model's answer, right or wrong.
+  const malformed = json ? null : malformedAnswer(cleaned);
   if (malformed) return malformed;
   throw new Error(
     truncated

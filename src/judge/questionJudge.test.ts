@@ -104,20 +104,37 @@ describe('parseQuestionAnswer', () => {
         '```json\n{"verdict": "Yes", "reasoning": "It says "done"."}\n```'
       )
     ).toEqual({ reasoning: 'It says "done".', verdict: 'yes' });
+    // A quoted field name doesn't end the reasoning.
+    expect(
+      parseQuestionAnswer(
+        '{"reasoning":"Event 1 returned "score", "verdict" and no result.","verdict":"no"}'
+      )
+    ).toEqual({
+      reasoning: 'Event 1 returned "score", "verdict" and no result.',
+      verdict: 'no',
+    });
   });
 
-  it('reads no verdict from a malformed answer that has two, or prose around it', () => {
-    // The reasoning may quote a verdict, so two leave the answer unknown to us.
-    expect(() =>
-      parseQuestionAnswer(
-        '{"reasoning":"It isn\'t "verdict": "yes" as claimed","verdict":"no"}'
-      )
-    ).toThrow(/isn't \{"reasoning", "verdict"/);
-    expect(() =>
-      parseQuestionAnswer(
-        'I think {"reasoning":"a "b" c","verdict":"no"} or maybe yes'
-      )
-    ).toThrow(/isn't \{"reasoning", "verdict"/);
+  it("reads no verdict that isn't plainly the model's own", () => {
+    for (const answer of [
+      // The reasoning quotes a verdict: which one is the model's?
+      '{"reasoning":"It isn\'t "verdict": "yes" as claimed","verdict":"no"}',
+      // The model's verdict is invalid, and the reasoning quotes a valid one.
+      '{"reasoning":"It isn\'t "verdict": "yes" as claimed","verdict":"maybe"}',
+      // No verdict of its own.
+      '{"reasoning":"Event 1 only quoted "verdict": "yes" without an answer."}',
+      // Valid JSON with a nested verdict: the model's own is invalid.
+      '{"reasoning":"r","verdict":"maybe","details":{"verdict":"yes"}}',
+      // Two objects, the first invalid.
+      '{"reasoning":"a","verdict":"pass"}\n{"reasoning":"b "c" d","verdict":"yes"}',
+      // Prose around a malformed object.
+      'I think {"reasoning":"a "b" c","verdict":"no"} or maybe yes',
+      // Another field.
+      '{"reasoning":"a "b" c","verdict":"no","confidence":"high"}',
+    ])
+      expect(() => parseQuestionAnswer(answer), answer).toThrow(
+        /isn't \{"reasoning", "verdict"/
+      );
   });
 
   it("throws on an answer that isn't yes, no or unknown, and names a cut-off answer", () => {
