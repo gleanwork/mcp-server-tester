@@ -274,8 +274,12 @@ judgesCommand
     'Where runs are written, to find a run by ID',
     '.mcp-test-results'
   )
-  .action((runs: string[], options: JudgeCheckCommandOptions) =>
-    checkJudgeCommand(runs, options).then(() => undefined)
+  // `judges` has a --json of its own, which takes the flag wherever it is.
+  .action((runs: string[], _options: unknown, command: Command) =>
+    checkJudgeCommand(
+      runs,
+      command.optsWithGlobals<JudgeCheckCommandOptions>()
+    ).then(() => undefined)
   );
 
 // Label command: a person's labels for a run's judge verdicts (ADR 0009)

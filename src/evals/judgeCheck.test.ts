@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { z } from 'zod';
 import { gradeRun, runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
@@ -320,6 +323,34 @@ async function check(
 }
 
 describe('mst judges check', () => {
+  it('prints JSON with --json from the command line', async () => {
+    // `judges` has a --json of its own: check must still get it.
+    const { base } = await evalDirectory();
+    const directory = await run(base);
+    await label(directory, 'ck/judge/keyword', () => undefined);
+    const bin = fileURLToPath(
+      new URL('../../dist/cli/index.js', import.meta.url)
+    );
+    const { stdout } = await promisify(execFile)(process.execPath, [
+      bin,
+      'judges',
+      'check',
+      directory,
+      '--judge',
+      'ck/judge/keyword',
+      '--json',
+      '--no-record',
+    ]);
+    expect(JSON.parse(stdout)).toEqual([
+      expect.objectContaining({
+        judge: 'ck/judge/keyword',
+        kind: 'pointwise',
+        labels: 80,
+        recorded: [],
+      }),
+    ]);
+  });
+
   it('measures TPR and TNR against test labels and records the calibration', async () => {
     const { results: dir, base } = await evalDirectory();
     const directory = await run(base);
