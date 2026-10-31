@@ -65,8 +65,32 @@ const AnswerSchema = z.object({
 });
 
 /**
+ * A model sometimes quotes words in its reasoning without escaping the
+ * quotes, so its answer isn't JSON, though its verdict is plain. When the
+ * whole answer is one object with exactly one `"verdict": "yes" | "no" |
+ * "unknown"`, that's the verdict. Two would be ambiguous (the reasoning may
+ * quote one), and prose around the object may be anything, so neither is
+ * read.
+ */
+function malformedAnswer(
+  text: string
+): { verdict: QuestionVerdict; reasoning: string } | null {
+  if (!text.startsWith('{') || !text.endsWith('}')) return null;
+  const verdicts = [...text.matchAll(/"verdict"\s*:\s*"(yes|no|unknown)"/gi)];
+  if (verdicts.length !== 1) return null;
+  const reasoning =
+    /"reasoning"\s*:\s*"([\s\S]*?)"\s*(?:,\s*"verdict"|}$)/.exec(text)?.[1];
+  if (reasoning === undefined) return null;
+  return {
+    verdict: verdicts[0]![1]!.toLowerCase() as QuestionVerdict,
+    reasoning,
+  };
+}
+
+/**
  * Reads a model's answer: the JSON object itself, or the last one in the
- * text that has the answer's shape (models sometimes reason first).
+ * text that has the answer's shape (models sometimes reason first), or one
+ * whose reasoning has unescaped quotes (`malformedAnswer`).
  */
 export function parseQuestionAnswer(
   text: string,
@@ -95,6 +119,8 @@ export function parseQuestionAnswer(
     const parsed = AnswerSchema.safeParse(normalized);
     if (parsed.success) return parsed.data;
   }
+  const malformed = malformedAnswer(cleaned);
+  if (malformed) return malformed;
   throw new Error(
     truncated
       ? `The judge's answer was cut off at its token limit before its JSON was complete; raise the judge's maxTokens. Answer: ${text}`

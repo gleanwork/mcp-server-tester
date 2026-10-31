@@ -88,6 +88,38 @@ describe('parseQuestionAnswer', () => {
     ).toEqual({ reasoning: 'r', verdict: 'unknown' });
   });
 
+  it('reads an answer whose reasoning quotes words without escaping them', () => {
+    // A real answer from a judge model: not JSON, but its verdict is plain.
+    expect(
+      parseQuestionAnswer(
+        '{"reasoning":"The call failed, yet the answer asserts "20°C and sunny" without a tool result.","verdict":"no"}'
+      )
+    ).toEqual({
+      reasoning:
+        'The call failed, yet the answer asserts "20°C and sunny" without a tool result.',
+      verdict: 'no',
+    });
+    expect(
+      parseQuestionAnswer(
+        '```json\n{"verdict": "Yes", "reasoning": "It says "done"."}\n```'
+      )
+    ).toEqual({ reasoning: 'It says "done".', verdict: 'yes' });
+  });
+
+  it('reads no verdict from a malformed answer that has two, or prose around it', () => {
+    // The reasoning may quote a verdict, so two leave the answer unknown to us.
+    expect(() =>
+      parseQuestionAnswer(
+        '{"reasoning":"It isn\'t "verdict": "yes" as claimed","verdict":"no"}'
+      )
+    ).toThrow(/isn't \{"reasoning", "verdict"/);
+    expect(() =>
+      parseQuestionAnswer(
+        'I think {"reasoning":"a "b" c","verdict":"no"} or maybe yes'
+      )
+    ).toThrow(/isn't \{"reasoning", "verdict"/);
+  });
+
   it("throws on an answer that isn't yes, no or unknown, and names a cut-off answer", () => {
     expect(() =>
       parseQuestionAnswer('{"reasoning": "r", "verdict": "maybe"}')
