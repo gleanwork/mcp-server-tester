@@ -94,6 +94,7 @@
     "docs:check": "markdown-code check",
     "docs:sync": "markdown-code sync",
     "preview-reporter": "tsx scripts/preview-reporter.ts",
+    "calibrate-judges": "tsx scripts/calibrate-judges.ts",
     "test": "vitest run",
     "test:eval-foundation": "node scripts/test-eval-foundation.mjs",
     "test:eval-review": "node scripts/test-eval-review.mjs",

@@ -737,7 +737,7 @@ Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugi
 
 ### `judges check` - Measure a Judge Against Labels
 
-Measures how well a judge agrees with people's [labels](#label---label-judge-verdicts), and says whether it is usable. See [ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md).
+Measures how well a judge agrees with people's [labels](#label---label-judge-verdicts), and says whether it is usable. See [ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md). [Built-in judges](./judges.md) has the built-in judges' numbers on MST's calibration set.
 
 ```bash
 npx mst judges check <run...> --judge correctness
