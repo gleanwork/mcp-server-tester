@@ -61,7 +61,11 @@ export interface JudgeTrial {
   events: TraceEvent[];
   /** Conversation turns, when the client reports them. */
   messages?: JudgeMessage[];
-  /** How the trace was observed. Absent for a tool result. */
+  /**
+   * How the trace was observed. Absent for a tool result. A client trial
+   * whose client declares none is `structured`, as tool-call assertions
+   * treat it.
+   */
   evidence?: TraceEvidence;
   /**
    * A local directory with the client's own record of the trial (for
@@ -89,7 +93,7 @@ export interface JudgeSubScore {
 
 /** What a judge returns for one rep. Only `score` is required. */
 export interface JudgeScore {
-  /** Score from 0 to 1. Ignored when `skipped` is true. */
+  /** Score from 0 to 1. Ignored when `skipped` or `unknown` is true. */
   score: number;
   reasoning?: string;
   /**
@@ -103,6 +107,13 @@ export interface JudgeScore {
    * `metadata` are kept; its `score` is not.
    */
   skipped?: boolean;
+  /**
+   * The trial's trace can't support a verdict: the judge read it and can't
+   * tell. Unlike a skip, it doesn't pass the trial. It is recorded, left
+   * out of the judge's pass rate and score metrics, and counted by
+   * `mst judges check`. Its `score` and `pass` are ignored.
+   */
+  unknown?: boolean;
   /** Named sub-scores, such as one per rubric criterion. */
   subScores?: Record<string, JudgeSubScore>;
   /** Token usage and cost of the judge's own model calls. */
@@ -208,7 +219,9 @@ export function buildJudgeTrial(
     ...(clientResponse?.conversationHistory !== undefined && {
       messages: clientResponse.conversationHistory,
     }),
-    ...(client?.evidence !== undefined && { evidence: client.evidence }),
+    ...(client?.evidence !== undefined
+      ? { evidence: client.evidence }
+      : clientResponse !== undefined && { evidence: 'structured' as const }),
     ...(clientResponse?.usage !== undefined && { usage: clientResponse.usage }),
     ...(typeof clientResponse?.artifactsDir === 'string' && {
       artifactsDir: clientResponse.artifactsDir,
@@ -257,8 +270,9 @@ function checkScore(value: unknown, label: string): number {
 /**
  * Checks a judge output and resolves pass/fail.
  *
- * A skipped output passes and keeps no score requirement. Otherwise `score`
- * and every sub-score must be between 0 and 1, and `pass` defaults to
+ * A skipped output passes and keeps no score requirement. An unknown one
+ * doesn't pass, and needs no score either. Otherwise `score` and every
+ * sub-score must be between 0 and 1, and `pass` defaults to
  * `score >= threshold`.
  */
 export function checkJudgeScore(
@@ -275,27 +289,38 @@ export function checkJudgeScore(
   if (result.skipped !== undefined && typeof result.skipped !== 'boolean') {
     throw new Error('returned a `skipped` that is not a boolean');
   }
+  if (result.unknown !== undefined && typeof result.unknown !== 'boolean') {
+    throw new Error('returned an `unknown` that is not a boolean');
+  }
   if (result.skipped) {
     return { ...result, pass: true };
   }
-  const score = checkScore(result.score, 'score');
-  if (result.subScores !== undefined) {
-    if (!isRecord(result.subScores)) {
-      throw new Error('returned `subScores` that is not an object');
-    }
-    for (const [key, sub] of Object.entries(result.subScores)) {
-      if (!isRecord(sub)) {
-        throw new Error(`returned sub-score "${key}" that is not an object`);
-      }
-      checkScore(sub.score, `sub-score "${key}"`);
-    }
+  // An unknown verdict has no score, but the sub-scores it keeps must be valid.
+  checkSubScores(result.subScores);
+  if (result.unknown) {
+    const { pass: _pass, score: _score, ...rest } = result;
+    return { ...rest, score: 0, unknown: true, pass: false };
   }
+  const score = checkScore(result.score, 'score');
   return {
     ...result,
     score,
     pass: result.pass ?? score >= threshold,
     ...(result.pass !== undefined ? { judgePass: result.pass } : {}),
   };
+}
+
+function checkSubScores(subScores: unknown): void {
+  if (subScores === undefined) return;
+  if (!isRecord(subScores)) {
+    throw new Error('returned `subScores` that is not an object');
+  }
+  for (const [key, sub] of Object.entries(subScores)) {
+    if (!isRecord(sub)) {
+      throw new Error(`returned sub-score "${key}" that is not an object`);
+    }
+    checkScore(sub.score, `sub-score "${key}"`);
+  }
 }
 
 const USAGE_FIELDS = [

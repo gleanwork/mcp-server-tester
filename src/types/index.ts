@@ -172,6 +172,13 @@ export interface GraderScore {
   skipped?: boolean;
 
   /**
+   * The judge read the trial and its trace can't support a verdict. `pass`
+   * is false, because the trial didn't earn a pass, but the judge's pass
+   * rate and score metrics leave it out, and `mst judges check` counts it.
+   */
+  unknown?: true;
+
+  /**
    * The grader failed to run (a judge's SDK missing, its endpoint down, an
    * invalid score): no verdict on the trial. A trial with a grader error is
    * an infrastructure failure, left out of pass rates.

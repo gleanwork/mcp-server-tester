@@ -91,6 +91,7 @@ function scoresOf(trial: Trial, redacted: boolean): RunReportScore[] {
       grader: name,
       ...(isJudge ? { judge: true } : {}),
       pass: s.pass,
+      ...(s.unknown === true ? { unknown: true as const } : {}),
       ...(typeof s.score === 'number' ? { score: s.score } : {}),
       ...(words && s.details ? { details: clip(s.details) } : {}),
       ...(words && s.reasoning ? { reasoning: clip(s.reasoning) } : {}),

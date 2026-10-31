@@ -139,9 +139,27 @@ describe('buildJudgeTrial', () => {
   });
 
   it('reads a direct result as text with no events', () => {
+    const trial = buildJudgeTrial({
+      content: [{ type: 'text', text: 'tool text' }],
+    });
+    expect(trial).toMatchObject({ text: 'tool text', events: [] });
+    // A tool result has no trace, so it has no evidence level.
+    expect(trial.evidence).toBeUndefined();
+  });
+
+  it('counts a client trial without an evidence level as structured, as tool-call assertions do', () => {
+    // The mst client in a Playwright test declares no evidence.
+    const clientResponse = {
+      response: 't',
+      toolCalls: [{ name: 'search', arguments: {}, output: 'hit' }],
+    };
+    expect(buildJudgeTrial(clientResponse, { clientResponse }).evidence).toBe(
+      'structured'
+    );
     expect(
-      buildJudgeTrial({ content: [{ type: 'text', text: 'tool text' }] })
-    ).toMatchObject({ text: 'tool text', events: [] });
+      buildJudgeTrial(clientResponse, { clientResponse, evidence: 'observed' })
+        .evidence
+    ).toBe('observed');
   });
 });
 
@@ -181,6 +199,28 @@ describe('checkJudgeScore', () => {
     expect(
       checkJudgeScore({ score: Number.NaN, skipped: true }, 0.5)
     ).toMatchObject({ pass: true, skipped: true });
+  });
+
+  it("takes unknown without a valid score, and doesn't pass it", () => {
+    expect(
+      checkJudgeScore({ score: Number.NaN, pass: true, unknown: true }, 0.5)
+    ).toMatchObject({ pass: false, unknown: true });
+    // The sub-scores an unknown answer keeps are checked like any others.
+    expect(() =>
+      checkJudgeScore(
+        { score: 0, unknown: true, subScores: { a: { score: 5 } } },
+        0.5
+      )
+    ).toThrow('sub-score "a"');
+    expect(() =>
+      checkJudgeScore(
+        { score: 0, unknown: true, subScores: 'x' } as unknown as JudgeScore,
+        0.5
+      )
+    ).toThrow('`subScores` that is not an object');
+    expect(() => checkJudgeScore({ score: 1, unknown: 'maybe' }, 0.5)).toThrow(
+      'an `unknown` that is not a boolean'
+    );
   });
 
   it.each([
@@ -431,6 +471,117 @@ describe('judge output', () => {
       judge_pass: true,
       judge_score: { 'always/judge/judge': 1 },
     });
+  });
+
+  it("records unknown without passing the trial, and leaves it out of the judge's metrics", async () => {
+    judge('unsure', async (input) =>
+      input.case.input.prompt === 'can tell'
+        ? { score: 1, pass: true }
+        : {
+            score: 0,
+            unknown: true,
+            reasoning: 'the result was cut off',
+            usage: { inputTokens: 4, outputTokens: 1 },
+          }
+    );
+    judge('always', async () => ({ score: 1 }));
+    judge('never', async () => ({ score: 0 }));
+    const result = await run([
+      { id: 'alone', input: 'cannot tell', judges: ['unsure/judge/judge'] },
+      {
+        id: 'with-another',
+        input: 'cannot tell',
+        judges: ['always/judge/judge', 'unsure/judge/judge'],
+      },
+      { id: 'told', input: 'can tell', judges: ['unsure/judge/judge'] },
+      {
+        id: 'with-a-fail',
+        input: 'cannot tell',
+        judges: ['never/judge/judge', 'unsure/judge/judge'],
+      },
+    ]);
+    const [alone, withAnother, told, withAFail] = result.caseResults;
+    // A judge that failed makes the judges together a fail.
+    expect(withAFail!.scores.judge?.unknown).toBeUndefined();
+    expect(withAFail!.scores.judge?.pass).toBe(false);
+    // Unlike a skip, unknown doesn't pass the trial; nor is it a grading
+    // error, which would make the trial an infrastructure failure.
+    expect(alone!.pass).toBe(false);
+    expect(alone!.gradingError).toBeUndefined();
+    expect(alone!.scores.judge).toMatchObject({
+      pass: false,
+      unknown: true,
+      reasoning: 'the result was cut off',
+      details:
+        'Judge "unsure/judge/judge" answered unknown: the result was cut off',
+    });
+    expect(alone!.scores.judge?.score).toBeUndefined();
+    expect(alone!.judgeUsage).toEqual({ inputTokens: 4, outputTokens: 1 });
+    expect(withAnother!.pass).toBe(false);
+    // No judge failed, so the judges together are unknown, not failed.
+    expect(withAnother!.scores.judge).toMatchObject({
+      pass: false,
+      unknown: true,
+      details: '1/2 judges passed (1 unknown)',
+    });
+    expect(told!.pass).toBe(true);
+
+    const metrics = computeMetrics(
+      [{ type: 'judge_score_for', judge: 'unsure/judge/judge' }],
+      result.caseResults
+    );
+    // Only the trial it could tell counts toward its score.
+    expect(metrics.aggregated).toMatchObject({
+      'judge_unsure/judge/judge_score_mean': 1,
+    });
+  });
+
+  it('leaves unknown reps out, and is unknown only when every rep is', async () => {
+    const answers: JudgeScore[] = [
+      { score: 0, unknown: true },
+      { score: 0.4, pass: false },
+      { score: 0, unknown: true },
+      { score: 0, unknown: true, reasoning: 'still cannot tell' },
+    ];
+    const evaluate = judge('mixed', async () => answers.shift()!);
+    const decided = await validateJudge('x', {
+      judge: 'mixed/judge/judge',
+      reps: 2,
+    });
+    // The rep that answered decides, and its score is the mean.
+    expect(decided.pass).toBe(false);
+    expect(decided.details).toMatchObject({ score: 0.4 });
+    expect(decided.details?.unknown).toBeUndefined();
+    expect(decided.message).toContain('1 unknown');
+
+    const unknown = await validateJudge('x', {
+      judge: 'mixed/judge/judge',
+      reps: 2,
+    });
+    expect(evaluate).toHaveBeenCalledTimes(4);
+    expect(unknown.pass).toBe(false);
+    expect(unknown.details).toMatchObject({
+      unknown: true,
+      reasoning: 'still cannot tell',
+    });
+    expect(unknown.details?.score).toBeUndefined();
+    expect(unknown.details?.error).toBeUndefined();
+  });
+
+  it('takes the majority of a judge-owned pass over the reps that answered', async () => {
+    // Counted over all three reps, one pass of three would fail.
+    const answers: JudgeScore[] = [
+      { score: 0, unknown: true },
+      { score: 0, unknown: true },
+      { score: 1, pass: true },
+    ];
+    judge('owned', async () => answers.shift()!);
+    const result = await validateJudge('x', {
+      judge: 'owned/judge/judge',
+      reps: 3,
+    });
+    expect(result.pass).toBe(true);
+    expect(result.message).toContain('2 unknown');
   });
 
   it('decides a judge-owned score by majority over reps and sums usage', async () => {

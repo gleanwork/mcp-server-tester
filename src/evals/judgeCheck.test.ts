@@ -109,8 +109,9 @@ describe('the statistics', () => {
 
 /**
  * An eval of 40 cases: the answers to `good-*` cases name the certificate
- * and the keyword judge passes them; it skips (answers unknown) `odd-*`
- * cases.
+ * and the keyword judge passes them; it can't tell on `odd-*` cases: it
+ * answers unknown on half of them, and skips the rest, which a check also
+ * counts as unknown.
  */
 async function evalDirectory(
   options: {
@@ -149,7 +150,9 @@ async function evalDirectory(
         schema: z.object({ keyword: z.string() }).strict(),
         async evaluate({ case: judged, trial }, judgeOptions) {
           if (judged.id?.startsWith('odd'))
-            return { score: 0, skipped: true, reasoning: 'no answer' };
+            return Number(judged.id.slice(4)) % 2
+              ? { score: 0, unknown: true, reasoning: 'cannot tell' }
+              : { score: 0, skipped: true, reasoning: 'no answer' };
           return {
             score: trial.text?.includes(String(judgeOptions.keyword)) ? 1 : 0,
             reasoning: `looked for ${String(judgeOptions.keyword)}`,

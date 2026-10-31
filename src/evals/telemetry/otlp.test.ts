@@ -459,6 +459,32 @@ describe('gradingSpans', () => {
       'mst.grader': 'precision',
     });
   });
+
+  it('labels an unknown answer unknown, not a failure', () => {
+    const result = trial({
+      pass: false,
+      scores: {
+        judge: {
+          pass: false,
+          unknown: true,
+          judgeName: 'grounded',
+          reasoning: 'The result was cut off.',
+        },
+      },
+    } as Partial<EvalCaseResult>);
+    const [, span] = gradingSpans(result, identity, run, {
+      content: true,
+      maxChars: 100,
+      gradingRunId: 'run-1',
+      now: ms(30),
+    });
+    expect(attrs(span!)).toMatchObject({
+      'gen_ai.evaluation.name': 'grounded',
+      'gen_ai.evaluation.score.label': 'unknown',
+    });
+    expect(attrs(span!)['gen_ai.evaluation.score.value']).toBeUndefined();
+    expect(span!.status).not.toEqual({ code: 2 });
+  });
 });
 
 describe('pairwiseSpans', () => {

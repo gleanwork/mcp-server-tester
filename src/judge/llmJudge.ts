@@ -63,7 +63,7 @@ export function buildJudgePrompt(
  * strings don't count) that parses. An object inside another isn't listed
  * separately.
  */
-function embeddedJsonObjects(text: string): unknown[] {
+export function embeddedJsonObjects(text: string): unknown[] {
   const objects: unknown[] = [];
   let start = -1;
   let depth = 0;

@@ -305,9 +305,13 @@ function allJudgeEntries(
 function judgeEntries(
   caseResult: EvalCaseResult
 ): Array<Record<string, unknown>> {
-  // A skipped judge, or one that failed to run, gave no verdict.
+  // A skipped judge, an unknown one, or one that failed to run gave no
+  // verdict.
   return allJudgeEntries(caseResult).filter(
-    (entry) => entry.skipped !== true && entry.error === undefined
+    (entry) =>
+      entry.skipped !== true &&
+      entry.unknown !== true &&
+      entry.error === undefined
   );
 }
 

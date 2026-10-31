@@ -831,6 +831,8 @@ export interface RunReportScore {
   reasoning?: string;
   /** Whether a judge gave the score. */
   judge?: boolean;
+  /** The judge couldn't tell from the trace: no verdict, though not a pass. */
+  unknown?: true;
 }
 
 /** One event of a trial's trace, with long fields shortened. */

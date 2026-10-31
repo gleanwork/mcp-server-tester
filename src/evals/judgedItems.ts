@@ -19,7 +19,7 @@ import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 type PointwiseLabel = (typeof POINTWISE_LABELS)[number];
 type PairwiseLabel = (typeof PAIRWISE_LABELS)[number];
 
-/** What a judge said: `unknown` when it couldn't decide (it skipped). */
+/** What a judge said: `unknown` when it skipped or answered unknown. */
 type JudgeVerdict = PointwiseLabel | PairwiseLabel | 'unknown';
 
 /** One verdict a judge gave in a run: what a label is compared with. */
@@ -64,7 +64,7 @@ function judgeResults(score: GraderScore | undefined): GraderScore[] {
 
 function pointwiseVerdict(score: GraderScore): JudgeVerdict | undefined {
   if (score.error !== undefined) return undefined;
-  if (score.skipped) return 'unknown';
+  if (score.skipped || score.unknown) return 'unknown';
   return score.pass ? 'pass' : 'fail';
 }
 

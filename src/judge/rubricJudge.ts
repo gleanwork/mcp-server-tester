@@ -13,7 +13,7 @@ import {
 } from './adapterSupport.js';
 import { createJudge, preflightJudge } from './judgeClient.js';
 import { contentHash } from './judgeIdentity.js';
-import { DEFAULT_JUDGE_PROVIDER, JUDGE_PROVIDER_KINDS } from './judgeTypes.js';
+import { DEFAULT_JUDGE_PROVIDER, JudgeLLMSchema } from './judgeTypes.js';
 import { buildJudgePrompt, JUDGE_SYSTEM_PROMPT } from './llmJudge.js';
 import {
   BUILT_IN_RUBRICS,
@@ -32,19 +32,7 @@ export const RubricSpecSchema = z.union([
   z.object({ text: z.string().min(1) }),
 ]);
 
-/** The rubric judge's LLM settings, which an assertion may also set flat. */
-export const RubricJudgeLLMSchema = z.object({
-  provider: z.enum(JUDGE_PROVIDER_KINDS).optional(),
-  model: z.string().optional(),
-  apiKeyEnvVar: z.string().optional(),
-  maxTokens: z.number().int().positive().optional(),
-  temperature: z.number().min(0).max(1).optional(),
-  maxBudgetUsd: z.number().positive().optional(),
-  effort: z.string().min(1).optional(),
-  maxToolOutputSize: z.number().int().positive().optional(),
-});
-
-const RubricJudgeOptionsSchema = RubricJudgeLLMSchema.extend({
+const RubricJudgeOptionsSchema = JudgeLLMSchema.extend({
   rubric: RubricSpecSchema,
 }).strict();
 

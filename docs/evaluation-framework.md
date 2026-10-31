@@ -229,17 +229,21 @@ judges: {
 
 A judge returns a `JudgeScore`. Only `score` (0 to 1) is required:
 
-| Field               | Effect                                                                                                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pass`              | The judge's own pass/fail. Without it, the case passes when the mean score meets the threshold.                                                                                            |
-| `skipped`           | The judge cannot grade this case. It doesn't count for pass/fail or judge metrics; the remaining reps don't run. Its `reasoning`, `usage` and `metadata` are recorded, its `score` is not. |
-| `subScores`         | Named sub-scores, such as one per criterion: `{ [key]: { score, pass?, reasoning? } }`.                                                                                                    |
-| `usage`             | The judge's own token usage and cost, summed over reps.                                                                                                                                    |
-| `provider`, `model` | Reported as `judgeProvider` and `judgeModel`.                                                                                                                                              |
-| `metadata`          | Other JSON output, kept in the result.                                                                                                                                                     |
+| Field               | Effect                                                                                                                                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `pass`              | The judge's own pass/fail. Without it, the case passes when the mean score meets the threshold.                                                                                                        |
+| `skipped`           | The judge cannot grade this case. It doesn't count for pass/fail or judge metrics; the remaining reps don't run. Its `reasoning`, `usage` and `metadata` are recorded, its `score` is not.             |
+| `unknown`           | The judge read the trial, and the trace can't support a verdict. Unlike a skip, the trial doesn't pass. The judge's pass rate and score metrics leave the trial out, and `mst judges check` counts it. |
+| `subScores`         | Named sub-scores, such as one per criterion: `{ [key]: { score, pass?, reasoning? } }`.                                                                                                                |
+| `usage`             | The judge's own token usage and cost, summed over reps.                                                                                                                                                |
+| `provider`, `model` | Reported as `judgeProvider` and `judgeModel`.                                                                                                                                                          |
+| `metadata`          | Other JSON output, kept in the result.                                                                                                                                                                 |
 
 A score or sub-score outside 0 to 1 is an error, not a result. When every
-judge of a case skips, the judge assertion passes.
+judge of a case skips, the judge assertion passes. Over several reps, a rep
+that answers `unknown` is left out, and the reps that answered decide; the
+judge is `unknown` only when every rep is. The report shows an unknown
+answer as UNKNOWN, and its _Judges_ table counts them.
 
 Judge usage is kept apart from client usage: `judgeUsage` on each case and
 trial, `totalJudgeUsage` on the run and eval telemetry, and the
