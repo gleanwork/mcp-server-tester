@@ -382,6 +382,9 @@ describe('mst CLI', () => {
       expect(list.stdout).toMatch(
         /^grounded-in-tools {2}judge {2}Asks whether every claim/m
       );
+      expect(list.stdout).toMatch(
+        /^tool-use +judge {2}Asks whether the client/m
+      );
 
       const show = await runBin('judges', 'show', 'rubric', '--json');
       expect(show.exitCode).toBe(0);

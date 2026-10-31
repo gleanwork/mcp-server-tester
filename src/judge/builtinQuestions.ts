@@ -6,8 +6,10 @@
  */
 import { GROUNDED_IN_TOOLS_QUESTION } from './prompts/groundedInTools.js';
 import { TASK_COMPLETION_QUESTION } from './prompts/taskCompletion.js';
+import { TOOL_USE_LABEL_QUESTION } from './prompts/toolUse.js';
 
 export const BUILT_IN_JUDGE_QUESTIONS: Readonly<Record<string, string>> = {
   'task-completion': TASK_COMPLETION_QUESTION,
   'grounded-in-tools': GROUNDED_IN_TOOLS_QUESTION,
+  'tool-use': TOOL_USE_LABEL_QUESTION,
 };

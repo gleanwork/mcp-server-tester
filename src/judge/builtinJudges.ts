@@ -3,6 +3,7 @@ import { extensionLookup } from '../plugins/extensions.js';
 import { GROUNDED_IN_TOOLS_JUDGE } from './groundedInToolsJudge.js';
 import { RUBRIC_JUDGE } from './rubricJudge.js';
 import { TASK_COMPLETION_JUDGE } from './taskCompletionJudge.js';
+import { TOOL_USE_JUDGE } from './toolUseJudge.js';
 
 /** Built-in judges by name. */
 function builtinJudges(): Readonly<Record<string, JudgeDefinition>> {
@@ -10,6 +11,7 @@ function builtinJudges(): Readonly<Record<string, JudgeDefinition>> {
     rubric: RUBRIC_JUDGE,
     'task-completion': TASK_COMPLETION_JUDGE,
     'grounded-in-tools': GROUNDED_IN_TOOLS_JUDGE,
+    'tool-use': TOOL_USE_JUDGE,
   };
 }
 
