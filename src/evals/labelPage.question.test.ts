@@ -1,6 +1,7 @@
 /**
- * The question the label page shows: a built-in rubric's text, a custom
- * rubric's, or --question. The rubric judges run on a mocked judge client.
+ * The question the label page shows: a built-in yes-or-no judge's, a
+ * built-in rubric's text, a custom rubric's, or --question. The judges run
+ * on a mocked judge client.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
@@ -8,7 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import type * as JudgeClientModule from '../judge/judgeClient.js';
-import { createJudge } from '../judge/judgeClient.js';
+import { createJudge, createJudgeCompletion } from '../judge/judgeClient.js';
+import { TASK_COMPLETION_QUESTION } from '../judge/prompts/taskCompletion.js';
 import { BUILT_IN_RUBRICS } from '../judge/rubrics.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -18,6 +20,7 @@ import { runEval } from './runEval.js';
 vi.mock('../judge/judgeClient.js', async (original) => ({
   ...(await original<typeof JudgeClientModule>()),
   createJudge: vi.fn(),
+  createJudgeCompletion: vi.fn(),
   preflightJudge: vi.fn(async () => {}),
 }));
 
@@ -61,6 +64,10 @@ async function storedRun(): Promise<string> {
       return { pass: true, score: 1, reasoning: 'ok' };
     },
   }));
+  vi.mocked(createJudgeCompletion).mockImplementation(() => async () => ({
+    text: '{"reasoning": "ok", "verdict": "yes"}',
+    usage: {},
+  }));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-label-question-'));
   dirs.push(dir);
   const judge = { provider: 'anthropic', model: 'claude-haiku-4-5' };
@@ -91,6 +98,7 @@ async function storedRun(): Promise<string> {
       servers: { docs: { transport: 'stdio', command: 'docs-server' } },
       judges: [
         { type: 'rubric', rubric: 'correctness', ...judge },
+        { type: 'task-completion', ...judge },
         'lq/judge/always',
       ],
       variants: [{ name: 'only', servers: ['docs'] }],
@@ -120,8 +128,11 @@ async function question(
 }
 
 describe("the label page's question", () => {
-  it("is a built-in rubric's text, a custom rubric's, --question, or none", async () => {
+  it("is a built-in judge's question, a built-in rubric's text, a custom rubric's, --question, or none", async () => {
     const directory = await storedRun();
+    expect(await question(directory, 'task-completion')).toBe(
+      TASK_COMPLETION_QUESTION
+    );
     expect(await question(directory, 'correctness')).toBe(
       BUILT_IN_RUBRICS.correctness
     );

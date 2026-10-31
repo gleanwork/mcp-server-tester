@@ -287,7 +287,7 @@ Sanitizers are applied automatically by `toMatchToolSnapshot()`. The sanitizer n
 
 A judge scores a response from 0 to 1, and the assertion passes when the score reaches its `threshold` (default `0.7`). Use one for subjective criteria such as relevance, quality or tone.
 
-Every judge runs the same way. The built-in `rubric` judge asks an LLM to score the response against a rubric. A plugin can add judges of its own, referenced as `<namespace>/judge/<name>` (see [Plugins](./evaluation-framework.md#plugins)).
+Every judge runs the same way. The built-in `rubric` judge asks an LLM to score the response against a rubric. The built-in `task-completion` judge reads the trial's trace and asks whether the assistant did what the user asked (see [Built-in judges](./evaluation-framework.md#built-in-judges)). It needs a trial's tool calls, so it belongs in evals: on a single tool response (`toPassToolJudge`) there are none, and it answers `unknown`, which doesn't pass. A plugin can add judges of its own, referenced as `<namespace>/judge/<name>` (see [Plugins](./evaluation-framework.md#plugins)).
 
 ### Eval Case Format
 
