@@ -76,14 +76,22 @@ describe('the grounded-in-tools judge', () => {
     );
     // Claims about the assistant's own calls count.
     expect(rule('A claim is anything')).toContain('what the assistant did');
-    // Facts derived from results, or given in the request, are supported.
-    expect(rule('A claim is supported')).toContain('follows directly');
-    expect(rule('A claim is supported')).toContain("the user's request");
-    // An answer that only reports a failure can pass.
-    expect(rule('Answer "yes"')).toContain('makes no claims');
-    // General knowledge and a failed call's result are unsupported.
+    // Facts derived from results, or given in the request, are supported,
+    // but not what the assistant works out from the request itself.
+    const supported = rule('A claim is supported');
+    expect(supported).toContain('follows directly from tool results');
+    expect(supported).toContain("The names and facts the user's request gives");
+    expect(supported).toContain('but not what the assistant works out');
+    // Reporting a failure is supported by the failed call.
+    expect(supported).toContain('"the call failed" is supported');
+    expect(rule('Answer "yes"')).toContain('reports, as the trace shows');
+    // General knowledge, and a value only a failed call could give, aren't.
     expect(rule('Answer "no"')).toContain('general knowledge');
-    expect(rule('Answer "no"')).toContain('a call that failed');
+    expect(rule('Answer "no"')).toContain(
+      'a value that only a call that failed could have given'
+    );
+    // An invented claim is a no, whatever calls the trace has.
+    expect(rule('Answer "no"')).not.toContain('the results it would need');
     // A result the trace can't show is unknown, not no.
     expect(rule('Answer "unknown"')).toContain('observed="false"');
     expect(rule('Answer "unknown"')).toContain('complete="false"');
