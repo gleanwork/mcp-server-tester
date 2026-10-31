@@ -119,27 +119,48 @@ interface TraceEventLike {
   text?: string;
 }
 
+interface TraceLike {
+  events?: TraceEventLike[];
+  finalText?: string;
+  evidence?: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+}
+
+function traceOf(trial: Trial): TraceLike | undefined {
+  return (trial as { trace?: TraceLike }).trace;
+}
+
 function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
-  const trace = (
-    trial as {
-      trace?: {
-        events?: TraceEventLike[];
-        finalText?: string;
-        usage?: { inputTokens?: number; outputTokens?: number };
-      };
-    }
-  ).trace;
-  const usage = trace?.usage;
+  const usage = traceOf(trial)?.usage;
   return {
     pass: trial.pass,
     ...(trial.error ? { error: clip(trial.error) } : {}),
     ...(isInfraTrial(trial) ? { infrastructureError: true } : {}),
     ...(trial.durationMs !== undefined ? { durationMs: trial.durationMs } : {}),
+    ...trialTrace(trial),
+    scores: scoresOf(trial, redacted),
+    ...(usage &&
+    (usage.inputTokens !== undefined || usage.outputTokens !== undefined)
+      ? {
+          tokens: totalTokens(usage),
+        }
+      : {}),
+  };
+}
+
+/**
+ * What a trial did, as the report shows it: its final answer and each event
+ * of its trace, long fields shortened. No scores, so `mst label` can show it
+ * without the judge's verdict.
+ */
+export function trialTrace(
+  trial: Trial
+): Pick<RunReportTrial, 'finalText' | 'traced' | 'events'> {
+  const trace = traceOf(trial);
+  return {
     ...(trace?.finalText ? { finalText: clip(trace.finalText) } : {}),
     // A client that can't observe calls (evidence 'none') has no trace to read.
-    traced:
-      trace?.events !== undefined &&
-      (trace as { evidence?: string }).evidence !== 'none',
+    traced: trace?.events !== undefined && trace.evidence !== 'none',
     events: (trace?.events ?? []).map((event) => ({
       kind: event.kind ?? 'event',
       ...(event.name ? { name: event.name } : {}),
@@ -151,13 +172,6 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
       ...(event.text ? { text: clip(event.text) } : {}),
       ...(event.isError ? { isError: true } : {}),
     })),
-    scores: scoresOf(trial, redacted),
-    ...(usage &&
-    (usage.inputTokens !== undefined || usage.outputTokens !== undefined)
-      ? {
-          tokens: totalTokens(usage),
-        }
-      : {}),
   };
 }
 

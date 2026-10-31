@@ -54,6 +54,8 @@ import {
 import {
   labelExport,
   labelImport,
+  labelPage,
+  type LabelPageCommandOptions,
   type LabelExportCommandOptions,
   type LabelImportCommandOptions,
 } from './commands/label/index.js';
@@ -277,13 +279,53 @@ judgesCommand
   );
 
 // Label command: a person's labels for a run's judge verdicts (ADR 0009)
+const runArgumentHelp =
+  'A run directory, an eval directory (its latest run), or a run ID or its short form (7f3c2a)';
 const labelCommand = program
   .command('label')
   .description(
     "A person's labels for a run's judge verdicts, which mst judges check measures judges against"
   );
-const runArgumentHelp =
-  'A run directory, an eval directory (its latest run), or a run ID or its short form (7f3c2a)';
+// The default, so `mst label <run> --judge <name>` serves the page. Its
+// options are its own, not `label`'s, so they never take export's --judge.
+labelCommand
+  .command('page', { isDefault: true })
+  .description(
+    "Serve a page that shows one trial at a time, without the judge's verdict, and stores your labels (the default: mst label <run> --judge <name>)"
+  )
+  .argument('<run>', runArgumentHelp)
+  .option(
+    '--judge <name>',
+    "The judge whose verdicts to label, by its name in results (a rubric judge's rubric)"
+  )
+  .option(
+    '--split <split>',
+    "The split for a case without labels: test or dev (default: each case's own); a case's labels share one split"
+  )
+  .option('--labeler <name>', 'Who is labeling (default: your user name)')
+  .option(
+    '--question <text>',
+    "The judge's question, to show above each trial (default: a rubric's text; other judges have none)"
+  )
+  .option('--port <n>', 'The port to serve on (default: any free port)')
+  .option('--no-open', "Print the page's address without opening a browser")
+  .option(
+    '-d, --dir <directory>',
+    'Where runs are written, to find a run by ID',
+    '.mcp-test-results'
+  )
+  .action(async (run: string, options: LabelPageCommandOptions) => {
+    const server = await labelPage(run, options);
+    await new Promise<void>((resolve) => {
+      process.once('SIGINT', resolve);
+      process.once('SIGTERM', resolve);
+    });
+    await server.close();
+    const written = server.written();
+    console.log(
+      `\nStored ${written} label${written === 1 ? '' : 's'}. Run mst judges check to measure the judge.`
+    );
+  });
 labelCommand
   .command('import')
   .description(

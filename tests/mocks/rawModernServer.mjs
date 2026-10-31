@@ -133,7 +133,9 @@ function handle(message, headers) {
       if (faults.has('paginate') || faults.has('mixed-scope-pages')) {
         const second = message.params?.cursor === 'page-2';
         const page = complete(
-          second ? { tools: tools.slice(2) } : { tools: tools.slice(0, 2), nextCursor: 'page-2' },
+          second
+            ? { tools: tools.slice(2) }
+            : { tools: tools.slice(0, 2), nextCursor: 'page-2' },
           { cacheable: true }
         );
         if (second && faults.has('mixed-scope-pages') && page.cacheScope) {
@@ -271,9 +273,10 @@ const server = createServer((req, res) => {
 });
 
 // Port 0 picks a free port; the actual URL is printed for the caller.
-if (!stdio) server.listen(port, '127.0.0.1', () => {
-  const { port: bound } = server.address();
-  console.error(
-    `raw modern server on http://127.0.0.1:${bound}/mcp faults=${[...faults].join(',')}`
-  );
-});
+if (!stdio)
+  server.listen(port, '127.0.0.1', () => {
+    const { port: bound } = server.address();
+    console.error(
+      `raw modern server on http://127.0.0.1:${bound}/mcp faults=${[...faults].join(',')}`
+    );
+  });
