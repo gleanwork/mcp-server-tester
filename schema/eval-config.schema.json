@@ -213,7 +213,7 @@
       "items": {
         "$ref": "#/definitions/extension"
       },
-      "description": "Pairwise judges (<namespace>/pairwise-judge/<name>, or { type, reps, ...options }). After every variant runs, each compares each variant with the baseline, case by case."
+      "description": "Pairwise judges (the built-in preference, <namespace>/pairwise-judge/<name>, or { type, reps, ...options }), each listed once. After every variant runs, each compares each variant with the baseline, case by case."
     },
     "results": {
       "type": "object",

@@ -9,7 +9,7 @@
  * with the LLM settings every built-in judge takes and a version that
  * covers its prompts, the trace format and the defaults it falls back on.
  */
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
 import {
   DEFAULT_JUDGE_MAX_TOKENS,
@@ -71,44 +71,89 @@ interface QuestionAnswer {
   usage: Partial<UsageMetrics>;
 }
 
-const AnswerSchema = z.object({
-  verdict: z.enum(['yes', 'no', 'unknown']),
-  reasoning: z.string(),
-});
+/**
+ * The shape of a judge's answer: `{"reasoning": "...", "<key>": "<choice>"}`,
+ * where the choice is one of `choices`, in any case.
+ */
+export interface JudgeAnswerShape<Choice extends string> {
+  key: string;
+  choices: readonly Choice[];
+}
 
-/** `{"reasoning": "...", "verdict": "..."}`, the reasoning taken whole. */
-const REASONING_FIRST =
-  /^\{\s*"reasoning"\s*:\s*"([\s\S]*)"\s*,\s*"verdict"\s*:\s*"(yes|no|unknown)"\s*\}$/i;
-/** `{"verdict": "...", "reasoning": "..."}`, the reasoning taken whole. */
-const VERDICT_FIRST =
-  /^\{\s*"verdict"\s*:\s*"(yes|no|unknown)"\s*,\s*"reasoning"\s*:\s*"([\s\S]*)"\s*\}$/i;
+/** A judge's answer as read: its choice, as `choices` spells it. */
+export interface JudgeAnswer<Choice extends string> {
+  choice: Choice;
+  reasoning: string;
+}
+
+const VERDICT_ANSWER: JudgeAnswerShape<QuestionVerdict> = {
+  key: 'verdict',
+  choices: ['yes', 'no', 'unknown'],
+};
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** The shape's choice for `value`, compared without case. */
+function choiceOf<Choice extends string>(
+  shape: JudgeAnswerShape<Choice>,
+  value: unknown
+): Choice | undefined {
+  if (typeof value !== 'string') return undefined;
+  const lower = value.toLowerCase();
+  return shape.choices.find((choice) => choice.toLowerCase() === lower);
+}
 
 /**
  * A model sometimes quotes words in its reasoning without escaping the
- * quotes, so its answer isn't JSON, though its verdict is plain. This reads
+ * quotes, so its answer isn't JSON, though its choice is plain. This reads
  * an answer that is exactly the two fields, in either order, with one
- * `"verdict":` key in all its text and nothing shaped like a key (`"name":`)
- * in its reasoning. Anything else isn't read: a second `"verdict":` may be
+ * `"<key>":` in all its text and nothing shaped like a key (`"name":`)
+ * in its reasoning. Anything else isn't read: a second `"<key>":` may be
  * the reasoning quoting one, or a second object; a key in the reasoning may
- * be another field, or quoted JSON with a verdict of its own; and the
- * verdict must be the model's own.
+ * be another field, or quoted JSON with a choice of its own; and the
+ * choice must be the model's own.
  */
-function malformedAnswer(
-  text: string
-): { verdict: QuestionVerdict; reasoning: string } | null {
-  if ((text.match(/"verdict"\s*:/g) ?? []).length !== 1) return null;
-  const first = REASONING_FIRST.exec(text);
-  const last = first ? null : VERDICT_FIRST.exec(text);
+function malformedAnswer<Choice extends string>(
+  text: string,
+  shape: JudgeAnswerShape<Choice>
+): JudgeAnswer<Choice> | null {
+  const key = escapeRegExp(shape.key);
+  const choices = shape.choices.map(escapeRegExp).join('|');
+  if ((text.match(new RegExp(`"${key}"\\s*:`, 'g')) ?? []).length !== 1)
+    return null;
+  const first = new RegExp(
+    `^\\{\\s*"reasoning"\\s*:\\s*"([\\s\\S]*)"\\s*,\\s*"${key}"\\s*:\\s*"(${choices})"\\s*\\}$`,
+    'i'
+  ).exec(text);
+  const last = first
+    ? null
+    : new RegExp(
+        `^\\{\\s*"${key}"\\s*:\\s*"(${choices})"\\s*,\\s*"reasoning"\\s*:\\s*"([\\s\\S]*)"\\s*\\}$`,
+        'i'
+      ).exec(text);
   const answer = first
-    ? { reasoning: first[1]!, verdict: first[2]! }
+    ? { reasoning: first[1]!, choice: first[2]! }
     : last
-      ? { verdict: last[1]!, reasoning: last[2]! }
+      ? { choice: last[1]!, reasoning: last[2]! }
       : null;
   if (!answer || /"[^"\s]+"\s*:/.test(answer.reasoning)) return null;
-  return {
-    verdict: answer.verdict.toLowerCase() as QuestionVerdict,
-    reasoning: answer.reasoning,
-  };
+  const choice = choiceOf(shape, answer.choice);
+  return choice === undefined ? null : { choice, reasoning: answer.reasoning };
+}
+
+/** A yes-or-no judge's answer (see `parseJudgeAnswer`). */
+export function parseQuestionAnswer(
+  text: string,
+  truncated = false
+): { verdict: QuestionVerdict; reasoning: string } {
+  const { choice, reasoning } = parseJudgeAnswer(
+    text,
+    VERDICT_ANSWER,
+    truncated
+  );
+  return { verdict: choice, reasoning };
 }
 
 /**
@@ -116,10 +161,11 @@ function malformedAnswer(
  * text that has the answer's shape (models sometimes reason first), or one
  * whose reasoning has unescaped quotes (`malformedAnswer`).
  */
-export function parseQuestionAnswer(
+export function parseJudgeAnswer<Choice extends string>(
   text: string,
+  shape: JudgeAnswerShape<Choice>,
   truncated = false
-): { verdict: QuestionVerdict; reasoning: string } {
+): JudgeAnswer<Choice> {
   const cleaned = text
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
@@ -134,25 +180,20 @@ export function parseQuestionAnswer(
     candidates = embeddedJsonObjects(cleaned).reverse();
   }
   for (const candidate of candidates) {
-    const verdict =
-      candidate && typeof candidate === 'object'
-        ? (candidate as { verdict?: unknown }).verdict
-        : undefined;
-    const normalized =
-      typeof verdict === 'string'
-        ? { ...(candidate as object), verdict: verdict.toLowerCase() }
-        : candidate;
-    const parsed = AnswerSchema.safeParse(normalized);
-    if (parsed.success) return parsed.data;
+    if (!candidate || typeof candidate !== 'object') continue;
+    const fields = candidate as Record<string, unknown>;
+    const choice = choiceOf(shape, fields[shape.key]);
+    if (choice !== undefined && typeof fields.reasoning === 'string')
+      return { choice, reasoning: fields.reasoning };
   }
   // Valid JSON was the model's answer, right or wrong, and a cut-off answer
-  // has no verdict of its own yet.
-  const malformed = json || truncated ? null : malformedAnswer(cleaned);
+  // has no choice of its own yet.
+  const malformed = json || truncated ? null : malformedAnswer(cleaned, shape);
   if (malformed) return malformed;
   throw new Error(
     truncated
       ? `The judge's answer was cut off at its token limit before its JSON was complete; raise the judge's maxTokens. Answer: ${text}`
-      : `The judge's answer isn't {"reasoning", "verdict": "yes" | "no" | "unknown"}: ${text.slice(0, 500)}`
+      : `The judge's answer isn't {"reasoning", "${shape.key}": ${shape.choices.map((c) => `"${c}"`).join(' | ')}}: ${text.slice(0, 500)}`
   );
 }
 
@@ -164,20 +205,35 @@ export function parseQuestionAnswer(
  * cut-off answer isn't asked again: the same token limit would cut it off
  * again. Part of the judge's version.
  */
-const UNREADABLE_ANSWER_RETRIES = 1;
+export const UNREADABLE_ANSWER_RETRIES = 1;
 
 async function askJudgeQuestion(
   complete: JudgeCompletionAdapter,
   trace: string,
   question: string
 ): Promise<QuestionAnswer> {
+  const { choice, ...answer } = await askJudge(
+    complete,
+    { system: QUESTION_SYSTEM_PROMPT, prompt: questionPrompt(trace, question) },
+    VERDICT_ANSWER
+  );
+  return { verdict: choice, ...answer };
+}
+
+/**
+ * One model call, read as an answer of `shape`. An answer that can't be
+ * read is asked again, up to `UNREADABLE_ANSWER_RETRIES` times, unless it
+ * was cut off. Usage covers every attempt.
+ */
+export async function askJudge<Choice extends string>(
+  complete: JudgeCompletionAdapter,
+  request: { system: string; prompt: string },
+  shape: JudgeAnswerShape<Choice>
+): Promise<JudgeAnswer<Choice> & { usage: Partial<UsageMetrics> }> {
   const started = Date.now();
   const usage: Partial<UsageMetrics>[] = [];
   for (let attempt = 0; ; attempt++) {
-    const completion = await complete({
-      system: QUESTION_SYSTEM_PROMPT,
-      prompt: questionPrompt(trace, question),
-    });
+    const completion = await complete(request);
     usage.push(
       Object.fromEntries(
         Object.entries(completion.usage ?? {}).filter(
@@ -186,9 +242,9 @@ async function askJudgeQuestion(
       ) as Partial<UsageMetrics>
     );
     const truncated = completion.truncated === true;
-    let answer: { verdict: QuestionVerdict; reasoning: string };
+    let answer: JudgeAnswer<Choice>;
     try {
-      answer = parseQuestionAnswer(completion.text, truncated);
+      answer = parseJudgeAnswer(completion.text, shape, truncated);
     } catch (error) {
       if (truncated || attempt >= UNREADABLE_ANSWER_RETRIES) throw error;
       continue;
@@ -314,7 +370,7 @@ function sampleInput(trial: Partial<JudgeInput['trial']>): JudgeInput {
  * empty traces, a cut result), so a change to how traces render changes the
  * version.
  */
-function sampleTraces(reference: boolean | undefined): string[] {
+export function sampleTraces(reference: boolean | undefined): string[] {
   const options = { reference };
   return [
     renderJudgeTrace(sampleInput({}), options),
@@ -407,6 +463,27 @@ function sampleQuestions<Options extends z.ZodRawShape>(
   }
 }
 
+/** The model settings among a built-in judge's options. */
+export function judgeLLMConfig(options: JudgeLLMOptions): JudgeConfig {
+  const { maxToolOutputSize: _size, ...config } = JudgeLLMSchema.parse(
+    Object.fromEntries(
+      Object.keys(JudgeLLMSchema.shape)
+        .filter((key) => key in options)
+        .map((key) => [key, options[key as keyof JudgeLLMOptions]])
+    )
+  );
+  return config;
+}
+
+/** The defaults a built-in judge falls back on, for its version. */
+export const JUDGE_DEFAULTS = {
+  provider: DEFAULT_JUDGE_PROVIDER,
+  models: DEFAULT_JUDGE_MODELS,
+  maxTokens: DEFAULT_JUDGE_MAX_TOKENS,
+  temperature: DEFAULT_JUDGE_TEMPERATURE,
+  maxToolOutputSize: DEFAULT_TRACE_OUTPUT_BYTES,
+};
+
 /** A yes-or-no judge from its questions. */
 export function defineQuestionJudge<
   Options extends z.ZodRawShape = Record<never, never>,
@@ -422,24 +499,8 @@ export function defineQuestionJudge<
     questions: sampleQuestions(spec, schema),
     needsTrace: spec.needsTrace !== false,
     unreadableAnswerRetries: UNREADABLE_ANSWER_RETRIES,
-    defaults: {
-      provider: DEFAULT_JUDGE_PROVIDER,
-      models: DEFAULT_JUDGE_MODELS,
-      maxTokens: DEFAULT_JUDGE_MAX_TOKENS,
-      temperature: DEFAULT_JUDGE_TEMPERATURE,
-      maxToolOutputSize: DEFAULT_TRACE_OUTPUT_BYTES,
-    },
+    defaults: JUDGE_DEFAULTS,
   });
-  function llmConfig(options: JudgeLLMOptions): JudgeConfig {
-    const { maxToolOutputSize: _size, ...config } = JudgeLLMSchema.parse(
-      Object.fromEntries(
-        Object.keys(JudgeLLMSchema.shape)
-          .filter((key) => key in options)
-          .map((key) => [key, options[key as keyof JudgeLLMOptions]])
-      )
-    );
-    return config;
-  }
   return {
     description: spec.description,
     schema,
@@ -453,7 +514,7 @@ export function defineQuestionJudge<
         z.ZodObject<Options>
       > &
         JudgeLLMOptions;
-      const config = llmConfig(options);
+      const config = judgeLLMConfig(options);
       const questions = spec.questions(input, options);
       if (questions.length === 0)
         return { score: 0, skipped: true, reasoning: 'no questions to ask' };
@@ -501,7 +562,7 @@ export function defineQuestionJudge<
     },
     async preflight(rawOptions) {
       await preflightJudge(
-        llmConfig(schema.parse(rawOptions) as JudgeLLMOptions)
+        judgeLLMConfig(schema.parse(rawOptions) as JudgeLLMOptions)
       );
     },
   };

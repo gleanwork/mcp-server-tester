@@ -223,6 +223,15 @@ function checkPairwiseJudges(
   configs: ExtensionConfig[] | undefined,
   lookups: ConfigLookups
 ): ExtensionConfig[] | undefined {
+  // A comparison's preferences and labels are keyed by the judge's type.
+  const types = new Set<string>();
+  for (const config of configs ?? []) {
+    if (types.has(config.type))
+      throw new Error(
+        `Pairwise judge "${config.type}" is listed twice. List each pairwise judge once: its preferences and labels are keyed by its type.`
+      );
+    types.add(config.type);
+  }
   return configs?.map((config) => {
     const definition = lookups.pairwiseJudge(config.type);
     const reps = PairwiseRepsSchema.safeParse(config.reps);

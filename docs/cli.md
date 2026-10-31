@@ -729,6 +729,7 @@ npx mst judges show rubric --json
 acme/judge/completeness         judge     requires case.expected.answer  Did the answer cover every point of the expected answer?
 rubric                          judge                                    An LLM grades the answer against a rubric: ...
 acme/pairwise-judge/preference  pairwise                                 Which answer would the asker rather get?
+preference                      pairwise                                 Asks which run better did what the user asked: ...
 ```
 
 A `judge` scores each trial; a `pairwise` judge compares each variant's trial with the baseline's. `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options as JSON Schema: what an eval config's `judges` entry may set besides `type`. Plugins add `description` to a judge or pairwise judge for these commands.

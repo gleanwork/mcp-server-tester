@@ -101,6 +101,25 @@ describe('eval config validation', () => {
     );
   });
 
+  it('takes the built-in preference judge, and rejects a pairwise judge listed twice', () => {
+    const evalConfig = {
+      name: 'pairwise',
+      datasets: [{ type: 'file', path: './cases.json' }],
+      servers: [],
+      pairwiseJudges: [{ type: 'preference', reference: false }],
+    } as EvalConfig;
+    expect(() => validateEvalConfig(evalConfig)).not.toThrow();
+    expect(() =>
+      validateEvalConfig({
+        ...evalConfig,
+        pairwiseJudges: [
+          { type: 'preference' },
+          { type: 'preference', model: 'claude-sonnet-4-6' },
+        ],
+      } as EvalConfig)
+    ).toThrow('Pairwise judge "preference" is listed twice');
+  });
+
   it.each(['dataset', 'client', 'judge'] as const)(
     'rejects a %s reference to a namespace the eval does not load',
     (kind) => {

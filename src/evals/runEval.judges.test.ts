@@ -202,14 +202,22 @@ describe('pairwiseJudges in an eval config', () => {
     expect(
       validate({
         pairwiseJudges: [
-          'acme/pairwise-judge/prefer',
+          'preference',
           { type: 'acme/pairwise-judge/prefer', favour: 'base', reps: 2 },
         ],
       }).pairwiseJudges
     ).toEqual([
-      { type: 'acme/pairwise-judge/prefer' },
+      { type: 'preference' },
       { type: 'acme/pairwise-judge/prefer', favour: 'base', reps: 2 },
     ]);
+    expect(() =>
+      validate({
+        pairwiseJudges: [
+          'acme/pairwise-judge/prefer',
+          { type: 'acme/pairwise-judge/prefer', favour: 'base' },
+        ],
+      })
+    ).toThrow('"acme/pairwise-judge/prefer" is listed twice');
   });
 
   it.each([

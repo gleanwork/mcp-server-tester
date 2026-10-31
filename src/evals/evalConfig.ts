@@ -168,7 +168,8 @@ export interface EvalConfig {
   /** Judges every case runs, on top of each case's own `judges`. */
   judges?: ExtensionConfig[];
   /**
-   * Pairwise judges (`<namespace>/pairwise-judge/<name>`): after every variant
+   * Pairwise judges (the built-in `preference`, or
+   * `<namespace>/pairwise-judge/<name>`): after every variant
    * runs, each compares each other variant with the baseline, case by case.
    */
   pairwiseJudges?: ExtensionConfig[];

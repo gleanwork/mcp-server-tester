@@ -8,6 +8,7 @@ import { QUESTION_SYSTEM_PROMPT } from './prompts/question.js';
 import {
   combineAnswers,
   defineQuestionJudge,
+  parseJudgeAnswer,
   parseQuestionAnswer,
   type AnsweredQuestion,
 } from './questionJudge.js';
@@ -156,6 +157,24 @@ describe('parseQuestionAnswer', () => {
         true
       )
     ).toThrow(/cut off at its token limit/);
+  });
+
+  it('reads any answer shape the same way, by its own key and choices', () => {
+    const shape = { key: 'preference', choices: ['A', 'B', 'tie'] };
+    expect(
+      parseJudgeAnswer('{"reasoning": "r", "preference": "b"}', shape)
+    ).toEqual({ choice: 'B', reasoning: 'r' });
+    expect(
+      parseJudgeAnswer('{"preference":"TIE","reasoning":"A says "1"."}', shape)
+    ).toEqual({ choice: 'tie', reasoning: 'A says "1".' });
+    for (const answer of [
+      '{"reasoning": "r", "verdict": "yes"}',
+      '{"reasoning": "r", "preference": "C"}',
+      '{"reasoning":"not "preference": "A"","preference":"B"}',
+    ])
+      expect(() => parseJudgeAnswer(answer, shape), answer).toThrow(
+        /isn't \{"reasoning", "preference": "A" \| "B" \| "tie"\}/
+      );
   });
 });
 

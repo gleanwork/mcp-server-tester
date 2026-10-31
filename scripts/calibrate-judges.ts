@@ -396,6 +396,8 @@ ${rows.join('\n')}
 
 \`criteria\` isn't measured here. Its questions are each case's own criteria, and each criterion is a question of its own, with its own identity, so it needs its own labels: label a criterion with \`mst label --judge criteria#<id>\` and check it with \`mst judges check\`.
 
+\`preference\`, the pairwise judge, isn't measured here either: the set's traces stand alone, not in pairs. Label a comparison's preferences with \`mst label --judge preference\` and check them with \`mst judges check\`, which reports how often the judge agrees with the labels, and how often the judge and the labels each call a tie. A pairwise judge has no usable gate.
+
 ## Disagreements
 
 The \`test\` traces where a judge's verdict and the label differ. Read a case's trace in \`scripts/calibration/cases.ts\` to see why.
