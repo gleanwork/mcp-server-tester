@@ -310,6 +310,31 @@ describe('defineQuestionJudge', () => {
     requests = replies({ text: '{"reasoning": "Event', truncated: true });
     await expect(judge.evaluate(INPUT, {})).rejects.toThrow(/cut off/);
     expect(requests).toHaveLength(1);
+
+    // A call that fails is the adapter's error, not an unreadable answer.
+    let calls = 0;
+    vi.mocked(createJudgeCompletion).mockImplementation(() => async () => {
+      calls++;
+      throw new Error('rate limited');
+    });
+    await expect(judge.evaluate(INPUT, {})).rejects.toThrow('rate limited');
+    expect(calls).toBe(1);
+
+    // Cost and an adapter's own duration add up across the calls.
+    let attempt = 0;
+    vi.mocked(createJudgeCompletion).mockImplementation(() => async () => ({
+      text:
+        attempt++ === 0
+          ? unreadable
+          : '{"reasoning": "Event 1.", "verdict": "yes"}',
+      usage: { inputTokens: 5, totalCostUsd: 0.25, durationMs: 100 },
+    }));
+    expect((await judge.evaluate(INPUT, {})).usage).toMatchObject({
+      inputTokens: 10,
+      outputTokens: 0,
+      totalCostUsd: 0.5,
+      durationMs: 200,
+    });
   });
 
   it('shows the reference answer to a judge that asks for it', async () => {
