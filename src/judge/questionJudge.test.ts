@@ -88,6 +88,60 @@ describe('parseQuestionAnswer', () => {
     ).toEqual({ reasoning: 'r', verdict: 'unknown' });
   });
 
+  it('reads an answer whose reasoning quotes words without escaping them', () => {
+    // A real answer from a judge model: not JSON, but its verdict is plain.
+    expect(
+      parseQuestionAnswer(
+        '{"reasoning":"The call failed, yet the answer asserts "20°C and sunny" without a tool result.","verdict":"no"}'
+      )
+    ).toEqual({
+      reasoning:
+        'The call failed, yet the answer asserts "20°C and sunny" without a tool result.',
+      verdict: 'no',
+    });
+    expect(
+      parseQuestionAnswer(
+        '```json\n{"verdict": "Yes", "reasoning": "It says "done"."}\n```'
+      )
+    ).toEqual({ reasoning: 'It says "done".', verdict: 'yes' });
+    // A quoted field name doesn't end the reasoning.
+    expect(
+      parseQuestionAnswer(
+        '{"reasoning":"Event 1 returned "score", "verdict" and no result.","verdict":"no"}'
+      )
+    ).toEqual({
+      reasoning: 'Event 1 returned "score", "verdict" and no result.',
+      verdict: 'no',
+    });
+  });
+
+  it("reads no verdict that isn't plainly the model's own", () => {
+    for (const answer of [
+      // The reasoning quotes a verdict: which one is the model's?
+      '{"reasoning":"It isn\'t "verdict": "yes" as claimed","verdict":"no"}',
+      // The model's verdict is invalid, and the reasoning quotes a valid one.
+      '{"reasoning":"It isn\'t "verdict": "yes" as claimed","verdict":"maybe"}',
+      // No verdict of its own.
+      '{"reasoning":"Event 1 only quoted "verdict": "yes" without an answer."}',
+      // Valid JSON with a nested verdict: the model's own is invalid.
+      '{"reasoning":"r","verdict":"maybe","details":{"verdict":"yes"}}',
+      // Two objects, the first invalid.
+      '{"reasoning":"a","verdict":"pass"}\n{"reasoning":"b "c" d","verdict":"yes"}',
+      // Prose around a malformed object.
+      'I think {"reasoning":"a "b" c","verdict":"no"} or maybe yes',
+      // Another field, after the verdict or after the reasoning.
+      '{"reasoning":"a "b" c","verdict":"no","confidence":"high"}',
+      '{"verdict":"no","reasoning":"a "b" c","confidence":"high"}',
+      // Quoted JSON in the reasoning, with a verdict of its own.
+      '{"reasoning":"The trace says {"reasoning":"x","verdict":"yes"}',
+      // Two objects, the first without a verdict.
+      '{"reasoning":"first"}\n{"reasoning":"second "quote" words","verdict":"yes"}',
+    ])
+      expect(() => parseQuestionAnswer(answer), answer).toThrow(
+        /isn't \{"reasoning", "verdict"/
+      );
+  });
+
   it("throws on an answer that isn't yes, no or unknown, and names a cut-off answer", () => {
     expect(() =>
       parseQuestionAnswer('{"reasoning": "r", "verdict": "maybe"}')
@@ -95,6 +149,13 @@ describe('parseQuestionAnswer', () => {
     expect(() => parseQuestionAnswer('{"reasoning": "r", "verd', true)).toThrow(
       /cut off at its token limit/
     );
+    // A cut-off answer has no verdict of its own, whatever its text holds.
+    expect(() =>
+      parseQuestionAnswer(
+        '{"reasoning":"It said "done" and","verdict":"yes"}',
+        true
+      )
+    ).toThrow(/cut off at its token limit/);
   });
 });
 
