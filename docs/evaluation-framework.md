@@ -251,8 +251,9 @@ When at least one criterion is required (any without `required: false`), the
 criteria decide the judge, in place of its own `pass`, `unknown` and score,
 and of the threshold: it fails when a required criterion fails, is `unknown`
 when none fails and one is `unknown`, and passes otherwise. Its score is the
-share of required criteria that passed, and its reasoning and sub-scores are
-the criteria's. When none is required, the judge's own verdict decides, as
+share of required criteria that passed, and its reasoning and each
+criterion's sub-score are the criteria's (a criterion that came out
+`unknown` has no sub-score). When none is required, the judge's own verdict decides, as
 for any judge. A judge that skips keeps the criteria its reps listed, each
 `unknown`. A criterion's `id` can't have a `#`.
 

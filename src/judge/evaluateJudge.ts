@@ -207,10 +207,18 @@ export async function evaluateJudge(
     const decided = criteria && criteriaOutcome(criteria);
     if (decided) {
       const shown = last ?? final;
+      // A criterion's sub-score is its combined verdict's, and a criterion
+      // that came out unknown has none; other sub-scores stay.
+      const ids = new Set(criteria.map((c) => c.id));
       const combined = {
         ...shown,
         reasoning: decided.reasoning,
-        subScores: { ...shown.subScores, ...decided.subScores },
+        subScores: {
+          ...Object.fromEntries(
+            Object.entries(shown.subScores ?? {}).filter(([id]) => !ids.has(id))
+          ),
+          ...decided.subScores,
+        },
       };
       if (decided.verdict === 'unknown')
         return judgeUnknown(label, identity, combined, usage, criteria);
@@ -307,8 +315,12 @@ function combineCriteria(
     const last = verdicts.at(-1)!;
     const verdict =
       passed > failed ? 'pass' : failed > passed ? 'fail' : 'unknown';
-    const { reasoning } =
-      [...verdicts].reverse().find((v) => v.verdict === verdict) ?? last;
+    // A tie between reps that answered has no one rep's reasoning.
+    const { reasoning } = [...verdicts]
+      .reverse()
+      .find((v) => v.verdict === verdict) ?? {
+      reasoning: `The reps disagreed: ${passed} passed it and ${failed} failed it.`,
+    };
     return {
       id,
       ...(last.text !== undefined ? { text: last.text } : {}),

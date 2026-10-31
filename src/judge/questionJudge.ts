@@ -478,8 +478,12 @@ export function defineQuestionJudge<
         }))
       );
       const provider = config.provider ?? DEFAULT_JUDGE_PROVIDER;
+      const combined = combineAnswers(answers);
+      // A judge that reports criteria lists its answers there; one rep's
+      // `metadata.questions` would contradict their majority over reps.
+      const { metadata: _questions, ...withoutQuestions } = combined;
       return {
-        ...combineAnswers(answers),
+        ...(spec.criteria ? withoutQuestions : combined),
         ...(spec.criteria
           ? {
               criteria: answers.map((a) => ({

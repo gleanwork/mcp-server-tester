@@ -195,6 +195,12 @@ describe('the criteria judge', () => {
     const two = await grade([CITES], { reps: 2 });
     expect(two.criteria?.[0]?.verdict).toBe('unknown');
     expect(two).toMatchObject({ pass: false, unknown: true });
+    // A tie has no one rep's reasoning or sub-score, and no rep's questions.
+    expect(two.criteria?.[0]?.reasoning).toBe(
+      'The reps disagreed: 1 passed it and 1 failed it.'
+    );
+    expect(two.subScores).toEqual({});
+    expect(two.metadata).toBeUndefined();
   });
 
   it("passes when every required criterion's majority passes, though no rep passed whole", async () => {
