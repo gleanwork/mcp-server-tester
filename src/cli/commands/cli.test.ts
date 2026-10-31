@@ -428,7 +428,7 @@ describe('mst CLI', () => {
     it("still takes mst's --version after a command", async () => {
       const result = await runBin('run', '--version');
       expect(result.exitCode).toBe(0);
-      expect(result.stdout.trim()).toBe(packageJson.version);
+      expect(String(result.stdout).trim()).toBe(packageJson.version);
     });
   });
 

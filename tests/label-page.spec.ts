@@ -124,6 +124,9 @@ test.describe('the label page', () => {
         /Why did checkout fail\?|How long was checkout down\?/
       );
       await expect(body).not.toContainText('SECRET-REASONING');
+      // MST can't know a plugin judge's question, and says so.
+      await expect(page.locator('#no-question')).toBeVisible();
+      await expect(page.locator('#question')).toBeHidden();
       await expect(body).not.toContainText('better');
       await expect(page.locator('.event summary').first()).toHaveText(
         'tool_call search (docs)'
@@ -172,9 +175,15 @@ test.describe('the label page', () => {
       directory,
       judge: 'lps/pairwise-judge/longer',
       labeler: 'spec',
+      question: 'Which answer names the cause?',
     });
     try {
       await page.goto(server.url);
+      await expect(page.locator('#no-question')).toBeHidden();
+      await page.locator('#question summary').click();
+      await expect(page.locator('#question-text')).toHaveText(
+        'Which answer names the cause?'
+      );
       await expect(page.locator('.sides h2').first()).toHaveText('A');
       await page.keyboard.press('a');
       await saved(page, 1);

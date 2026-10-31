@@ -4,6 +4,8 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
@@ -329,8 +331,8 @@ describe('the label page', () => {
   it('shows both sides of a pairwise case with their whole answers', async () => {
     const t = await storedRun({ long: true });
     const server = await start(t.directory, 'lp/pairwise-judge/longer');
-    const answers = server.data.items[0]!.sides!.flatMap((side) =>
-      side.trials.map((trial) => trial.answer ?? '')
+    const answers = server.data.items[0]!.sides!.map(
+      (side) => side.trial.answer ?? ''
     );
     expect(Math.max(...answers.map((answer) => answer.length))).toBeGreaterThan(
       6000
@@ -349,7 +351,10 @@ describe('the label page', () => {
       'baseline',
       'candidate',
     ]);
-    expect(item.sides![0].trials).toHaveLength(2);
+    // Each side shows the trial the judge compared: the last one.
+    for (const side of item.sides!)
+      expect(side).toMatchObject({ trialIndex: 1, trialCount: 2 });
+    expect(item.sides![0].trial.answer).toMatch(/^(Why|How)/);
     await post(server, { id: item.id, label: item.sides![0].label });
     const [label] = await readLabels(t.directory);
     expect(label).toMatchObject({
@@ -403,6 +408,52 @@ describe('the label page', () => {
     await expect(
       labelPage(t.directory, { judge: 'lp/judge/keyword', port: 'x' })
     ).rejects.toThrow(/--port x/);
+  });
+
+  it('mst label serves until Ctrl+C, then says how many labels it stored', async () => {
+    const t = await storedRun();
+    const bin = fileURLToPath(
+      new URL('../../dist/cli/index.js', import.meta.url)
+    );
+    const child = spawn(
+      process.execPath,
+      [bin, 'label', t.directory, '--judge', 'lp/judge/keyword', '--no-open'],
+      { stdio: ['ignore', 'pipe', 'pipe'] }
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    const exited = new Promise<number | null>((resolve) =>
+      child.on('exit', (code) => resolve(code))
+    );
+    try {
+      const url = await new Promise<string>((resolve, reject) => {
+        const timer = setInterval(() => {
+          const match = /http:\/\/127\.0\.0\.1:\d+\/[\w-]+\//.exec(stdout);
+          if (match) {
+            clearInterval(timer);
+            resolve(match[0]);
+          } else if (child.exitCode !== null) {
+            clearInterval(timer);
+            reject(new Error(`mst label exited: ${stderr}`));
+          }
+        }, 20);
+      });
+      const saved = await fetch(new URL('api/label', url), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: 0, label: 'pass' }),
+      });
+      expect(saved.status).toBe(200);
+      child.kill('SIGINT');
+      expect(await exited).toBe(0);
+      expect(stdout).toContain('8 verdicts, 0 labeled');
+      expect(stdout).toContain('Stored 1 label.');
+      expect(await readLabels(t.directory)).toHaveLength(1);
+    } finally {
+      if (child.exitCode === null) child.kill('SIGKILL');
+    }
   });
 
   it('serves a page whose script parses and writes values as text, not HTML', () => {

@@ -97,7 +97,9 @@ function render() {
     const grid = el('div', { class: 'sides' });
     item.sides.forEach((side, i) => {
       const column = el('div', null, el('h2', { text: i === 0 ? 'A' : 'B' }));
-      side.trials.forEach((trial, n) => column.append(trialView(trial, side.trials.length > 1 ? 'Trial ' + (n + 1) : '')));
+      if (side.trialCount > 1)
+        column.append(el('p', { class: 'muted', text: 'Trial ' + (side.trialIndex + 1) + ' of ' + side.trialCount + ': the one the judge compared' }));
+      column.append(trialView(side.trial));
       grid.append(column);
     });
     main.append(grid);
@@ -177,6 +179,7 @@ fetch('api/items').then((response) => response.json()).then((data) => {
   $('title').textContent = 'Label ' + data.judge;
   $('run').textContent = 'run ' + data.runId;
   if (data.question) { $('question-text').textContent = data.question; $('question').hidden = false; }
+  else $('no-question').hidden = false;
   const first = data.items.findIndex((item) => item.label === undefined);
   state.index = first === -1 ? 0 : first;
   render();
@@ -200,7 +203,8 @@ export function labelPageHtml(): string {
   <span id="progress" class="muted"></span>
 </header>
 <details id="question" class="question" hidden><summary>The judge's question</summary><div id="question-text"></div></details>
-<p class="muted">Answer the judge's question for each trial. The page doesn't show the judge's verdict or which variant ran the trial.</p>
+<p id="no-question" class="error" hidden>MST doesn't know this judge's question. Ask what it checks, and give it with --question, so that your labels answer the question the judge answers.</p>
+<p class="muted">Answer the judge's question for each trial. The page doesn't show the judge's verdict or name the variant; the calls a trial made may still show which variant ran it.</p>
 <main id="item"></main>
 <div class="actions">
   <span id="choices"></span>

@@ -303,6 +303,10 @@ labelCommand
     "The split new labels go in: test or dev (default: each case's own)"
   )
   .option('--labeler <name>', 'Who is labeling (default: your user name)')
+  .option(
+    '--question <text>',
+    "The judge's question, to show above each trial (default: a rubric's text; other judges have none)"
+  )
   .option('--port <n>', 'The port to serve on (default: any free port)')
   .option('--no-open', "Print the page's address without opening a browser")
   .option(

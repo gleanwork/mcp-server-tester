@@ -47,7 +47,11 @@ interface LabelPageTrial {
 interface LabelPageSide {
   /** The label that prefers this side. */
   label: 'baseline' | 'candidate';
-  trials: LabelPageTrial[];
+  /** The trial the judge compared: the last one that ran. */
+  trial: LabelPageTrial;
+  /** That trial's index, and how many the case ran. */
+  trialIndex: number;
+  trialCount: number;
 }
 
 /**
@@ -77,7 +81,10 @@ interface LabelPageData {
   runId: string;
   judge: string;
   kind: 'pointwise' | 'pairwise';
-  /** The question the judge answers, when MST knows its text. */
+  /**
+   * The question the judge answers: `--question`, a built-in rubric, or a
+   * custom rubric's text. Undefined when MST doesn't know it.
+   */
   question?: string;
   items: LabelPageItem[];
 }
@@ -93,6 +100,8 @@ export interface LabelPageOptions {
   split?: LabelSplit;
   /** @default 0, any free port */
   port?: number;
+  /** The judge's question, for a judge whose question MST doesn't know. */
+  question?: string;
 }
 
 export interface LabelPageServer {
@@ -148,7 +157,14 @@ export async function startLabelPage(
     .map((item) => ({ item, rank: hash(stored.run.runId, labelKey(item)) }))
     .sort((a, b) => a.rank.localeCompare(b.rank))
     .map(({ item }) => item);
-  const data = pageData(stored, options.judge, order, labels, options.split);
+  const data = pageData(
+    stored,
+    options.judge,
+    order,
+    labels,
+    options.split,
+    options.question
+  );
   const token = randomBytes(18).toString('base64url');
   const html = labelPageHtml();
   let written = 0;
@@ -303,12 +319,36 @@ function hash(...parts: string[]): string {
   return createHash('sha256').update(parts.join('\0')).digest('hex');
 }
 
+/**
+ * The question a judge answers, when the run says: a built-in rubric's
+ * text, or a custom rubric's. A custom rubric (`{ text }`) is named
+ * `rubric`, so it has a question only when every case's text is the same.
+ */
+function questionOf(stored: StoredRun, judge: string): string | undefined {
+  if (judge in BUILT_IN_RUBRICS)
+    return BUILT_IN_RUBRICS[judge as keyof typeof BUILT_IN_RUBRICS];
+  const texts = new Set<string>();
+  for (const variant of stored.summary.variants)
+    for (const result of variant.result?.caseResults ?? []) {
+      const judges = (result.request as { judges?: unknown } | undefined)
+        ?.judges;
+      for (const entry of Array.isArray(judges) ? judges : []) {
+        const { type, rubric } = entry as { type?: unknown; rubric?: unknown };
+        if (type !== 'rubric' || judge !== 'rubric') continue;
+        const text = (rubric as { text?: unknown } | undefined)?.text;
+        if (typeof text === 'string') texts.add(text);
+      }
+    }
+  return texts.size === 1 ? [...texts][0] : undefined;
+}
+
 function pageData(
   stored: StoredRun,
   judge: string,
   items: readonly JudgedItem[],
   labels: ReadonlyMap<string, LabelRecord>,
-  split: LabelSplit | undefined
+  split: LabelSplit | undefined,
+  question: string | undefined
 ): LabelPageData {
   const cases = new Map<string, EvalCaseResult>();
   for (const variant of stored.summary.variants)
@@ -321,16 +361,34 @@ function pageData(
       ?.length
       ? result.trialResults
       : [result];
-    return trials.map(pageTrial);
+    return trials;
+  };
+  // A pairwise judge compares each side's case result, which is the last
+  // trial that ran (evalRunner keeps it); a trial that threw has no trace.
+  const sideOf = (
+    label: LabelPageSide['label'],
+    variant: string,
+    caseId: string
+  ): LabelPageSide => {
+    const trials = trialsOf(variant, caseId);
+    let index = trials.length - 1;
+    while (index > 0 && !('trace' in trials[index]! && trials[index]!.trace))
+      index--;
+    const trial = trials[index];
+    return {
+      label,
+      trial: trial ? pageTrial(trial) : { traced: false, events: [] },
+      trialIndex: Math.max(index, 0),
+      trialCount: trials.length,
+    };
   };
   const pairwise = items.some((item) => item.baseline !== undefined);
+  const known = question ?? questionOf(stored, judge);
   return {
     runId: stored.run.runId,
     judge,
     kind: pairwise ? 'pairwise' : 'pointwise',
-    ...(judge in BUILT_IN_RUBRICS
-      ? { question: BUILT_IN_RUBRICS[judge as keyof typeof BUILT_IN_RUBRICS] }
-      : {}),
+    ...(known !== undefined ? { question: known } : {}),
     items: items.map((item, id): LabelPageItem => {
       const caseResult = cases.get(`${item.variant}\0${item.caseId}`);
       const existing = labels.get(labelKey(item));
@@ -351,17 +409,11 @@ function pageData(
         return {
           ...base,
           trial: item.trial ?? 0,
-          trace: trial ?? { traced: false, events: [] },
+          trace: trial ? pageTrial(trial) : { traced: false, events: [] },
         };
       }
-      const baseline: LabelPageSide = {
-        label: 'baseline',
-        trials: trialsOf(item.baseline, item.caseId),
-      };
-      const candidate: LabelPageSide = {
-        label: 'candidate',
-        trials: trialsOf(item.variant, item.caseId),
-      };
+      const baseline = sideOf('baseline', item.baseline, item.caseId);
+      const candidate = sideOf('candidate', item.variant, item.caseId);
       // Which side is A is fixed for the case but not always the baseline.
       const flip =
         parseInt(

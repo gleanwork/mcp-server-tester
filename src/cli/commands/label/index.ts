@@ -45,6 +45,7 @@ export interface LabelPageCommandOptions {
   judge?: string;
   split?: string;
   labeler?: string;
+  question?: string;
   port?: string;
   /** Commander's `--no-open`. */
   open?: boolean;
@@ -89,6 +90,7 @@ export async function labelPage(
       ? { split: split as (typeof LABEL_SPLITS)[number] }
       : {}),
     ...(options.labeler !== undefined ? { labeler: options.labeler } : {}),
+    ...(options.question !== undefined ? { question: options.question } : {}),
     ...(port !== undefined ? { port } : {}),
   });
   const labeled = server.data.items.filter(
