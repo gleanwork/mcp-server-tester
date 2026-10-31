@@ -61,6 +61,12 @@ const JUDGES: Partial<
     provider: model.provider,
     model: model.model,
   }),
+  'grounded-in-tools': (model) => ({
+    type: 'grounded-in-tools',
+    ...model.options,
+    provider: model.provider,
+    model: model.model,
+  }),
 };
 
 interface JudgeModel {
@@ -377,6 +383,8 @@ ${rows.join('\n')}
 \`correctness\` is the \`rubric\` judge with its built-in \`correctness\` rubric, which asks whether the answer is correct against the reference. It gets the trial's response as JSON, tool calls included, so it can fail a right answer because a tool call failed: that is a disagreement with the \`false-success\` labels, which pass a right answer on this question.
 
 \`task-completion\` reads the trace and asks whether the assistant did what the user asked. A \`false-success\` trace's answer claims a result that no tool result shows, so it fails.
+
+\`grounded-in-tools\` reads the trace and asks whether every claim in the answer comes from a tool result. It doesn't see the reference answer. A \`wrong-tool\` answer is true to what the wrong tool returned, so it passes; a \`gave-up\` answer reports the error the trace shows, so it passes too.
 
 ## Disagreements
 

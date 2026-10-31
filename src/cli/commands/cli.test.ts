@@ -378,7 +378,10 @@ describe('mst CLI', () => {
       const list = await runBin('judges');
       expect(list.exitCode).toBe(0);
       expect(list.stdout).toMatch(/^rubric +judge {2}An LLM grades/m);
-      expect(list.stdout).toMatch(/^task-completion {2}judge {2}Asks whether/m);
+      expect(list.stdout).toMatch(/^task-completion +judge {2}Asks whether/m);
+      expect(list.stdout).toMatch(
+        /^grounded-in-tools {2}judge {2}Asks whether every claim/m
+      );
 
       const show = await runBin('judges', 'show', 'rubric', '--json');
       expect(show.exitCode).toBe(0);

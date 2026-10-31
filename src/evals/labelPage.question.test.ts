@@ -10,6 +10,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import type * as JudgeClientModule from '../judge/judgeClient.js';
 import { createJudge, createJudgeCompletion } from '../judge/judgeClient.js';
+import { GROUNDED_IN_TOOLS_QUESTION } from '../judge/prompts/groundedInTools.js';
 import { TASK_COMPLETION_QUESTION } from '../judge/prompts/taskCompletion.js';
 import { BUILT_IN_RUBRICS } from '../judge/rubrics.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
@@ -99,6 +100,7 @@ async function storedRun(): Promise<string> {
       judges: [
         { type: 'rubric', rubric: 'correctness', ...judge },
         { type: 'task-completion', ...judge },
+        { type: 'grounded-in-tools', ...judge },
         'lq/judge/always',
       ],
       variants: [{ name: 'only', servers: ['docs'] }],
@@ -132,6 +134,9 @@ describe("the label page's question", () => {
     const directory = await storedRun();
     expect(await question(directory, 'task-completion')).toBe(
       TASK_COMPLETION_QUESTION
+    );
+    expect(await question(directory, 'grounded-in-tools')).toBe(
+      GROUNDED_IN_TOOLS_QUESTION
     );
     expect(await question(directory, 'correctness')).toBe(
       BUILT_IN_RUBRICS.correctness

@@ -4,8 +4,10 @@
  * built-ins are here: a plugin's judge is named `<namespace>/judge/<name>`,
  * so a bare name can't be one.
  */
+import { GROUNDED_IN_TOOLS_QUESTION } from './prompts/groundedInTools.js';
 import { TASK_COMPLETION_QUESTION } from './prompts/taskCompletion.js';
 
 export const BUILT_IN_JUDGE_QUESTIONS: Readonly<Record<string, string>> = {
   'task-completion': TASK_COMPLETION_QUESTION,
+  'grounded-in-tools': GROUNDED_IN_TOOLS_QUESTION,
 };

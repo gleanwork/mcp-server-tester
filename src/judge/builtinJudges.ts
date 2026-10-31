@@ -1,11 +1,16 @@
 import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
+import { GROUNDED_IN_TOOLS_JUDGE } from './groundedInToolsJudge.js';
 import { RUBRIC_JUDGE } from './rubricJudge.js';
 import { TASK_COMPLETION_JUDGE } from './taskCompletionJudge.js';
 
 /** Built-in judges by name. */
 function builtinJudges(): Readonly<Record<string, JudgeDefinition>> {
-  return { rubric: RUBRIC_JUDGE, 'task-completion': TASK_COMPLETION_JUDGE };
+  return {
+    rubric: RUBRIC_JUDGE,
+    'task-completion': TASK_COMPLETION_JUDGE,
+    'grounded-in-tools': GROUNDED_IN_TOOLS_JUDGE,
+  };
 }
 
 const judges = extensionLookup('judges', builtinJudges);
