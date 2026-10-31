@@ -480,6 +480,17 @@ describe('mst judges check', () => {
   it('attributes a kept pairwise preference to the judge that gave it, or to none', async () => {
     const { base } = await evalDirectory();
     const directory = await run(base);
+    await label(directory, 'ck/pairwise-judge/longer', () => undefined);
+    const recorded = (await readRunDirectory(directory)).run.judges?.find(
+      (judge) => judge.type === 'ck/pairwise-judge/longer'
+    )?.identity;
+    expect(recorded).toBeDefined();
+    const current = await check([directory], {
+      judge: 'ck/pairwise-judge/longer',
+      record: false,
+    });
+    expect(current.checks[0]!.judgeIdentity).toBe(recorded);
+
     // A run graded before preferences recorded their judge's identity.
     const scores = path.join(
       directory,
@@ -511,7 +522,6 @@ describe('mst judges check', () => {
         for (const preference of comparison.preferences)
           delete preference.judgeIdentity;
     await fs.writeFile(summaryFile, JSON.stringify(summary));
-    await label(directory, 'ck/pairwise-judge/longer', () => undefined);
 
     const { checks, text } = await check([directory], {
       judge: 'ck/pairwise-judge/longer',
