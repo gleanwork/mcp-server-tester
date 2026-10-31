@@ -11,7 +11,8 @@ import { runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { defaultSplit, readLabels } from './labels.js';
-import { labelKey } from './judgedItems.js';
+import { judgedItems, labelKey } from './judgedItems.js';
+import { readRunDirectory } from './runFormat.js';
 import {
   isLabelPageHost,
   startLabelPage,
@@ -401,7 +402,7 @@ describe('the label page', () => {
   it('mixes the variants, rather than showing one and then the other', async () => {
     const t = await storedRun();
     const server = await start(t.directory);
-    const variants: string[] = [];
+    const shown: string[] = [];
     for (const item of server.data.items) {
       const before = new Set(
         (await readLabels(t.directory)).map((label) => labelKey(label))
@@ -410,12 +411,18 @@ describe('the label page', () => {
       const added = (await readLabels(t.directory)).find(
         (label) => !before.has(labelKey(label))
       );
-      variants.push(added!.variant);
+      shown.push(labelKey(added!));
     }
-    expect(variants.filter((v) => v === 'baseline')).toHaveLength(4);
-    // Grouped, the variant would change once.
-    const changes = variants.filter((v, i) => i > 0 && v !== variants[i - 1]);
-    expect(changes.length).toBeGreaterThan(1);
+    // The run stores one variant's trials, then the other's. The page's
+    // order comes from a hash of the run's random ID, so any one order can
+    // show one variant and then the other; but the stored order itself is 1
+    // of the 8! orders, and the page doesn't keep it.
+    const stored = judgedItems(await readRunDirectory(t.directory))
+      .filter((item) => item.judge === 'lp/judge/keyword')
+      .map((item) => labelKey(item));
+    expect([...shown].sort()).toEqual([...stored].sort());
+    expect(shown).toHaveLength(8);
+    expect(shown).not.toEqual(stored);
   });
 
   it("refuses a run that redacts stored responses, and a judge the run doesn't have", async () => {
