@@ -235,14 +235,40 @@ A judge returns a `JudgeScore`. Only `score` (0 to 1) is required:
 | `skipped`           | The judge cannot grade this case. It doesn't count for pass/fail or judge metrics; the remaining reps don't run. Its `reasoning`, `usage` and `metadata` are recorded, its `score` is not.             |
 | `unknown`           | The judge read the trial, and the trace can't support a verdict. Unlike a skip, the trial doesn't pass. The judge's pass rate and score metrics leave the trial out, and `mst judges check` counts it. |
 | `subScores`         | Named sub-scores, such as one per criterion: `{ [key]: { score, pass?, reasoning? } }`.                                                                                                                |
+| `criteria`          | Criteria a person labels one at a time: `[{ id, text?, required?, verdict, reasoning? }]`, `verdict` `pass`, `fail` or `unknown`. See below.                                                           |
 | `usage`             | The judge's own token usage and cost, summed over reps.                                                                                                                                                |
 | `provider`, `model` | Reported as `judgeProvider` and `judgeModel`.                                                                                                                                                          |
 | `metadata`          | Other JSON output, kept in the result.                                                                                                                                                                 |
 
+A judge that checks several criteria, each a question a person can answer
+on its own, lists their verdicts in `criteria`. Each criterion is then its own
+label question, `<judge>#<id>`: `mst label`, `mst label export` and
+`mst judges check` take it as `--judge`, and the report's _Judges_ table has a
+row for each, with its pass rate, in place of the judge's. Over several reps,
+each criterion's majority wins, and a tie is `unknown`.
+
+When at least one criterion is required (any without `required: false`), the
+criteria decide the judge, in place of its own `pass`, `unknown` and score,
+and of the threshold: it fails when a required criterion fails, is `unknown`
+when none fails and one is `unknown`, and passes otherwise. Its score is the
+share of required criteria that passed, and its reasoning and each
+criterion's sub-score are the criteria's (a criterion that came out
+`unknown` has no sub-score). When none is required, the judge's own verdict decides, as
+for any judge. A judge that skips keeps the criteria its reps listed, each
+`unknown`. A criterion's `id` can't have a `#`.
+
+A criterion's identity
+is the judge's unless the judge sets `criterionOptions(options, id)`: the
+options, before `schema` parses them, that decide that criterion alone. Its
+identity then hashes those in place of the judge's options, so the same
+criterion in several cases shares one calibration. The built-in `criteria`
+judge keeps only that criterion of its list.
+
 A score or sub-score outside 0 to 1 is an error, not a result. When every
 judge of a case skips, the judge assertion passes. Over several reps, a rep
 that answers `unknown` is left out, and the reps that answered decide; the
-judge is `unknown` only when every rep is. The report shows an unknown
+judge is `unknown` only when every rep is (unless required criteria decide
+it, as above). The report shows an unknown
 answer as UNKNOWN, and its _Judges_ table counts them.
 
 Judge usage is kept apart from client usage: `judgeUsage` on each case and
@@ -889,8 +915,9 @@ How far to trust a judge is measured, not assumed: label some trials and run [`m
 | `task-completion`   | Did the assistant do what the user asked, as the trace shows? A success that no tool result supports fails; a result the trace can't show is `unknown`. Uses the reference answer, if any.                   |
 | `grounded-in-tools` | Is every claim in the answer supported by a tool result in the trace? Claims about what the assistant did count; general knowledge doesn't support a claim. Doesn't see the reference answer.                |
 | `tool-use`          | Did the client call the tools the request needed, pass arguments that fit, avoid calls it didn't need, and recover from errors? Four questions, one model call each; any no fails. Doesn't grade the answer. |
+| `criteria`          | Does the trial meet each of the case's own criteria? One model call per criterion; the case passes when every required one does. Uses the reference answer, if any.                                          |
 
-`task-completion`, `grounded-in-tools` and `tool-use` are yes-or-no judges ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)). Each reads the trace: the request, each tool call with its arguments and result (cut to `maxToolOutputSize`), and the final answer. It answers yes (score 1), no (score 0) or `unknown`, when the trace can't settle the question; `unknown` doesn't count as a pass, and the pass rate leaves it out. It answers `unknown` without a model call when the client didn't report its tool calls (evidence `none`). When the judge can't read a verdict from a model's answer, it asks the same question once more, and a second unreadable answer is a judge error. An unreadable answer that was cut off at `maxTokens` is a judge error at once: the same limit would cut it off again. It takes the `rubric` judge's LLM settings (`provider`, `model`, `effort`, ...). Their questions are in [`src/judge/prompts/`](../src/judge/prompts/) (`taskCompletion.ts`, `groundedInTools.ts`, `toolUse.ts`), and `mst label` shows them. They ask different things: an answer true to the wrong tool's result is grounded but doesn't do the task, and a right answer with one invented detail does the task but isn't grounded.
+`task-completion`, `grounded-in-tools`, `tool-use` and `criteria` are yes-or-no judges ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)). Each reads the trace: the request, each tool call with its arguments and result (cut to `maxToolOutputSize`), and the final answer. It answers yes (score 1), no (score 0) or `unknown`, when the trace can't settle the question; `unknown` doesn't count as a pass, and the pass rate leaves it out. It answers `unknown` without a model call when the client didn't report its tool calls (evidence `none`), except `criteria`, whose criteria can be about the answer alone. When the judge can't read a verdict from a model's answer, it asks the same question once more, and a second unreadable answer is a judge error. An unreadable answer that was cut off at `maxTokens` is a judge error at once: the same limit would cut it off again. It takes the `rubric` judge's LLM settings (`provider`, `model`, `effort`, ...). Their questions are in [`src/judge/prompts/`](../src/judge/prompts/) (`taskCompletion.ts`, `groundedInTools.ts`, `toolUse.ts`, `criteria.ts`), and `mst label` shows them. They ask different things: an answer true to the wrong tool's result is grounded but doesn't do the task, and a right answer with one invented detail does the task but isn't grounded.
 
 `tool-use` asks four questions, each in its own model call: `tool-choice`, `arguments`, `needed-calls` and `error-recovery`. It fails when any answer is no, and is `unknown` when none is no and one is `unknown`. Each question's answer is a sub-score, so the report shows which one failed. Each question leaves the others' ground alone. Which tool is `tool-choice`'s question, and what a call asks it for is `arguments`': reading the wrong file with a file-reading tool fails `arguments`, not `tool-choice`. A mistake the assistant corrects with a later call passes `arguments` and `error-recovery`; one it doesn't correct, such as an invalid argument it stops after, fails both. None of the questions grades the final answer; `error-recovery` reads it only to see whether the user was told of an error the assistant couldn't fix. A label for `tool-use` answers all four: `mst label` shows them together. It goes beside [`toolsTriggered` and `toolCallCount`](./assertions.md), which check named tools and counts without a model, and doesn't replace them.
 
@@ -901,6 +928,28 @@ How far to trust a judge is measured, not assumed: label some trials and run [`m
       "type": "task-completion",
       "provider": "anthropic",
       "model": "claude-sonnet-4-6"
+    }
+  ]
+}
+```
+
+`criteria` checks the criteria a case lists in its `judges` entry, each `{ "id", "text", "required"? }`. It asks about each one in its own model call, wrapped in the question in `criteria.ts`, and fails when a required criterion's answer is no. A criterion with `"required": false` is reported and labeled but doesn't decide the pass. Each criterion is its own label question, `criteria#<id>`, with the criterion's text as the question `mst label` shows, and its own row in the report's _Judges_ table. Its identity covers only that criterion's `id` and `text` and the judge's settings, not `required`, so the same criterion in several cases is one question, labeled and calibrated together. A changed text is a new identity, so its calibration goes stale, but its labels stay with `criteria#<id>`: give a criterion whose meaning changes a new `id`, so that old labels don't answer it. When cases word one `id` differently, `mst label` shows each trial's text with it. Write a criterion as one thing a person could check in the trial, such as "The answer gives the port from the deployed config". An `id` starts with a letter or digit, then has letters, digits, `_`, `.` and `-`, and is unique in the list.
+
+```json
+{
+  "id": "deploy-port",
+  "input": "What port does the service listen on in production?",
+  "judges": [
+    {
+      "type": "criteria",
+      "criteria": [
+        { "id": "deployed-port", "text": "The answer gives port 7341." },
+        {
+          "id": "names-source",
+          "text": "The answer says which file the port came from.",
+          "required": false
+        }
+      ]
     }
   ]
 }

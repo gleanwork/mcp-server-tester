@@ -200,13 +200,14 @@ describe('labels', () => {
       'labeler',
       'labeledAt',
       'note',
+      'question',
       'input',
       'answer',
     ]);
     expect(rows).toHaveLength(11);
     // An answer a spreadsheet would run as a formula reads back as written.
     const better = rows.find((row) => row[2] === 'better' && row[5] === '0')!;
-    expect(better[13]).toMatch(/^=SUM\(A1\) .*"after 41 minutes"$/);
+    expect(better[14]).toMatch(/^=SUM\(A1\) .*"after 41 minutes"$/);
     expect(await fs.readFile(sheet, 'utf8')).toContain(`"'=SUM(A1)`);
 
     // A person disagrees with one verdict and agrees with the others.

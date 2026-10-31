@@ -238,6 +238,9 @@ async function evaluateJudges(
               subScores: details.subScores as GraderScore['subScores'],
             }
           : {}),
+        ...(details.criteria !== undefined
+          ? { criteria: details.criteria as GraderScore['criteria'] }
+          : {}),
         ...(details.usage !== undefined
           ? { usage: details.usage as GraderScore['usage'] }
           : {}),

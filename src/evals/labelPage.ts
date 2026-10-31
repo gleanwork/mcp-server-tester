@@ -65,6 +65,11 @@ interface LabelPageItem {
   /** Pointwise: the trial's index. */
   trial?: number;
   input?: string;
+  /**
+   * This trial's question, when the judge's trials don't share one: a
+   * criterion that cases word differently.
+   */
+  question?: string;
   /** The answer the case expects, when it gives one. */
   reference?: string;
   split: LabelSplit;
@@ -418,7 +423,11 @@ function pageData(
     };
   };
   const pairwise = items.some((item) => item.baseline !== undefined);
-  const known = question ?? questionOf(stored, judge);
+  // A criterion's text is its question, when every case words it the same.
+  const criterionTexts = new Set(items.map((item) => item.question));
+  const criterionText =
+    criterionTexts.size === 1 ? [...criterionTexts][0] : undefined;
+  const known = question ?? criterionText ?? questionOf(stored, judge);
   return {
     runId: stored.run.runId,
     judge,
@@ -433,6 +442,9 @@ function pageData(
       const base = {
         id,
         caseId: item.caseId,
+        ...(criterionTexts.size > 1 && item.question !== undefined
+          ? { question: item.question }
+          : {}),
         ...(item.input !== undefined ? { input: item.input } : {}),
         ...(typeof reference === 'string' ? { reference } : {}),
         split: existing?.split ?? splitOf(item.caseId),

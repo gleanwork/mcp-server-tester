@@ -230,6 +230,34 @@ describe('checkJudgeScore', () => {
     [{ score: 1, pass: 'yes' }, '`pass` that is not a boolean'],
     [{ score: 1, subScores: { a: { score: 2 } } }, 'sub-score "a"'],
     [{ score: 1, subScores: [] }, '`subScores` that is not an object'],
+    [{ score: 1, criteria: {} }, '`criteria` that is not an array'],
+    [{ score: 1, criteria: [{ verdict: 'pass' }] }, 'without an `id`'],
+    [
+      { score: 1, criteria: [{ id: 'a#b', verdict: 'pass' }] },
+      'whose id has a "#"',
+    ],
+    [
+      {
+        score: 1,
+        criteria: [
+          { id: 'a', verdict: 'pass' },
+          { id: 'a', verdict: 'fail' },
+        ],
+      },
+      'criterion "a" twice',
+    ],
+    [
+      { score: 1, criteria: [{ id: 'a', verdict: 'yes' }] },
+      "isn't pass, fail or unknown",
+    ],
+    [
+      { score: 1, criteria: [{ id: 'a', verdict: 'pass', required: 'no' }] },
+      'of the wrong type',
+    ],
+    [
+      { score: 0, unknown: true, criteria: [{ id: 'a' }] },
+      "isn't pass, fail or unknown",
+    ],
   ])('rejects invalid output %j', (output, message) => {
     expect(() => checkJudgeScore(output, 0.5)).toThrow(message);
   });

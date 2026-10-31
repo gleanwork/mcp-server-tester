@@ -1,5 +1,6 @@
 import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
+import { CRITERIA_JUDGE } from './criteriaJudge.js';
 import { GROUNDED_IN_TOOLS_JUDGE } from './groundedInToolsJudge.js';
 import { RUBRIC_JUDGE } from './rubricJudge.js';
 import { TASK_COMPLETION_JUDGE } from './taskCompletionJudge.js';
@@ -12,6 +13,7 @@ function builtinJudges(): Readonly<Record<string, JudgeDefinition>> {
     'task-completion': TASK_COMPLETION_JUDGE,
     'grounded-in-tools': GROUNDED_IN_TOOLS_JUDGE,
     'tool-use': TOOL_USE_JUDGE,
+    criteria: CRITERIA_JUDGE,
   };
 }
 

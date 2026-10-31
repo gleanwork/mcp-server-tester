@@ -43,6 +43,13 @@ import { QUESTION_SYSTEM_PROMPT, questionPrompt } from './prompts/question.js';
 
 export type QuestionVerdict = 'yes' | 'no' | 'unknown';
 
+/** A criterion's verdict, as labels give it, for each answer. */
+const VERDICT_LABELS = {
+  yes: 'pass',
+  no: 'fail',
+  unknown: 'unknown',
+} as const satisfies Record<QuestionVerdict, string>;
+
 /** One question a judge asks about a trial. */
 interface JudgeQuestion {
   /** Names the answer in results, such as a criterion's ID. */
@@ -50,6 +57,11 @@ interface JudgeQuestion {
   text: string;
   /** A required question decides the verdict. @default true */
   required?: boolean;
+  /**
+   * For a judge that reports criteria: what a person labeling this one
+   * answers, when it isn't `text` (the criterion as the case wrote it).
+   */
+  labelText?: string;
 }
 
 /** A model's answer to one question. */
@@ -349,6 +361,13 @@ export interface QuestionJudgeSpec<Options extends z.ZodRawShape> {
    * @default true
    */
   needsTrace?: boolean;
+  /**
+   * Each question is a criterion a person labels on its own: the score lists
+   * each one's verdict as `criteria`, so it is its own label question.
+   */
+  criteria?: boolean;
+  /** The options that decide one criterion (see `JudgeDefinition.criterionOptions`). */
+  criterionOptions?: JudgeDefinition['criterionOptions'];
   /** The questions to ask about one trial: one model call each. */
   questions: (
     input: JudgeInput,
@@ -426,6 +445,9 @@ export function defineQuestionJudge<
     schema,
     version,
     ...(spec.requires !== undefined ? { requires: spec.requires } : {}),
+    ...(spec.criterionOptions !== undefined
+      ? { criterionOptions: spec.criterionOptions }
+      : {}),
     async evaluate(input, rawOptions) {
       const options = schema.parse(rawOptions) as z.infer<
         z.ZodObject<Options>
@@ -456,8 +478,23 @@ export function defineQuestionJudge<
         }))
       );
       const provider = config.provider ?? DEFAULT_JUDGE_PROVIDER;
+      const combined = combineAnswers(answers);
+      // A judge that reports criteria lists its answers there; one rep's
+      // `metadata.questions` would contradict their majority over reps.
+      const { metadata: _questions, ...withoutQuestions } = combined;
       return {
-        ...combineAnswers(answers),
+        ...(spec.criteria ? withoutQuestions : combined),
+        ...(spec.criteria
+          ? {
+              criteria: answers.map((a) => ({
+                id: a.question.id,
+                text: a.question.labelText ?? a.question.text,
+                ...(a.question.required === false ? { required: false } : {}),
+                verdict: VERDICT_LABELS[a.verdict],
+                reasoning: a.reasoning,
+              })),
+            }
+          : {}),
         provider,
         model: config.model ?? DEFAULT_JUDGE_MODELS[provider],
       };

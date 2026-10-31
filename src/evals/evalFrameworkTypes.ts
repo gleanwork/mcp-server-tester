@@ -465,6 +465,18 @@ export interface JudgeDefinition {
    */
   readonly requires?: readonly string[];
   /**
+   * For a judge whose score lists `criteria`: the options, before `schema`
+   * parses them, that decide one criterion's verdict, such as only that
+   * criterion of a list. Each criterion's identity hashes them in place of
+   * the judge's whole options, so the same criterion in another case shares
+   * an identity and a calibration. Without it, a criterion's identity is the
+   * judge's.
+   */
+  readonly criterionOptions?: (
+    options: Record<string, unknown>,
+    criterion: string
+  ) => Record<string, unknown>;
+  /**
    * Grades one run of a case. `input.case` is the case as written in the
    * dataset; `input.trial` is the observed run. `options` is parsed by `schema`.
    */

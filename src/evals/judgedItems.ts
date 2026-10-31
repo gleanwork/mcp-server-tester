@@ -40,6 +40,8 @@ export interface JudgedItem {
   judgeProvider?: string;
   judgeModel?: string;
   reasoning?: string;
+  /** What a criterion asks, for one criterion of a judge that checks several. */
+  question?: string;
   /** The case's input. */
   input?: string;
   /** The trial's final answer, when the run stores responses. */
@@ -88,20 +90,38 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
             : undefined;
         for (const score of judgeResults(result.scores?.judge)) {
           if (score.judgeName === undefined) continue;
-          const verdict = pointwiseVerdict(score);
-          items.push({
+          const common = {
             judge: score.judgeName,
             variant: variant.name,
             caseId: caseResult.id,
             trial,
-            ...(verdict !== undefined ? { verdict } : {}),
-            ...optional('judgeIdentity', score.judgeIdentity),
             ...optional('judgeUnversioned', score.judgeUnversioned),
             ...optional('judgeProvider', score.judgeProvider),
             ...optional('judgeModel', score.judgeModel),
-            ...optional('reasoning', score.reasoning),
             ...optional('input', input),
             ...optional('answer', answer),
+          };
+          // A judge that checks criteria is labeled one criterion at a
+          // time: each is its own question, and the judge's whole verdict,
+          // over criteria that differ by case, is no one question.
+          if (score.criteria?.length && score.error === undefined) {
+            for (const criterion of score.criteria)
+              items.push({
+                ...common,
+                criterion: criterion.id,
+                verdict: criterion.verdict,
+                judgeIdentity: criterion.judgeIdentity,
+                ...optional('question', criterion.text),
+                ...optional('reasoning', criterion.reasoning),
+              });
+            continue;
+          }
+          const verdict = pointwiseVerdict(score);
+          items.push({
+            ...common,
+            ...(verdict !== undefined ? { verdict } : {}),
+            ...optional('judgeIdentity', score.judgeIdentity),
+            ...optional('reasoning', score.reasoning),
           });
         }
       }

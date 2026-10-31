@@ -67,6 +67,21 @@ const plugin: Plugin = {
           ? { score: 0, unknown: true, reasoning: 'cannot tell' }
           : { score: 1 },
     },
+    // Two criteria: `greets` passes everywhere; `short` fails on case two.
+    checks: {
+      schema: z.object({}),
+      evaluate: async ({ case: judged }) => ({
+        score: judged.id === 'two' ? 0 : 1,
+        criteria: [
+          { id: 'greets', text: 'Greets the user.', verdict: 'pass' },
+          {
+            id: 'short',
+            text: 'Is short.',
+            verdict: judged.id === 'two' ? 'fail' : 'pass',
+          },
+        ],
+      }),
+    },
   },
   pairwiseJudges: {
     longer: {
@@ -362,6 +377,39 @@ describe('the run report', () => {
         passed: 2,
         unknown: 2,
         passRate: 1,
+      }),
+    ]);
+  });
+
+  it("shows a pass rate for each of a judge's criteria", async () => {
+    const configPath = path.join(dir, 'eval.json');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, judges: ['rr/judge/checks'] })
+    );
+    const report = await readReport((await run()).outputDir);
+    const judges = report.variants.find(
+      (v) => v.name === 'base'
+    )!.judgeCalibration;
+    // Each criterion is its own row; the judge's whole verdict isn't one.
+    expect(judges).toEqual([
+      expect.objectContaining({
+        judge: 'rr/judge/checks#greets',
+        judged: 4,
+        passed: 4,
+        passRate: 1,
+        status: 'uncalibrated',
+      }),
+      expect.objectContaining({
+        judge: 'rr/judge/checks#short',
+        judged: 4,
+        passed: 2,
+        passRate: 0.5,
+        status: 'uncalibrated',
       }),
     ]);
   });
