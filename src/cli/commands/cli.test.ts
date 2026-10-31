@@ -390,7 +390,7 @@ describe('mst CLI', () => {
   });
 
   describe('label command', () => {
-    it('serves the page by default, and gives each command its own options', async () => {
+    it('serves the page by default, and lists its commands', async () => {
       const none = await runBin('label');
       expect(none.exitCode).toBe(1);
       expect(none.stderr).toContain("missing required argument 'run'");
@@ -399,7 +399,9 @@ describe('mst CLI', () => {
       expect(help.exitCode).toBe(0);
       expect(help.stdout).toMatch(/page \[options\] <run>/);
       expect(help.stdout).toMatch(/import \[options\] <run> <file>/);
+    });
 
+    it('gives the page its options, and takes a mistyped command as a run', async () => {
       // The page's options reach it, after the run.
       const port = await runBin(
         'label',
@@ -416,7 +418,9 @@ describe('mst CLI', () => {
       const typo = await runBin('label', 'exprot', '--judge', 'x');
       expect(typo.exitCode).toBe(1);
       expect(typo.stderr).toContain('"exprot" isn\'t a run directory');
+    });
 
+    it("keeps export's own options, without the page's", async () => {
       // export keeps its own --judge, and doesn't take the page's options.
       const exported = await runBin('label', 'export', 'r1', '--judge', 'x');
       expect(exported.stderr).toContain('"r1" isn\'t a run directory');
