@@ -11,7 +11,8 @@ import { runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { defaultSplit, readLabels } from './labels.js';
-import { labelKey } from './judgedItems.js';
+import { judgedItems, labelKey } from './judgedItems.js';
+import { readRunDirectory } from './runFormat.js';
 import {
   isLabelPageHost,
   startLabelPage,
@@ -398,24 +399,48 @@ describe('the label page', () => {
     expect(isLabelPageHost('evil.test', 80)).toBe(false);
   });
 
-  it('mixes the variants, rather than showing one and then the other', async () => {
+  it('mixes the variants, in an order each run sets', async () => {
     const t = await storedRun();
-    const server = await start(t.directory);
-    const variants: string[] = [];
-    for (const item of server.data.items) {
-      const before = new Set(
-        (await readLabels(t.directory)).map((label) => labelKey(label))
-      );
-      await post(server, { id: item.id, label: 'pass' });
-      const added = (await readLabels(t.directory)).find(
-        (label) => !before.has(labelKey(label))
-      );
-      variants.push(added!.variant);
+    const stored = await readRunDirectory(t.directory);
+    // The run stores one variant's trials, then the other's.
+    const storedOrder = judgedItems(stored)
+      .filter((item) => item.judge === 'lp/judge/keyword')
+      .map((item) => labelKey(item));
+    // The page orders by a hash of the run's ID, which is random: pin it,
+    // so the orders this test sees are fixed.
+    const runFile = path.join(t.directory, 'run.json');
+    const run = JSON.parse(await fs.readFile(runFile, 'utf8')) as object;
+    async function pageOrder(runId: string): Promise<string[]> {
+      await fs.writeFile(runFile, JSON.stringify({ ...run, runId }));
+      await fs.rm(path.join(t.directory, 'labels'), {
+        recursive: true,
+        force: true,
+      });
+      const server = await start(t.directory);
+      const shown: string[] = [];
+      for (const item of server.data.items) {
+        const before = new Set(
+          (await readLabels(t.directory)).map((label) => labelKey(label))
+        );
+        await post(server, { id: item.id, label: 'pass' });
+        const added = (await readLabels(t.directory)).find(
+          (label) => !before.has(labelKey(label))
+        );
+        shown.push(labelKey(added!));
+      }
+      return shown;
     }
-    expect(variants.filter((v) => v === 'baseline')).toHaveLength(4);
-    // Grouped, the variant would change once.
-    const changes = variants.filter((v, i) => i > 0 && v !== variants[i - 1]);
-    expect(changes.length).toBeGreaterThan(1);
+    const first = await pageOrder('20260101T000000Z-000001');
+    const second = await pageOrder('20260101T000000Z-000002');
+    for (const shown of [first, second]) {
+      expect([...shown].sort()).toEqual([...storedOrder].sort());
+      // A label key is [question, variant, case, trial, baseline].
+      const variants = shown.map((key) => (JSON.parse(key) as string[])[1]);
+      // Grouped, the variant would change once.
+      const changes = variants.filter((v, i) => i > 0 && v !== variants[i - 1]);
+      expect(changes.length).toBeGreaterThan(1);
+    }
+    expect(second).not.toEqual(first);
   });
 
   it("refuses a run that redacts stored responses, and a judge the run doesn't have", async () => {

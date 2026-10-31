@@ -43,6 +43,8 @@ async function storedRun(
     redact?: boolean;
     /** Add a second judge, which fails on every trial. */
     brokenJudge?: boolean;
+    /** While `down` is true, the keyword judge fails (for a regrade). */
+    keyword?: { down: boolean };
   } = {}
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-labels-'));
@@ -69,6 +71,7 @@ async function storedRun(
       keyword: {
         schema: z.object({ keyword: z.string() }).strict(),
         async evaluate({ trial }, judgeOptions) {
+          if (options.keyword?.down) throw new Error('the judge model is down');
           return {
             score: trial.text?.includes(String(judgeOptions.keyword)) ? 1 : 0,
             reasoning: `looked for ${String(judgeOptions.keyword)}`,
@@ -566,6 +569,101 @@ describe('label checks', () => {
     expect(
       checkImportedLabels([{ ...label, judge: 'lb/judge/keyword' }], items, [])
     ).toHaveLength(1);
+  });
+
+  it('exports no row for a trial the judge failed on, so the filled-in sheet imports', async () => {
+    const t = await storedRun({ brokenJudge: true });
+    const out = capture();
+    await labelExport(t.directory, { format: 'jsonl' }, out.write, () => {});
+    const rows = out.out
+      .join('')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(rows.filter((row) => row.judge === 'lb/judge/broken')).toEqual([]);
+    expect(rows.every((row) => row.verdict !== undefined)).toBe(true);
+    const file = path.join(t.dir, 'filled.jsonl');
+    await fs.writeFile(
+      file,
+      rows
+        .filter((row) => row.trial !== undefined)
+        .map((row) => JSON.stringify({ ...row, label: 'pass' }))
+        .join('\n')
+    );
+    await labelImport(t.directory, file, { labeler: 'test' }, () => {});
+    expect(await readLabels(t.directory)).toHaveLength(8);
+    // Asked for by name, the failed judge has nothing to export.
+    await expect(
+      labelExport(t.directory, { judge: ['lb/judge/broken'] }, () => {})
+    ).rejects.toThrow('has no verdicts from lb/judge/broken');
+  });
+
+  it('exports a kept label on a verdict a regrade lost with its trial, and imports the sheet back', async () => {
+    const keyword = { down: false };
+    const t = await storedRun({ keyword });
+    const key = {
+      judge: 'lb/judge/keyword',
+      variant: 'better',
+      caseId: 'cause',
+      trial: 0,
+    };
+    const file = path.join(t.dir, 'one.jsonl');
+    await fs.writeFile(
+      file,
+      JSON.stringify({ ...key, label: 'fail', note: 'missed the cause' })
+    );
+    await labelImport(t.directory, file, { labeler: 'test' }, () => {});
+    // The regrade carries the label, but the judge fails on every trial.
+    keyword.down = true;
+    const regrade = (
+      await gradeRun({ ...t.base, run: path.basename(t.directory) })
+    ).outputDir;
+    const out = capture();
+    await labelExport(regrade, { format: 'jsonl' }, out.write, () => {});
+    const rows = out.out
+      .join('')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const keyRows = rows.filter((row) => row.judge === 'lb/judge/keyword');
+    expect(keyRows).toEqual([
+      expect.objectContaining({
+        ...key,
+        label: 'fail',
+        note: 'missed the cause',
+        input: 'Why did checkout fail',
+        answer: expect.stringContaining('the certificate expired'),
+      }),
+    ]);
+    expect(keyRows[0]).not.toHaveProperty('verdict');
+    // The sheet imports back as it is: the kept label is skipped.
+    const sheet = path.join(t.dir, 'sheet.jsonl');
+    await fs.writeFile(sheet, out.out.join(''));
+    await labelImport(regrade, sheet, { labeler: 'test' }, () => {});
+    expect(await readLabels(regrade)).toEqual([
+      expect.objectContaining({ ...key, label: 'fail' }),
+    ]);
+    // A changed label there still has no verdict to label.
+    await fs.writeFile(sheet, JSON.stringify({ ...keyRows[0], label: 'pass' }));
+    await expect(
+      labelImport(regrade, sheet, { labeler: 'test' }, () => {})
+    ).rejects.toThrow('the run has no verdict from "lb/judge/keyword"');
+  });
+
+  it('says which judges asked for failed every time they ran', async () => {
+    const failed = await storedRun({
+      keyword: { down: true },
+      brokenJudge: true,
+    });
+    await expect(
+      labelExport(
+        failed.directory,
+        { judge: ['lb/judge/keyword', 'lb/judge/broken', 'lb/judge/typo'] },
+        () => {}
+      )
+    ).rejects.toThrow(
+      'has no verdicts from lb/judge/keyword, lb/judge/broken, lb/judge/typo (lb/judge/keyword failed all 8 times it ran; lb/judge/broken failed all 8 times it ran); its judges are lb/pairwise-judge/longer.'
+    );
   });
 
   it('rejects a criterion its judge never reported, and names that look like object keys', async () => {
