@@ -91,7 +91,10 @@ describe('the grounded-in-tools judge', () => {
       'a value that only a call that failed could have given'
     );
     // An invented claim is a no, whatever calls the trace has.
+    expect(rule('Answer "no"')).toContain('nothing in the request supports');
     expect(rule('Answer "no"')).not.toContain('the results it would need');
+    expect(rule('Answer "unknown"')).toContain('only when');
+    expect(rule('Answer "unknown"')).toContain('cut off');
     // A result the trace can't show is unknown, not no.
     expect(rule('Answer "unknown"')).toContain('observed="false"');
     expect(rule('Answer "unknown"')).toContain('complete="false"');
