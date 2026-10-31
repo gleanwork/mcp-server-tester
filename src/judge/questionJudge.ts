@@ -29,7 +29,7 @@ import {
   embeddedJsonObjects,
   type JudgeCompletionAdapter,
 } from './llmJudge.js';
-import { renderJudgeTrace } from './judgeTrace.js';
+import { renderJudgeTrace, traceRecorded } from './judgeTrace.js';
 import { QUESTION_SYSTEM_PROMPT, questionPrompt } from './prompts/question.js';
 
 export type QuestionVerdict = 'yes' | 'no' | 'unknown';
@@ -274,7 +274,7 @@ export function defineQuestionJudge<
       const questions = spec.questions(input, options);
       if (questions.length === 0)
         return { score: 0, skipped: true, reasoning: 'no questions to ask' };
-      if (spec.needsTrace !== false && input.trial.evidence === 'none')
+      if (spec.needsTrace !== false && !traceRecorded(input.trial))
         return {
           score: 0,
           unknown: true,

@@ -187,6 +187,19 @@ describe('checkJudgeScore', () => {
     expect(
       checkJudgeScore({ score: Number.NaN, pass: true, unknown: true }, 0.5)
     ).toMatchObject({ pass: false, unknown: true });
+    // The sub-scores an unknown answer keeps are checked like any others.
+    expect(() =>
+      checkJudgeScore(
+        { score: 0, unknown: true, subScores: { a: { score: 5 } } },
+        0.5
+      )
+    ).toThrow('sub-score "a"');
+    expect(() =>
+      checkJudgeScore(
+        { score: 0, unknown: true, subScores: 'x' } as unknown as JudgeScore,
+        0.5
+      )
+    ).toThrow('`subScores` that is not an object');
     expect(() => checkJudgeScore({ score: 1, unknown: 'maybe' }, 0.5)).toThrow(
       'an `unknown` that is not a boolean'
     );
@@ -524,6 +537,22 @@ describe('judge output', () => {
     });
     expect(unknown.details?.score).toBeUndefined();
     expect(unknown.details?.error).toBeUndefined();
+  });
+
+  it('takes the majority of a judge-owned pass over the reps that answered', async () => {
+    // Counted over all three reps, one pass of three would fail.
+    const answers: JudgeScore[] = [
+      { score: 0, unknown: true },
+      { score: 0, unknown: true },
+      { score: 1, pass: true },
+    ];
+    judge('owned', async () => answers.shift()!);
+    const result = await validateJudge('x', {
+      judge: 'owned/judge/judge',
+      reps: 3,
+    });
+    expect(result.pass).toBe(true);
+    expect(result.message).toContain('2 unknown');
   });
 
   it('decides a judge-owned score by majority over reps and sums usage', async () => {

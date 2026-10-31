@@ -289,28 +289,32 @@ export function checkJudgeScore(
   if (result.skipped) {
     return { ...result, pass: true };
   }
+  // An unknown verdict has no score, but the sub-scores it keeps must be valid.
+  checkSubScores(result.subScores);
   if (result.unknown) {
     const { pass: _pass, score: _score, ...rest } = result;
     return { ...rest, score: 0, unknown: true, pass: false };
   }
   const score = checkScore(result.score, 'score');
-  if (result.subScores !== undefined) {
-    if (!isRecord(result.subScores)) {
-      throw new Error('returned `subScores` that is not an object');
-    }
-    for (const [key, sub] of Object.entries(result.subScores)) {
-      if (!isRecord(sub)) {
-        throw new Error(`returned sub-score "${key}" that is not an object`);
-      }
-      checkScore(sub.score, `sub-score "${key}"`);
-    }
-  }
   return {
     ...result,
     score,
     pass: result.pass ?? score >= threshold,
     ...(result.pass !== undefined ? { judgePass: result.pass } : {}),
   };
+}
+
+function checkSubScores(subScores: unknown): void {
+  if (subScores === undefined) return;
+  if (!isRecord(subScores)) {
+    throw new Error('returned `subScores` that is not an object');
+  }
+  for (const [key, sub] of Object.entries(subScores)) {
+    if (!isRecord(sub)) {
+      throw new Error(`returned sub-score "${key}" that is not an object`);
+    }
+    checkScore(sub.score, `sub-score "${key}"`);
+  }
 }
 
 const USAGE_FIELDS = [

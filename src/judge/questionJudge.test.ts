@@ -230,6 +230,14 @@ describe('defineQuestionJudge', () => {
       reasoning: expect.stringContaining("didn't report"),
     });
     expect(requests).toHaveLength(0);
+    // So does a trial with no evidence level: a tool result.
+    expect(
+      await defineQuestionJudge(spec).evaluate(
+        { ...INPUT, trial: { ...INPUT.trial, evidence: undefined } },
+        {}
+      )
+    ).toMatchObject({ unknown: true });
+    expect(requests).toHaveLength(0);
     // A judge whose questions don't need the trace still asks them.
     expect(
       await defineQuestionJudge({ ...spec, needsTrace: false }).evaluate(

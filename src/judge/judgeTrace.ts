@@ -54,16 +54,22 @@ function cut(value: string, max: number): { text: string; cut: boolean } {
   return { text: head, cut: true };
 }
 
+/** An attribute's value is run data too (a tool or skill name): escape all of it. */
 function attribute(name: string, value: string | undefined): string {
-  return value === undefined
-    ? ''
-    : ` ${name}="${value.replace(/"/g, '&quot;')}"`;
+  if (value === undefined) return '';
+  const escaped = value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  return ` ${name}="${escaped}"`;
 }
 
 function eventView(event: TraceEvent, index: number, max: number): string {
   const name = event.server ? `${event.server}/${event.name}` : event.name;
   const head =
-    `<event n="${index + 1}" kind="${event.kind}"` +
+    `<event n="${index + 1}"` +
+    attribute('kind', event.kind) +
     attribute('name', name) +
     (event.isError === true ? ' error="true"' : '') +
     (event.simulatedWrite === true ? ' simulated="true"' : '') +
@@ -89,8 +95,19 @@ function eventView(event: TraceEvent, index: number, max: number): string {
 }
 
 /**
+ * Whether the client recorded the trial's tool calls. A trial with no
+ * evidence level (a tool result, or a client that doesn't declare one)
+ * counts as unrecorded.
+ */
+export function traceRecorded(trial: JudgeInput['trial']): boolean {
+  return (trial.evidence ?? 'none') !== 'none';
+}
+
+/**
  * The trial as the judge reads it. A trace the client didn't record says so
- * (`observed="false"`), so the judge can answer unknown rather than guess.
+ * (`observed="false"`), and one it recorded on a best-effort basis (evidence
+ * `observed`) says it may be incomplete (`complete="false"`), so the judge
+ * can answer unknown rather than read a missing call as a no.
  */
 export function renderJudgeTrace(
   input: JudgeInput,
@@ -104,15 +121,21 @@ export function renderJudgeTrace(
   const reference = input.case.expected.answer;
   if (options.reference && reference !== undefined && reference !== null)
     parts.push(`<reference_answer>\n${text(reference)}\n</reference_answer>`);
-  if (trial.evidence === 'none')
+  const partial = trial.evidence === 'observed';
+  const open = partial ? '<trace complete="false">' : '<trace>';
+  if (!traceRecorded(trial))
     parts.push(
       '<trace observed="false">\nThe client did not report its tool calls.\n</trace>'
     );
   else if (trial.events.length === 0)
-    parts.push('<trace>\nThe client made no tool calls.\n</trace>');
+    parts.push(
+      partial
+        ? `${open}\nThe client recorded no tool calls. It records them on a best-effort basis, so it may have made calls that aren't shown.\n</trace>`
+        : '<trace>\nThe client made no tool calls.\n</trace>'
+    );
   else
     parts.push(
-      `<trace>\n${trial.events.map((event, i) => eventView(event, i, max)).join('\n')}\n</trace>`
+      `${open}\n${partial ? "The client records tool calls on a best-effort basis, so it may have made calls that aren't shown.\n" : ''}${trial.events.map((event, i) => eventView(event, i, max)).join('\n')}\n</trace>`
     );
   parts.push(`<final_answer>\n${text(trial.text)}\n</final_answer>`);
   return parts.join('\n\n');

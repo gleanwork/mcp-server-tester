@@ -857,7 +857,12 @@ export function gradingSpans(
         score.judgeName ?? key,
         `score/${key}`,
         {
-          'gen_ai.evaluation.score.label': score.pass ? 'pass' : 'fail',
+          // An unknown answer is no verdict: not a failure, and no score.
+          'gen_ai.evaluation.score.label': score.unknown
+            ? 'unknown'
+            : score.pass
+              ? 'pass'
+              : 'fail',
           'gen_ai.evaluation.score.value': score.score,
           'mst.grader': key,
           'gen_ai.evaluation.explanation': content(
@@ -865,7 +870,7 @@ export function gradingSpans(
             score.reasoning ?? score.details
           ),
         },
-        !score.pass
+        !score.pass && !score.unknown
       )
     ),
   ];
