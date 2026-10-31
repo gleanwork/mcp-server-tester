@@ -1,0 +1,8 @@
+{
+  "port": 7341,
+  "workers": 12,
+  "region": "eu-north-1",
+  "retentionDays": 21,
+  "maxPayloadKb": 512,
+  "deadLetterQueue": true
+}

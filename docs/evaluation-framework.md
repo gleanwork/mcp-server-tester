@@ -879,6 +879,8 @@ Which judges a case runs:
 
 Every judge a case runs must pass. Scores are reported under the case's `judge` grader, with one entry per judge when there are several.
 
+How far to trust a judge is measured, not assumed: label some trials and run [`mst judges check`](./cli.md#judges-check---measure-a-judge-against-labels). [Built-in judges](./judges.md) has the built-in judges' numbers on MST's calibration set, which are not a calibration for your data.
+
 ### Pairwise judges in an eval config
 
 `pairwiseJudges` lists [pairwise judges](#pairwise-judges) at the eval config's top level (or in a shared config, not on a variant): references `<namespace>/pairwise-judge/<name>`, or `{ "type": <reference>, "reps": 2, ...options }`. Validation checks each one exists in a plugin the eval loads, and that its schema takes the options.
