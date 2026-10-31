@@ -132,7 +132,10 @@ export async function evaluateJudge(
     const context = { settings: settingsFor(run.settings, request.judge) };
     // What every score records about the judge that gave it (ADR 0009).
     const identity: JudgeIdentityDetails = {
-      judgeIdentity: judgeIdentity(request.judge, judge, request.options),
+      judgeIdentity: judgeIdentity(request.judge, judge, request.options, {
+        threshold,
+        reps,
+      }),
       ...(judgeIsVersioned(request.judge, judge)
         ? {}
         : { judgeUnversioned: true as const }),

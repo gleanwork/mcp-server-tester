@@ -173,6 +173,10 @@ export interface CheckJudgeOptions {
 /**
  * Checks a judge against the labels in `runs`: one result per judge identity
  * the runs' verdicts have, newest runs' identity first.
+ *
+ * Each label counts once per identity: a run given twice is read once, and
+ * when a run and its regrades (which share its traces and labels) gave the
+ * same identity's verdict for a label, only the newest run's counts.
  */
 export function checkJudge(
   runs: readonly CheckedRun[],
@@ -187,29 +191,23 @@ export function checkJudge(
       unversioned: boolean;
       models: Set<string>;
       runs: Set<string>;
-      pairs: Array<{ item: JudgedItem; label: LabelRecord; runId: string }>;
+      /** By the trace's run and the label's key. */
+      pairs: Map<string, Pair>;
     }
   >();
   let unmatched = 0;
-  for (const run of runs) {
+  const ordered = [
+    ...new Map(runs.map((run) => [run.stored.run.runId, run])).values(),
+  ].sort((a, b) =>
+    a.stored.run.createdAt.localeCompare(b.stored.run.createdAt)
+  );
+  for (const run of ordered) {
     const runId = run.stored.run.runId;
+    const traces = run.stored.run.gradedFrom ?? runId;
     const items = new Map(
       run.items
         .filter((item) => labelQuestion(item) === options.judge)
         .map((item) => [labelKey(item), item])
-    );
-    const unversionedPairwise = new Set(
-      (run.stored.run.judges ?? [])
-        .filter((record) => record.level === 'pairwise' && record.unversioned)
-        .map((record) => record.type)
-    );
-    const pairwiseIdentity = new Map(
-      (run.stored.run.judges ?? [])
-        .filter(
-          (record) =>
-            record.level === 'pairwise' && typeof record.identity === 'string'
-        )
-        .map((record) => [record.type, record.identity as string])
     );
     for (const label of run.labels) {
       if (labelQuestion(label) !== options.judge) continue;
@@ -219,10 +217,9 @@ export function checkJudge(
         unmatched++;
         continue;
       }
-      const pairwise = item.baseline !== undefined;
-      const identity = pairwise
-        ? pairwiseIdentity.get(item.judge)
-        : item.judgeIdentity;
+      // Each verdict's own identity: a regrade can keep verdicts an older
+      // judge gave, so the run's current judges don't say whose they are.
+      const identity = item.judgeIdentity;
       const key = identity ?? '';
       let group = groups.get(key);
       if (!group) {
@@ -231,27 +228,30 @@ export function checkJudge(
           unversioned: false,
           models: new Set(),
           runs: new Set(),
-          pairs: [],
+          pairs: new Map(),
         };
         groups.set(key, group);
       }
-      if (
-        pairwise
-          ? unversionedPairwise.has(item.judge)
-          : item.judgeUnversioned === true
-      )
-        group.unversioned = true;
+      if (item.judgeUnversioned === true) group.unversioned = true;
       if (item.judgeModel) group.models.add(item.judgeModel);
-      group.runs.add(runId);
-      group.pairs.push({ item, label, runId });
+      group.pairs.set(JSON.stringify([traces, labelKey(label)]), {
+        item,
+        label,
+        runId,
+      });
     }
   }
-  const order = runs.map((run) => run.stored.run.runId);
+  const order = ordered.map((run) => run.stored.run.runId);
+  for (const group of groups.values())
+    for (const pair of group.pairs.values()) group.runs.add(pair.runId);
   return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      runs: [...group.runs].sort((a, b) => order.indexOf(a) - order.indexOf(b)),
+      pairs: [...group.pairs.values()],
+    }))
     .sort(
-      (a, b) =>
-        Math.max(...[...b.runs].map((id) => order.indexOf(id))) -
-        Math.max(...[...a.runs].map((id) => order.indexOf(id)))
+      (a, b) => order.indexOf(b.runs.at(-1)!) - order.indexOf(a.runs.at(-1)!)
     )
     .map((group) => {
       const base = {
@@ -261,7 +261,7 @@ export function checkJudge(
           : {}),
         unversioned: group.unversioned,
         judgeModels: [...group.models].sort(),
-        runs: [...group.runs],
+        runs: group.runs,
         split,
         unmatched,
       };

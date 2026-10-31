@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
-import { judgeIdentity, judgeIsVersioned } from './judgeIdentity.js';
+import {
+  judgeIdentity as identityWithPolicy,
+  judgeIsVersioned,
+  type JudgeVerdictPolicy,
+} from './judgeIdentity.js';
 import { RUBRIC_JUDGE } from './rubricJudge.js';
 import type * as Rubrics from './rubrics.js';
 import {
@@ -17,6 +21,17 @@ afterEach(() => {
 });
 
 const HEX64 = /^[0-9a-f]{64}$/;
+
+const POLICY: JudgeVerdictPolicy = { threshold: 0.7, reps: 1 };
+
+/** An identity under the default verdict policy. */
+function judgeIdentity(
+  reference: string,
+  definition: Parameters<typeof identityWithPolicy>[1],
+  options: Record<string, unknown>
+): string {
+  return identityWithPolicy(reference, definition, options, POLICY);
+}
 
 const schema = z.object({ level: z.string().default('strict') }).passthrough();
 
@@ -117,6 +132,41 @@ describe('judgeIdentity', () => {
     expect(judgeIdentity('mst/judge/rubric', RUBRIC_JUDGE, options)).toBe(
       judgeIdentity('rubric', RUBRIC_JUDGE, options)
     );
+  });
+
+  it('changes with the pass threshold and the repetitions', () => {
+    const definition = install({});
+    const base = identityWithPolicy(
+      'acme/judge/quality',
+      definition,
+      {},
+      POLICY
+    );
+    expect(
+      identityWithPolicy('acme/judge/quality', definition, {}, { ...POLICY })
+    ).toBe(base);
+    expect(
+      identityWithPolicy(
+        'acme/judge/quality',
+        definition,
+        {},
+        {
+          ...POLICY,
+          threshold: 0.9,
+        }
+      )
+    ).not.toBe(base);
+    expect(
+      identityWithPolicy(
+        'acme/judge/quality',
+        definition,
+        {},
+        {
+          ...POLICY,
+          reps: 3,
+        }
+      )
+    ).not.toBe(base);
   });
 
   it('hashes the options as given when the schema rejects them', () => {
