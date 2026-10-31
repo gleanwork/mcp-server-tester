@@ -300,7 +300,7 @@ labelCommand
   )
   .option(
     '--split <split>',
-    "The split new labels go in: test or dev (default: each case's own)"
+    "The split for a case without labels: test or dev (default: each case's own); a case's labels share one split"
   )
   .option('--labeler <name>', 'Who is labeling (default: your user name)')
   .option(

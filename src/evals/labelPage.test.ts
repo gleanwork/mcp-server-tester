@@ -11,7 +11,12 @@ import { runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { defaultSplit, readLabels } from './labels.js';
-import { startLabelPage, type LabelPageServer } from './labelPage.js';
+import { labelKey } from './judgedItems.js';
+import {
+  isLabelPageHost,
+  startLabelPage,
+  type LabelPageServer,
+} from './labelPage.js';
 import { labelPageHtml } from './labelPageHtml.js';
 import { labelPage } from '../cli/commands/label/index.js';
 
@@ -257,7 +262,7 @@ describe('the label page', () => {
     expect(shown).toBeDefined();
   });
 
-  it('puts new labels in --split, and keeps the split of a label given again', async () => {
+  it("puts a case's labels in one split: its labels' split, then --split, then the default", async () => {
     const t = await storedRun();
     // Both cases' own split is dev.
     expect([defaultSplit('cause'), defaultSplit('duration')]).toEqual([
@@ -268,19 +273,30 @@ describe('the label page', () => {
       split: 'test',
     });
     expect(test.data.items.every((item) => item.split === 'test')).toBe(true);
+    const first = test.data.items[0]!;
     await post(test, { id: 0, label: 'pass' });
     expect((await readLabels(t.directory)).map((label) => label.split)).toEqual(
       ['test']
     );
 
+    // A later session puts the case's other trials and variants in test
+    // too, whatever its --split; other cases take --split, or the default.
+    for (const split of ['dev', undefined] as const) {
+      const later = await start(
+        t.directory,
+        'lp/judge/keyword',
+        split ? { split } : {}
+      );
+      for (const item of later.data.items)
+        expect(item.split).toBe(item.caseId === first.caseId ? 'test' : 'dev');
+    }
     const dev = await start(t.directory, 'lp/judge/keyword', { split: 'dev' });
-    expect(dev.data.items[0]!.split).toBe('test');
-    await post(dev, { id: 0, label: 'fail' });
-    await post(dev, { id: 1, label: 'fail' });
+    for (const item of dev.data.items)
+      await post(dev, { id: item.id, label: 'fail' });
     const labels = await readLabels(t.directory);
-    expect(labels.map((label) => label.label)).toEqual(['fail', 'fail']);
-    // The first item's label was in test and stays there; the second is new.
-    expect(labels.map((label) => label.split).sort()).toEqual(['dev', 'test']);
+    expect(labels).toHaveLength(8);
+    for (const label of labels)
+      expect(label.split).toBe(label.caseId === first.caseId ? 'test' : 'dev');
   });
 
   it("rejects a label the judge can't give, an unknown item, and a body that isn't JSON", async () => {
@@ -366,6 +382,40 @@ describe('the label page', () => {
     expect((await post(server, { id: item.id, label: 'pass' })).status).toBe(
       400
     );
+    await post(server, { id: item.id, label: 'tie' });
+    expect(await readLabels(t.directory)).toMatchObject([{ label: 'tie' }]);
+  });
+
+  it('takes requests only for its own address, with or without a default port', () => {
+    expect(isLabelPageHost('127.0.0.1:4100', 4100)).toBe(true);
+    expect(isLabelPageHost('localhost:4100', 4100)).toBe(true);
+    expect(isLabelPageHost('127.0.0.1', 4100)).toBe(false);
+    expect(isLabelPageHost('evil.test:4100', 4100)).toBe(false);
+    expect(isLabelPageHost(undefined, 4100)).toBe(false);
+    // A browser leaves port 80 out of Host.
+    expect(isLabelPageHost('127.0.0.1', 80)).toBe(true);
+    expect(isLabelPageHost('localhost:80', 80)).toBe(true);
+    expect(isLabelPageHost('evil.test', 80)).toBe(false);
+  });
+
+  it('mixes the variants, rather than showing one and then the other', async () => {
+    const t = await storedRun();
+    const server = await start(t.directory);
+    const variants: string[] = [];
+    for (const item of server.data.items) {
+      const before = new Set(
+        (await readLabels(t.directory)).map((label) => labelKey(label))
+      );
+      await post(server, { id: item.id, label: 'pass' });
+      const added = (await readLabels(t.directory)).find(
+        (label) => !before.has(labelKey(label))
+      );
+      variants.push(added!.variant);
+    }
+    expect(variants.filter((v) => v === 'baseline')).toHaveLength(4);
+    // Grouped, the variant would change once.
+    const changes = variants.filter((v, i) => i > 0 && v !== variants[i - 1]);
+    expect(changes.length).toBeGreaterThan(1);
   });
 
   it("refuses a run that redacts stored responses, and a judge the run doesn't have", async () => {

@@ -153,6 +153,11 @@ test.describe('the label page', () => {
       );
       await expect(page.locator('#note')).toHaveValue('names no cause');
 
+      // Opened again, the page starts at the first trial without a label.
+      await page.reload();
+      await expect(page.locator('#progress')).toHaveText(/^2 of 4 labeled/);
+      await expect(page.locator('#item p').first()).toContainText('3 of 4 ·');
+
       const labels = await readLabels(directory);
       expect(labels.map((label) => label.label).sort()).toEqual([
         'fail',
@@ -195,9 +200,22 @@ test.describe('the label page', () => {
       const body = page.locator('body');
       await expect(body).not.toContainText('baseline');
       await expect(body).not.toContainText('candidate');
-      const [label] = await readLabels(directory);
-      expect(label).toMatchObject({ baseline: 'baseline', variant: 'better' });
-      expect(['baseline', 'candidate']).toContain(label!.label);
+      // T labels the next case a tie.
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('t');
+      await saved(page, 2);
+      // That was the last case.
+      await expect(page.locator('#status')).toContainText(
+        'Every item has a label.'
+      );
+      const labels = await readLabels(directory);
+      for (const label of labels)
+        expect(label).toMatchObject({
+          baseline: 'baseline',
+          variant: 'better',
+        });
+      expect(['baseline', 'candidate']).toContain(labels[0]!.label);
+      expect(labels.map((label) => label.label)).toContain('tie');
     } finally {
       await server.close();
     }

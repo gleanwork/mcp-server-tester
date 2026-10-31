@@ -63,14 +63,24 @@ async function storedRun(): Promise<string> {
   }));
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-label-question-'));
   dirs.push(dir);
+  const judge = { provider: 'anthropic', model: 'claude-haiku-4-5' };
   await fs.writeFile(
     path.join(dir, 'dataset.json'),
     JSON.stringify({
       name: 'outages',
-      cases: [{ id: 'cause', input: 'Why did checkout fail' }],
+      cases: [
+        {
+          id: 'cause',
+          input: 'Why did checkout fail',
+          // A case's judge can give its rubric in options, which grading
+          // reads over the flat form.
+          judges: [
+            { type: 'rubric', options: { rubric: { text: CAUSE }, ...judge } },
+          ],
+        },
+      ],
     })
   );
-  const judge = { provider: 'anthropic', model: 'claude-haiku-4-5' };
   await fs.writeFile(
     path.join(dir, 'eval.json'),
     JSON.stringify({
@@ -81,7 +91,6 @@ async function storedRun(): Promise<string> {
       servers: { docs: { transport: 'stdio', command: 'docs-server' } },
       judges: [
         { type: 'rubric', rubric: 'correctness', ...judge },
-        { type: 'rubric', rubric: { text: CAUSE }, ...judge },
         'lq/judge/always',
       ],
       variants: [{ name: 'only', servers: ['docs'] }],

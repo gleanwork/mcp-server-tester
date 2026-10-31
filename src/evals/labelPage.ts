@@ -153,6 +153,16 @@ export async function startLabelPage(
       label,
     ])
   );
+  // Every label of a case shares its split, so a case read while changing
+  // a judge never measures it: a new label takes the split its case's
+  // labels already have, then --split, then the default.
+  const caseSplits = new Map<string, LabelSplit>();
+  for (const label of labels.values())
+    if (!caseSplits.has(label.caseId))
+      caseSplits.set(label.caseId, label.split);
+  function caseSplit(caseId: string): LabelSplit {
+    return caseSplits.get(caseId) ?? options.split ?? defaultSplit(caseId);
+  }
   const order = items
     .map((item) => ({ item, rank: hash(stored.run.runId, labelKey(item)) }))
     .sort((a, b) => a.rank.localeCompare(b.rank))
@@ -162,7 +172,7 @@ export async function startLabelPage(
     options.judge,
     order,
     labels,
-    options.split,
+    caseSplit,
     options.question
   );
   const token = randomBytes(18).toString('base64url');
@@ -185,10 +195,8 @@ export async function startLabelPage(
       ...(item.trial !== undefined ? { trial: item.trial } : {}),
       ...(item.baseline !== undefined ? { baseline: item.baseline } : {}),
       label,
-      // --split places new labels; a label given again keeps its split.
-      ...(options.split !== undefined && !labels.has(labelKey(item))
-        ? { split: options.split }
-        : {}),
+      // A label given again keeps its split; a new one takes its case's.
+      ...(labels.has(labelKey(item)) ? {} : { split: caseSplit(item.caseId) }),
       ...(note ? { note } : {}),
       source: 'the label page',
     };
@@ -206,6 +214,8 @@ export async function startLabelPage(
     await writeLabels(options.directory, records);
     const record = records[0]!;
     labels.set(labelKey(record), record);
+    if (!caseSplits.has(record.caseId))
+      caseSplits.set(record.caseId, record.split);
     const shown = data.items[id as number]!;
     shown.label = record.label;
     shown.split = record.split;
@@ -230,7 +240,7 @@ export async function startLabelPage(
   ): Promise<void> {
     const { port } = server.address() as AddressInfo;
     const host = request.headers.host;
-    if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`)
+    if (!isLabelPageHost(host, port))
       throw new LabelPageError(403, 'Wrong host.');
     const url = new URL(request.url ?? '/', `http://${host}`);
     const prefix = `/${token}/`;
@@ -320,6 +330,20 @@ function hash(...parts: string[]): string {
 }
 
 /**
+ * Whether a request's Host names the page, so another site's page can't
+ * reach it through DNS rebinding. A browser leaves port 80 out of Host.
+ */
+export function isLabelPageHost(
+  host: string | undefined,
+  port: number
+): boolean {
+  if (host === undefined) return false;
+  return ['127.0.0.1', 'localhost'].some(
+    (name) => host === `${name}:${port}` || (port === 80 && host === name)
+  );
+}
+
+/**
  * The question a judge answers, when the run says: a built-in rubric's
  * text, or a custom rubric's. A custom rubric (`{ text }`) is named
  * `rubric`, so it has a question only when every case's text is the same.
@@ -333,9 +357,16 @@ function questionOf(stored: StoredRun, judge: string): string | undefined {
       const judges = (result.request as { judges?: unknown } | undefined)
         ?.judges;
       for (const entry of Array.isArray(judges) ? judges : []) {
-        const { type, rubric } = entry as { type?: unknown; rubric?: unknown };
+        const { type, rubric, options } = entry as {
+          type?: unknown;
+          rubric?: unknown;
+          options?: { rubric?: unknown };
+        };
         if (type !== 'rubric' || judge !== 'rubric') continue;
-        const text = (rubric as { text?: unknown } | undefined)?.text;
+        // As grading reads it: `options` wins over the flat shorthand.
+        const text = (
+          (options?.rubric ?? rubric) as { text?: unknown } | undefined
+        )?.text;
         if (typeof text === 'string') texts.add(text);
       }
     }
@@ -347,7 +378,7 @@ function pageData(
   judge: string,
   items: readonly JudgedItem[],
   labels: ReadonlyMap<string, LabelRecord>,
-  split: LabelSplit | undefined,
+  splitOf: (caseId: string) => LabelSplit,
   question: string | undefined
 ): LabelPageData {
   const cases = new Map<string, EvalCaseResult>();
@@ -400,7 +431,7 @@ function pageData(
         caseId: item.caseId,
         ...(item.input !== undefined ? { input: item.input } : {}),
         ...(typeof reference === 'string' ? { reference } : {}),
-        split: existing?.split ?? split ?? defaultSplit(item.caseId),
+        split: existing?.split ?? splitOf(item.caseId),
         ...(existing ? { label: existing.label } : {}),
         ...(existing?.note !== undefined ? { note: existing.note } : {}),
       };
