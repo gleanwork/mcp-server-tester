@@ -91,6 +91,21 @@ export interface JudgeSubScore {
   reasoning?: string;
 }
 
+/**
+ * One criterion's verdict, for a judge that checks several things a person
+ * labels one at a time (ADR 0009). Its label question is `<judge>#<id>`.
+ */
+export interface JudgeCriterion {
+  /** Unique within the score. */
+  id: string;
+  /** What the criterion asks, shown to a person labeling it. */
+  text?: string;
+  /** `false` when the criterion doesn't decide the judge's pass. */
+  required?: boolean;
+  verdict: 'pass' | 'fail' | 'unknown';
+  reasoning?: string;
+}
+
 /** What a judge returns for one rep. Only `score` is required. */
 export interface JudgeScore {
   /** Score from 0 to 1. Ignored when `skipped` or `unknown` is true. */
@@ -116,6 +131,12 @@ export interface JudgeScore {
   unknown?: boolean;
   /** Named sub-scores, such as one per rubric criterion. */
   subScores?: Record<string, JudgeSubScore>;
+  /**
+   * Each criterion's verdict, when the judge checks criteria a person labels
+   * one at a time. Over several reps, each criterion's majority wins, and a
+   * tie is unknown.
+   */
+  criteria?: JudgeCriterion[];
   /** Token usage and cost of the judge's own model calls. */
   usage?: Partial<UsageMetrics>;
   /** The LLM provider that scored, when the judge uses one. */
@@ -295,8 +316,10 @@ export function checkJudgeScore(
   if (result.skipped) {
     return { ...result, pass: true };
   }
-  // An unknown verdict has no score, but the sub-scores it keeps must be valid.
+  // An unknown verdict has no score, but the sub-scores and criteria it
+  // keeps must be valid.
   checkSubScores(result.subScores);
+  checkCriteria(result.criteria);
   if (result.unknown) {
     const { pass: _pass, score: _score, ...rest } = result;
     return { ...rest, score: 0, unknown: true, pass: false };
@@ -308,6 +331,38 @@ export function checkJudgeScore(
     pass: result.pass ?? score >= threshold,
     ...(result.pass !== undefined ? { judgePass: result.pass } : {}),
   };
+}
+
+const CRITERION_VERDICTS: readonly unknown[] = ['pass', 'fail', 'unknown'];
+
+function checkCriteria(criteria: unknown): void {
+  if (criteria === undefined) return;
+  if (!Array.isArray(criteria))
+    throw new Error('returned `criteria` that is not an array');
+  const ids = new Set<string>();
+  for (const criterion of criteria) {
+    const id = isRecord(criterion) ? criterion.id : undefined;
+    if (typeof id !== 'string' || id === '')
+      throw new Error('returned a criterion without an `id`');
+    if (ids.has(id)) throw new Error(`returned criterion "${id}" twice`);
+    ids.add(id);
+    const { verdict, text, required, reasoning } = criterion as Record<
+      string,
+      unknown
+    >;
+    if (!CRITERION_VERDICTS.includes(verdict))
+      throw new Error(
+        `returned criterion "${id}" with a verdict that isn't pass, fail or unknown`
+      );
+    if (
+      (text !== undefined && typeof text !== 'string') ||
+      (reasoning !== undefined && typeof reasoning !== 'string') ||
+      (required !== undefined && typeof required !== 'boolean')
+    )
+      throw new Error(
+        `returned criterion "${id}" with a \`text\`, \`reasoning\` or \`required\` of the wrong type`
+      );
+  }
 }
 
 function checkSubScores(subScores: unknown): void {

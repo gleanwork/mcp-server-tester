@@ -418,7 +418,11 @@ function pageData(
     };
   };
   const pairwise = items.some((item) => item.baseline !== undefined);
-  const known = question ?? questionOf(stored, judge);
+  // A criterion's text is its question, when every case words it the same.
+  const criterionTexts = new Set(items.map((item) => item.question));
+  const criterionText =
+    criterionTexts.size === 1 ? [...criterionTexts][0] : undefined;
+  const known = question ?? criterionText ?? questionOf(stored, judge);
   return {
     runId: stored.run.runId,
     judge,

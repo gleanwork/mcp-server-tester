@@ -17,8 +17,10 @@ import {
   sumJudgeUsage,
   type CheckedJudgeScore,
   type JudgeCaseSource,
+  type JudgeCriterion,
   type JudgeInput,
 } from './judgeContract.js';
+import type { GraderCriterion } from '../types/index.js';
 
 /** The case and run a dataset judge grades. Matchers pass none. */
 export interface JudgeRun {
@@ -171,13 +173,23 @@ export async function evaluateJudge(
         );
     }
     const usage = sumJudgeUsage(repScores.map((v) => v.usage));
+    const criteria = combineCriteria(repScores, (criterion) =>
+      judge.criterionOptions
+        ? judgeIdentity(
+            request.judge,
+            judge,
+            judge.criterionOptions(request.options, criterion),
+            { threshold, reps }
+          )
+        : identity.judgeIdentity
+    );
     const answered = repScores.filter((v) => v.unknown !== true);
     const last = answered.at(-1);
     if (!last) {
       const final = repScores.at(-1);
       if (!final)
         return judgeError(`Judge "${label}" error: no scores collected`, label);
-      return judgeUnknown(label, identity, final, usage);
+      return judgeUnknown(label, identity, final, usage, criteria);
     }
 
     const scores = answered.map((v) => v.score);
@@ -223,6 +235,7 @@ export async function evaluateJudge(
             }
           : {}),
         ...(last.subScores !== undefined ? { subScores: last.subScores } : {}),
+        ...(criteria !== undefined ? { criteria } : {}),
         ...(usage !== undefined ? { usage } : {}),
         ...(last.metadata !== undefined ? { metadata: last.metadata } : {}),
       },
@@ -233,6 +246,36 @@ export async function evaluateJudge(
       label
     );
   }
+}
+
+/**
+ * Each criterion's verdict over the reps: the majority of the reps that
+ * gave it pass or fail, unknown on a tie or when none did. Its text,
+ * `required` and reasoning are the last rep's, and its identity is
+ * `identityOf` it. Undefined when no rep listed criteria.
+ */
+function combineCriteria(
+  reps: readonly CheckedJudgeScore[],
+  identityOf: (criterion: string) => string
+): GraderCriterion[] | undefined {
+  const byId = new Map<string, JudgeCriterion[]>();
+  for (const rep of reps)
+    for (const criterion of rep.criteria ?? [])
+      byId.set(criterion.id, [...(byId.get(criterion.id) ?? []), criterion]);
+  if (byId.size === 0) return undefined;
+  return [...byId].map(([id, verdicts]): GraderCriterion => {
+    const passed = verdicts.filter((v) => v.verdict === 'pass').length;
+    const failed = verdicts.filter((v) => v.verdict === 'fail').length;
+    const last = verdicts.at(-1)!;
+    return {
+      id,
+      ...(last.text !== undefined ? { text: last.text } : {}),
+      ...(last.required === false ? { required: false as const } : {}),
+      verdict: passed > failed ? 'pass' : failed > passed ? 'fail' : 'unknown',
+      ...(last.reasoning !== undefined ? { reasoning: last.reasoning } : {}),
+      judgeIdentity: identityOf(id),
+    };
+  });
 }
 
 /** A judge's identity, and whether MST can see its version change. */
@@ -249,7 +292,8 @@ function judgeUnknown(
   label: string,
   identity: JudgeIdentityDetails,
   final: CheckedJudgeScore,
-  usage: ReturnType<typeof sumJudgeUsage>
+  usage: ReturnType<typeof sumJudgeUsage>,
+  criteria: GraderCriterion[] | undefined
 ): ValidationResult {
   return {
     pass: false,
@@ -264,6 +308,7 @@ function judgeUnknown(
         : {}),
       ...(final.model !== undefined ? { judgeModel: final.model } : {}),
       ...(final.subScores !== undefined ? { subScores: final.subScores } : {}),
+      ...(criteria !== undefined ? { criteria } : {}),
       ...(usage !== undefined ? { usage } : {}),
       ...(final.metadata !== undefined ? { metadata: final.metadata } : {}),
     },

@@ -188,6 +188,13 @@ export interface GraderScore {
   /** Named sub-scores from the judge, such as one per rubric criterion. */
   subScores?: Record<string, JudgeSubScore>;
 
+  /**
+   * Each criterion's verdict, for a judge that checks criteria a person
+   * labels one at a time (the `criteria` judge). Each is its own label
+   * question, `<judge>#<id>`, with its own identity.
+   */
+  criteria?: GraderCriterion[];
+
   /** Token usage and cost of the judge's own model calls. */
   usage?: Partial<UsageMetrics>;
 
@@ -200,6 +207,23 @@ export interface GraderScore {
    * Only populated when a case runs 2+ judges.
    */
   judgeResults?: GraderScore[];
+}
+
+/** One criterion's verdict in a judge's score (ADR 0009). */
+export interface GraderCriterion {
+  id: string;
+  /** What the criterion asks. */
+  text?: string;
+  /** `false` when the criterion doesn't decide the judge's pass. */
+  required?: false;
+  verdict: 'pass' | 'fail' | 'unknown';
+  reasoning?: string;
+  /**
+   * The identity of the judge as it graded this criterion: its identity
+   * with only this criterion in its options, so the same criterion in
+   * another case shares it, and a changed criterion gets a new one.
+   */
+  judgeIdentity: string;
 }
 
 /**

@@ -394,6 +394,8 @@ ${rows.join('\n')}
 
 \`tool-use\` asks four questions about the calls, one model call each, and fails when any answer is no: did the assistant call the tools the request needed, pass arguments that fit, avoid calls it didn't need, and recover from errors? It doesn't grade the answer, so \`wrong-fact\` and \`unsupported-claim\` traces pass. A \`recovered\` trace passes, because the assistant corrected its mistake; \`false-success\` and \`gave-up\` traces fail, because it didn't.
 
+\`criteria\` isn't measured here. Its questions are each case's own criteria, and each criterion is a question of its own, with its own identity, so it needs its own labels: label a criterion with \`mst label --judge criteria#<id>\` and check it with \`mst judges check\`.
+
 ## Disagreements
 
 The \`test\` traces where a judge's verdict and the label differ. Read a case's trace in \`scripts/calibration/cases.ts\` to see why.

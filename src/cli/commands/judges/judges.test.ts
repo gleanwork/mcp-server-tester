@@ -66,6 +66,12 @@ describe('mst judges', () => {
     await listJudgeCommand({ json: true }, out.print);
     expect(JSON.parse(out.text())).toEqual([
       {
+        ref: 'criteria',
+        kind: 'judge',
+        description: expect.stringContaining("the case's own criteria"),
+        requires: [],
+      },
+      {
         ref: 'grounded-in-tools',
         kind: 'judge',
         description: expect.stringContaining('supported by a tool result'),
@@ -98,6 +104,7 @@ describe('mst judges', () => {
     const lines = out.text().trimEnd().split('\n');
     expect(lines.map((line) => line.split(/\s{2,}/).slice(0, 2))).toEqual([
       ['acme/judge/completeness', 'judge'],
+      ['criteria', 'judge'],
       ['grounded-in-tools', 'judge'],
       ['rubric', 'judge'],
       ['task-completion', 'judge'],
@@ -157,7 +164,7 @@ describe('mst judges', () => {
 
   it('names the judges there are when one is missing', async () => {
     await expect(showJudge('acme/judge/nope', plugins())).rejects.toThrow(
-      /No judge "acme\/judge\/nope"\. Judges: acme\/judge\/completeness, grounded-in-tools, rubric, task-completion, tool-use, acme\/pairwise-judge\/ordered, acme\/pairwise-judge\/preference\./
+      /No judge "acme\/judge\/nope"\. Judges: acme\/judge\/completeness, criteria, grounded-in-tools, rubric, task-completion, tool-use, acme\/pairwise-judge\/ordered, acme\/pairwise-judge\/preference\./
     );
     await expect(showJudge('acme/judge/completeness', {})).rejects.toThrow(
       /Plugin judges need --plugins or --config/

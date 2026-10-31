@@ -59,6 +59,7 @@ const plugin: Plugin = {
 };
 
 const CAUSE = 'Does the answer name the cause?';
+const CRITERION = 'The answer names the expired certificate.';
 
 async function storedRun(): Promise<string> {
   vi.mocked(createJudge).mockImplementation(() => ({
@@ -85,6 +86,11 @@ async function storedRun(): Promise<string> {
           // reads over the flat form.
           judges: [
             { type: 'rubric', options: { rubric: { text: CAUSE }, ...judge } },
+            {
+              type: 'criteria',
+              criteria: [{ id: 'names-cause', text: CRITERION }],
+              ...judge,
+            },
           ],
         },
       ],
@@ -146,6 +152,8 @@ describe("the label page's question", () => {
     );
     // A custom rubric ({ text }) is named rubric.
     expect(await question(directory, 'rubric')).toBe(CAUSE);
+    // A criterion is labeled on its own, and its text is its question.
+    expect(await question(directory, 'criteria#names-cause')).toBe(CRITERION);
     // MST can't know a plugin judge's question unless it's given.
     expect(await question(directory, 'lq/judge/always')).toBeUndefined();
     expect(await question(directory, 'lq/judge/always', 'Is it right?')).toBe(
