@@ -145,33 +145,53 @@ export function parseQuestionAnswer(
 }
 
 /** Asks one question about a rendered trace: one model call. */
+/**
+ * How many times a question is asked again when its answer can't be read.
+ * A model that writes JSON into its reasoning without escaping it (a tool
+ * call's arguments, say) usually writes valid JSON the next time. A
+ * cut-off answer isn't asked again: the same token limit would cut it off
+ * again. Part of the judge's version.
+ */
+const UNREADABLE_ANSWER_RETRIES = 1;
+
 async function askJudgeQuestion(
   complete: JudgeCompletionAdapter,
   trace: string,
   question: string
 ): Promise<QuestionAnswer> {
   const started = Date.now();
-  const completion = await complete({
-    system: QUESTION_SYSTEM_PROMPT,
-    prompt: questionPrompt(trace, question),
-  });
-  const answer = parseQuestionAnswer(
-    completion.text,
-    completion.truncated === true
-  );
-  const reported = Object.fromEntries(
-    Object.entries(completion.usage ?? {}).filter(([, v]) => v !== undefined)
-  ) as Partial<UsageMetrics>;
-  return {
-    ...answer,
-    usage: {
-      inputTokens: 0,
-      outputTokens: 0,
-      totalCostUsd: 0,
-      durationMs: Date.now() - started,
-      ...reported,
-    },
-  };
+  const usage: Partial<UsageMetrics>[] = [];
+  for (let attempt = 0; ; attempt++) {
+    const completion = await complete({
+      system: QUESTION_SYSTEM_PROMPT,
+      prompt: questionPrompt(trace, question),
+    });
+    usage.push(
+      Object.fromEntries(
+        Object.entries(completion.usage ?? {}).filter(
+          ([, v]) => v !== undefined
+        )
+      ) as Partial<UsageMetrics>
+    );
+    const truncated = completion.truncated === true;
+    let answer: { verdict: QuestionVerdict; reasoning: string };
+    try {
+      answer = parseQuestionAnswer(completion.text, truncated);
+    } catch (error) {
+      if (truncated || attempt >= UNREADABLE_ANSWER_RETRIES) throw error;
+      continue;
+    }
+    return {
+      ...answer,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        totalCostUsd: 0,
+        durationMs: Date.now() - started,
+        ...sumUsage(usage.map((u) => ({ usage: u }))),
+      },
+    };
+  }
 }
 
 /** One question with its answer. */
@@ -179,7 +199,9 @@ export interface AnsweredQuestion extends QuestionAnswer {
   question: JudgeQuestion;
 }
 
-function sumUsage(answers: readonly AnsweredQuestion[]): Partial<UsageMetrics> {
+function sumUsage(
+  answers: readonly { usage: Partial<UsageMetrics> }[]
+): Partial<UsageMetrics> {
   const total: Record<string, number> = {};
   for (const { usage } of answers)
     for (const [key, value] of Object.entries(usage))
@@ -380,6 +402,7 @@ export function defineQuestionJudge<
     prompts: spec.prompts,
     questions: sampleQuestions(spec, schema),
     needsTrace: spec.needsTrace !== false,
+    unreadableAnswerRetries: UNREADABLE_ANSWER_RETRIES,
     defaults: {
       provider: DEFAULT_JUDGE_PROVIDER,
       models: DEFAULT_JUDGE_MODELS,
