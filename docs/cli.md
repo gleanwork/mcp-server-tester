@@ -735,6 +735,42 @@ A `judge` scores each trial; a `pairwise` judge compares each variant's trial wi
 
 Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
 
+### `judges check` - Measure a Judge Against Labels
+
+Measures how well a judge agrees with people's [labels](#label---label-judge-verdicts), and says whether it is usable. See [ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md).
+
+```bash
+npx mst judges check <run...> --judge correctness
+npx mst judges check 7f3c2a 9b1d04 --judge acme/judge/completeness --json
+npx mst judges check <run> --judge correctness --split dev   # while changing the judge; not recorded
+```
+
+```text
+correctness  (identity 3f2a9c1be0d4, claude-sonnet-4-5)
+  80 test labels from 2 runs
+  people   42 fail, 38 pass
+  TPR      0.95 (0.84 to 0.99)  the judge failed 40 of the 42 trials people failed
+  TNR      1.00 (0.91 to 1.00)  the judge passed 38 of the 38 trials people passed
+  kappa    0.95
+  unknown  0 of 80 (0%)
+  usable   yes
+  recorded .mcp-test-results/my-eval/calibrations/correctness/3f2a9c1b….json
+  disagreements (2):
+    6ff33b baseline lookup-order #0: judge pass, label fail: The answer gives the order's status...
+```
+
+`--judge` is the judge's name as its labels have it: a `rubric` judge's rubric, else its reference. `<run...>` takes what [`label`](#label---label-judge-verdicts) does.
+
+For a pointwise judge, a failing trial is the positive class. TPR is the share of the trials people failed that the judge also failed; TNR is the share of the trials people passed that it also passed. Each has a 95% Wilson interval. Kappa is Cohen's. `unknown` counts the labeled trials the judge couldn't decide (it skipped them).
+
+A judge is **usable** when it gave a verdict on at least 15 failing and 15 passing labels (`--min-labels`), the lower bound of both TPR and TNR is at least 0.8 (`--min-rate`), and it answered `unknown` on at most 10% of the labeled trials (`--max-unknown`). The output says which part fails.
+
+For a pairwise judge, it reports the share of labels its preference matches, and how often the judge and people called a tie. A pairwise judge has no usable gate.
+
+The check uses `test` labels unless `--split dev` or `--split all` says otherwise. Each judge identity in the runs is checked on its own, newest run first, because a changed judge must be measured again. A label counts once for each identity: a run given twice is read once, and when a run and its regrades gave the same identity's verdict for a label, only the newest one's counts. For a `test` check, it writes the calibration record `calibrations/<judge>/<identity>.json` in each eval's directory, replacing an earlier one (`--no-record` doesn't). A judge without a version MST can see change (one that declares none, in a plugin that has none) is marked **unversioned**: its calibration can't tell when it goes stale, so set the judge's `version`. Verdicts from before MST recorded judge identities can be checked but not recorded: grade the run again (`mst grade`).
+
+Options: `--judge <name>` (required), `--split <test|dev|all>`, `--min-labels <n>`, `--min-rate <rate>`, `--max-unknown <rate>`, `--no-record`, `--json`, `-d, --dir <directory>`.
+
 ## `label` - Label Judge Verdicts
 
 A label is a person's answer to a judge's question for one trial: `pass` or `fail`. For a pairwise judge, it is their preference for one case: `baseline`, `candidate` or `tie`. Labels are kept in the run, so that a judge can be measured against them. See [ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md).

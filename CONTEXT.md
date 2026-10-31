@@ -109,12 +109,20 @@ A model grader: an LLM that scores a trial against the case's expected result or
 _Avoid_: LLM grader, evaluator, rater
 
 **Judge identity**:
-A hash of what decides a judge's verdict besides the trial: the judge's reference, its `version` (or its plugin's), and its options as its schema parses them. Every score records it, and `run.json` records it for each eval config judge, so two scores with the same identity came from a judge that grades the same way.
+A hash of what decides a judge's verdict besides the trial: the judge's reference, its `version` (or its plugin's), its options as its schema parses them, and the threshold and repetitions that turn its answers into a verdict. Every score and pairwise preference records it, and `run.json` records it for each eval config judge, so two scores with the same identity came from a judge that grades the same way.
 _Avoid_: judge hash, judge fingerprint, judge version (the version is one part of the identity)
 
 **Label**:
 A person's answer to a judge's question: pass or fail for one trial, or, for a pairwise judge, the side they prefer for one case. It belongs to the question (the judge's name in results), not to a judge identity, so a changed judge is measured against the same labels. Its split says whether it measures a judge (`test`) or may be read while changing one (`dev`).
 _Avoid_: annotation, ground truth, gold label, mark
+
+**Calibration**:
+What `mst judges check` measured for one judge identity against people's `test` labels: TPR and TNR with their intervals, kappa, the `unknown` rate, and whether the judge is usable. It applies only to that identity. An unversioned calibration is of a judge whose version MST can't see change, so it can't tell when it goes stale.
+_Avoid_: accuracy, validation, judge score
+
+**Usable**:
+A judge whose calibration passes the gate: enough failing and passing labels with a verdict, TPR and TNR lower bounds at or above the minimum, and few enough `unknown` answers.
+_Avoid_: calibrated (a judge is calibrated for a user's labels, not in general), trusted, valid
 
 **Pairwise judge**:
 A judge that compares two variants' trials of the same case and says which is better, instead of scoring one alone.

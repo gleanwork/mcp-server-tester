@@ -19,6 +19,7 @@ import type { ListedServerTools } from './toolSurface.js';
  *
  * ```text
  * <eval dir>/latest.json
+ * <eval dir>/calibrations/<judge>/<judge identity>.json
  * <eval dir>/runs/<run-id>/run.json
  * <eval dir>/runs/<run-id>/traces/<variant>/<case-id>/<trial>.json
  * <eval dir>/runs/<run-id>/scores/<grader>/<variant>/<case-id>/<trial>.json
@@ -147,6 +148,8 @@ const RunRecordSchema = z.looseObject({
           .string()
           .regex(/^[0-9a-f]{64}$/)
           .optional(),
+        /** The judge has no version MST can see change (ADR 0009). */
+        unversioned: z.literal(true).optional(),
       })
     )
     .optional(),
@@ -399,6 +402,98 @@ export function parseLabelRecord(value: unknown, file: string): LabelRecord {
   return parsed.data;
 }
 
+const RateSchema = z.object({
+  k: z.number().int().nonnegative(),
+  n: z.number().int().nonnegative(),
+  value: z.number().nullable(),
+  low: z.number().nullable(),
+  high: z.number().nullable(),
+});
+
+const CalibrationFields = {
+  ...Envelope('calibration'),
+  /** The judge's name in results, as its labels name it. */
+  judge: z.string().min(1),
+  judgeIdentity: z.string().regex(/^[0-9a-f]{64}$/),
+  /** MST can't see the judge's version change, so it can't tell when this goes stale. */
+  unversioned: z.literal(true).optional(),
+  judgeModels: z.array(z.string()),
+  createdAt: z.string(),
+  /** The runs whose labels it used. */
+  runs: z.array(z.string()),
+  split: z.enum(['test', 'dev', 'all']),
+  labels: z.number().int().nonnegative(),
+  unknown: RateSchema,
+};
+
+/**
+ * `calibrations/<judge>/<judge identity>.json`, in the eval's directory:
+ * what `mst judges check` measured for one judge identity against people's
+ * labels. It applies only to that identity.
+ */
+const CalibrationRecordSchema = z.union([
+  z.looseObject({
+    ...CalibrationFields,
+    judgeKind: z.literal('pointwise'),
+    humanPass: z.number().int().nonnegative(),
+    humanFail: z.number().int().nonnegative(),
+    counts: z.object({
+      truePositive: z.number().int().nonnegative(),
+      falseNegative: z.number().int().nonnegative(),
+      trueNegative: z.number().int().nonnegative(),
+      falsePositive: z.number().int().nonnegative(),
+    }),
+    tpr: RateSchema,
+    tnr: RateSchema,
+    kappa: z.number().nullable(),
+    gate: z.object({
+      minPassLabels: z.number(),
+      minFailLabels: z.number(),
+      minRate: z.number(),
+      maxUnknownRate: z.number(),
+    }),
+    usable: z.boolean(),
+    reasons: z.array(z.string()),
+  }),
+  z.looseObject({
+    ...CalibrationFields,
+    judgeKind: z.literal('pairwise'),
+    agreement: RateSchema,
+    judgeTies: RateSchema,
+    humanTies: RateSchema,
+  }),
+]);
+
+/** A judge identity's calibration, as an eval keeps it. */
+export type CalibrationRecord = z.infer<typeof CalibrationRecordSchema>;
+
+/** A calibration's file, relative to the eval's directory. */
+export function calibrationRecordPath(
+  record: Pick<CalibrationRecord, 'judge' | 'judgeIdentity'>
+): string {
+  if (!/^[0-9a-f]{64}$/.test(record.judgeIdentity))
+    throw new Error(
+      `"${record.judgeIdentity}" isn't a judge identity (64 hex characters).`
+    );
+  return path.join(
+    'calibrations',
+    segment(record.judge),
+    `${record.judgeIdentity}.json`
+  );
+}
+
+/** Parses a calibration file's contents; throws with the file's name when it isn't one. */
+export function parseCalibrationRecord(
+  value: unknown,
+  file: string
+): CalibrationRecord {
+  assertRunFormat(value, file);
+  const parsed = CalibrationRecordSchema.safeParse(value);
+  if (!parsed.success)
+    throw new Error(`${file} isn't a calibration: ${parsed.error.message}`);
+  return parsed.data;
+}
+
 /** `results.json`: every case result, traces and scores joined. */
 const ResultsRecordSchema = z.looseObject({
   ...Envelope('results'),
@@ -433,6 +528,7 @@ export const RUN_SCHEMAS = {
   score: ScoreRecordSchema,
   preference: PreferenceRecordSchema,
   label: LabelRecordSchema,
+  calibration: CalibrationRecordSchema,
   results: ResultsRecordSchema,
   summary: SummaryRecordSchema,
   latest: LatestRecordSchema,
@@ -489,6 +585,8 @@ export interface JudgeRecord {
   level: string;
   optionsHash: string;
   identity?: string;
+  /** The judge has no version MST can see change (ADR 0009). */
+  unversioned?: true;
 }
 
 /** The facts `run.json` records, beyond what the summary has. */

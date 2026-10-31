@@ -930,8 +930,9 @@ exports[`golden: judges > judges a client response 1`] = `
     "scores": {
       "judge": {
         "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
-        "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
+        "judgeIdentity": "3efb5903c3d6a9a6639c8c70989f34a0b3b2934fa38578cb8645183fc66733f5",
         "judgeName": "test/judge/golden-case-judge",
+        "judgeUnversioned": true,
         "pass": true,
         "reasoning": "looks right",
         "score": 0.9,
@@ -1081,8 +1082,9 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     "scores": {
       "judge": {
         "details": "Judge "test/judge/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
-        "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
+        "judgeIdentity": "4e6ddb762f29b13a5ba466b9d2ae9f1d279518b3f8d22d2dffe19961517f1e2e",
         "judgeName": "test/judge/golden-case-judge",
+        "judgeUnversioned": true,
         "pass": true,
         "reasoning": "looks right",
         "score": 0.9,
@@ -1296,16 +1298,18 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         "judgeResults": [
           {
             "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
-            "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
+            "judgeIdentity": "3efb5903c3d6a9a6639c8c70989f34a0b3b2934fa38578cb8645183fc66733f5",
             "judgeName": "test/judge/golden-case-judge",
+            "judgeUnversioned": true,
             "pass": true,
             "reasoning": "looks right",
             "score": 0.9,
           },
           {
             "details": "Judge "test/judge/golden-strict-judge" failed with score 0.20 (threshold: 0.5) (mean of 3 reps: [0.20, 0.20, 0.20]). too vague",
-            "judgeIdentity": "1781ff07a242d3b2a67a8ec64dfc6306e78989f57a3cc075fbb4ea7c3a4153f3",
+            "judgeIdentity": "76fd406902890594a2cc47f30f9e46e1a68efd3526b070b58887fdb629bb0448",
             "judgeName": "test/judge/golden-strict-judge",
+            "judgeUnversioned": true,
             "pass": false,
             "reasoning": "too vague",
             "score": 0.2,
@@ -1433,7 +1437,7 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
     "scores": {
       "judge": {
         "details": "Judge "correctness" passed with score 0.80",
-        "judgeIdentity": "652b8ebebe67345da00585dab4d6b7913b02b4ce6afe6a86ae0c31e7f27fefd7",
+        "judgeIdentity": "6c7228f2427ed7b529ea58783746c5b69e32690fdc99f99ebc3397293326c289",
         "judgeName": "correctness",
         "judgeProvider": "anthropic",
         "pass": true,
@@ -1577,7 +1581,7 @@ Answer carefully.",
     "scores": {
       "judge": {
         "details": "Judge "rubric" failed with score 0.60 (threshold: 0.9). Partly.",
-        "judgeIdentity": "763d35e65f4aab9c6c56485051dee0b94dc2abc29579d73471ba5d25c8741081",
+        "judgeIdentity": "6667403577779bb4f71b08b9ce1501c5f97313dc523723cc49b8d4a076c828d6",
         "judgeModel": "gpt-test",
         "judgeName": "rubric",
         "judgeProvider": "openai",
@@ -1927,7 +1931,7 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
         "judgeResults": [
           {
             "details": "Judge "conciseness" passed with score 0.80 (mean of 2 reps: [0.70, 0.90])",
-            "judgeIdentity": "dd7112fe042e00d052db7a8ffca4868259d2789c3318960a889ed3c50c455ece",
+            "judgeIdentity": "912950bf848d5441afbf1d05a1adc5bc97dd6fed4fa24380fd54aa2f286242d9",
             "judgeName": "conciseness",
             "judgeProvider": "anthropic",
             "pass": true,
@@ -1935,8 +1939,9 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
           },
           {
             "details": "Judge "test/judge/golden-case-judge" passed with score 0.90 (mean of 2 reps: [0.90, 0.90])",
-            "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
+            "judgeIdentity": "4e6ddb762f29b13a5ba466b9d2ae9f1d279518b3f8d22d2dffe19961517f1e2e",
             "judgeName": "test/judge/golden-case-judge",
+            "judgeUnversioned": true,
             "pass": true,
             "reasoning": "looks right",
             "score": 0.9,
@@ -2130,7 +2135,7 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     "scores": {
       "judge": {
         "details": "Judge "completeness" failed with score 0.53 (threshold: 0.7) (mean of 3 reps: [0.20, 0.90, 0.50]). third",
-        "judgeIdentity": "f396598a6c10d48dd9d2e907523736ad6682d9e6db8c165701db00c9cb8e10d0",
+        "judgeIdentity": "b169b0b09ae24ba3804e6bfad4c0fcd45dd7a7f6d6a310c9d1b49c753cb594bf",
         "judgeName": "completeness",
         "judgeProvider": "anthropic",
         "pass": false,
@@ -2392,7 +2397,7 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
           "judgeResults": [
             {
               "details": "Judge "correctness" failed with score 0.60 (threshold: 0.9). Says sunny.",
-              "judgeIdentity": "652b8ebebe67345da00585dab4d6b7913b02b4ce6afe6a86ae0c31e7f27fefd7",
+              "judgeIdentity": "8333c4f34b25a69ced728bd05cae9b02e74901c1a37d1febc98c01ef535431e0",
               "judgeName": "correctness",
               "judgeProvider": "anthropic",
               "pass": false,
@@ -2401,7 +2406,7 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
             },
             {
               "details": "Judge "conciseness" passed with score 0.80",
-              "judgeIdentity": "dd7112fe042e00d052db7a8ffca4868259d2789c3318960a889ed3c50c455ece",
+              "judgeIdentity": "e1e640cae6bef4b2090cd737d7d83e65d49139e232edd5ba4ac90d6dd3e4a25e",
               "judgeName": "conciseness",
               "judgeProvider": "anthropic",
               "pass": true,
@@ -2668,16 +2673,18 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
           "judgeResults": [
             {
               "details": "Judge "test/judge/golden-case-judge" passed with score 0.90",
-              "judgeIdentity": "9612ffd1f782ad43d2ba702db479c86e34384261c5f7ddef51ca06b602aca4d4",
+              "judgeIdentity": "8a078f374bd67134b0043c37489846eb629379f8e112d4c63c3c8ac0516c083f",
               "judgeName": "test/judge/golden-case-judge",
+              "judgeUnversioned": true,
               "pass": true,
               "reasoning": "looks right",
               "score": 0.9,
             },
             {
               "details": "Judge "test/judge/golden-config-judge" failed with score 0.00 (threshold: 0.7). eval config judge",
-              "judgeIdentity": "e9d77224698ffdbaa5b8c9de35e0afa4f929417e755c7ba94bedf672dbcb60c1",
+              "judgeIdentity": "6850f7fa2301a6e1a57943ce09d10baa9e85f9405e4d3ade36a68fcdf713bfff",
               "judgeName": "test/judge/golden-config-judge",
+              "judgeUnversioned": true,
               "pass": false,
               "reasoning": "eval config judge",
               "score": 0,

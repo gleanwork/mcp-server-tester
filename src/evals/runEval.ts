@@ -92,7 +92,8 @@ import {
   preflightCaseJudges,
 } from './grading.js';
 import type { CaseJudge } from './datasetTypes.js';
-import { judgeIdentity } from '../judge/judgeIdentity.js';
+import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
+import { getJudge } from '../judge/builtinJudges.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import type { EvalRunnerResult } from './evalRunner.js';
@@ -651,7 +652,11 @@ function assertResumable(
   const fullRegrade = `Grade it again in full, without --resume: \`mst grade ${run.runId}\`.`;
   const recorded = run.judges ?? [];
   const withoutIdentity = (records: readonly JudgeRecord[]) =>
-    records.map(({ identity: _identity, ...record }) => record);
+    // What older runs don't record: a run graded before MST recorded them
+    // can still be resumed.
+    records.map(
+      ({ identity: _identity, unversioned: _unversioned, ...record }) => record
+    );
   if (
     JSON.stringify(withoutIdentity(recorded)) !==
     JSON.stringify(withoutIdentity(judges))
@@ -694,10 +699,32 @@ function entryIdentity(level: string, entry: unknown): string | undefined {
   } & Record<string, unknown>;
   if (level !== 'pairwise') return judgeEntryIdentity(config as CaseJudge);
   try {
-    const { type, options } = pairwiseJudgeSpec(config);
-    return judgeIdentity(type, getPairwiseJudge(type), options);
+    const { type, options, reps } = pairwiseJudgeSpec(config);
+    return judgeIdentity(type, getPairwiseJudge(type), options, {
+      reps: Math.max(1, reps ?? 1),
+    });
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Whether an eval config entry's judge has no version MST can see change.
+ * Scores record it for pointwise judges; run.json records it for every
+ * level, so a pairwise judge's calibration can say so too.
+ */
+function entryUnversioned(level: string, entry: unknown): boolean {
+  const config = (typeof entry === 'string' ? { type: entry } : entry) as {
+    type: string;
+  } & Record<string, unknown>;
+  try {
+    if (level === 'pairwise') {
+      const { type } = pairwiseJudgeSpec(config);
+      return !judgeIsVersioned(type, getPairwiseJudge(type));
+    }
+    return !judgeIsVersioned(config.type, getJudge(config.type));
+  } catch {
+    return false;
   }
 }
 
@@ -727,6 +754,9 @@ function judgeRecords(
           .update(JSON.stringify(options))
           .digest('hex'),
         ...(identity !== undefined ? { identity } : {}),
+        ...(entryUnversioned(level, entry)
+          ? { unversioned: true as const }
+          : {}),
       };
     };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);

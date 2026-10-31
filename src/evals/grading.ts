@@ -227,6 +227,9 @@ async function evaluateJudges(
         ...(typeof details.judgeIdentity === 'string'
           ? { judgeIdentity: details.judgeIdentity }
           : {}),
+        ...(details.judgeUnversioned === true
+          ? { judgeUnversioned: true as const }
+          : {}),
         ...(details.skipped === true ? { skipped: true } : {}),
         ...(typeof details.error === 'string' ? { error: details.error } : {}),
         ...(details.subScores !== undefined

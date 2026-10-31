@@ -251,13 +251,15 @@ fails saying so.
 
 #### Judge identity
 
-Every score records the identity of the judge that gave it, in
-`judgeIdentity`. `run.json` records the identity of each eval config,
-variant and pairwise judge, in `judges[].identity`. The identity is a
-SHA-256 of the judge's reference, its `version` and its options as its
-schema parses them, so an option left to its default hashes the same as the
-value written out. Two scores with the same identity came from a judge that
-grades the same way, which a calibration needs
+Every score and pairwise preference records the identity of the judge that
+gave it, in `judgeIdentity`. `run.json` records the identity of each eval
+config, variant and pairwise judge, in `judges[].identity`. The identity is
+a SHA-256 of the judge's reference, its `version`, its options as its
+schema parses them (so an option left to its default hashes the same as the
+value written out), and how its answers become a verdict: a judge's
+`threshold` and `reps`, a pairwise judge's `reps`. Two scores with the same
+identity came from a judge that grades the same way, which a calibration
+needs
 ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)).
 
 A judge or pairwise judge can declare a `version`: a non-empty string that
@@ -772,6 +774,7 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 ```text
 .mcp-test-results/<eval name>/
 ├── latest.json                     # the newest complete, full run
+├── calibrations/<judge>/<identity>.json  # how one judge identity agreed with people (mst judges check)
 └── runs/<run-id>/
     ├── run.json                    # what ran: variants, datasets (with content hashes), judges, environment, phases
     ├── traces/<variant>/<case-id>/<trial>.json          # what the client did in one trial
@@ -783,7 +786,7 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 ```
 
 - **Run IDs** sort by start time: `20261007T182504Z-7f3c2a`. The last six characters are its short form.
-- **Every file** starts with `"format": "mst.run/v1"` and its `kind` (`run`, `trial`, `score`, `preference`, `label`, `results`, `summary`, `latest`). Readers ignore fields they don't know, so new optional fields keep the version; removing or renaming one moves the format to `mst.run/v2`. The JSON Schemas are published in `schema/run/v1/`.
+- **Every file** starts with `"format": "mst.run/v1"` and its `kind` (`run`, `trial`, `score`, `preference`, `label`, `calibration`, `results`, `summary`, `latest`). Readers ignore fields they don't know, so new optional fields keep the version; removing or renaming one moves the format to `mst.run/v2`. The JSON Schemas are published in `schema/run/v1/`.
 - **Paths:** variant, case and grader names are URI-encoded into one path segment each, and trials count from 0. Case IDs must be unique within a run, because they name these paths: a case ID in two datasets fails before anything runs.
 - **`latest.json`** is written last, and only for a full, graded run, so a crash, a partial run or an `mst run --no-grade` run leaves it at the previous run.
 - **A run is saved as it goes.** Each trial's trace is written to `traces/` as soon as the trial finishes, so a run that is stopped or killed keeps every trial that finished. With the first trial, and after each variant but the last, MST writes the run directory with what has run so far, and `run.json` says `"phases": { "collect": "partial", "grade": "partial" }`; the final write makes both `complete`. If the run stops on an error, it is written with `collect: failed` before the error is reported. `results.json`, `summary.json` and `run.json`'s `variants` list only the variants that finished, so `traces/` can also hold the trials of the variant that was running. Pairwise judges and the comparison with the previous run happen only in the final write.
@@ -793,6 +796,7 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 - **Phases:** `run.json`'s `phases.grade` is `skipped` for a run collected with `mst run --no-grade`: its trials have traces and no scores, and it is never a previous run to compare with.
 - **Regrades:** `mst grade <run>` grades a run's traces with the eval config's graders as they are now, and writes the scores as a new run, `<run-id>.g2` (then `.g3`, …), next to it. Its `run.json` has `gradedFrom`, the run that collected the traces, and the regrade carries a copy of them and of the run's labels.
 - **Labels:** `mst label import` writes a person's labels into `labels/`: a pass or fail for one trial of a judge, or `labels/<pairwise judge>/<variant>/<case-id>/vs/<baseline>.json` for a preference against a baseline. A label records who gave it, when, and its split (`dev` or `test`). See [`mst label`](./cli.md#label---label-judge-verdicts).
+- **Calibrations:** `mst judges check` writes `calibrations/<judge>/<identity>.json` in the eval's directory: one judge identity's TPR, TNR, kappa and `unknown` rate against the `test` labels of the runs it read (or a pairwise judge's agreement and ties), and whether it is usable. It applies only to that identity, and a later check replaces it. `unversioned: true` means MST can't see the judge's version change; scores and `run.json`'s judges say the same as `judgeUnversioned` and `unversioned`. See [`mst judges check`](./cli.md#judges-check---measure-a-judge-against-labels).
 - **`--output-dir`** names the eval's directory (`<output-dir>/runs/<run-id>/`).
 - **`report/`** is built from the run's own files, so `mst open <run>` can rebuild it for a run copied without it. `run.json` records each variant's setup (client, model, servers, tool metadata, input template, judges, and client options, with any whose name suggests a credential replaced by a hash) for the report's _What differs_. See [`mst open`](./cli.md#open---open-a-runs-report).
 
