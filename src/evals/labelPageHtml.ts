@@ -90,8 +90,12 @@ function render() {
     (state.index + 1) + ' of ' + state.data.items.length + ' · case ' + item.caseId +
     (item.trial !== undefined ? ' · trial ' + (item.trial + 1) : '') + ' · ' + item.split + ' split' +
     (item.label !== undefined ? ' · labeled ' + labelText(item, item.label) : '') }));
-  main.append(textBlock('Input', item.input));
-  main.append(textBlock('Reference answer', item.reference));
+  // append(null) would add the text "null", so skip blocks with no value.
+  for (const block of [
+    textBlock("This trial's question", item.question),
+    textBlock('Input', item.input),
+    textBlock('Reference answer', item.reference),
+  ]) if (block) main.append(block);
   if (item.trace) main.append(trialView(item.trace));
   if (item.sides) {
     const grid = el('div', { class: 'sides' });
@@ -179,7 +183,7 @@ fetch('api/items').then((response) => response.json()).then((data) => {
   $('title').textContent = 'Label ' + data.judge;
   $('run').textContent = 'run ' + data.runId;
   if (data.question) { $('question-text').textContent = data.question; $('question').hidden = false; }
-  else $('no-question').hidden = false;
+  else if (!data.items.every((item) => item.question)) $('no-question').hidden = false;
   const first = data.items.findIndex((item) => item.label === undefined);
   state.index = first === -1 ? 0 : first;
   render();

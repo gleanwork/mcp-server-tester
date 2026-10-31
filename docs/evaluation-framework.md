@@ -245,7 +245,11 @@ on its own, lists their verdicts in `criteria`. Each criterion is then its own
 label question, `<judge>#<id>`: `mst label`, `mst label export` and
 `mst judges check` take it as `--judge`, and the report's _Judges_ table has a
 row for each, with its pass rate, in place of the judge's. Over several reps,
-each criterion's majority wins, and a tie is `unknown`. A criterion's identity
+each criterion's majority wins, and a tie is `unknown`. The judge's verdict
+is then its criteria's: it fails when a required one (any without
+`required: false`) fails, and is `unknown` when none fails and one is
+`unknown`. A judge that skips keeps the criteria it lists, each `unknown`. A
+criterion's `id` can't have a `#`. A criterion's identity
 is the judge's unless the judge sets `criterionOptions(options, id)`: the
 options, before `schema` parses them, that decide that criterion alone. Its
 identity then hashes those in place of the judge's options, so the same
@@ -920,7 +924,7 @@ How far to trust a judge is measured, not assumed: label some trials and run [`m
 }
 ```
 
-`criteria` checks the criteria a case lists in its `judges` entry, each `{ "id", "text", "required"? }`. It asks about each one in its own model call, wrapped in the question in `criteria.ts`, and fails when a required criterion's answer is no. A criterion with `"required": false` is reported and labeled but doesn't decide the pass. Each criterion is its own label question, `criteria#<id>`, with the criterion's text as the question `mst label` shows, and its own row in the report's _Judges_ table. Its identity covers only that criterion and the judge's settings, so the same criterion (the same `id` and `text`) in several cases is one question, labeled and calibrated together, and a changed text is a new one. Write a criterion as one thing a person could check in the trial, such as "The answer gives the port from the deployed config". An `id` is letters, digits, `_`, `.` and `-`, unique in the list.
+`criteria` checks the criteria a case lists in its `judges` entry, each `{ "id", "text", "required"? }`. It asks about each one in its own model call, wrapped in the question in `criteria.ts`, and fails when a required criterion's answer is no. A criterion with `"required": false` is reported and labeled but doesn't decide the pass. Each criterion is its own label question, `criteria#<id>`, with the criterion's text as the question `mst label` shows, and its own row in the report's _Judges_ table. Its identity covers only that criterion's `id` and `text` and the judge's settings, not `required`, so the same criterion in several cases is one question, labeled and calibrated together, and a changed text is a new one. When cases word one `id` differently, `mst label` shows each trial's text with it. Write a criterion as one thing a person could check in the trial, such as "The answer gives the port from the deployed config". An `id` starts with a letter or digit, then has letters, digits, `_`, `.` and `-`, and is unique in the list.
 
 ```json
 {

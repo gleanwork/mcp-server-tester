@@ -8,7 +8,10 @@ import type { JudgeCompletionRequest } from './llmJudge.js';
 import { criterionQuestion } from './prompts/criteria.js';
 import { judgedItems } from '../evals/judgedItems.js';
 import type { StoredRun } from '../evals/runFormat.js';
+import { formatLabels, parseCsv, parseLabels } from '../evals/labels.js';
 import type { GraderScore } from '../types/index.js';
+import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
+import { z } from 'zod';
 
 vi.mock('./judgeClient.js', async (original) => ({
   ...(await original<typeof JudgeClientModule>()),
@@ -16,7 +19,10 @@ vi.mock('./judgeClient.js', async (original) => ({
   preflightJudge: vi.fn(async () => {}),
 }));
 
-afterEach(() => vi.mocked(createJudgeCompletion).mockReset());
+afterEach(() => {
+  vi.mocked(createJudgeCompletion).mockReset();
+  resetPluginsForTests();
+});
 
 const CITES = {
   id: 'cites-source',
@@ -159,15 +165,83 @@ describe('the criteria judge', () => {
     expect(identity(other, 'cites-source')).not.toBe(
       identity(a, 'cites-source')
     );
+    // `required` decides the case, not the criterion's verdict.
+    const optional = await grade([{ ...CITES, required: false }]);
+    const explicit = await grade([{ ...CITES, required: true }]);
+    expect(identity(optional, 'cites-source')).toBe(
+      identity(a, 'cites-source')
+    );
+    expect(identity(explicit, 'cites-source')).toBe(
+      identity(a, 'cites-source')
+    );
   });
 
   it("takes each criterion's majority over reps, and a tie is unknown", async () => {
     model({ 'cites-source': ['no', 'yes', 'no'], brief: ['yes', 'no', 'yes'] });
     const three = await grade([CITES, BRIEF], { reps: 3 });
     expect(three.criteria?.map((c) => c.verdict)).toEqual(['fail', 'pass']);
+    expect(three.pass).toBe(false);
+    // The reasoning is from a rep that agrees with the verdict.
+    expect(three.criteria?.map((c) => c.reasoning)).toEqual([
+      'cites-source no',
+      'brief yes',
+    ]);
     model({ 'cites-source': ['no', 'yes'] });
     const two = await grade([CITES], { reps: 2 });
     expect(two.criteria?.[0]?.verdict).toBe('unknown');
+    expect(two).toMatchObject({ pass: false, unknown: true });
+  });
+
+  it("passes when every required criterion's majority passes, though no rep passed whole", async () => {
+    // Reps 1 and 2 each fail one criterion; each criterion passes 2 to 1.
+    model({
+      'cites-source': ['no', 'yes', 'yes'],
+      brief: ['yes', 'no', 'yes'],
+    });
+    const score = await grade([CITES, BRIEF], { reps: 3 });
+    expect(score.criteria?.map((c) => c.verdict)).toEqual(['pass', 'pass']);
+    expect(score.pass).toBe(true);
+    expect(score.unknown).toBeUndefined();
+  });
+
+  it("keeps a skipping judge's criteria, each unknown", async () => {
+    installPlugins([
+      {
+        meta: { name: 'skips', namespace: 'skips' },
+        judges: {
+          checks: {
+            schema: z.object({}),
+            evaluate: async () => ({
+              score: 0,
+              skipped: true,
+              reasoning: 'no answer to check',
+              criteria: [{ id: 'supported', verdict: 'pass' }],
+            }),
+          },
+        },
+      },
+    ]);
+    const result = await evaluateJudge(
+      'x',
+      {
+        judge: 'skips/judge/checks',
+        options: {},
+        label: 'skips/judge/checks',
+        threshold: 0.5,
+        reps: 1,
+      },
+      RUN
+    );
+    expect(result.details).toMatchObject({
+      skipped: true,
+      criteria: [
+        {
+          id: 'supported',
+          verdict: 'unknown',
+          judgeIdentity: expect.any(String),
+        },
+      ],
+    });
   });
 
   it("asks even when the client didn't report its calls", async () => {
@@ -209,5 +283,22 @@ describe("a criteria judge's verdicts", () => {
       judgeIdentity: score.criteria![0]!.judgeIdentity,
       reasoning: 'cites-source yes',
     });
+    // An export carries each criterion's text, and reads back.
+    const sheet = parseCsv(formatLabels('csv', stored, items, []));
+    const header = sheet[0]!;
+    expect(
+      sheet.slice(1).map((row) => row[header.indexOf('question')])
+    ).toEqual([CITES.text, BRIEF.text]);
+    const filled = formatLabels('csv', stored, items, []).replace(
+      /,pass,,,,,/,
+      ',pass,fail,,,,'
+    );
+    expect(parseLabels('csv', filled, 'labels.csv')).toEqual([
+      expect.objectContaining({
+        judge: 'criteria',
+        criterion: 'cites-source',
+        label: 'fail',
+      }),
+    ]);
   });
 });

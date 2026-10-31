@@ -344,6 +344,9 @@ function checkCriteria(criteria: unknown): void {
     const id = isRecord(criterion) ? criterion.id : undefined;
     if (typeof id !== 'string' || id === '')
       throw new Error('returned a criterion without an `id`');
+    // Its label question is `<judge>#<id>`, read back from the last `#`.
+    if (id.includes('#'))
+      throw new Error(`returned criterion "${id}", whose id has a "#"`);
     if (ids.has(id)) throw new Error(`returned criterion "${id}" twice`);
     ids.add(id);
     const { verdict, text, required, reasoning } = criterion as Record<

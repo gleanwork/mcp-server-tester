@@ -233,6 +233,10 @@ describe('checkJudgeScore', () => {
     [{ score: 1, criteria: {} }, '`criteria` that is not an array'],
     [{ score: 1, criteria: [{ verdict: 'pass' }] }, 'without an `id`'],
     [
+      { score: 1, criteria: [{ id: 'a#b', verdict: 'pass' }] },
+      'whose id has a "#"',
+    ],
+    [
       {
         score: 1,
         criteria: [

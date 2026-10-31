@@ -105,6 +105,41 @@ async function saved(page: Page, count: number): Promise<void> {
 }
 
 test.describe('the label page', () => {
+  test('shows no stray text for a part a trial lacks', async ({ page }) => {
+    const directory = await storedRun();
+    const server = await startLabelPage({
+      directory,
+      judge: 'lps/judge/keyword',
+      labeler: 'spec',
+    });
+    try {
+      await page.goto(server.url);
+      await expect(page.locator('#progress')).toHaveText(/^0 of 4 labeled/);
+      // One case has no reference answer: no block for it, and no "null".
+      for (let i = 0; i < 4; i++) {
+        await expect(page.locator('#item')).toContainText(`${i + 1} of 4`);
+        const strays = await page.locator('#item').evaluate((main) => {
+          // The spec compiles without DOM types; 3 is a text node.
+          const nodes = (
+            main as unknown as {
+              childNodes: ArrayLike<{
+                nodeType: number;
+                textContent: string | null;
+              }>;
+            }
+          ).childNodes;
+          return Array.from(nodes)
+            .filter((node) => node.nodeType === 3)
+            .map((node) => node.textContent);
+        });
+        expect(strays).toEqual([]);
+        await page.locator('#skip').click();
+      }
+    } finally {
+      await server.close();
+    }
+  });
+
   test('labels trials with the keyboard, without showing the verdict or the variant', async ({
     page,
   }) => {

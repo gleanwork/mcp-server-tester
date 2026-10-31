@@ -61,13 +61,20 @@ export const CRITERIA_JUDGE: JudgeDefinition = defineQuestionJudge({
       labelText: criterion.text,
       ...(criterion.required === false ? { required: false } : {}),
     })),
+  // A criterion's verdict depends on its id and text, not on `required`,
+  // which only says whether it decides the case.
   criterionOptions: (options, id) => ({
     ...options,
     criteria: Array.isArray(options.criteria)
-      ? options.criteria.filter(
-          (criterion: unknown) =>
-            (criterion as { id?: unknown } | null)?.id === id
-        )
+      ? options.criteria
+          .filter(
+            (criterion: unknown) =>
+              (criterion as { id?: unknown } | null)?.id === id
+          )
+          .map((criterion: unknown) => {
+            const { id, text } = criterion as { id?: unknown; text?: unknown };
+            return { id, text };
+          })
       : options.criteria,
   }),
 });

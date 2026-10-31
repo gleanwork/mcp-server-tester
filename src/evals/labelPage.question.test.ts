@@ -88,7 +88,24 @@ async function storedRun(): Promise<string> {
             { type: 'rubric', options: { rubric: { text: CAUSE }, ...judge } },
             {
               type: 'criteria',
-              criteria: [{ id: 'names-cause', text: CRITERION }],
+              criteria: [
+                { id: 'names-cause', text: CRITERION },
+                { id: 'reworded', text: 'The answer is short.' },
+              ],
+              ...judge,
+            },
+          ],
+        },
+        {
+          id: 'duration',
+          input: 'How long was checkout down',
+          judges: [
+            {
+              type: 'criteria',
+              criteria: [
+                { id: 'names-cause', text: CRITERION },
+                { id: 'reworded', text: 'The answer gives a duration.' },
+              ],
               ...judge,
             },
           ],
@@ -154,6 +171,21 @@ describe("the label page's question", () => {
     expect(await question(directory, 'rubric')).toBe(CAUSE);
     // A criterion is labeled on its own, and its text is its question.
     expect(await question(directory, 'criteria#names-cause')).toBe(CRITERION);
+    // When cases word one criterion differently, each trial shows its own.
+    expect(await question(directory, 'criteria#reworded')).toBeUndefined();
+    const reworded = await startLabelPage({
+      directory,
+      judge: 'criteria#reworded',
+    });
+    servers.push(reworded);
+    expect(
+      reworded.data.items.map((item) => [item.caseId, item.question])
+    ).toEqual(
+      expect.arrayContaining([
+        ['cause', 'The answer is short.'],
+        ['duration', 'The answer gives a duration.'],
+      ])
+    );
     // MST can't know a plugin judge's question unless it's given.
     expect(await question(directory, 'lq/judge/always')).toBeUndefined();
     expect(await question(directory, 'lq/judge/always', 'Is it right?')).toBe(

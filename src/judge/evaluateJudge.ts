@@ -148,6 +148,16 @@ export async function evaluateJudge(
     if (missing !== undefined)
       return judgeSkipped(label, identity, `no ${missing}`, undefined);
 
+    const criterionIdentity = (criterion: string): string =>
+      judge.criterionOptions
+        ? judgeIdentity(
+            request.judge,
+            judge,
+            judge.criterionOptions(request.options, criterion),
+            { threshold, reps }
+          )
+        : identity.judgeIdentity;
+
     const repScores: CheckedJudgeScore[] = [];
     for (let i = 0; i < reps; i++) {
       let repScore: CheckedJudgeScore;
@@ -163,43 +173,51 @@ export async function evaluateJudge(
         );
       }
       repScores.push(repScore);
-      if (repScore.skipped)
+      if (repScore.skipped) {
+        // A skip gives no verdict, so each criterion it lists is unknown:
+        // its labels still count, as a trial the judge couldn't decide.
+        const criteria = combineCriteria([repScore], criterionIdentity)?.map(
+          (criterion) => ({ ...criterion, verdict: 'unknown' as const })
+        );
         return judgeSkipped(
           label,
           identity,
           repScore.reasoning,
           sumJudgeUsage(repScores.map((v) => v.usage)),
-          repScore.metadata
+          repScore.metadata,
+          criteria
         );
+      }
     }
     const usage = sumJudgeUsage(repScores.map((v) => v.usage));
-    const criteria = combineCriteria(repScores, (criterion) =>
-      judge.criterionOptions
-        ? judgeIdentity(
-            request.judge,
-            judge,
-            judge.criterionOptions(request.options, criterion),
-            { threshold, reps }
-          )
-        : identity.judgeIdentity
-    );
+    const final = repScores.at(-1);
+    if (!final)
+      return judgeError(`Judge "${label}" error: no scores collected`, label);
+    const criteria = combineCriteria(repScores, criterionIdentity);
+    // A judge that lists criteria is what its criteria are, each decided by
+    // its own majority over the reps, so the two never disagree.
+    const fromCriteria = criteria && criteriaVerdict(criteria);
     const answered = repScores.filter((v) => v.unknown !== true);
     const last = answered.at(-1);
-    if (!last) {
-      const final = repScores.at(-1);
-      if (!final)
-        return judgeError(`Judge "${label}" error: no scores collected`, label);
-      return judgeUnknown(label, identity, final, usage, criteria);
-    }
+    if (fromCriteria === 'unknown' || (!last && fromCriteria === undefined))
+      return judgeUnknown(label, identity, last ?? final, usage, criteria);
 
     const scores = answered.map((v) => v.score);
-    const score = mean(scores);
+    const score = scores.length
+      ? mean(scores)
+      : fromCriteria === 'pass'
+        ? 1
+        : 0;
     // A judge that decides pass/fail itself wins by majority over the reps;
     // otherwise the mean score meets the threshold or not.
     const judgeDecides = answered.some((v) => v.judgePass !== undefined);
-    const passed = judgeDecides
-      ? answered.filter((v) => v.pass).length * 2 > answered.length
-      : score >= threshold;
+    const passed =
+      fromCriteria !== undefined
+        ? fromCriteria === 'pass'
+        : judgeDecides
+          ? answered.filter((v) => v.pass).length * 2 > answered.length
+          : score >= threshold;
+    const shown = last ?? final;
     const spread = answered.length > 1 ? scoreSpread(scores, score) : undefined;
     const unknownReps = repScores.length - answered.length;
     const repNote =
@@ -217,16 +235,16 @@ export async function evaluateJudge(
       pass: passed,
       message: passed
         ? `Judge "${label}" passed with score ${score.toFixed(2)}${repNote}`
-        : `Judge "${label}" failed with score ${score.toFixed(2)} (threshold: ${threshold})${repNote}. ${last.reasoning ?? ''}`,
+        : `Judge "${label}" failed with score ${score.toFixed(2)} (threshold: ${threshold})${repNote}. ${shown.reasoning ?? ''}`,
       details: {
         judgeName: label,
         ...identity,
         score,
-        reasoning: last.reasoning,
-        ...(last.provider !== undefined
-          ? { judgeProvider: last.provider }
+        reasoning: shown.reasoning,
+        ...(shown.provider !== undefined
+          ? { judgeProvider: shown.provider }
           : {}),
-        ...(last.model !== undefined ? { judgeModel: last.model } : {}),
+        ...(shown.model !== undefined ? { judgeModel: shown.model } : {}),
         ...(spread !== undefined
           ? {
               scores,
@@ -234,10 +252,12 @@ export async function evaluateJudge(
               highVariance: spread > HIGH_VARIANCE,
             }
           : {}),
-        ...(last.subScores !== undefined ? { subScores: last.subScores } : {}),
+        ...(shown.subScores !== undefined
+          ? { subScores: shown.subScores }
+          : {}),
         ...(criteria !== undefined ? { criteria } : {}),
         ...(usage !== undefined ? { usage } : {}),
-        ...(last.metadata !== undefined ? { metadata: last.metadata } : {}),
+        ...(shown.metadata !== undefined ? { metadata: shown.metadata } : {}),
       },
     };
   } catch (err) {
@@ -250,9 +270,10 @@ export async function evaluateJudge(
 
 /**
  * Each criterion's verdict over the reps: the majority of the reps that
- * gave it pass or fail, unknown on a tie or when none did. Its text,
- * `required` and reasoning are the last rep's, and its identity is
- * `identityOf` it. Undefined when no rep listed criteria.
+ * gave it pass or fail, unknown on a tie or when none did. Its text and
+ * `required` are the last rep's, its reasoning the last rep's that agrees
+ * with the verdict, and its identity is `identityOf` it. Undefined when no
+ * rep listed criteria.
  */
 function combineCriteria(
   reps: readonly CheckedJudgeScore[],
@@ -267,15 +288,32 @@ function combineCriteria(
     const passed = verdicts.filter((v) => v.verdict === 'pass').length;
     const failed = verdicts.filter((v) => v.verdict === 'fail').length;
     const last = verdicts.at(-1)!;
+    const verdict =
+      passed > failed ? 'pass' : failed > passed ? 'fail' : 'unknown';
+    const { reasoning } =
+      [...verdicts].reverse().find((v) => v.verdict === verdict) ?? last;
     return {
       id,
       ...(last.text !== undefined ? { text: last.text } : {}),
       ...(last.required === false ? { required: false as const } : {}),
-      verdict: passed > failed ? 'pass' : failed > passed ? 'fail' : 'unknown',
-      ...(last.reasoning !== undefined ? { reasoning: last.reasoning } : {}),
+      verdict,
+      ...(reasoning !== undefined ? { reasoning } : {}),
       judgeIdentity: identityOf(id),
     };
   });
+}
+
+/**
+ * A judge's verdict from its criteria: fail when a required criterion
+ * fails, unknown when none fails and one is unknown, else pass.
+ */
+function criteriaVerdict(
+  criteria: readonly GraderCriterion[]
+): GraderCriterion['verdict'] {
+  const required = criteria.filter((c) => c.required !== false);
+  if (required.some((c) => c.verdict === 'fail')) return 'fail';
+  if (required.some((c) => c.verdict === 'unknown')) return 'unknown';
+  return 'pass';
 }
 
 /** A judge's identity, and whether MST can see its version change. */
@@ -325,7 +363,8 @@ function judgeSkipped(
   identity: JudgeIdentityDetails,
   reason: string | undefined,
   usage: ReturnType<typeof sumJudgeUsage>,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  criteria?: GraderCriterion[]
 ): ValidationResult {
   return {
     pass: true,
@@ -335,6 +374,7 @@ function judgeSkipped(
       ...identity,
       skipped: true,
       ...(reason !== undefined ? { reasoning: reason } : {}),
+      ...(criteria !== undefined ? { criteria } : {}),
       ...(usage !== undefined ? { usage } : {}),
       ...(metadata !== undefined ? { metadata } : {}),
     },

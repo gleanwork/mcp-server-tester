@@ -117,6 +117,7 @@ const COLUMNS = [
   'labeler',
   'labeledAt',
   'note',
+  'question',
   'input',
   'answer',
 ] as const;
@@ -158,6 +159,7 @@ function rowOf(item: JudgedItem | undefined, label?: LabelRecord): Row {
     ...optional('labeler', label?.labeler),
     ...optional('labeledAt', label?.labeledAt),
     ...optional('note', label?.note),
+    ...optional('question', item?.question),
     ...optional('input', item?.input),
     ...optional('answer', item?.answer),
   };
