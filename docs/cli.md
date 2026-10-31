@@ -780,12 +780,17 @@ A label is a person's answer to a judge's question for one trial: `pass` or `fai
 ### Usage
 
 ```bash
+npx mst label <run> --judge correctness      # label on a page, one trial at a time
 npx mst label export <run> -o labels.csv     # a row for each judge verdict, to fill in
 npx mst label import <run> labels.csv        # the filled-in labels, into the run
 npx mst label export <run> --format judgekeeper --judge correctness > records.jsonl
 ```
 
 `<run>` is a run directory, an eval directory (its latest run), or a run ID or its short form (`7f3c2a`) under `--dir` (default `.mcp-test-results`).
+
+With a run and `--judge`, `mst label` serves a page on this machine and opens it in a browser. The page shows one of the judge's trials at a time: the case's input and reference answer, the calls the client made, and its answer. It doesn't show the judge's verdict or which variant ran the trial, and it mixes the variants' trials in a fixed order, so neither sways you. For a built-in rubric, it shows the rubric as the judge's question. Press `P` or `F` to label a trial `pass` or `fail`, and add a note if you like. For a pairwise judge, the page shows the two variants' trials as A and B, in an order fixed for each case, and you press `A`, `B` or `T` (tie). Each label is stored as soon as you give it, checked as `import` checks one. The page starts at the first trial without a label and shows the labels you gave before, which you can change. Press Ctrl+C in the terminal when you're done.
+
+The page binds to 127.0.0.1 on a random path, so other pages in your browser can't read the run or store labels. A run stored with `redactStoredResponses` has no answers to show, so `mst label` refuses it. Page options: `--judge <name>` (required: the judge's name in results), `--split <test|dev>` (the split new labels go in; a label you change keeps its split), `--labeler <name>`, `--port <n>`, `--no-open` (print the address only), `-d, --dir <directory>`.
 
 `export` writes a row for each verdict the run's judges gave. Each row has the judge's name in results (a `rubric` judge's rubric, else its reference), the variant, the case, the trial (from 0) or, for a pairwise judge, the `baseline` variant, the `split`, the judge's `verdict`, and the case's input and the trial's answer. Rows that already have a label carry it, with its `labeler`, `labeledAt` and `note`. Fill in the `label` column and import the file back. A run stored with `redactStoredResponses` has no answers to export, and the command says so: to label from answers, collect with `"redactStoredResponses": false`.
 

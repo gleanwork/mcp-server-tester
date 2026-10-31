@@ -54,6 +54,8 @@ import {
 import {
   labelExport,
   labelImport,
+  labelPage,
+  type LabelPageCommandOptions,
   type LabelExportCommandOptions,
   type LabelImportCommandOptions,
 } from './commands/label/index.js';
@@ -91,7 +93,10 @@ program
     'MST (MCP Server Tester): CLI tools for MCP server evaluation and testing.\n' +
       'Also available as `mcp-server-tester`.'
   )
-  .version(packageJson.version);
+  .version(packageJson.version)
+  // mst's own options come before a command, so a command's options all
+  // reach it (mst label's --judge isn't taken from mst label export's).
+  .enablePositionalOptions();
 
 // Init command
 program
@@ -277,13 +282,48 @@ judgesCommand
   );
 
 // Label command: a person's labels for a run's judge verdicts (ADR 0009)
+const runArgumentHelp =
+  'A run directory, an eval directory (its latest run), or a run ID or its short form (7f3c2a)';
 const labelCommand = program
   .command('label')
   .description(
-    "A person's labels for a run's judge verdicts, which mst judges check measures judges against"
-  );
-const runArgumentHelp =
-  'A run directory, an eval directory (its latest run), or a run ID or its short form (7f3c2a)';
+    "A person's labels for a run's judge verdicts, which mst judges check measures judges against. With a run, serves a page that shows one trial at a time, without the judge's verdict, and stores your labels"
+  )
+  // Its options stop at import and export, which take their own --judge.
+  .enablePositionalOptions()
+  .argument('[run]', runArgumentHelp)
+  .option(
+    '--judge <name>',
+    "The judge whose verdicts to label, by its name in results (a rubric judge's rubric)"
+  )
+  .option(
+    '--split <split>',
+    "The split new labels go in: test or dev (default: each case's own)"
+  )
+  .option('--labeler <name>', 'Who is labeling (default: your user name)')
+  .option('--port <n>', 'The port to serve on (default: any free port)')
+  .option('--no-open', "Print the page's address without opening a browser")
+  .option(
+    '-d, --dir <directory>',
+    'Where runs are written, to find a run by ID',
+    '.mcp-test-results'
+  )
+  .action(async (run: string | undefined, options: LabelPageCommandOptions) => {
+    if (run === undefined) {
+      labelCommand.help();
+      return;
+    }
+    const server = await labelPage(run, options);
+    await new Promise<void>((resolve) => {
+      process.once('SIGINT', resolve);
+      process.once('SIGTERM', resolve);
+    });
+    await server.close();
+    const written = server.written();
+    console.log(
+      `\nStored ${written} label${written === 1 ? '' : 's'}. Run mst judges check to measure the judge.`
+    );
+  });
 labelCommand
   .command('import')
   .description(

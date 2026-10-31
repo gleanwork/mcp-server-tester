@@ -1,6 +1,7 @@
 /**
  * `mst label`: a person's labels for a run's judge verdicts (ADR 0009).
  *
+ *   mst label <run> --judge <name> [--split test|dev] [--labeler <name>] [--port <n>] [--no-open]
  *   mst label import <run> <file> [--format csv|jsonl|judgekeeper] [--labeler <name>]
  *   mst label export <run> [--judge <name>...] [--format csv|jsonl|judgekeeper] [-o <file>]
  */
@@ -18,6 +19,11 @@ import {
   type LabelFormat,
 } from '../../../evals/labels.js';
 import { judgedItems, labelKey } from '../../../evals/judgedItems.js';
+import {
+  startLabelPage,
+  type LabelPageServer,
+} from '../../../evals/labelPage.js';
+import { LABEL_SPLITS } from '../../../evals/runFormat.js';
 import { labelQuestion, readRunDirectory } from '../../../evals/runFormat.js';
 import { resolveRunArgument } from '../../runArgument.js';
 
@@ -33,6 +39,68 @@ export interface LabelExportCommandOptions {
   judge?: string[];
   output?: string;
   dir?: string;
+}
+
+export interface LabelPageCommandOptions {
+  judge?: string;
+  split?: string;
+  labeler?: string;
+  port?: string;
+  /** Commander's `--no-open`. */
+  open?: boolean;
+  dir?: string;
+}
+
+/**
+ * `mst label <run> --judge <name>`: serves the label page and opens it.
+ * Returns the server; the CLI keeps it up until Ctrl+C.
+ */
+export async function labelPage(
+  run: string,
+  options: LabelPageCommandOptions,
+  print: (text: string) => void = (text) => process.stdout.write(text),
+  openPage: (url: string) => Promise<unknown> = async (url) => {
+    const { default: openBrowser } = await import('open');
+    return openBrowser(url);
+  }
+): Promise<LabelPageServer> {
+  if (options.judge === undefined)
+    throw new Error(
+      'Give --judge <name>: the judge whose verdicts to label, by its name in results.'
+    );
+  const split = options.split;
+  if (
+    split !== undefined &&
+    !LABEL_SPLITS.includes(split as (typeof LABEL_SPLITS)[number])
+  )
+    throw new Error(`--split ${split} isn't ${LABEL_SPLITS.join(' or ')}.`);
+  const port = options.port === undefined ? undefined : Number(options.port);
+  if (
+    port !== undefined &&
+    !(Number.isInteger(port) && port >= 0 && port < 65536)
+  )
+    throw new Error(`--port ${options.port} isn't a port number.`);
+  const directory = await resolveRunArgument(run, options.dir);
+  const server = await startLabelPage({
+    directory,
+    judge: options.judge,
+    ...(split !== undefined
+      ? { split: split as (typeof LABEL_SPLITS)[number] }
+      : {}),
+    ...(options.labeler !== undefined ? { labeler: options.labeler } : {}),
+    ...(port !== undefined ? { port } : {}),
+  });
+  const labeled = server.data.items.filter(
+    (item) => item.label !== undefined
+  ).length;
+  print(
+    `Labeling ${options.judge} in ${directory}: ${server.data.items.length} verdict${server.data.items.length === 1 ? '' : 's'}, ${labeled} labeled.\n${server.url}\nPress Ctrl+C when you're done.\n`
+  );
+  if (options.open !== false)
+    await openPage(server.url).catch(() => {
+      print('Could not open a browser; open the address above.\n');
+    });
+  return server;
 }
 
 function labelFormat(value: string | undefined): LabelFormat | undefined {

@@ -1,0 +1,391 @@
+/**
+ * `mst label <run> --judge <name>`: a page on this machine that shows a
+ * person one of a judge's trials at a time, without the judge's verdict, and
+ * stores their answer as a label (ADR 0009).
+ *
+ * The page binds to 127.0.0.1 and serves under a random path, and checks the
+ * Host header, so another page in the browser can't read the run or write
+ * labels.
+ */
+
+import { createHash, randomBytes } from 'node:crypto';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { BUILT_IN_RUBRICS } from '../judge/rubrics.js';
+import type {
+  EvalCaseResult,
+  RunReportEvent,
+  TrialResult,
+} from '../types/reporter.js';
+import { judgedItems, labelKey, type JudgedItem } from './judgedItems.js';
+import { labelPageHtml } from './labelPageHtml.js';
+import {
+  checkImportedLabels,
+  defaultSplit,
+  readLabels,
+  writeLabels,
+  type ImportedLabel,
+  type LabelSplit,
+} from './labels.js';
+import { trialTrace } from './runReport.js';
+import {
+  labelQuestion,
+  readRunDirectory,
+  type LabelRecord,
+  type StoredRun,
+} from './runFormat.js';
+
+/** What a trial did, as the page shows it: never its scores. */
+export interface LabelPageTrial {
+  answer?: string;
+  /** Whether the client recorded what it called. */
+  traced: boolean;
+  events: RunReportEvent[];
+}
+
+/** One of a pairwise comparison's two sides, shown as A or B. */
+export interface LabelPageSide {
+  /** The label that prefers this side. */
+  label: 'baseline' | 'candidate';
+  trials: LabelPageTrial[];
+}
+
+/**
+ * One verdict to label. It names neither the variant nor the judge's
+ * verdict, so neither sways the person.
+ */
+export interface LabelPageItem {
+  id: number;
+  caseId: string;
+  /** Pointwise: the trial's index. */
+  trial?: number;
+  input?: string;
+  /** The answer the case expects, when it gives one. */
+  reference?: string;
+  split: LabelSplit;
+  /** The stored label, when there is one. */
+  label?: string;
+  note?: string;
+  /** Pointwise: the trial. */
+  trace?: LabelPageTrial;
+  /** Pairwise: the two sides, in an order fixed for the case. */
+  sides?: [LabelPageSide, LabelPageSide];
+}
+
+/** What the page loads. */
+export interface LabelPageData {
+  runId: string;
+  judge: string;
+  kind: 'pointwise' | 'pairwise';
+  /** The question the judge answers, when MST knows its text. */
+  question?: string;
+  items: LabelPageItem[];
+}
+
+export interface LabelPageOptions {
+  /** The run directory. */
+  directory: string;
+  /** The judge's name in results, as its labels have it. */
+  judge: string;
+  /** Who is labeling. @default the OS user name */
+  labeler?: string;
+  /** The split new labels go in. @default each case's own */
+  split?: LabelSplit;
+  /** @default 0, any free port */
+  port?: number;
+}
+
+export interface LabelPageServer {
+  /** The page's address, with its random path. */
+  url: string;
+  data: LabelPageData;
+  /** How many labels the page has stored since it started. */
+  written(): number;
+  close(): Promise<void>;
+}
+
+/** The largest request body the page accepts: a label and a note. */
+const MAX_BODY = 64 * 1024;
+
+/**
+ * Starts the label page for a run's judge. Throws when the run has no
+ * answers to show (it redacts stored responses) or no verdicts from the
+ * judge.
+ */
+export async function startLabelPage(
+  options: LabelPageOptions
+): Promise<LabelPageServer> {
+  const stored = await readRunDirectory(options.directory);
+  if (stored.run.redactStoredResponses)
+    throw new Error(
+      `Run ${stored.run.runId} redacts stored responses, so it has no answers to label. Collect it again with "redactStoredResponses": false in the eval config, or label from another tool with mst label import.`
+    );
+  const all = judgedItems(stored);
+  const items = all.filter(
+    (item) =>
+      labelQuestion(item) === options.judge && item.verdict !== undefined
+  );
+  if (items.length === 0) {
+    const names = [...new Set(all.map((item) => labelQuestion(item)))].sort();
+    throw new Error(
+      `Run ${stored.run.runId} has no verdicts from ${options.judge}${names.length ? `; its judges are ${names.join(', ')}` : ''}.`
+    );
+  }
+  const labels = new Map(
+    (await readLabels(options.directory)).map((label) => [
+      labelKey(label),
+      label,
+    ])
+  );
+  const order = items
+    .map((item) => ({ item, rank: hash(stored.run.runId, labelKey(item)) }))
+    .sort((a, b) => a.rank.localeCompare(b.rank))
+    .map(({ item }) => item);
+  const data = pageData(stored, options.judge, order, labels, options.split);
+  const token = randomBytes(18).toString('base64url');
+  const html = labelPageHtml();
+  let written = 0;
+
+  async function label(body: unknown): Promise<LabelRecord> {
+    const { id, label, note } = (body ?? {}) as Record<string, unknown>;
+    const item = typeof id === 'number' ? order[id] : undefined;
+    if (!item) throw new LabelPageError(404, 'No such item.');
+    if (typeof label !== 'string')
+      throw new LabelPageError(400, 'A label is a string.');
+    if (note !== undefined && typeof note !== 'string')
+      throw new LabelPageError(400, 'A note is a string.');
+    const imported: ImportedLabel = {
+      judge: item.judge,
+      ...(item.criterion !== undefined ? { criterion: item.criterion } : {}),
+      variant: item.variant,
+      caseId: item.caseId,
+      ...(item.trial !== undefined ? { trial: item.trial } : {}),
+      ...(item.baseline !== undefined ? { baseline: item.baseline } : {}),
+      label,
+      // --split places new labels; a label given again keeps its split.
+      ...(options.split !== undefined && !labels.has(labelKey(item))
+        ? { split: options.split }
+        : {}),
+      ...(note ? { note } : {}),
+      source: 'the label page',
+    };
+    let records: LabelRecord[];
+    try {
+      records = checkImportedLabels([imported], all, [...labels.values()], {
+        ...(options.labeler !== undefined ? { labeler: options.labeler } : {}),
+      });
+    } catch (error) {
+      throw new LabelPageError(
+        400,
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+    await writeLabels(options.directory, records);
+    const record = records[0]!;
+    labels.set(labelKey(record), record);
+    const shown = data.items[id as number]!;
+    shown.label = record.label;
+    shown.split = record.split;
+    if (record.note !== undefined) shown.note = record.note;
+    else delete shown.note;
+    written++;
+    return record;
+  }
+
+  const server = http.createServer((request, response) => {
+    handle(request, response).catch((error: unknown) => {
+      const status = error instanceof LabelPageError ? error.status : 500;
+      send(response, status, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  });
+
+  async function handle(
+    request: http.IncomingMessage,
+    response: http.ServerResponse
+  ): Promise<void> {
+    const { port } = server.address() as AddressInfo;
+    const host = request.headers.host;
+    if (host !== `127.0.0.1:${port}` && host !== `localhost:${port}`)
+      throw new LabelPageError(403, 'Wrong host.');
+    const url = new URL(request.url ?? '/', `http://${host}`);
+    const prefix = `/${token}/`;
+    if (!url.pathname.startsWith(prefix))
+      throw new LabelPageError(404, 'Not found.');
+    const route = url.pathname.slice(prefix.length);
+    if (request.method === 'GET' && route === '') {
+      response.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-security-policy':
+          "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'",
+      });
+      response.end(html);
+      return;
+    }
+    if (request.method === 'GET' && route === 'api/items') {
+      send(response, 200, data);
+      return;
+    }
+    if (request.method === 'POST' && route === 'api/label') {
+      if (!request.headers['content-type']?.startsWith('application/json'))
+        throw new LabelPageError(415, 'Send JSON.');
+      const record = await label(await readJson(request));
+      send(response, 200, { label: record.label, split: record.split });
+      return;
+    }
+    throw new LabelPageError(404, 'Not found.');
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(options.port ?? 0, '127.0.0.1', () => resolve());
+  });
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}/${token}/`,
+    data,
+    written: () => written,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.closeAllConnections();
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
+}
+
+class LabelPageError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+function send(
+  response: http.ServerResponse,
+  status: number,
+  body: unknown
+): void {
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+  });
+  response.end(JSON.stringify(body));
+}
+
+async function readJson(request: http.IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY) throw new LabelPageError(413, 'Too large.');
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+  } catch {
+    throw new LabelPageError(400, 'Not JSON.');
+  }
+}
+
+/** A stable order that mixes the variants, so their trials don't come in runs. */
+function hash(...parts: string[]): string {
+  return createHash('sha256').update(parts.join('\0')).digest('hex');
+}
+
+function pageData(
+  stored: StoredRun,
+  judge: string,
+  items: readonly JudgedItem[],
+  labels: ReadonlyMap<string, LabelRecord>,
+  split: LabelSplit | undefined
+): LabelPageData {
+  const cases = new Map<string, EvalCaseResult>();
+  for (const variant of stored.summary.variants)
+    for (const result of variant.result?.caseResults ?? [])
+      cases.set(`${variant.name}\0${result.id}`, result);
+  const trialsOf = (variant: string, caseId: string) => {
+    const result = cases.get(`${variant}\0${caseId}`);
+    if (!result) return [];
+    const trials: Array<TrialResult | EvalCaseResult> = result.trialResults
+      ?.length
+      ? result.trialResults
+      : [result];
+    return trials.map(pageTrial);
+  };
+  const pairwise = items.some((item) => item.baseline !== undefined);
+  return {
+    runId: stored.run.runId,
+    judge,
+    kind: pairwise ? 'pairwise' : 'pointwise',
+    ...(judge in BUILT_IN_RUBRICS
+      ? { question: BUILT_IN_RUBRICS[judge as keyof typeof BUILT_IN_RUBRICS] }
+      : {}),
+    items: items.map((item, id): LabelPageItem => {
+      const caseResult = cases.get(`${item.variant}\0${item.caseId}`);
+      const existing = labels.get(labelKey(item));
+      const reference = (
+        caseResult?.request as { reference?: unknown } | undefined
+      )?.reference;
+      const base = {
+        id,
+        caseId: item.caseId,
+        ...(item.input !== undefined ? { input: item.input } : {}),
+        ...(typeof reference === 'string' ? { reference } : {}),
+        split: existing?.split ?? split ?? defaultSplit(item.caseId),
+        ...(existing ? { label: existing.label } : {}),
+        ...(existing?.note !== undefined ? { note: existing.note } : {}),
+      };
+      if (item.baseline === undefined) {
+        const trial = trialsOf(item.variant, item.caseId)[item.trial ?? 0];
+        return {
+          ...base,
+          trial: item.trial ?? 0,
+          trace: trial
+            ? {
+                ...trial,
+                ...(item.answer !== undefined ? { answer: item.answer } : {}),
+              }
+            : { traced: false, events: [] },
+        };
+      }
+      const baseline: LabelPageSide = {
+        label: 'baseline',
+        trials: trialsOf(item.baseline, item.caseId),
+      };
+      const candidate: LabelPageSide = {
+        label: 'candidate',
+        trials: trialsOf(item.variant, item.caseId),
+      };
+      // Which side is A is fixed for the case but not always the baseline.
+      const flip =
+        parseInt(
+          hash(
+            stored.run.runId,
+            item.baseline,
+            item.variant,
+            item.caseId
+          ).slice(0, 2),
+          16
+        ) %
+          2 ===
+        1;
+      return {
+        ...base,
+        sides: flip ? [candidate, baseline] : [baseline, candidate],
+      };
+    }),
+  };
+}
+
+function pageTrial(trial: TrialResult | EvalCaseResult): LabelPageTrial {
+  const { finalText, traced, events } = trialTrace(trial);
+  return {
+    ...(finalText !== undefined ? { answer: finalText } : {}),
+    traced: traced ?? false,
+    events,
+  };
+}
