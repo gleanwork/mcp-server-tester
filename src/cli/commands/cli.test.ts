@@ -377,13 +377,14 @@ describe('mst CLI', () => {
     it('lists and shows built-in judges without plugins', async () => {
       const list = await runBin('judges');
       expect(list.exitCode).toBe(0);
-      expect(list.stdout).toMatch(/^rubric +judge {2}An LLM grades/m);
-      expect(list.stdout).toMatch(/^task-completion +judge {2}Asks whether/m);
+      expect(list.stdout).toMatch(/^rubric +judge +An LLM grades/m);
+      expect(list.stdout).toMatch(/^task-completion +judge +Asks whether/m);
       expect(list.stdout).toMatch(
-        /^grounded-in-tools {2}judge {2}Asks whether every claim/m
+        /^grounded-in-tools {2}judge +Asks whether every claim/m
       );
+      expect(list.stdout).toMatch(/^tool-use +judge +Asks whether the client/m);
       expect(list.stdout).toMatch(
-        /^tool-use +judge {2}Asks whether the client/m
+        /^preference +pairwise {2}Asks which run better/m
       );
 
       const show = await runBin('judges', 'show', 'rubric', '--json');

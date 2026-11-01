@@ -31,6 +31,11 @@ const TAGS = [
   'result',
   'final_answer',
 ];
+/**
+ * The tags a pair adds around each trial. They are escaped only in a pair,
+ * so a single trace renders as it did before pairs existed.
+ */
+const PAIR_TAG_PATTERN = /<(\/?)(assistant_a|assistant_b)\b/gi;
 const TAG_PATTERN = new RegExp(`<(/?)(${TAGS.join('|')})\\b`, 'gi');
 
 /** A value as text, with the trace's own tags escaped. */
@@ -114,14 +119,56 @@ export function renderJudgeTrace(
   input: JudgeInput,
   options: JudgeTraceOptions = {}
 ): string {
-  const max = options.maxToolOutputSize ?? DEFAULT_TRACE_OUTPUT_BYTES;
-  const { trial } = input;
+  return [
+    ...caseParts(input.case, options),
+    ...trialParts(input.trial, options),
+  ].join('\n\n');
+}
+
+/**
+ * Two trials of one case, as a pairwise judge reads them: the request once,
+ * then each trial's trace and answer, A first.
+ */
+export function renderJudgePair(
+  input: {
+    case: JudgeInput['case'];
+    a: JudgeInput['trial'];
+    b: JudgeInput['trial'];
+  },
+  options: JudgeTraceOptions = {}
+): string {
+  // A trial's own parts hold no pair tag but its data's, so each one there
+  // is escaped; the request and reference are outside both trials.
+  const escapePair = (part: string) =>
+    part.replace(PAIR_TAG_PATTERN, '&lt;$1$2');
+  const trial = (t: JudgeInput['trial']) =>
+    trialParts(t, options).map(escapePair).join('\n\n');
+  return [
+    ...caseParts(input.case, options).map(escapePair),
+    `<assistant_a>\n${trial(input.a)}\n</assistant_a>`,
+    `<assistant_b>\n${trial(input.b)}\n</assistant_b>`,
+  ].join('\n\n');
+}
+
+function caseParts(
+  judgeCase: JudgeInput['case'],
+  options: JudgeTraceOptions
+): string[] {
   const parts = [
-    `<request>\n${text(input.case.input.prompt ?? '')}\n</request>`,
+    `<request>\n${text(judgeCase.input.prompt ?? '')}\n</request>`,
   ];
-  const reference = input.case.expected.answer;
+  const reference = judgeCase.expected.answer;
   if (options.reference && reference !== undefined && reference !== null)
     parts.push(`<reference_answer>\n${text(reference)}\n</reference_answer>`);
+  return parts;
+}
+
+function trialParts(
+  trial: JudgeInput['trial'],
+  options: JudgeTraceOptions
+): string[] {
+  const max = options.maxToolOutputSize ?? DEFAULT_TRACE_OUTPUT_BYTES;
+  const parts: string[] = [];
   const partial = trial.evidence === 'observed';
   const open = partial ? '<trace complete="false">' : '<trace>';
   if (!traceRecorded(trial))
@@ -139,5 +186,5 @@ export function renderJudgeTrace(
       `${open}\n${partial ? "The client records tool calls on a best-effort basis, so it may have made calls that aren't shown.\n" : ''}${trial.events.map((event, i) => eventView(event, i, max)).join('\n')}\n</trace>`
     );
   parts.push(`<final_answer>\n${text(trial.text)}\n</final_answer>`);
-  return parts.join('\n\n');
+  return parts;
 }

@@ -24,6 +24,7 @@ import type {
   PairwisePreference,
 } from '../judge/pairwiseContract.js';
 import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
+import { PREFERENCE_JUDGE } from '../judge/preferenceJudge.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import {
   parseExtensionOptions,
@@ -31,14 +32,23 @@ import {
 } from '../plugins/plugin.js';
 import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 
-const pairwiseJudges = extensionLookup('pairwiseJudges', () => ({}));
+function builtinPairwiseJudges(): Readonly<
+  Record<string, PairwiseJudgeDefinition>
+> {
+  return { preference: PREFERENCE_JUDGE };
+}
 
-/** The pairwise judge `reference` names: `<namespace>/pairwise-judge/<name>` from a plugin. */
+const pairwiseJudges = extensionLookup('pairwiseJudges', builtinPairwiseJudges);
+
+/**
+ * The pairwise judge `reference` names: a built-in (`preference`) or
+ * `<namespace>/pairwise-judge/<name>` from a plugin.
+ */
 export function getPairwiseJudge(reference: string): PairwiseJudgeDefinition {
   return pairwiseJudges.get(reference);
 }
 
-/** Installed plugins' pairwise judges, by reference, sorted. */
+/** The built-in and installed plugins' pairwise judges, by reference, sorted. */
 export function listPairwiseJudges(): Array<[string, PairwiseJudgeDefinition]> {
   return pairwiseJudges.list();
 }
@@ -334,11 +344,7 @@ async function judgeCase(
       strength: toward.reduce((sum, v) => sum + v.strength!, 0) / toward.length,
     }),
     ...(both && { consistent: majority(forward) === majority(reverse) }),
-    ...((all.find((v) => v.preference === preference) ?? last).reasoning !==
-      undefined && {
-      reasoning: (all.find((v) => v.preference === preference) ?? last)
-        .reasoning,
-    }),
+    ...reasoningOf(forward, reverse, preference),
     ...(dimensions && { dimensions }),
     ...(usage && { usage }),
     ...(last.provider && { provider: last.provider }),
@@ -346,6 +352,28 @@ async function judgeCase(
     ...(last.version && { version: last.version }),
     ...(last.metadata && { metadata: last.metadata }),
   };
+}
+
+/**
+ * The reasoning of a vote for the preference, a forward one first. A
+ * swapped vote's reasoning names the runs as the judge saw them, so it
+ * says so.
+ */
+function reasoningOf(
+  forward: readonly PairwisePreference[],
+  reverse: readonly PairwisePreference[],
+  preference: PreferredSide
+): { reasoning?: string } {
+  const vote =
+    forward.find((v) => v.preference === preference) ??
+    reverse.find((v) => v.preference === preference);
+  const chosen = vote ?? [...forward, ...reverse].at(-1)!;
+  if (chosen.reasoning === undefined) return {};
+  return forward.includes(chosen)
+    ? { reasoning: chosen.reasoning }
+    : {
+        reasoning: `(With the runs swapped, so the candidate was shown first, as A or the baseline.) ${chosen.reasoning}`,
+      };
 }
 
 function summarize(

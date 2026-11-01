@@ -310,7 +310,8 @@ resumes as before.
 ### Pairwise judges
 
 A pairwise judge compares two runs of the same case, a baseline and a
-candidate, and says which is better. It is a separate extension kind,
+candidate, and says which is better. MST has one built in,
+[`preference`](#the-preference-pairwise-judge). It is a separate extension kind,
 `pairwiseJudges`, because a preference is not a score against a threshold:
 pointwise judges decide whether a case passes, pairwise judges decide which
 variant did better.
@@ -955,9 +956,27 @@ How far to trust a judge is measured, not assumed: label some trials and run [`m
 }
 ```
 
+### The `preference` pairwise judge
+
+`preference` is MST's built-in [pairwise judge](#pairwise-judges). It reads both trials of a case and asks which assistant better did what the user asked: A, B or tie. It weighs the final answer first (does it give the user what they asked for, correctly, as its tool results show?) and the tool use only when the answers are even. A claimed success its tool results don't show loses to an answer that says plainly what the assistant couldn't do. It shows the request and the reference answer once, then each trial's trace and answer, and its prompt is in [`src/judge/prompts/preference.ts`](../src/judge/prompts/preference.ts).
+
+MST asks it in both orders (`swapPositions`) and reconciles the two answers by majority, so a judge that only follows the order (A, then A again with the trials swapped) gives a tie, and `consistent: false`. In the run summary, the variant's `pairwise` summary has `consistency`: the share of cases where both orders agreed. A preference's reasoning comes from an order that gave it, the forward one first; reasoning from the swapped order says so, because there the candidate was A. A trace the client didn't record, or recorded only in part, doesn't count against its run: the judge compares what each trace shows, and judges such an answer by what it says and the reference answer. Without a reference answer, nothing can show such an answer is right, so it can lose or tie to one that says plainly what the assistant couldn't do: give cases a reference when you compare a client that doesn't report its tool calls. It takes the `rubric` judge's LLM settings, and `reference: false` hides the reference answer. An unreadable answer is asked again once, as for the yes-or-no judges. List it once in `pairwiseJudges`: a comparison's preferences and labels are keyed by the judge's type, so a second entry of the same type is an error. A label for it is a preference, labeled with `mst label --judge preference` and checked with `mst judges check`.
+
+```json
+{
+  "pairwiseJudges": [
+    {
+      "type": "preference",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6"
+    }
+  ]
+}
+```
+
 ### Pairwise judges in an eval config
 
-`pairwiseJudges` lists [pairwise judges](#pairwise-judges) at the eval config's top level (or in a shared config, not on a variant): references `<namespace>/pairwise-judge/<name>`, or `{ "type": <reference>, "reps": 2, ...options }`. Validation checks each one exists in a plugin the eval loads, and that its schema takes the options.
+`pairwiseJudges` lists [pairwise judges](#pairwise-judges) at the eval config's top level (or in a shared config, not on a variant): the built-in `preference`, references `<namespace>/pairwise-judge/<name>`, or `{ "type": <reference>, "reps": 2, ...options }`. Validation checks that each plugin judge exists in a plugin the eval loads, and that each judge's schema takes the options.
 
 After every variant has run, MST compares each variant with the baseline (the first, or the one `baseline` names), case by case, with `comparePairwise`. The result is the variant's `pairwise` in the run summary: a preference per case and judge, and per judge the wins, losses, ties and `candidateWinRate`. The baseline has none. When `--variant` leaves the baseline out, MST skips pairwise and prints a note. Pairwise judge usage counts in the telemetry's `totalJudgeUsage`, and on its own in `pairwiseJudgeUsage`. `mst run` prints each judge's win, loss and tie rates. A case that errored in either variant isn't compared. With several trials, the judge compares each variant's last trial of the case. A pairwise judge that fails to start is reported and the run keeps its results. Tool optimization rounds don't run pairwise judges.
 

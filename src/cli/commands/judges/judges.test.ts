@@ -95,6 +95,12 @@ describe('mst judges', () => {
         description: expect.stringContaining('chose the right tools'),
         requires: [],
       },
+      {
+        ref: 'preference',
+        kind: 'pairwise',
+        description: expect.stringContaining('better did what the user asked'),
+        requires: [],
+      },
     ]);
   });
 
@@ -111,6 +117,7 @@ describe('mst judges', () => {
       ['tool-use', 'judge'],
       ['acme/pairwise-judge/ordered', 'pairwise'],
       ['acme/pairwise-judge/preference', 'pairwise'],
+      ['preference', 'pairwise'],
     ]);
     expect(lines[0]).toContain('requires case.expected.answer');
     expect(lines[0]).toContain(
@@ -164,7 +171,7 @@ describe('mst judges', () => {
 
   it('names the judges there are when one is missing', async () => {
     await expect(showJudge('acme/judge/nope', plugins())).rejects.toThrow(
-      /No judge "acme\/judge\/nope"\. Judges: acme\/judge\/completeness, criteria, grounded-in-tools, rubric, task-completion, tool-use, acme\/pairwise-judge\/ordered, acme\/pairwise-judge\/preference\./
+      /No judge "acme\/judge\/nope"\. Judges: acme\/judge\/completeness, criteria, grounded-in-tools, rubric, task-completion, tool-use, acme\/pairwise-judge\/ordered, acme\/pairwise-judge\/preference, preference\./
     );
     await expect(showJudge('acme/judge/completeness', {})).rejects.toThrow(
       /Plugin judges need --plugins or --config/
