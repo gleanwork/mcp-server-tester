@@ -19,7 +19,7 @@ describe('a built-in judge as a jury', () => {
   it('calls each member on its own model and takes the majority', async () => {
     const called: string[] = [];
     vi.mocked(createJudgeCompletion).mockImplementation((config) => {
-      const model = config.model ?? 'default';
+      const model = config?.model ?? 'default';
       return async () => {
         called.push(model);
         const verdict = model === 'gpt-5-mini' ? 'no' : 'yes';

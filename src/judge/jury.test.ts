@@ -13,14 +13,23 @@ import {
   type JudgeRequest,
 } from './evaluateJudge.js';
 import type { JudgeScore } from './judgeContract.js';
+import { toPassToolJudge } from '../assertions/matchers/toPassToolJudge.js';
 
 afterEach(() => resetPluginsForTests());
 
 /** What each model answers: a verdict, or an error it throws. */
 type Answer = 'pass' | 'fail' | 'unknown' | 'skip' | 'throw';
 
-/** A judge that answers by the `model` in its options. */
-function install(answers: Record<string, Answer>, criteria = false): void {
+/**
+ * A judge that answers by the `model` in its options. With `criteria`, it
+ * lists one criterion, `cites`, with its verdict; `optionalFor` names the
+ * models that list it as not required.
+ */
+function install(
+  answers: Record<string, Answer>,
+  criteria = false,
+  optionalFor: string[] = []
+): void {
   resetPluginsForTests();
   installPlugins([
     {
@@ -51,7 +60,14 @@ function install(answers: Record<string, Answer>, criteria = false): void {
               ...(criteria
                 ? {
                     criteria: [
-                      { id: 'cites', verdict: answer, reasoning: model },
+                      {
+                        id: 'cites',
+                        verdict: answer,
+                        reasoning: model,
+                        ...(optionalFor.includes(model)
+                          ? { required: false as const }
+                          : {}),
+                      },
                     ],
                   }
                 : {}),
@@ -75,7 +91,10 @@ function request(models: string[], extra: Partial<JudgeRequest> = {}) {
   } satisfies JudgeRequest;
 }
 
-async function grade(models: string[], extra: Partial<JudgeRequest> = {}) {
+async function grade(
+  models: string[],
+  extra: Partial<JudgeRequest> = {}
+): Promise<{ pass: boolean; message: string } & Record<string, unknown>> {
   const result = await evaluateJudge('answer', request(models, extra));
   return { pass: result.pass, message: result.message, ...result.details };
 }
@@ -147,6 +166,58 @@ describe('a jury', () => {
     install({ a: 'pass', b: 'fail' }, true);
     const tied = await grade(['a', 'b']);
     expect(tied.criteria).toMatchObject([{ id: 'cites', verdict: 'unknown' }]);
+  });
+
+  it("doesn't let the members' order decide whether a criterion is required", async () => {
+    // `a` lists the criterion as optional, `b` as required.
+    install({ a: 'pass', b: 'fail', c: 'fail' }, true, ['a']);
+    const forward = await grade(['a', 'b', 'c']);
+    const backward = await grade(['c', 'b', 'a']);
+    expect(forward.pass).toBe(backward.pass);
+    // Reasoning is the first agreeing member's, so only it may differ.
+    const decided = (r: Record<string, unknown>) =>
+      (r.criteria as Array<Record<string, unknown>>).map(
+        ({ reasoning: _reasoning, ...rest }) => rest
+      );
+    expect(decided(forward)).toEqual(decided(backward));
+    expect(forward.criteria).toMatchObject([{ id: 'cites', verdict: 'fail' }]);
+    expect(
+      (forward.criteria as Array<{ required?: false }>)[0]
+    ).not.toHaveProperty('required');
+    // Only when every member lists it as optional is it optional.
+    install({ a: 'pass', b: 'pass' }, true, ['a', 'b']);
+    expect(await grade(['a', 'b'])).toMatchObject({
+      criteria: [{ id: 'cites', required: false }],
+    });
+  });
+
+  it("keeps a criterion's identity when a member skips", async () => {
+    install({ a: 'pass', b: 'pass', c: 'pass' }, true);
+    const all = await grade(['a', 'b', 'c']);
+    install({ a: 'pass', b: 'skip', c: 'pass' }, true);
+    const skipped = await grade(['a', 'b', 'c']);
+    const identity = (r: Record<string, unknown>) =>
+      (r.criteria as Array<{ judgeIdentity: string }>)[0]!.judgeIdentity;
+    expect(identity(skipped)).toBe(identity(all));
+    expect(skipped.judgeIdentity).toBe(all.judgeIdentity);
+  });
+
+  it('runs from the toPassToolJudge matcher', async () => {
+    install({ a: 'pass', b: 'fail' });
+    const tied = await toPassToolJudge.call({ isNot: false }, 'answer', {
+      judge: 'acme/judge/votes',
+      passingThreshold: 0.5,
+      jury: [{ model: 'a' }, { model: 'b' }],
+    });
+    // A tie is unknown, which doesn't pass.
+    expect(tied.pass).toBe(false);
+    expect(tied.message()).toContain('answered unknown');
+    install({ a: 'pass', b: 'pass' });
+    const passed = await toPassToolJudge.call({ isNot: false }, 'answer', {
+      judge: 'acme/judge/votes',
+      jury: [{ model: 'a' }, { model: 'b' }],
+    });
+    expect(passed.pass).toBe(true);
   });
 
   it("has an identity that is its members', in any order", async () => {

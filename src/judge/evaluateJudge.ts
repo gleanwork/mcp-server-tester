@@ -91,16 +91,17 @@ export interface JudgeRequest {
 
 /** The requests a jury's members run: its options with each member's. */
 function juryMembers(request: JudgeRequest): JudgeRequest[] {
-  const { jury } = request;
-  if (
-    !Array.isArray(jury) ||
-    jury.length < 2 ||
-    !jury.every((m) => typeof m === 'object' && m !== null && !Array.isArray(m))
-  )
+  const jury: readonly unknown[] = Array.isArray(request.jury)
+    ? (request.jury as readonly unknown[])
+    : [];
+  const isMember = (m: unknown): m is Record<string, unknown> =>
+    typeof m === 'object' && m !== null && !Array.isArray(m);
+  const members = jury.filter(isMember);
+  if (members.length < 2 || members.length !== jury.length)
     throw new Error(
       'jury must list at least two members, each an object of the options it changes, such as { "model": "claude-sonnet-4-6" }.'
     );
-  return jury.map((member) => {
+  return members.map((member) => {
     for (const key of Object.keys(member))
       if (ASSERTION_KEYS.has(key))
         throw new Error(
@@ -109,6 +110,31 @@ function juryMembers(request: JudgeRequest): JudgeRequest[] {
     const { jury: _jury, ...single } = request;
     return { ...single, options: { ...request.options, ...member } };
   });
+}
+
+/**
+ * The identity one criterion of `request` records: the judge's identity
+ * with only that criterion in its options, when the judge says which
+ * options decide it (`criterionOptions`), otherwise the judge's. A jury's
+ * is the set of its members' for the criterion, every member counted, so a
+ * member that skips a trial doesn't change it.
+ */
+function criterionIdentity(request: JudgeRequest, criterion: string): string {
+  if (request.jury !== undefined)
+    return contentHash({
+      jury: juryMembers(request)
+        .map((member) => criterionIdentity(member, criterion))
+        .sort(),
+    });
+  const judge = getJudge(request.judge);
+  return judge.criterionOptions
+    ? judgeIdentity(
+        request.judge,
+        judge,
+        judge.criterionOptions(request.options, criterion),
+        { threshold: request.threshold, reps: request.reps }
+      )
+    : judgeRequestIdentity(request).judgeIdentity;
 }
 
 /**
@@ -226,15 +252,8 @@ export async function evaluateJudge(
     if (missing !== undefined)
       return judgeSkipped(label, identity, `no ${missing}`, undefined);
 
-    const criterionIdentity = (criterion: string): string =>
-      judge.criterionOptions
-        ? judgeIdentity(
-            request.judge,
-            judge,
-            judge.criterionOptions(request.options, criterion),
-            { threshold, reps }
-          )
-        : identity.judgeIdentity;
+    const identityOf = (criterion: string): string =>
+      criterionIdentity(request, criterion);
 
     const repScores: CheckedJudgeScore[] = [];
     for (let i = 0; i < reps; i++) {
@@ -255,7 +274,7 @@ export async function evaluateJudge(
         // A skip gives no verdict, so each criterion the reps listed is
         // unknown: its labels still count, as a trial the judge couldn't
         // decide.
-        const criteria = combineCriteria(repScores, criterionIdentity)?.map(
+        const criteria = combineCriteria(repScores, identityOf)?.map(
           (criterion) => ({ ...criterion, verdict: 'unknown' as const })
         );
         return judgeSkipped(
@@ -272,7 +291,7 @@ export async function evaluateJudge(
     const final = repScores.at(-1);
     if (!final)
       return judgeError(`Judge "${label}" error: no scores collected`, label);
-    const criteria = combineCriteria(repScores, criterionIdentity);
+    const criteria = combineCriteria(repScores, identityOf);
     const answered = repScores.filter((v) => v.unknown !== true);
     const last = answered.at(-1);
     // A judge with a required criterion is what its criteria are, each
@@ -442,7 +461,9 @@ async function evaluateJury(
   const usage = sumJudgeUsage(
     results.map((r) => r.details?.usage as Partial<UsageMetrics> | undefined)
   );
-  const criteria = combineJuryCriteria(results);
+  const criteria = combineJuryCriteria(results, (id) =>
+    criterionIdentity(request, id)
+  );
   const jury = {
     jury: votes,
     judgeModel: votes.map((v) => v.model ?? '?').join(', '),
@@ -508,11 +529,13 @@ async function evaluateJury(
 
 /**
  * Each criterion's verdict over a jury's members, as `combineCriteria`
- * gives it over reps. Its identity is the set of the members' identities
- * for it. Undefined when no member listed criteria.
+ * gives it over reps, with its identity from `identityOf`. A criterion is
+ * optional only when every member that listed it says so, so the members'
+ * order can't change the verdict. Undefined when no member listed criteria.
  */
 function combineJuryCriteria(
-  results: readonly ValidationResult[]
+  results: readonly ValidationResult[],
+  identityOf: (criterion: string) => string
 ): GraderCriterion[] | undefined {
   const byId = new Map<string, GraderCriterion[]>();
   for (const result of results)
@@ -523,21 +546,21 @@ function combineJuryCriteria(
   return [...byId].map(([id, verdicts]): GraderCriterion => {
     const passed = verdicts.filter((v) => v.verdict === 'pass').length;
     const failed = verdicts.filter((v) => v.verdict === 'fail').length;
-    const first = verdicts[0]!;
     const verdict =
       passed > failed ? 'pass' : failed > passed ? 'fail' : 'unknown';
     const { reasoning } = verdicts.find((v) => v.verdict === verdict) ?? {
       reasoning: `The jury members disagreed: ${passed} passed it and ${failed} failed it.`,
     };
+    const text = verdicts.find((v) => v.text !== undefined)?.text;
     return {
       id,
-      ...(first.text !== undefined ? { text: first.text } : {}),
-      ...(first.required === false ? { required: false as const } : {}),
+      ...(text !== undefined ? { text } : {}),
+      ...(verdicts.every((v) => v.required === false)
+        ? { required: false as const }
+        : {}),
       verdict,
       ...(reasoning !== undefined ? { reasoning } : {}),
-      judgeIdentity: contentHash({
-        jury: verdicts.map((v) => v.judgeIdentity).sort(),
-      }),
+      judgeIdentity: identityOf(id),
     };
   });
 }

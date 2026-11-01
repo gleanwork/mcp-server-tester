@@ -295,7 +295,10 @@ majority of the members that passed or failed. A tie is `unknown`, a member
 that answered `unknown` or skipped is left out, and the jury skips only
 when every member does. A member that fails to run fails the score, naming
 the member. A jury's score is the mean of those members' scores, and its
-`criteria`, for the `criteria` judge, each take the members' majority.
+`criteria`, for the `criteria` judge, each take the members' majority; a
+criterion is optional only when every member that lists it says so. A
+criterion's identity is the set of every member's identity for it, so a
+member that skips a trial doesn't change it.
 
 The score records each member's verdict in `jury`, and its `judgeModel`
 lists the members' models. Its identity is a hash of the set of its

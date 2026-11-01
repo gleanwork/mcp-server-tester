@@ -16,7 +16,7 @@ export interface JudgeModels {
 }
 
 /** The models a judge score ran on: a jury's members', or its own. */
-export function scoreModels(score: GraderScore): string[] {
+function scoreModels(score: GraderScore): string[] {
   if (score.jury?.length)
     return score.jury.flatMap((vote) =>
       vote.model !== undefined ? [vote.model] : []

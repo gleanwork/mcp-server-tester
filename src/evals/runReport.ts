@@ -665,23 +665,34 @@ function judgeCalibrationOf(
   });
 }
 
-/** The models a judge's verdicts ran on, and those from the client's family. */
+/** The models a verdict ran on: a jury's members', or the judge's. */
+function itemModels(item: JudgedItem): string[] {
+  if (item.jury)
+    return item.jury.flatMap((vote) =>
+      vote.model !== undefined ? [vote.model] : []
+    );
+  return item.judgeModel !== undefined ? [item.judgeModel] : [];
+}
+
+/**
+ * The models a judge's verdicts ran on, and those from the family of the
+ * client each verdict graded: the trial's own model, which a case can set,
+ * or else the variant's.
+ */
 function judgeModelsRow(
   verdicts: readonly JudgedItem[],
-  clientModel: string | undefined
+  variantModel: string | undefined
 ): Pick<RunReportJudgeCalibration, 'models' | 'sameFamilyAsClient'> {
-  const models = [
+  const models = [...new Set(verdicts.flatMap(itemModels))];
+  const same = [
     ...new Set(
       verdicts.flatMap((item) =>
-        item.jury
-          ? item.jury.map((vote) => vote.member)
-          : item.judgeModel !== undefined
-            ? [item.judgeModel]
-            : []
+        itemModels(item).filter((model) =>
+          sameModelFamily(model, item.clientModel ?? variantModel)
+        )
       )
     ),
   ];
-  const same = models.filter((model) => sameModelFamily(model, clientModel));
   return {
     ...(models.length ? { models } : {}),
     ...(same.length ? { sameFamilyAsClient: same } : {}),
@@ -694,9 +705,20 @@ function juryRow(
 ): Pick<RunReportJudgeCalibration, 'jury'> {
   const juried = verdicts.filter((item) => item.jury?.length);
   if (juried.length === 0) return {};
-  const members = [
-    ...new Set(juried.flatMap((item) => item.jury!.map((v) => v.member))),
-  ];
+  // Members by identity, which two never share; shown by model, with the
+  // identity's start when two members run the same model.
+  const models = new Map<string, string | undefined>();
+  for (const item of juried)
+    for (const vote of item.jury!)
+      if (!models.has(vote.member) || vote.model !== undefined)
+        models.set(vote.member, vote.model);
+  const members = [...models.keys()];
+  const shown = (member: string): string => {
+    const model = models.get(member);
+    if (model === undefined) return member.slice(0, 12);
+    const shared = [...models.values()].filter((m) => m === model).length;
+    return shared > 1 ? `${model} (${member.slice(0, 8)})` : model;
+  };
   const decided = (verdict: string) =>
     verdict === 'pass' || verdict === 'fail' ? verdict : undefined;
   const units = juried.map((item) =>
@@ -712,7 +734,7 @@ function juryRow(
           item.jury!.filter((vote) => vote.member === member)
         );
         return {
-          member,
+          member: shown(member),
           passed: votes.filter((v) => v.verdict === 'pass').length,
           failed: votes.filter((v) => v.verdict === 'fail').length,
         };

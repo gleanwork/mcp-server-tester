@@ -68,13 +68,23 @@ const plugin: Plugin = {
           : { score: 1 },
     },
     // Answers by its model: `strict` fails case two, the others pass all.
+    // `lenient: true` passes everything.
     voter: {
       version: '1',
-      schema: z.object({ model: z.string() }),
-      evaluate: async ({ case: judged }, { model }) => ({
-        score: model === 'strict' && judged.id === 'two' ? 0 : 1,
-        model,
+      schema: z.object({
+        model: z.string(),
+        lenient: z.boolean().optional(),
       }),
+      evaluate: async ({ case: judged }, options) => {
+        const { model, lenient } = options as {
+          model: string;
+          lenient?: boolean;
+        };
+        return {
+          score: model === 'strict' && !lenient && judged.id === 'two' ? 0 : 1,
+          model,
+        };
+      },
     },
     // Two criteria: `greets` passes everywhere; `short` fails on case two.
     checks: {
@@ -456,11 +466,65 @@ describe('the run report', () => {
     expect(log).toHaveBeenCalledWith(
       'Judges: rr/judge/voter (strict, lenient, claude-x)'
     );
-    expect(warn.mock.calls.map(([message]) => message)).toEqual([
+    expect(warn.mock.calls.map(([message]) => String(message))).toEqual([
       expect.stringContaining(
         'judge "rr/judge/voter" ran on claude-x, from the same family as the client\'s claude-client'
       ),
     ]);
+  });
+
+  it('keeps jury members on one model apart, and checks each case against its own client model', async () => {
+    await fs.writeFile(
+      path.join(dir, 'cases.json'),
+      JSON.stringify({
+        name: 'cases',
+        cases: [
+          { id: 'one', input: 'hello' },
+          // This case's client is a Claude model; the variant's isn't.
+          { id: 'two', input: 'bye', model: 'claude-case' },
+        ],
+      })
+    );
+    const configPath = path.join(dir, 'eval.json');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        ...config,
+        variants: [{ name: 'base' }],
+        pairwiseJudges: undefined,
+        judges: [
+          {
+            type: 'rr/judge/voter',
+            model: 'strict',
+            jury: [{}, { lenient: true }, { model: 'claude-x' }],
+          },
+        ],
+      })
+    );
+    const report = await readReport((await run()).outputDir);
+    const [judge] = report.variants[0]!.judgeCalibration!;
+    const members = judge!.jury!.members;
+    // Two members run `strict`: both rows stay, told apart by identity.
+    expect(members).toHaveLength(3);
+    expect(members.map((m) => m.member)).toEqual([
+      expect.stringMatching(/^strict \([0-9a-f]{8}\)$/),
+      expect.stringMatching(/^strict \([0-9a-f]{8}\)$/),
+      'claude-x',
+    ]);
+    expect(members[0]!.member).not.toBe(members[1]!.member);
+    expect(members.map(({ passed, failed }) => [passed, failed])).toEqual([
+      [2, 2],
+      [4, 0],
+      [4, 0],
+    ]);
+    // The two strict members disagree on case two's trials: alpha below 1.
+    expect(judge!.jury!.alpha).toBeLessThan(1);
+    // Case two's own client model is Claude, so claude-x is flagged.
+    expect(judge!.sameFamilyAsClient).toEqual(['claude-x']);
   });
 
   it("shows a pass rate for each of a judge's criteria", async () => {

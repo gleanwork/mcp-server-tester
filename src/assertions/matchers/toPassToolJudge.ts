@@ -30,6 +30,7 @@ async function runSingleJudge(
     provider,
     model,
     judge,
+    jury,
     options: judgeOptions,
   } = options;
 
@@ -41,6 +42,7 @@ async function runSingleJudge(
     ...(provider !== undefined && { provider }),
     ...(model !== undefined && { model }),
     ...(judge !== undefined && { judge }),
+    ...(jury !== undefined && { jury }),
     ...(judgeOptions !== undefined && { options: judgeOptions }),
   });
 

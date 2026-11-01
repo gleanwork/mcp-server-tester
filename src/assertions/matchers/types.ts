@@ -37,6 +37,12 @@ export interface JudgeMatcherOptions {
   /** Override the judge model */
   model?: string;
   /**
+   * Run the judge on several models: each member is the options it
+   * changes, such as `{ model: 'gpt-5-mini' }`. The verdict is the
+   * members' majority; a tie is unknown, which doesn't pass.
+   */
+  jury?: Array<Record<string, unknown>>;
+  /**
    * The judge to run: the built-in `rubric`, or `<namespace>/judge/<name>` from a
    * plugin. Its mean score over `reps` is compared with passingThreshold.
    */
