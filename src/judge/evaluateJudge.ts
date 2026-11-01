@@ -436,11 +436,17 @@ async function evaluateJury(
         : typeof given === 'string'
           ? given
           : undefined;
-    if (typeof details.error === 'string')
+    if (typeof details.error === 'string') {
+      // The member's message starts with the same judge's name: drop it.
+      const prefix = `Judge "${label}" error: `;
+      const reason = result.message.startsWith(prefix)
+        ? result.message.slice(prefix.length)
+        : result.message;
       return judgeError(
-        `Judge "${label}" error: jury member ${i + 1}${model ? ` (${model})` : ''}: ${result.message}`,
+        `Judge "${label}" error: jury member ${i + 1}${model ? ` (${model})` : ''}: ${reason}`,
         label
       );
+    }
     votes.push({
       ...(typeof details.judgeProvider === 'string'
         ? { provider: details.judgeProvider }

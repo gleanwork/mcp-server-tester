@@ -153,8 +153,9 @@ describe('a jury', () => {
     install({ a: 'pass', b: 'throw' });
     const result = await grade(['a', 'b']);
     expect(result.error).toBeDefined();
-    expect(result.message).toContain('jury member 2');
-    expect(result.message).toContain('rate limited');
+    expect(result.message).toBe(
+      'Judge "acme/judge/votes" error: jury member 2 (b): rate limited'
+    );
   });
 
   it('takes each criterion by the majority too, with a jury identity', async () => {
