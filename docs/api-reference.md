@@ -594,8 +594,8 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
  */
 export interface EvalRunnerResult {
   /**
-   * Number of complete cases: `passed` plus `failed`. An incomplete case
-   * (short a trial, or with one ungraded) is in `incomplete`.
+   * Number of cases: `passed` plus `failed` plus `incomplete`, so
+   * `passed === total` only when every case passed.
    */
   total: number;
 

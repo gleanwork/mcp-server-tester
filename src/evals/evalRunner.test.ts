@@ -22,6 +22,7 @@ import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type { CaseExecution } from './caseExecution.js';
 import { clientRunToExecution } from './clientTrace.js';
 import { caseIncompleteness } from './trialEnding.js';
+import { passRate } from './evalRunComparison.js';
 import type * as SimulationModule from './mstClient/simulation.js';
 import { simulateMstClient } from './mstClient/simulation.js';
 import type { MstClientSimulationResult } from './mstClient/types.js';
@@ -635,6 +636,36 @@ describe('runEvalDataset defaultTrials', () => {
     expect(executeCase).toHaveBeenCalledTimes(3);
     expect(result.caseResults[0]!.trialResults).toHaveLength(3);
     expect(result.caseResults[0]!.passRate).toBe(1);
+  });
+
+  it('counts an incomplete case in total, so passed === total fails (ADR 0010)', async () => {
+    const mcp = createMockMCP();
+    const dataset = createDataset([
+      createEvalCase({ id: 'passes', input: 'one' }),
+      createEvalCase({ id: 'lost', input: 'two' }),
+    ]);
+    const executeCase = vi.fn(
+      async (evalCase: EvalCase): Promise<CaseExecution> =>
+        evalCase.id === 'lost'
+          ? clientRunToExecution(
+              { finalText: '', events: [], error: 'read ECONNRESET' },
+              'structured'
+            )
+          : clientRunToExecution({ finalText: 'ok', events: [] }, 'structured')
+    );
+    const result = await runEvalDataset(
+      { dataset, executeCase },
+      createContext(mcp)
+    );
+    // The template's `expect(result.passed).toBe(result.total)` fails, as it
+    // did when the case counted as failed.
+    expect(result).toMatchObject({
+      total: 2,
+      passed: 1,
+      failed: 0,
+      incomplete: 1,
+    });
+    expect(passRate(result)).toBe(1);
   });
 
   it('case-level trials override defaultTrials', async () => {

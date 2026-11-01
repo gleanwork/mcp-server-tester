@@ -132,8 +132,8 @@ export interface ToolOverrideVariant {
  */
 export interface EvalRunnerResult {
   /**
-   * Number of complete cases: `passed` plus `failed`. An incomplete case
-   * (short a trial, or with one ungraded) is in `incomplete`.
+   * Number of cases: `passed` plus `failed` plus `incomplete`, so
+   * `passed === total` only when every case passed.
    */
   total: number;
 
@@ -1262,8 +1262,10 @@ export async function runEvalDataset(
     caseResults = await runWithConcurrency(tasks, concurrency);
   }
 
+  // Incomplete cases neither pass nor fail (ADR 0010), but they are cases:
+  // `passed === total` must not hold while one is incomplete.
   const complete = completeCases(caseResults);
-  const total = complete.length;
+  const total = caseResults.length;
   const passed = complete.filter((r) => r.pass).length;
   const incomplete = caseResults.length - complete.length;
 
@@ -1291,7 +1293,7 @@ export async function runEvalDataset(
   const result: EvalRunnerResult = {
     total,
     passed,
-    failed: total - passed,
+    failed: complete.length - passed,
     ...(incomplete > 0 ? { incomplete } : {}),
     caseResults,
     durationMs: Date.now() - startTime,

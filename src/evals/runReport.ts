@@ -461,11 +461,14 @@ export function buildRunReport(
         });
       preferences[id] = prefs;
     }
-    const passRate = variant.result
-      ? variant.result.total
-        ? variant.result.passed / variant.result.total
-        : undefined
-      : undefined;
+    // Of its complete cases (ADR 0010).
+    const complete = variant.result
+      ? variant.result.total - (variant.result.incomplete ?? 0)
+      : 0;
+    const passRate =
+      variant.result && complete > 0
+        ? variant.result.passed / complete
+        : undefined;
     return {
       id,
       name: variant.name,

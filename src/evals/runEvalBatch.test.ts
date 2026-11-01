@@ -220,6 +220,35 @@ describe('runEvalBatch skipExisting', () => {
     expect(runEval).not.toHaveBeenCalled();
   });
 
+  it('counts a config with incomplete cases as failed, and runs it again (ADR 0010)', async () => {
+    const incomplete = (summary: EvaluationSummary) => {
+      // Its one case lost a trial to infrastructure: neither passed nor failed.
+      summary.results[0]!.pass = false;
+      summary.metrics = { total: 0, passed: 0, failed: 0, incomplete: 1 };
+      summary.variants[0]!.result = {
+        ...summary.variants[0]!.result!,
+        passed: 0,
+        failed: 0,
+        incomplete: 1,
+      };
+      return summary;
+    };
+    const saved = await saveValidSummary();
+    incomplete(saved.summary);
+    await saveRun(store, saved);
+    vi.mocked(runEval).mockImplementation(async (options) => ({
+      evalConfig: loadEvalConfig(options.configPath, { rootDir }),
+      summary: incomplete(
+        completedSummary(loadEvalConfig(options.configPath, { rootDir }))
+      ),
+      outputDir: options.outputDir ?? rootDir,
+      environment: { name: 'local', shards: 1, keep: 'never', options: {} },
+      datasets: [],
+    }));
+    expect(await run()).toMatchObject({ skipped: 0, failed: 1, passed: 0 });
+    expect(runEval).toHaveBeenCalledOnce();
+  });
+
   it.each(['partial', 'ungraded'])(
     'never resumes from a %s run',
     async (kind) => {

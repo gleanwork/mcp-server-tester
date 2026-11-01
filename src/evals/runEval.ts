@@ -829,7 +829,7 @@ function summarizeVariant(
     servers: servers.map(redactServerForReport),
     result: {
       caseResults,
-      total: complete.length,
+      total: caseResults.length,
       passed: complete.filter((result) => result.pass).length,
       failed: complete.filter((result) => !result.pass).length,
       ...(incomplete > 0 ? { incomplete } : {}),
