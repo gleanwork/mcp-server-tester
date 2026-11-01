@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # A trial's ending is decided where it ends
@@ -39,4 +39,4 @@ Every attempt at a case ends in one of two ways. Either it is a trial, which is 
 - Pass rates on real runs change. Cases that were graded on fewer trials than they declare, or that counted as failed with no trials, become incomplete until they are resumed. Turn-limit and context-overflow failures start counting against the client.
 - A run that lost many trials to infrastructure shows them as incomplete cases with a reason, instead of quietly smaller cases.
 - A new client maps its own failures onto the closed set. It doesn't add words to a shared list.
-- It ships in two steps in one beta. The first adds the ending module, the stored field, the readers and the resume change, with each producer's existing failure kinds mapped as they are. Until the second, the ending module still reads the old shared text list, unchanged, for an error with no failure kind, so no attempt changes classification because of its words. The second makes each producer type its own endings (Claude Code's turn limit, the context split, ChatGPT and Cowork) and deletes the shared text list.
+- It shipped in two steps in one beta. The first added the ending module, the stored field, the readers and the resume change, with each producer's existing failure kinds mapped as they were, and kept the old shared text list for an error with no failure kind. The second made each producer type its own endings (the `mst` client from its provider's status, Claude Code's turn limit, the context split, ChatGPT and Cowork) and deleted the shared text list. A stored infrastructure failure with no failure kind now reads as a retryable client-app failure.
