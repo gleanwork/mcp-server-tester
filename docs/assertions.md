@@ -392,10 +392,13 @@ The matcher takes `passingThreshold` where datasets use `threshold`, plus `refer
 | `threshold`  | `0.7`                          | Minimum mean score (0–1) to pass.                                                                                                       |
 | `reference`  | the case's `expected.answer`   | What the judge compares the response with.                                                                                              |
 | `reps`       | the case's `judgeReps`, or `1` | Times the judge scores the same response; the mean is compared with `threshold`.                                                        |
+| `jury`       | —                              | Run the judge on several models: a list of at least two option overrides, such as `{ "model": "gpt-5-mini" }`. The majority decides.    |
 | `options`    | —                              | The judge's own options. Without `options`, a named judge gets its other flat fields.                                                   |
 | LLM settings | `provider`: `anthropic`        | The `rubric` judge's `provider`, `model`, `apiKeyEnvVar`, `maxTokens`, `temperature`, `maxBudgetUsd`, `effort` and `maxToolOutputSize`. |
 
 `reps` repeats only the judge, not the case: `trials: 3` with `judgeReps: 2` is 6 calls per judge.
+
+A `jury` runs the judge once per member, so `jury` with three members and `reps: 2` is 6 calls per trial. See [Juries](./evaluation-framework.md#juries).
 
 ### Built-in Rubrics and Scoring Scale
 

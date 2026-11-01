@@ -6,8 +6,6 @@
  */
 
 import { builtinShortName } from '../../plugins/extensions.js';
-import { getJudge } from '../../judge/builtinJudges.js';
-import { judgeIdentity } from '../../judge/judgeIdentity.js';
 import type { SettingsSections } from '../../plugins/settings.js';
 import type { ValidationResult } from './types.js';
 import type { ProviderKind } from '../../judge/judgeTypes.js';
@@ -19,6 +17,7 @@ import {
   judgeError,
   judgeOwnOptions,
   type JudgeRequest,
+  judgeRequestIdentity,
   preflightJudgeRequest,
 } from '../../judge/evaluateJudge.js';
 
@@ -44,6 +43,12 @@ export interface JudgeValidatorConfig {
   threshold?: number;
   /** Number of judge evaluations to run. Scores averaged. @default 1 */
   reps?: number;
+  /**
+   * Run the judge on several models: each member is the options it
+   * changes, such as `{ "model": "gpt-5-mini" }`. The verdict is the
+   * members' majority; a tie is unknown (ADR 0009).
+   */
+  jury?: Array<Record<string, unknown>>;
   /** The rubric judge's provider. @default 'anthropic' */
   provider?: ProviderKind;
   /** Model override (e.g., 'claude-opus-4-20250514') */
@@ -140,12 +145,7 @@ export function judgeIdentityOf(
   const request = judgeRequest(config);
   if (typeof request === 'string') return undefined;
   try {
-    return judgeIdentity(
-      request.judge,
-      getJudge(request.judge),
-      request.options,
-      { threshold: request.threshold, reps: request.reps }
-    );
+    return judgeRequestIdentity(request).judgeIdentity;
   } catch {
     return undefined;
   }
@@ -157,6 +157,7 @@ function judgeRequest(config: JudgeValidatorConfig): JudgeRequest | string {
     reference: config.reference ?? undefined,
     threshold: config.threshold ?? DEFAULT_JUDGE_THRESHOLD,
     reps: config.reps ?? 1,
+    ...(config.jury !== undefined ? { jury: config.jury } : {}),
   };
   if (config.judge !== undefined) {
     // `options`, when given, is the judge's whole option set.

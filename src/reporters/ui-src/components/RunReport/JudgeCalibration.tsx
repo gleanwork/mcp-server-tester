@@ -30,6 +30,41 @@ function statusTitle(row: RunReportJudgeCalibration): string {
 }
 
 /**
+ * The models a judge ran on, a same-family warning, and, for a jury, each
+ * member's pass and fail counts and their agreement (Krippendorff's α).
+ */
+function JudgeModels({ judge }: { judge: RunReportJudgeCalibration }) {
+  if (!judge.models?.length && !judge.jury) return null;
+  const alpha = judge.jury?.alpha;
+  return (
+    <div className="mt-0.5 grid gap-0.5 font-sans text-xs text-muted-foreground">
+      {judge.jury ? (
+        <span>
+          Jury:{' '}
+          {judge.jury.members
+            .map((m) => `${m.member} ${m.passed} pass, ${m.failed} fail`)
+            .join('; ')}
+          {' · '}
+          <span title="Krippendorff's alpha over the trials: 1 is full agreement, 0 is chance">
+            agreement α {alpha === undefined ? 'n/a' : alpha.toFixed(2)}
+          </span>
+        </span>
+      ) : (
+        <span>{judge.models!.join(', ')}</span>
+      )}
+      {judge.sameFamilyAsClient && (
+        <span
+          className={`w-fit rounded-full px-2 py-px font-semibold ${TONE.warn}`}
+          title={`${judge.sameFamilyAsClient.join(', ')} is from the client model's family.`}
+        >
+          same family as client
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
  * Each pointwise judge's pass rate per variant, its calibration, and the
  * pass rate corrected for its errors when a usable calibration applies
  * (ADR 0009). The raw rate is always shown.
@@ -49,6 +84,7 @@ export function JudgeCalibration({
   const td = 'px-3 py-2 align-middle';
   const tdNum = `${td} text-right font-mono`;
   const unversioned = rows.some(({ judge }) => judge.unversioned);
+  const sameFamily = rows.some(({ judge }) => judge.sameFamilyAsClient);
   return (
     <section aria-labelledby="run-judges-h" className="grid gap-2">
       <h2 id="run-judges-h" className="text-lg font-semibold">
@@ -98,6 +134,7 @@ export function JudgeCalibration({
                     className={`${td} text-left font-mono font-normal`}
                   >
                     {judge.judge}
+                    <JudgeModels judge={judge} />
                   </th>
                   {!single && (
                     <td className={`${td} font-mono`}>{variant.name}</td>
@@ -141,6 +178,13 @@ export function JudgeCalibration({
           </tbody>
         </table>
       </div>
+      {sameFamily && (
+        <p className="text-sm text-muted-foreground">
+          A judge marked <em>same family</em> ran on a model from the family of
+          the client it graded. A model tends to rate its own family&apos;s
+          answers higher: judge with a model from another family, or a jury.
+        </p>
+      )}
       {unversioned && (
         <p className="text-sm text-muted-foreground">
           An unversioned judge declares no version, and neither does its plugin,

@@ -46,6 +46,8 @@ export interface JudgedItem {
   input?: string;
   /** The trial's final answer, when the run stores responses. */
   answer?: string;
+  /** A jury's members' verdicts, by member (its model, or its identity). */
+  jury?: Array<{ member: string; verdict: JudgeVerdict | 'skipped' }>;
 }
 
 function caseTrials(
@@ -122,6 +124,14 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
             ...(verdict !== undefined ? { verdict } : {}),
             ...optional('judgeIdentity', score.judgeIdentity),
             ...optional('reasoning', score.reasoning),
+            ...(score.jury?.length && score.error === undefined
+              ? {
+                  jury: score.jury.map((vote) => ({
+                    member: vote.model ?? vote.judgeIdentity,
+                    verdict: vote.verdict,
+                  })),
+                }
+              : {}),
           });
         }
       }
