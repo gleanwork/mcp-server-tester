@@ -158,13 +158,19 @@ describe('a shard in a child-process environment', () => {
     const a = await readClientResult(path.join(shard.resultsDir, '0/0.json'));
     expect(a.key).toEqual({ variant: 'baseline', caseId: 'a', trial: 0 });
     expect(a.result.finalText).toBe('a: token-1 then token-2; key key-1');
-    // An error never carries a token.
+    // An error never carries a token, nor does the ending's reason.
     const flaky = await readClientResult(
       path.join(shard.resultsDir, '0/1.json')
     );
     expect(flaky.result).toMatchObject({
       error: 'ECONNRESET while using [REDACTED]',
+      ending: {
+        kind: 'infrastructure',
+        broke: 'network',
+        reason: 'ECONNRESET while using [REDACTED]',
+      },
     });
+    expect(JSON.stringify(flaky)).not.toContain('token-');
     // The batch client's result, reported as it finished.
     const b = await readClientResult(path.join(shard.resultsDir, '1/0.json'));
     expect(b.key).toEqual({ variant: 'candidate', caseId: 'b', trial: 0 });

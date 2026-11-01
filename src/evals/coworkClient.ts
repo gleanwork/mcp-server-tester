@@ -30,7 +30,7 @@ import {
   awaitingUserAnswer,
   type ClaudeTrace,
 } from './externalClient/builtins/claudeTrace.js';
-import { COWORK_WORKSPACE_UNAVAILABLE_MESSAGE } from './trialEnding.js';
+import { infrastructureEnding } from './trialEnding.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
   claudeDesktopOtlpSettings,
@@ -539,7 +539,13 @@ async function runBatch(
                 : {}),
             };
           }
-          result = failure(safeError(error));
+          // Cowork didn't take the prompt, or its Claude session never bound
+          // to the case: the client app, not the model, failed.
+          const message = safeError(error);
+          result = {
+            ...failure(message),
+            ending: infrastructureEnding('client-app', message),
+          };
           continuation = 'reset';
           return finishCase();
         }
@@ -793,22 +799,28 @@ async function runBatch(
             // Cowork's VM didn't start, so the task ran without its shell:
             // an infrastructure failure, kept with its evidence. Cowork
             // starts the VM again for the next task.
+            const error = `Cowork's workspace was unavailable: ${unavailable}`;
             result = {
               ...result,
-              error: `${COWORK_WORKSPACE_UNAVAILABLE_MESSAGE}: ${unavailable}`,
+              error,
+              ending: infrastructureEnding('workspace', error),
               diagnostics: { ...result.diagnostics, failureKind: 'startup' },
             };
             if (platform.reset) continuation = 'reset';
           }
           const truncated = truncatedPrompt(trace);
-          if (truncated !== undefined)
+          if (truncated !== undefined) {
             // The model answered the beginning of the prompt, not the case:
-            // never graded, kept with its evidence.
+            // never graded, kept with its evidence. A retry gets the same
+            // part, so the case needs a shorter prompt.
+            const error = `Claude kept ${truncated.storedChars} of the prompt's ${truncated.promptChars} characters: the model got only its beginning. No resubmission attempted.`;
             result = {
               ...result,
-              error: `Claude kept ${truncated.storedChars} of the prompt's ${truncated.promptChars} characters: the model got only its beginning. No resubmission attempted.`,
+              error,
+              ending: infrastructureEnding('setup', error, false),
               diagnostics: { ...result.diagnostics, failureKind: 'input' },
             };
+          }
         } catch (error) {
           // Trace collection or attribution failed: the app state is unknown.
           result = failure(safeError(error));

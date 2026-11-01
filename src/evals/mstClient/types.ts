@@ -17,6 +17,7 @@ import type {
   ModelCall,
   TraceEvent,
 } from '../evalFrameworkTypes.js';
+import type { TrialEnding } from '../../types/trialEnding.js';
 
 /**
  * Client type for client simulation.
@@ -276,6 +277,13 @@ export interface MstClientSimulationResult {
 
   /** Error message if simulation failed */
   error?: string;
+
+  /**
+   * How the attempt ended, when something around the client broke (ADR
+   * 0010): the adapter types it from its provider's or CLI's failure. A
+   * failed simulation without one is a trial that failed.
+   */
+  ending?: TrialEnding;
 
   /** The case's input, as given to the model */
   input?: string;

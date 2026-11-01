@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { getClient } from '../builtinClients.js';
-import { redactClientSecrets } from '../clientSecrets.js';
+import { redactedClientRun } from '../clientSecrets.js';
 import {
   expandWorkerConnectors,
   writeTokenFile,
@@ -286,9 +286,7 @@ export async function collectShard(
           usedWrites
         )
       : trace;
-    const redacted: ClientRunResult = result.error
-      ? { ...result, error: redactClientSecrets(result.error, [...secrets]) }
-      : result;
+    const redacted: ClientRunResult = redactedClientRun(result, [...secrets]);
     // The client's artifacts (a Cowork session folder) are on this machine:
     // copy them beside the result, which the coordinator copies back, and
     // name them relative to the results directory.

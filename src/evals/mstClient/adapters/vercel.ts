@@ -29,6 +29,12 @@ import type * as AI from 'ai';
 import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import { z } from 'zod';
 import { resolveLLMEndpoint } from '../../../llm/endpoint.js';
+import type { TrialEnding } from '../../../types/trialEnding.js';
+import {
+  TRIAL_ENDING,
+  contextOverflowEnding,
+  infrastructureEnding,
+} from '../../trialEnding.js';
 import {
   GenerationOptions,
   ProviderSchema,
@@ -49,15 +55,24 @@ const SdkConfigSchema = z
   })
   .strict();
 
+/** A failed simulation's message, and how its attempt ended. */
+interface SdkFailure {
+  message: string;
+  ending: TrialEnding;
+}
+
 /**
- * Classifies a raw error from the Vercel AI SDK agentic loop and returns a
- * human-readable message with an actionable hint.
- *
- * The message is always prefixed with "client simulation failed: " so that
- * callers see a consistent error surface regardless of which failure path was
- * hit.
+ * Classifies a raw error from the Vercel AI SDK agentic loop: a
+ * human-readable message with an actionable hint, and how the attempt ended
+ * (ADR 0010). The provider reports these only as text and status codes, so
+ * this is the one place they are read. `acted` says whether the model had
+ * answered at least once, which decides what running out of context means.
  */
-function enrichErrorMessage(err: unknown, provider: string): string {
+function sdkFailure(
+  err: unknown,
+  provider: string,
+  acted: boolean
+): SdkFailure {
   const raw = errorText(err);
   // APICallError carries the HTTP status separately from its message, which
   // is often the provider's own text ("Bearer token required").
@@ -74,10 +89,20 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     raw.includes('Cannot find module') ||
     raw.includes('ERR_MODULE_NOT_FOUND')
   ) {
-    return (
+    const message =
       `The mst client failed: required package not installed.\n` +
-      `Hint: run \`getMissingDependencyMessage('${provider}')\` or check docs/mst-client.md for install instructions.`
-    );
+      `Hint: run \`getMissingDependencyMessage('${provider}')\` or check docs/mst-client.md for install instructions.`;
+    return {
+      message,
+      ending: infrastructureEnding('setup', message, false),
+    };
+  }
+
+  // The model's context ran out: before it answered, the case's prompt
+  // didn't fit; after, its own turns and tool results filled it.
+  if (CONTEXT_OVERFLOW.test(`${probe} ${responseBody(err)}`)) {
+    const message = `client simulation failed: ${raw}`;
+    return { message, ending: contextOverflowEnding(message, acted) };
   }
 
   // Authentication / API key problems
@@ -87,10 +112,13 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     probe.includes('API key') ||
     probe.includes('api_key')
   ) {
-    return (
+    const message =
       `client simulation failed: authentication error (${raw}).\n` +
-      `Hint: ${AUTH_HINTS[provider] ?? AUTH_HINTS.default}`
-    );
+      `Hint: ${AUTH_HINTS[provider] ?? AUTH_HINTS.default}`;
+    return {
+      message,
+      ending: infrastructureEnding('setup', message, false),
+    };
   }
 
   // 404 / not-found: the SDK collapses several distinct causes here — a wrong
@@ -102,25 +130,30 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     (probe.toLowerCase().includes('model') &&
       probe.toLowerCase().includes('not found'))
   ) {
-    return (
+    const message =
       `client simulation failed: ${raw}\n` +
       `Hint: a 404 usually means the model id is wrong or retired, or a ` +
       `base-URL override (e.g. ANTHROPIC_BASE_URL / OPENAI_BASE_URL pointing ` +
       `at a gateway) is routing requests somewhere that doesn't serve this ` +
-      `model. Verify the model id and that no unexpected *_BASE_URL is set.`
-    );
+      `model. Verify the model id and that no unexpected *_BASE_URL is set.`;
+    return {
+      message,
+      ending: infrastructureEnding('setup', message, false),
+    };
   }
 
   // Network / DNS / connection errors
   if (
     probe.includes('ENOTFOUND') ||
     probe.includes('fetch failed') ||
-    probe.includes('ECONNREFUSED')
+    probe.includes('ECONNREFUSED') ||
+    probe.includes('ECONNRESET') ||
+    probe.includes('ETIMEDOUT')
   ) {
-    return (
+    const message =
       `The mst client failed: network error.\n` +
-      `Hint: check network connectivity and whether the provider's API endpoint is reachable from this machine.`
-    );
+      `Hint: check network connectivity and whether the provider's API endpoint is reachable from this machine.`;
+    return { message, ending: infrastructureEnding('network', message) };
   }
 
   // Rate limiting
@@ -129,14 +162,48 @@ function enrichErrorMessage(err: unknown, provider: string): string {
     probe.toLowerCase().includes('rate limit') ||
     probe.includes('Too Many Requests')
   ) {
-    return (
+    const message =
       `The mst client failed: rate limited.\n` +
-      `Hint: reduce concurrency, add delays between requests, or upgrade your API plan.`
-    );
+      `Hint: reduce concurrency, add delays between requests, or upgrade your API plan.`;
+    return { message, ending: infrastructureEnding('provider', message) };
   }
 
   // Default: preserve original message with a consistent prefix
-  return `client simulation failed: ${raw}`;
+  const message = `client simulation failed: ${raw}`;
+  // The provider's API failed: a server error, or overloaded.
+  if (
+    (statusCode !== null && statusCode >= 500) ||
+    probe.includes('503') ||
+    PROVIDER_ERROR_TYPES.has(errorType(err) ?? '')
+  )
+    return { message, ending: infrastructureEnding('provider', message) };
+  // Anything else is the client's own failure: a trial that failed.
+  return { message, ending: TRIAL_ENDING };
+}
+
+/** How providers say the context ran out (Anthropic, OpenAI, Google). */
+const CONTEXT_OVERFLOW =
+  /prompt is too long|context_length_exceeded|maximum context length|exceeds the context window|input token count .*exceeds the maximum|tokens > \d+ maximum/i;
+
+/** Error types a provider streams when its API, not the request, failed. */
+const PROVIDER_ERROR_TYPES: ReadonlySet<string> = new Set([
+  'overloaded_error',
+  'api_error',
+  'rate_limit_error',
+]);
+
+/** A stream error part's `type` (`{ type: 'overloaded_error', message }`). */
+function errorType(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const type = (err as { type?: unknown }).type;
+  return typeof type === 'string' ? type : undefined;
+}
+
+/** An APICallError's response body, where OpenAI puts its error `code`. */
+function responseBody(err: unknown): string {
+  if (typeof err !== 'object' || err === null) return '';
+  const body = (err as { responseBody?: unknown }).responseBody;
+  return typeof body === 'string' ? body : '';
 }
 
 /** What to check after an authentication error, by provider. */
@@ -446,7 +513,11 @@ export function stepModelCalls(
 
 /** Errors thrown as-is; anything else (a streamed error part) wrapped. */
 function toError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(errorText(value));
+  if (value instanceof Error) return value;
+  // Keep a stream error part's `type`: it says the provider failed.
+  const type = errorType(value);
+  const error = new Error(errorText(value));
+  return type !== undefined ? Object.assign(error, { type }) : error;
 }
 
 /** Skill loads and the ordered tool/skill event trace, when skills ran. */
@@ -493,6 +564,8 @@ export function createVercelOrchestrator(): MstClientSimulator {
       let timer: ReturnType<typeof setTimeout> | undefined;
       let abortFromClient: (() => void) | undefined;
       const allToolCalls: LLMToolCall[] = [];
+      // Whether the model has answered: what running out of context means.
+      let stepsFinished = 0;
       let skills: ClientSkillsSession | null = null;
       let expired: Promise<never>;
       function withinDeadline<T>(promise: Promise<T>): Promise<T> {
@@ -651,7 +724,10 @@ export function createVercelOrchestrator(): MstClientSimulator {
               maxOutputTokens: config.maxTokens,
               abortSignal: controller.signal,
               ...(providerOptions ? { providerOptions } : {}),
-              onStepFinish: () => stepEnds.push(Date.now()),
+              onStepFinish: () => {
+                stepsFinished++;
+                stepEnds.push(Date.now());
+              },
             },
             streams === true
           )
@@ -722,10 +798,16 @@ export function createVercelOrchestrator(): MstClientSimulator {
           ...skillsTrace(allToolCalls, skills),
         };
       } catch (err) {
+        const failure = sdkFailure(
+          err,
+          config.provider ?? 'unknown',
+          stepsFinished > 0 || allToolCalls.length > 0
+        );
         return {
           success: false,
           toolCalls: allToolCalls,
-          error: enrichErrorMessage(err, config.provider ?? 'unknown'),
+          error: failure.message,
+          ending: failure.ending,
           ...skillsTrace(allToolCalls, skills),
         };
       } finally {

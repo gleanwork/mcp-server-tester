@@ -33,6 +33,7 @@ import {
   redactClientError,
   redactClientSecrets,
   redactedClientError,
+  redactedClientRun,
 } from './clientSecrets.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
 
@@ -318,12 +319,7 @@ export async function runDesktopBatch<Session>(
           : outcome.result;
       results.push(result);
       // A copy: the batch adds to its results when it ends.
-      await reportResult?.(index, {
-        ...result,
-        ...(result.error
-          ? { error: redactClientSecrets(result.error, secrets) }
-          : {}),
-      });
+      await reportResult?.(index, redactedClientRun(result, secrets));
       consecutiveFailures = result.error ? consecutiveFailures + 1 : 0;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
         blocked = `Not submitted because the last ${MAX_CONSECUTIVE_FAILURES} ${adapter.name} cases failed in a row (latest: ${redactClientSecrets(result.error ?? '', secrets)}). Check the desktop before running again.`;
@@ -384,8 +380,9 @@ export async function runDesktopBatch<Session>(
       const lifecycle = adapter.batchTelemetry?.(session);
       for (const [index, result] of results.entries()) {
         // Nothing the client reports leaves unredacted.
-        if (result.error)
-          result.error = redactClientSecrets(result.error, secrets);
+        const redacted = redactedClientRun(result, secrets);
+        if (redacted.error !== undefined) result.error = redacted.error;
+        if (redacted.ending) result.ending = redacted.ending;
         result.telemetry = {
           ...result.telemetry,
           ...(lifecycle ? { batchLifecycle: lifecycle } : {}),

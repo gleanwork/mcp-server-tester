@@ -80,6 +80,7 @@ export function clientRunToExecution(
       ...(trace.artifacts ? { artifacts: trace.artifacts } : {}),
     },
     error: trace.error,
+    ...(trace.ending ? { ending: trace.ending } : {}),
     usage: trace.usage,
     telemetry: trace.telemetry,
     ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
@@ -140,6 +141,7 @@ export function simulationToClientRun(
     error: result.success
       ? undefined
       : (result.error ?? 'Client execution failed.'),
+    ...(result.ending ? { ending: result.ending } : {}),
     usage: result.usage,
     ...(result.modelCalls?.length ? { modelCalls: result.modelCalls } : {}),
     ...(result.hostTelemetry ? { hostTelemetry: result.hostTelemetry } : {}),

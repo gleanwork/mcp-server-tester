@@ -2,27 +2,14 @@
  * How a client's attempt at a case ended (ADR 0010): a trial, graded as
  * usual, or an infrastructure failure, left out of pass rates. Collection
  * decides it, where the attempt ended; grading never changes it. Every
- * reader asks this module and never parses errors itself.
+ * reader asks this module, and nothing here reads an error's words: a
+ * producer that gets its failures as text (a provider SDK, a desktop app)
+ * types them where it gets them.
  */
 import type { ClientDiagnostics } from '../types/clientDiagnostics.js';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { InfrastructureBreak, TrialEnding } from '../types/trialEnding.js';
 import type { ExternalClientFailureKind } from './externalClient/types.js';
-
-/**
- * Message prefixes Cowork reports a Claude binding failure with, as text. The
- * Claude session watcher (`claudeSessions.ts`) throws them. Keep the wording
- * here and nowhere else.
- */
-export const CLAUDE_SESSION_TIMEOUT_MESSAGE =
-  'Timed out waiting for Claude session';
-export const CLAUDE_NO_MATCHING_SESSION_MESSAGE = 'No matching Claude session';
-/**
- * A Cowork trial whose sandbox (Cowork's VM) didn't start: the task ran
- * without its shell, so the answer says nothing about the servers under test.
- */
-export const COWORK_WORKSPACE_UNAVAILABLE_MESSAGE =
-  "Cowork's workspace was unavailable";
 
 /** Every value an infrastructure failure can name, for schemas. */
 export const INFRASTRUCTURE_BREAKS = [
@@ -47,6 +34,26 @@ export function infrastructureEnding(
 }
 
 /**
+ * A client that ran out of context (ADR 0010). After the client acted, its
+ * own turns and tool results filled the context: a trial, which counts
+ * against it. Before it acted, the case's prompt didn't fit: a setup failure
+ * a retry can't help. Each producer decides from its own provider's text
+ * whether the context ran out, and whether the client had acted.
+ */
+export function contextOverflowEnding(
+  reason: string,
+  acted: boolean
+): TrialEnding {
+  return acted
+    ? TRIAL_ENDING
+    : infrastructureEnding(
+        'setup',
+        `The case's prompt didn't fit the model's context before the client acted: ${reason}`,
+        false
+      );
+}
+
+/**
  * What a trial result, a stored trial record or a client's result says about
  * how its attempt ended. Records from before endings carry only the old
  * fields; `endingOf` maps those.
@@ -68,9 +75,11 @@ export interface EndingEvidence {
 
 /**
  * How an attempt ended. Its recorded ending when it has one. Otherwise, for
- * a record from before endings or an attempt still being attached, the
- * ending its failure kinds and error say. A run stored before endings keeps
- * the classification it was recorded with.
+ * a record from before endings or a result its producer didn't type, the
+ * ending its failure kinds say: an error alone is a trial that failed. A
+ * stored record from before endings keeps the classification it was
+ * recorded with (`infrastructureError`); when its failure kinds don't say
+ * what broke, it is the client app, and a retry can help.
  */
 export function endingOf(evidence: EndingEvidence): TrialEnding {
   if (evidence.ending) return evidence.ending;
@@ -85,9 +94,7 @@ export function endingOf(evidence: EndingEvidence): TrialEnding {
     diagnosticEnding(
       failureKindOf(evidence.clientDiagnostics ?? evidence.diagnostics),
       error
-    ) ??
-    externalEnding(failureKindOf(evidence.clientMetadata), error) ??
-    (error !== undefined ? textEnding(error) : undefined);
+    ) ?? externalEnding(failureKindOf(evidence.clientMetadata), error);
   if (found) return found;
   return recorded === true
     ? infrastructureEnding(
@@ -98,24 +105,40 @@ export function endingOf(evidence: EndingEvidence): TrialEnding {
 }
 
 /**
- * How an attempt ended when its client threw and MST caught the error: an
- * infrastructure failure when the error names what broke (an aborted wait,
- * a refused connection), else a trial that failed with the error.
+ * How an attempt ended when its client threw and MST caught the error. An
+ * aborted wait is a deadline, and a Node network error (by its `code`, or
+ * its cause's, as `fetch` reports one) is the network. Anything else is a
+ * trial that failed with the error: a client that knows what broke returns
+ * its ending instead of throwing.
  */
 export function thrownEnding(error: unknown): TrialEnding {
-  if (error instanceof Error) {
-    if (error.name.toLowerCase() === 'aborterror')
-      return infrastructureEnding('deadline', error.message || 'Aborted.');
-    const code = String(
-      (error as NodeJS.ErrnoException).code ?? ''
-    ).toLowerCase();
-    if (NETWORK_CODES.some((network) => code.includes(network)))
-      return infrastructureEnding('network', error.message || code);
-    return textEnding(error.message) ?? TRIAL_ENDING;
-  }
-  return typeof error === 'string'
-    ? (textEnding(error) ?? TRIAL_ENDING)
+  if (!(error instanceof Error)) return TRIAL_ENDING;
+  if (error.name === 'AbortError')
+    return infrastructureEnding('deadline', error.message || 'Aborted.');
+  const code = networkCode(error) ?? networkCode(error.cause);
+  return code
+    ? infrastructureEnding('network', error.message || code)
     : TRIAL_ENDING;
+}
+
+/** Node's codes for a connection that failed or was refused. */
+const NETWORK_CODES: ReadonlySet<string> = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EPIPE',
+  'ENETUNREACH',
+  'EHOSTUNREACH',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+
+function networkCode(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const code = (value as { code?: unknown }).code;
+  return typeof code === 'string' && NETWORK_CODES.has(code) ? code : undefined;
 }
 
 export function isInfrastructure(evidence: EndingEvidence): boolean {
@@ -241,11 +264,6 @@ function diagnosticEnding(
 ): TrialEnding | undefined {
   if (kind === undefined) return undefined;
   const reason = error ?? `The client's attempt ended with "${kind}".`;
-  if (
-    kind === 'startup' &&
-    error?.startsWith(COWORK_WORKSPACE_UNAVAILABLE_MESSAGE)
-  )
-    return infrastructureEnding('workspace', reason);
   const [broke, retryable] = DIAGNOSTIC_BREAKS[
     kind as DiagnosticFailureKind
   ] ?? ['client-app', true];
@@ -265,69 +283,4 @@ function externalEnding(
     error ?? `The client's attempt ended with "${kind}".`,
     retryable
   );
-}
-
-const NETWORK_CODES = ['econnreset', 'etimedout', 'econnrefused'];
-
-/**
- * Error text that names what broke, for clients that report failures only
- * as text. In the order they are tried.
- */
-const TEXT_BREAKS: Array<{
-  phrases: string[];
-  broke: InfrastructureBreak;
-  retryable: boolean;
-}> = [
-  {
-    phrases: ['automation permission', 'automation/accessibility'],
-    broke: 'setup',
-    retryable: false,
-  },
-  {
-    // The model couldn't run: a retry sends the same prompt.
-    phrases: [
-      'prompt is too long',
-      'context length exceeded',
-      'maximum context length',
-      'context_length_exceeded',
-      'tokens > ',
-    ],
-    broke: 'setup',
-    retryable: false,
-  },
-  {
-    phrases: [COWORK_WORKSPACE_UNAVAILABLE_MESSAGE.toLowerCase()],
-    broke: 'workspace',
-    retryable: true,
-  },
-  {
-    phrases: [
-      CLAUDE_NO_MATCHING_SESSION_MESSAGE.toLowerCase(),
-      CLAUDE_SESSION_TIMEOUT_MESSAGE.toLowerCase(),
-      'failed to submit prompt to claude',
-      'failed to submit prompt to desktop client',
-    ],
-    broke: 'client-app',
-    retryable: true,
-  },
-  {
-    phrases: ['rate limit', '429', '503'],
-    broke: 'provider',
-    retryable: true,
-  },
-  {
-    phrases: [...NETWORK_CODES, 'network'],
-    broke: 'network',
-    retryable: true,
-  },
-];
-
-function textEnding(message: string): TrialEnding | undefined {
-  const text = message.toLowerCase();
-  const match = TEXT_BREAKS.find(({ phrases }) =>
-    phrases.some((phrase) => text.includes(phrase))
-  );
-  return match
-    ? infrastructureEnding(match.broke, message, match.retryable)
-    : undefined;
 }

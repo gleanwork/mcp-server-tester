@@ -30,6 +30,8 @@ import {
 } from '../config/mcpConfig.js';
 import { resolveLLMEndpoint } from '../llm/endpoint.js';
 import { codexSandboxMode } from '../judge/agentic/codexSandbox.js';
+import type { TrialEnding } from '../types/trialEnding.js';
+import { contextOverflowEnding, infrastructureEnding } from './trialEnding.js';
 import type { ClientDiagnostics } from '../types/index.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import { buildCodexTrace, type TimedCodexEvent } from './codexTrace.js';
@@ -483,6 +485,13 @@ async function runCodex(
     const host =
       receiver && threadId ? await receiver.collect([threadId]) : undefined;
     const error = failure?.message ?? (trace.error && redact(trace.error));
+    const ending =
+      failure?.kind === 'timeout' || trace.error === undefined
+        ? undefined
+        : codexTurnEnding(
+            redact(trace.error),
+            trace.events.length > 0 || trace.finalText.length > 0
+          );
     const durationMs = Date.parse(endedAt) - Date.parse(startedAt);
     const toolMs = trace.telemetry.toolWallDurationMs;
     return {
@@ -499,6 +508,7 @@ async function runCodex(
       telemetry: trace.telemetry,
       ...(host ? { hostTelemetry: host } : {}),
       ...(error ? { error } : {}),
+      ...(ending ? { ending } : {}),
       ...(failure ? { diagnostics: { failureKind: failure.kind } } : {}),
     };
   } finally {
@@ -513,6 +523,34 @@ async function runCodex(
  * The `codex` client. It connects to the servers it is given, so a variant's
  * tool metadata reaches it through MST's proxy; it needs no desktop.
  */
+/**
+ * How a Codex turn that failed ended (ADR 0010), from the error Codex
+ * reported for it: Codex reports these only as text. Running out of context
+ * depends on whether the model had done anything (`acted`); a provider's
+ * `429`, server error or dropped stream is the provider; a key it can't use
+ * is setup. Anything else is left to the failure kind (`process`: Codex
+ * itself failed) or, with none, a trial that failed.
+ */
+function codexTurnEnding(
+  error: string,
+  acted: boolean
+): TrialEnding | undefined {
+  if (CODEX_CONTEXT_OVERFLOW.test(error))
+    return contextOverflowEnding(error, acted);
+  if (CODEX_PROVIDER_FAILURE.test(error))
+    return infrastructureEnding('provider', error);
+  if (CODEX_SETUP_FAILURE.test(error))
+    return infrastructureEnding('setup', error, false);
+  return undefined;
+}
+
+const CODEX_CONTEXT_OVERFLOW =
+  /context window|context_length_exceeded|maximum context length/i;
+/** Codex says `unexpected status 503 ...` or `last status: 429 ...`. */
+const CODEX_PROVIDER_FAILURE =
+  /status:? (429|5\d\d)\b|too many requests|rate limit|stream disconnected|overloaded/i;
+const CODEX_SETUP_FAILURE = /status:? 40[13]\b|unauthorized|invalid api key/i;
+
 export const CODEX_CLIENT: ClientDefinition = {
   schema: CodexClientSchema,
   evidence: 'structured',

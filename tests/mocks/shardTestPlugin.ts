@@ -16,6 +16,11 @@ import type { Plugin } from '../../src/plugins/plugin.js';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** The network failed: as a plugin client types it (ADR 0010). */
+function network(reason: string): NonNullable<ClientRunResult['ending']> {
+  return { kind: 'infrastructure', broke: 'network', retryable: true, reason };
+}
+
 async function token(input: ClientRunInput): Promise<string> {
   const dir = input.env?.MST_TOKENS_DIR;
   if (!dir) return 'none';
@@ -47,6 +52,8 @@ async function probe(
       finalText: '',
       events: [],
       error: `ECONNRESET while using ${second}`,
+      // A client types what broke (ADR 0010); MST never reads the words.
+      ending: network(`ECONNRESET while using ${second}`),
     };
   // Fails on the network the first time only: a retry helps. The marker
   // file, at SHARD_TEST_FLAKY_ONCE, says it already failed.
@@ -58,7 +65,12 @@ async function probe(
     );
     if (!failed) {
       await appendFile(once, 'failed\n');
-      return { finalText: '', events: [], error: 'read ECONNRESET' };
+      return {
+        finalText: '',
+        events: [],
+        error: 'read ECONNRESET',
+        ending: network('read ECONNRESET'),
+      };
     }
   }
   // The desktop kept only the prompt's beginning: a retry gets the same.

@@ -7,6 +7,12 @@ import {
   resolvePersistedOutput,
 } from '../../../persistedToolOutput.js';
 import type { UsageMetrics } from '../../../../types/index.js';
+import type { TrialEnding } from '../../../../types/trialEnding.js';
+import {
+  TRIAL_ENDING,
+  contextOverflowEnding,
+  infrastructureEnding,
+} from '../../../trialEnding.js';
 import {
   claudeModelCalls,
   claudeThinkingTokens,
@@ -186,14 +192,14 @@ export function parseStreamJson(
 
     if (event.type === 'result' && event.is_error === true) {
       const modelCalls = claudeModelCalls(messages);
+      const acted = messages.some((message) => message.type === 'assistant');
+      const { error, ending } = claudeResultEnding(event, acted);
       return {
         success: false,
         toolCalls: toolCalls.map(typeClaudeCodeCall),
         ...(modelCalls.length ? { modelCalls } : {}),
-        error:
-          typeof event.result === 'string'
-            ? event.result
-            : 'CLI client reported an error',
+        error,
+        ending,
         usage,
       };
     }
@@ -276,6 +282,8 @@ interface StreamJsonEvent {
   };
   result?: string;
   is_error?: boolean;
+  subtype?: string;
+  num_turns?: number;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -288,6 +296,51 @@ interface StreamJsonEvent {
   duration_ms?: number;
   duration_api_ms?: number;
 }
+
+/**
+ * How a Claude Code run that reported an error ended (ADR 0010), from its
+ * `result` event: Claude Code reports these only as a subtype and text.
+ * Reaching its own turn or budget limit is a trial; running out of context
+ * depends on whether the model had answered (`acted`); a provider's `429`
+ * or server error is the provider; a key or account Claude Code can't use
+ * is setup. Anything else is the client app failing.
+ */
+function claudeResultEnding(
+  event: { subtype?: string; result?: string; num_turns?: number },
+  acted: boolean
+): { error: string; ending: TrialEnding } {
+  const text = typeof event.result === 'string' ? event.result : '';
+  if (event.subtype === 'error_max_turns')
+    return {
+      error:
+        text ||
+        `Claude Code reached its turn limit${event.num_turns !== undefined ? ` (${event.num_turns} turns)` : ''}.`,
+      ending: TRIAL_ENDING,
+    };
+  if (event.subtype === 'error_max_budget_usd')
+    return {
+      error: text || 'Claude Code reached its budget limit.',
+      ending: TRIAL_ENDING,
+    };
+  const error = text || 'CLI client reported an error';
+  if (CLAUDE_CONTEXT_OVERFLOW.test(text))
+    return { error, ending: contextOverflowEnding(error, acted) };
+  if (CLAUDE_PROVIDER_FAILURE.test(text))
+    return { error, ending: infrastructureEnding('provider', error) };
+  if (CLAUDE_SETUP_FAILURE.test(text))
+    return { error, ending: infrastructureEnding('setup', error, false) };
+  return { error, ending: infrastructureEnding('client-app', error) };
+}
+
+/** How Claude Code says the context ran out. */
+const CLAUDE_CONTEXT_OVERFLOW =
+  /prompt is too long|context window|context length|context_length_exceeded/i;
+/** Claude Code's `API Error: <status>` for a rate limit or a server error. */
+const CLAUDE_PROVIDER_FAILURE =
+  /API Error: (429|5\d\d)\b|overloaded_error|rate_limit_error|rate limit/i;
+/** A key or account Claude Code can't run with: a retry fails the same way. */
+const CLAUDE_SETUP_FAILURE =
+  /invalid api key|please run \/login|credit balance is too low|API Error: 40[13]\b/i;
 
 /** A result's thinking tokens, when it reports them. */
 function thinking(event: StreamJsonEvent): Partial<UsageMetrics> {

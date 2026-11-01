@@ -5,10 +5,6 @@ import type { ExternalClientConfig, ClientRunContext } from '../types.js';
 import { POLL_INTERVAL_MS, delay } from './claudeCommon.js';
 import { NativeTraceError } from '../nativeTraceError.js';
 import {
-  CLAUDE_NO_MATCHING_SESSION_MESSAGE,
-  CLAUDE_SESSION_TIMEOUT_MESSAGE,
-} from '../../trialEnding.js';
-import {
   type ClaudeSessionBinding,
   type ClaudeSessionMetadata,
   type ClaudeTrace,
@@ -142,13 +138,13 @@ async function waitForClaudeMatch(
   if (lastPending) {
     throw new NativeTraceError(
       'timeout',
-      `${CLAUDE_SESSION_TIMEOUT_MESSAGE} ${lastPending.candidate.id} to complete`
+      `Timed out waiting for Claude session ${lastPending.candidate.id} to complete`
     );
   }
 
   throw new NativeTraceError(
     'no_matching_session',
-    `${CLAUDE_NO_MATCHING_SESSION_MESSAGE} found for ${describeCorrelation(options)}`
+    `No matching Claude session found for ${describeCorrelation(options)}`
   );
 }
 

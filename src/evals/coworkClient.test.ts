@@ -1079,6 +1079,14 @@ describe('V2 Cowork client', () => {
       );
       const results = await COWORK_CLIENT.runBatch!(batch(), stdioContext);
       expect(results[0]!.error).toBe('adapter rejected [REDACTED]');
+      // Cowork didn't take the prompt: the client app failed, and the reason
+      // it records is as redacted as the error (ADR 0010).
+      expect(results[0]!.ending).toEqual({
+        kind: 'infrastructure',
+        broke: 'client-app',
+        retryable: true,
+        reason: 'adapter rejected [REDACTED]',
+      });
       expect(mocks.reset).toHaveBeenCalledOnce();
       expect(results[1]!.error).toBeUndefined();
       expect(JSON.stringify(results)).not.toContain('good-token');
@@ -1741,14 +1749,6 @@ describe("Cowork's workspace unavailable", () => {
         { ...down('Workspace unavailable.'), isError: false },
       ])
     ).toBeUndefined();
-  });
-  it('is an infrastructure failure of the workspace', () => {
-    expect(
-      endingOf({
-        error:
-          "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s",
-      })
-    ).toMatchObject({ kind: 'infrastructure', broke: 'workspace' });
   });
 });
 
