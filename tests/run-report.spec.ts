@@ -19,16 +19,25 @@ const plugin: Plugin = {
       schema: z.object({ type: z.string() }).passthrough(),
       evidence: 'structured',
       run: async (input, _config, context) => {
-        // The `flaky` variant's client times out on one case.
+        // The `flaky` variant's client can't reach its provider on one
+        // case, and says so: MST doesn't read the error's words.
         if (
           context.variant?.name === 'flaky' &&
           input.prompt?.includes('owners')
-        )
+        ) {
+          const error = 'connect ETIMEDOUT 10.0.0.1:443';
           return {
             finalText: '',
             events: [],
-            error: 'connect ETIMEDOUT 10.0.0.1:443',
+            error,
+            ending: {
+              kind: 'infrastructure' as const,
+              broke: 'network' as const,
+              retryable: true,
+              reason: error,
+            },
           };
+        }
         // The `long` variant's call and answer have lines nothing can break.
         if (context.variant?.name === 'long')
           return {

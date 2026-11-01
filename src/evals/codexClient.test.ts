@@ -15,6 +15,7 @@ import {
 import { assertClientSupports, getClient } from './builtinClients.js';
 import type { ClientRunContext } from './evalFrameworkTypes.js';
 import type { EvalConfig } from './evalConfig.js';
+import { endingOf } from './trialEnding.js';
 
 /** What the fake SDK saw, and how it behaves. */
 const sdk = vi.hoisted(() => ({
@@ -25,6 +26,12 @@ const sdk = vi.hoisted(() => ({
   homeMode: undefined as number | undefined,
   hang: false,
   fail: undefined as string | undefined,
+  /** Fail before the first turn starts, as a Codex that can't start does. */
+  failBeforeTurn: undefined as string | undefined,
+  /** Fail the turn with this error, as Codex reports one, then exit 1. */
+  turnFailed: undefined as string | undefined,
+  /** Answer once before the turn fails. */
+  actedFirst: undefined as boolean | undefined,
 }));
 
 vi.mock('@openai/codex-sdk', () => ({
@@ -82,8 +89,18 @@ vi.mock('@openai/codex-sdk', () => ({
           );
           async function* events() {
             yield { type: 'thread.started', thread_id: 'thread-9' };
+            if (sdk.failBeforeTurn) throw new Error(sdk.failBeforeTurn);
             yield { type: 'turn.started' };
             if (sdk.fail) throw new Error(sdk.fail);
+            if (sdk.turnFailed !== undefined) {
+              if (sdk.actedFirst)
+                yield {
+                  type: 'item.completed',
+                  item: { id: 'item_0', type: 'agent_message', text: 'Hm.' },
+                };
+              yield { type: 'turn.failed', error: { message: sdk.turnFailed } };
+              throw new Error('Codex Exec exited with code 1');
+            }
             if (sdk.hang)
               await new Promise((_, reject) =>
                 turn.signal?.addEventListener('abort', () =>
@@ -446,6 +463,79 @@ describe('codex client run', () => {
     );
     expect(result.error).toContain('Codex exited with an error: boom');
     expect(result.error).not.toContain('sk-gateway');
+    expect(result.diagnostics).toEqual({ failureKind: 'process' });
+    // Codex itself failed: the failure kind says so (ADR 0010).
+    expect(result.ending).toBeUndefined();
+  });
+
+  // How a failed turn ended (ADR 0010), from the error Codex reported.
+  it.each([
+    [
+      'a context overflow before the model acted',
+      'Your input exceeds the context window of this model.',
+      false,
+      { kind: 'infrastructure', broke: 'setup', retryable: false },
+    ],
+    [
+      'a context overflow after it acted',
+      'Your input exceeds the context window of this model.',
+      true,
+      { kind: 'trial' },
+    ],
+    [
+      'a rate limit',
+      'exceeded retry limit, last status: 429 Too Many Requests',
+      true,
+      { kind: 'infrastructure', broke: 'provider', retryable: true },
+    ],
+    [
+      'a server error',
+      'unexpected status 503 Service Unavailable: upstream',
+      false,
+      { kind: 'infrastructure', broke: 'provider', retryable: true },
+    ],
+    [
+      'a key the provider rejects',
+      'unexpected status 401 Unauthorized: invalid key',
+      false,
+      { kind: 'infrastructure', broke: 'setup', retryable: false },
+    ],
+  ])('types %s', async (_, message, acted, expected) => {
+    sdk.turnFailed = message;
+    sdk.actedFirst = acted;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex' },
+      context(GATEWAY)
+    );
+    expect(result.error).toContain('Codex exited with an error');
+    expect(result.ending).toMatchObject(expected);
+  });
+
+  it('is a startup failure when Codex fails before its turn starts', async () => {
+    sdk.failBeforeTurn = 'spawn codex ENOENT';
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex' },
+      context(GATEWAY)
+    );
+    expect(result.diagnostics).toEqual({ failureKind: 'startup' });
+    expect(result.ending).toBeUndefined();
+    expect(endingOf(result)).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'client-app',
+      retryable: true,
+    });
+  });
+
+  it('leaves a failed turn it cannot name to the failure kind', async () => {
+    sdk.turnFailed = 'The model refused: line 500 of the plan.';
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex' },
+      context(GATEWAY)
+    );
+    expect(result.ending).toBeUndefined();
     expect(result.diagnostics).toEqual({ failureKind: 'process' });
   });
 });

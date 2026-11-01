@@ -118,6 +118,7 @@ describe('a shard in a child-process environment', () => {
         // Long enough for the first token to be renewed while it runs.
         { caseId: 'a', prompt: 'a', delayMs: 2500 },
         { caseId: 'flaky', prompt: 'flaky' },
+        { caseId: 'thrown', prompt: 'thrown' },
       ],
       [{ caseId: 'b', prompt: 'b' }]
     );
@@ -151,20 +152,40 @@ describe('a shard in a child-process environment', () => {
     expect(outcome).toEqual({
       ok: true,
       collected: 2,
-      infra: 1,
+      infra: 2,
       cancelled: false,
     });
     expect(reasons).toEqual(['start', 'expiring']);
     const a = await readClientResult(path.join(shard.resultsDir, '0/0.json'));
     expect(a.key).toEqual({ variant: 'baseline', caseId: 'a', trial: 0 });
     expect(a.result.finalText).toBe('a: token-1 then token-2; key key-1');
-    // An error never carries a token.
+    // An error never carries a token, nor does the ending's reason.
     const flaky = await readClientResult(
       path.join(shard.resultsDir, '0/1.json')
     );
     expect(flaky.result).toMatchObject({
       error: 'ECONNRESET while using [REDACTED]',
+      ending: {
+        kind: 'infrastructure',
+        broke: 'network',
+        reason: 'ECONNRESET while using [REDACTED]',
+      },
     });
+    expect(JSON.stringify(flaky)).not.toContain('token-');
+    // A client that threw a network error: typed by its code, then redacted.
+    const thrown = await readClientResult(
+      path.join(shard.resultsDir, '0/2.json')
+    );
+    expect(thrown.result).toMatchObject({
+      error: 'read ECONNRESET while using [REDACTED]',
+      ending: {
+        kind: 'infrastructure',
+        broke: 'network',
+        retryable: true,
+        reason: 'read ECONNRESET while using [REDACTED]',
+      },
+    });
+    expect(JSON.stringify(thrown)).not.toContain('token-');
     // The batch client's result, reported as it finished.
     const b = await readClientResult(path.join(shard.resultsDir, '1/0.json'));
     expect(b.key).toEqual({ variant: 'candidate', caseId: 'b', trial: 0 });
@@ -179,7 +200,7 @@ describe('a shard in a child-process environment', () => {
       progress
         .filter((event) => event.type === 'trial')
         .map((event) => event.type === 'trial' && event.status)
-    ).toEqual(['collected', 'infra', 'collected']);
+    ).toEqual(['collected', 'infra', 'infra', 'collected']);
     expect(progress.some((event) => event.type === 'heartbeat')).toBe(true);
     // Tokens are gone, the bundle never held the secrets, the machine is deleted.
     await expect(fs.stat(tokensDir)).rejects.toThrow();

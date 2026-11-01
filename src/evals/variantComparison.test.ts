@@ -365,7 +365,7 @@ describe('measureAgainstBaseline', () => {
     ).toBe(1);
   });
 
-  it('knows an infrastructure failure by its error when a trial has no flag', () => {
+  it('never reads an infrastructure failure from a trial error by its words (ADR 0010)', () => {
     const base = run([
       { id: 'c', trials: [false, false] },
       { id: 'd', trials: [false, false] },
@@ -374,13 +374,16 @@ describe('measureAgainstBaseline', () => {
       {
         id: 'c',
         trials: [false, true],
-        error: [undefined, 'connect ETIMEDOUT 10.0.0.1:443'],
+        error: ['connect ETIMEDOUT 10.0.0.1:443', undefined],
       },
       { id: 'd', trials: [true, true] },
     ]);
+    // The failed trial counts, so the case is complete: three of its
+    // variant's four trials passed. Flagged as infrastructure, it would be
+    // left out (the test above).
     expect(
       measureAgainstBaseline(base, candidate, declared).capability.passRate
-    ).toBe(1);
+    ).toBe(0.75);
   });
 });
 

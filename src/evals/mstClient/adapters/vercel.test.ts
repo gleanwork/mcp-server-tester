@@ -497,6 +497,132 @@ describe('createVercelOrchestrator', () => {
       expect(result.error).toContain('ANTHROPIC_BASE_URL');
     });
   });
+
+  describe('how a failed run ended (ADR 0010)', () => {
+    const statusError = (statusCode: number, message: string) =>
+      Object.assign(new Error(message), { statusCode });
+    const infra = (broke: string, retryable = true) => ({
+      kind: 'infrastructure',
+      broke,
+      retryable,
+    });
+
+    it.each([
+      ['an error of its own', new Error('API error'), { kind: 'trial' }],
+      [
+        'a missing provider package',
+        new Error("Cannot find module '@ai-sdk/openai'"),
+        infra('setup', false),
+      ],
+      [
+        'a key the provider rejects',
+        new Error('401 Unauthorized: Invalid API key'),
+        infra('setup', false),
+      ],
+      [
+        'a model the provider does not serve',
+        new Error('404 Not Found: model not found'),
+        infra('setup', false),
+      ],
+      ['a rate limit', new Error('429 Too Many Requests'), infra('provider')],
+      [
+        'a server error',
+        statusError(500, 'Internal server error'),
+        infra('provider'),
+      ],
+      [
+        'an overloaded stream',
+        { type: 'overloaded_error', message: 'Overloaded' },
+        infra('provider'),
+      ],
+      ['a failed connection', new Error('fetch failed'), infra('network')],
+      // A status is the provider's answer; the words in its message aren't.
+      [
+        'a bad request that quotes an API key',
+        statusError(400, 'Invalid tool schema; the API key field is unused'),
+        { kind: 'trial' },
+      ],
+      [
+        'a server error that quotes a 429',
+        statusError(502, 'Upstream returned 429 and ECONNRESET'),
+        infra('provider'),
+      ],
+      [
+        'a forbidden key by status alone',
+        statusError(403, 'Forbidden'),
+        infra('setup', false),
+      ],
+      // The AI SDK retries these, then throws a RetryError around the last.
+      [
+        'an overload the SDK gave up retrying',
+        Object.assign(
+          new Error('Failed after 3 attempts. Last error: Overloaded'),
+          {
+            name: 'AI_RetryError',
+            reason: 'maxRetriesExceeded',
+            lastError: statusError(529, 'Overloaded'),
+          }
+        ),
+        infra('provider'),
+      ],
+      [
+        'a server error the SDK gave up retrying',
+        Object.assign(
+          new Error('Failed after 3 attempts. Last error: Internal error'),
+          {
+            name: 'AI_RetryError',
+            reason: 'maxRetriesExceeded',
+            lastError: statusError(500, 'Internal error'),
+          }
+        ),
+        infra('provider'),
+      ],
+      [
+        'a prompt too long for the context',
+        statusError(400, 'prompt is too long: 210000 tokens > 200000 maximum'),
+        infra('setup', false),
+      ],
+      [
+        "OpenAI's context code in the response body",
+        Object.assign(statusError(400, 'Bad request'), {
+          responseBody: '{"error":{"code":"context_length_exceeded"}}',
+        }),
+        infra('setup', false),
+      ],
+    ])('types %s', async (_, error, expected) => {
+      const { generateText } = await import('ai');
+      vi.mocked(generateText).mockRejectedValueOnce(error);
+      const result = await createVercelOrchestrator().simulate(
+        createMockMCP(),
+        'scenario',
+        { provider: 'openai', model: 'gpt-4o' }
+      );
+      expect(result.success).toBe(false);
+      expect(result.ending).toMatchObject(expected);
+    });
+
+    it('is a trial when the context fills after the model answered', async () => {
+      const { generateText } = await import('ai');
+      vi.mocked(generateText).mockImplementationOnce((async (options: {
+        onStepFinish?: () => void;
+      }) => {
+        // The first request answered; the next one no longer fit.
+        options.onStepFinish?.();
+        throw statusError(
+          400,
+          'prompt is too long: 210000 tokens > 200000 maximum'
+        );
+      }) as never);
+      const result = await createVercelOrchestrator().simulate(
+        createMockMCP(),
+        'scenario',
+        { provider: 'openai', model: 'gpt-4o' }
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('prompt is too long');
+      expect(result.ending).toEqual({ kind: 'trial' });
+    });
+  });
 });
 
 describe('stepModelCalls', () => {

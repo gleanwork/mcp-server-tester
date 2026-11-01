@@ -155,6 +155,7 @@ function simulationExecution(
     response: result,
     trace: simulationTrace(result),
     ...(error !== undefined ? { error } : {}),
+    ...(result.ending ? { ending: result.ending } : {}),
     usage: result.usage,
     ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
     ...('clientMetadata' in result && result.clientMetadata
@@ -209,7 +210,17 @@ export async function executeEvalCase(
       mcp
     );
     if (simulation.success) return simulationExecution(simulation);
-    throw new Error(simulation.error || 'The mst client failed.');
+    // The adapter typed how it ended, or its failure kind says (a CLI that
+    // didn't start); a thrown error would lose both.
+    const error = simulation.error || 'The mst client failed.';
+    return {
+      kind: 'failed',
+      response: undefined,
+      error,
+      ending:
+        simulation.ending ??
+        endingOf({ error, diagnostics: simulation.diagnostics }),
+    };
   } catch (error) {
     // Simulation errors are already enriched by the adapter; pass them through.
     return failedExecution(error);

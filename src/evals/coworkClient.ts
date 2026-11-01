@@ -30,7 +30,9 @@ import {
   awaitingUserAnswer,
   type ClaudeTrace,
 } from './externalClient/builtins/claudeTrace.js';
-import { COWORK_WORKSPACE_UNAVAILABLE_MESSAGE } from './trialEnding.js';
+import { infrastructureEnding } from './trialEnding.js';
+import { computerUseEnding } from './cowork/anthropicComputerUse.js';
+import { NativeTraceError } from './externalClient/nativeTraceError.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
   claudeDesktopOtlpSettings,
@@ -539,7 +541,15 @@ async function runBatch(
                 : {}),
             };
           }
-          result = failure(safeError(error));
+          // Cowork didn't take the prompt, or its Claude session never bound
+          // to the case: not the model. Computer Use types why it stopped
+          // (a permission, the planner's provider, the deadline); anything
+          // else is the client app.
+          const message = safeError(error);
+          result = {
+            ...failure(message),
+            ending: computerUseEnding(error, message),
+          };
           continuation = 'reset';
           return finishCase();
         }
@@ -793,25 +803,41 @@ async function runBatch(
             // Cowork's VM didn't start, so the task ran without its shell:
             // an infrastructure failure, kept with its evidence. Cowork
             // starts the VM again for the next task.
+            const error = `Cowork's workspace was unavailable: ${unavailable}`;
             result = {
               ...result,
-              error: `${COWORK_WORKSPACE_UNAVAILABLE_MESSAGE}: ${unavailable}`,
+              error,
+              ending: infrastructureEnding('workspace', error),
               diagnostics: { ...result.diagnostics, failureKind: 'startup' },
             };
             if (platform.reset) continuation = 'reset';
           }
           const truncated = truncatedPrompt(trace);
-          if (truncated !== undefined)
+          if (truncated !== undefined) {
             // The model answered the beginning of the prompt, not the case:
-            // never graded, kept with its evidence.
+            // never graded, kept with its evidence. A retry gets the same
+            // part, so the case needs a shorter prompt.
+            const error = `Claude kept ${truncated.storedChars} of the prompt's ${truncated.promptChars} characters: the model got only its beginning. No resubmission attempted.`;
             result = {
               ...result,
-              error: `Claude kept ${truncated.storedChars} of the prompt's ${truncated.promptChars} characters: the model got only its beginning. No resubmission attempted.`,
+              error,
+              ending: infrastructureEnding('setup', error, false),
               diagnostics: { ...result.diagnostics, failureKind: 'input' },
             };
+          }
         } catch (error) {
           // Trace collection or attribution failed: the app state is unknown.
-          result = failure(safeError(error));
+          const message = safeError(error);
+          // The bound session never finished or went away: the client app
+          // failed, not the model. Any other error here is the trial's.
+          const lostSession =
+            error instanceof NativeTraceError &&
+            (error.failureKind === 'timeout' ||
+              error.failureKind === 'no_matching_session');
+          const ending = lostSession
+            ? infrastructureEnding('client-app', message)
+            : undefined;
+          result = { ...failure(message), ...(ending ? { ending } : {}) };
           if (Date.now() >= deadlineAt) {
             // Past the deadline the task may still be running: keep what
             // its bound session did by now, as a failed case's evidence.
@@ -842,6 +868,7 @@ async function runBatch(
                   },
                   servers
                 ),
+                ...(ending ? { ending } : {}),
                 ...taskTimes(partial),
                 artifacts: {
                   dir: partial.candidate.sessionDir,

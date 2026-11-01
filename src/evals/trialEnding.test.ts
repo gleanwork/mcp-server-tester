@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import {
   caseIncompleteness,
+  contextOverflowEnding,
   endingOf,
   isCounted,
   thrownEnding,
@@ -53,19 +54,12 @@ describe('endingOf', () => {
     ).toMatchObject(expected);
   });
 
-  it("tells Cowork's workspace from the client app on startup", () => {
-    expect(
-      endingOf({
-        error: "Cowork's workspace was unavailable: the VM didn't start",
-        diagnostics: { failureKind: 'startup' },
-      })
-    ).toMatchObject(infra('workspace'));
-  });
-
   it.each([
     ['app_unavailable', infra('client-app')],
     ['automation_permission_denied', infra('setup', false)],
     ['no_matching_session', infra('client-app')],
+    ['client_run_failed', infra('client-app')],
+    ['cleanup_failed', infra('client-app')],
     ['timeout', infra('deadline')],
     ['unsupported_client', infra('setup', false)],
   ])('maps the external client failure %s', (failureKind, expected) => {
@@ -74,14 +68,27 @@ describe('endingOf', () => {
     ).toMatchObject(expected);
   });
 
+  // Words the old shared list matched. Only a producer reads its own
+  // provider's or app's text (ADR 0010); an error alone is a trial.
   it.each([
-    ['read ECONNRESET', infra('network')],
-    ['Rate limit reached for requests', infra('provider')],
-    ['HTTP 503 Service Unavailable', infra('provider')],
-    ['No matching Claude session found', infra('client-app')],
-    ['prompt is too long: 210000 tokens > 200000', infra('setup', false)],
-  ])('reads what broke from text: %s', (error, expected) => {
-    expect(endingOf({ error })).toMatchObject({ ...expected, reason: error });
+    'read ECONNRESET',
+    'Rate limit reached for requests',
+    'HTTP 503 Service Unavailable',
+    'No matching Claude session found',
+    "Cowork's workspace was unavailable: the VM didn't start",
+    'prompt is too long: 210000 tokens > 200000',
+    'automation permission was denied',
+  ])('never reads what broke from an error: %s', (error) => {
+    expect(endingOf({ error })).toEqual(TRIAL_ENDING);
+  });
+
+  it("keeps a startup failure the client app's, whatever its words", () => {
+    expect(
+      endingOf({
+        error: "Cowork's workspace was unavailable: the VM didn't start",
+        diagnostics: { failureKind: 'startup' },
+      })
+    ).toMatchObject(infra('client-app'));
   });
 
   it('is a trial when a grader failed: the attempt ended fine', () => {
@@ -106,6 +113,48 @@ describe('endingOf', () => {
       endingOf({ error: 'Something odd.', infrastructureError: true })
     ).toMatchObject({ ...infra('client-app'), reason: 'Something odd.' });
   });
+
+  // Stored trial records from before endings, as `mst.run/v1` wrote them:
+  // every record has `infrastructureError`, so a record's words never
+  // decided it. They keep that, and a retry can help unless a failure kind
+  // says otherwise.
+  it.each([
+    [
+      'a rate limit',
+      { error: '429 Too Many Requests', infrastructureError: true },
+      infra('client-app'),
+    ],
+    [
+      'a context overflow',
+      { error: 'prompt is too long', infrastructureError: true },
+      infra('client-app'),
+    ],
+    [
+      'a Cowork workspace',
+      {
+        error: "Cowork's workspace was unavailable: down",
+        infrastructureError: true,
+        clientDiagnostics: { failureKind: 'startup' },
+      },
+      infra('client-app'),
+    ],
+    [
+      'a truncated prompt',
+      {
+        error: 'Claude kept 10 of the prompt',
+        infrastructureError: true,
+        clientDiagnostics: { failureKind: 'input' },
+      },
+      infra('setup', false),
+    ],
+    [
+      'a failed trial that mentions a 503',
+      { error: 'Expected 200, got 503.', infrastructureError: false },
+      TRIAL_ENDING,
+    ],
+  ])('maps a stored record from before endings: %s', (_, record, expected) => {
+    expect(endingOf(record)).toMatchObject(expected);
+  });
 });
 
 describe('thrownEnding', () => {
@@ -119,9 +168,35 @@ describe('thrownEnding', () => {
     expect(thrownEnding(refused)).toMatchObject(infra('network'));
   });
 
+  it('reads a network code from the cause, as fetch reports one', () => {
+    const failed = new TypeError('fetch failed', {
+      cause: Object.assign(new Error('getaddrinfo ENOTFOUND api.example'), {
+        code: 'ENOTFOUND',
+      }),
+    });
+    expect(thrownEnding(failed)).toMatchObject({
+      ...infra('network'),
+      reason: 'fetch failed',
+    });
+  });
+
   it('is a trial that failed when nothing names what broke', () => {
     expect(thrownEnding(new Error('Unexpected token'))).toEqual(TRIAL_ENDING);
     expect(thrownEnding({ odd: true })).toEqual(TRIAL_ENDING);
+    // Words alone never decide it: a client that knows returns its ending.
+    expect(thrownEnding(new Error('read ECONNRESET'))).toEqual(TRIAL_ENDING);
+    expect(thrownEnding('429 rate limit')).toEqual(TRIAL_ENDING);
+  });
+});
+
+describe('contextOverflowEnding', () => {
+  it('is a trial once the client acted, and setup before', () => {
+    expect(contextOverflowEnding('prompt is too long', true)).toEqual(
+      TRIAL_ENDING
+    );
+    expect(contextOverflowEnding('prompt is too long', false)).toMatchObject(
+      infra('setup', false)
+    );
   });
 });
 

@@ -402,8 +402,10 @@ describe('multi-trial cases', () => {
     vi.mocked(mcp.callTool).mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        const err = new Error('ECONNRESET: connection reset by peer');
-        throw err;
+        // As Node reports a reset socket: by its `code`.
+        throw Object.assign(new Error('read ECONNRESET'), {
+          code: 'ECONNRESET',
+        });
       }
       return {
         content: [{ type: 'text', text: 'hello' }],
@@ -440,12 +442,14 @@ describe('multi-trial cases', () => {
     expect(result.trialResults?.[1]?.isInfrastructureError).toBe(false);
   });
 
-  it('classifies prompt-too-long errors as infrastructure errors', async () => {
+  it('never reads a thrown error by its words: a trial that failed (ADR 0010)', async () => {
     let callCount = 0;
     const mcp = createMockMCP();
     vi.mocked(mcp.callTool).mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
+        // Words the old shared list matched. A producer that knows the
+        // context ran out types it; MST doesn't guess from text.
         throw new Error('prompt is too long: 200795 tokens > 200000 maximum');
       }
       return { content: [{ type: 'text', text: 'hello' }], isError: false };
@@ -453,17 +457,17 @@ describe('multi-trial cases', () => {
 
     const evalCase = createEvalCase({
       trials: 2,
-      passThreshold: 1.0,
+      passThreshold: 0.5,
       assertions: { containsText: 'hello' },
     });
 
     const result = await runEvalCase(evalCase, createContext(mcp));
 
-    expect(result.trialResults?.[0]?.isInfrastructureError).toBe(true);
-    expect(result.trialResults?.[1]?.isInfrastructureError).toBe(false);
-    // Excluded from denominator: 1 assertion result, 1 pass
-    expect(result.passRate).toBe(1.0);
-    expect(result.infrastructureErrorCount).toBe(1);
+    expect(result.trialResults?.[0]?.ending).toEqual({ kind: 'trial' });
+    expect(result.trialResults?.[0]?.isInfrastructureError).toBe(false);
+    expect(result.infrastructureErrorCount).toBe(0);
+    // Both trials count: one failed, one passed.
+    expect(result.passRate).toBe(0.5);
   });
 });
 
@@ -648,7 +652,18 @@ describe('runEvalDataset defaultTrials', () => {
       async (evalCase: EvalCase): Promise<CaseExecution> =>
         evalCase.id === 'lost'
           ? clientRunToExecution(
-              { finalText: '', events: [], error: 'read ECONNRESET' },
+              {
+                finalText: '',
+                events: [],
+                error: 'read ECONNRESET',
+                // The client typed it: `ClientRunResult.ending`.
+                ending: {
+                  kind: 'infrastructure',
+                  broke: 'network',
+                  retryable: true,
+                  reason: 'read ECONNRESET',
+                },
+              },
               'structured'
             )
           : clientRunToExecution({ finalText: 'ok', events: [] }, 'structured')

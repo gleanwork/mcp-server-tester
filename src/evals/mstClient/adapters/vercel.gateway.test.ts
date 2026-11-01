@@ -403,6 +403,12 @@ describe('SDK client through a bearer-only LLM gateway', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Overloaded');
+    // The provider's API failed, not the model: a retry can help.
+    expect(result.ending).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'provider',
+      retryable: true,
+    });
   });
 
   // Why the anthropic provider streams. If an AI SDK upgrade starts accepting

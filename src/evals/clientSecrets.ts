@@ -1,4 +1,5 @@
 import type { MCPConfig } from '../config/mcpConfig.js';
+import type { TrialEnding } from '../types/trialEnding.js';
 
 const SECRET_ENV_NAME = /token|key|secret|password|authorization/i;
 /** Shorter values are not credentials and would garble every message. */
@@ -41,6 +42,30 @@ export function redactClientSecrets(
   for (const secret of [...secrets].sort((a, b) => b.length - a.length))
     redacted = redacted.split(secret).join(REDACTED);
   return redacted;
+}
+
+/**
+ * A client result whose failure text is redacted: its `error`, and its
+ * ending's `reason`, which a client often fills with the same message.
+ */
+export function redactedClientRun<
+  T extends { error?: string; ending?: TrialEnding },
+>(result: T, secrets: readonly string[]): T {
+  const ending = result.ending;
+  return {
+    ...result,
+    ...(result.error !== undefined
+      ? { error: redactClientSecrets(result.error, secrets) }
+      : {}),
+    ...(ending?.kind === 'infrastructure'
+      ? {
+          ending: {
+            ...ending,
+            reason: redactClientSecrets(ending.reason, secrets),
+          },
+        }
+      : {}),
+  };
 }
 
 /** A redacted message for `error`, or `fallback` for non-Error values. */

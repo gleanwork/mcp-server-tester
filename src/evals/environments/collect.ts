@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { getClient } from '../builtinClients.js';
-import { redactClientSecrets } from '../clientSecrets.js';
+import { redactedClientRun } from '../clientSecrets.js';
 import {
   expandWorkerConnectors,
   writeTokenFile,
@@ -22,7 +22,7 @@ import {
   type ConnectorServerConfig,
   type EvalServerConfig,
 } from '../evalConfig.js';
-import { isInfrastructure } from '../trialEnding.js';
+import { isInfrastructure, thrownEnding } from '../trialEnding.js';
 import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
@@ -286,9 +286,7 @@ export async function collectShard(
           usedWrites
         )
       : trace;
-    const redacted: ClientRunResult = result.error
-      ? { ...result, error: redactClientSecrets(result.error, [...secrets]) }
-      : result;
+    const redacted: ClientRunResult = redactedClientRun(result, [...secrets]);
     // The client's artifacts (a Cowork session folder) are on this machine:
     // copy them beside the result, which the coordinator copies back, and
     // name them relative to the results directory.
@@ -468,10 +466,14 @@ export async function collectShard(
               true
             );
           } catch (error) {
+            // Read how it ended from the error itself (a network code, an
+            // abort), as a local run does: only its message crosses the
+            // channel. `save` redacts both.
             result = {
               finalText: '',
               events: [],
               error: error instanceof Error ? error.message : String(error),
+              ending: thrownEnding(error),
             };
           }
           await save(batchIndex, index, keyOf(index), result);

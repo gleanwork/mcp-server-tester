@@ -203,7 +203,10 @@ describe('golden: the mst client (dataset API)', () => {
   it('trials exclude infrastructure errors from the pass rate', async () => {
     vi.mocked(simulateMstClient)
       .mockResolvedValueOnce(simulation)
-      .mockRejectedValueOnce(new Error('read ECONNRESET'))
+      // A Node network error, as a socket reports it: by its `code`.
+      .mockRejectedValueOnce(
+        Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+      )
       .mockResolvedValueOnce({ ...simulation, response: 'cloudy' });
     const result = await runEvalCase(
       { ...clientCase, trials: 3, passThreshold: 0.5 },

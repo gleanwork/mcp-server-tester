@@ -14,6 +14,7 @@ import {
   truncatedPrompt,
 } from './coworkClient.js';
 import { endingOf, isInfrastructure } from './trialEnding.js';
+import { NativeTraceError } from './externalClient/nativeTraceError.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import { CoworkHitlError } from './cowork/driver.js';
 import { toCoworkServers } from './coworkSetup/config.js';
@@ -1079,10 +1080,48 @@ describe('V2 Cowork client', () => {
       );
       const results = await COWORK_CLIENT.runBatch!(batch(), stdioContext);
       expect(results[0]!.error).toBe('adapter rejected [REDACTED]');
+      // Cowork didn't take the prompt: the client app failed, and the reason
+      // it records is as redacted as the error (ADR 0010).
+      expect(results[0]!.ending).toEqual({
+        kind: 'infrastructure',
+        broke: 'client-app',
+        retryable: true,
+        reason: 'adapter rejected [REDACTED]',
+      });
       expect(mocks.reset).toHaveBeenCalledOnce();
       expect(results[1]!.error).toBeUndefined();
       expect(JSON.stringify(results)).not.toContain('good-token');
       expect(mocks.dispose).toHaveBeenCalledOnce();
+    });
+
+    it('ends a submission as Computer Use typed its stop (ADR 0010)', async () => {
+      mocks.submit
+        .mockRejectedValueOnce(
+          new ComputerUseDriverError(
+            'Computer Use submit failed: stopped before completion; not retrying (permissions_required)',
+            undefined,
+            { code: 'permissions_required', aborted: false }
+          )
+        )
+        .mockRejectedValueOnce(
+          new ComputerUseDriverError(
+            'Computer Use submit failed: deadline reached before completion; not retrying',
+            undefined,
+            { code: undefined, aborted: true }
+          )
+        );
+      const results = await COWORK_CLIENT.runBatch!(batch(), stdioContext);
+      // A permission the desktop needs: a retry can't help.
+      expect(results[0]!.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke: 'setup',
+        retryable: false,
+      });
+      expect(results[1]!.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke: 'deadline',
+        retryable: true,
+      });
     });
   });
   it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {
@@ -1241,6 +1280,29 @@ describe('V2 Cowork client', () => {
     expect(result[0]!.error).toContain('Ambiguous');
     expect(result[1]!.error).toBeUndefined();
   });
+  // How a case ended when its trace couldn't be collected (ADR 0010).
+  it.each([
+    [
+      new NativeTraceError(
+        'timeout',
+        'Timed out waiting for Claude session local_1 to complete'
+      ),
+      { kind: 'infrastructure', broke: 'client-app', retryable: true },
+    ],
+    [
+      new NativeTraceError('no_matching_session', 'No matching Claude session'),
+      { kind: 'infrastructure', broke: 'client-app', retryable: true },
+    ],
+    [new Error('Cowork model mismatch: requested a, observed b.'), undefined],
+  ])('types a failed collection: %s', async (error, expected) => {
+    mocks.trace.mockRejectedValueOnce(error);
+    const [result] = await COWORK_CLIENT.runBatch!(requests(), context);
+    expect(result!.error).toBe(error.message);
+    expect(result!.ending).toEqual(
+      expected ? { ...expected, reason: error.message } : undefined
+    );
+  });
+
   it('preserves whitespace and Unicode and binds repeated identical prompts to different sessions', async () => {
     const scenario = '  café\n重复 query  ';
     const batch = requests().map((r) => ({
@@ -1741,14 +1803,6 @@ describe("Cowork's workspace unavailable", () => {
         { ...down('Workspace unavailable.'), isError: false },
       ])
     ).toBeUndefined();
-  });
-  it('is an infrastructure failure of the workspace', () => {
-    expect(
-      endingOf({
-        error:
-          "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s",
-      })
-    ).toMatchObject({ kind: 'infrastructure', broke: 'workspace' });
   });
 });
 

@@ -142,7 +142,94 @@ describe('parseStreamJson', () => {
     const result = parseStreamJson(stdout);
     expect(result.success).toBe(false);
     expect(result.error).toBe('CLI client reported an error');
+    // Claude Code didn't say why: the client app failed.
+    expect(result.ending).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'client-app',
+    });
   });
+
+  // How an error result ended (ADR 0010). `acted`: the model answered first.
+  it.each([
+    [{ subtype: 'error_max_turns' }, true, { kind: 'trial' }],
+    [{ subtype: 'error_max_budget_usd' }, true, { kind: 'trial' }],
+    [{ result: 'Prompt is too long' }, true, { kind: 'trial' }],
+    [
+      { result: 'Prompt is too long' },
+      false,
+      { kind: 'infrastructure', broke: 'setup', retryable: false },
+    ],
+    [
+      { result: 'API Error: 429 rate_limit_error' },
+      true,
+      { kind: 'infrastructure', broke: 'provider', retryable: true },
+    ],
+    [
+      { result: 'API Error: 500 Internal server error' },
+      true,
+      { kind: 'infrastructure', broke: 'provider', retryable: true },
+    ],
+    [
+      { result: 'Invalid API key · Please run /login' },
+      false,
+      { kind: 'infrastructure', broke: 'setup', retryable: false },
+    ],
+    [
+      { subtype: 'error_during_execution' },
+      true,
+      { kind: 'infrastructure', broke: 'client-app', retryable: true },
+    ],
+  ])('types the error result %j (acted: %s)', (fields, acted, expected) => {
+    expectEnding(fields, acted, expected);
+  });
+
+  it("doesn't take Claude Code's message for an API error as the model acting", () => {
+    // What Claude Code prints when the first request doesn't fit.
+    const result = parseStreamJson(
+      [
+        {
+          type: 'assistant',
+          is_api_error_message: true,
+          error: 'invalid_request',
+          message: {
+            model: '<synthetic>',
+            content: [{ type: 'text', text: 'Prompt is too long' }],
+          },
+        },
+        { type: 'result', is_error: true, result: 'Prompt is too long' },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n')
+    );
+    expect(result.ending).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'setup',
+      retryable: false,
+    });
+  });
+
+  function expectEnding(
+    fields: Record<string, unknown>,
+    acted: boolean,
+    expected: Record<string, unknown>
+  ) {
+    const lines = [
+      ...(acted
+        ? [
+            {
+              type: 'assistant',
+              message: { content: [{ type: 'text', text: 'Looking.' }] },
+            },
+          ]
+        : []),
+      { type: 'result', is_error: true, ...fields },
+    ];
+    const result = parseStreamJson(
+      lines.map((line) => JSON.stringify(line)).join('\n')
+    );
+    expect(result.success).toBe(false);
+    expect(result.ending).toMatchObject(expected);
+  }
 
   it('handles missing fields gracefully', () => {
     const stdout = [

@@ -5,6 +5,7 @@ import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult, PairedChange } from '../types/reporter.js';
 import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
+import type { TrialEnding } from '../types/trialEnding.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
   DatasetConfig,
@@ -273,6 +274,14 @@ export interface ClientRunResult {
   startedAt?: string;
   completedAt?: string;
   error?: string;
+  /**
+   * How the attempt ended, when the client knows (ADR 0010). Set it when
+   * something around the client broke: `{ kind: 'infrastructure', broke:
+   * 'provider', retryable: true, reason }` for a provider's `429`, say.
+   * Without it, a `diagnostics.failureKind` says what broke, and an `error`
+   * alone is a trial that failed. MST never reads an error's words to decide.
+   */
+  ending?: TrialEnding;
   usage?: UsageMetrics;
   /** Native and driver observations remain separately scoped; UI actions are not LLM usage. */
   telemetry?: Record<string, unknown>;

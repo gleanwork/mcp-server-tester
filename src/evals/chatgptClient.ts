@@ -18,6 +18,7 @@ import {
 } from './clientPlugins.js';
 import type { ExternalClientConfig } from './externalClient/types.js';
 import { simulationToClientRun } from './clientTrace.js';
+import { endingOf } from './trialEnding.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import {
   requireIdenticalClientSettings,
@@ -255,8 +256,20 @@ async function runBatch(
             'ChatGPT completed without calling a required evaluation MCP tool on the configured server selection.';
         if (measurementError) trace.error = measurementError;
         const session = result.clientMetadata?.session;
+        // How a failed turn ended, from the failure kind the driver typed
+        // (ADR 0010): the metadata goes under telemetry, where no reader
+        // looks. A completed turn that missed the servers is a trial.
+        const ending =
+          trace.ending ??
+          (result.success
+            ? undefined
+            : endingOf({
+                error: trace.error,
+                clientMetadata: result.clientMetadata,
+              }));
         const caseResult: ClientRunResult = {
           ...trace,
+          ...(ending ? { ending } : {}),
           // The native turn's own times, when it was bound.
           ...(session?.startedAt ? { startedAt: session.startedAt } : {}),
           ...(session?.completedAt ? { completedAt: session.completedAt } : {}),

@@ -139,8 +139,26 @@ export async function runCLIClient(
           /* Keep the process failure, never echo raw output. */
         }
       }
+      const timedOut =
+        message.includes('timed out') || message.includes('TIMEOUT');
+      // Claude Code exits non-zero after an error result: the result says
+      // how the run ended (a turn limit, a provider's 429), not the exit.
+      if (
+        !timedOut &&
+        !message.includes('MCP connection failed') &&
+        !startup?.error &&
+        partial.ending
+      )
+        return {
+          ...partial,
+          success: false,
+          ...(startup ? { diagnostics: startup.diagnostics } : {}),
+        };
       return {
         ...partial,
+        // The process failed (or a server didn't start): its failure kind
+        // says how the run ended, whatever Claude Code reported before.
+        ending: undefined,
         success: false,
         error:
           message.includes('timed out') || message.includes('TIMEOUT')
@@ -227,7 +245,8 @@ export async function runCLIClient(
     };
   }
 
-  if (isClaude && !result.success)
+  // An error result the parser couldn't type is the client app failing.
+  if (isClaude && !result.success && result.ending === undefined)
     result.diagnostics = { failureKind: 'process' };
   if (startup) {
     result.diagnostics = { ...result.diagnostics, ...startup.diagnostics };
@@ -236,6 +255,8 @@ export async function runCLIClient(
         ...result,
         success: false,
         error: startup.error,
+        // An MCP server didn't start: whatever Claude Code said next is moot.
+        ending: undefined,
         diagnostics: { ...startup.diagnostics, failureKind: 'startup' },
       };
   }
