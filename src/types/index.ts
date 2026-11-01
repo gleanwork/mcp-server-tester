@@ -16,6 +16,7 @@
  */
 export type AuthType = 'oauth' | 'api-token' | 'none';
 export type { ClientDiagnostics } from './clientDiagnostics.js';
+export type { InfrastructureBreak, TrialEnding } from './trialEnding.js';
 import type { UsageMetrics } from '../judge/judgeTypes.js';
 import type { JudgeSubScore } from '../judge/judgeContract.js';
 

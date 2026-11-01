@@ -2,9 +2,12 @@ import { rejectRenamedOptions } from './renamedKeys.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { simulationTrace } from './clientTrace.js';
 import {
-  isInfrastructureError,
-  isInfrastructureFailure,
-} from './infrastructureFailure.js';
+  completeCases,
+  endingOf,
+  isCounted,
+  isInfrastructure,
+  thrownEnding,
+} from './trialEnding.js';
 import type { Trace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -14,6 +17,7 @@ import type { ClientOptions } from './clientFields.js';
 import {
   checkedExecution,
   executeEvalCase,
+  executionEnding,
   failedExecution,
   type CaseExecution,
   type ClientExecution,
@@ -128,7 +132,8 @@ export interface ToolOverrideVariant {
  */
 export interface EvalRunnerResult {
   /**
-   * Total number of cases
+   * Number of complete cases: `passed` plus `failed`. An incomplete case
+   * (short a trial, or with one ungraded) is in `incomplete`.
    */
   total: number;
 
@@ -141,6 +146,12 @@ export interface EvalRunnerResult {
    * Number of failing cases
    */
   failed: number;
+
+  /**
+   * Number of incomplete cases: neither passed nor failed (ADR 0010).
+   * Present when there are any.
+   */
+  incomplete?: number;
 
   /**
    * Individual case results
@@ -774,6 +785,7 @@ export function executedTrialResult(
       ? { trace: caseTrace(clientExecution, evidence, error) }
       : {}),
     ...(clientDiagnostics ? { clientDiagnostics } : {}),
+    ending: executionEnding(execution),
     clientUsage,
     clientTelemetry: clientExecution?.telemetry,
     clientMetadata,
@@ -920,16 +932,15 @@ export async function runEvalCase(
       const result = await runTrial(evalCase, context, options, i);
       ran = result;
       lastResult = result;
-      // Check whether the tool call itself failed due to infrastructure (the
-      // error is surfaced as result.error since executeEvalCase swallows throws)
-      const infraError = isInfrastructureFailure(result);
+      const ending = endingOf(result);
       trialResults.push({
         pass: result.pass,
         scores: result.scores,
         durationMs: result.durationMs,
         error: result.error,
         ...(result.gradingError ? { gradingError: result.gradingError } : {}),
-        isInfrastructureError: infraError,
+        ending,
+        isInfrastructureError: ending.kind === 'infrastructure',
         toolCallTrace: result.toolCallTrace,
         traceEvidence: result.traceEvidence,
         ...(result.trace ? { trace: result.trace } : {}),
@@ -948,11 +959,13 @@ export async function runEvalCase(
     } catch (err) {
       // runTrial should not throw, but guard defensively
       const errorMessage = err instanceof Error ? err.message : String(err);
+      const ending = thrownEnding(err);
       trialResults.push({
         pass: false,
         durationMs: 0,
         error: errorMessage,
-        isInfrastructureError: isInfrastructureError(err),
+        ending,
+        isInfrastructureError: ending.kind === 'infrastructure',
       });
     }
     // With the trial's skill loads, as its trial result keeps them.
@@ -963,8 +976,9 @@ export async function runEvalCase(
       );
   }
 
-  const infraErrors = trialResults.filter((r) => r.isInfrastructureError);
-  const assertionResults = trialResults.filter((r) => !r.isInfrastructureError);
+  const infraErrors = trialResults.filter((r) => isInfrastructure(r));
+  // The trials pass rates count: graded trials, not infrastructure failures.
+  const assertionResults = trialResults.filter((r) => isCounted(r));
   const passCount = assertionResults.filter((r) => r.pass).length;
   const passRate =
     assertionResults.length > 0 ? passCount / assertionResults.length : 0;
@@ -976,6 +990,7 @@ export async function runEvalCase(
   // A case with trials has no grading error of its own: each trial says.
   const {
     trace: _lastTrace,
+    ending: _lastEnding,
     gradingError: lastGradingError,
     ...lastWithoutTrace
   }: Partial<EvalCaseResult> = lastResult ?? {};
@@ -1003,7 +1018,9 @@ export async function runEvalCase(
 
   return {
     ...baseResult,
-    pass: passRate >= threshold,
+    // A case short a trial, or with one ungraded, is incomplete: it doesn't
+    // pass (ADR 0010), and pass rates leave it out until it is completed.
+    pass: assertionResults.length === trials && passRate >= threshold,
     passRate: passRate,
     passRateCI: wilsonCI(passCount, assertionResults.length),
     infrastructureErrorRate,
@@ -1245,8 +1262,10 @@ export async function runEvalDataset(
     caseResults = await runWithConcurrency(tasks, concurrency);
   }
 
-  const total = caseResults.length;
-  const passed = caseResults.filter((r) => r.pass).length;
+  const complete = completeCases(caseResults);
+  const total = complete.length;
+  const passed = complete.filter((r) => r.pass).length;
+  const incomplete = caseResults.length - complete.length;
 
   const [gitHash] = await Promise.all([getGitHash()]);
 
@@ -1273,6 +1292,7 @@ export async function runEvalDataset(
     total,
     passed,
     failed: total - passed,
+    ...(incomplete > 0 ? { incomplete } : {}),
     caseResults,
     durationMs: Date.now() - startTime,
     metadata,

@@ -56,6 +56,8 @@ describe('executeEvalCase', () => {
       kind: 'failed',
       response: undefined,
       error: 'rejected',
+      // Nothing names what broke: the client failed its trial.
+      ending: { kind: 'trial' },
     });
   });
 

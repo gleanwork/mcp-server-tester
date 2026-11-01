@@ -29,6 +29,7 @@ import type {
   TraceEvent,
 } from '../evalFrameworkTypes.js';
 import { isHostContentAttribute } from './hostContent.js';
+import { endingOf } from '../trialEnding.js';
 import type { PairwiseComparisonResult } from '../pairwiseComparison.js';
 
 export const DEFAULT_MAX_ATTRIBUTE_CHARS = 16_384;
@@ -682,10 +683,8 @@ export function trialSpans(
   const model = options.model ?? request?.model;
   const usage = trace?.usage ?? result.clientUsage;
   const error = trace?.error ?? result.error;
-  const infrastructure =
-    'isInfrastructureError' in result
-      ? result.isInfrastructureError === true
-      : ((result as EvalCaseResult).infrastructureErrorCount ?? 0) > 0;
+  const ending = endingOf(result);
+  const infrastructure = ending.kind === 'infrastructure';
   const inferred = inferredToolTimes(modelCalls);
   const host = hostEventIndex(trace?.hostTelemetry, modelCalls, events);
   const toolNames = new Map(
@@ -721,6 +720,10 @@ export function trialSpans(
         ? hostAttributes(trace.hostTelemetry.resource, options, 'mst.host.')
         : {}),
       'mst.infrastructure_error': infrastructure || undefined,
+      'mst.infrastructure.broke':
+        ending.kind === 'infrastructure' ? ending.broke : undefined,
+      'mst.infrastructure.retryable':
+        ending.kind === 'infrastructure' ? ending.retryable : undefined,
       'error.type': error
         ? infrastructure
           ? 'infrastructure'

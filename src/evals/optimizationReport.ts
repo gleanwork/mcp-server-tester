@@ -12,7 +12,7 @@ import type {
 import type { EvalRunnerResult, ToolMetadataOverride } from './evalRunner.js';
 import { servedTool } from './optimizationCandidates.js';
 import type { OptimizationRecord } from './optimizationFormat.js';
-import { isInfraTrial } from './runFormat.js';
+import { isCounted } from './trialEnding.js';
 import type { ListedServerTools } from './toolSurface.js';
 import type {
   OptimizationState,
@@ -207,7 +207,7 @@ function caseEvidence(
   result: EvalCaseResult,
   group: 'capability' | 'regression'
 ): CaseEvidence {
-  const counted = trialsOf(result).filter((trial) => !isInfraTrial(trial));
+  const counted = trialsOf(result).filter((trial) => isCounted(trial));
   return {
     id: result.id,
     group,

@@ -22,7 +22,7 @@ import {
   type ConnectorServerConfig,
   type EvalServerConfig,
 } from '../evalConfig.js';
-import { isInfrastructureError } from '../infrastructureFailure.js';
+import { isInfrastructure } from '../trialEnding.js';
 import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
@@ -312,10 +312,8 @@ export async function collectShard(
       path.join(options.resultsDir, relative),
       `${JSON.stringify({ format: SHARD_PROTOCOL, kind: 'client-result', key, result: stored })}\n`
     );
-    const isInfra =
-      stored.error !== undefined &&
-      (stored.diagnostics?.failureKind !== undefined ||
-        isInfrastructureError(stored.error));
+    // The runner's rule, so the worker and the coordinator agree (ADR 0010).
+    const isInfra = isInfrastructure(stored);
     if (isInfra) infra++;
     else collected++;
     send({

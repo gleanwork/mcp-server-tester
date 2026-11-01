@@ -94,7 +94,7 @@ Common issues and how to fix them.
    }
    ```
 
-4. **Inspect `infrastructureErrorRate` separately from `passRate`.** Infrastructure errors (timeouts, connection resets) are distinct from assertion failures. A high infrastructure error rate signals a connectivity or capacity problem, not a quality problem with your MCP server.
+4. **Inspect `infrastructureErrorRate` separately from `passRate`.** Infrastructure errors (timeouts, connection resets) are distinct from assertion failures, and a case with one is incomplete, not failed. Each trial's `ending.broke` says what failed: `network`, `provider` and so on. A high infrastructure error rate signals a connectivity or capacity problem, not a quality problem with your MCP server.
 
 ---
 

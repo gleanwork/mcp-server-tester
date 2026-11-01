@@ -30,7 +30,7 @@ import {
   awaitingUserAnswer,
   type ClaudeTrace,
 } from './externalClient/builtins/claudeTrace.js';
-import { COWORK_WORKSPACE_UNAVAILABLE_MESSAGE } from './infrastructureFailure.js';
+import { COWORK_WORKSPACE_UNAVAILABLE_MESSAGE } from './trialEnding.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
   claudeDesktopOtlpSettings,

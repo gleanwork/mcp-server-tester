@@ -2,6 +2,7 @@ import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import type { ModelPricing } from './evalConfig.js';
+import { isInfrastructure } from './trialEnding.js';
 
 /** USD for one trial's usage at `price` (per million tokens). */
 function costOf(usage: UsageMetrics, price: ModelPricing): number {
@@ -71,7 +72,7 @@ export function costSource(
   const usages = results.flatMap((result) =>
     result.trialResults?.length
       ? result.trialResults
-          .filter((trial) => !trial.isInfrastructureError)
+          .filter((trial) => !isInfrastructure(trial))
           .map((trial) => trial.clientUsage)
       : [result.clientUsage]
   );

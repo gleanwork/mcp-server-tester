@@ -39,7 +39,12 @@ import type {
   VariantToolMistake,
 } from '../types/reporter.js';
 import type { EvalRunnerResult, ToolMetadataOverride } from './evalRunner.js';
-import { isInfrastructureFailure } from './infrastructureFailure.js';
+import {
+  isCounted,
+  isIncompleteCase,
+  isInfrastructure,
+  type EndingEvidence,
+} from './trialEnding.js';
 import {
   clopperPearson,
   passRateInterval,
@@ -294,11 +299,12 @@ export function pairedChange(
 
 /** Classifies a failed trial from its trace and error. */
 function failureOf(
-  trial: Pick<TrialResult, 'error' | 'isInfrastructureError'> & {
-    toolCallTrace?: TrialResult['toolCallTrace'];
-  }
+  trial: Pick<TrialResult, 'error'> &
+    EndingEvidence & {
+      toolCallTrace?: TrialResult['toolCallTrace'];
+    }
 ): TrialFailureKind {
-  if (trial.isInfrastructureError || trial.error) return 'error';
+  if (isInfrastructure(trial) || trial.error) return 'error';
   const trace = trial.toolCallTrace;
   if (!trace) return 'check-failed';
   if (trace.calls.length === 0) return 'no-tool-call';
@@ -312,20 +318,18 @@ function failureOf(
 }
 
 interface RecordedAttempt extends VariantTrial {
-  /** Infrastructure failures don't count toward pass rates, as in the runner. */
-  infrastructure: boolean;
+  /**
+   * Left out of pass rates, as in the runner: an infrastructure failure, an
+   * ungraded trial, or any trial of an incomplete case (ADR 0010).
+   */
+  uncounted: boolean;
 }
 
 function toAttempt(
   pass: boolean,
-  source: Pick<
-    TrialResult,
-    | 'error'
-    | 'isInfrastructureError'
-    | 'clientUsage'
-    | 'clientDiagnostics'
-    | 'clientMetadata'
-  > & { toolCallTrace?: TrialResult['toolCallTrace'] }
+  source: Pick<TrialResult, 'error' | 'clientUsage'> &
+    EndingEvidence & { toolCallTrace?: TrialResult['toolCallTrace'] },
+  incomplete: boolean
 ): RecordedAttempt {
   const trace = source.toolCallTrace;
   const usage = source.clientUsage;
@@ -339,31 +343,31 @@ function toAttempt(
         }
       : {}),
     ...(usage ? { tokens: totalTokens(usage) } : {}),
-    // As the runner and the run report classify it: the flag when a trial
-    // has one, else the error itself (a single-trial case result has none).
-    infrastructure:
-      source.isInfrastructureError ?? isInfrastructureFailure(source),
+    uncounted: incomplete || !isCounted(source),
   };
 }
 
 /** The trials behind a case result: its trials, or the case itself. */
 function attemptsOf(result: EvalCaseResult): RecordedAttempt[] {
+  const incomplete = isIncompleteCase(result);
   if (result.trialResults && result.trialResults.length > 0) {
-    return result.trialResults.map((trial) => toAttempt(trial.pass, trial));
+    return result.trialResults.map((trial) =>
+      toAttempt(trial.pass, trial, incomplete)
+    );
   }
-  return [toAttempt(result.pass, result)];
+  return [toAttempt(result.pass, result, incomplete)];
 }
 
-/** Share of trials that passed, ignoring infrastructure failures. */
+/** Share of trials that passed, ignoring the ones pass rates leave out. */
 function passRateOf(trials: RecordedAttempt[]): number | undefined {
-  const counted = trials.filter((a) => !a.infrastructure);
+  const counted = trials.filter((a) => !a.uncounted);
   if (counted.length === 0) return undefined;
   return counted.filter((a) => a.pass).length / counted.length;
 }
 
 /**
  * Mean per-case share of trials passed (pass@1, each case weighted
- * equally), ignoring infrastructure failures. 0 for a run with no cases.
+ * equally), ignoring incomplete cases. 0 for a run with no cases.
  */
 export function meanCasePassRate(result: EvalRunnerResult): number {
   const rates = result.caseResults
@@ -425,7 +429,7 @@ interface CaseRates {
 }
 
 function passCount(trials: RecordedAttempt[]): [number, number] {
-  const counted = trials.filter((a) => !a.infrastructure);
+  const counted = trials.filter((a) => !a.uncounted);
   return [counted.filter((a) => a.pass).length, counted.length];
 }
 
@@ -542,7 +546,7 @@ interface MeasureOptions {
 /**
  * Measures a candidate run against the baseline on `capability` and
  * `regression` cases. Cases are paired by id; a case missing from either
- * run, or with only infrastructure failures, is left out.
+ * run, or incomplete in either, is left out.
  */
 export function measureAgainstBaseline(
   baseline: EvalRunnerResult,
@@ -700,7 +704,7 @@ function expectedToolsOf(result: EvalCaseResult): string[] | undefined {
 }
 
 function stripAttempt(trial: RecordedAttempt): VariantTrial {
-  const { infrastructure: _infrastructure, ...rest } = trial;
+  const { uncounted: _uncounted, ...rest } = trial;
   return rest;
 }
 

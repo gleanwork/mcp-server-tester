@@ -13,10 +13,7 @@ import {
   describeDeadlineWait,
   truncatedPrompt,
 } from './coworkClient.js';
-import {
-  isInfrastructureError,
-  isInfrastructureFailure,
-} from './infrastructureFailure.js';
+import { endingOf, isInfrastructure } from './trialEnding.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import { CoworkHitlError } from './cowork/driver.js';
 import { toCoworkServers } from './coworkSetup/config.js';
@@ -1394,7 +1391,8 @@ describe('V2 Cowork client', () => {
     expect(result!.error).toMatch(
       /^Native Claude trace deadline exceeded\. No resubmission attempted\. It had been waiting on the model's response for 1m 3\ds\.$/
     );
-    expect(isInfrastructureFailure(result!)).toBe(false);
+    // The client ran out of its own time: a trial (ADR 0010).
+    expect(isInfrastructure(result!)).toBe(false);
     expect(result!.finalText).toBe('answer so far');
     expect(result!.events.map((event) => event.name)).toEqual(['search']);
     expect(result!.artifacts?.dir).toBe('/fixture/local_partial');
@@ -1434,12 +1432,12 @@ describe('V2 Cowork client', () => {
     );
     expect(result[0]!.diagnostics?.failureKind).toBe('input');
     // As the runner records it: the client's diagnostics with the error.
-    expect(
-      isInfrastructureFailure({
-        error: result[0]!.error,
-        clientDiagnostics: result[0]!.diagnostics,
-      })
-    ).toBe(true);
+    // A retry gets the same part of the prompt: it needs a fix to the case.
+    expect(endingOf(result[0]!)).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'setup',
+      retryable: false,
+    });
     // Kept with its evidence.
     expect(result[0]!.finalText).toBe('answer');
   });
@@ -1504,7 +1502,11 @@ describe('V2 Cowork client', () => {
       "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s"
     );
     expect(result[0]!.diagnostics?.failureKind).toBe('startup');
-    expect(isInfrastructureFailure(result[0]!)).toBe(true);
+    expect(endingOf(result[0]!)).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'workspace',
+      retryable: true,
+    });
     // The evidence stays: the answer and every call, the failed one included.
     expect(result[0]!.finalText).toBe('answer');
     expect(result[0]!.events.map((event) => event.name)).toEqual([
@@ -1740,12 +1742,13 @@ describe("Cowork's workspace unavailable", () => {
       ])
     ).toBeUndefined();
   });
-  it('is an infrastructure error', () => {
+  it('is an infrastructure failure of the workspace', () => {
     expect(
-      isInfrastructureError(
-        "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s"
-      )
-    ).toBe(true);
+      endingOf({
+        error:
+          "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s",
+      })
+    ).toMatchObject({ kind: 'infrastructure', broke: 'workspace' });
   });
 });
 

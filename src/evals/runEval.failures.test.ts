@@ -286,10 +286,15 @@ describe('a run that meets failures', () => {
     expect(cases[0]?.error).toBe(
       'Not graded: judge: Judge "test/judge/flaky" error: Cannot find package @anthropic-ai/sdk'
     );
-    const trial = await readJson<{ infrastructureError: boolean }>(
-      path.join(runDirectory, 'traces', 'baseline', 'one', '0.json')
-    );
-    expect(trial.infrastructureError).toBe(true);
+    const trial = await readJson<{
+      infrastructureError: boolean;
+      ending: unknown;
+      gradingError?: string;
+    }>(path.join(runDirectory, 'traces', 'baseline', 'one', '0.json'));
+    // The client's attempt ended fine: a trial, just not graded (ADR 0010).
+    expect(trial.infrastructureError).toBe(false);
+    expect(trial.ending).toEqual({ kind: 'trial' });
+    expect(trial.gradingError).toBeDefined();
     // The other graders' scores, and the judge's error, are kept.
     const graders = await fs.readdir(path.join(runDirectory, 'scores'));
     expect(graders.sort()).toEqual(

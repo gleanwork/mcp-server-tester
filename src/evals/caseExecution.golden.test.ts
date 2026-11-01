@@ -600,7 +600,7 @@ describe('golden: rubric judges', () => {
     expect(stable({ result, calls })).toMatchSnapshot();
   });
 
-  it('a judge client error leaves the trial ungraded, an infrastructure failure', async () => {
+  it('a judge client error leaves the trial ungraded, not an infrastructure failure', async () => {
     scriptLLMJudge([new Error('rate limited')]);
     const result = await runEvalCase(
       {

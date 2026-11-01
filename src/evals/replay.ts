@@ -24,6 +24,7 @@ import {
   type TrialRecord,
 } from './runFormat.js';
 import { ALL_ARTIFACTS } from './allArtifacts.js';
+import { endingOf, resumeCollects } from './trialEnding.js';
 import fs from 'node:fs/promises';
 
 /** A stored run to grade, and the ID of the run that grades it. */
@@ -45,19 +46,6 @@ export interface RunReplay {
    * and the run is graded into its own directory, not as a regrade.
    */
   resume?: boolean;
-}
-
-/**
- * What `--resume` collects: a trial whose shard ended without it (ADR 0004),
- * or one the client never submitted, an infrastructure failure such as a
- * batch blocked after a failed reset. A case the client ran and failed is
- * kept: that is the trial's result.
- */
-export function isMissingTrial(trial: TrialRecord | undefined): boolean {
-  const kind = (
-    trial?.clientDiagnostics as { failureKind?: unknown } | undefined
-  )?.failureKind;
-  return trial === undefined || kind === 'missing' || kind === 'not-submitted';
 }
 
 /**
@@ -226,11 +214,13 @@ async function storedExecution(
   // client ran; finishing its grading is what a regrade is for.
   const runnerError =
     trial.gradingError === undefined ? trial.error : undefined;
+  // As it was recorded: a regrade never changes how an attempt ended.
+  const ending = endingOf(trial);
   if (!trace) {
     const execution = failedExecution(
       runnerError ?? 'The stored trial has no trace.'
     );
-    return { ...execution, preExecutionDurationMs: trial.durationMs };
+    return { ...execution, preExecutionDurationMs: trial.durationMs, ending };
   }
   const run: ClientRunResult = {
     events: trace.events ?? [],
@@ -292,6 +282,7 @@ async function storedExecution(
       : {}),
     // The trial took this long when it ran; grading adds its own time.
     preExecutionDurationMs: trial.durationMs,
+    ending,
   };
   // An error the runner recorded, not the client, still fails the trial.
   return runnerError !== undefined && completed.error === undefined
@@ -317,7 +308,7 @@ export function replayExecutor(
     const index = next.get(evalCase.id) ?? 0;
     next.set(evalCase.id, index + 1);
     const trial = trials[index];
-    if (collected && isMissingTrial(trial)) {
+    if (collected && resumeCollects(trial)) {
       const execution = collected(evalCase.id, index);
       if (execution) return execution;
     }

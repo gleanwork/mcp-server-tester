@@ -8,7 +8,11 @@ import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
 import type { EvalDataset } from './datasetTypes.js';
-import { isInfrastructureFailure } from './infrastructureFailure.js';
+import {
+  INFRASTRUCTURE_BREAKS,
+  endingOf,
+  isInfrastructure,
+} from './trialEnding.js';
 import type { RunEnvironment } from './environments/builtinEnvironments.js';
 import type { ShardRecord } from './environments/shardedCollect.js';
 import type { ListedServerTools } from './toolSurface.js';
@@ -274,6 +278,19 @@ export function trialArtifactsPath(
   );
 }
 
+/** How a trial's attempt ended (ADR 0010): a trial, or an infrastructure failure. */
+const TrialEndingSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('trial') }),
+  z.object({
+    kind: z.literal('infrastructure'),
+    /** What broke around the client. */
+    broke: z.enum(INFRASTRUCTURE_BREAKS),
+    /** Whether collecting the attempt again can end differently: `mst run --resume` collects it. */
+    retryable: z.boolean(),
+    reason: z.string(),
+  }),
+]);
+
 /** `traces/<variant>/<case-id>/<trial>.json`: what the client did in one trial. */
 const TrialRecordSchema = z.looseObject({
   ...Envelope('trial'),
@@ -283,6 +300,12 @@ const TrialRecordSchema = z.looseObject({
   datasetName: z.string(),
   trial: z.number().int().nonnegative(),
   durationMs: z.number(),
+  /**
+   * How the attempt ended (ADR 0010). Runs stored before endings have none:
+   * `infrastructureError` and the failure kinds say.
+   */
+  ending: TrialEndingSchema.optional(),
+  /** Whether `ending` is an infrastructure failure. */
   infrastructureError: z.boolean(),
   error: z.string().optional(),
   /** A grader couldn't score the trial (`<grader>: <error>`); the client ran. */
@@ -670,14 +693,6 @@ function trialsOf(result: EvalCaseResult): Array<TrialResult | EvalCaseResult> {
   return result.trialResults?.length ? result.trialResults : [result];
 }
 
-/** Whether a trial failed on infrastructure: graders didn't score it. */
-export function isInfraTrial(trial: TrialResult | EvalCaseResult): boolean {
-  return 'isInfrastructureError' in trial &&
-    trial.isInfrastructureError !== undefined
-    ? trial.isInfrastructureError
-    : isInfrastructureFailure(trial as EvalCaseResult);
-}
-
 /** Each grader's score in a trial: one per judge when several judges ran. */
 function graderScores(
   scores: Partial<Record<string, GraderScore>>
@@ -720,7 +735,8 @@ function trialRecord(
     datasetName: result.datasetName,
     trial: index,
     durationMs: t.durationMs ?? 0,
-    infrastructureError: isInfraTrial(trial),
+    ending: endingOf(t),
+    infrastructureError: isInfrastructure(t),
     ...(t.error !== undefined ? { error: t.error } : {}),
     // The client ran; a grader couldn't score it. A regrade can finish it.
     ...(t.gradingError !== undefined ? { gradingError: t.gradingError } : {}),
@@ -879,9 +895,9 @@ export async function writeRun(
     const caseId = segment(result.id);
     for (const [index, trial] of trialsOf(result).entries()) {
       await writeTrialRecord(runDirectory, runId, result, trial, index);
-      // An infrastructure failure isn't a trial the graders scored, except
-      // one where a grader failed: the others' scores, and its error, stay.
-      if (isInfraTrial(trial) && !trial.gradingError) continue;
+      // An infrastructure failure isn't a trial the graders scored. A trial
+      // a grader failed on keeps the others' scores, and its error.
+      if (isInfrastructure(trial)) continue;
       const scores = (trial as Partial<EvalCaseResult>).scores ?? {};
       for (const [grader, score] of graderScores(scores)) {
         await writeJson(

@@ -29,8 +29,8 @@ import type {
   EvaluationVariantResult,
 } from './evalFrameworkTypes.js';
 import { RUN_FORMAT } from './resultFormat.js';
+import { isInfrastructure } from './trialEnding.js';
 import {
-  isInfraTrial,
   labelQuestion,
   readRunDirectory,
   type CalibrationRecord,
@@ -149,7 +149,7 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
   return {
     pass: trial.pass,
     ...(trial.error ? { error: clip(trial.error) } : {}),
-    ...(isInfraTrial(trial) ? { infrastructureError: true } : {}),
+    ...(isInfrastructure(trial) ? { infrastructureError: true } : {}),
     ...(trial.durationMs !== undefined ? { durationMs: trial.durationMs } : {}),
     ...trialTrace(trial),
     scores: scoresOf(trial, redacted),

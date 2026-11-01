@@ -102,6 +102,8 @@ export type {
   MCPConformanceResultData,
   MCPServerCapabilitiesData,
   ClientDiagnostics,
+  InfrastructureBreak,
+  TrialEnding,
 } from './types/index.js';
 export {
   MCPConfigSchema,

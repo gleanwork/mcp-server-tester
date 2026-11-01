@@ -11,6 +11,38 @@
     "datasetName": { "type": "string" },
     "trial": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
     "durationMs": { "type": "number" },
+    "ending": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": { "kind": { "type": "string", "const": "trial" } },
+          "required": ["kind"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "type": "string", "const": "infrastructure" },
+            "broke": {
+              "type": "string",
+              "enum": [
+                "client-app",
+                "workspace",
+                "network",
+                "provider",
+                "collection",
+                "deadline",
+                "setup"
+              ]
+            },
+            "retryable": { "type": "boolean" },
+            "reason": { "type": "string" }
+          },
+          "required": ["kind", "broke", "retryable", "reason"],
+          "additionalProperties": false
+        }
+      ]
+    },
     "infrastructureError": { "type": "boolean" },
     "error": { "type": "string" },
     "gradingError": { "type": "string" },
