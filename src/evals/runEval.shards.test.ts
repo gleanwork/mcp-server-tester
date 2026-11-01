@@ -25,14 +25,19 @@ afterEach(async () => {
 async function fixture({
   redact = true,
   extra = {},
-}: { redact?: boolean; extra?: Record<string, unknown> } = {}) {
+  cases = CASES,
+}: {
+  redact?: boolean;
+  extra?: Record<string, unknown>;
+  cases?: string[];
+} = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-run-shards-'));
   dirs.push(dir);
   await fs.writeFile(
     path.join(dir, 'cases.json'),
     JSON.stringify({
       name: 'cases',
-      cases: CASES.map((id) => ({
+      cases: cases.map((id) => ({
         id,
         input: id,
         assertions: { containsText: 'then' },
@@ -210,7 +215,60 @@ describe('a run in an environment with shards', () => {
     }
 
     await expect(f.resume(runId)).rejects.toThrow(
-      `Run ${runId} has no missing trials: there is nothing to resume.`
+      `Run ${runId} has no trials to collect again: there is nothing to resume.`
+    );
+  }, 90_000);
+
+  it('--resume collects an infrastructure failure a retry can help, and keeps one it cannot (ADR 0010)', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture({
+      redact: false,
+      cases: ['alpha', 'flaky-once', 'truncated'],
+      extra: { variants: [{ name: 'baseline' }] },
+    });
+    const marker = path.join(path.dirname(f.outputDir), 'flaky-once.marker');
+    vi.stubEnv('SHARD_TEST_FLAKY_ONCE', marker);
+
+    const first = await f.run({ shards: '1' });
+    const runId = path.basename(first.outputDir);
+    // Both failures are incomplete cases, neither passed nor failed. Every
+    // shard came back, so the run collected everything it could.
+    expect(first.summary.metrics).toMatchObject({
+      total: 1,
+      passed: 1,
+      failed: 0,
+      incomplete: 2,
+    });
+    const trial = (name: string) =>
+      f.readJson<{ ending: unknown; infrastructureError: boolean }>(
+        path.join(first.outputDir, 'traces', 'baseline', name, '0.json')
+      );
+    expect(await trial('flaky-once')).toMatchObject({
+      infrastructureError: true,
+      ending: { kind: 'infrastructure', broke: 'network', retryable: true },
+    });
+    expect(await trial('truncated')).toMatchObject({
+      infrastructureError: true,
+      ending: { kind: 'infrastructure', broke: 'setup', retryable: false },
+    });
+    log.mockClear();
+
+    const resumed = await f.resume(runId, { shards: '1' });
+
+    // Only the network failure ran again, and passed this time.
+    const collected = log.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => / collected$/.test(line));
+    expect(collected).toHaveLength(1);
+    expect(collected[0]).toContain(' flaky-once ');
+    expect(resumed.summary.metrics).toMatchObject({
+      total: 2,
+      passed: 2,
+      incomplete: 1,
+    });
+    // What remains needs a fix, not another resume.
+    await expect(f.resume(runId, { shards: '1' })).rejects.toThrow(
+      `Run ${runId} has no trials to collect again: there is nothing to resume. 1 trials ended in infrastructure failures a retry can't help: fix the eval, the case or the setup, and run it again.`
     );
   }, 90_000);
 

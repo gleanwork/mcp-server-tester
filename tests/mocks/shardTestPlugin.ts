@@ -48,6 +48,27 @@ async function probe(
       events: [],
       error: `ECONNRESET while using ${second}`,
     };
+  // Fails on the network the first time only: a retry helps. The marker
+  // file, at SHARD_TEST_FLAKY_ONCE, says it already failed.
+  const once = process.env.SHARD_TEST_FLAKY_ONCE;
+  if (input.prompt === 'flaky-once' && once) {
+    const failed = await readFile(once, 'utf8').then(
+      () => true,
+      () => false
+    );
+    if (!failed) {
+      await appendFile(once, 'failed\n');
+      return { finalText: '', events: [], error: 'read ECONNRESET' };
+    }
+  }
+  // The desktop kept only the prompt's beginning: a retry gets the same.
+  if (input.prompt === 'truncated')
+    return {
+      finalText: '',
+      events: [],
+      error: 'The client kept only part of the prompt.',
+      diagnostics: { failureKind: 'input' },
+    };
   return {
     finalText: `${input.prompt}: ${first} then ${second}; key ${input.env?.API_KEY ?? 'unset'}`,
     events: [],

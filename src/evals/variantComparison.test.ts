@@ -349,10 +349,16 @@ describe('measureAgainstBaseline', () => {
     expect(worseCaseP(3, 5, 5, 5)).toBeCloseTo(1);
   });
 
-  it('leaves out infrastructure failures, as the runner does', () => {
-    const base = run([{ id: 'c', trials: [false, false] }]);
+  // Case `c` is short a trial in the candidate, so it is incomplete and left
+  // out: only `d` counts. Counting `c` on the trial it has would give 0.5.
+  it('leaves out a case incomplete in either run (ADR 0010)', () => {
+    const base = run([
+      { id: 'c', trials: [false, false] },
+      { id: 'd', trials: [false, false] },
+    ]);
     const candidate = run([
-      { id: 'c', trials: [true, false], infra: [false, true] },
+      { id: 'c', trials: [false, true], infra: [false, true] },
+      { id: 'd', trials: [true, true] },
     ]);
     expect(
       measureAgainstBaseline(base, candidate, declared).capability.passRate
@@ -360,13 +366,17 @@ describe('measureAgainstBaseline', () => {
   });
 
   it('knows an infrastructure failure by its error when a trial has no flag', () => {
-    const base = run([{ id: 'c', trials: [false, false] }]);
+    const base = run([
+      { id: 'c', trials: [false, false] },
+      { id: 'd', trials: [false, false] },
+    ]);
     const candidate = run([
       {
         id: 'c',
-        trials: [true, false],
+        trials: [false, true],
         error: [undefined, 'connect ETIMEDOUT 10.0.0.1:443'],
       },
+      { id: 'd', trials: [true, true] },
     ]);
     expect(
       measureAgainstBaseline(base, candidate, declared).capability.passRate

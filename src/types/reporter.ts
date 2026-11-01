@@ -17,6 +17,7 @@ import type {
   ClientDiagnostics,
   MCPProtocolInfo,
   SkillLoad,
+  TrialEnding,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type { TraceEvidence, Trace } from '../evals/evalFrameworkTypes.js';
@@ -239,7 +240,9 @@ export interface TrialResult {
   error?: string;
   /** A grader failed to run on this trial, so it has no verdict (`<grader>: <error>`). */
   gradingError?: string;
-  /** When true, this trial failed due to network/infrastructure issues rather than an assertion failure */
+  /** How the trial's attempt ended (ADR 0010): a trial, or an infrastructure failure. */
+  ending?: TrialEnding;
+  /** Whether `ending` is an infrastructure failure: something around the client broke. */
   isInfrastructureError?: boolean;
   /**
    * Ordered trace of tool calls the client made in this trial (client cases only).
@@ -484,6 +487,11 @@ export interface EvalCaseResult {
 
   /** Sanitized client evidence; each trial retains its own diagnostics. */
   clientDiagnostics?: ClientDiagnostics;
+  /**
+   * How the attempt ended (ADR 0010), for a case that ran once. With several
+   * trials, each one's ending is in `trialResults`.
+   */
+  ending?: TrialEnding;
   /** Evidence level retained in persisted comparisons after response redaction. */
   traceEvidence?: TraceEvidence;
   /**

@@ -285,10 +285,13 @@ export async function runEvalBatch(
   );
   const items = await runWithConcurrency(tasks, options.workers ?? 1);
   const skipped = items.filter((item) => item.skipped).length;
+  // A config with incomplete cases didn't finish, so it didn't pass either
+  // (ADR 0010), as `mst run` exits.
   const failed = items.filter(
     (item) =>
       item.error !== undefined ||
-      ((item.result?.summary.metrics.failed as number | undefined) ?? 0) > 0
+      ((item.result?.summary.metrics.failed as number | undefined) ?? 0) > 0 ||
+      ((item.result?.summary.metrics.incomplete as number | undefined) ?? 0) > 0
   ).length;
   return { items, passed: items.length - failed - skipped, failed, skipped };
 }

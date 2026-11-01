@@ -186,9 +186,17 @@ _Avoid_: execution id, run number
 One of a run's two stages, collect and grade, each recorded in `run.json` as `complete`, `partial`, `skipped` or `failed`.
 _Avoid_: stage, step
 
+**Ending**:
+How a client's attempt at a case ended, decided where it ended (by the client, the batch or the shard): a trial, which is graded as usual even when the client errored or ran out of turns, time or context; or an infrastructure failure. Collection decides it; grading never changes it.
+_Avoid_: outcome, status, result
+
 **Infrastructure failure**:
-An attempt that ended because something around the client broke (the desktop crashed or was leased, a machine couldn't be reached), not because of what the client did. It is recorded with why, and left out of pass rates.
+An attempt that ended because something around the client broke (the desktop crashed or was leased, a machine couldn't be reached), not because of what the client did. MST must be able to name what broke, one of: the client app (the desktop or CLI program MST drives crashed, wasn't available, didn't take the prompt, or gave output MST couldn't read), the client's workspace (Cowork's VM), the network, the model provider's API, collection (MST couldn't collect the trial's result: its shard ended without it, or its artifacts couldn't be copied), an MST deadline, or setup (the eval, the case, a client setting or a permission). A client that ran out of its own turns, time or context failed the trial. An infrastructure failure isn't a trial: it is recorded with why, its case is incomplete, and `--resume` collects it again unless a retry can't help (a prompt the desktop truncates or the model's context can't hold, a client setting the eval can't run with). Those are reported as needing a fix to the eval, the case or the setup.
 _Avoid_: error trial, flake
+
+**Incomplete case**:
+A case that is short a trial (an infrastructure failure, completed by `--resume`) or has a trial its judges couldn't grade (a grading error, completed by `mst grade --resume`). It is neither passed nor failed and is left out of pass rates until it is completed; per-trial measurements (tool calls, duration, usage) use the trials it has. A grading error isn't an infrastructure failure: the client's attempt ended fine.
+_Avoid_: partial case, failed case
 
 **Partial run**:
 A run narrowed at run time (`--variant`, `--case`, `--filter-tag`, `--max-cases`, `--trials`). It's compared only with partial runs narrowed the same way, and never becomes a result store's latest run.
@@ -257,7 +265,7 @@ The eval config's run-wide caps on trials running at once, per LLM provider and 
 _Avoid_: rate limit (that is the provider's), quota, concurrency
 
 **Missing trial**:
-A trial with no trace after collect, because its shard failed. It isn't a failed trial: its case is incomplete, left out of the pass rate, and `--resume` collects it.
+A trial with no trace after collect, because its shard failed: an infrastructure failure with nothing recorded but its absence. It isn't a failed trial: its case is incomplete, and `--resume` collects it.
 _Avoid_: failed trial, skipped trial
 
 ### Tests

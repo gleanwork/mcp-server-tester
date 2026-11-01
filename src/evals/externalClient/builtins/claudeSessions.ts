@@ -7,7 +7,7 @@ import { NativeTraceError } from '../nativeTraceError.js';
 import {
   CLAUDE_NO_MATCHING_SESSION_MESSAGE,
   CLAUDE_SESSION_TIMEOUT_MESSAGE,
-} from '../../infrastructureFailure.js';
+} from '../../trialEnding.js';
 import {
   type ClaudeSessionBinding,
   type ClaudeSessionMetadata,

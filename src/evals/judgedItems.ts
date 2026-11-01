@@ -8,11 +8,11 @@
 import {
   type PAIRWISE_LABELS,
   type POINTWISE_LABELS,
-  isInfraTrial,
   labelQuestion,
   type LabelRecord,
   type StoredRun,
 } from './runFormat.js';
+import { isInfrastructure } from './trialEnding.js';
 import type { GraderScore } from '../types/index.js';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 
@@ -94,9 +94,9 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
     for (const caseResult of variant.result?.caseResults ?? []) {
       const input = caseResult.request?.input;
       for (const { trial, result } of caseTrials(caseResult)) {
-        // A trial the client couldn't run has no verdicts. One a grader
-        // failed on keeps the other judges' verdicts.
-        if (isInfraTrial(result) && result.gradingError === undefined) continue;
+        // An infrastructure failure has no verdicts. A trial a grader failed
+        // on keeps the other judges' verdicts.
+        if (isInfrastructure(result)) continue;
         const answer =
           'trace' in result && result.trace?.finalText !== undefined
             ? result.trace.finalText

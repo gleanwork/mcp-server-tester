@@ -530,11 +530,34 @@ describe('per-trial metrics', () => {
       passRate: undefined,
       pass: true,
     };
+    const complete = iterated({
+      id: 'complete',
+      trialResults: iterated().trialResults!.slice(0, 2),
+    });
     const { aggregated } = computeMetrics(
       ['passed', 'trial_pass'],
-      [iterated(), single]
+      [complete, single]
     );
     expect(aggregated).toEqual({ passed_rate: 0.5, trial_pass_rate: 0.75 });
+  });
+
+  it('leaves an incomplete case out of pass rates, not its measurements (ADR 0010)', () => {
+    const ungraded = iterated({
+      id: 'ungraded',
+      trialResults: [
+        ...iterated().trialResults!.slice(0, 2),
+        { pass: false, durationMs: 200, gradingError: 'judge: failed' },
+      ],
+    });
+    const { aggregated } = computeMetrics(
+      ['passed', 'trial_pass', 'duration_s'],
+      [iterated(), ungraded]
+    );
+    // Short a trial, and with one ungraded: neither passed nor failed. Each
+    // trial the client ran still has a duration, graded or not.
+    expect(aggregated.passed_rate).toBeUndefined();
+    expect(aggregated.trial_pass_rate).toBeUndefined();
+    expect(aggregated.duration_s_mean).toBe((0.2 + 0.2) / 2);
   });
 
   it('reports no trace metrics for a client with no evidence, and lists them as unavailable', () => {

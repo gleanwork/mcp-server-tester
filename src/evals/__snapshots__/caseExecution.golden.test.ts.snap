@@ -13,6 +13,9 @@ exports[`golden: client traces through executeCase > client trace error 1`] = `
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
+  "ending": {
+    "kind": "trial",
+  },
   "error": "native session missing",
   "id": "trace",
   "pass": false,
@@ -136,6 +139,9 @@ exports[`golden: client traces through executeCase > executeCase that throws 1`]
   "authType": "none",
   "datasetName": "single-case",
   "durationMs": "<time>",
+  "ending": {
+    "kind": "trial",
+  },
   "error": "client crashed",
   "id": "trace",
   "pass": false,
@@ -181,6 +187,9 @@ exports[`golden: client traces through executeCase > none evidence 1`] = `
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
+  "ending": {
+    "kind": "trial",
+  },
   "id": "trace",
   "pass": false,
   "project": "golden",
@@ -323,6 +332,9 @@ exports[`golden: client traces through executeCase > observed evidence 1`] = `
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
+  "ending": {
+    "kind": "trial",
+  },
   "id": "trace",
   "pass": false,
   "project": "golden",
@@ -465,6 +477,9 @@ exports[`golden: client traces through executeCase > structured evidence 1`] = `
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
+  "ending": {
+    "kind": "trial",
+  },
   "id": "trace",
   "pass": false,
   "project": "golden",
@@ -625,6 +640,9 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
       },
       "datasetName": "mixed",
       "durationMs": "<time>",
+      "ending": {
+        "kind": "trial",
+      },
       "id": "d",
       "pass": true,
       "project": "golden",
@@ -703,6 +721,9 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
       },
       "datasetName": "mixed",
       "durationMs": "<time>",
+      "ending": {
+        "kind": "trial",
+      },
       "id": "client",
       "pass": false,
       "project": "golden",
@@ -891,6 +912,9 @@ exports[`golden: judges > judges a client response 1`] = `
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "host-judged",
     "pass": true,
     "project": "golden",
@@ -1041,6 +1065,9 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "judged",
     "pass": true,
     "project": "golden",
@@ -1248,6 +1275,9 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "multi-judged",
     "pass": false,
     "project": "golden",
@@ -1396,6 +1426,9 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "rubric-judged",
     "pass": true,
     "project": "golden",
@@ -1530,6 +1563,9 @@ exports[`golden: rubric judges > a custom-text rubric with provider, model, LLM 
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "rubric-custom",
     "pass": false,
     "project": "golden",
@@ -1622,7 +1658,7 @@ Answer carefully.",
 }
 `;
 
-exports[`golden: rubric judges > a judge client error leaves the trial ungraded, an infrastructure failure 1`] = `
+exports[`golden: rubric judges > a judge client error leaves the trial ungraded, not an infrastructure failure 1`] = `
 {
   "calls": [
     [
@@ -1668,6 +1704,9 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "error": "Not graded: judge: Judge "correctness" error: rate limited",
     "gradingError": "judge: Judge "correctness" error: rate limited",
     "id": "rubric-error",
@@ -1884,6 +1923,9 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "rubric-and-plugin",
     "pass": true,
     "project": "golden",
@@ -2094,6 +2136,9 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     },
     "datasetName": "single-case",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "rubric-reps",
     "pass": false,
     "project": "golden",
@@ -2315,6 +2360,9 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
       },
       "datasetName": "golden",
       "durationMs": "<time>",
+      "ending": {
+        "kind": "trial",
+      },
       "id": "suite-rubric",
       "pass": false,
       "request": {
@@ -2593,6 +2641,9 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
       },
       "datasetName": "golden",
       "durationMs": "<time>",
+      "ending": {
+        "kind": "trial",
+      },
       "id": "suite-judged",
       "pass": false,
       "request": {
@@ -2747,6 +2798,9 @@ exports[`golden: runEval clients > run client 1`] = `
     },
     "datasetName": "golden",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "suite-host",
     "pass": true,
     "request": {
@@ -2899,6 +2953,9 @@ exports[`golden: runEval clients > runBatch client 1`] = `
     },
     "datasetName": "golden",
     "durationMs": "<time>",
+    "ending": {
+      "kind": "trial",
+    },
     "id": "suite-host",
     "pass": true,
     "request": {
@@ -3046,6 +3103,9 @@ exports[`golden: the mst client (dataset API) > maps native tool names through t
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
+  "ending": {
+    "kind": "trial",
+  },
   "id": "client",
   "pass": true,
   "project": "golden",
@@ -3167,6 +3227,9 @@ exports[`golden: the mst client (dataset API) > simulation failure 1`] = `
   "authType": "none",
   "datasetName": "single-case",
   "durationMs": "<time>",
+  "ending": {
+    "kind": "trial",
+  },
   "error": "provider rejected the request",
   "id": "client",
   "pass": false,
@@ -3209,6 +3272,9 @@ exports[`golden: the mst client (dataset API) > succeeds with tool evidence and 
   },
   "datasetName": "single-case",
   "durationMs": "<time>",
+  "ending": {
+    "kind": "trial",
+  },
   "id": "client",
   "pass": false,
   "project": "golden",
@@ -3446,6 +3512,9 @@ exports[`golden: the mst client (dataset API) > trials exclude infrastructure er
         "outputTokens": 20,
       },
       "durationMs": "<time>",
+      "ending": {
+        "kind": "trial",
+      },
       "isInfrastructureError": false,
       "pass": false,
       "scores": {
@@ -3515,6 +3584,12 @@ exports[`golden: the mst client (dataset API) > trials exclude infrastructure er
     },
     {
       "durationMs": "<time>",
+      "ending": {
+        "broke": "network",
+        "kind": "infrastructure",
+        "reason": "read ECONNRESET",
+        "retryable": true,
+      },
       "error": "read ECONNRESET",
       "isInfrastructureError": true,
       "pass": false,
@@ -3527,6 +3602,9 @@ exports[`golden: the mst client (dataset API) > trials exclude infrastructure er
         "outputTokens": 20,
       },
       "durationMs": "<time>",
+      "ending": {
+        "kind": "trial",
+      },
       "isInfrastructureError": false,
       "pass": false,
       "scores": {

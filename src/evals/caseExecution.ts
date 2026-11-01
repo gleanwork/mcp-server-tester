@@ -9,7 +9,11 @@
 import { randomUUID } from 'node:crypto';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
+import type {
+  ClientDiagnostics,
+  TrialEnding,
+  UsageMetrics,
+} from '../types/index.js';
 import type { EvalCase } from './datasetTypes.js';
 import { settingsFor } from '../plugins/settings.js';
 import type { EvalVariant, EvalConfig, ClientConfig } from './evalConfig.js';
@@ -37,6 +41,7 @@ import {
 } from './toolSurfaceProxy.js';
 import { simulateMstClient } from './mstClient/simulation.js';
 import type { MstClientSimulationResult } from './mstClient/types.js';
+import { endingOf, thrownEnding } from './trialEnding.js';
 
 /** The client payload validators and reports read: the simulation shape. */
 export type ClientResponse = MstClientSimulationResult & {
@@ -52,6 +57,11 @@ interface ExecutionBase {
   error?: string;
   /** Client time spent before the runner's timer started (batch traces). */
   preExecutionDurationMs?: number;
+  /**
+   * How the attempt ended (ADR 0010), when its producer said. Otherwise
+   * `executionEnding` reads it from the execution's failure kinds and error.
+   */
+  ending?: TrialEnding;
 }
 
 /** An LLM or desktop client run, adapted to the simulation-shaped response. */
@@ -106,7 +116,33 @@ export function failedExecution(error: unknown): FailedExecution {
     kind: 'failed',
     response: undefined,
     error: error instanceof Error ? error.message : String(error),
+    ending: thrownEnding(error),
   };
+}
+
+/**
+ * How an execution's attempt ended: the one place a producer's ending
+ * becomes the trial's (ADR 0010). The producer's when it gave one, else the
+ * ending its failure kinds and error say.
+ */
+export function executionEnding(execution: CaseExecution): TrialEnding {
+  if (execution.ending) return execution.ending;
+  const response = execution.response;
+  return endingOf({
+    error:
+      execution.error ??
+      (response && !response.success
+        ? (response.error ?? 'Client execution failed.')
+        : undefined),
+    diagnostics:
+      execution.kind === 'completed'
+        ? (execution.diagnostics ?? response?.diagnostics)
+        : undefined,
+    clientMetadata:
+      execution.kind === 'completed'
+        ? (execution.clientMetadata ?? response?.clientMetadata)
+        : undefined,
+  });
 }
 
 /** Adapt a simulated (SDK/CLI/browser) or external client result. */

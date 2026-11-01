@@ -414,7 +414,7 @@ program
   )
   .option(
     '--resume <run>',
-    'Collect only the trials a run is missing (its shards ended early, or the client never submitted them), in its environment (not local; use --env), and grade it again'
+    'Collect again only the trials a run is missing or lost to an infrastructure failure a retry can help, in its environment (not local; use --env), and grade it again'
   )
   .option(
     '--no-report',

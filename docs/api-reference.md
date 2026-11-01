@@ -588,13 +588,14 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L126-L208
+```typescript snippet=src/evals/evalRunner.ts#L130-L219
 /**
  * Overall result of running an eval dataset
  */
 export interface EvalRunnerResult {
   /**
-   * Total number of cases
+   * Number of cases: `passed` plus `failed` plus `incomplete`, so
+   * `passed === total` only when every case passed.
    */
   total: number;
 
@@ -607,6 +608,12 @@ export interface EvalRunnerResult {
    * Number of failing cases
    */
   failed: number;
+
+  /**
+   * Number of incomplete cases: neither passed nor failed (ADR 0010).
+   * Present when there are any.
+   */
+  incomplete?: number;
 
   /**
    * Individual case results

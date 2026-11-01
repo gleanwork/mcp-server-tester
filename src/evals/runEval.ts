@@ -24,10 +24,10 @@ import {
   withCopiedArtifacts,
   withoutTrialArtifacts,
 } from './trialArtifacts.js';
+import { completeCases, endingOf, resumeCollects } from './trialEnding.js';
 import {
   assertReplayedCases,
   assertStoredArtifacts,
-  isMissingTrial,
   replayExecutor,
   replayedCases,
   replayedVariants,
@@ -361,16 +361,6 @@ export async function loadSecretsFile(
   return Object.fromEntries(
     Object.entries(entries).filter(
       (entry): entry is [string, string] => typeof entry[1] === 'string'
-    )
-  );
-}
-
-/** Whether a shard ended before one of the case's trials came back. */
-function hasMissingTrial(result: EvalCaseResult): boolean {
-  return (
-    result.clientDiagnostics?.failureKind === 'missing' ||
-    (result.trialResults ?? []).some(
-      (trial) => trial.clientDiagnostics?.failureKind === 'missing'
     )
   );
 }
@@ -831,14 +821,18 @@ function summarizeVariant(
   const totalJudgeUsage = sumJudgeUsage(
     results.map(({ result }) => result.totalJudgeUsage)
   );
+  // Incomplete cases neither pass nor fail (ADR 0010).
+  const complete = completeCases(caseResults);
+  const incomplete = caseResults.length - complete.length;
   return {
     name: variant.name,
     servers: servers.map(redactServerForReport),
     result: {
       caseResults,
       total: caseResults.length,
-      passed: caseResults.filter((result) => result.pass).length,
-      failed: caseResults.filter((result) => !result.pass).length,
+      passed: complete.filter((result) => result.pass).length,
+      failed: complete.filter((result) => !result.pass).length,
+      ...(incomplete > 0 ? { incomplete } : {}),
       durationMs: results.reduce(
         (sum, item) => sum + item.result.durationMs,
         0
@@ -1363,11 +1357,20 @@ export async function resumeRun(
       }`
     );
   const trials = await readRunTrials(directory);
-  const missing = trials.filter(isMissingTrial).length;
-  if (missing === 0)
+  const missing = trials.filter((trial) => resumeCollects(trial)).length;
+  if (missing === 0) {
+    const needsFix = trials.filter((trial) => {
+      const ending = endingOf(trial);
+      return ending.kind === 'infrastructure' && !ending.retryable;
+    }).length;
     throw new Error(
-      `Run ${run.runId} has no missing trials: there is nothing to resume.`
+      `Run ${run.runId} has no trials to collect again: there is nothing to resume.${
+        needsFix > 0
+          ? ` ${needsFix} trials ended in infrastructure failures a retry can't help: fix the eval, the case or the setup, and run it again.`
+          : ''
+      }`
     );
+  }
   const recorded = run.environment as {
     name?: string;
     shards?: number;
@@ -2013,7 +2016,7 @@ async function evaluate(
           ).filter(
             (request) =>
               !replay ||
-              isMissingTrial(
+              resumeCollects(
                 replay.trials.get(variant.name)?.get(request.caseId)?.[
                   request.trial
                 ]
@@ -2572,12 +2575,12 @@ async function evaluate(
       ...variantResults.map((variant) => variant.result?.totalJudgeUsage),
       pairwiseUsage,
     ]);
-    const complete = allResults.filter((result) => !hasMissingTrial(result));
+    const complete = completeCases(allResults);
     const incomplete = allResults.length - complete.length;
     const telemetry: RunTelemetry = {
       cases: allResults.length,
       toolCalls: countTrialToolCalls(allResults),
-      failedCases: allResults.filter((result) => !result.pass).length,
+      failedCases: complete.filter((result) => !result.pass).length,
       totalClientUsage,
       ...(totalJudgeUsage !== undefined && { totalJudgeUsage }),
       ...(pairwiseUsage !== undefined && { pairwiseJudgeUsage: pairwiseUsage }),
@@ -2590,7 +2593,8 @@ async function evaluate(
       configName: evalConfig.name,
       variants: variantResults,
       metrics: {
-        // A case with a missing trial is incomplete: neither passed nor failed.
+        // A case short a trial, or with one ungraded, is incomplete: neither
+        // passed nor failed (ADR 0010).
         total: complete.length,
         passed: complete.filter((result) => result.pass).length,
         failed: complete.filter((result) => !result.pass).length,

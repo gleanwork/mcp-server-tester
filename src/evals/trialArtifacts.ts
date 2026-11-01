@@ -12,6 +12,7 @@ import type { CaseExecution } from './caseExecution.js';
 import type { ClientArtifacts } from './evalFrameworkTypes.js';
 import { trialArtifactsPath } from './runFormat.js';
 import { ALL_ARTIFACTS, DIAGNOSIS_DIR } from './allArtifacts.js';
+import { infrastructureEnding } from './trialEnding.js';
 import { jsonCopy } from '../utils/jsonFile.js';
 
 /** The most a trial's copy may hold. A copy over a limit fails. */
@@ -211,11 +212,14 @@ export function withCopiedArtifacts(
         ...(execution.diagnostics ?? response.diagnostics),
         failureKind: 'artifacts' as const,
       };
+      const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
       return {
         ...execution,
         response: { ...response, diagnostics },
         diagnostics,
-        error: `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`,
+        error: message,
+        // Whatever the client said: MST couldn't collect the trial.
+        ending: infrastructureEnding('collection', message),
       };
     }
     return {

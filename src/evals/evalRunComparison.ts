@@ -273,9 +273,17 @@ function compareCaseOutcome(
   return baselinePass ? 'UNCHANGED_PASS' : 'UNCHANGED_FAIL';
 }
 
-/** Fraction of cases that passed; 0 for a run without cases. Every run-level pass rate uses this. */
-export function passRate(run: { passed: number; total: number }): number {
-  return run.total > 0 ? run.passed / run.total : 0;
+/**
+ * Fraction of complete cases that passed; 0 for a run without any. Every
+ * run-level pass rate uses this. Incomplete cases are left out (ADR 0010).
+ */
+export function passRate(run: {
+  passed: number;
+  total: number;
+  incomplete?: number;
+}): number {
+  const complete = run.total - (run.incomplete ?? 0);
+  return complete > 0 ? run.passed / complete : 0;
 }
 
 function metricDelta(

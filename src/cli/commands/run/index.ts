@@ -5,6 +5,7 @@ import { datasetContentHash } from '../../../evals/runFormat.js';
 import { trialGradeComplete } from '../../../evals/gradingSource.js';
 import { runReportPath } from '../../../evals/runReport.js';
 import { judgeModelsOf } from '../../../evals/judgeModels.js';
+import { caseIncompleteness } from '../../../evals/trialEnding.js';
 import type { EvalCaseResult } from '../../../types/reporter.js';
 import {
   headlinePassRate,
@@ -449,9 +450,7 @@ export function printRunResult(
       `Report: ${report} (open it with \`mst open${result.summary.partial || !graded ? ` ${result.outputDir}` : ''}\`)`
     );
   if (metrics.incomplete)
-    console.log(
-      `${metrics.incomplete} cases are incomplete: their shard ended before every trial came back.`
-    );
+    printIncomplete(result.summary.results, metrics.incomplete, runId, config);
   // A run that didn't finish isn't a success either.
   if (
     (graded && (metrics.failed ?? 0) > 0) ||
@@ -459,6 +458,37 @@ export function printRunResult(
     (metrics.incomplete ?? 0) > 0
   )
     process.exitCode = 1;
+}
+
+/**
+ * Why cases are incomplete, so neither passed nor failed (ADR 0010), and
+ * what finishes them.
+ */
+function printIncomplete(
+  results: readonly EvalCaseResult[],
+  incomplete: number,
+  runId: string,
+  config: string
+): void {
+  let short = 0;
+  let needsFix = 0;
+  for (const caseResult of results) {
+    const why = caseIncompleteness(caseResult);
+    short += why?.shortTrials ?? 0;
+    needsFix += why?.needsFix ?? 0;
+  }
+  const parts = [
+    `${incomplete} cases are incomplete, so neither passed nor failed.`,
+  ];
+  if (short > needsFix)
+    parts.push(
+      `${short - needsFix} trials ended in infrastructure failures: collect them again with \`mst run --resume ${runId.split('-').pop()} -c ${config}\` (a local run needs --env).`
+    );
+  if (needsFix > 0)
+    parts.push(
+      `${needsFix} trials ended in infrastructure failures a retry can't help: fix the eval, the case or the setup. See the report for each reason.`
+    );
+  console.log(parts.join(' '));
 }
 
 /**

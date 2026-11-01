@@ -3,7 +3,7 @@ import { referenceSchema } from './referenceSchemas.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import type { Trace } from './evalFrameworkTypes.js';
-import { isInfrastructureFailure } from './infrastructureFailure.js';
+import { isInfrastructure, isIncompleteCase } from './trialEnding.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 /**
@@ -57,13 +57,13 @@ interface Trial {
 }
 
 /**
- * A case's trials: the runs that didn't fail on infrastructure (they are left
- * out, as from the pass rate).
+ * A case's trials: the attempts that were trials, graded or not.
+ * Infrastructure failures are left out: they say nothing about the client.
  */
 function caseTrials(caseResult: EvalCaseResult): Trial[] {
   if (caseResult.trialResults?.length) {
     return caseResult.trialResults
-      .filter((trial) => !trial.isInfrastructureError)
+      .filter((trial) => !isInfrastructure(trial))
       .map((trial) => ({
         pass: trial.pass,
         trace: trial.trace,
@@ -74,7 +74,7 @@ function caseTrials(caseResult: EvalCaseResult): Trial[] {
         isCase: false,
       }));
   }
-  if (isInfrastructureFailure(caseResult)) return [];
+  if (isInfrastructure(caseResult)) return [];
   return [
     {
       pass: caseResult.pass,
@@ -469,12 +469,21 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
   Object.freeze({
     judge_pass_for: parameterizedJudgeMetric('judge_pass_for'),
     judge_score_for: parameterizedJudgeMetric('judge_score_for'),
-    passed: metric('binary', (result) => result.pass, rateAggregation),
+    // An incomplete case neither passed nor failed (ADR 0010).
+    passed: metric(
+      'binary',
+      (result) => (isIncompleteCase(result) ? null : result.pass),
+      rateAggregation
+    ),
     // Per case: the share of its trials that passed. The case passes when
     // that share reaches its pass threshold; `trial_pass_rate` keeps it.
+    // An incomplete case has no share until it is completed.
     trial_pass: metric(
       'continuous',
-      (result) => perTrial(result, (trial) => trial.pass),
+      (result) =>
+        isIncompleteCase(result)
+          ? null
+          : perTrial(result, (trial) => trial.pass),
       fractionRateAggregation
     ),
     // Per case: the share of its trials that ran without a client error.

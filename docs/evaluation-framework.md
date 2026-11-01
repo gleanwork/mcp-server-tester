@@ -178,9 +178,11 @@ A judge that can't score (it throws, its SDK isn't installed, its endpoint
 rejects the call, or it returns an invalid score) gives no verdict. Unless
 another grader already failed the trial (every grader must pass, so that fail
 stands), the trial is **not graded**: its `error` says
-`Not graded: <grader>: <error>`, its trial record has `gradingError`, it's an
-infrastructure failure left out of the trial pass rate and judge metrics, and
-the run's `run.json` says `grade: partial`. Its other graders' scores, and the
+`Not graded: <grader>: <error>`, its trial record has `gradingError`, it's left
+out of the trial pass rate and judge metrics, its case is incomplete (neither
+passed nor failed), and the run's `run.json` says `grade: partial`. It isn't an
+infrastructure failure: the client's attempt ended fine, and
+`mst grade --resume` grades it. Its other graders' scores, and the
 judge's error, are still stored under `scores/`.
 
 `case.expected` holds the case's ground truth:
@@ -1051,6 +1053,8 @@ An eval config's or variant's `metrics` list adds more. Built-in names:
 | `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge scores, from the case's last trial.                                            |
 
 - **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and a variant's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a client that couldn't start, aren't trials, as they don't count toward accuracy.
+- **How an attempt ended.** Each trial record has an `ending` ([ADR 0010](./adr/0010-a-trial-ending-is-decided-where-it-ends.md)): `{ "kind": "trial" }`, graded as usual even when the client errored or ran out of its own turns, time or context, or `{ "kind": "infrastructure", "broke", "retryable", "reason" }`, where `broke` is what failed around the client: `client-app`, `workspace`, `network`, `provider`, `collection`, `deadline` or `setup`. `infrastructureError` is still written, derived from it. A run stored before `ending` gets one from its old fields when it's read, and keeps the classification it was recorded with, except an ungraded trial, which is a trial.
+- **Incomplete cases.** A case short a trial (one ended in an infrastructure failure) or with an ungraded trial is incomplete: neither passed nor failed, and left out of `passed`, `failed`, the pass rates and their comparisons until it's completed. A variant's `result.total` (and `runEvalDataset`'s) still counts it, so `passed === total` only when every case passed; the run summary's `metrics.total` counts complete cases. Its trials still count toward per-trial measurements such as tool calls, duration and usage. `metrics.incomplete` counts them, and `mst run` says what finishes them: `mst run --resume` for an infrastructure failure a retry can help, a fix to the eval, the case or the setup for one it can't, and `mst grade --resume` for an ungraded trial.
 - **Unavailable, not zero.** A metric with no value for any case is left out of `metrics`; if the eval config lists it, it's also in the variant's `unavailableMetrics`. A client that reports no cost has no `cost_usd` unless the eval config prices its model. A client whose evidence is `none` has no tool metrics.
 - **Evidence.** A variant's `evidence` is the weakest among its cases (`none`, then `observed`, then `structured`). With `observed`, tool metrics come from a best-effort trace; compare them only between variants with the same evidence.
 - **Deltas.** `variantDeltas` compares each variant with the first: `passRate`, `trialPassRate` and their deltas, and `metricDeltas`, the change in every numeric metric both variants report (`metricDeltas.input_tokens_mean`, say), with `judge_score` per judge.

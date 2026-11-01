@@ -21,6 +21,8 @@ import {
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type { CaseExecution } from './caseExecution.js';
 import { clientRunToExecution } from './clientTrace.js';
+import { caseIncompleteness } from './trialEnding.js';
+import { passRate } from './evalRunComparison.js';
 import type * as SimulationModule from './mstClient/simulation.js';
 import { simulateMstClient } from './mstClient/simulation.js';
 import type { MstClientSimulationResult } from './mstClient/types.js';
@@ -393,7 +395,7 @@ describe('multi-trial cases', () => {
     expect(result.trialResults).toBeUndefined();
   });
 
-  it('excludes infrastructure errors from the pass rate computation', async () => {
+  it('leaves a case short a trial incomplete: it does not pass (ADR 0010)', async () => {
     let callCount = 0;
     const mcp = createMockMCP();
     // First call throws ECONNRESET (infrastructure error), second passes
@@ -417,13 +419,24 @@ describe('multi-trial cases', () => {
 
     const result = await runEvalCase(evalCase, createContext(mcp));
 
-    // The infrastructure error is excluded from the denominator
-    // Only 1 assertion result (the second trial), and it passes → passRate = 1.0
+    // The infrastructure error is excluded from the denominator: the one
+    // trial that ran passed. But the case declares two trials, so it is
+    // incomplete until `--resume` collects the other, and doesn't pass.
     expect(result.infrastructureErrorCount).toBe(1);
     expect(result.passRate).toBe(1.0);
-    expect(result.pass).toBe(true);
+    expect(result.pass).toBe(false);
+    expect(caseIncompleteness(result)).toEqual({
+      shortTrials: 1,
+      needsFix: 0,
+      ungradedTrials: 0,
+    });
     expect(result.trialResults).toHaveLength(2);
     expect(result.trialResults?.[0]?.isInfrastructureError).toBe(true);
+    expect(result.trialResults?.[0]?.ending).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'network',
+      retryable: true,
+    });
     expect(result.trialResults?.[1]?.isInfrastructureError).toBe(false);
   });
 
@@ -623,6 +636,36 @@ describe('runEvalDataset defaultTrials', () => {
     expect(executeCase).toHaveBeenCalledTimes(3);
     expect(result.caseResults[0]!.trialResults).toHaveLength(3);
     expect(result.caseResults[0]!.passRate).toBe(1);
+  });
+
+  it('counts an incomplete case in total, so passed === total fails (ADR 0010)', async () => {
+    const mcp = createMockMCP();
+    const dataset = createDataset([
+      createEvalCase({ id: 'passes', input: 'one' }),
+      createEvalCase({ id: 'lost', input: 'two' }),
+    ]);
+    const executeCase = vi.fn(
+      async (evalCase: EvalCase): Promise<CaseExecution> =>
+        evalCase.id === 'lost'
+          ? clientRunToExecution(
+              { finalText: '', events: [], error: 'read ECONNRESET' },
+              'structured'
+            )
+          : clientRunToExecution({ finalText: 'ok', events: [] }, 'structured')
+    );
+    const result = await runEvalDataset(
+      { dataset, executeCase },
+      createContext(mcp)
+    );
+    // The template's `expect(result.passed).toBe(result.total)` fails, as it
+    // did when the case counted as failed.
+    expect(result).toMatchObject({
+      total: 2,
+      passed: 1,
+      failed: 0,
+      incomplete: 1,
+    });
+    expect(passRate(result)).toBe(1);
   });
 
   it('case-level trials override defaultTrials', async () => {
