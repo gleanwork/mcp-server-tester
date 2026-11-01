@@ -833,6 +833,12 @@ export interface RunReportScore {
   judge?: boolean;
   /** The judge couldn't tell from the trace: no verdict, though not a pass. */
   unknown?: true;
+  /** A jury's members' verdicts (ADR 0009). */
+  jury?: Array<{
+    model?: string;
+    verdict: 'pass' | 'fail' | 'unknown' | 'skipped';
+    reasoning?: string;
+  }>;
 }
 
 /** One event of a trial's trace, with long fields shortened. */
@@ -902,6 +908,20 @@ export interface RunReportJudgeCalibration {
   corrected?: { value: number; low: number; high: number };
   /** MST can't see the judge's version change, so staleness can't be told. */
   unversioned?: true;
+  /** The models the judge ran on, a jury's members included. */
+  models?: string[];
+  /** Judge models from the same family as the variant's client model. */
+  sameFamilyAsClient?: string[];
+  /**
+   * For a jury: each member's pass and fail counts, and how much the
+   * members agree, as Krippendorff's α over the trials (absent when it
+   * can't be computed: fewer than two verdicts on any trial, or every
+   * verdict the same).
+   */
+  jury?: {
+    members: Array<{ member: string; passed: number; failed: number }>;
+    alpha?: number;
+  };
   /** The calibration of this identity, or, when stale, the newest one of the judge. */
   calibration?: {
     judgeIdentity: string;

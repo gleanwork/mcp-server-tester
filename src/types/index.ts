@@ -195,6 +195,12 @@ export interface GraderScore {
    */
   criteria?: GraderCriterion[];
 
+  /**
+   * Each member's verdict, for a judge run as a jury on several models.
+   * The score's verdict is their majority (ADR 0009).
+   */
+  jury?: GraderJuryVote[];
+
   /** Token usage and cost of the judge's own model calls. */
   usage?: Partial<UsageMetrics>;
 
@@ -224,6 +230,18 @@ export interface GraderCriterion {
    * another case shares it, and a changed criterion gets a new one.
    */
   judgeIdentity: string;
+}
+
+/** One jury member's verdict in a jury's score (ADR 0009). */
+export interface GraderJuryVote {
+  provider?: string;
+  model?: string;
+  /** The identity of the judge this member ran. */
+  judgeIdentity: string;
+  verdict: 'pass' | 'fail' | 'unknown' | 'skipped';
+  /** The member's score, when it passed or failed. */
+  score?: number;
+  reasoning?: string;
 }
 
 /**

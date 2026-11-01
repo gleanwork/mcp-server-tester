@@ -46,6 +46,19 @@ export interface JudgedItem {
   input?: string;
   /** The trial's final answer, when the run stores responses. */
   answer?: string;
+  /**
+   * A jury's members' verdicts: each member by its judge identity, which
+   * two members never share, with its model when it named one.
+   */
+  jury?: Array<{
+    member: string;
+    model?: string;
+    verdict: JudgeVerdict | 'skipped';
+  }>;
+  /** The model of the client that the judged trial ran on. */
+  clientModel?: string;
+  /** A jury's members' models, on its criteria's verdicts too. */
+  judgeModels?: string[];
 }
 
 function caseTrials(
@@ -100,6 +113,15 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
             ...optional('judgeModel', score.judgeModel),
             ...optional('input', input),
             ...optional('answer', answer),
+            ...optional('clientModel', caseResult.request?.model),
+            // A jury's models one by one: its `judgeModel` joins them.
+            ...(score.jury?.length
+              ? {
+                  judgeModels: score.jury.flatMap((vote) =>
+                    vote.model !== undefined ? [vote.model] : []
+                  ),
+                }
+              : {}),
           };
           // A judge that checks criteria is labeled one criterion at a
           // time: each is its own question, and the judge's whole verdict,
@@ -122,6 +144,15 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
             ...(verdict !== undefined ? { verdict } : {}),
             ...optional('judgeIdentity', score.judgeIdentity),
             ...optional('reasoning', score.reasoning),
+            ...(score.jury?.length && score.error === undefined
+              ? {
+                  jury: score.jury.map((vote) => ({
+                    member: vote.judgeIdentity,
+                    ...optional('model', vote.model),
+                    verdict: vote.verdict,
+                  })),
+                }
+              : {}),
           });
         }
       }

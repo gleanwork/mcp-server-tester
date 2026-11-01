@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Users calibrate judges against their own labels
@@ -53,9 +53,15 @@ Three facts shape what MST should do instead:
   - `tool-use`: did the client choose the right tools, pass valid arguments, avoid calls it didn't need, and recover from errors? It goes beside `toolsTriggered` and `toolCallCount` and doesn't replace them.
   - `preference` (pairwise): which variant's trials are better for this case? It runs in both orders (`swapPositions`), and ties are allowed.
 - **The `rubric` judge stays, and its behaviour doesn't change.** Its five built-in rubrics stay available, but the docs stop calling them calibrated and point to the new judges.
-- **The judge model stays the user's choice, and MST makes it visible.** The built-in judges keep a default provider so that a first run works. The run output and the report name every judge's model. MST warns when a judge's model family is the same as the client's model family.
-- **A built-in judge can run on several models, as a jury.** The verdict is the majority, and a tie between the models is `unknown`. The report shows each model's verdict and the agreement between them (Krippendorff's α). A jury's identity is the set of its members' identities.
-- **MST publishes a calibration set for its built-in judges.** The set has traces from MST's mock servers and public reference MCP servers, with labels for each built-in judge's question. A script runs `mst judges check` on it for each judge model, and `docs/judges.md` publishes the results. The numbers show that the built-ins are reasonable judges. They are not a calibration for a user's data.
+- **The judge model stays the user's choice, and MST makes it visible.** The built-in judges, new ones included, keep a default provider and model so that a first run works; the user doesn't have to pick one first. The default is part of the judge's identity, so a calibration of it goes stale when the default changes. The run output and the report name every judge's model. MST warns when a judge's model family is the same as the client's model family. It knows the families by model ID (Anthropic, OpenAI, Google, Mistral, xAI, DeepSeek, Meta and Qwen) and doesn't warn about a model it can't place.
+- **A judge can run on several models, as a jury.** A judge entry's `jury` lists at least two members, each the options it changes, such as `{ "model": "gpt-5-mini" }`. The members are merged over the entry's options, and each runs as its own judge, with the entry's threshold and repetitions. Any pointwise judge whose options choose its model can be a jury: a built-in, or a plugin's.
+  - The verdict is the majority of the members that passed or failed. A tie between the models is `unknown`, and so is a jury whose members all answered `unknown`. A member that skips is left out, and a jury whose members all skip is skipped. A member that fails to run fails the jury's score, so a resume runs it again.
+  - A `criteria` judge's criteria each take the members' majority too, and its required criteria decide its verdict, as they do over repetitions. A criterion is optional only when every member that lists it says so, so the members' order can't change a verdict.
+  - A jury's identity is the set of its members' identities, so the members' order doesn't change it, and two members may not be the same judge. A criterion's identity in a jury is the set of the members' identities for that criterion.
+  - Each score records every member's verdict. The report shows each model's verdict on a trial, and, for each jury and variant, each member's pass and fail counts and the agreement between them (Krippendorff's α, nominal, over the trials, with a member that gave no verdict on a trial left out of it). The report gives no α for a `criteria` jury's criteria, or when α can't be computed: no trial with two verdicts, or every verdict the same.
+  - Pairwise judges don't run as juries yet. A pairwise judge already compares both orders, and a jury of preferences needs its own rule for ties.
+- **MST publishes a calibration set for its built-in judges.** The set has 128 traces: 16 tasks, each in 8 kinds of trace, from a scripted client that calls MST's mock server and the filesystem reference server. Each trace's label comes from its kind, not from a person, and the docs say so. It labels the `correctness`, `task-completion`, `grounded-in-tools` and `tool-use` questions; `criteria` asks each case's own questions, and `preference` is pairwise, so neither has labels in it. A script runs `mst judges check` on it for each judge model, refuses to publish when a judge has no verdict on a trace, and `docs/judges.md` publishes the results. The numbers show whether the built-ins are reasonable judges. They are not a calibration for a user's data.
+- **Agentic and staged judges are calibrated like any other.** Their verdicts record an identity, take the same labels, and `mst judges check` measures them. MST doesn't run a check for them: a check costs minutes per trial, and the user chooses how many trials to label.
 - **A judge can run on an open-weight model** through an OpenAI-compatible endpoint (`OPENAI_BASE_URL`), so it needs no vendor. MST doesn't bundle or recommend an open-weight judge until one passes on the calibration set. Judge models such as Prometheus 2, Selene Mini and Flow Judge were trained on chat and question answering, not on agent traces.
 
 ## Considered
@@ -66,11 +72,11 @@ Three facts shape what MST should do instead:
 - **Keeping five-point scales and making the descriptions more precise.** Binary checks agree with people more, and holistic scores bunch up.
 - **An open-weight judge as the default.** It would need no API key, but it needs local hardware, and no open-weight judge has been measured on agent traces.
 
-## Not decided here
+## Left for later
 
-- Whether new built-in judges keep a default model, or the user must pick one the first time.
-- How agentic and staged judges are calibrated. Their verdicts fit the same labels, but a check costs minutes per trial.
-- The size of the published calibration set and which public servers it uses.
+- A usable gate for pairwise judges, and a corrected preference rate.
+- Pairwise juries.
+- A calibration set with labels people reviewed, and traces from more public servers.
 
 ## Consequences
 

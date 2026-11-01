@@ -184,6 +184,7 @@ function parseMetrics(
 const JudgeGradingSchema = z.object({
   threshold: z.number().min(0).max(1).optional(),
   reps: z.number().int().min(1).optional(),
+  jury: z.array(z.record(z.string(), z.unknown())).min(2).optional(),
 });
 
 function parseJudges(
@@ -199,6 +200,19 @@ function parseJudges(
     // The judge's schema sees only its own options; the assertion keys
     // (threshold, reference, reps) and routing (type, name) are kept as given.
     const own = judgeOwnOptions(config);
+    // A jury's members each complete the options (a member may set the
+    // model the others lack), so each is checked, and the entry is kept
+    // as written for the grader to merge.
+    if (grading.data.jury) {
+      grading.data.jury.forEach((member, i) =>
+        parseExtensionOptions(
+          lookups.judge(config.type).schema,
+          { ...own, ...member },
+          `judge options "${config.type}" (jury member ${i + 1})`
+        )
+      );
+      return config;
+    }
     const options = parseExtensionOptions(
       lookups.judge(config.type).schema,
       own,

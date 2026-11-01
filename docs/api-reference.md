@@ -1420,7 +1420,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L180-L234
+```typescript snippet=src/evals/datasetTypes.ts#L186-L240
 /**
  * A case's assertions
  *
@@ -1482,7 +1482,7 @@ export interface EvalAssertions {
 
 A case's `judges` entries, written like an eval config's `judges`.
 
-```typescript snippet=src/evals/datasetTypes.ts#L121-L165
+```typescript snippet=src/evals/datasetTypes.ts#L121-L171
 /**
  * One of a case's judges, written like an eval config's: a reference
  * (`acme/judge/completeness`) or `{ "type": <reference>, ...options }`.
@@ -1503,6 +1503,12 @@ interface JudgeSettings {
   threshold?: number;
   /** Number of judge evaluations. Overrides EvalCase.judgeReps. */
   reps?: number;
+  /**
+   * Run the judge on several models: each member is the options it
+   * changes, such as `{ "model": "gpt-5-mini" }`. The verdict is the
+   * members' majority; a tie is unknown (ADR 0009).
+   */
+  jury?: Array<Record<string, unknown>>;
   /** The rubric judge's provider. @default 'anthropic' */
   provider?: ProviderKind;
   /** Model override (e.g., 'claude-opus-4-20250514') */

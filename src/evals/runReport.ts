@@ -38,6 +38,8 @@ import {
   type StoredRun,
 } from './runFormat.js';
 import { judgedItems, type JudgedItem } from './judgedItems.js';
+import { krippendorffAlpha } from './agreement.js';
+import { sameModelFamily } from '../judge/modelFamily.js';
 import {
   correctedPassRate,
   evalDirectoryOf,
@@ -95,6 +97,17 @@ function scoresOf(trial: Trial, redacted: boolean): RunReportScore[] {
       ...(typeof s.score === 'number' ? { score: s.score } : {}),
       ...(words && s.details ? { details: clip(s.details) } : {}),
       ...(words && s.reasoning ? { reasoning: clip(s.reasoning) } : {}),
+      ...(s.jury?.length
+        ? {
+            jury: s.jury.map((vote) => ({
+              ...(vote.model !== undefined ? { model: vote.model } : {}),
+              verdict: vote.verdict,
+              ...(words && vote.reasoning
+                ? { reasoning: clip(vote.reasoning) }
+                : {}),
+            })),
+          }
+        : {}),
     });
     if (grader === 'judge' && score.judgeResults?.length)
       return score.judgeResults.map((result, index) =>
@@ -471,7 +484,8 @@ export function buildRunReport(
       })),
       judgeCalibration: judgeCalibrationOf(
         judged.filter((item) => item.variant === variant.name),
-        calibrations
+        calibrations,
+        record?.model
       ),
       ...(numberMetric(variant, 'cost_usd_mean') !== undefined
         ? { costPerCase: numberMetric(variant, 'cost_usd_mean') }
@@ -583,7 +597,8 @@ export function buildRunReport(
  */
 function judgeCalibrationOf(
   items: readonly JudgedItem[],
-  calibrations: readonly CalibrationRecord[]
+  calibrations: readonly CalibrationRecord[],
+  clientModel: string | undefined
 ): RunReportJudgeCalibration[] {
   const byJudge = new Map<string, JudgedItem[]>();
   for (const item of items) {
@@ -631,6 +646,8 @@ function judgeCalibrationOf(
       ...(verdicts.some((item) => item.judgeUnversioned)
         ? { unversioned: true as const }
         : {}),
+      ...judgeModelsRow(verdicts, clientModel),
+      ...juryRow(verdicts),
       ...(shown?.judgeKind === 'pointwise'
         ? {
             calibration: {
@@ -646,6 +663,82 @@ function judgeCalibrationOf(
         : {}),
     };
   });
+}
+
+/** The models a verdict ran on: a jury's members', or the judge's. */
+function itemModels(item: JudgedItem): string[] {
+  if (item.judgeModels) return item.judgeModels;
+  return item.judgeModel !== undefined ? [item.judgeModel] : [];
+}
+
+/**
+ * The models a judge's verdicts ran on, and those from the family of the
+ * client each verdict graded: the trial's own model, which a case can set,
+ * or else the variant's.
+ */
+function judgeModelsRow(
+  verdicts: readonly JudgedItem[],
+  variantModel: string | undefined
+): Pick<RunReportJudgeCalibration, 'models' | 'sameFamilyAsClient'> {
+  const models = [...new Set(verdicts.flatMap(itemModels))];
+  const same = [
+    ...new Set(
+      verdicts.flatMap((item) =>
+        itemModels(item).filter((model) =>
+          sameModelFamily(model, item.clientModel ?? variantModel)
+        )
+      )
+    ),
+  ];
+  return {
+    ...(models.length ? { models } : {}),
+    ...(same.length ? { sameFamilyAsClient: same } : {}),
+  };
+}
+
+/** A jury's members' verdicts and their agreement (ADR 0009). */
+function juryRow(
+  verdicts: readonly JudgedItem[]
+): Pick<RunReportJudgeCalibration, 'jury'> {
+  const juried = verdicts.filter((item) => item.jury?.length);
+  if (juried.length === 0) return {};
+  // Members by identity, which two never share; shown by model, with the
+  // identity's start when two members run the same model.
+  const models = new Map<string, string | undefined>();
+  for (const item of juried)
+    for (const vote of item.jury!)
+      if (!models.has(vote.member) || vote.model !== undefined)
+        models.set(vote.member, vote.model);
+  const members = [...models.keys()];
+  const shown = (member: string): string => {
+    const model = models.get(member);
+    if (model === undefined) return member.slice(0, 12);
+    const shared = [...models.values()].filter((m) => m === model).length;
+    return shared > 1 ? `${model} (${member.slice(0, 8)})` : model;
+  };
+  const decided = (verdict: string) =>
+    verdict === 'pass' || verdict === 'fail' ? verdict : undefined;
+  const units = juried.map((item) =>
+    members.map((member) =>
+      decided(item.jury!.find((vote) => vote.member === member)?.verdict ?? '')
+    )
+  );
+  const alpha = krippendorffAlpha(units);
+  return {
+    jury: {
+      members: members.map((member) => {
+        const votes = juried.flatMap((item) =>
+          item.jury!.filter((vote) => vote.member === member)
+        );
+        return {
+          member: shown(member),
+          passed: votes.filter((v) => v.verdict === 'pass').length,
+          failed: votes.filter((v) => v.verdict === 'fail').length,
+        };
+      }),
+      ...(alpha !== undefined ? { alpha } : {}),
+    },
+  };
 }
 
 /**

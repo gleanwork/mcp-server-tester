@@ -116,6 +116,10 @@ _Avoid_: abstain, no verdict, indeterminate
 A hash of what decides a judge's verdict besides the trial: the judge's reference, its `version` (or its plugin's), its options as its schema parses them, and the threshold and repetitions that turn its answers into a verdict. Every score and pairwise preference records it, and `run.json` records it for each eval config judge, so two scores with the same identity came from a judge that grades the same way.
 _Avoid_: judge hash, judge fingerprint, judge version (the version is one part of the identity)
 
+**Jury**:
+One judge run on several models, its members, each with the options it changes (usually `model`). Its verdict is the majority of the members that passed or failed, and a tie is `unknown`. Its judge identity is the set of its members' identities. The report gives the members' agreement as Krippendorff's α.
+_Avoid_: ensemble, panel, committee, multi-judge
+
 **Label**:
 A person's answer to a judge's question: pass or fail for one trial, or, for a pairwise judge, the side they prefer for one case. It belongs to the question (the judge's name in results), not to a judge identity, so a changed judge is measured against the same labels. Its split says whether it measures a judge (`test`) or may be read while changing one (`dev`).
 _Avoid_: annotation, ground truth, gold label, mark

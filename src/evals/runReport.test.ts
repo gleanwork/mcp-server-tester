@@ -10,7 +10,7 @@ import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { MCPRunReportData } from '../types/reporter.js';
 import { open } from '../cli/commands/open/index.js';
-import { printRunResult } from '../cli/commands/run/index.js';
+import { printJudgeModels, printRunResult } from '../cli/commands/run/index.js';
 
 let dir: string;
 
@@ -67,9 +67,28 @@ const plugin: Plugin = {
           ? { score: 0, unknown: true, reasoning: 'cannot tell' }
           : { score: 1 },
     },
+    // Answers by its model: `strict` fails case two, the others pass all.
+    // `lenient: true` passes everything.
+    voter: {
+      version: '1',
+      schema: z.object({
+        model: z.string(),
+        lenient: z.boolean().optional(),
+      }),
+      evaluate: async ({ case: judged }, options) => {
+        const { model, lenient } = options as {
+          model: string;
+          lenient?: boolean;
+        };
+        return {
+          score: model === 'strict' && !lenient && judged.id === 'two' ? 0 : 1,
+          model,
+        };
+      },
+    },
     // Two criteria: `greets` passes everywhere; `short` fails on case two.
     checks: {
-      schema: z.object({}),
+      schema: z.object({ model: z.string().optional() }),
       evaluate: async ({ case: judged }) => ({
         score: judged.id === 'two' ? 0 : 1,
         criteria: [
@@ -379,6 +398,168 @@ describe('the run report', () => {
         passRate: 1,
       }),
     ]);
+  });
+
+  it("shows a jury's members, their agreement, and a judge from the client's family", async () => {
+    const configPath = path.join(dir, 'eval.json');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        ...config,
+        model: 'claude-client',
+        judges: [
+          {
+            type: 'rr/judge/voter',
+            jury: [
+              { model: 'strict' },
+              { model: 'lenient' },
+              { model: 'claude-x' },
+            ],
+          },
+        ],
+      })
+    );
+    const result = await run();
+    const report = await readReport(result.outputDir);
+    const variant = report.variants.find((v) => v.name === 'base')!;
+    const [judge] = variant.judgeCalibration!;
+    // Two of three members pass every trial, so the jury does.
+    expect(judge).toMatchObject({
+      judge: 'rr/judge/voter',
+      judged: 4,
+      passed: 4,
+      models: ['strict', 'lenient', 'claude-x'],
+      jury: {
+        members: [
+          { member: 'strict', passed: 2, failed: 2 },
+          { member: 'lenient', passed: 4, failed: 0 },
+          { member: 'claude-x', passed: 4, failed: 0 },
+        ],
+      },
+    });
+    expect(judge!.jury!.alpha).toBeLessThan(1);
+    const [trial] = report.trials.base!.two!;
+    expect(trial!.scores).toContainEqual(
+      expect.objectContaining({
+        grader: 'rr/judge/voter',
+        jury: [
+          expect.objectContaining({ model: 'strict', verdict: 'fail' }),
+          expect.objectContaining({ model: 'lenient', verdict: 'pass' }),
+          expect.objectContaining({ model: 'claude-x', verdict: 'pass' }),
+        ],
+      })
+    );
+    // The client is a Claude model, and so is one member.
+    expect(judge!.sameFamilyAsClient).toEqual(['claude-x']);
+    // The `longer` variant's client isn't, so its row has no warning.
+    expect(
+      report.variants.find((v) => v.name === 'longer')!.judgeCalibration![0]
+    ).not.toHaveProperty('sameFamilyAsClient');
+    // The run output names the models and warns once per pair.
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    printJudgeModels(result.summary.results);
+    expect(log).toHaveBeenCalledWith(
+      'Judges: rr/judge/voter (strict, lenient, claude-x)'
+    );
+    expect(warn.mock.calls.map(([message]) => String(message))).toEqual([
+      expect.stringContaining(
+        'judge "rr/judge/voter" ran on claude-x, from the same family as the client\'s claude-client'
+      ),
+    ]);
+  });
+
+  it('keeps jury members on one model apart, and checks each case against its own client model', async () => {
+    await fs.writeFile(
+      path.join(dir, 'cases.json'),
+      JSON.stringify({
+        name: 'cases',
+        cases: [
+          { id: 'one', input: 'hello' },
+          // This case's client is a Claude model; the variant's isn't.
+          { id: 'two', input: 'bye', model: 'claude-case' },
+        ],
+      })
+    );
+    const configPath = path.join(dir, 'eval.json');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        ...config,
+        variants: [{ name: 'base' }],
+        pairwiseJudges: undefined,
+        judges: [
+          {
+            type: 'rr/judge/voter',
+            model: 'strict',
+            jury: [{}, { lenient: true }, { model: 'claude-x' }],
+          },
+        ],
+      })
+    );
+    const report = await readReport((await run()).outputDir);
+    const [judge] = report.variants[0]!.judgeCalibration!;
+    const members = judge!.jury!.members;
+    // Two members run `strict`: both rows stay, told apart by identity.
+    expect(members).toHaveLength(3);
+    expect(members.map((m) => m.member)).toEqual([
+      expect.stringMatching(/^strict \([0-9a-f]{8}\)$/),
+      expect.stringMatching(/^strict \([0-9a-f]{8}\)$/),
+      'claude-x',
+    ]);
+    expect(members[0]!.member).not.toBe(members[1]!.member);
+    expect(members.map(({ passed, failed }) => [passed, failed])).toEqual([
+      [2, 2],
+      [4, 0],
+      [4, 0],
+    ]);
+    // The two strict members disagree on case two's trials: alpha below 1.
+    expect(judge!.jury!.alpha).toBeLessThan(1);
+    // Case two's own client model is Claude, so claude-x is flagged.
+    expect(judge!.sameFamilyAsClient).toEqual(['claude-x']);
+  });
+
+  it("checks a criteria jury's models one by one against the client's family", async () => {
+    const configPath = path.join(dir, 'eval.json');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        ...config,
+        model: 'gpt-5',
+        judges: [
+          {
+            type: 'rr/judge/checks',
+            jury: [{ model: 'gpt-5-mini' }, { model: 'claude-sonnet-4-6' }],
+          },
+        ],
+      })
+    );
+    const report = await readReport((await run()).outputDir);
+    const rows = report.variants.find(
+      (v) => v.name === 'base'
+    )!.judgeCalibration!;
+    expect(rows.map((row) => row.judge)).toEqual([
+      'rr/judge/checks#greets',
+      'rr/judge/checks#short',
+    ]);
+    for (const row of rows) {
+      expect(row.models).toEqual(['gpt-5-mini', 'claude-sonnet-4-6']);
+      expect(row.sameFamilyAsClient).toEqual(['gpt-5-mini']);
+      // Members' counts and alpha are for a whole verdict, not a criterion.
+      expect(row).not.toHaveProperty('jury');
+    }
   });
 
   it("shows a pass rate for each of a judge's criteria", async () => {

@@ -4,6 +4,8 @@ import type { EvalDataset } from '../../../evals/datasetTypes.js';
 import { datasetContentHash } from '../../../evals/runFormat.js';
 import { trialGradeComplete } from '../../../evals/gradingSource.js';
 import { runReportPath } from '../../../evals/runReport.js';
+import { judgeModelsOf } from '../../../evals/judgeModels.js';
+import type { EvalCaseResult } from '../../../types/reporter.js';
 import {
   headlinePassRate,
   headlineTallies,
@@ -378,6 +380,7 @@ export function printRunResult(
     );
   }
   printVariantTable(result.summary.variants, graded);
+  printJudgeModels(result.summary.results);
   printPairwise(result.summary.variants);
   if (graded) printUnfinishedGrading(result, runId, config);
   const { selection } = result.summary;
@@ -456,6 +459,24 @@ export function printRunResult(
     (metrics.incomplete ?? 0) > 0
   )
     process.exitCode = 1;
+}
+
+/**
+ * Each judge's models, and a warning for each judge model from the client's
+ * own family (ADR 0009).
+ */
+export function printJudgeModels(results: readonly EvalCaseResult[]): void {
+  const judges = judgeModelsOf(results);
+  const named = judges.filter((judge) => judge.models.length);
+  if (named.length)
+    console.log(
+      `Judges: ${named.map((judge) => `${judge.judge} (${judge.models.join(', ')})`).join('; ')}`
+    );
+  for (const judge of judges)
+    for (const { judgeModel, clientModel } of judge.sameFamily)
+      console.warn(
+        `Warning: judge "${judge.judge}" ran on ${judgeModel}, from the same family as the client's ${clientModel}. A model tends to rate its own family's answers higher: judge with a model from another family, or a jury.`
+      );
 }
 
 type VariantSummary = Awaited<

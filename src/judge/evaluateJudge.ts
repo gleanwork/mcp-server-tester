@@ -8,7 +8,11 @@ import type { TraceEvidence } from '../evals/evalFrameworkTypes.js';
 import { parseExtensionOptions } from '../plugins/plugin.js';
 import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 import { getJudge } from './builtinJudges.js';
-import { judgeIdentity, judgeIsVersioned } from './judgeIdentity.js';
+import {
+  contentHash,
+  judgeIdentity,
+  judgeIsVersioned,
+} from './judgeIdentity.js';
 import {
   buildJudgeCase,
   buildJudgeTrial,
@@ -21,7 +25,11 @@ import {
   type JudgeInput,
   type JudgeSubScore,
 } from './judgeContract.js';
-import type { GraderCriterion } from '../types/index.js';
+import type {
+  GraderCriterion,
+  GraderJuryVote,
+  UsageMetrics,
+} from '../types/index.js';
 
 /** The case and run a dataset judge grades. Matchers pass none. */
 export interface JudgeRun {
@@ -50,6 +58,7 @@ const ASSERTION_KEYS = new Set([
   'reference',
   'threshold',
   'reps',
+  'jury',
 ]);
 
 /** An assertion's flat fields without the assertion and routing keys. */
@@ -72,6 +81,98 @@ export interface JudgeRequest {
   threshold: number;
   /** Times the judge scores the response; the scores are averaged. */
   reps: number;
+  /**
+   * Run the judge on several models, as a jury (ADR 0009): each member is
+   * option overrides, such as `{ "model": "claude-sonnet-4-6" }`, merged
+   * over `options`. The verdict is the members' majority; a tie is unknown.
+   */
+  jury?: ReadonlyArray<Record<string, unknown>>;
+}
+
+/** The requests a jury's members run: its options with each member's. */
+function juryMembers(request: JudgeRequest): JudgeRequest[] {
+  const jury: readonly unknown[] = Array.isArray(request.jury)
+    ? (request.jury as readonly unknown[])
+    : [];
+  const isMember = (m: unknown): m is Record<string, unknown> =>
+    typeof m === 'object' && m !== null && !Array.isArray(m);
+  const members = jury.filter(isMember);
+  if (members.length < 2 || members.length !== jury.length)
+    throw new Error(
+      'jury must list at least two members, each an object of the options it changes, such as { "model": "claude-sonnet-4-6" }.'
+    );
+  return members.map((member) => {
+    for (const key of Object.keys(member))
+      if (ASSERTION_KEYS.has(key))
+        throw new Error(
+          `A jury member sets only the judge's options, not "${key}".`
+        );
+    const { jury: _jury, ...single } = request;
+    return { ...single, options: { ...request.options, ...member } };
+  });
+}
+
+/**
+ * The identity one criterion of `request` records: the judge's identity
+ * with only that criterion in its options, when the judge says which
+ * options decide it (`criterionOptions`), otherwise the judge's. A jury's
+ * is the set of its members' for the criterion: every member configured
+ * with it counts, so a member that skips a trial doesn't change it, and a
+ * member whose options don't have it is left out.
+ */
+function criterionIdentity(request: JudgeRequest, criterion: string): string {
+  if (request.jury !== undefined) {
+    const ids = juryMembers(request).flatMap((member) => {
+      try {
+        return [criterionIdentity(member, criterion)];
+      } catch {
+        return [];
+      }
+    });
+    return ids.length
+      ? contentHash({ jury: ids.sort() })
+      : judgeRequestIdentity(request).judgeIdentity;
+  }
+  const judge = getJudge(request.judge);
+  return judge.criterionOptions
+    ? judgeIdentity(
+        request.judge,
+        judge,
+        judge.criterionOptions(request.options, criterion),
+        { threshold: request.threshold, reps: request.reps }
+      )
+    : judgeRequestIdentity(request).judgeIdentity;
+}
+
+/**
+ * The identity every score of `request` records (ADR 0009). A jury's is
+ * the set of its members' identities, so the members' order doesn't count.
+ */
+export function judgeRequestIdentity(
+  request: JudgeRequest
+): JudgeIdentityDetails {
+  if (request.jury !== undefined) {
+    const members = juryMembers(request).map(judgeRequestIdentity);
+    const ids = members.map((m) => m.judgeIdentity);
+    if (new Set(ids).size !== ids.length)
+      throw new Error('Two jury members are the same judge.');
+    return {
+      judgeIdentity: contentHash({ jury: [...ids].sort() }),
+      ...(members.some((m) => m.judgeUnversioned)
+        ? { judgeUnversioned: true as const }
+        : {}),
+    };
+  }
+  const judge = getJudge(request.judge);
+  return {
+    judgeIdentity: judgeIdentity(request.judge, judge, request.options, {
+      threshold: request.threshold,
+      reps: request.reps,
+    }),
+    ...(judgeIsVersioned(request.judge, judge)
+      ? {}
+      : { judgeUnversioned: true as const }),
+  };
 }
 
 /**
@@ -83,6 +184,18 @@ export async function preflightJudgeRequest(
   request: JudgeRequest,
   settings?: SettingsSections
 ): Promise<void> {
+  if (request.jury !== undefined) {
+    try {
+      judgeRequestIdentity(request);
+    } catch (error) {
+      throw new Error(
+        `Judge "${request.label}" can't run: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    for (const member of juryMembers(request))
+      await preflightJudgeRequest(member, settings);
+    return;
+  }
   try {
     const judge = getJudge(request.judge);
     const options = parseExtensionOptions(
@@ -127,6 +240,7 @@ export async function evaluateJudge(
   run: JudgeRun = {}
 ): Promise<ValidationResult> {
   const { label, threshold, reps } = request;
+  if (request.jury !== undefined) return evaluateJury(response, request, run);
   try {
     const judge = getJudge(request.judge);
     const options = parseExtensionOptions(
@@ -140,28 +254,13 @@ export async function evaluateJudge(
     };
     const context = { settings: settingsFor(run.settings, request.judge) };
     // What every score records about the judge that gave it (ADR 0009).
-    const identity: JudgeIdentityDetails = {
-      judgeIdentity: judgeIdentity(request.judge, judge, request.options, {
-        threshold,
-        reps,
-      }),
-      ...(judgeIsVersioned(request.judge, judge)
-        ? {}
-        : { judgeUnversioned: true as const }),
-    };
+    const identity = judgeRequestIdentity(request);
     const missing = missingRequirement(input, judge.requires);
     if (missing !== undefined)
       return judgeSkipped(label, identity, `no ${missing}`, undefined);
 
-    const criterionIdentity = (criterion: string): string =>
-      judge.criterionOptions
-        ? judgeIdentity(
-            request.judge,
-            judge,
-            judge.criterionOptions(request.options, criterion),
-            { threshold, reps }
-          )
-        : identity.judgeIdentity;
+    const identityOf = (criterion: string): string =>
+      criterionIdentity(request, criterion);
 
     const repScores: CheckedJudgeScore[] = [];
     for (let i = 0; i < reps; i++) {
@@ -182,7 +281,7 @@ export async function evaluateJudge(
         // A skip gives no verdict, so each criterion the reps listed is
         // unknown: its labels still count, as a trial the judge couldn't
         // decide.
-        const criteria = combineCriteria(repScores, criterionIdentity)?.map(
+        const criteria = combineCriteria(repScores, identityOf)?.map(
           (criterion) => ({ ...criterion, verdict: 'unknown' as const })
         );
         return judgeSkipped(
@@ -199,7 +298,7 @@ export async function evaluateJudge(
     const final = repScores.at(-1);
     if (!final)
       return judgeError(`Judge "${label}" error: no scores collected`, label);
-    const criteria = combineCriteria(repScores, criterionIdentity);
+    const criteria = combineCriteria(repScores, identityOf);
     const answered = repScores.filter((v) => v.unknown !== true);
     const last = answered.at(-1);
     // A judge with a required criterion is what its criteria are, each
@@ -291,6 +390,200 @@ export async function evaluateJudge(
       label
     );
   }
+}
+
+/** A member's verdict, from its result. */
+function memberVerdict(result: ValidationResult): GraderJuryVote['verdict'] {
+  const details = result.details ?? {};
+  return details.skipped === true
+    ? 'skipped'
+    : details.unknown === true
+      ? 'unknown'
+      : result.pass
+        ? 'pass'
+        : 'fail';
+}
+
+/**
+ * A jury (ADR 0009): the judge on each member's options, then the majority
+ * of the members that passed or failed it. A tie, or no member deciding,
+ * is unknown; every member skipping is a skip. A member that fails to run
+ * fails the jury, so a resume runs it again. A judge's criteria each take
+ * the members' majority too, and its required ones decide, as over reps.
+ */
+async function evaluateJury(
+  response: unknown,
+  request: JudgeRequest,
+  run: JudgeRun
+): Promise<ValidationResult> {
+  const { label } = request;
+  let members: JudgeRequest[];
+  let identity: JudgeIdentityDetails;
+  try {
+    members = juryMembers(request);
+    identity = judgeRequestIdentity(request);
+  } catch (err) {
+    return judgeError(
+      `Judge "${label}" error: ${err instanceof Error ? err.message : String(err)}`,
+      label
+    );
+  }
+  const results = await Promise.all(
+    members.map((member) => evaluateJudge(response, member, run))
+  );
+  const votes: GraderJuryVote[] = [];
+  for (const [i, result] of results.entries()) {
+    const details = result.details ?? {};
+    // A member that answered without calling its model still names the
+    // one it was given.
+    const given = members[i]!.options.model;
+    const model =
+      typeof details.judgeModel === 'string'
+        ? details.judgeModel
+        : typeof given === 'string'
+          ? given
+          : undefined;
+    if (typeof details.error === 'string') {
+      // The member's message starts with the same judge's name: drop it.
+      const prefix = `Judge "${label}" error: `;
+      const reason = result.message.startsWith(prefix)
+        ? result.message.slice(prefix.length)
+        : result.message;
+      return judgeError(
+        `Judge "${label}" error: jury member ${i + 1}${model ? ` (${model})` : ''}: ${reason}`,
+        label
+      );
+    }
+    votes.push({
+      ...(typeof details.judgeProvider === 'string'
+        ? { provider: details.judgeProvider }
+        : {}),
+      ...(model !== undefined ? { model } : {}),
+      judgeIdentity: details.judgeIdentity as string,
+      verdict: memberVerdict(result),
+      ...(typeof details.score === 'number' &&
+      details.skipped !== true &&
+      details.unknown !== true
+        ? { score: details.score }
+        : {}),
+      ...(typeof details.reasoning === 'string'
+        ? { reasoning: details.reasoning }
+        : {}),
+    });
+  }
+  const usage = sumJudgeUsage(
+    results.map((r) => r.details?.usage as Partial<UsageMetrics> | undefined)
+  );
+  let criteria: GraderCriterion[] | undefined;
+  try {
+    criteria = combineJuryCriteria(results, (id) =>
+      criterionIdentity(request, id)
+    );
+  } catch (err) {
+    return judgeError(
+      `Judge "${label}" error: ${err instanceof Error ? err.message : String(err)}`,
+      label
+    );
+  }
+  const jury = {
+    jury: votes,
+    judgeModel: votes.map((v) => v.model ?? '?').join(', '),
+  };
+  if (votes.every((v) => v.verdict === 'skipped')) {
+    const skipped = judgeSkipped(
+      label,
+      identity,
+      'Every jury member skipped.',
+      usage,
+      undefined,
+      criteria?.map((c) => ({ ...c, verdict: 'unknown' as const }))
+    );
+    return { ...skipped, details: { ...skipped.details, ...jury } };
+  }
+  const passed = votes.filter((v) => v.verdict === 'pass').length;
+  const failed = votes.filter((v) => v.verdict === 'fail').length;
+  const decided = criteria && criteriaOutcome(criteria);
+  const verdict = decided
+    ? decided.verdict
+    : passed > failed
+      ? 'pass'
+      : failed > passed
+        ? 'fail'
+        : 'unknown';
+  const tally = `${passed} of ${votes.length} jury members passed it and ${failed} failed it`;
+  const agreeing = votes.find((v) => v.verdict === verdict);
+  const reasoning = decided
+    ? decided.reasoning
+    : agreeing?.reasoning !== undefined
+      ? agreeing.reasoning
+      : `The jury members disagreed: ${tally}.`;
+  const scores = votes.flatMap((v) =>
+    v.score !== undefined && v.verdict !== 'unknown' ? [v.score] : []
+  );
+  const score = decided
+    ? decided.score
+    : scores.length
+      ? mean(scores)
+      : undefined;
+  const details = {
+    judgeName: label,
+    ...identity,
+    ...(verdict === 'unknown' ? { unknown: true } : {}),
+    ...(score !== undefined && verdict !== 'unknown' ? { score } : {}),
+    reasoning,
+    ...jury,
+    ...(decided ? { subScores: decided.subScores } : {}),
+    ...(criteria !== undefined ? { criteria } : {}),
+    ...(usage !== undefined ? { usage } : {}),
+  };
+  return {
+    pass: verdict === 'pass',
+    message:
+      verdict === 'unknown'
+        ? `Judge "${label}" answered unknown: ${tally}.`
+        : verdict === 'pass'
+          ? `Judge "${label}" passed: ${tally}.`
+          : `Judge "${label}" failed: ${tally}. ${reasoning}`,
+    details,
+  };
+}
+
+/**
+ * Each criterion's verdict over a jury's members, as `combineCriteria`
+ * gives it over reps, with its identity from `identityOf`. A criterion is
+ * optional only when every member that listed it says so, so the members'
+ * order can't change the verdict. Undefined when no member listed criteria.
+ */
+function combineJuryCriteria(
+  results: readonly ValidationResult[],
+  identityOf: (criterion: string) => string
+): GraderCriterion[] | undefined {
+  const byId = new Map<string, GraderCriterion[]>();
+  for (const result of results)
+    for (const criterion of (result.details?.criteria ??
+      []) as GraderCriterion[])
+      byId.set(criterion.id, [...(byId.get(criterion.id) ?? []), criterion]);
+  if (byId.size === 0) return undefined;
+  return [...byId].map(([id, verdicts]): GraderCriterion => {
+    const passed = verdicts.filter((v) => v.verdict === 'pass').length;
+    const failed = verdicts.filter((v) => v.verdict === 'fail').length;
+    const verdict =
+      passed > failed ? 'pass' : failed > passed ? 'fail' : 'unknown';
+    const { reasoning } = verdicts.find((v) => v.verdict === verdict) ?? {
+      reasoning: `The jury members disagreed: ${passed} passed it and ${failed} failed it.`,
+    };
+    const text = verdicts.find((v) => v.text !== undefined)?.text;
+    return {
+      id,
+      ...(text !== undefined ? { text } : {}),
+      ...(verdicts.every((v) => v.required === false)
+        ? { required: false as const }
+        : {}),
+      verdict,
+      ...(reasoning !== undefined ? { reasoning } : {}),
+      judgeIdentity: identityOf(id),
+    };
+  });
 }
 
 /**

@@ -138,6 +138,12 @@ interface JudgeSettings {
   threshold?: number;
   /** Number of judge evaluations. Overrides EvalCase.judgeReps. */
   reps?: number;
+  /**
+   * Run the judge on several models: each member is the options it
+   * changes, such as `{ "model": "gpt-5-mini" }`. The verdict is the
+   * members' majority; a tie is unknown (ADR 0009).
+   */
+  jury?: Array<Record<string, unknown>>;
   /** The rubric judge's provider. @default 'anthropic' */
   provider?: ProviderKind;
   /** Model override (e.g., 'claude-opus-4-20250514') */
@@ -279,6 +285,7 @@ const CaseJudgeFieldsSchema = z.object({
   reference: z.unknown().optional(),
   threshold: z.number().min(0).max(1).optional(),
   reps: z.number().int().min(1).optional(),
+  jury: z.array(z.record(z.string(), z.unknown())).min(2).optional(),
   // A built-in judge's LLM settings, which a case may set flat.
   ...JudgeLLMSchema.shape,
 });

@@ -188,6 +188,23 @@ export function TrialView({
                   {score.reasoning ?? score.details}
                 </span>
               )}
+              {score.jury && (
+                <ul className="ml-4 grid gap-0.5" aria-label="Jury votes">
+                  {score.jury.map((vote, j) => (
+                    <li key={j} className="flex flex-wrap items-baseline gap-2">
+                      <span className="font-mono">
+                        {vote.model ?? `member ${j + 1}`}
+                      </span>
+                      <span className="font-semibold">{vote.verdict}</span>
+                      {vote.reasoning && (
+                        <span className="text-muted-foreground">
+                          {vote.reasoning}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))}
         </ul>

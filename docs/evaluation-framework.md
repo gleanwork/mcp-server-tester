@@ -271,6 +271,48 @@ judge is `unknown` only when every rep is (unless required criteria decide
 it, as above). The report shows an unknown
 answer as UNKNOWN, and its _Judges_ table counts them.
 
+#### Juries
+
+A judge entry's `jury` runs the judge on several models and takes their
+majority
+([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)).
+Each member is the options it changes, merged over the entry's own:
+
+```json
+{
+  "type": "task-completion",
+  "jury": [
+    { "model": "claude-sonnet-4-6" },
+    { "provider": "openai", "model": "gpt-5-mini" },
+    { "provider": "google", "model": "gemini-2.5-flash" }
+  ]
+}
+```
+
+Each member runs as its own judge, with the entry's `threshold` and
+`reps`, and validation checks each member's options. The verdict is the
+majority of the members that passed or failed. A tie is `unknown`, a member
+that answered `unknown` or skipped is left out, and the jury skips only
+when every member does. A member that fails to run fails the score, naming
+the member. A jury's score is the mean of those members' scores, and its
+`criteria`, for the `criteria` judge, each take the members' majority; a
+criterion is optional only when every member that lists it says so. A
+criterion's identity is the set of every member's identity for it, so a
+member that skips a trial doesn't change it.
+
+The score records each member's verdict in `jury`, and its `judgeModel`
+lists the members' models. Its identity is a hash of the set of its
+members' identities, so the order of the members doesn't change it, and two
+members can't be the same judge. The report's _Judges_ table shows each
+member's pass and fail counts and their agreement, Krippendorff's α over
+the trials (1 is full agreement, 0 is chance; absent when there is no
+variation to measure). A trial's scores show each member's verdict.
+
+The run output names each judge's models, and warns when a judge model is
+from the same family as the client's model, since a model tends to rate
+its own family's answers higher. The report's _Judges_ table marks those
+judges _same family as client_. Pairwise judges don't take `jury`.
+
 Judge usage is kept apart from client usage: `judgeUsage` on each case and
 trial, `totalJudgeUsage` on the run and eval telemetry, and the
 `judge_cost_usd`, `judge_input_tokens`, and `judge_output_tokens` metrics.

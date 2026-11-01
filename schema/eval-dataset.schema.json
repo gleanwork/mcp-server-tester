@@ -237,6 +237,12 @@
               "minimum": 1,
               "description": "Number of judge evaluations to run; scores are averaged. Overrides EvalCase.judgeReps."
             },
+            "jury": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "type": "object" },
+              "description": "Run the judge on several models: each member is the options it changes, such as { \"model\": \"gpt-5-mini\" }. The verdict is the members' majority; a tie is unknown."
+            },
             "provider": {
               "type": "string",
               "enum": [
@@ -310,6 +316,12 @@
               "type": "integer",
               "minimum": 1,
               "description": "Number of judge evaluations to run; scores are averaged. Overrides EvalCase.judgeReps."
+            },
+            "jury": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "type": "object" },
+              "description": "Run the judge on several models: each member is the options it changes, such as { \"model\": \"gpt-5-mini\" }. The verdict is the members' majority; a tie is unknown."
             },
             "options": {
               "type": "object",
