@@ -203,6 +203,66 @@ describe('a jury', () => {
     expect(skipped.judgeIdentity).toBe(all.judgeIdentity);
   });
 
+  it('grades members configured with different criteria', async () => {
+    resetPluginsForTests();
+    installPlugins([
+      {
+        meta: { name: 'listed-plugin', namespace: 'listed' },
+        judges: {
+          checks: {
+            version: '1',
+            schema: z.object({ model: z.string(), ids: z.array(z.string()) }),
+            // Like the built-in `criteria` judge: a criterion's options are
+            // the one criterion, and a criterion it doesn't have is an error.
+            criterionOptions: (options, id) => {
+              const { model, ids } = options as {
+                model: string;
+                ids: string[];
+              };
+              if (!ids.includes(id)) throw new Error(`no criterion ${id}`);
+              return { model, ids: [id] };
+            },
+            async evaluate(_input, options): Promise<JudgeScore> {
+              const { model, ids } = options as {
+                model: string;
+                ids: string[];
+              };
+              return {
+                score: 1,
+                model,
+                criteria: ids.map((id) => ({ id, verdict: 'pass' as const })),
+              };
+            },
+          },
+        },
+      },
+    ]);
+    const jury = (b: string[]) => ({
+      judge: 'listed/judge/checks',
+      options: {},
+      label: 'listed/judge/checks',
+      threshold: 0.5,
+      reps: 1,
+      jury: [
+        { model: 'a', ids: ['x'] },
+        { model: 'b', ids: b },
+      ],
+    });
+    const result = await evaluateJudge('answer', jury(['y']));
+    expect(result.details?.error).toBeUndefined();
+    const criteria = result.details?.criteria as Array<{
+      id: string;
+      judgeIdentity: string;
+    }>;
+    expect(criteria.map((c) => c.id)).toEqual(['x', 'y']);
+    // `x` is only member a's, so b's other criteria don't change it.
+    const again = (await evaluateJudge('answer', jury(['y', 'z']))).details
+      ?.criteria as typeof criteria;
+    expect(again.find((c) => c.id === 'x')!.judgeIdentity).toBe(
+      criteria[0]!.judgeIdentity
+    );
+  });
+
   it('runs from the toPassToolJudge matcher', async () => {
     install({ a: 'pass', b: 'fail' });
     const tied = await toPassToolJudge.call({ isNot: false }, 'answer', {

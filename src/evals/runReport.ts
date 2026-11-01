@@ -667,10 +667,7 @@ function judgeCalibrationOf(
 
 /** The models a verdict ran on: a jury's members', or the judge's. */
 function itemModels(item: JudgedItem): string[] {
-  if (item.jury)
-    return item.jury.flatMap((vote) =>
-      vote.model !== undefined ? [vote.model] : []
-    );
+  if (item.judgeModels) return item.judgeModels;
   return item.judgeModel !== undefined ? [item.judgeModel] : [];
 }
 

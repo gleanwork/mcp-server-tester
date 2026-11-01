@@ -116,16 +116,23 @@ function juryMembers(request: JudgeRequest): JudgeRequest[] {
  * The identity one criterion of `request` records: the judge's identity
  * with only that criterion in its options, when the judge says which
  * options decide it (`criterionOptions`), otherwise the judge's. A jury's
- * is the set of its members' for the criterion, every member counted, so a
- * member that skips a trial doesn't change it.
+ * is the set of its members' for the criterion: every member configured
+ * with it counts, so a member that skips a trial doesn't change it, and a
+ * member whose options don't have it is left out.
  */
 function criterionIdentity(request: JudgeRequest, criterion: string): string {
-  if (request.jury !== undefined)
-    return contentHash({
-      jury: juryMembers(request)
-        .map((member) => criterionIdentity(member, criterion))
-        .sort(),
+  if (request.jury !== undefined) {
+    const ids = juryMembers(request).flatMap((member) => {
+      try {
+        return [criterionIdentity(member, criterion)];
+      } catch {
+        return [];
+      }
     });
+    return ids.length
+      ? contentHash({ jury: ids.sort() })
+      : judgeRequestIdentity(request).judgeIdentity;
+  }
   const judge = getJudge(request.judge);
   return judge.criterionOptions
     ? judgeIdentity(
@@ -467,9 +474,17 @@ async function evaluateJury(
   const usage = sumJudgeUsage(
     results.map((r) => r.details?.usage as Partial<UsageMetrics> | undefined)
   );
-  const criteria = combineJuryCriteria(results, (id) =>
-    criterionIdentity(request, id)
-  );
+  let criteria: GraderCriterion[] | undefined;
+  try {
+    criteria = combineJuryCriteria(results, (id) =>
+      criterionIdentity(request, id)
+    );
+  } catch (err) {
+    return judgeError(
+      `Judge "${label}" error: ${err instanceof Error ? err.message : String(err)}`,
+      label
+    );
+  }
   const jury = {
     jury: votes,
     judgeModel: votes.map((v) => v.model ?? '?').join(', '),

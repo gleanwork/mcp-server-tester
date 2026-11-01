@@ -88,7 +88,7 @@ const plugin: Plugin = {
     },
     // Two criteria: `greets` passes everywhere; `short` fails on case two.
     checks: {
-      schema: z.object({}),
+      schema: z.object({ model: z.string().optional() }),
       evaluate: async ({ case: judged }) => ({
         score: judged.id === 'two' ? 0 : 1,
         criteria: [
@@ -525,6 +525,41 @@ describe('the run report', () => {
     expect(judge!.jury!.alpha).toBeLessThan(1);
     // Case two's own client model is Claude, so claude-x is flagged.
     expect(judge!.sameFamilyAsClient).toEqual(['claude-x']);
+  });
+
+  it("checks a criteria jury's models one by one against the client's family", async () => {
+    const configPath = path.join(dir, 'eval.json');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        ...config,
+        model: 'gpt-5',
+        judges: [
+          {
+            type: 'rr/judge/checks',
+            jury: [{ model: 'gpt-5-mini' }, { model: 'claude-sonnet-4-6' }],
+          },
+        ],
+      })
+    );
+    const report = await readReport((await run()).outputDir);
+    const rows = report.variants.find(
+      (v) => v.name === 'base'
+    )!.judgeCalibration!;
+    expect(rows.map((row) => row.judge)).toEqual([
+      'rr/judge/checks#greets',
+      'rr/judge/checks#short',
+    ]);
+    for (const row of rows) {
+      expect(row.models).toEqual(['gpt-5-mini', 'claude-sonnet-4-6']);
+      expect(row.sameFamilyAsClient).toEqual(['gpt-5-mini']);
+      // Members' counts and alpha are for a whole verdict, not a criterion.
+      expect(row).not.toHaveProperty('jury');
+    }
   });
 
   it("shows a pass rate for each of a judge's criteria", async () => {
