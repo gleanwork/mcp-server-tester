@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, onTestFinished } from 'vitest';
 import {
   ComputerUseDriverError,
+  computerUseEnding,
   ComputerUseHitlBudgetError,
   runAnthropicComputerUseHitl,
   runAnthropicComputerUseReset,
@@ -239,6 +240,11 @@ it.each([
     /^Computer Use submission failed: stopped before completion; not retrying/
   );
   if (code) expect(message).toContain(code);
+  // The code reaches the ending too, not only the words (ADR 0010).
+  expect((failure as ComputerUseDriverError).stop).toEqual({
+    code: code?.slice(1, -1),
+    aborted: false,
+  });
   expect(message).not.toContain('private');
   expect((failure as ComputerUseDriverError).telemetry?.accounting).toBe(
     'partial'
@@ -250,6 +256,9 @@ it('checks the deadline before starting', async () => {
   await expect(
     runAnthropicComputerUseSubmission('query', { deadlineAt: Date.now() - 1 })
   ).rejects.toThrow('submission deadline exceeded; not retrying');
+  await expect(
+    runAnthropicComputerUseSubmission('query', { deadlineAt: Date.now() - 1 })
+  ).rejects.toMatchObject({ stop: { aborted: true } });
   expect(fake.requests).toEqual([]);
   expect(fake.launches).toEqual([]);
 });
@@ -271,6 +280,37 @@ it('stops at the deadline with partial telemetry', async () => {
   expect((failure as ComputerUseDriverError).telemetry).toMatchObject({
     accounting: 'partial',
     planner_response_count: 0,
+  });
+  expect(computerUseEnding(failure, 'deadline')).toMatchObject({
+    broke: 'deadline',
+    retryable: true,
+  });
+});
+
+it.each([
+  ['provider_rate_limit', 'provider', true],
+  ['provider_authentication', 'setup', false],
+  ['sign_in_required', 'setup', false],
+  ['app_unavailable', 'client-app', true],
+] as const)('ends a stop on %s as %s (ADR 0010)', (code, broke, retryable) => {
+  const error = new ComputerUseDriverError('stopped', undefined, {
+    code,
+    aborted: false,
+  });
+  expect(computerUseEnding(error, 'stopped')).toEqual({
+    kind: 'infrastructure',
+    broke,
+    retryable,
+    reason: 'stopped',
+  });
+});
+
+it('ends an untyped error as the client app', () => {
+  expect(computerUseEnding(new Error('bind failed'), 'bind failed')).toEqual({
+    kind: 'infrastructure',
+    broke: 'client-app',
+    retryable: true,
+    reason: 'bind failed',
   });
 });
 

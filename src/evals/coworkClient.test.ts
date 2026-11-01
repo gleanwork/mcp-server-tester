@@ -1093,6 +1093,36 @@ describe('V2 Cowork client', () => {
       expect(JSON.stringify(results)).not.toContain('good-token');
       expect(mocks.dispose).toHaveBeenCalledOnce();
     });
+
+    it('ends a submission as Computer Use typed its stop (ADR 0010)', async () => {
+      mocks.submit
+        .mockRejectedValueOnce(
+          new ComputerUseDriverError(
+            'Computer Use submit failed: stopped before completion; not retrying (permissions_required)',
+            undefined,
+            { code: 'permissions_required', aborted: false }
+          )
+        )
+        .mockRejectedValueOnce(
+          new ComputerUseDriverError(
+            'Computer Use submit failed: deadline reached before completion; not retrying',
+            undefined,
+            { code: undefined, aborted: true }
+          )
+        );
+      const results = await COWORK_CLIENT.runBatch!(batch(), stdioContext);
+      // A permission the desktop needs: a retry can't help.
+      expect(results[0]!.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke: 'setup',
+        retryable: false,
+      });
+      expect(results[1]!.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke: 'deadline',
+        retryable: true,
+      });
+    });
   });
   it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {
     mocks.matches.mockResolvedValue([{ isComplete: true }]);

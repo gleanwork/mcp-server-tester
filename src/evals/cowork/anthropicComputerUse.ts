@@ -9,10 +9,17 @@ import {
   DEFAULT_COMPUTER_USE_MODEL,
   runComputerUseLoop,
   secretValues,
+  type BlockerCode,
   type ComputerUseDesktop,
   type ComputerUseMode,
   type ComputerUsePlanner,
+  type ProviderCode,
 } from './computerUseLoop.js';
+import { infrastructureEnding } from '../trialEnding.js';
+import type {
+  InfrastructureBreak,
+  TrialEnding,
+} from '../../types/trialEnding.js';
 import {
   abortableSleep,
   anthropicComputerUsePlanner,
@@ -40,10 +47,49 @@ export interface ComputerUseOptions extends CoworkDriverOptions {
 export class ComputerUseDriverError extends CoworkDriverError {
   constructor(
     message: string,
-    public override readonly telemetry?: ComputerUseTelemetry
+    public override readonly telemetry?: ComputerUseTelemetry,
+    /** What the loop typed when it stopped: a blocker or provider code, and whether the deadline aborted it. */
+    readonly stop?: {
+      code: BlockerCode | ProviderCode | undefined;
+      aborted: boolean;
+    }
   ) {
     super(message, telemetry);
   }
+}
+
+/** What broke when Computer Use stopped on a typed code, and whether a retry can help. */
+const COMPUTER_USE_BREAKS: Record<
+  BlockerCode | ProviderCode,
+  [InfrastructureBreak, boolean]
+> = {
+  provider_rate_limit: ['provider', true],
+  provider_unavailable: ['provider', true],
+  provider_authentication: ['setup', false],
+  provider_request_rejected: ['setup', false],
+  model_unavailable: ['setup', false],
+  reasoning_unavailable: ['setup', false],
+  sign_in_required: ['setup', false],
+  permissions_required: ['setup', false],
+  screen_recording_required: ['setup', false],
+  accessibility_required: ['setup', false],
+  app_unavailable: ['client-app', true],
+  navigation_blocked: ['client-app', true],
+  action_budget_exhausted: ['client-app', true],
+};
+
+/**
+ * How an attempt ended when Computer Use couldn't drive the app (ADR 0010),
+ * from what its loop typed: the planner's provider, a setting or permission
+ * the desktop needs, or MST's deadline. Any other error is the client app's.
+ */
+export function computerUseEnding(error: unknown, reason: string): TrialEnding {
+  const stop = error instanceof ComputerUseDriverError ? error.stop : undefined;
+  if (stop?.aborted) return infrastructureEnding('deadline', reason);
+  const [broke, retryable] = stop?.code
+    ? COMPUTER_USE_BREAKS[stop.code]
+    : (['client-app', true] as const);
+  return infrastructureEnding(broke, reason, retryable);
 }
 
 export interface ComputerUseSubmissionResult {
@@ -162,7 +208,11 @@ async function runComputerUseDriver(
   ComputerUseSubmissionResult | ComputerUseHitlResult | ComputerUseResetResult
 > {
   if (options.deadlineAt <= Date.now())
-    throw new Error(`Computer Use ${label} deadline exceeded; not retrying.`);
+    throw new ComputerUseDriverError(
+      `Computer Use ${label} deadline exceeded; not retrying.`,
+      undefined,
+      { code: undefined, aborted: true }
+    );
   const env: NodeJS.ProcessEnv = { ...process.env, ...options.env };
   const maxActions = options.maxActions ?? (mode === 'hitl' ? 12 : 24);
   const timeoutMs = options.deadlineAt - Date.now();
@@ -246,7 +296,8 @@ async function runComputerUseDriver(
     diagnostic(`Computer Use ${label} failed: ${details}`);
     throw new ComputerUseDriverError(
       `Computer Use ${label} failed: ${details}${error.code ? ` (${error.code})` : ''}`,
-      error.telemetry
+      error.telemetry,
+      { code: error.code, aborted: error.aborted }
     );
   } finally {
     clearTimeout(timer);

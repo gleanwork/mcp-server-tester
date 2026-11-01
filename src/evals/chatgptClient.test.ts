@@ -569,6 +569,24 @@ describe('ChatGPT V2 batch client', () => {
       });
     }
   });
+  it('ends a failed turn as its failure kind says (ADR 0010)', async () => {
+    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+      success: false,
+      error: 'No fresh ChatGPT session matched the prompt.',
+      toolCalls: [],
+      clientMetadata: { ...metadata, failureKind: 'no_matching_session' },
+    });
+    const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
+    expect(traces[0]!.ending).toEqual({
+      kind: 'infrastructure',
+      broke: 'client-app',
+      retryable: true,
+      reason: 'No fresh ChatGPT session matched the prompt.',
+    });
+    // A completed turn has no ending of its own: a trial.
+    expect(traces[1]!.ending).toBeUndefined();
+  });
+
   it('sends nothing more when the app cannot be restarted after a failed case', async () => {
     vi.mocked(runExternalClientCase).mockResolvedValueOnce({
       success: false,

@@ -85,7 +85,14 @@ function sdkFailure(
     typeof (err as { statusCode?: unknown }).statusCode === 'number'
       ? (err as { statusCode: number }).statusCode
       : null;
-  const probe = statusCode === null ? raw : `${statusCode} ${raw}`;
+  // A status code is the provider's answer: the message is read only when
+  // there is none. The message can quote anything (a tool result, a model
+  // id, "API key" in a 400's explanation), so it never overrides a status.
+  const lower = raw.toLowerCase();
+  const says = (
+    status: (code: number) => boolean,
+    words: (text: string, lowered: string) => boolean
+  ): boolean => (statusCode !== null ? status(statusCode) : words(raw, lower));
 
   // Missing optional peer dependency
   if (
@@ -103,17 +110,21 @@ function sdkFailure(
 
   // The model's context ran out: before it answered, the case's prompt
   // didn't fit; after, its own turns and tool results filled it.
-  if (CONTEXT_OVERFLOW.test(`${probe} ${responseBody(err)}`)) {
+  if (CONTEXT_OVERFLOW.test(`${raw} ${responseBody(err)}`)) {
     const message = `client simulation failed: ${raw}`;
     return { message, ending: contextOverflowEnding(message, acted) };
   }
 
   // Authentication / API key problems
   if (
-    probe.includes('401') ||
-    probe.includes('Unauthorized') ||
-    probe.includes('API key') ||
-    probe.includes('api_key')
+    says(
+      (code) => code === 401 || code === 403,
+      (text) =>
+        text.includes('401') ||
+        text.includes('Unauthorized') ||
+        text.includes('API key') ||
+        text.includes('api_key')
+    )
   ) {
     const message =
       `client simulation failed: authentication error (${raw}).\n` +
@@ -128,10 +139,13 @@ function sdkFailure(
   // or retired model id, or a base-URL override routing to a gateway that
   // doesn't serve the model. Preserve the raw error instead of guessing.
   if (
-    probe.includes('404') ||
-    probe.includes('Not Found') ||
-    (probe.toLowerCase().includes('model') &&
-      probe.toLowerCase().includes('not found'))
+    says(
+      (code) => code === 404,
+      (text, lowered) =>
+        text.includes('404') ||
+        text.includes('Not Found') ||
+        (lowered.includes('model') && lowered.includes('not found'))
+    )
   ) {
     const message =
       `client simulation failed: ${raw}\n` +
@@ -146,12 +160,17 @@ function sdkFailure(
   }
 
   // Network / DNS / connection errors
+  // A request that got a status reached the provider: not the network.
   if (
-    probe.includes('ENOTFOUND') ||
-    probe.includes('fetch failed') ||
-    probe.includes('ECONNREFUSED') ||
-    probe.includes('ECONNRESET') ||
-    probe.includes('ETIMEDOUT')
+    says(
+      () => false,
+      (text) =>
+        text.includes('ENOTFOUND') ||
+        text.includes('fetch failed') ||
+        text.includes('ECONNREFUSED') ||
+        text.includes('ECONNRESET') ||
+        text.includes('ETIMEDOUT')
+    )
   ) {
     const message =
       `The mst client failed: network error.\n` +
@@ -161,9 +180,13 @@ function sdkFailure(
 
   // Rate limiting
   if (
-    probe.includes('429') ||
-    probe.toLowerCase().includes('rate limit') ||
-    probe.includes('Too Many Requests')
+    says(
+      (code) => code === 429,
+      (text, lowered) =>
+        text.includes('429') ||
+        lowered.includes('rate limit') ||
+        text.includes('Too Many Requests')
+    )
   ) {
     const message =
       `The mst client failed: rate limited.\n` +
@@ -175,8 +198,10 @@ function sdkFailure(
   const message = `client simulation failed: ${raw}`;
   // The provider's API failed: a server error, or overloaded.
   if (
-    (statusCode !== null && statusCode >= 500) ||
-    probe.includes('503') ||
+    says(
+      (code) => code >= 500,
+      (text) => text.includes('503')
+    ) ||
     PROVIDER_ERROR_TYPES.has(errorType(err) ?? '')
   )
     return { message, ending: infrastructureEnding('provider', message) };

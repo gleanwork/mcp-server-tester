@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
 import { runEvalDataset } from './evalRunner.js';
+import { executionEnding } from './caseExecution.js';
+import { infrastructureEnding } from './trialEnding.js';
 import type { ClientDefinition, TraceEvidence } from './evalFrameworkTypes.js';
 import { z } from 'zod';
 
@@ -17,6 +19,24 @@ describe('clientRunToExecution', () => {
         'structured'
       )
     ).toThrow("it is now `source: 'builtin'`");
+  });
+
+  it("keeps the producer's ending from a simulation to the execution (ADR 0010)", () => {
+    // The words name no network failure: only the producer's ending does.
+    const ending = infrastructureEnding('provider', 'The model was busy.');
+    const run = simulationToClientRun(
+      {
+        success: false,
+        toolCalls: [],
+        error: 'The model was busy.',
+        ending,
+      },
+      []
+    );
+    expect(run.ending).toEqual(ending);
+    expect(executionEnding(clientRunToExecution(run, 'structured'))).toEqual(
+      ending
+    );
   });
 });
 

@@ -536,6 +536,22 @@ describe('createVercelOrchestrator', () => {
         infra('provider'),
       ],
       ['a failed connection', new Error('fetch failed'), infra('network')],
+      // A status is the provider's answer; the words in its message aren't.
+      [
+        'a bad request that quotes an API key',
+        statusError(400, 'Invalid tool schema; the API key field is unused'),
+        { kind: 'trial' },
+      ],
+      [
+        'a server error that quotes a 429',
+        statusError(502, 'Upstream returned 429 and ECONNRESET'),
+        infra('provider'),
+      ],
+      [
+        'a forbidden key by status alone',
+        statusError(403, 'Forbidden'),
+        infra('setup', false),
+      ],
       // The AI SDK retries these, then throws a RetryError around the last.
       [
         'an overload the SDK gave up retrying',

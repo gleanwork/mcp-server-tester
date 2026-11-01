@@ -31,6 +31,7 @@ import {
   type ClaudeTrace,
 } from './externalClient/builtins/claudeTrace.js';
 import { infrastructureEnding } from './trialEnding.js';
+import { computerUseEnding } from './cowork/anthropicComputerUse.js';
 import { NativeTraceError } from './externalClient/nativeTraceError.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
@@ -541,11 +542,13 @@ async function runBatch(
             };
           }
           // Cowork didn't take the prompt, or its Claude session never bound
-          // to the case: the client app, not the model, failed.
+          // to the case: not the model. Computer Use types why it stopped
+          // (a permission, the planner's provider, the deadline); anything
+          // else is the client app.
           const message = safeError(error);
           result = {
             ...failure(message),
-            ending: infrastructureEnding('client-app', message),
+            ending: computerUseEnding(error, message),
           };
           continuation = 'reset';
           return finishCase();
