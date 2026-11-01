@@ -61,6 +61,25 @@ describe('executeEvalCase', () => {
     });
   });
 
+  it('keeps what a simulation failure says broke', async () => {
+    // A CLI that didn't start says so with its failure kind (ADR 0010).
+    vi.mocked(simulateMstClient).mockResolvedValue({
+      success: false,
+      toolCalls: [],
+      error: 'CLI client process failed: exit 1',
+      diagnostics: { failureKind: 'startup' },
+    });
+    await expect(executeEvalCase(clientCase, mcp)).resolves.toMatchObject({
+      kind: 'failed',
+      ending: {
+        kind: 'infrastructure',
+        broke: 'client-app',
+        retryable: true,
+        reason: 'CLI client process failed: exit 1',
+      },
+    });
+  });
+
   it("runs on the run's mst client, with the case's own fields over it", async () => {
     vi.mocked(simulateMstClient).mockResolvedValue({
       success: true,

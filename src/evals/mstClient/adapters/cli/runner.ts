@@ -156,6 +156,9 @@ export async function runCLIClient(
         };
       return {
         ...partial,
+        // The process failed (or a server didn't start): its failure kind
+        // says how the run ended, whatever Claude Code reported before.
+        ending: undefined,
         success: false,
         error:
           message.includes('timed out') || message.includes('TIMEOUT')

@@ -92,6 +92,9 @@ export function parseStreamJson(
   const lines = stdout.split('\n').filter((line) => line.trim().length > 0);
   const timed = lineTimes !== undefined && lineTimes.length === lines.length;
   const messages: ClaudeMessageEvent[] = [];
+  // Whether the model answered: Claude Code wraps an API error in an
+  // assistant message of its own (`is_api_error_message`), which isn't one.
+  let acted = false;
   const toolCalls: LLMToolCall[] = [];
   const textParts: string[] = [];
   let usage: UsageMetrics | undefined;
@@ -112,6 +115,8 @@ export function parseStreamJson(
     const at = timed ? lineTimes[index] : undefined;
     const atIso = at !== undefined ? new Date(at).toISOString() : undefined;
     messages.push({ ...(event as ClaudeMessageEvent), at });
+    if (event.type === 'assistant' && event.is_api_error_message !== true)
+      acted = true;
 
     if (event.type === 'assistant' && event.message?.content) {
       for (const block of event.message.content) {
@@ -192,7 +197,6 @@ export function parseStreamJson(
 
     if (event.type === 'result' && event.is_error === true) {
       const modelCalls = claudeModelCalls(messages);
-      const acted = messages.some((message) => message.type === 'assistant');
       const { error, ending } = claudeResultEnding(event, acted);
       return {
         success: false,
@@ -282,6 +286,8 @@ interface StreamJsonEvent {
   };
   result?: string;
   is_error?: boolean;
+  /** On an assistant message Claude Code made from an API error. */
+  is_api_error_message?: boolean;
   subtype?: string;
   num_turns?: number;
   usage?: {

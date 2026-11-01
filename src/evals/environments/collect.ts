@@ -22,7 +22,7 @@ import {
   type ConnectorServerConfig,
   type EvalServerConfig,
 } from '../evalConfig.js';
-import { isInfrastructure } from '../trialEnding.js';
+import { isInfrastructure, thrownEnding } from '../trialEnding.js';
 import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
@@ -466,10 +466,14 @@ export async function collectShard(
               true
             );
           } catch (error) {
+            // Read how it ended from the error itself (a network code, an
+            // abort), as a local run does: only its message crosses the
+            // channel. `save` redacts both.
             result = {
               finalText: '',
               events: [],
               error: error instanceof Error ? error.message : String(error),
+              ending: thrownEnding(error),
             };
           }
           await save(batchIndex, index, keyOf(index), result);

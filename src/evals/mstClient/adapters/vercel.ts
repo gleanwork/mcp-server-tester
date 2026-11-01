@@ -69,11 +69,14 @@ interface SdkFailure {
  * answered at least once, which decides what running out of context means.
  */
 function sdkFailure(
-  err: unknown,
+  thrown: unknown,
   provider: string,
   acted: boolean
 ): SdkFailure {
-  const raw = errorText(err);
+  // The AI SDK retries a retryable provider error, then throws a RetryError
+  // around the last one: read that one. Its message keeps the attempts.
+  const err = lastRetriedError(thrown) ?? thrown;
+  const raw = errorText(thrown);
   // APICallError carries the HTTP status separately from its message, which
   // is often the provider's own text ("Bearer token required").
   const statusCode =
@@ -179,6 +182,13 @@ function sdkFailure(
     return { message, ending: infrastructureEnding('provider', message) };
   // Anything else is the client's own failure: a trial that failed.
   return { message, ending: TRIAL_ENDING };
+}
+
+/** The last error an AI SDK `RetryError` gave up on, if `error` is one. */
+function lastRetriedError(error: unknown): unknown {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const { name, lastError } = error as { name?: unknown; lastError?: unknown };
+  return name === 'AI_RetryError' ? lastError : undefined;
 }
 
 /** How providers say the context ran out (Anthropic, OpenAI, Google). */

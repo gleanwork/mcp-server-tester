@@ -93,6 +93,40 @@ describe('how a Claude Code run that exited with an error ended (ADR 0010)', () 
     expect(result.ending).toEqual({ kind: 'trial' });
   });
 
+  it("is a startup failure when a server didn't start, whatever Claude Code said next", async () => {
+    // One write, so the failed init and the result arrive in one chunk.
+    const stream = [
+      {
+        type: 'system',
+        subtype: 'init',
+        mcp_servers: [{ name: 'tested', status: 'failed' }],
+        tools: [],
+      },
+      { type: 'result', subtype: 'error_max_turns', is_error: true },
+    ]
+      .map((line) => `${JSON.stringify(line)}\n`)
+      .join('');
+    const result = await simulateMstClient(unusedMcp, 'hello', {
+      clientType: 'cli',
+      cli: {
+        command: process.execPath,
+        args: [
+          '-e',
+          `process.stdout.write(${JSON.stringify(stream)}); setTimeout(() => process.exit(1), 1000);`,
+        ],
+        claudeMcpServers: ['tested'],
+        timeout: 5000,
+      },
+    });
+    expect(result.success).toBe(false);
+    expect(result.ending).toBeUndefined();
+    expect(
+      executionEnding(
+        clientRunToExecution(simulationToClientRun(result, []), 'structured')
+      )
+    ).toMatchObject({ kind: 'infrastructure', broke: 'client-app' });
+  });
+
   it('is the client app when Claude Code exits without saying why', async () => {
     const result = await claudeExiting([answered], 1);
     expect(result.success).toBe(false);

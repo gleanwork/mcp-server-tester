@@ -536,6 +536,31 @@ describe('createVercelOrchestrator', () => {
         infra('provider'),
       ],
       ['a failed connection', new Error('fetch failed'), infra('network')],
+      // The AI SDK retries these, then throws a RetryError around the last.
+      [
+        'an overload the SDK gave up retrying',
+        Object.assign(
+          new Error('Failed after 3 attempts. Last error: Overloaded'),
+          {
+            name: 'AI_RetryError',
+            reason: 'maxRetriesExceeded',
+            lastError: statusError(529, 'Overloaded'),
+          }
+        ),
+        infra('provider'),
+      ],
+      [
+        'a server error the SDK gave up retrying',
+        Object.assign(
+          new Error('Failed after 3 attempts. Last error: Internal error'),
+          {
+            name: 'AI_RetryError',
+            reason: 'maxRetriesExceeded',
+            lastError: statusError(500, 'Internal error'),
+          }
+        ),
+        infra('provider'),
+      ],
       [
         'a prompt too long for the context',
         statusError(400, 'prompt is too long: 210000 tokens > 200000 maximum'),

@@ -31,6 +31,7 @@ import {
   type ClaudeTrace,
 } from './externalClient/builtins/claudeTrace.js';
 import { infrastructureEnding } from './trialEnding.js';
+import { NativeTraceError } from './externalClient/nativeTraceError.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
   claudeDesktopOtlpSettings,
@@ -823,7 +824,17 @@ async function runBatch(
           }
         } catch (error) {
           // Trace collection or attribution failed: the app state is unknown.
-          result = failure(safeError(error));
+          const message = safeError(error);
+          // The bound session never finished or went away: the client app
+          // failed, not the model. Any other error here is the trial's.
+          const lostSession =
+            error instanceof NativeTraceError &&
+            (error.failureKind === 'timeout' ||
+              error.failureKind === 'no_matching_session');
+          const ending = lostSession
+            ? infrastructureEnding('client-app', message)
+            : undefined;
+          result = { ...failure(message), ...(ending ? { ending } : {}) };
           if (Date.now() >= deadlineAt) {
             // Past the deadline the task may still be running: keep what
             // its bound session did by now, as a failed case's evidence.
@@ -854,6 +865,7 @@ async function runBatch(
                   },
                   servers
                 ),
+                ...(ending ? { ending } : {}),
                 ...taskTimes(partial),
                 artifacts: {
                   dir: partial.candidate.sessionDir,

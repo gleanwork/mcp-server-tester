@@ -180,6 +180,39 @@ describe('parseStreamJson', () => {
       { kind: 'infrastructure', broke: 'client-app', retryable: true },
     ],
   ])('types the error result %j (acted: %s)', (fields, acted, expected) => {
+    expectEnding(fields, acted, expected);
+  });
+
+  it("doesn't take Claude Code's message for an API error as the model acting", () => {
+    // What Claude Code prints when the first request doesn't fit.
+    const result = parseStreamJson(
+      [
+        {
+          type: 'assistant',
+          is_api_error_message: true,
+          error: 'invalid_request',
+          message: {
+            model: '<synthetic>',
+            content: [{ type: 'text', text: 'Prompt is too long' }],
+          },
+        },
+        { type: 'result', is_error: true, result: 'Prompt is too long' },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n')
+    );
+    expect(result.ending).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'setup',
+      retryable: false,
+    });
+  });
+
+  function expectEnding(
+    fields: Record<string, unknown>,
+    acted: boolean,
+    expected: Record<string, unknown>
+  ) {
     const lines = [
       ...(acted
         ? [
@@ -196,7 +229,7 @@ describe('parseStreamJson', () => {
     );
     expect(result.success).toBe(false);
     expect(result.ending).toMatchObject(expected);
-  });
+  }
 
   it('handles missing fields gracefully', () => {
     const stdout = [

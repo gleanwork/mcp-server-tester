@@ -15,6 +15,7 @@ import {
 import { assertClientSupports, getClient } from './builtinClients.js';
 import type { ClientRunContext } from './evalFrameworkTypes.js';
 import type { EvalConfig } from './evalConfig.js';
+import { endingOf } from './trialEnding.js';
 
 /** What the fake SDK saw, and how it behaves. */
 const sdk = vi.hoisted(() => ({
@@ -25,6 +26,8 @@ const sdk = vi.hoisted(() => ({
   homeMode: undefined as number | undefined,
   hang: false,
   fail: undefined as string | undefined,
+  /** Fail before the first turn starts, as a Codex that can't start does. */
+  failBeforeTurn: undefined as string | undefined,
   /** Fail the turn with this error, as Codex reports one, then exit 1. */
   turnFailed: undefined as string | undefined,
   /** Answer once before the turn fails. */
@@ -86,6 +89,7 @@ vi.mock('@openai/codex-sdk', () => ({
           );
           async function* events() {
             yield { type: 'thread.started', thread_id: 'thread-9' };
+            if (sdk.failBeforeTurn) throw new Error(sdk.failBeforeTurn);
             yield { type: 'turn.started' };
             if (sdk.fail) throw new Error(sdk.fail);
             if (sdk.turnFailed !== undefined) {
@@ -506,6 +510,22 @@ describe('codex client run', () => {
     );
     expect(result.error).toContain('Codex exited with an error');
     expect(result.ending).toMatchObject(expected);
+  });
+
+  it('is a startup failure when Codex fails before its turn starts', async () => {
+    sdk.failBeforeTurn = 'spawn codex ENOENT';
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex' },
+      context(GATEWAY)
+    );
+    expect(result.diagnostics).toEqual({ failureKind: 'startup' });
+    expect(result.ending).toBeUndefined();
+    expect(endingOf(result)).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'client-app',
+      retryable: true,
+    });
   });
 
   it('leaves a failed turn it cannot name to the failure kind', async () => {

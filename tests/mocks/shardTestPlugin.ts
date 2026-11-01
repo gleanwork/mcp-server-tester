@@ -55,6 +55,12 @@ async function probe(
       // A client types what broke (ADR 0010); MST never reads the words.
       ending: network(`ECONNRESET while using ${second}`),
     };
+  // Throws a Node network error: the worker reads its code, as a local
+  // run does, before only the message crosses the channel.
+  if (input.prompt === 'thrown')
+    throw Object.assign(new Error(`read ECONNRESET while using ${second}`), {
+      code: 'ECONNRESET',
+    });
   // Fails on the network the first time only: a retry helps. The marker
   // file, at SHARD_TEST_FLAKY_ONCE, says it already failed.
   const once = process.env.SHARD_TEST_FLAKY_ONCE;

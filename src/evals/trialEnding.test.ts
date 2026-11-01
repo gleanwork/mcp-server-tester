@@ -58,6 +58,8 @@ describe('endingOf', () => {
     ['app_unavailable', infra('client-app')],
     ['automation_permission_denied', infra('setup', false)],
     ['no_matching_session', infra('client-app')],
+    ['client_run_failed', infra('client-app')],
+    ['cleanup_failed', infra('client-app')],
     ['timeout', infra('deadline')],
     ['unsupported_client', infra('setup', false)],
   ])('maps the external client failure %s', (failureKind, expected) => {

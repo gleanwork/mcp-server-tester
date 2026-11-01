@@ -14,6 +14,7 @@ import {
   truncatedPrompt,
 } from './coworkClient.js';
 import { endingOf, isInfrastructure } from './trialEnding.js';
+import { NativeTraceError } from './externalClient/nativeTraceError.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import { CoworkHitlError } from './cowork/driver.js';
 import { toCoworkServers } from './coworkSetup/config.js';
@@ -1249,6 +1250,29 @@ describe('V2 Cowork client', () => {
     expect(result[0]!.error).toContain('Ambiguous');
     expect(result[1]!.error).toBeUndefined();
   });
+  // How a case ended when its trace couldn't be collected (ADR 0010).
+  it.each([
+    [
+      new NativeTraceError(
+        'timeout',
+        'Timed out waiting for Claude session local_1 to complete'
+      ),
+      { kind: 'infrastructure', broke: 'client-app', retryable: true },
+    ],
+    [
+      new NativeTraceError('no_matching_session', 'No matching Claude session'),
+      { kind: 'infrastructure', broke: 'client-app', retryable: true },
+    ],
+    [new Error('Cowork model mismatch: requested a, observed b.'), undefined],
+  ])('types a failed collection: %s', async (error, expected) => {
+    mocks.trace.mockRejectedValueOnce(error);
+    const [result] = await COWORK_CLIENT.runBatch!(requests(), context);
+    expect(result!.error).toBe(error.message);
+    expect(result!.ending).toEqual(
+      expected ? { ...expected, reason: error.message } : undefined
+    );
+  });
+
   it('preserves whitespace and Unicode and binds repeated identical prompts to different sessions', async () => {
     const scenario = '  café\n重复 query  ';
     const batch = requests().map((r) => ({

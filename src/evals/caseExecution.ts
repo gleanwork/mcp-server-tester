@@ -41,7 +41,7 @@ import {
 } from './toolSurfaceProxy.js';
 import { simulateMstClient } from './mstClient/simulation.js';
 import type { MstClientSimulationResult } from './mstClient/types.js';
-import { TRIAL_ENDING, endingOf, thrownEnding } from './trialEnding.js';
+import { endingOf, thrownEnding } from './trialEnding.js';
 
 /** The client payload validators and reports read: the simulation shape. */
 export type ClientResponse = MstClientSimulationResult & {
@@ -210,12 +210,16 @@ export async function executeEvalCase(
       mcp
     );
     if (simulation.success) return simulationExecution(simulation);
-    // The adapter typed how it ended; a thrown error would lose that.
+    // The adapter typed how it ended, or its failure kind says (a CLI that
+    // didn't start); a thrown error would lose both.
+    const error = simulation.error || 'The mst client failed.';
     return {
       kind: 'failed',
       response: undefined,
-      error: simulation.error || 'The mst client failed.',
-      ending: simulation.ending ?? TRIAL_ENDING,
+      error,
+      ending:
+        simulation.ending ??
+        endingOf({ error, diagnostics: simulation.diagnostics }),
     };
   } catch (error) {
     // Simulation errors are already enriched by the adapter; pass them through.
