@@ -48,8 +48,12 @@ async function probe(
   const second = await token(input);
   await mark('end', input.prompt);
   if (input.prompt === 'flaky') {
-    // Quotes the token, a secrets file credential and a setting beside it.
-    const message = `ECONNRESET while using ${second} for ${input.env?.ACME_INSTANCE} with ${input.env?.ACME_API_KEY}`;
+    // Quotes the token, a secrets file credential, a setting beside it, and
+    // the credential its first server was resolved with.
+    const server = input.servers[0];
+    const used =
+      server && server.transport !== 'stdio' ? server.auth?.accessToken : '';
+    const message = `ECONNRESET while using ${second} for ${input.env?.ACME_INSTANCE} with ${input.env?.ACME_API_KEY} via ${used}`;
     return {
       finalText: '',
       events: [],

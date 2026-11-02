@@ -204,6 +204,37 @@ describe('redactedClientRun', () => {
     expect(result.events[0]!.arguments.at).toBe(at);
   });
 
+  it('redacts a secret used as a key, keeping both values when keys collide', () => {
+    const first = 'env-credential-1';
+    const second = 'env-credential-2';
+    expect(
+      redactedClientRun(
+        { events: [{ output: { [first]: 'valid', [second]: 'revoked' } }] },
+        [first, second]
+      )
+    ).toEqual({
+      events: [
+        { output: { '[REDACTED]': 'valid', '[REDACTED] 2': 'revoked' } },
+      ],
+    });
+  });
+
+  it('redacts a secret JSON escapes inside another object', () => {
+    class Payload {
+      constructor(readonly token: string) {}
+    }
+    for (const secret of ['secret-"12345678', 'line1\nline2-xyz']) {
+      const result = redactedClientRun(
+        { telemetry: { payload: new Payload(secret) } },
+        [secret]
+      );
+      expect(JSON.stringify(result)).not.toContain(
+        JSON.stringify(secret).slice(1, -1)
+      );
+      expect(result.telemetry.payload).toEqual({ token: '[REDACTED]' });
+    }
+  });
+
   it('returns the result itself when there is nothing to redact', () => {
     const result = { finalText: 'ok' };
     expect(redactedClientRun(result, ['abc'])).toBe(result);

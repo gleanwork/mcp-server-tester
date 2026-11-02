@@ -10,7 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { getClient } from '../builtinClients.js';
-import { namedSecretValues, redactedClientRun } from '../clientSecrets.js';
+import {
+  clientSecretValues,
+  namedSecretValues,
+  redactedClientRun,
+} from '../clientSecrets.js';
 import {
   expandWorkerConnectors,
   writeTokenFile,
@@ -350,10 +354,17 @@ export async function collectShard(
     // Servers arrive as declared; their secrets come from this machine's
     // environment and the coordinator's `tokens`.
     const serverEnv = { ...process.env, ...runtimeEnv };
+    // A resolved server's credentials are secrets by use, whatever the
+    // variable that held them is named, as they are in a local run.
+    const resolved = (server: MCPConfig): MCPConfig => {
+      const config = resolveServerSecrets(server, serverEnv);
+      for (const value of clientSecretValues(serverEnv, [config]))
+        secrets.add(value);
+      return config;
+    };
     const serverFor = (server: unknown): MCPConfig => {
       const declared = server as EvalServerConfig;
-      if (!isConnectorServer(declared))
-        return resolveServerSecrets(declared, serverEnv);
+      if (!isConnectorServer(declared)) return resolved(declared);
       const expanded = connectors?.servers.get(
         declared.label ?? declared.connector
       );
@@ -361,7 +372,7 @@ export async function collectShard(
         throw new Error(
           `Connector server "${declared.label ?? declared.connector}" wasn't expanded.`
         );
-      return resolveServerSecrets(expanded, serverEnv);
+      return resolved(expanded);
     };
     for (const [batchIndex, batch] of bundle.batches.entries()) {
       if (cancelled || !batch.requests.length) continue;

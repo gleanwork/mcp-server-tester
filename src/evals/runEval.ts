@@ -71,6 +71,7 @@ import type {
   EvaluationVariantResult,
   EvaluationSummary,
   ClientDefinition,
+  ClientRunResult,
   TraceEvidence,
   RunSelection,
   RunTelemetry,
@@ -96,6 +97,7 @@ import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
+import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import {
@@ -1846,6 +1848,16 @@ async function evaluate(
   // (the secrets file's included) and the servers': the connector tokens,
   // every one delivered, since they renew while the run goes on.
   const runSecrets = (): string[] => credentials.secrets();
+  // A trace a worker sent back, with this machine's secrets replaced too
+  // before it is saved, exported or graded: the worker knows only its own.
+  const receivedTrace = (
+    trace: ClientRunResult,
+    servers: readonly MCPConfig[]
+  ): ClientRunResult =>
+    redactedClientRun(trace, [
+      ...clientSecretValues(env, servers),
+      ...runSecrets(),
+    ]);
   // A replay's servers only name the trace's tools: no secrets, no endpoint.
   const serverFor = (server: MCPConfig): MCPConfig =>
     replay ? server : resolveServerSecrets(server, env);
@@ -2088,7 +2100,7 @@ async function evaluate(
                 ...executedTrialResult(
                   entry.evalCase,
                   batchTraceExecution(
-                    trace,
+                    receivedTrace(trace, resolvedServers),
                     clientConfig.definition,
                     resolvedServers
                   ),
@@ -2335,11 +2347,14 @@ async function evaluate(
                               gathered
                                 ? (caseId, trial) =>
                                     batchTraceExecution(
-                                      gathered.result({
-                                        variant: variant.name,
-                                        caseId,
-                                        trial,
-                                      }),
+                                      receivedTrace(
+                                        gathered.result({
+                                          variant: variant.name,
+                                          caseId,
+                                          trial,
+                                        }),
+                                        resolvedServers
+                                      ),
                                       clientConfig.definition,
                                       resolvedServers
                                     )

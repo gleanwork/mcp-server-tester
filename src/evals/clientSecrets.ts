@@ -105,16 +105,24 @@ function redactStrings(
   if (typeof value === 'string') return replaceAll(value, secrets);
   if (Array.isArray(value))
     return value.map((item) => redactStrings(item, secrets, `${path}[]`));
-  if (isPlainObject(value))
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => {
-        const at = path ? `${path}.${key}` : key;
-        return [
-          key,
-          FILE_PATHS.has(at) ? item : redactStrings(item, secrets, at),
-        ];
-      })
-    );
+  if (isPlainObject(value)) {
+    const entries: Array<[string, unknown]> = [];
+    const names = new Set<string>();
+    for (const [key, item] of Object.entries(value)) {
+      const at = path ? `${path}.${key}` : key;
+      // A key can be a secret too (a map of tokens). Two keys that redact
+      // alike are numbered, so neither value is lost.
+      const redacted = replaceAll(key, secrets);
+      let name = redacted;
+      for (let n = 2; names.has(name); n++) name = `${redacted} ${n}`;
+      names.add(name);
+      entries.push([
+        name,
+        FILE_PATHS.has(at) ? item : redactStrings(item, secrets, at),
+      ]);
+    }
+    return Object.fromEntries(entries);
+  }
   if (typeof value === 'object' && value !== null)
     return redactedJsonForm(value, secrets, path);
   return value;
@@ -137,9 +145,11 @@ function redactedJsonForm(
     // Circular or a BigInt: it can't be stored either.
     return value;
   }
-  if (json === undefined || !secrets.some((secret) => json.includes(secret)))
-    return value;
-  return redactStrings(JSON.parse(json) as unknown, secrets, path);
+  if (json === undefined) return value;
+  // Compare parsed strings, not the JSON text, where a secret with a quote
+  // or a newline in it is escaped.
+  const redacted = redactStrings(JSON.parse(json) as unknown, secrets, path);
+  return JSON.stringify(redacted) === json ? value : redacted;
 }
 
 /**

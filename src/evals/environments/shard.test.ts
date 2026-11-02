@@ -14,6 +14,7 @@ import {
   type ShardTokens,
 } from './protocol.js';
 import type { EvalConfig } from '../evalConfig.js';
+import type { MCPConfig } from '../../config/mcpConfig.js';
 import type {
   EnvironmentContext,
   ShardEvents,
@@ -49,14 +50,15 @@ interface RequestSpec {
 async function shardIn(
   root: string,
   probe: RequestSpec[],
-  batch: RequestSpec[] = []
+  batch: RequestSpec[] = [],
+  servers: MCPConfig[] = []
 ): Promise<ShardSpec> {
   const bundleDir = path.join(root, 'bundle');
   const request = (type: string) => (spec: RequestSpec) => ({
     caseId: spec.caseId,
     trial: 0,
     config: { type, delayMs: spec.delayMs ?? 0 },
-    input: { prompt: spec.prompt, servers: [], env: { SECRET: 'leak' } },
+    input: { prompt: spec.prompt, servers, env: { SECRET: 'leak' } },
   });
   await writeShardBundle(bundleDir, {
     runId: 'run-1',
@@ -115,6 +117,15 @@ describe('a shard in a child-process environment', () => {
     API_KEY: 'key-1',
     ACME_API_KEY: 'acme-key-0123456789',
     ACME_INSTANCE: 'acme-prod',
+    ACME_SESSION: 'session-credential-0123',
+  };
+  // Its credential is in the secrets file under a name that doesn't say it
+  // is one: a secret by use.
+  const sessionServer: MCPConfig = {
+    transport: 'http',
+    label: 'session',
+    serverUrl: 'https://session.example.test/mcp',
+    auth: { accessTokenEnv: 'ACME_SESSION' },
   };
 
   it('runs end to end, renewing a token mid-trial', async () => {
@@ -128,7 +139,8 @@ describe('a shard in a child-process environment', () => {
         { caseId: 'flaky', prompt: 'flaky' },
         { caseId: 'thrown', prompt: 'thrown' },
       ],
-      [{ caseId: 'b', prompt: 'b' }]
+      [{ caseId: 'b', prompt: 'b' }],
+      [sessionServer]
     );
     const { events, progress, reasons } = recorder([
       () => ({
@@ -174,7 +186,7 @@ describe('a shard in a child-process environment', () => {
     );
     // Nor a secrets file credential; a setting beside it stays.
     const flakyMessage =
-      'ECONNRESET while using [REDACTED] for acme-prod with [REDACTED]';
+      'ECONNRESET while using [REDACTED] for acme-prod with [REDACTED] via [REDACTED]';
     expect(flaky.result).toMatchObject({
       error: flakyMessage,
       ending: {
@@ -184,6 +196,7 @@ describe('a shard in a child-process environment', () => {
       },
     });
     expect(JSON.stringify(flaky)).not.toContain('acme-key-');
+    expect(JSON.stringify(flaky)).not.toContain('session-credential-');
     expect(JSON.stringify(flaky)).not.toContain('token-');
     // A client that threw a network error: typed by its code, then redacted.
     const thrown = await readClientResult(
