@@ -114,6 +114,41 @@ describe('withSimulatedWriteMarks', () => {
     }
   });
 
+  it('marks a write whose arguments the trace has redacted', async () => {
+    const dir = await fs.mkdtemp(join(os.tmpdir(), 'mst-marks-'));
+    try {
+      const file = join(dir, 'acme.jsonl');
+      const secret = 'webhook-secret-0123456789';
+      // The proxy records what the client sent.
+      await recordSimulatedWrite(file, {
+        time: '',
+        server: 'acme',
+        tool: 'create_webhook',
+        arguments: { url: 'https://hooks.example.test', secret },
+        reply: '',
+      });
+      // The executor's trace has the secret replaced.
+      const execute = withSimulatedWriteMarks(
+        async () =>
+          completed([
+            call(
+              'create_webhook',
+              { url: 'https://hooks.example.test', secret: '[REDACTED]' },
+              'acme'
+            ),
+          ]),
+        [file],
+        () => [secret]
+      );
+      const execution = (await execute({ id: 'c' } as never)) as {
+        trace: { events: TraceEvent[] };
+      };
+      expect(execution.trace.events[0]?.simulatedWrite).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('leaves a failed trial alone', async () => {
     const failed: CaseExecution = {
       kind: 'failed',

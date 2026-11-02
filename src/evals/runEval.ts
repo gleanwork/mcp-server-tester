@@ -2372,7 +2372,12 @@ async function evaluate(
                                 toolVariant,
                                 secrets: runSecrets,
                               }),
-                              connectors.simulatedWriteFiles
+                              connectors.simulatedWriteFiles,
+                              // What the executor redacts its traces with.
+                              () => [
+                                ...clientSecretValues(env, resolvedServers),
+                                ...runSecrets(),
+                              ]
                             ),
                         await artifactsRoot(),
                         variant.name

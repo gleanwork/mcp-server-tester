@@ -1,12 +1,24 @@
 import type { MCPConfig } from '../config/mcpConfig.js';
 
 /**
- * A name that says its value is a credential, for an environment variable,
- * a secrets file entry or a header alike: `ACME_API_KEY`, `Authorization`,
- * `GITHUB_PAT`. `OPENAI_BASE_URL`, `Accept` and `PATH` are not.
+ * The words of a name that say its value is a credential. A whole word must
+ * match, so `GIT_AUTHOR_NAME`, `MCP_OAUTH_SERVER_URL`, `KEYCLOAK_URL` and
+ * `MST_TOKENS_DIR` are settings.
  */
-const CREDENTIAL_NAME =
-  /token|key|secret|password|auth|cookie|credential|(^|[_-])pat($|[_-])/i;
+const CREDENTIAL_WORDS = new Set([
+  'token',
+  'key',
+  'apikey',
+  'secret',
+  'password',
+  'passwd',
+  'auth',
+  'authorization',
+  'cookie',
+  'credential',
+  'credentials',
+  'pat',
+]);
 /** Shorter values are not credentials and would garble every message. */
 const MIN_SECRET_LENGTH = 4;
 /**
@@ -17,7 +29,7 @@ const MIN_NAMED_SECRET_LENGTH = 8;
 const REDACTED = '[REDACTED]';
 
 /**
- * Values with a credential's name ({@link CREDENTIAL_NAME}), at least
+ * Values with a credential's name ({@link isCredentialName}), at least
  * {@link MIN_NAMED_SECRET_LENGTH} long: environment variables, a secrets
  * file's entries, a server's headers. Settings beside them, such as a base
  * URL or an instance name, are kept, so traces that quote them grade as
@@ -29,10 +41,24 @@ export function namedSecretValues(
   return Object.entries(values).flatMap(([name, value]) =>
     value !== undefined &&
     value.length >= MIN_NAMED_SECRET_LENGTH &&
-    CREDENTIAL_NAME.test(name)
+    isCredentialName(name)
       ? [value]
       : []
   );
+}
+
+/**
+ * Whether a name says its value is a credential, for an environment
+ * variable, a secrets file entry or a header alike: one of its words, split
+ * at `_`, `-`, `.` and camelCase, is a {@link CREDENTIAL_WORDS} word.
+ * `ACME_API_KEY`, `Authorization`, `GITHUB_PAT` and `accessToken` are;
+ * `OPENAI_BASE_URL`, `Accept` and `PATH` are not.
+ */
+export function isCredentialName(name: string): boolean {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .split(/[^A-Za-z0-9]+/)
+    .some((word) => CREDENTIAL_WORDS.has(word.toLowerCase()));
 }
 
 /**

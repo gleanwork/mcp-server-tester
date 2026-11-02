@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clientSecretValues,
+  isCredentialName,
   namedSecretValues,
   redactClientError,
   redactClientSecrets,
@@ -84,6 +85,43 @@ describe('clientSecretValues', () => {
     expect(
       clientSecretValues({ MODE_KEY: 'enabled' }, [], ['tok-123'])
     ).toEqual(['tok-123']);
+  });
+});
+
+describe('isCredentialName', () => {
+  it.each([
+    'ACME_API_KEY',
+    'GITHUB_TOKEN',
+    'GITHUB_PAT',
+    'GLEAN_AUTH',
+    'NPM_AUTH_TOKEN',
+    'DB_PASSWORD',
+    'SESSION_COOKIE',
+    'GOOGLE_APPLICATION_CREDENTIALS',
+    'APIKEY',
+    'Authorization',
+    'X-Api-Key',
+    'accessToken',
+    'OAuthToken',
+  ])('%s names a credential', (name) => {
+    expect(isCredentialName(name)).toBe(true);
+  });
+
+  it.each([
+    'OPENAI_BASE_URL',
+    'MCP_OAUTH_SERVER_URL',
+    'GIT_AUTHOR_NAME',
+    'AUTH0_DOMAIN',
+    'KEYCLOAK_URL',
+    'MST_TOKENS_DIR',
+    'MONKEY_NAME',
+    'ACME_INSTANCE',
+    'PATH',
+    'Accept',
+    // One word: name a credential with its own part, such as GITHUB_TOKEN.
+    'GITHUBTOKEN',
+  ])('%s names a setting', (name) => {
+    expect(isCredentialName(name)).toBe(false);
   });
 });
 

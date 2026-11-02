@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { CaseExecution } from './caseExecution.js';
 import type { EvalCase } from './datasetTypes.js';
 import type { ClientRunResult, TraceEvent } from './evalFrameworkTypes.js';
+import { redactedClientRun } from './clientSecrets.js';
 import {
   readSimulatedWrites,
   type SimulatedWriteRecord,
@@ -81,19 +82,40 @@ export async function markResultSimulatedWrites(
   return { ...result, events };
 }
 
+/** A record's arguments redacted as a trace event's arguments are. */
+function redactedArguments(args: unknown, secrets: readonly string[]): unknown {
+  if (args === undefined || secrets.length === 0) return args;
+  const [event] = redactedClientRun(
+    { events: [{ arguments: args }] },
+    secrets
+  ).events;
+  return event?.arguments;
+}
+
 /**
  * `executor`, with each completed trial's simulated writes marked. `files`
  * are the proxies' records (see `ConnectorLaunchContext.simulateWrites`).
+ * `executor` returns redacted traces, so each record's arguments are
+ * redacted with the same `secrets` before they are matched: a write with a
+ * secret in its arguments is still found.
  */
 export function withSimulatedWriteMarks(
   executor: Executor,
-  files: readonly string[]
+  files: readonly string[],
+  secrets: () => readonly string[] = () => []
 ): Executor {
   const used = new Set<string>();
   return async (evalCase) => {
     const execution = await executor(evalCase);
     if (execution.kind !== 'completed') return execution;
-    const records = await readRecords(files);
+    const known = secrets();
+    const records = (await readRecords(files)).map(({ key, record }) => ({
+      key,
+      record: {
+        ...record,
+        arguments: redactedArguments(record.arguments, known),
+      },
+    }));
     if (records.length === 0) return execution;
     // The trace and the response may hold the same event objects, or copies.
     const { toolCalls } = execution.response as { toolCalls?: unknown };
