@@ -8,6 +8,10 @@ import { z, type ZodType } from 'zod';
 import { listJudges } from '../../../judge/builtinJudges.js';
 import { listPairwiseJudges } from '../../../evals/pairwiseComparison.js';
 import {
+  judgeIsVersioned,
+  judgeVersion,
+} from '../../../judge/judgeIdentity.js';
+import {
   formatTable,
   inNamespaces,
   loadDiscoveryPlugins,
@@ -20,8 +24,38 @@ interface ListedJudge {
   ref: string;
   /** `judge` scores each trial; `pairwise` compares a candidate with the baseline. */
   kind: JudgeKind;
+  /**
+   * The judge's version (ADR 0009): a built-in's, the one a plugin judge
+   * declares, or else its plugin's package version.
+   */
+  version?: string;
+  /** The judge has no version MST can see change. */
+  unversioned?: true;
   description?: string;
   requires: string[];
+}
+
+/** `version` or `unversioned`, as a listed judge reports them. */
+function versionFields(
+  ref: string,
+  definition: { schema: ZodType; version?: string }
+): Pick<ListedJudge, 'version' | 'unversioned'> {
+  const version = judgeVersion(ref, definition);
+  return {
+    ...(version !== undefined ? { version } : {}),
+    ...(judgeIsVersioned(ref, definition)
+      ? {}
+      : { unversioned: true as const }),
+  };
+}
+
+/** A version for a table: a content hash is cut to 12 characters. */
+function shownVersion(entry: ListedJudge): string {
+  if (entry.version === undefined)
+    return entry.unversioned ? 'unversioned' : '';
+  return /^[0-9a-f]{64}$/.test(entry.version)
+    ? entry.version.slice(0, 12)
+    : entry.version;
 }
 
 interface JudgeEntry extends ListedJudge {
@@ -40,6 +74,7 @@ async function judgeEntries(options: DiscoveryOptions): Promise<JudgeEntry[]> {
     ...listJudges().map(([ref, definition]) => ({
       ref,
       kind: 'judge' as const,
+      ...versionFields(ref, definition),
       ...(definition.description !== undefined
         ? { description: definition.description }
         : {}),
@@ -49,6 +84,7 @@ async function judgeEntries(options: DiscoveryOptions): Promise<JudgeEntry[]> {
     ...listPairwiseJudges().map(([ref, definition]) => ({
       ref,
       kind: 'pairwise' as const,
+      ...versionFields(ref, definition),
       ...(definition.description !== undefined
         ? { description: definition.description }
         : {}),
@@ -63,11 +99,15 @@ async function judgeEntries(options: DiscoveryOptions): Promise<JudgeEntry[]> {
 const listed = ({
   ref,
   kind,
+  version,
+  unversioned,
   description,
   requires,
 }: JudgeEntry): ListedJudge => ({
   ref,
   kind,
+  ...(version !== undefined ? { version } : {}),
+  ...(unversioned ? { unversioned } : {}),
   ...(description !== undefined ? { description } : {}),
   requires,
 });
@@ -85,6 +125,7 @@ export async function listJudgeCommand(
   const rows = entries.map((entry) => [
     entry.ref,
     entry.kind,
+    shownVersion(entry),
     entry.requires.length ? `requires ${entry.requires.join(', ')}` : '',
     entry.description ?? '',
   ]);
@@ -140,6 +181,7 @@ export async function showJudge(
     [
       `${entry.ref}  (${entry.kind === 'judge' ? 'judge: scores each trial' : 'pairwise judge: compares each variant with the baseline'})`,
       ...(entry.description !== undefined ? [`  ${entry.description}`] : []),
+      `  version   ${shownVersion(entry) || '-'}`,
       `  requires  ${entry.requires.length ? entry.requires.join(', ') : '-'}`,
       ...(entry.swapPositions !== undefined
         ? [
