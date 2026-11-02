@@ -241,7 +241,24 @@ setInterval(() => {}, 1000);
         { name: 'search', source: 'mcp', server: 'acme' },
       ]);
       expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
+      // Claude Code ran out of the case's own time: a trial that failed, its
+      // partial trace graded (ADR 0010). The failure kind stays for people.
+      expect(result.ending).toEqual({ kind: 'trial' });
+      expect(result.diagnostics?.failureKind).toBe('timeout');
       expect(result.usage).toBeUndefined();
+    },
+    DEADLINE_TEST_MS
+  );
+
+  it(
+    'is not a trial when the deadline comes before Claude Code started',
+    async () => {
+      const result = await host('setInterval(() => {}, 1000);', DEADLINE_MS);
+      expect(result.error).toContain('timed out');
+      // No `init`: the model never had the case, so the time wasn't its own.
+      expect(result.ending).toBeUndefined();
+      expect(result.diagnostics?.failureKind).toBe('timeout');
+      expect(result.diagnostics?.claudeStartup?.status).toBe('missing');
     },
     DEADLINE_TEST_MS
   );
