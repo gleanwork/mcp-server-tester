@@ -400,6 +400,25 @@ describe('ChatGPT V2 batch client', () => {
       telemetry: { inputTokens: 10 },
     });
   });
+  it('keeps the conversation under telemetry content, which stored results drop', async () => {
+    const conversationHistory = [
+      { role: 'user' as const, content: 'the prompt' },
+      { role: 'assistant' as const, content: 'answer' },
+    ];
+    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+      success: true,
+      response: 'answer',
+      toolCalls: [],
+      clientMetadata: metadata,
+      conversationHistory,
+    });
+    const [trace] = await CHATGPT_CLIENT.runBatch!(
+      requests().slice(0, 1),
+      context
+    );
+    expect(trace!.telemetry?.content).toEqual({ conversationHistory });
+    expect(trace!.telemetry).not.toHaveProperty('conversationHistory');
+  });
   it('fails out-of-selection MCP calls without blocking later completed measurements', async () => {
     vi.mocked(runExternalClientCase).mockResolvedValueOnce({
       success: true,

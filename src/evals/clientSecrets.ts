@@ -1,6 +1,9 @@
 import type { MCPConfig } from '../config/mcpConfig.js';
 
 const SECRET_ENV_NAME = /token|key|secret|password|authorization/i;
+/** A header that carries a credential; `Accept` or a tenant header doesn't. */
+const SECRET_HEADER_NAME =
+  /auth|token|key|secret|password|cookie|session|credential/i;
 /** Shorter values are not credentials and would garble every message. */
 const MIN_SECRET_LENGTH = 4;
 /**
@@ -34,12 +37,27 @@ export function clientSecretValues(
   for (const server of servers)
     if (server.transport !== 'stdio') {
       add(server.auth?.accessToken);
-      for (const value of Object.values(server.headers ?? {})) add(value);
+      for (const [name, value] of Object.entries(server.headers ?? {}))
+        if (SECRET_HEADER_NAME.test(name)) add(value);
     } else if (server.auth?.accessTokenEnv) {
       add(env[server.auth.accessTokenEnv]);
     }
   for (const value of extra) add(value);
   return [...secrets];
+}
+
+/**
+ * A secrets file's values that count as secrets: those long enough not to
+ * garble a trace. The file can also hold settings (`LOG_LEVEL=info`), and
+ * every value goes to the workers whatever its name.
+ */
+export function fileSecretValues(
+  values: Readonly<Record<string, string | undefined>>
+): string[] {
+  return Object.values(values).filter(
+    (value): value is string =>
+      value !== undefined && value.length >= MIN_ENV_SECRET_LENGTH
+  );
 }
 
 /** The secrets long enough to be credentials, longest first. */
@@ -64,32 +82,48 @@ export function redactClientSecrets(
   return replaceAll(text, credentials(secrets));
 }
 
-function redactStrings(value: unknown, secrets: readonly string[]): unknown {
+/**
+ * Where a result names files on this machine (a Cowork session folder): a
+ * path, not content, and rewriting it would lose the files.
+ */
+const FILE_PATHS = new Set(['artifacts', 'response.artifacts']);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function redactStrings(
+  value: unknown,
+  secrets: readonly string[],
+  path: string
+): unknown {
   if (typeof value === 'string') return replaceAll(value, secrets);
   if (Array.isArray(value))
-    return value.map((item) => redactStrings(item, secrets));
-  if (
-    typeof value === 'object' &&
-    value !== null &&
-    Object.getPrototypeOf(value) === Object.prototype
-  )
+    return value.map((item) => redactStrings(item, secrets, `${path}[]`));
+  if (isPlainObject(value))
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        redactStrings(item, secrets),
-      ])
+      Object.entries(value).map(([key, item]) => {
+        const at = path ? `${path}.${key}` : key;
+        return [
+          key,
+          FILE_PATHS.has(at) ? item : redactStrings(item, secrets, at),
+        ];
+      })
     );
   return value;
 }
 
 /**
  * A client's result with every secret replaced, wherever it is: the answer,
- * events, model calls, telemetry, `error` and the ending's `reason`. MST does
- * this to every result a client returns, before it is graded or stored.
+ * events, model calls, telemetry, `error` and the ending's `reason`. Its
+ * `artifacts` are paths to files, kept as they are. MST does this to every
+ * result a client returns, before it is graded or stored.
  */
 export function redactedClientRun<T>(result: T, secrets: readonly string[]): T {
   const list = credentials(secrets);
-  return list.length ? (redactStrings(result, list) as T) : result;
+  return list.length ? (redactStrings(result, list, '') as T) : result;
 }
 
 /** A redacted message for `error`, or `fallback` for non-Error values. */

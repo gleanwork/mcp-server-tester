@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clientSecretValues,
+  fileSecretValues,
   redactClientError,
   redactClientSecrets,
   redactedClientRun,
@@ -19,7 +20,13 @@ describe('clientSecretValues', () => {
           transport: 'http',
           serverUrl: 'https://example.test/mcp',
           auth: { accessToken: 'http-token' },
-          headers: { 'X-Api-Key': 'header-value' },
+          headers: {
+            'X-Api-Key': 'header-value',
+            Cookie: 'session=cookie-value',
+            // Not credentials: rewriting them would garble every trace.
+            Accept: 'application/json',
+            'X-Tenant': 'acme-production',
+          },
         },
         {
           transport: 'stdio',
@@ -35,9 +42,20 @@ describe('clientSecretValues', () => {
         'stdio-token',
         'http-token',
         'header-value',
+        'session=cookie-value',
         'extra-secret',
       ])
     );
+  });
+
+  it('counts a secrets file value from 8 characters, whatever its name', () => {
+    expect(
+      fileSecretValues({
+        LOG_LEVEL: 'info',
+        ACME_PAT: 'pat-12345678',
+        EMPTY: '',
+      })
+    ).toEqual(['pat-12345678']);
   });
 
   it('ignores empty and short values that would garble messages', () => {
@@ -115,6 +133,34 @@ describe('redactedClientRun', () => {
     });
     // The client's own result is not changed.
     expect(result.finalText).toContain(secret);
+  });
+
+  it('keeps artifact paths, which name files rather than content', () => {
+    const secret = 'secret-in-path';
+    const result = redactedClientRun(
+      {
+        finalText: secret,
+        artifacts: { dir: `/tmp/${secret}` },
+        response: { artifacts: { dir: `/tmp/${secret}` } },
+        events: [{ artifacts: secret }],
+      },
+      [secret]
+    );
+    expect(result).toEqual({
+      finalText: '[REDACTED]',
+      artifacts: { dir: `/tmp/${secret}` },
+      response: { artifacts: { dir: `/tmp/${secret}` } },
+      events: [{ artifacts: '[REDACTED]' }],
+    });
+  });
+
+  it('redacts objects with no prototype, such as parsed records', () => {
+    const record = Object.assign(Object.create(null) as object, {
+      text: 'has secret-value-1',
+    });
+    expect(
+      redactedClientRun({ clientTelemetry: record }, ['secret-value-1'])
+    ).toEqual({ clientTelemetry: { text: 'has [REDACTED]' } });
   });
 
   it('returns the result itself when there is nothing to redact', () => {

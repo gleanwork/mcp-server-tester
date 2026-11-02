@@ -96,6 +96,7 @@ import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
+import { fileSecretValues } from './clientSecrets.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import {
@@ -1842,6 +1843,13 @@ async function evaluate(
           variants: variants.map((variant) => variant.name),
         }
       );
+  // What MST replaces in every client result, besides the environment's and
+  // the servers' secrets: the secrets file and the connector tokens, which
+  // renew while the run goes on.
+  const runSecrets = (): string[] => [
+    ...fileSecretValues(fileSecrets),
+    ...credentials.secrets(),
+  ];
   // A replay's servers only name the trace's tools: no secrets, no endpoint.
   const serverFor = (server: MCPConfig): MCPConfig =>
     replay ? server : resolveServerSecrets(server, env);
@@ -2251,6 +2259,7 @@ async function evaluate(
                     { evalConfig: effectiveConfig, variant, env },
                     toolVariant,
                     {
+                      secrets: runSecrets,
                       // A trace the client reports before its batch ends is saved
                       // as the trial it will be graded as.
                       onTrace: async (request, trace) => {
@@ -2350,10 +2359,7 @@ async function evaluate(
                                 env,
                                 batchTraces,
                                 toolVariant,
-                                secrets: () => [
-                                  ...Object.values(fileSecrets),
-                                  ...credentials.secrets(),
-                                ],
+                                secrets: runSecrets,
                               }),
                               connectors.simulatedWriteFiles
                             ),

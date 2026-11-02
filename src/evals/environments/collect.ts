@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { getClient } from '../builtinClients.js';
-import { redactedClientRun } from '../clientSecrets.js';
+import { fileSecretValues, redactedClientRun } from '../clientSecrets.js';
 import {
   expandWorkerConnectors,
   writeTokenFile,
@@ -251,8 +251,7 @@ export async function collectShard(
     }
     if (tokens.env) {
       runEnv = tokens.env;
-      for (const value of Object.values(tokens.env))
-        if (value) secrets.add(value);
+      for (const value of fileSecretValues(tokens.env)) secrets.add(value);
     }
     // Ask again before the first token expires.
     const expiries = Object.values(tokens.byServer)
