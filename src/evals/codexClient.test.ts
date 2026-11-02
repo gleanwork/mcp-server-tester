@@ -25,6 +25,8 @@ const sdk = vi.hoisted(() => ({
   config: undefined as string | undefined,
   homeMode: undefined as number | undefined,
   hang: false,
+  /** Hang before the first turn starts, as a Codex stuck starting does. */
+  hangBeforeTurn: undefined as boolean | undefined,
   fail: undefined as string | undefined,
   /** Fail before the first turn starts, as a Codex that can't start does. */
   failBeforeTurn: undefined as string | undefined,
@@ -90,6 +92,12 @@ vi.mock('@openai/codex-sdk', () => ({
           async function* events() {
             yield { type: 'thread.started', thread_id: 'thread-9' };
             if (sdk.failBeforeTurn) throw new Error(sdk.failBeforeTurn);
+            if (sdk.hangBeforeTurn)
+              await new Promise((_, reject) =>
+                turn.signal?.addEventListener('abort', () =>
+                  reject(new Error('aborted'))
+                )
+              );
             yield { type: 'turn.started' };
             if (sdk.fail) throw new Error(sdk.fail);
             if (sdk.turnFailed !== undefined) {
@@ -451,6 +459,20 @@ describe('codex client run', () => {
       context(GATEWAY)
     );
     expect(result.error).toBe('codex client timed out after 50 ms.');
+    expect(result.diagnostics).toEqual({ failureKind: 'timeout' });
+    // The case's own time ran out: a trial that failed (ADR 0010).
+    expect(result.ending).toEqual({ kind: 'trial' });
+  });
+
+  it('is not a trial when the deadline comes before the turn started', async () => {
+    sdk.hangBeforeTurn = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex', timeout: 50 },
+      context(GATEWAY)
+    );
+    expect(result.error).toBe('codex client timed out after 50 ms.');
+    expect(result.ending).toBeUndefined();
     expect(result.diagnostics).toEqual({ failureKind: 'timeout' });
   });
 
