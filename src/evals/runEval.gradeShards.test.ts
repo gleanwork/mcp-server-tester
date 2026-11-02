@@ -77,7 +77,10 @@ async function fixture() {
     })
   );
   const secretsFile = path.join(dir, 'secrets.json');
-  await fs.writeFile(secretsFile, JSON.stringify({ GRADE_TEST_KEY: KEY }));
+  await fs.writeFile(
+    secretsFile,
+    JSON.stringify({ GRADE_TEST_KEY: KEY, GRADE_TEST_REGION: 'us-west-2-prod' })
+  );
   const outputDir = path.join(dir, 'out');
   const base = { configPath, rootDir: dir, outputDir };
   const collected = await runEval({ ...base, grade: false });
@@ -168,6 +171,8 @@ describe('mst grade --env (ADR 0005)', () => {
     const reasoning = JSON.stringify(sharded.summary.results);
     expect(reasoning).not.toContain(KEY);
     expect(reasoning).toContain('key [REDACTED]');
+    // A setting beside it is kept, as a collect worker keeps it.
+    expect(reasoning).toContain('region us-west-2-prod');
     const run = await f.readJson<Record<string, unknown>>(
       path.join(sharded.outputDir, 'run.json')
     );

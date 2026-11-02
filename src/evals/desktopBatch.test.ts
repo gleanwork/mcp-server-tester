@@ -584,6 +584,35 @@ describe('runDesktopBatch', () => {
     expect(results[0]?.error).not.toContain(SECRET);
   });
 
+  it('returns every result redacted, not only its error', async () => {
+    const results = await runDesktopBatch(
+      fakeClient({
+        async runCase() {
+          return {
+            result: {
+              finalText: `the key is ${SECRET}`,
+              events: [
+                {
+                  kind: 'tool_call',
+                  source: 'mcp',
+                  name: 'search',
+                  output: SECRET,
+                },
+              ],
+              telemetry: { content: { answer: SECRET } },
+            },
+            continuation: 'allowed',
+          };
+        },
+        batchTelemetry: () => ({ session: SECRET }),
+      }),
+      requests(1)
+    );
+    expect(JSON.stringify(results)).not.toContain(SECRET);
+    expect(results[0]?.finalText).toBe('the key is [REDACTED]');
+    expect(results[0]?.telemetry?.batchCase).toMatchObject({ index: 0 });
+  });
+
   it('disposes the prepared session when readiness fails, and throws redacted', async () => {
     const client = fakeClient({
       async ready() {
