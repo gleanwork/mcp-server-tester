@@ -158,7 +158,8 @@ describe('a shard in a child-process environment', () => {
     expect(reasons).toEqual(['start', 'expiring']);
     const a = await readClientResult(path.join(shard.resultsDir, '0/0.json'));
     expect(a.key).toEqual({ variant: 'baseline', caseId: 'a', trial: 0 });
-    expect(a.result.finalText).toBe('a: token-1 then token-2; key key-1');
+    // The tokens, reversed: the client read both, the second after renewal.
+    expect(a.result.finalText).toBe('a: 1-nekot then 2-nekot; key 1-yek');
     // An error never carries a token, nor does the ending's reason.
     const flaky = await readClientResult(
       path.join(shard.resultsDir, '0/1.json')
@@ -189,7 +190,7 @@ describe('a shard in a child-process environment', () => {
     // The batch client's result, reported as it finished.
     const b = await readClientResult(path.join(shard.resultsDir, '1/0.json'));
     expect(b.key).toEqual({ variant: 'candidate', caseId: 'b', trial: 0 });
-    expect(b.result.finalText).toBe('b: token-2 then token-2; key key-1');
+    expect(b.result.finalText).toBe('b: 2-nekot then 2-nekot; key 1-yek');
 
     expect(progress[0]).toEqual({
       type: 'hello',

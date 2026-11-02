@@ -213,9 +213,10 @@ describe('createEvalCaseExecutor', () => {
       evidence: 'structured',
       preExecutionDurationMs: 7,
     });
-    await expect(execute(clientCase)).rejects.toThrow(
-      'Batch trace already consumed or missing; refusing to resubmit.'
-    );
+    await expect(execute(clientCase)).resolves.toMatchObject({
+      kind: 'failed',
+      error: 'Batch trace already consumed or missing; refusing to resubmit.',
+    });
   });
 
   it('dispatches per case to run() with the declared evidence', async () => {
@@ -239,6 +240,59 @@ describe('createEvalCaseExecutor', () => {
       { type },
       { evalConfig, variant: undefined, env: undefined }
     );
+  });
+
+  it("redacts every client's result before grading", async () => {
+    const envKey = 'sk-env-0123456789';
+    const fileSecret = 'file-secret-0123';
+    const type = installTestClient('case-execution-redact', {
+      schema: z.object({ type: z.string() }),
+      run: async () => ({
+        finalText: `answer with ${envKey}`,
+        events: [],
+        telemetry: { content: { history: fileSecret } },
+      }),
+    });
+    const execute = createEvalCaseExecutor({
+      servers: [],
+      client: { type },
+      evalConfig,
+      env: { ACME_API_KEY: envKey },
+      secrets: () => [fileSecret],
+    });
+    const execution = await execute(clientCase);
+    expect(JSON.stringify(execution)).not.toContain(envKey);
+    expect(JSON.stringify(execution)).not.toContain(fileSecret);
+    expect(execution).toMatchObject({
+      kind: 'completed',
+      response: { response: 'answer with [REDACTED]' },
+      telemetry: { content: { history: '[REDACTED]' } },
+    });
+  });
+
+  it('redacts the error a run throws, after reading its ending', async () => {
+    const envKey = 'sk-env-0123456789';
+    const throwing = installTestClient('case-execution-redact-throw', {
+      schema: z.object({ type: z.string() }),
+      run: async () => {
+        throw Object.assign(new Error(`connect failed for ${envKey}`), {
+          code: 'ECONNRESET',
+        });
+      },
+    });
+    const failed = await createEvalCaseExecutor({
+      servers: [],
+      client: { type: throwing },
+      evalConfig,
+      env: { ACME_API_KEY: envKey },
+    })(clientCase);
+    // The ending is read from the error before its message is redacted.
+    expect(failed).toMatchObject({
+      kind: 'failed',
+      error: 'connect failed for [REDACTED]',
+      ending: { kind: 'infrastructure', broke: 'network' },
+    });
+    expect(JSON.stringify(failed)).not.toContain(envKey);
   });
 
   describe('with a tool variant', () => {

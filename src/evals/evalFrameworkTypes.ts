@@ -283,7 +283,13 @@ export interface ClientRunResult {
    */
   ending?: TrialEnding;
   usage?: UsageMetrics;
-  /** Native and driver observations remain separately scoped; UI actions are not LLM usage. */
+  /**
+   * What the client observed: counts, ids, statuses, timings. Put anything
+   * that may quote the prompt, the model or the server (a conversation, app
+   * text) under `telemetry.content`: stored results drop it unless they keep
+   * full traces (`redactStoredResponses: false`). UI actions are not LLM
+   * usage.
+   */
   telemetry?: Record<string, unknown>;
   /**
    * The host's own OpenTelemetry for the trial, from MST's receiver

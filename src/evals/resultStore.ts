@@ -188,6 +188,14 @@ function stripScoreMetadata(scores: unknown): void {
     if (isJsonObject(score)) delete score.metadata;
 }
 
+/**
+ * A client's telemetry keeps its counts, ids and statuses; what may quote
+ * the prompt, the model or the server goes under `content`, and goes.
+ */
+function stripClientTelemetry(telemetry: unknown): void {
+  if (isJsonObject(telemetry)) delete telemetry.content;
+}
+
 function stripResponses(value: unknown): void {
   if (Array.isArray(value)) {
     for (const item of value) stripResponses(item);
@@ -201,11 +209,13 @@ function stripResponses(value: unknown): void {
       delete request.assertions.response;
     stripTrace(value.trace);
     stripScoreMetadata(value.scores);
+    stripClientTelemetry(value.clientTelemetry);
     if (Array.isArray(value.trialResults))
       for (const trial of value.trialResults)
         if (isJsonObject(trial)) {
           stripTrace(trial.trace);
           stripScoreMetadata(trial.scores);
+          stripClientTelemetry(trial.clientTelemetry);
         }
   }
   for (const nested of Object.values(value)) stripResponses(nested);
@@ -216,7 +226,8 @@ function stripResponses(value: unknown): void {
  * every eval case result, wherever it is nested (runs, eval variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
  * `expect.response`, no `finalText`, event `output` or model call `text` in
- * its traces, and no judge score `metadata` (in it or its trials).
+ * its traces, no `content` in its client telemetry, and no judge score
+ * `metadata` (in it or its trials).
  * These may hold data from the server under test. Everything else is kept,
  * including each trace's events, servers, arguments and usage.
  */

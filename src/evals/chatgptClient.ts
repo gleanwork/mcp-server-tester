@@ -299,9 +299,11 @@ async function runBatch(
             clientMetadata: result.clientMetadata,
             computerUse: result.clientMetadata.computerUse,
             nativeController: result.clientMetadata.nativeController,
-            // Failed bound turns keep their partial native history.
+            // Failed bound turns keep their partial native history. It
+            // quotes the prompt and the answer, so it is content, which
+            // stored results drop unless they keep full traces.
             ...(result.conversationHistory
-              ? { conversationHistory: result.conversationHistory }
+              ? { content: { conversationHistory: result.conversationHistory } }
               : {}),
             ...(result.success ? { mcpDurationMs: result.mcpDurationMs } : {}),
           },

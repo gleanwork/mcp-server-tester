@@ -2350,6 +2350,10 @@ async function evaluate(
                                 env,
                                 batchTraces,
                                 toolVariant,
+                                secrets: () => [
+                                  ...Object.values(fileSecrets),
+                                  ...credentials.secrets(),
+                                ],
                               }),
                               connectors.simulatedWriteFiles
                             ),

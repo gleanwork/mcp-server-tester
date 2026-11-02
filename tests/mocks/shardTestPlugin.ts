@@ -87,8 +87,12 @@ async function probe(
       error: 'The client kept only part of the prompt.',
       diagnostics: { failureKind: 'input' },
     };
+  // Reversed: the answer says which tokens the client read without holding
+  // one, which MST would redact.
+  const reversed = (value: string | undefined) =>
+    [...(value ?? 'unset')].reverse().join('');
   return {
-    finalText: `${input.prompt}: ${first} then ${second}; key ${input.env?.API_KEY ?? 'unset'}`,
+    finalText: `${input.prompt}: ${reversed(first)} then ${reversed(second)}; key ${reversed(input.env?.API_KEY)}`,
     events: [],
     // What a native-trace client records beyond its events, which a
     // resume must keep for the trials it doesn't run again.

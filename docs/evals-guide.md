@@ -655,9 +655,10 @@ default. Set `redactStoredResponses: false` when the stored results should
 include full responses (`omitResponsesFromBaseline` controls baseline files
 written to a path). Every API that stores results (the runner, evals, the
 reporter's result store, run and server comparisons, baseline files) removes
-each case's raw `response`, and each client trace's
-answer text (`finalText`) and tool outputs (event `output`) by default, the
-same way. Events, servers, arguments and usage are kept.
+each case's raw `response`, each client trace's
+answer text (`finalText`) and tool outputs (event `output`), and the content
+in each client's telemetry (`clientTelemetry.content`) by default, the same
+way. Events, servers, arguments and usage are kept.
 
 ### Stored Variant Comparisons
 
