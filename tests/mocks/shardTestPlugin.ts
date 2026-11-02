@@ -47,14 +47,17 @@ async function probe(
   await sleep(Number(options.delayMs ?? options.clientOptions?.delayMs ?? 0));
   const second = await token(input);
   await mark('end', input.prompt);
-  if (input.prompt === 'flaky')
+  if (input.prompt === 'flaky') {
+    // Quotes the token, a secrets file credential and a setting beside it.
+    const message = `ECONNRESET while using ${second} for ${input.env?.ACME_INSTANCE} with ${input.env?.ACME_API_KEY}`;
     return {
       finalText: '',
       events: [],
-      error: `ECONNRESET while using ${second}`,
+      error: message,
       // A client types what broke (ADR 0010); MST never reads the words.
-      ending: network(`ECONNRESET while using ${second}`),
+      ending: network(message),
     };
+  }
   // Throws a Node network error: the worker reads its code, as a local
   // run does, before only the message crosses the channel.
   if (input.prompt === 'thrown')

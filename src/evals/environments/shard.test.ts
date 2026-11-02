@@ -109,6 +109,14 @@ const context = (
 ): EnvironmentContext => ({ runId: 'run-1', shards: 1, keep });
 
 describe('a shard in a child-process environment', () => {
+  // The secrets file a coordinator sends: a short key, a credential, and a
+  // setting that is not a secret.
+  const secretsFile = {
+    API_KEY: 'key-1',
+    ACME_API_KEY: 'acme-key-0123456789',
+    ACME_INSTANCE: 'acme-prod',
+  };
+
   it('runs end to end, renewing a token mid-trial', async () => {
     const root = await tempDir();
     const tokensDir = path.join(root, 'tokens');
@@ -127,13 +135,13 @@ describe('a shard in a child-process environment', () => {
         byServer: {
           acme: { accessToken: 'token-1', expiresAt: Date.now() + 2000 },
         },
-        env: { API_KEY: 'key-1' },
+        env: secretsFile,
       }),
       () => ({
         byServer: {
           acme: { accessToken: 'token-2', expiresAt: Date.now() + 3_600_000 },
         },
-        env: { API_KEY: 'key-1' },
+        env: secretsFile,
       }),
     ]);
     const environment = forkEnvironment(context(), root, {
@@ -164,14 +172,18 @@ describe('a shard in a child-process environment', () => {
     const flaky = await readClientResult(
       path.join(shard.resultsDir, '0/1.json')
     );
+    // Nor a secrets file credential; a setting beside it stays.
+    const flakyMessage =
+      'ECONNRESET while using [REDACTED] for acme-prod with [REDACTED]';
     expect(flaky.result).toMatchObject({
-      error: 'ECONNRESET while using [REDACTED]',
+      error: flakyMessage,
       ending: {
         kind: 'infrastructure',
         broke: 'network',
-        reason: 'ECONNRESET while using [REDACTED]',
+        reason: flakyMessage,
       },
     });
+    expect(JSON.stringify(flaky)).not.toContain('acme-key-');
     expect(JSON.stringify(flaky)).not.toContain('token-');
     // A client that threw a network error: typed by its code, then redacted.
     const thrown = await readClientResult(

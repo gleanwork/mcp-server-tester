@@ -1,23 +1,46 @@
 import type { MCPConfig } from '../config/mcpConfig.js';
 
-const SECRET_ENV_NAME = /token|key|secret|password|authorization/i;
-/** A header that carries a credential; `Accept` or a tenant header doesn't. */
-const SECRET_HEADER_NAME =
-  /auth|token|key|secret|password|cookie|session|credential/i;
+/**
+ * A name that says its value is a credential, for an environment variable,
+ * a secrets file entry or a header alike: `ACME_API_KEY`, `Authorization`,
+ * `GITHUB_PAT`. `OPENAI_BASE_URL`, `Accept` and `PATH` are not.
+ */
+const CREDENTIAL_NAME =
+  /token|key|secret|password|auth|cookie|credential|(^|[_-])pat($|[_-])/i;
 /** Shorter values are not credentials and would garble every message. */
 const MIN_SECRET_LENGTH = 4;
 /**
- * An environment value is a secret by its name alone only when it is at
- * least this long: a short one (`true`, `main`, a port) would garble the
- * traces graders read.
+ * A value is a secret by its name alone only when it is at least this long:
+ * a short one (`true`, `main`, a port) would garble the traces graders read.
  */
-const MIN_ENV_SECRET_LENGTH = 8;
+const MIN_NAMED_SECRET_LENGTH = 8;
 const REDACTED = '[REDACTED]';
 
 /**
- * Values a desktop client must never surface in errors: credential-like
- * environment values, resolved MCP credentials, and any `extra` values the
- * client resolved itself (e.g. plugin tokens).
+ * Values with a credential's name ({@link CREDENTIAL_NAME}), at least
+ * {@link MIN_NAMED_SECRET_LENGTH} long: environment variables, a secrets
+ * file's entries, a server's headers. Settings beside them, such as a base
+ * URL or an instance name, are kept, so traces that quote them grade as
+ * they should.
+ */
+export function namedSecretValues(
+  values: Readonly<Record<string, string | undefined>>
+): string[] {
+  return Object.entries(values).flatMap(([name, value]) =>
+    value !== undefined &&
+    value.length >= MIN_NAMED_SECRET_LENGTH &&
+    CREDENTIAL_NAME.test(name)
+      ? [value]
+      : []
+  );
+}
+
+/**
+ * Every secret MST knows for a client: values named as credentials
+ * ({@link namedSecretValues}) in the environment and the servers' headers,
+ * the credentials the servers use (an access token, the variable an
+ * `accessTokenEnv` names), and any `extra` values the client resolved
+ * itself (e.g. plugin tokens).
  */
 export function clientSecretValues(
   env: Record<string, string | undefined>,
@@ -28,36 +51,16 @@ export function clientSecretValues(
   const add = (value: string | undefined) => {
     if (value && value.length >= MIN_SECRET_LENGTH) secrets.add(value);
   };
-  for (const [name, value] of Object.entries(env))
-    if (
-      SECRET_ENV_NAME.test(name) &&
-      (value?.length ?? 0) >= MIN_ENV_SECRET_LENGTH
-    )
-      add(value);
+  for (const value of namedSecretValues(env)) add(value);
   for (const server of servers)
     if (server.transport !== 'stdio') {
       add(server.auth?.accessToken);
-      for (const [name, value] of Object.entries(server.headers ?? {}))
-        if (SECRET_HEADER_NAME.test(name)) add(value);
+      for (const value of namedSecretValues(server.headers ?? {})) add(value);
     } else if (server.auth?.accessTokenEnv) {
       add(env[server.auth.accessTokenEnv]);
     }
   for (const value of extra) add(value);
   return [...secrets];
-}
-
-/**
- * A secrets file's values that count as secrets: those long enough not to
- * garble a trace. The file can also hold settings (`LOG_LEVEL=info`), and
- * every value goes to the workers whatever its name.
- */
-export function fileSecretValues(
-  values: Readonly<Record<string, string | undefined>>
-): string[] {
-  return Object.values(values).filter(
-    (value): value is string =>
-      value !== undefined && value.length >= MIN_ENV_SECRET_LENGTH
-  );
 }
 
 /** The secrets long enough to be credentials, longest first. */
@@ -112,7 +115,31 @@ function redactStrings(
         ];
       })
     );
+  if (typeof value === 'object' && value !== null)
+    return redactedJsonForm(value, secrets, path);
   return value;
+}
+
+/**
+ * Any other object (a `URL`, a class instance) is stored as its JSON form,
+ * which can hold a secret. When it does, the redacted JSON form replaces it;
+ * otherwise the object stays as it is (a `Date` stays a `Date`).
+ */
+function redactedJsonForm(
+  value: object,
+  secrets: readonly string[],
+  path: string
+): unknown {
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(value);
+  } catch {
+    // Circular or a BigInt: it can't be stored either.
+    return value;
+  }
+  if (json === undefined || !secrets.some((secret) => json.includes(secret)))
+    return value;
+  return redactStrings(JSON.parse(json) as unknown, secrets, path);
 }
 
 /**

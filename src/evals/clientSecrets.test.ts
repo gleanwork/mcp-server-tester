@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clientSecretValues,
-  fileSecretValues,
+  namedSecretValues,
   redactClientError,
   redactClientSecrets,
   redactedClientRun,
@@ -48,14 +48,26 @@ describe('clientSecretValues', () => {
     );
   });
 
-  it('counts a secrets file value from 8 characters, whatever its name', () => {
+  it('counts a value as a secret by a credential name, from 8 characters', () => {
     expect(
-      fileSecretValues({
-        LOG_LEVEL: 'info',
+      namedSecretValues({
         ACME_PAT: 'pat-12345678',
-        EMPTY: '',
+        GLEAN_AUTH: 'auth-12345678',
+        'X-Session-Cookie': 'cookie-12345678',
+        SERVICE_CREDENTIALS: 'cred-12345678',
+        // Settings: their values stay in the traces graders read.
+        OPENAI_BASE_URL: 'https://gateway.example.test',
+        GLEAN_INSTANCE: 'acme-prod',
+        PATH: '/usr/local/bin:/usr/bin',
+        // Named as a credential, but too short to tell from a setting.
+        MODE_KEY: 'enabled',
       })
-    ).toEqual(['pat-12345678']);
+    ).toEqual([
+      'pat-12345678',
+      'auth-12345678',
+      'cookie-12345678',
+      'cred-12345678',
+    ]);
   });
 
   it('ignores empty and short values that would garble messages', () => {
@@ -161,6 +173,35 @@ describe('redactedClientRun', () => {
     expect(
       redactedClientRun({ clientTelemetry: record }, ['secret-value-1'])
     ).toEqual({ clientTelemetry: { text: 'has [REDACTED]' } });
+  });
+
+  it('redacts other objects in the JSON form they are stored in', () => {
+    const secret = 'sk-live-0123456789';
+    class Payload {
+      constructor(readonly token: string) {}
+    }
+    const at = new Date(0);
+    const result = redactedClientRun(
+      {
+        events: [
+          {
+            arguments: {
+              url: new URL(`https://example.test/?key=${secret}`),
+              payload: new Payload(secret),
+              at,
+            },
+          },
+        ],
+      },
+      [secret]
+    );
+    expect(result.events[0]!.arguments).toEqual({
+      url: 'https://example.test/?key=[REDACTED]',
+      payload: { token: '[REDACTED]' },
+      at,
+    });
+    // An object with no secret in it is kept, not converted.
+    expect(result.events[0]!.arguments.at).toBe(at);
   });
 
   it('returns the result itself when there is nothing to redact', () => {

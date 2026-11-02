@@ -96,7 +96,6 @@ import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
-import { fileSecretValues } from './clientSecrets.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import {
@@ -1843,13 +1842,10 @@ async function evaluate(
           variants: variants.map((variant) => variant.name),
         }
       );
-  // What MST replaces in every client result, besides the environment's and
-  // the servers' secrets: the secrets file and the connector tokens, which
-  // renew while the run goes on.
-  const runSecrets = (): string[] => [
-    ...fileSecretValues(fileSecrets),
-    ...credentials.secrets(),
-  ];
+  // What MST replaces in every client result besides the secrets in `env`
+  // (the secrets file's included) and the servers': the connector tokens,
+  // every one delivered, since they renew while the run goes on.
+  const runSecrets = (): string[] => credentials.secrets();
   // A replay's servers only name the trace's tools: no secrets, no endpoint.
   const serverFor = (server: MCPConfig): MCPConfig =>
     replay ? server : resolveServerSecrets(server, env);
