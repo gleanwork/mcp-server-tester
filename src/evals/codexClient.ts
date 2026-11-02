@@ -31,7 +31,11 @@ import {
 import { resolveLLMEndpoint } from '../llm/endpoint.js';
 import { codexSandboxMode } from '../judge/agentic/codexSandbox.js';
 import type { TrialEnding } from '../types/trialEnding.js';
-import { contextOverflowEnding, infrastructureEnding } from './trialEnding.js';
+import {
+  contextOverflowEnding,
+  infrastructureEnding,
+  TRIAL_ENDING,
+} from './trialEnding.js';
 import type { ClientDiagnostics } from '../types/index.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import { buildCodexTrace, type TimedCodexEvent } from './codexTrace.js';
@@ -485,13 +489,20 @@ async function runCodex(
     const host =
       receiver && threadId ? await receiver.collect([threadId]) : undefined;
     const error = failure?.message ?? (trace.error && redact(trace.error));
+    // Codex started its turn and ran out of the case's time: its own time, a
+    // trial that failed (ADR 0010). Before the turn started, the failure kind
+    // says how it ended.
     const ending =
-      failure?.kind === 'timeout' || trace.error === undefined
-        ? undefined
-        : codexTurnEnding(
-            redact(trace.error),
-            trace.events.length > 0 || trace.finalText.length > 0
-          );
+      failure?.kind === 'timeout'
+        ? stream.some((e) => e.event.type === 'turn.started')
+          ? TRIAL_ENDING
+          : undefined
+        : trace.error === undefined
+          ? undefined
+          : codexTurnEnding(
+              redact(trace.error),
+              trace.events.length > 0 || trace.finalText.length > 0
+            );
     const durationMs = Date.parse(endedAt) - Date.parse(startedAt);
     const toolMs = trace.telemetry.toolWallDurationMs;
     return {

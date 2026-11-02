@@ -12,6 +12,7 @@ import {
 } from './parsers.js';
 import { withFinalUsage } from '../../../claudeCodeEvents.js';
 import { ClaudeStartup } from './claudeStartup.js';
+import { TRIAL_ENDING } from '../../../trialEnding.js';
 
 class ProcessFailure extends Error {
   constructor(
@@ -156,24 +157,25 @@ export async function runCLIClient(
         };
       return {
         ...partial,
-        // The process failed (or a server didn't start): its failure kind
-        // says how the run ended, whatever Claude Code reported before.
-        ending: undefined,
+        // Claude Code started and ran out of the case's time: its own time,
+        // a trial that failed (ADR 0010). Otherwise the process failed, or
+        // it timed out before it started: its failure kind says how the run
+        // ended, whatever Claude Code reported before.
+        ending:
+          timedOut && startup?.error === undefined ? TRIAL_ENDING : undefined,
         success: false,
-        error:
-          message.includes('timed out') || message.includes('TIMEOUT')
-            ? `CLI client timed out after ${elapsed}ms (limit: ${timeout}ms).`
-            : `CLI client process failed: ${message}`,
+        error: timedOut
+          ? `CLI client timed out after ${elapsed}ms (limit: ${timeout}ms).`
+          : `CLI client process failed: ${message}`,
         diagnostics: {
           ...startup?.diagnostics,
-          failureKind:
-            message.includes('timed out') || message.includes('TIMEOUT')
-              ? 'timeout'
-              : message.includes('MCP connection failed')
-                ? 'startup'
-                : message.includes('capture limit')
-                  ? 'output'
-                  : 'process',
+          failureKind: timedOut
+            ? 'timeout'
+            : message.includes('MCP connection failed')
+              ? 'startup'
+              : message.includes('capture limit')
+                ? 'output'
+                : 'process',
         },
       };
     }
