@@ -48,7 +48,7 @@ Available matchers:
 
 ## Eval Datasets
 
-Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `api` client, or with `mst run` on any client (Claude Code, Cowork, ChatGPT). Checks on a single tool's response belong in Playwright tests, above.
+Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `api` client, or with `mst run` on any client (Claude Code, Codex, Cowork, ChatGPT and the ChatGPT app's Codex surface). Checks on a single tool's response belong in Playwright tests, above.
 
 ```json snippet=snippets/eval-dataset.json
 {
@@ -191,7 +191,7 @@ export default defineConfig({
 
 For HTTP servers, set `transport: 'http'` and `serverUrl`. For servers that require OAuth, see the [Transports Guide](./docs/transports.md) and [CLI Guide](./docs/cli.md) for authentication setup, including CI/CD token management.
 
-Plain stdio is supported by Claude CLI, Vercel AI SDK, ChatGPT Work/Codex, and
+Plain stdio is supported by Claude CLI, Vercel AI SDK, ChatGPT (`chatgpt` and `codex-app`), and
 Cowork evaluation clients, including Cowork on macOS and Linux. Cowork also
 supports private file-backed native proxies and mixed HTTP/stdio server sets.
 See [evaluation client transport support](./docs/transports.md#evaluation-client-support)

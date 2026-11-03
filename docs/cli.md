@@ -731,6 +731,7 @@ api          any OS        The model alone, through its provider's API, with the
 chatgpt      macOS, Linux  The ChatGPT desktop app
 claude-code  any OS        The Claude Code CLI, headless
 codex        any OS        The Codex CLI, headless, through the Codex SDK
+codex-app    macOS, Linux  The Codex surface of the ChatGPT desktop app
 cowork       macOS, Linux  Claude Desktop in Cowork mode
 ```
 
@@ -1154,7 +1155,7 @@ Initialises or validates the empty Claude third-party profile that the Cowork cl
 npx mst env setup docker --config eval.json --env-option contexts=colima-mst-kvm
 ```
 
-Prepares what runs in an environment need, once. For `docker`, it builds MST's Linux Cowork image on each Docker context, or its ChatGPT image when `--config` names a ChatGPT eval (see [Cowork in Docker](./cowork-docker.md) and [ChatGPT in Docker](./chatgpt-docker.md)).
+Prepares what runs in an environment need, once. For `docker`, it builds MST's Linux Cowork image on each Docker context, or its ChatGPT image when `--config` names a ChatGPT or Codex app eval (`chatgpt` or `codex-app`; see [Cowork in Docker](./cowork-docker.md) and [ChatGPT in Docker](./chatgpt-docker.md)).
 
 | Option                     | Meaning                                                                                                                                   |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |

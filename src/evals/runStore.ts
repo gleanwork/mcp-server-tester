@@ -342,6 +342,7 @@ export function storeRunHistory(store: RunStore, evalName: string): RunHistory {
         | undefined;
       return results?.cases ?? [];
     },
+    run: (runId) => getJson(store, `${runs}${runId}/run.json`),
   };
 }
 

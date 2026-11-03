@@ -72,6 +72,44 @@ describe('a dry run checks datasets too', () => {
   });
 });
 
+describe('a case clientOptions.surface', () => {
+  it.each([
+    [
+      'codex',
+      '`clientOptions.surface` is gone: use the `codex-app` client for the Codex surface, and remove `surface`.',
+    ],
+    [
+      'chatgpt-work',
+      '`clientOptions.surface` is gone: remove it. `chatgpt` always drives ChatGPT Work.',
+    ],
+  ])(
+    'fails for %s before anything runs, naming its replacement',
+    async (surface, message) => {
+      await expect(
+        dryRun(
+          [
+            {
+              id: 'desktop',
+              input: 'Find it',
+              client: 'chatgpt',
+              model: 'gpt-5',
+              clientOptions: { surface },
+            },
+          ],
+          {}
+        )
+      ).rejects.toThrow(message);
+      // On a case that inherits the eval's chatgpt too.
+      await expect(
+        dryRun(
+          [{ id: 'desktop', input: 'Find it', clientOptions: { surface } }],
+          { client: 'chatgpt', model: 'gpt-5', clientOptions: undefined }
+        )
+      ).rejects.toThrow(message);
+    }
+  );
+});
+
 describe('a case systemPrompt', () => {
   it("rejects one under a client that can't apply it", async () => {
     await expect(

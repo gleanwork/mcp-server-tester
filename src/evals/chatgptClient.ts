@@ -30,65 +30,125 @@ import {
   MAC_CHATGPT_PLATFORM,
   type ChatgptPlatform,
 } from './chatgptSetup/platform.js';
+import type { ChatgptSurface } from './chatgpt/driver.js';
 
-const Schema = z
-  .object({
-    type: z.string(),
-    model: z.string().min(1),
-    reasoningEffort: z
-      .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
-      .optional(),
-    provider: z.literal('openai').optional(),
-    timeout: z.number().int().positive().default(300_000),
-    env: z.record(z.string(), z.string()).optional(),
-    /** Client-owned: plugins installed into the fresh Linux profile. */
-    plugins: MarketplacePluginsSchema.optional().refine(
-      (plugins) => !plugins?.some((p) => p.blockMcpServers?.length),
-      'ChatGPT does not support plugins[].blockMcpServers; use plugins[].mcp.'
-    ),
-    configPath: z.string().min(1).optional(),
-    requireMcpCalls: z.boolean().optional(),
-    surface: z.enum(['chatgpt-work', 'codex']).default('chatgpt-work'),
-    correlation: z
-      .enum(['exact_prompt', 'prompt_marker'])
-      .default('exact_prompt'),
-    computerUseProvider: z.literal('anthropic-computer-use').optional(),
-    nativeMaxActions: z
-      .number()
-      .int()
-      .min(1)
-      .max(NATIVE_MAX_ACTIONS.max)
-      .optional(),
-    computerUseModel: z
-      .string()
-      .regex(/^[A-Za-z0-9._:-]+$/)
-      .optional(),
-    computerUseMaxActions: z.number().int().min(1).max(64).optional(),
-    options: z
-      .never({
-        message:
-          '`clientOptions.options` is gone: set its keys in `clientOptions` directly (`clientOptions.surface`, not `clientOptions.options.surface`).',
-      })
-      .optional(),
-  })
-  .strict();
+/**
+ * A product the ChatGPT desktop app runs, and so a client (ADR 0011):
+ * ChatGPT's work surface (`chatgpt`) or Codex (`codex-app`). Both drive the
+ * same app, so they share its desktop lease.
+ */
+interface DesktopProduct {
+  /** The client's name. */
+  readonly client: 'chatgpt' | 'codex-app';
+  /** The surface the drivers select. */
+  readonly surface: ChatgptSurface;
+  /** The product in messages: `ChatGPT`, `Codex app`. */
+  readonly label: string;
+}
+
+const CHATGPT_PRODUCT: DesktopProduct = {
+  client: 'chatgpt',
+  surface: 'chatgpt-work',
+  label: 'ChatGPT',
+};
+
+const CODEX_APP_PRODUCT: DesktopProduct = {
+  client: 'codex-app',
+  surface: 'codex',
+  label: 'Codex app',
+};
+
+/**
+ * Why `clientOptions.surface` fails: the surface is the client now (ADR
+ * 0011), and the message names the client to use for `value`.
+ */
+function surfaceGone(product: DesktopProduct, value: unknown): string {
+  const wanted =
+    value === 'codex'
+      ? CODEX_APP_PRODUCT
+      : value === 'chatgpt-work'
+        ? CHATGPT_PRODUCT
+        : undefined;
+  const gone = '`clientOptions.surface` is gone:';
+  if (!wanted)
+    return `${gone} use the \`chatgpt\` client for ChatGPT Work, or \`codex-app\` for the Codex surface.`;
+  const surface =
+    wanted === CODEX_APP_PRODUCT ? 'the Codex surface' : 'ChatGPT Work';
+  return wanted === product
+    ? `${gone} remove it. \`${product.client}\` always drives ${surface}.`
+    : `${gone} use the \`${wanted.client}\` client for ${surface}, and remove \`surface\`.`;
+}
+
+const schemaOf = (product: DesktopProduct) =>
+  z
+    .object({
+      type: z.string(),
+      model: z.string().min(1),
+      reasoningEffort: z
+        .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
+        .optional(),
+      provider: z.literal('openai').optional(),
+      timeout: z.number().int().positive().default(300_000),
+      env: z.record(z.string(), z.string()).optional(),
+      /** Client-owned: plugins installed into the fresh Linux profile. */
+      plugins: MarketplacePluginsSchema.optional().refine(
+        (plugins) => !plugins?.some((p) => p.blockMcpServers?.length),
+        'ChatGPT does not support plugins[].blockMcpServers; use plugins[].mcp.'
+      ),
+      configPath: z.string().min(1).optional(),
+      requireMcpCalls: z.boolean().optional(),
+      /** Gone: the surface is the client (`chatgpt` or `codex-app`). */
+      surface: z
+        .never({ error: (issue) => surfaceGone(product, issue.input) })
+        .optional(),
+      correlation: z
+        .enum(['exact_prompt', 'prompt_marker'])
+        .default('exact_prompt'),
+      computerUseProvider: z.literal('anthropic-computer-use').optional(),
+      nativeMaxActions: z
+        .number()
+        .int()
+        .min(1)
+        .max(NATIVE_MAX_ACTIONS.max)
+        .optional(),
+      computerUseModel: z
+        .string()
+        .regex(/^[A-Za-z0-9._:-]+$/)
+        .optional(),
+      computerUseMaxActions: z.number().int().min(1).max(64).optional(),
+      options: z
+        .never({
+          message:
+            '`clientOptions.options` is gone: set its keys in `clientOptions` directly (`clientOptions.model`, not `clientOptions.options.model`).',
+        })
+        .optional(),
+    })
+    .strict();
+
+const SCHEMAS = {
+  chatgpt: schemaOf(CHATGPT_PRODUCT),
+  'codex-app': schemaOf(CODEX_APP_PRODUCT),
+};
 
 async function runBatch(
   requests: ClientBatchRequest[],
   context: ClientRunContext,
-  platform: ChatgptPlatform
+  platform: ChatgptPlatform,
+  product: DesktopProduct
 ): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
+  const { label } = product;
   if ((context.evalConfig.concurrency ?? 1) !== 1)
-    throw new Error('ChatGPT desktop requires concurrency 1.');
+    throw new Error(`${label} desktop requires concurrency 1.`);
   if (variantToolMetadata(context.evalConfig, context.variant))
     throw new Error(
-      'ChatGPT desktop does not support tool metadata (`tools`).'
+      `${label} desktop does not support tool metadata (\`tools\`).`
     );
-  const configs = requests.map((request) => Schema.parse(request.config));
+  const schema = SCHEMAS[product.client];
+  const configs = requests.map((request) => schema.parse(request.config));
   if (requests.some((request) => !request.input.prompt.trim()))
-    throw new Error('ChatGPT requires a non-empty input.');
-  requireIdenticalClientSettings('ChatGPT', configs);
+    throw new Error(`${label} requires a non-empty input.`);
+  requireIdenticalClientSettings(label, configs);
   const credentialEnv = requests.map((request, index) => ({
     ...process.env,
     ...context.env,
@@ -146,7 +206,7 @@ async function runBatch(
         options: {
           environment: { ...config.env, ...serverConfig.environment },
           computerUseModel: config.computerUseModel,
-          surface: config.surface,
+          surface: product.surface,
           nativeMaxActions: config.nativeMaxActions,
           ...platform.clientOptions(config, environment),
           computerUseEnvironment: environment,
@@ -160,14 +220,15 @@ async function runBatch(
     )
   )
     throw new Error(
-      'ChatGPT batch requires identical MCP servers, credentials, and environment.'
+      `${label} batch requires identical MCP servers, credentials, and environment.`
     );
   // One desktop per run: claimed before any lifecycle operation, because
-  // another process must not stop the active app.
+  // another process must not stop the active app. `chatgpt` and
+  // `codex-app` drive the same app, so they claim the same lease.
   const appSession = new ChatgptAppSession('batch');
   return runDesktopBatch<ChatgptAppSession>(
     {
-      name: 'ChatGPT',
+      name: label,
       lease: {
         directory: join(
           platform.lockHome(externalConfigs[0]!),
@@ -214,8 +275,7 @@ async function runBatch(
         if (result.success) {
           const id = result.clientMetadata.session.id;
           if (!id || !result.clientMetadata.session.turnId || !ledger.claim(id))
-            trace.error =
-              'ChatGPT requires a distinct native session and turn for each fresh query; refusing duplicate attribution.';
+            trace.error = `${label} requires a distinct native session and turn for each fresh query; refusing duplicate attribution.`;
         }
         if (trace.usage) {
           // Native OpenAI input totals include cache reads; V2 counts cache separately.
@@ -245,15 +305,13 @@ async function runBatch(
         ];
         let measurementError: string | undefined;
         if (executionTrusted && unexpectedServers.length)
-          measurementError =
-            'ChatGPT called an MCP server outside the configured evaluation server selection.';
+          measurementError = `${label} called an MCP server outside the configured evaluation server selection.`;
         else if (
           executionTrusted &&
           config.requireMcpCalls &&
           !selectedCalls.length
         )
-          measurementError =
-            'ChatGPT completed without calling a required evaluation MCP tool on the configured server selection.';
+          measurementError = `${label} completed without calling a required evaluation MCP tool on the configured server selection.`;
         if (measurementError) trace.error = measurementError;
         const session = result.clientMetadata?.session;
         // How a failed turn ended, from the failure kind the driver typed
@@ -320,9 +378,12 @@ async function runBatch(
   );
 }
 
-function chatgptClient(platform: ChatgptPlatform): ClientDefinition {
-  return {
-    schema: Schema,
+/** What each product is and what a machine needs to run it (`mst clients`). */
+const PRODUCT_DEFINITIONS: Record<
+  DesktopProduct['client'],
+  Pick<ClientDefinition, 'description' | 'requirements'>
+> = {
+  chatgpt: {
     description: 'The ChatGPT desktop app',
     requirements: {
       os: ['macos', 'linux'],
@@ -336,25 +397,65 @@ function chatgptClient(platform: ChatgptPlatform): ClientDefinition {
       ],
       setup: ['Docker: `mst env setup docker --config <a ChatGPT eval>`'],
     },
+  },
+  'codex-app': {
+    description: 'The Codex surface of the ChatGPT desktop app',
+    requirements: {
+      os: ['macos', 'linux'],
+      install: [
+        'macOS: the ChatGPT app, signed in with access to Codex, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST',
+        "Linux: MST's ChatGPT image (`--env docker`), which runs Codex in the ChatGPT app",
+      ],
+      credentials: [
+        'macOS: `ANTHROPIC_API_KEY` or an LLM gateway, for the Computer Use planner',
+        'Linux image: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`)',
+      ],
+      setup: ['Docker: `mst env setup docker --config <a Codex app eval>`'],
+    },
+  },
+};
+
+function desktopClient(
+  platform: ChatgptPlatform,
+  product: DesktopProduct
+): ClientDefinition {
+  return {
+    schema: SCHEMAS[product.client],
+    ...PRODUCT_DEFINITIONS[product.client],
     evidence: 'structured',
     // Not verified against MST's local tool-variant proxy.
     toolSurfaceProxy: false,
     // One ChatGPT app window drives one conversation at a time.
     maxConcurrency: 1,
     runBatch(requests, context) {
-      return runBatch(requests, context, platform);
+      return runBatch(requests, context, platform, product);
     },
     async run(input, config, context) {
       return (
         await runBatch(
           [{ caseId: 'single', trial: 0, input, config }],
           context,
-          platform
+          platform,
+          product
         )
       )[0]!;
     },
   };
 }
 
-export const CHATGPT_LINUX_CLIENT = chatgptClient(LINUX_CHATGPT_PLATFORM);
-export const CHATGPT_CLIENT = chatgptClient(MAC_CHATGPT_PLATFORM);
+export const CHATGPT_LINUX_CLIENT = desktopClient(
+  LINUX_CHATGPT_PLATFORM,
+  CHATGPT_PRODUCT
+);
+export const CHATGPT_CLIENT = desktopClient(
+  MAC_CHATGPT_PLATFORM,
+  CHATGPT_PRODUCT
+);
+export const CODEX_APP_LINUX_CLIENT = desktopClient(
+  LINUX_CHATGPT_PLATFORM,
+  CODEX_APP_PRODUCT
+);
+export const CODEX_APP_CLIENT = desktopClient(
+  MAC_CHATGPT_PLATFORM,
+  CODEX_APP_PRODUCT
+);

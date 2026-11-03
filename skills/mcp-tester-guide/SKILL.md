@@ -18,30 +18,30 @@ MST (`@gleanwork/mcp-server-tester`, CLI `mst`) tests and evaluates MCP servers.
 
 MST uses these terms in its API, config keys, CLI and reports. Use them, and not the old ones in the last column.
 
-| Term           | Meaning                                                                                    | Not                |
-| -------------- | ------------------------------------------------------------------------------------------ | ------------------ |
-| eval           | What to evaluate and how: datasets, variants, graders, metrics                             | suite              |
-| eval config    | The JSON file that defines one eval; `mst run` runs one                                    | manifest           |
-| dataset        | A named list of cases                                                                      | eval set           |
-| case           | One input for a client to act on, with what is expected                                    | scenario, test     |
-| input          | The user's request, sent to the client as its prompt                                       | scenario           |
-| expected       | A case's ground truth: an answer, rubric criteria                                          | golden             |
-| client         | The MCP client application under test: `api`, `claude-code`, `codex`, `cowork`, `chatgpt`  | host               |
-| model          | The LLM the client runs, set beside the client                                             | engine             |
-| variant        | One setup an eval tests: client, model and options, servers, tool metadata                 | arm                |
-| baseline       | The variant the others are compared with (the first, unless `baseline` names one)          | control            |
-| tool metadata  | Tool names, descriptions and input schemas a variant shows the client (`tools`)            | tool overrides     |
-| trial          | One attempt at a case by one variant                                                       | iteration          |
-| trace          | What a client did in a trial: tool calls, skill loads, usage, final answer                 | transcript         |
-| grader         | An assertion (code) or a judge (model)                                                     | scorer             |
-| assertion      | A deterministic check of a trial's trace or answer (`toolsTriggered`, `containsText`, ...) | expectation        |
-| judge          | An LLM that scores a trial against expected or a rubric                                    | evaluator          |
-| score          | A grader's result for one trial: 0 to 1, pass, and why                                     | verdict            |
-| pass threshold | The share of a case's trials that must pass (`passThreshold`, default 1)                   | accuracy threshold |
-| metric         | An aggregate over a run's trials or cases: pass rate, tool count, tokens, cost             |                    |
-| run            | One execution of an eval: every variant on every case                                      | experiment         |
-| comparison     | How a variant differs from the baseline, or a run from an earlier run                      | diff               |
-| test           | A direct check of a server with MST's fixtures and matchers; not an eval                   | direct case        |
+| Term           | Meaning                                                                                                | Not                |
+| -------------- | ------------------------------------------------------------------------------------------------------ | ------------------ |
+| eval           | What to evaluate and how: datasets, variants, graders, metrics                                         | suite              |
+| eval config    | The JSON file that defines one eval; `mst run` runs one                                                | manifest           |
+| dataset        | A named list of cases                                                                                  | eval set           |
+| case           | One input for a client to act on, with what is expected                                                | scenario, test     |
+| input          | The user's request, sent to the client as its prompt                                                   | scenario           |
+| expected       | A case's ground truth: an answer, rubric criteria                                                      | golden             |
+| client         | The MCP client application under test: `api`, `claude-code`, `codex`, `cowork`, `chatgpt`, `codex-app` | host               |
+| model          | The LLM the client runs, set beside the client                                                         | engine             |
+| variant        | One setup an eval tests: client, model and options, servers, tool metadata                             | arm                |
+| baseline       | The variant the others are compared with (the first, unless `baseline` names one)                      | control            |
+| tool metadata  | Tool names, descriptions and input schemas a variant shows the client (`tools`)                        | tool overrides     |
+| trial          | One attempt at a case by one variant                                                                   | iteration          |
+| trace          | What a client did in a trial: tool calls, skill loads, usage, final answer                             | transcript         |
+| grader         | An assertion (code) or a judge (model)                                                                 | scorer             |
+| assertion      | A deterministic check of a trial's trace or answer (`toolsTriggered`, `containsText`, ...)             | expectation        |
+| judge          | An LLM that scores a trial against expected or a rubric                                                | evaluator          |
+| score          | A grader's result for one trial: 0 to 1, pass, and why                                                 | verdict            |
+| pass threshold | The share of a case's trials that must pass (`passThreshold`, default 1)                               | accuracy threshold |
+| metric         | An aggregate over a run's trials or cases: pass rate, tool count, tokens, cost                         |                    |
+| run            | One execution of an eval: every variant on every case                                                  | experiment         |
+| comparison     | How a variant differs from the baseline, or a run from an earlier run                                  | diff               |
+| test           | A direct check of a server with MST's fixtures and matchers; not an eval                               | direct case        |
 
 ## Entry points
 
@@ -210,6 +210,7 @@ One case: `runEvalCase(evalCase, { mcp, testInfo }, { client: 'api', model })`. 
 | `claude-code`               | Claude Code, with an empty config directory                          | `mst run`                             |
 | `cowork`                    | Claude Cowork in Claude Desktop                                      | `mst run` (macOS: `mst cowork setup`) |
 | `chatgpt`                   | The ChatGPT desktop app                                              | `mst run`                             |
+| `codex-app`                 | The Codex surface of the ChatGPT desktop app                         | `mst run`                             |
 | `<namespace>/client/<name>` | A plugin's client                                                    | `mst run`                             |
 
 The `api` client infers the API from the model id (`claude-*` Anthropic, `claude-*@date` Vertex, `gpt-*` OpenAI, `gemini-*` Google). It needs `ai` and the provider package (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`, `@ai-sdk/google-vertex`, `@ai-sdk/mistral`, `@ai-sdk/azure`, `@ai-sdk/deepseek`, `@ai-sdk/xai`, `@openrouter/ai-sdk-provider`), installed as optional dependencies, and the API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, ...). Its `clientOptions`: `provider`, `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout`, `apiKeyEnvVar`, `systemPrompt`, `skills` (`off`, `catalog`, `preload`), `env`. Gateways: set `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` with a gateway credential (`docs/llm-gateways.md`).
@@ -317,4 +318,4 @@ Full list: `docs/migrations/migration-2.0.md`.
 - **A server array.** `servers` is a map keyed by label; variants list labels.
 - **Secrets in configs.** Use `accessTokenEnv`, the environment, or `--secrets-file`.
 - **`runEvalDataset(dataset, mcp)`.** It takes two objects: `runEvalDataset({ dataset, ... }, { mcp, testInfo })`.
-- **A non-api client in Playwright.** `runEvalDataset` runs only `api`. Run `claude-code`, `codex`, `cowork`, `chatgpt` and plugin clients with `mst run`.
+- **A non-api client in Playwright.** `runEvalDataset` runs only `api`. Run `claude-code`, `codex`, `cowork`, `chatgpt`, `codex-app` and plugin clients with `mst run`.

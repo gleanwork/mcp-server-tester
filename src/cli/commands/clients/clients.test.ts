@@ -67,10 +67,14 @@ describe('mst clients', () => {
       'chatgpt',
       'claude-code',
       'codex',
+      'codex-app',
       'cowork',
     ]);
     expect(out.text()).toMatch(/^cowork\s+macOS, Linux\s+Claude Desktop/m);
     expect(out.text()).toMatch(/^codex\s+any OS\s+The Codex CLI/m);
+    expect(out.text()).toMatch(
+      /^codex-app\s+macOS, Linux\s+The Codex surface of the ChatGPT desktop app$/m
+    );
   });
 
   it("adds a plugin's clients, and lists them as JSON", async () => {
@@ -160,9 +164,28 @@ describe('mst clients', () => {
     ).rejects.toThrow('Client "chatgpt-mac" is now "chatgpt".');
   });
 
+  it('shows codex-app by either name, without a surface option', async () => {
+    for (const ref of ['codex-app', 'mst/client/codex-app']) {
+      const out = capture();
+      await showClient(ref, { json: true }, out.print);
+      const shown = JSON.parse(out.text()) as {
+        ref: string;
+        requirements: { setup?: string[] };
+        options: { properties?: Record<string, { not?: unknown }> };
+      };
+      expect(shown.ref).toBe('codex-app');
+      expect(shown.requirements.setup).toEqual([
+        'Docker: `mst env setup docker --config <a Codex app eval>`',
+      ]);
+      // `surface` is still a key, so it fails naming its replacement, but
+      // it takes no value.
+      expect(shown.options.properties?.surface).toEqual({ not: {} });
+    }
+  });
+
   it('says what it knows when a client is unknown', async () => {
     await expect(showClient('nope', {}, capture().print)).rejects.toThrow(
-      'Client "nope" is not available. Available: api, chatgpt, claude-code, codex, cowork.'
+      'Client "nope" is not available. Available: api, chatgpt, claude-code, codex, codex-app, cowork.'
     );
     await expect(
       showClient('acme/client/desk', {}, capture().print)

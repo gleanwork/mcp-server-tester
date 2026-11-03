@@ -3,7 +3,12 @@ import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type * as OsModule from 'node:os';
 import { join } from 'node:path';
-import { CHATGPT_CLIENT, CHATGPT_LINUX_CLIENT } from './chatgptClient.js';
+import {
+  CHATGPT_CLIENT,
+  CHATGPT_LINUX_CLIENT,
+  CODEX_APP_CLIENT,
+  CODEX_APP_LINUX_CLIENT,
+} from './chatgptClient.js';
 import { runExternalClientCase } from './externalClient/runtime.js';
 import { clientRunToExecution } from './clientTrace.js';
 import type { ClientBatchRequest } from './evalFrameworkTypes.js';
@@ -127,14 +132,14 @@ describe('ChatGPT V2 batch client', () => {
       CHATGPT_CLIENT.schema.parse({
         type: 'chatgpt',
         model: 'm',
-        surface: 'codex',
+        requireMcpCalls: true,
       })
-    ).toMatchObject({ surface: 'codex', correlation: 'exact_prompt' });
+    ).toMatchObject({ requireMcpCalls: true, correlation: 'exact_prompt' });
     expect(() =>
       CHATGPT_CLIENT.schema.parse({
         type: 'chatgpt',
         model: 'm',
-        options: { surface: 'codex' },
+        options: { requireMcpCalls: true },
       })
     ).toThrow(
       '`clientOptions.options` is gone: set its keys in `clientOptions` directly'
@@ -145,11 +150,10 @@ describe('ChatGPT V2 batch client', () => {
     for (const request of batch)
       request.config = {
         ...config,
-        type: 'chatgpt',
-        surface: 'codex',
+        type: 'codex-app',
         env: linuxEnvironment(home.value),
       };
-    await CHATGPT_LINUX_CLIENT.runBatch!(batch, context);
+    await CODEX_APP_LINUX_CLIENT.runBatch!(batch, context);
     expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
     expect(runExternalClientCase).toHaveBeenCalledTimes(2);
@@ -174,12 +178,21 @@ describe('ChatGPT V2 batch client', () => {
     expect(runExternalClientCase).not.toHaveBeenCalled();
   });
 
-  it.each(['codex', 'chatgpt-work'])(
-    'forwards explicit macOS %s surface without prompt instructions',
-    async (surface) => {
+  it.each([
+    ['chatgpt', 'macOS', 'chatgpt-work', CHATGPT_CLIENT],
+    ['codex-app', 'macOS', 'codex', CODEX_APP_CLIENT],
+    ['chatgpt', 'Linux', 'chatgpt-work', CHATGPT_LINUX_CLIENT],
+    ['codex-app', 'Linux', 'codex', CODEX_APP_LINUX_CLIENT],
+  ] as const)(
+    '%s on %s drives the %s surface, without prompt instructions',
+    async (type, platform, surface, client) => {
       const batch = requests().slice(0, 1);
-      batch[0]!.config = { ...config, surface };
-      await CHATGPT_CLIENT.runBatch!(batch, context);
+      batch[0]!.config = {
+        ...config,
+        type,
+        ...(platform === 'Linux' ? { env: linuxEnvironment(home.value) } : {}),
+      };
+      await client.runBatch!(batch, context);
       expect(runExternalClientCase).toHaveBeenCalledWith(
         'Answer one',
         expect.objectContaining({
@@ -189,6 +202,74 @@ describe('ChatGPT V2 batch client', () => {
       );
     }
   );
+  it.each([
+    [
+      'chatgpt',
+      'codex',
+      '`clientOptions.surface` is gone: use the `codex-app` client for the Codex surface, and remove `surface`.',
+    ],
+    [
+      'chatgpt',
+      'chatgpt-work',
+      '`clientOptions.surface` is gone: remove it. `chatgpt` always drives ChatGPT Work.',
+    ],
+    [
+      'codex-app',
+      'codex',
+      '`clientOptions.surface` is gone: remove it. `codex-app` always drives the Codex surface.',
+    ],
+    [
+      'codex-app',
+      'chatgpt-work',
+      '`clientOptions.surface` is gone: use the `chatgpt` client for ChatGPT Work, and remove `surface`.',
+    ],
+  ] as const)(
+    '%s rejects surface %s, naming what replaces it, before app setup',
+    async (type, surface, message) => {
+      const client = type === 'chatgpt' ? CHATGPT_CLIENT : CODEX_APP_CLIENT;
+      const batch = requests().slice(0, 1);
+      batch[0]!.config = { ...config, type, surface };
+      await expect(client.runBatch!(batch, context)).rejects.toThrow(message);
+      expect(lifecycle.prepare).not.toHaveBeenCalled();
+      expect(runExternalClientCase).not.toHaveBeenCalled();
+    }
+  );
+  it('names the Codex app in its errors', async () => {
+    const mixed = requests();
+    mixed[1]!.config = { ...config, model: 'other' };
+    await expect(CODEX_APP_CLIENT.runBatch!(mixed, context)).rejects.toThrow(
+      'Codex app batch requires identical client settings for all cases.'
+    );
+    await expect(
+      CODEX_APP_CLIENT.runBatch!(requests(), {
+        evalConfig: { ...context.evalConfig, concurrency: 2 },
+      })
+    ).rejects.toThrow('Codex app desktop requires concurrency 1.');
+  });
+  it('shares the desktop lease with chatgpt: one app, one batch at a time', async () => {
+    let started!: () => void;
+    const preparing = new Promise<void>((resolve) => (started = resolve));
+    let release!: () => void;
+    lifecycle.prepare.mockImplementationOnce(async () => {
+      started();
+      await new Promise<void>((resolve) => (release = resolve));
+    });
+    // ChatGPT holds the app while Codex app tries to start.
+    const chatgpt = CHATGPT_CLIENT.runBatch!(requests(), context);
+    await preparing;
+    await access(join(home.value, '.mcp-server-tester/chatgpt-desktop.lock'));
+    await expect(
+      CODEX_APP_CLIENT.runBatch!(requests(), context)
+    ).rejects.toThrow(
+      `Codex app desktop is locked by another run or an interrupted run (${join(home.value, '.mcp-server-tester/chatgpt-desktop.lock')})`
+    );
+    release();
+    await chatgpt;
+    expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
+    // Released, the app is Codex app's to drive.
+    await CODEX_APP_CLIENT.runBatch!(requests(), context);
+    expect(lifecycle.prepare).toHaveBeenCalledTimes(2);
+  });
   it('defaults to exact-prompt matching and passes the eval query without any suffix', async () => {
     const batch = requests().slice(0, 1);
     batch[0]!.input.prompt =

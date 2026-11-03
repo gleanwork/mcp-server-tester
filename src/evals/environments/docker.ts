@@ -1,7 +1,7 @@
 /**
  * The built-in `docker` environment (ADR 0004): each shard runs in a
  * container from MST's Linux Cowork image (docker/cowork-linux), or, for a
- * ChatGPT eval, its Linux ChatGPT image (docker/chatgpt-linux), on a Docker
+ * ChatGPT or Codex app eval, its Linux ChatGPT image (docker/chatgpt-linux), on a Docker
  * context. The channel is the Docker CLI: `docker exec` runs `mst collect`
  * as the desktop user, and `docker cp` moves the bundle and results.
  *
@@ -27,6 +27,7 @@ import { z } from 'zod';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
 import { getClient } from '../builtinClients.js';
+import { bareClientName } from '../clientNames.js';
 import { machineEnvironment } from './channel.js';
 import { readShardBundle } from './protocol.js';
 import {
@@ -59,14 +60,24 @@ import type {
 
 /** The image `mst env setup docker` builds for this MST version. */
 export const DEFAULT_COWORK_IMAGE = `mst-cowork-linux:${packageJson.version}`;
-/** The image `mst env setup docker` builds for a ChatGPT eval. */
+/** The image `mst env setup docker` builds for a ChatGPT or Codex app eval. */
 export const DEFAULT_CHATGPT_IMAGE = `mst-chatgpt-linux:${packageJson.version}`;
 
 /** Which desktop a container runs: the eval's client picks it. */
 export type DockerClient = 'cowork' | 'chatgpt';
 
+/** Clients that run in the ChatGPT image: its app's products (ADR 0011). */
+const CHATGPT_IMAGE_CLIENTS = new Set(['chatgpt', 'codex-app']);
+
+/**
+ * The desktop an eval's client runs in a container: the ChatGPT app for
+ * `chatgpt` and `codex-app`, by their full names too, else Cowork.
+ */
 export function dockerClient(client: string | undefined): DockerClient {
-  return client === 'chatgpt' ? 'chatgpt' : 'cowork';
+  return client !== undefined &&
+    CHATGPT_IMAGE_CLIENTS.has(bareClientName(client))
+    ? 'chatgpt'
+    : 'cowork';
 }
 
 /** Inside the image (docker/cowork-linux/Dockerfile). */
@@ -1145,7 +1156,7 @@ async function setupDocker(
 export const dockerEnvironment: EnvironmentDefinition = {
   schema: DockerOptionsSchema,
   description:
-    "Run shards in containers from MST's Linux Cowork image (one Cowork container per Docker context at a time, grade containers as many as fit) or, for a ChatGPT eval, its Linux ChatGPT image.",
+    "Run shards in containers from MST's Linux Cowork image (one Cowork container per Docker context at a time, grade containers as many as fit) or, for a ChatGPT or Codex app eval, its Linux ChatGPT image.",
   async open(options, context) {
     return openDocker(options as DockerOptions, context);
   },

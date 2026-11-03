@@ -8,7 +8,11 @@ import type {
 } from './evalFrameworkTypes.js';
 import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalResultStore } from './resultStore.js';
-import { joinCaseResults, summaryWithCurrentClients } from './runFormat.js';
+import {
+  joinCaseResults,
+  summaryWithCurrentClients,
+  type RunRecord,
+} from './runFormat.js';
 import { readJsonFile } from '../utils/jsonFile.js';
 import {
   DEFAULT_REGRESSION_TAG,
@@ -61,6 +65,12 @@ export interface RunHistory {
   summary(runId: string): Promise<unknown>;
   /** A run's case results, from its `results.json`. */
   cases(runId: string): Promise<EvalCaseResult[]>;
+  /**
+   * A run's `run.json`, or undefined when it has none: what its variants
+   * ran with, which says what client a stored case result's name means
+   * (`summaryWithCurrentClients`).
+   */
+  run?(runId: string): Promise<unknown>;
 }
 
 /** The runs in a local `runs/` directory. */
@@ -83,7 +93,20 @@ function localRunHistory(runsDirectory: string): RunHistory {
       )) as { cases?: EvalCaseResult[] };
       return results.cases ?? [];
     },
+    async run(runId) {
+      return readJsonFile(path.join(runsDirectory, runId, 'run.json'));
+    },
   };
+}
+
+/** A stored run.json's variants, when `value` has them. */
+function recordedVariants(
+  value: unknown
+): Pick<RunRecord, 'variants'> | undefined {
+  const variants = (value as { variants?: unknown } | undefined)?.variants;
+  return Array.isArray(variants)
+    ? { variants: variants as RunRecord['variants'] }
+    : undefined;
 }
 
 /**
@@ -197,9 +220,14 @@ export async function findPreviousRun(options: {
   if (!newest) return undefined;
   // A run without results.json compares as having no cases.
   const cases = await history.cases(newest.entry).catch(() => []);
+  // Without run.json, a case's client reads by its name alone.
+  const run = await history.run?.(newest.entry).catch(() => undefined);
   return {
     runId: newest.runId,
-    summary: summaryWithCurrentClients(joinCaseResults(newest.summary, cases)),
+    summary: summaryWithCurrentClients(
+      joinCaseResults(newest.summary, cases),
+      recordedVariants(run)
+    ),
   };
 }
 

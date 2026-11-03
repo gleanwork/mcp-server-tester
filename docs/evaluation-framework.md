@@ -746,6 +746,7 @@ The client is the MCP client application an eval tests. Built-in clients have ca
 | `chatgpt`     | The ChatGPT desktop app                                                                                            | macOS, Linux |
 | `claude-code` | The Claude Code CLI, headless                                                                                      | any OS       |
 | `codex`       | The Codex CLI, headless, through the Codex SDK                                                                     | any OS       |
+| `codex-app`   | The Codex surface of the ChatGPT desktop app                                                                       | macOS, Linux |
 | `cowork`      | Claude Desktop in Cowork mode                                                                                      | macOS, Linux |
 
 What each one needs on the machine that runs its trials (`mst clients show <client>` prints the same, with its options):
@@ -754,11 +755,12 @@ What each one needs on the machine that runs its trials (`mst clients show <clie
 - **`chatgpt`.** Install: macOS: the ChatGPT app, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's ChatGPT image (`--env docker`). Credentials: macOS: `ANTHROPIC_API_KEY` or an LLM gateway, for the Computer Use planner; Linux image: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`). Setup: Docker: `mst env setup docker --config <a ChatGPT eval>`.
 - **`claude-code`.** Install: Claude Code (`claude`) on `PATH`. Credentials: `ANTHROPIC_API_KEY`, or Google Application Default Credentials with `provider: "vertex"`.
 - **`codex`.** Install: `@openai/codex-sdk` beside MST (`npm install @openai/codex-sdk`), which brings the Codex CLI. Credentials: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`).
+- **`codex-app`.** Install: macOS: the ChatGPT app, signed in with access to Codex, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's ChatGPT image (`--env docker`), which runs Codex in the ChatGPT app. Credentials: macOS: `ANTHROPIC_API_KEY` or an LLM gateway, for the Computer Use planner; Linux image: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`). Setup: Docker: `mst env setup docker --config <a Codex app eval>`.
 - **`cowork`.** Install: macOS: Claude Desktop, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's Cowork image (`--env docker`), or a prepared desktop with Claude Desktop. Credentials: macOS: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider; `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner; Linux image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`). Setup: macOS: `mst cowork setup`, then sign in to Claude Desktop once; Docker: `mst env setup docker`.
 
 <!-- clients:end -->
 
-Each client has its own guide: [mst-client.md](./mst-client.md) for `api` and `claude-code`, [codex.md](./codex.md), [cowork.md](./cowork.md) and [cowork-docker.md](./cowork-docker.md), and [chatgpt-desktop.md](./chatgpt-desktop.md) and [chatgpt-docker.md](./chatgpt-docker.md).
+Each client has its own guide: [mst-client.md](./mst-client.md) for `api` and `claude-code`, [codex.md](./codex.md), [cowork.md](./cowork.md) and [cowork-docker.md](./cowork-docker.md), and [chatgpt-desktop.md](./chatgpt-desktop.md) and [chatgpt-docker.md](./chatgpt-docker.md) for `chatgpt` and `codex-app`.
 
 Set the model beside the client. The `api` client infers which API serves it from the model id (`claude-*`, `gpt-*`, `gemini-*` and so on; a `claude-*@date` id is Vertex). Set `provider` only to override that, for example to route through Vertex or a gateway.
 
