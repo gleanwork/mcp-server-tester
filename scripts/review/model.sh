@@ -27,6 +27,16 @@ with_timeout() {
 }
 
 case "$runner" in
+  claude) key=ANTHROPIC_API_KEY ;;
+  codex) key=OPENAI_API_KEY ;;
+  *) echo "unknown runner: $runner" >&2; exit 2 ;;
+esac
+if [ -z "${!key:-}" ]; then
+  echo "$key is not set; add it as a repo secret. The $runner slot cannot run." >&2
+  exit 1
+fi
+
+case "$runner" in
   claude)
     # shellcheck disable=SC2054 # the commas are part of the tool list
     args=(-p --bare --output-format json
@@ -51,9 +61,7 @@ case "$runner" in
 
   codex)
     # codex reads its key from its own login store, not the environment.
-    if [ -n "${OPENAI_API_KEY:-}" ]; then
-      printenv OPENAI_API_KEY | codex login --with-api-key >/dev/null
-    fi
+    printenv OPENAI_API_KEY | codex login --with-api-key >/dev/null
     args=(exec --sandbox read-only --ephemeral --ignore-user-config --ignore-rules
       --color never --output-schema "$schema"
       --output-last-message "$work/last.json")

@@ -44,7 +44,7 @@ else
 fi
 EOF
 chmod +x "$tmp/bin/claude" "$tmp/bin/codex"
-export PATH="$tmp/bin:$PATH" FAKE_LOG="$tmp" BASE=main PR=1 OPENAI_API_KEY=sk-test
+export PATH="$tmp/bin:$PATH" FAKE_LOG="$tmp" BASE=main PR=1 OPENAI_API_KEY=sk-test ANTHROPIC_API_KEY=sk-ant-test
 
 # --- a repo with origin/main and one PR commit -------------------------------
 repo="$tmp/repo"
@@ -84,6 +84,9 @@ jq '.findings = []' "$tmp/claude.json" >"$tmp/empty.json"
 rm -f "$tmp/codex.args"
 "$here/verify-slot.sh" "$tmp/empty.json" >"$tmp/empty.v.json" && [ ! -e "$tmp/codex.args" ] \
   && ok "empty slot verified without a model call" || bad "empty slot"
+
+if ANTHROPIC_API_KEY='' "$here/run-slot.sh" claude correctness >/dev/null 2>"$tmp/err"; then bad "missing key should fail"; else
+  grep -q 'ANTHROPIC_API_KEY is not set' "$tmp/err" && ok "missing key fails with a clear message" || bad "missing key message: $(cat "$tmp/err")"; fi
 
 # --- failures are loud ---------------------------------------------------------
 if FAKE_FAIL=1 "$here/run-slot.sh" claude correctness >"$tmp/out" 2>/dev/null; then bad "claude error should fail the slot"; else ok "claude error fails the slot"; fi
