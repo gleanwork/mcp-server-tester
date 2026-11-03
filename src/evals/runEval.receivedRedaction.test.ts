@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resumeRun, runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
 
 const mock = (name: string) =>
   fileURLToPath(new URL(`../../tests/mocks/${name}`, import.meta.url));
@@ -16,6 +17,7 @@ afterEach(async () => {
   resetPluginsForTests();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   delete (globalThis as Record<symbol, unknown>)[SNAPSHOT];
   await Promise.all(
     dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))
@@ -96,6 +98,59 @@ describe('a trial a worker sends back', () => {
     const stored = await allText(result.outputDir);
     expect(stored).toContain('the key is [REDACTED]');
     expect(stored).not.toContain(KEY);
+  });
+
+  it('has the connector tokens handed to the worker redacted', async () => {
+    const f = await leakyEval(['alpha']);
+    vi.stubEnv('MST_TOKENS_DIR', path.join(f.dir, 'tokens'));
+    // A client-credentials grant gives a new token each time: the one this
+    // machine starts with, then the one the worker asks for.
+    let grants = 0;
+    vi.stubGlobal('fetch', async () =>
+      Response.json({
+        access_token: `connector-token-${++grants}-abcdef`,
+        token_type: 'Bearer',
+        expires_in: 3600,
+      })
+    );
+    const connectors: Plugin = {
+      meta: { name: 'connector-plugin', namespace: 'notes' },
+      connectors: {
+        notes: {
+          url: 'https://notes.example.test/mcp',
+          auth: {
+            type: 'client-credentials',
+            tokenEndpoint: 'https://auth.example.test/token',
+            async client() {
+              return { clientId: 'client', clientSecret: 'client-secret' };
+            },
+          },
+        },
+      },
+    };
+    const config = JSON.parse(await fs.readFile(f.configPath, 'utf8'));
+    await fs.writeFile(
+      f.configPath,
+      JSON.stringify({
+        ...config,
+        servers: { notes: { connector: 'notes/connector/notes' } },
+      })
+    );
+
+    const result = await runEval({
+      configPath: f.configPath,
+      rootDir: f.dir,
+      outputDir: f.outputDir,
+      plugins: [connectors],
+      env: 'leaky/env/unredacted',
+      secretsFile: f.secretsFile,
+      report: false,
+    });
+
+    expect(grants).toBe(2);
+    const stored = await allText(result.outputDir);
+    expect(stored).toContain('a token is [REDACTED]');
+    expect(stored).not.toContain('connector-token-');
   });
 
   it('is redacted when a resume collects it', async () => {
