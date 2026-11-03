@@ -50,9 +50,7 @@ names the values ChatGPT accepts.
 Both clients run a variant's cases in one app, with one set of settings. A case
 that sets its own `model` or a `clientOptions` value that differs from its
 variant's fails when its dataset loads, before anything runs, and so does a case
-that names another client. In a variant on another client, the cases that name
-one of these clients must agree on its settings. Use a variant for a different
-setting.
+that names another client. Use a variant for a different setting.
 
 On macOS, MST starts and stops ChatGPT through a small Swift helper that it
 compiles with no caller credentials. The helper launches the app with the test

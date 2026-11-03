@@ -131,6 +131,7 @@ import { carryLabels } from './labels.js';
 import {
   collectInEnvironment,
   gatheredQueues,
+  requestGroups,
   type GatheredResults,
   type RequestGroup,
   type ShardRecord,
@@ -452,10 +453,12 @@ function resolveClient(
 }
 
 /**
- * The built-in clients that run a variant's cases on them as one batch in
- * one app (`requireIdenticalClientSettings` checks it when the batch
- * starts), so those cases all run with the same client settings. A case on
- * another client runs in that client's own batch.
+ * The built-in clients that run a variant's cases as one batch in one app
+ * (`requireIdenticalClientSettings` checks it when the batch starts), so
+ * every case runs with the variant's client settings. A case that names one
+ * of them in a variant on another client runs on its own locally and in a
+ * batch of the cases with its settings in an environment, so it needs no
+ * check.
  */
 const ONE_APP_PER_VARIANT: ReadonlySet<string> = new Set([
   'cowork',
@@ -464,30 +467,36 @@ const ONE_APP_PER_VARIANT: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Throws when a case's client settings differ from `reference`'s, the
- * settings the variant's other cases on the same client run with, on a
- * client that runs them in one app (ADR 0011). Both are as their schemas
- * parsed them, so a case that repeats the settings passes. The message names
- * the fields that differ.
+ * Throws when a case in a variant on a client that runs every case of a
+ * variant in one app (ADR 0011) names another client, or sets client settings
+ * that differ from the variant's. Both are as their schemas parsed them, so a
+ * case that repeats the variant's settings passes. The message names the
+ * fields that differ.
  */
-function assertCaseUsesBatchClient(
-  reference: { config: ClientConfig; source: string },
+function assertCaseUsesVariantClient(
+  variantClient: ClientConfig,
   caseClient: ClientConfig,
   context: string
 ): void {
-  const client = bareClientName(caseClient.type);
+  const client = bareClientName(variantClient.type);
+  if (!ONE_APP_PER_VARIANT.has(client)) return;
+  // prepareClientBatch refuses to mix client types in a batch.
+  if (bareClientName(caseClient.type) !== client)
+    throw new Error(
+      `${context} sets its own \`client\`, which client "${client}" can't honour: it runs a variant's cases in one app. Use a variant for a different client.`
+    );
   const fields = [
-    ...new Set([...Object.keys(reference.config), ...Object.keys(caseClient)]),
+    ...new Set([...Object.keys(variantClient), ...Object.keys(caseClient)]),
   ]
     .filter(
       (key) =>
         key !== 'type' &&
-        !isDeepStrictEqual(reference.config[key], caseClient[key])
+        !isDeepStrictEqual(variantClient[key], caseClient[key])
     )
     .map((key) => (key === 'model' ? 'model' : `clientOptions.${key}`));
   if (!fields.length) return;
   throw new Error(
-    `${context} sets its own ${fields.map((field) => `\`${field}\``).join(', ')}, which client "${client}" can't honour: it runs a variant's cases in one app, with one set of settings, and ${reference.source} sets them differently. Use a variant for a different setting.`
+    `${context} sets its own ${fields.map((field) => `\`${field}\``).join(', ')}, which client "${client}" can't honour: it runs a variant's cases in one app, with the variant's settings. Use a variant for a different setting.`
   );
 }
 
@@ -514,12 +523,6 @@ function assertCaseClients(
     );
     let variantClient: ClientConfig | undefined;
     for (const dataset of datasets) {
-      // Per one-app client: the settings its batch for this variant and
-      // dataset runs with.
-      const batchClients = new Map<
-        string,
-        { config: ClientConfig; source: string }
-      >();
       for (const evalCase of dataset.cases) {
         const casePatch = clientPatchOf(evalCase);
         if (!casePatch) continue;
@@ -536,32 +539,7 @@ function assertCaseClients(
           ...(os ? { os } : {}),
         });
         variantClient ??= parseClientConfig(declaration, rawConfig);
-        const client = bareClientName(caseClient.type);
-        const variantType = bareClientName(variantClient.type);
-        // A one-app variant's batch can't hold another client's cases
-        // (prepareClientBatch refuses to mix client types).
-        if (ONE_APP_PER_VARIANT.has(variantType) && client !== variantType)
-          throw new Error(
-            `${context} sets its own \`client\`, which client "${variantType}" can't honour: it runs a variant's cases in one app. Use a variant for a different client.`
-          );
-        if (!ONE_APP_PER_VARIANT.has(client)) continue;
-        // Cases that set nothing run with the variant's settings.
-        if (
-          !batchClients.has(client) &&
-          bareClientName(variantClient.type) === client
-        )
-          batchClients.set(client, {
-            config: variantClient,
-            source: 'the variant',
-          });
-        const reference = batchClients.get(client);
-        if (reference)
-          assertCaseUsesBatchClient(reference, caseClient, context);
-        else
-          batchClients.set(client, {
-            config: caseClient,
-            source: `case "${evalCase.id}"`,
-          });
+        assertCaseUsesVariantClient(variantClient, caseClient, context);
       }
     }
   }
@@ -2133,11 +2111,7 @@ async function evaluate(
                 ]
               )
           );
-          for (const type of new Set(requests.map((r) => r.config.type)))
-            groups.push({
-              variant,
-              requests: requests.filter((r) => r.config.type === type),
-            });
+          groups.push(...requestGroups(variant, requests));
         }
       }
       const { plugins: workerPlugins, pluginPackages } = workerPluginsOf(

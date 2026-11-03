@@ -169,14 +169,15 @@ describe('maxActions at load', () => {
     "on ChatGPT, fails outside the range of the host's OS for local: %s",
     async (host, name, fallback) => {
       vi.spyOn(process, 'platform', 'get').mockReturnValue(host);
-      for (const client of ['chatgpt', 'codex-app']) {
-        const ok = await at('variant', client, { maxActions: 64 });
-        await expect(ok()).resolves.toBeDefined();
-        const over = await at('variant', client, { maxActions: 65 });
-        await expect(over()).rejects.toThrow(
-          `Variant "only": client "${client}" can't run as configured. maxActions is 65, and on ${name}, where this trial runs, it is 1 to 64 (default ${fallback}).`
-        );
-      }
+      for (const level of ['eval', 'variant'] as const)
+        for (const client of ['chatgpt', 'codex-app']) {
+          const ok = await at(level, client, { maxActions: 64 });
+          await expect(ok()).resolves.toBeDefined();
+          const over = await at(level, client, { maxActions: 65 });
+          await expect(over()).rejects.toThrow(
+            `client "${client}" can't run as configured. maxActions is 65, and on ${name}, where this trial runs, it is 1 to 64 (default ${fallback}).`
+          );
+        }
     }
   );
 
@@ -200,7 +201,7 @@ describe('a case override a desktop client runs in one app', () => {
       const run = await fixture({ client, caseFields: { model: 'other' } });
       // A plugin's environment too: nothing about the OS decides it.
       await expect(run({ env: 'test/env/vm' })).rejects.toThrow(
-        `Case "one" in variant "only" sets its own \`model\`, which client "${client}" can't honour: it runs a variant's cases in one app, with one set of settings, and the variant sets them differently. Use a variant for a different setting.`
+        `Case "one" in variant "only" sets its own \`model\`, which client "${client}" can't honour: it runs a variant's cases in one app, with the variant's settings. Use a variant for a different setting.`
       );
     }
   );
@@ -242,27 +243,17 @@ describe('a case override a desktop client runs in one app', () => {
   );
 
   it.each(DESKTOP_CLIENTS)(
-    'loads cases on %s in an api variant when they agree, and fails when they differ',
+    'loads cases on %s with different settings in an api variant: each runs in its own batch',
     async (client) => {
-      const agree = await fixture({
+      const run = await fixture({
         client: 'api',
         cases: [
           { id: 'plain' },
           { id: 'a', client, model: 'm', clientOptions: { timeout: 1000 } },
-          { id: 'b', client, model: 'm', clientOptions: { timeout: 1000 } },
-        ],
-      });
-      await expect(agree()).resolves.toBeDefined();
-      const differ = await fixture({
-        client: 'api',
-        cases: [
-          { id: 'a', client, model: 'm', clientOptions: { timeout: 1000 } },
           { id: 'b', client, model: 'm', clientOptions: { timeout: 2000 } },
         ],
       });
-      await expect(differ()).rejects.toThrow(
-        `Case "b" in variant "only" sets its own \`clientOptions.timeout\`, which client "${client}" can't honour: it runs a variant's cases in one app, with one set of settings, and case "a" sets them differently.`
-      );
+      await expect(run()).resolves.toBeDefined();
     }
   );
 
