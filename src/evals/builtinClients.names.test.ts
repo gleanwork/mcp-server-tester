@@ -47,6 +47,33 @@ describe('built-in client names', () => {
     ).toThrow('Client "mst" is now "api".');
   });
 
+  it('the full name mst/client/mst fails naming mst/client/api', () => {
+    const config = {
+      name: 'm',
+      datasets: [{ type: 'file', path: 'x.json' }],
+    };
+    const renamed = 'Client "mst/client/mst" is now "mst/client/api".';
+    expect(() => getClient('mst/client/mst')).toThrow(renamed);
+    expect(() =>
+      validateEvalConfig({ ...config, client: 'mst/client/mst' })
+    ).toThrow(renamed);
+    expect(() =>
+      validateEvalConfig({
+        ...config,
+        client: 'api',
+        variants: [{ name: 'old', client: 'mst/client/mst' }],
+      })
+    ).toThrow(renamed);
+    expect(() =>
+      playwrightClientOf(
+        { id: 'c', input: 'hi', client: 'mst/client/mst' },
+        undefined
+      )
+    ).toThrow(renamed);
+    // The current full name still works.
+    expect(getClient('mst/client/api')).toBe(getClient('api'));
+  });
+
   it('a stored run that says mst reads as api', () => {
     expect(storedClientName('mst')).toBe('api');
     expect(storedClientName('api')).toBe('api');

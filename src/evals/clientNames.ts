@@ -31,15 +31,23 @@ const STORED_CLIENT_NAMES: Readonly<Record<string, string>> = {
   mst: 'api',
 };
 
+/** How a built-in client's full name starts: `mst/client/api` is `api`. */
+const BUILTIN_CLIENT_PREFIX = 'mst/client/';
+
 /**
  * A client reference, checked: a renamed built-in fails naming its
- * replacement; anything else is returned unchanged.
+ * replacement, by its full name too (`mst/client/mst`); anything else is
+ * returned unchanged.
  */
 export function resolveClientName(reference: string): string {
-  if (Object.hasOwn(RENAMED_CLIENTS, reference))
+  const full = reference.startsWith(BUILTIN_CLIENT_PREFIX);
+  const name = full ? reference.slice(BUILTIN_CLIENT_PREFIX.length) : reference;
+  if (Object.hasOwn(RENAMED_CLIENTS, name)) {
+    const current = RENAMED_CLIENTS[name]!;
     throw new Error(
-      `Client "${reference}" is now "${RENAMED_CLIENTS[reference]}".`
+      `Client "${reference}" is now "${full ? BUILTIN_CLIENT_PREFIX + current : current}".`
     );
+  }
   return reference;
 }
 
