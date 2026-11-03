@@ -25,6 +25,78 @@ interface StoredTrace {
   trace: { events: TraceEvent[] };
 }
 
+/** Every file under `dir`, as text. */
+async function allText(dir: string): Promise<string> {
+  const entries = await fs.readdir(dir, {
+    recursive: true,
+    withFileTypes: true,
+  });
+  const files = entries.filter((entry) => entry.isFile());
+  const texts = await Promise.all(
+    files.map((entry) =>
+      fs.readFile(path.join(entry.parentPath, entry.name), 'utf8')
+    )
+  );
+  return texts.join('\n');
+}
+
+describe('connector tokens in a local run', () => {
+  it.each(['sc/client/leaky', 'sc/client/leaky-batch'])(
+    'replaces a connector token %s quotes, early batch traces included',
+    async (client) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-conn-redact-'));
+      dirs.push(dir);
+      vi.stubEnv('MST_TOKENS_DIR', path.join(dir, 'tokens'));
+      const store = localCredentialStore(path.join(dir, 'grants'));
+      await store.put('sc.notes', {
+        version: 1,
+        type: 'oauth',
+        tokenEndpoint: 'https://auth.example/token',
+        clientId: 'c',
+        refreshToken: 'refresh',
+        accessToken: 'notes-token-1',
+        accessTokenExpiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        scopes: [],
+        resource: 'https://notes.example/mcp',
+        signedInAt: new Date().toISOString(),
+      });
+      await fs.writeFile(
+        path.join(dir, 'cases.json'),
+        JSON.stringify({
+          name: 'cases',
+          cases: [{ id: 'alpha', input: 'alpha', trials: 2 }],
+        })
+      );
+      const configPath = path.join(dir, 'eval.json');
+      await fs.writeFile(
+        configPath,
+        JSON.stringify({
+          name: 'connector-redaction',
+          plugins: [mock('shardConnectorPlugin.ts')],
+          client,
+          datasets: ['./cases.json'],
+          servers: { notes: { connector: 'sc/connector/notes' } },
+          // Full traces: the answer and telemetry content are stored.
+          redactStoredResponses: false,
+        })
+      );
+
+      const result = await runEval({
+        configPath,
+        rootDir: dir,
+        outputDir: path.join(dir, 'out'),
+        credentialStore: store,
+        report: false,
+      });
+
+      const stored = await allText(result.outputDir);
+      expect(stored).toContain('the token is [REDACTED]');
+      expect(stored).not.toContain('notes-token-1');
+    }
+  );
+});
+
 describe('connector servers and tool metadata in an environment', () => {
   it("runs on a worker that expands the connector itself, gets its token from the coordinator, and applies the variant's tool metadata", async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});

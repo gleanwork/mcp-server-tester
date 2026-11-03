@@ -379,19 +379,23 @@ export async function runDesktopBatch<Session>(
     } finally {
       const lifecycle = adapter.batchTelemetry?.(session);
       for (const [index, result] of results.entries()) {
-        // Nothing the client reports leaves unredacted.
-        const redacted = redactedClientRun(result, secrets);
-        if (redacted.error !== undefined) result.error = redacted.error;
-        if (redacted.ending) result.ending = redacted.ending;
-        result.telemetry = {
-          ...result.telemetry,
-          ...(lifecycle ? { batchLifecycle: lifecycle } : {}),
-          batchCase: {
-            index,
-            caseId: requests[index]!.caseId,
-            count: requests.length,
+        // Nothing the client reports leaves unredacted: the whole result,
+        // with the batch's own telemetry, is what the batch returns.
+        results[index] = redactedClientRun(
+          {
+            ...result,
+            telemetry: {
+              ...result.telemetry,
+              ...(lifecycle ? { batchLifecycle: lifecycle } : {}),
+              batchCase: {
+                index,
+                caseId: requests[index]!.caseId,
+                count: requests.length,
+              },
+            },
           },
-        };
+          secrets
+        );
       }
       await lease.release(cleanupFailed);
     }

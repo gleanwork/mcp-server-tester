@@ -51,8 +51,9 @@ export default {
         await called('where', trial.text);
         return {
           score: trial.text?.includes('then') ? 1 : 0,
-          // The key itself, as a careless judge might echo it.
-          reasoning: `pid ${process.pid}; key ${process.env[KEY] ?? 'unset'}`,
+          // The key itself, as a careless judge might echo it, and a
+          // setting from the same secrets file.
+          reasoning: `pid ${process.pid}; key ${process.env[KEY] ?? 'unset'}; region ${process.env.GRADE_TEST_REGION ?? 'unset'}`,
         };
       },
     },

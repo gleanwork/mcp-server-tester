@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { CaseExecution } from './caseExecution.js';
 import type { EvalCase } from './datasetTypes.js';
 import type { ClientRunResult, TraceEvent } from './evalFrameworkTypes.js';
+import { redactedClientRun } from './clientSecrets.js';
 import {
   readSimulatedWrites,
   type SimulatedWriteRecord,
@@ -47,16 +48,34 @@ function markSimulatedWrites(
   return marked;
 }
 
-/** Every record in `files`, each keyed by its file and position. */
+/** A record's arguments redacted as a trace event's arguments are. */
+function redactedArguments(args: unknown, secrets: readonly string[]): unknown {
+  if (args === undefined || secrets.length === 0) return args;
+  const [event] = redactedClientRun(
+    { events: [{ arguments: args }] },
+    secrets
+  ).events;
+  return event?.arguments;
+}
+
+/**
+ * Every record in `files`, each keyed by its file and position, with its
+ * arguments redacted with `secrets`: traces are matched after they are
+ * redacted, so a write with a secret in its arguments is still found.
+ */
 async function readRecords(
-  files: readonly string[]
+  files: readonly string[],
+  secrets: readonly string[]
 ): Promise<Array<{ key: string; record: SimulatedWriteRecord }>> {
   return (
     await Promise.all(
       files.map(async (file) =>
         (await readSimulatedWrites(file)).map((record, index) => ({
           key: `${file}\0${index}`,
-          record,
+          record: {
+            ...record,
+            arguments: redactedArguments(record.arguments, secrets),
+          },
         }))
       )
     )
@@ -67,33 +86,41 @@ async function readRecords(
  * A client's result with its simulated writes marked: what a shard's worker
  * does before it sends a result back, because its proxies record writes on
  * its own machine. `used` holds the records already matched, across trials.
+ * `result` is redacted with `secrets` first, so it matches records redacted
+ * the same way, whatever the client redacted itself (a desktop batch does).
  */
 export async function markResultSimulatedWrites(
   result: ClientRunResult,
   files: readonly string[],
-  used: Set<string>
+  used: Set<string>,
+  secrets: readonly string[] = []
 ): Promise<ClientRunResult> {
-  if (files.length === 0) return result;
-  const records = await readRecords(files);
-  if (records.length === 0) return result;
-  const events = result.events.map((event) => ({ ...event }));
+  const redacted = redactedClientRun(result, secrets);
+  if (files.length === 0) return redacted;
+  const records = await readRecords(files, secrets);
+  if (records.length === 0) return redacted;
+  const events = redacted.events.map((event) => ({ ...event }));
   markSimulatedWrites(events, records, used);
-  return { ...result, events };
+  return { ...redacted, events };
 }
 
 /**
  * `executor`, with each completed trial's simulated writes marked. `files`
  * are the proxies' records (see `ConnectorLaunchContext.simulateWrites`).
+ * `executor` returns redacted traces, so each record's arguments are
+ * redacted with the same `secrets` before they are matched: a write with a
+ * secret in its arguments is still found.
  */
 export function withSimulatedWriteMarks(
   executor: Executor,
-  files: readonly string[]
+  files: readonly string[],
+  secrets: () => readonly string[] = () => []
 ): Executor {
   const used = new Set<string>();
   return async (evalCase) => {
     const execution = await executor(evalCase);
     if (execution.kind !== 'completed') return execution;
-    const records = await readRecords(files);
+    const records = await readRecords(files, secrets());
     if (records.length === 0) return execution;
     // The trace and the response may hold the same event objects, or copies.
     const { toolCalls } = execution.response as { toolCalls?: unknown };
