@@ -475,16 +475,18 @@ describe('ChatGPT V2 batch client', () => {
     expect(chatgptOptionIssues({ maxActions: 65 }, 'win32')).toEqual([]);
   });
   it.each([
-    ['darwin', CHATGPT_CLIENT, 32],
-    ['linux', CHATGPT_LINUX_CLIENT, 24],
+    ['darwin', 'chatgpt', CHATGPT_CLIENT, 32],
+    ['linux', 'chatgpt', CHATGPT_LINUX_CLIENT, 24],
+    ['darwin', 'codex-app', CODEX_APP_CLIENT, 32],
+    ['linux', 'codex-app', CODEX_APP_LINUX_CLIENT, 24],
   ] as const)(
-    "gives the driver the trial OS's default maxActions on %s, or the one set",
-    async (os, client, fallback) => {
+    "gives the driver the trial OS's default maxActions on %s for %s, or the one set",
+    async (os, type, client, fallback) => {
       const env = os === 'linux' ? { env: linuxEnvironment(home.value) } : {};
       const batch = requests().slice(0, 1);
-      batch[0]!.config = { ...config, ...env };
+      batch[0]!.config = { ...config, type, ...env };
       await client.runBatch!(batch, context);
-      batch[0]!.config = { ...config, ...env, maxActions: 9 };
+      batch[0]!.config = { ...config, type, ...env, maxActions: 9 };
       await client.runBatch!(batch, context);
       expect(
         vi

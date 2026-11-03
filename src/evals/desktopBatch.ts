@@ -36,6 +36,7 @@ import {
   redactedClientRun,
 } from './clientSecrets.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
+import { stableJson } from '../skills/skillEntry.js';
 
 /**
  * Failed cases in a row after which a batch stops submitting. A reset that
@@ -423,13 +424,16 @@ export async function runDesktopBatch<Session>(
   return results;
 }
 
-/** Throws unless every client config in a batch is the same. */
+/**
+ * Throws unless every client config in a batch is the same. Key order doesn't
+ * count, as it doesn't where the eval groups requests into batches.
+ */
 export function requireIdenticalClientSettings(
   client: string,
   configs: readonly unknown[]
 ): void {
-  const first = JSON.stringify(configs[0]);
-  if (configs.some((config) => JSON.stringify(config) !== first))
+  const first = stableJson(configs[0]);
+  if (configs.some((config) => stableJson(config) !== first))
     throw new Error(
       `${client} batch requires identical client settings for all cases.`
     );

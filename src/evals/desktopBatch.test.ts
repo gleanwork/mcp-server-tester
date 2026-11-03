@@ -727,4 +727,13 @@ describe('requireIdenticalClientSettings', () => {
       requireIdenticalClientSettings('Fake', [{ a: 1 }, { a: 2 }])
     ).toThrow('Fake batch requires identical client settings for all cases.');
   });
+
+  it('ignores key order, as the batches are grouped', () => {
+    expect(() =>
+      requireIdenticalClientSettings('Fake', [
+        { model: 'm', env: { A: '1', B: '2' } },
+        { env: { B: '2', A: '1' }, model: 'm' },
+      ])
+    ).not.toThrow();
+  });
 });
