@@ -1,5 +1,4 @@
 /** Desktop driver contracts. Runtime provisioning belongs to the caller/platform. */
-export type CoworkDriverProvider = 'anthropic-computer-use' | 'linux-desktop';
 
 export interface CoworkDriverOptions {
   deadlineAt: number;

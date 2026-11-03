@@ -28,9 +28,11 @@ import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
 import {
   LINUX_CHATGPT_PLATFORM,
   MAC_CHATGPT_PLATFORM,
+  chatgptPlatformFor,
   type ChatgptPlatform,
 } from './chatgptSetup/platform.js';
 import type { ChatgptSurface } from './chatgpt/driver.js';
+import { COMPUTER_USE_PROVIDER_GONE, osName } from './desktopOS.js';
 
 /**
  * A product the ChatGPT desktop app runs, and so a client (ADR 0011):
@@ -104,7 +106,10 @@ const schemaOf = (product: DesktopProduct) =>
       correlation: z
         .enum(['exact_prompt', 'prompt_marker'])
         .default('exact_prompt'),
-      computerUseProvider: z.literal('anthropic-computer-use').optional(),
+      /** Gone: the trial's OS decides (ADR 0011). */
+      computerUseProvider: z
+        .never({ message: COMPUTER_USE_PROVIDER_GONE })
+        .optional(),
       nativeMaxActions: z
         .number()
         .int()
@@ -130,6 +135,44 @@ const SCHEMAS = {
   'codex-app': schemaOf(CODEX_APP_PRODUCT),
 };
 
+/**
+ * The ChatGPT app's options that the OS a trial runs on can't use. macOS runs
+ * Computer Use (`computerUseModel`, `computerUseMaxActions`) on the installed
+ * app; Linux runs the accessibility automation (`nativeMaxActions`) in a
+ * fresh profile, the only one `plugins` install into. Checked when the eval
+ * config loads, when MST knows the OS its trials run on, and again on the
+ * machine that runs them.
+ */
+export function chatgptOptionIssues(
+  options: {
+    computerUseModel?: unknown;
+    computerUseMaxActions?: unknown;
+    nativeMaxActions?: unknown;
+    plugins?: readonly unknown[];
+  },
+  os: NodeJS.Platform
+): string[] {
+  const issues: string[] = [];
+  const on = osName(os);
+  if (
+    os !== 'darwin' &&
+    (options.computerUseModel !== undefined ||
+      options.computerUseMaxActions !== undefined)
+  )
+    issues.push(
+      `computerUseModel and computerUseMaxActions are for Computer Use on macOS, and this trial runs on ${on}, which has no planner. On Linux, the action budget is nativeMaxActions.`
+    );
+  if (os !== 'linux' && options.nativeMaxActions !== undefined)
+    issues.push(
+      `nativeMaxActions is the action budget on Linux, and this trial runs on ${on}. On macOS, it is computerUseMaxActions.`
+    );
+  if (os !== 'linux' && options.plugins?.length)
+    issues.push(
+      `plugins install into the fresh profile ChatGPT runs on Linux, and this trial runs on ${on}, which runs the installed app.`
+    );
+  return issues;
+}
+
 async function runBatch(
   requests: ClientBatchRequest[],
   context: ClientRunContext,
@@ -149,6 +192,9 @@ async function runBatch(
   if (requests.some((request) => !request.input.prompt.trim()))
     throw new Error(`${label} requires a non-empty input.`);
   requireIdenticalClientSettings(label, configs);
+  const osIssues = chatgptOptionIssues(configs[0]!, platform.os);
+  if (osIssues.length)
+    throw new Error(`${label} can't run this trial: ${osIssues.join(' ')}`);
   const credentialEnv = requests.map((request, index) => ({
     ...process.env,
     ...context.env,
@@ -208,7 +254,11 @@ async function runBatch(
           computerUseModel: config.computerUseModel,
           surface: product.surface,
           nativeMaxActions: config.nativeMaxActions,
-          ...platform.clientOptions(config, environment),
+          // macOS plans with Computer Use; Linux launches the app in the
+          // environment it is given.
+          ...(platform.os === 'darwin'
+            ? { computerUseMaxActions: config.computerUseMaxActions ?? 32 }
+            : { desktopEnvironment: environment }),
           computerUseEnvironment: environment,
         },
       };
@@ -415,10 +465,15 @@ const PRODUCT_DEFINITIONS: Record<
   },
 };
 
+/**
+ * A client of the ChatGPT app. Without `platform`, how it runs follows from
+ * the OS of the machine that runs the batch, read when the batch starts.
+ */
 function desktopClient(
-  platform: ChatgptPlatform,
-  product: DesktopProduct
+  product: DesktopProduct,
+  platform?: ChatgptPlatform
 ): ClientDefinition {
+  const platformNow = () => platform ?? chatgptPlatformFor(process.platform);
   return {
     schema: SCHEMAS[product.client],
     ...PRODUCT_DEFINITIONS[product.client],
@@ -428,14 +483,14 @@ function desktopClient(
     // One ChatGPT app window drives one conversation at a time.
     maxConcurrency: 1,
     runBatch(requests, context) {
-      return runBatch(requests, context, platform, product);
+      return runBatch(requests, context, platformNow(), product);
     },
     async run(input, config, context) {
       return (
         await runBatch(
           [{ caseId: 'single', trial: 0, input, config }],
           context,
-          platform,
+          platformNow(),
           product
         )
       )[0]!;
@@ -443,19 +498,26 @@ function desktopClient(
   };
 }
 
+/** The built-in `chatgpt` and `codex-app`: the trial's machine picks the OS. */
+export const CHATGPT_APP_CLIENTS = {
+  chatgpt: desktopClient(CHATGPT_PRODUCT),
+  'codex-app': desktopClient(CODEX_APP_PRODUCT),
+} as const;
+
+// Each product pinned to one OS, whatever this machine runs.
 export const CHATGPT_LINUX_CLIENT = desktopClient(
-  LINUX_CHATGPT_PLATFORM,
-  CHATGPT_PRODUCT
+  CHATGPT_PRODUCT,
+  LINUX_CHATGPT_PLATFORM
 );
 export const CHATGPT_CLIENT = desktopClient(
-  MAC_CHATGPT_PLATFORM,
-  CHATGPT_PRODUCT
+  CHATGPT_PRODUCT,
+  MAC_CHATGPT_PLATFORM
 );
 export const CODEX_APP_LINUX_CLIENT = desktopClient(
-  LINUX_CHATGPT_PLATFORM,
-  CODEX_APP_PRODUCT
+  CODEX_APP_PRODUCT,
+  LINUX_CHATGPT_PLATFORM
 );
 export const CODEX_APP_CLIENT = desktopClient(
-  MAC_CHATGPT_PLATFORM,
-  CODEX_APP_PRODUCT
+  CODEX_APP_PRODUCT,
+  MAC_CHATGPT_PLATFORM
 );

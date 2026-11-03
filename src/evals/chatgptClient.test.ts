@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import type * as OsModule from 'node:os';
 import { join } from 'node:path';
 import {
+  CHATGPT_APP_CLIENTS,
   CHATGPT_CLIENT,
   CHATGPT_LINUX_CLIENT,
   CODEX_APP_CLIENT,
   CODEX_APP_LINUX_CLIENT,
+  chatgptOptionIssues,
 } from './chatgptClient.js';
 import { runExternalClientCase } from './externalClient/runtime.js';
 import { clientRunToExecution } from './clientTrace.js';
@@ -122,6 +124,7 @@ beforeEach(async () => {
     }));
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await rm(home.value, { recursive: true, force: true });
 });
@@ -162,7 +165,7 @@ describe('ChatGPT V2 batch client', () => {
       expect(prompt).toMatch(/^Answer (one|two)$/);
       expect(external.driver).toBe('openai.chatgpt.agent.desktop-app.linux');
       expect(external.options?.surface).toBe('codex');
-      expect(external.options?.computerUseProvider).toBeUndefined();
+      expect(external.options).not.toHaveProperty('computerUseMaxActions');
       expect(external.options?.desktopEnvironment).toMatchObject({
         HOME: home.value,
       });
@@ -401,15 +404,88 @@ describe('ChatGPT V2 batch client', () => {
       vi.mocked(runExternalClientCase).mock.calls[0]![1].options?.environment
     ).not.toHaveProperty('ANTHROPIC_API_KEY');
   });
-  it('rejects deterministic and Linux UI providers for this macOS client', async () => {
-    const batch = requests();
-    batch[0]!.config = {
-      ...config,
-      computerUseProvider: 'linux-desktop',
-    };
-    await expect(CHATGPT_CLIENT.runBatch!(batch, context)).rejects.toThrow();
-    expect(runExternalClientCase).not.toHaveBeenCalled();
+  it.each([
+    ['chatgpt', 'anthropic-computer-use'],
+    ['chatgpt', 'linux-desktop'],
+    ['codex-app', 'anthropic-computer-use'],
+  ] as const)(
+    '%s rejects computerUseProvider %s: the trial machine decides',
+    async (type, provider) => {
+      const client = type === 'chatgpt' ? CHATGPT_CLIENT : CODEX_APP_CLIENT;
+      const batch = requests().slice(0, 1);
+      batch[0]!.config = { ...config, type, computerUseProvider: provider };
+      await expect(client.runBatch!(batch, context)).rejects.toThrow(
+        '`clientOptions.computerUseProvider` is gone: remove it. The OS of the machine that runs the trial decides how a desktop client runs'
+      );
+      expect(lifecycle.prepare).not.toHaveBeenCalled();
+      expect(runExternalClientCase).not.toHaveBeenCalled();
+    }
+  );
+  it.each([
+    ['darwin', 'openai.chatgpt.agent.desktop-app.macos'],
+    ['linux', 'openai.chatgpt.agent.desktop-app.linux'],
+  ] as const)(
+    "runs a config parsed on another OS with the trial machine's driver, on %s",
+    async (platformName, driver) => {
+      // The coordinator parses the config on the other OS.
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(
+        platformName === 'linux' ? 'darwin' : 'linux'
+      );
+      const parsed = CHATGPT_APP_CLIENTS.chatgpt.schema.parse({
+        ...config,
+        ...(platformName === 'linux'
+          ? { env: linuxEnvironment(home.value) }
+          : {}),
+      }) as Record<string, unknown>;
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(platformName);
+      const batch = requests().slice(0, 1);
+      batch[0]!.config = { ...parsed, type: 'chatgpt' };
+      await CHATGPT_APP_CLIENTS.chatgpt.runBatch!(batch, context);
+      expect(runExternalClientCase).toHaveBeenCalledWith(
+        'Answer one',
+        expect.objectContaining({ driver }),
+        expect.anything()
+      );
+    }
+  );
+  it('checks the options each OS uses against the OS it is given', () => {
+    const macOnly = { computerUseModel: 'planner', computerUseMaxActions: 8 };
+    const linuxOnly = { nativeMaxActions: 8, plugins: [{}] };
+    expect(chatgptOptionIssues(macOnly, 'darwin')).toEqual([]);
+    expect(chatgptOptionIssues(linuxOnly, 'linux')).toEqual([]);
+    expect(chatgptOptionIssues(macOnly, 'linux')).toEqual([
+      'computerUseModel and computerUseMaxActions are for Computer Use on macOS, and this trial runs on Linux, which has no planner. On Linux, the action budget is nativeMaxActions.',
+    ]);
+    expect(chatgptOptionIssues(linuxOnly, 'darwin')).toEqual([
+      'nativeMaxActions is the action budget on Linux, and this trial runs on macOS. On macOS, it is computerUseMaxActions.',
+      'plugins install into the fresh profile ChatGPT runs on Linux, and this trial runs on macOS, which runs the installed app.',
+    ]);
   });
+  it.each([
+    ['macOS', CODEX_APP_CLIENT, { nativeMaxActions: 8 }, 'nativeMaxActions'],
+    [
+      'Linux',
+      CODEX_APP_LINUX_CLIENT,
+      { computerUseModel: 'planner' },
+      'computerUseModel and computerUseMaxActions',
+    ],
+  ] as const)(
+    'on %s, rejects an option the OS cannot use before the app is prepared',
+    async (platform, client, options, message) => {
+      const batch = requests().slice(0, 1);
+      batch[0]!.config = {
+        ...config,
+        type: 'codex-app',
+        ...options,
+        ...(platform === 'Linux' ? { env: linuxEnvironment(home.value) } : {}),
+      };
+      await expect(client.runBatch!(batch, context)).rejects.toThrow(
+        `Codex app can't run this trial: ${message}`
+      );
+      expect(lifecycle.prepare).not.toHaveBeenCalled();
+      expect(runExternalClientCase).not.toHaveBeenCalled();
+    }
+  );
   it('runs ordered cases and preserves model, evidence, timing and unknown cost', async () => {
     const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
     expect(runExternalClientCase).toHaveBeenCalledTimes(2);
@@ -427,7 +503,6 @@ describe('ChatGPT V2 batch client', () => {
       },
       options: {
         environment: { MST_CHATGPT_MCP_TOKEN_0: 'fixture-secret' },
-        computerUseProvider: 'anthropic-computer-use',
         computerUseMaxActions: 32,
       },
     });
@@ -732,14 +807,20 @@ describe('ChatGPT V2 batch client', () => {
         },
       },
     ];
+    // Plugins install into the fresh profile ChatGPT runs on Linux.
     const batch = requests()
       .slice(0, 1)
       .map((r) => ({
         ...r,
-        config: { ...config, plugins, requireMcpCalls: true },
+        config: {
+          ...config,
+          plugins,
+          requireMcpCalls: true,
+          env: linuxEnvironment(home.value),
+        },
         input: { ...r.input, servers: [] },
       }));
-    const [trace] = await CHATGPT_CLIENT.runBatch!(batch, context);
+    const [trace] = await CHATGPT_LINUX_CLIENT.runBatch!(batch, context);
     expect(trace!.error).toBeUndefined();
     expect(trace!.telemetry?.mcpSelection).toMatchObject({
       status: 'passed',
@@ -773,10 +854,11 @@ describe('ChatGPT V2 batch client', () => {
               },
             },
           ],
+          env: linuxEnvironment(home.value),
         },
       }));
     await expect(
-      CHATGPT_CLIENT.runBatch!(batch, context)
+      CHATGPT_LINUX_CLIENT.runBatch!(batch, context)
     ).rejects.toMatchObject({
       code: 'plugin_credential_missing',
     });

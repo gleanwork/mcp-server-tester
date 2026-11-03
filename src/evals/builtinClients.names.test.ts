@@ -2,12 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getClient, providerForModel } from './builtinClients.js';
 import { validateEvalConfig } from './configValidation.js';
 import { loadEvalConfigFromObject } from './evalConfig.js';
-import {
-  CHATGPT_CLIENT,
-  CHATGPT_LINUX_CLIENT,
-  CODEX_APP_CLIENT,
-  CODEX_APP_LINUX_CLIENT,
-} from './chatgptClient.js';
+import { CHATGPT_APP_CLIENTS } from './chatgptClient.js';
 import { storedClientName } from './clientNames.js';
 import { playwrightClientOf } from './caseExecution.js';
 import { runEvalCase } from './evalRunner.js';
@@ -149,15 +144,12 @@ describe('built-in client names', () => {
     ).toEqual(ran);
   });
 
-  it('chatgpt is the ChatGPT client for this platform', () => {
-    expect(getClient('chatgpt')).toBe(
-      process.platform === 'linux' ? CHATGPT_LINUX_CLIENT : CHATGPT_CLIENT
-    );
+  it('chatgpt is the ChatGPT client, whose OS the trial machine picks', () => {
+    expect(getClient('chatgpt')).toBe(CHATGPT_APP_CLIENTS.chatgpt);
   });
 
-  it('codex-app is the Codex app client for this platform, by either name', () => {
-    const client =
-      process.platform === 'linux' ? CODEX_APP_LINUX_CLIENT : CODEX_APP_CLIENT;
+  it('codex-app is the Codex app client, by either name', () => {
+    const client = CHATGPT_APP_CLIENTS['codex-app'];
     expect(getClient('codex-app')).toBe(client);
     expect(getClient('mst/client/codex-app')).toBe(client);
     expect(client).not.toBe(getClient('chatgpt'));

@@ -202,6 +202,7 @@
               },
               "mst": { "type": "string" },
               "image": { "type": "string" },
+              "platform": { "type": "string" },
               "client": { "type": "string" },
               "ok": { "type": "boolean" },
               "collected": {

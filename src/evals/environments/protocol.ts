@@ -50,6 +50,8 @@ const WorkerMessageSchema = z.union([
     mst: z.string(),
     /** The worker image's digest or reference, when the image says. */
     image: z.string().optional(),
+    /** The worker's OS (`process.platform`): it decides how a desktop client runs. */
+    platform: z.string().optional(),
     client: z.object({ name: z.string(), version: z.string().optional() }),
   }),
   z.object({

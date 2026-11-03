@@ -97,6 +97,31 @@ describe('collectInEnvironment', () => {
     expect(client).toBe('chatgpt');
   });
 
+  it("records the OS each shard's worker ran on, not the coordinator's", async () => {
+    const gathered = await collect(
+      environment(async (_shard, events) => {
+        events.progress({
+          type: 'hello',
+          mst: '9.9.9',
+          platform: process.platform === 'linux' ? 'darwin' : 'linux',
+          client: 'cowork',
+        });
+        return { ...ok, collected: 0 };
+      }),
+      ['a']
+    );
+    expect(gathered.shards).toEqual([
+      {
+        shard: 1,
+        mst: '9.9.9',
+        platform: process.platform === 'linux' ? 'darwin' : 'linux',
+        client: 'cowork',
+        ok: true,
+        collected: 0,
+      },
+    ]);
+  });
+
   it('finds a result announced before its file was copied back', async () => {
     const gathered = await collect(
       environment(async (shard, events) => {

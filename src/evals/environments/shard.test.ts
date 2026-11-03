@@ -217,9 +217,11 @@ describe('a shard in a child-process environment', () => {
     expect(b.key).toEqual({ variant: 'candidate', caseId: 'b', trial: 0 });
     expect(b.result.finalText).toBe('b: 2-nekot then 2-nekot; key 1-yek');
 
+    // The worker says which OS it runs on: it decides how a desktop client runs.
     expect(progress[0]).toEqual({
       type: 'hello',
       mst: packageJson.version,
+      platform: process.platform,
       client: 'shard-test/client/probe',
     });
     expect(

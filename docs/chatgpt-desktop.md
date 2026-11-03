@@ -11,8 +11,9 @@ The desktop app has two products, and each is a client:
 - `"client": "codex-app"` drives the app's Codex surface. It is not the `codex`
   client, which runs the Codex CLI headless ([codex.md](./codex.md)).
 
-Both run on macOS and on Linux; the desktop driver follows the platform. The
-earlier names (`openai.chatgpt.agent.desktop-app.macos`,
+Both run on macOS and on Linux. How they run follows from the OS of the machine
+that runs the trial, and no option selects it. `clientOptions.computerUseProvider`
+is gone: it fails validation. The earlier names (`openai.chatgpt.agent.desktop-app.macos`,
 `openai.chatgpt.agent.desktop-app.linux`, `chatgpt-mac` and `chatgpt-linux`)
 fail validation, naming `chatgpt`. `clientOptions.surface` is gone: it fails
 validation and names the client to use. The client picks the surface, which
@@ -29,6 +30,14 @@ Screen Recording permission.
 Linux uses native draft deep links and deterministic AT-SPI actions. It requires
 no Anthropic key and rejects Computer Use planner configuration. It does not fall
 back to macOS CUA.
+
+Some options apply to one OS only. `computerUseModel` and
+`computerUseMaxActions` are for Computer Use on macOS. `nativeMaxActions`, the
+Linux action budget, and `plugins`, which install into Linux's fresh profile,
+are for Linux. An option the trial's OS can't use fails when the eval config
+loads, against this machine's OS for `--env local` (the default) and against
+Linux for `--env docker`. A plugin's environment checks it on its worker, before
+the app is prepared.
 
 On macOS, MST starts and stops ChatGPT through a small Swift helper that it
 compiles with no caller credentials. The helper launches the app with the test

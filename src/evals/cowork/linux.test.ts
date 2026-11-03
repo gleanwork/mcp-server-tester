@@ -54,7 +54,6 @@ const evalConfig: EvalConfig = {
   name: 'linux-contract',
   datasets: [],
   client: 'cowork',
-  clientOptions: { computerUseProvider: 'linux-desktop' },
   servers: [
     {
       transport: 'http',

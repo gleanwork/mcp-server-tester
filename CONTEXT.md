@@ -245,7 +245,7 @@ The machine where `mst run` or `mst grade` was typed (your machine or a CI job).
 _Avoid_: controller, host, driver
 
 **Environment**:
-Where a run's trials are collected, chosen with `--env`: `local` (in the `mst run` process, the default), `docker` (containers from MST's Linux Cowork image), or an environment extension that creates machines, such as containers or VMs (`acme/env/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)).
+Where a run's trials are collected, chosen with `--env`: `local` (in the `mst run` process, the default), `docker` (containers from MST's Linux Cowork image), or an environment extension that creates machines, such as containers or VMs (`acme/env/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)). The OS of the machine that runs a trial decides how a desktop client runs: Computer Use on macOS, the accessibility automation on Linux ([ADR 0011](docs/adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md)); each shard's machine records its OS.
 _Avoid_: sandbox, backend, runner, target
 
 **Shard**:

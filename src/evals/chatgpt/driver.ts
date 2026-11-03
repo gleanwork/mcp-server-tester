@@ -95,7 +95,6 @@ export function validateChatgptConfig(config: ExternalClientConfig): void {
     );
   if (isLinuxChatgpt(config)) {
     if (
-      config.options?.computerUseProvider !== undefined ||
       config.options?.computerUseModel !== undefined ||
       config.options?.computerUseMaxActions !== undefined
     )
@@ -105,13 +104,6 @@ export function validateChatgptConfig(config: ExternalClientConfig): void {
     nativeMaxActions(config);
     return;
   }
-  if (
-    (config.options?.computerUseProvider ?? 'anthropic-computer-use') !==
-    'anthropic-computer-use'
-  )
-    throw new Error(
-      'ChatGPT macOS requires the anthropic-computer-use driver; there is no deterministic UI fallback.'
-    );
   if (!hasLLMCredential('anthropic', { env: plannerEnvironment(config) }))
     throw new Error(
       'The Computer Use planner needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'

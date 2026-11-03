@@ -6,6 +6,7 @@ import type { CoworkPlatform } from './cowork/platform.js';
 import { runEvalBatch } from './runEvalBatch.js';
 import {
   COWORK_CLIENT,
+  coworkOptionIssues,
   coworkOwnToolCalls,
   coworkWorkspaceUnavailable,
   createCoworkClient,
@@ -52,6 +53,16 @@ vi.mock('node:os', async (original) => {
   return { ...actual, homedir: () => lockHome.value || actual.homedir() };
 });
 
+// Cowork on Linux, as the trial machine picks it.
+const linuxPlatform = vi.hoisted(() => ({
+  dataDirectory: () => '/prepared/session',
+  prepare: vi.fn(),
+  recover: vi.fn(),
+  submit: vi.fn(),
+  handleHitl: vi.fn(),
+}));
+vi.mock('./cowork/linux.js', () => ({ linuxCoworkPlatform: linuxPlatform }));
+
 vi.mock('./coworkSetup/recoverSession.js', () => ({
   recoverMacCoworkSession: vi.fn(),
 }));
@@ -81,7 +92,6 @@ const dirs: string[] = [];
 const clientConfig = {
   type: 'cowork',
   timeout: 900_000,
-  computerUseProvider: 'anthropic-computer-use',
 };
 const server = {
   transport: 'http' as const,
@@ -94,10 +104,7 @@ const context: ClientRunContext = {
     name: 'cowork',
     datasets: [],
     client: clientConfig.type,
-    clientOptions: {
-      timeout: clientConfig.timeout,
-      computerUseProvider: clientConfig.computerUseProvider,
-    },
+    clientOptions: { timeout: clientConfig.timeout },
     servers: [server],
     coworkSetup: { approveWriteTools: true },
   },
@@ -136,6 +143,12 @@ beforeEach(async () => {
   });
   mocks.dispose.mockImplementation(async () => {
     mocks.order.push('dispose');
+  });
+  linuxPlatform.prepare.mockResolvedValue({ dispose: mocks.dispose });
+  linuxPlatform.submit.mockResolvedValue({ status: 'submitted' });
+  linuxPlatform.handleHitl.mockResolvedValue({
+    status: 'hitl_checked',
+    action_count: 0,
   });
   mocks.snapshot.mockResolvedValue(new Map());
   mocks.matches.mockReset().mockResolvedValue([{ isComplete: false }]);
@@ -308,15 +321,60 @@ describe('V2 Cowork client', () => {
       '`clientOptions.options` is gone: set its keys in `clientOptions` directly'
     );
   });
-  it('rejects an app pin for the prepared Linux desktop', () => {
-    expect(() =>
-      COWORK_CLIENT.schema.parse({
-        type: 'cowork',
-        computerUseProvider: 'linux-desktop',
-        appVersion: '1.2.3',
-      })
-    ).toThrow('appVersion requires anthropic-computer-use');
+  it.each(['anthropic-computer-use', 'linux-desktop'])(
+    'rejects computerUseProvider %s: the trial machine decides',
+    (provider) => {
+      expect(() =>
+        COWORK_CLIENT.schema.parse({
+          type: 'cowork',
+          computerUseProvider: provider,
+        })
+      ).toThrow(
+        '`clientOptions.computerUseProvider` is gone: remove it. The OS of the machine that runs the trial decides how a desktop client runs: on macOS, Computer Use, with `computerUseModel` as its planner; on Linux, the accessibility automation, with no planner.'
+      );
+    }
+  );
+  it('checks the options each OS uses against the OS it is given', () => {
+    const linuxOnly = { pluginRoots: { fake: '/opt/p' }, mcpDataRoot: '/d' };
+    const macOnly = { computerUseModel: 'planner', appVersion: '1.2.3' };
+    expect(coworkOptionIssues(linuxOnly, 'linux')).toEqual([]);
+    expect(coworkOptionIssues(macOnly, 'darwin')).toEqual([]);
+    expect(coworkOptionIssues(linuxOnly, 'darwin')).toEqual([
+      'pluginRoots and mcpDataRoot are for Cowork on Linux, and this trial runs on macOS.',
+    ]);
+    expect(coworkOptionIssues(macOnly, 'linux')).toEqual([
+      'computerUseModel is the planner of Computer Use on macOS, and this trial runs on Linux, which has no planner.',
+      'appVersion pins Claude Desktop on macOS, and this trial runs on Linux, which runs the prepared desktop.',
+    ]);
   });
+  it.each([
+    ['linux', { appVersion: '1.2.3' }, 'appVersion pins Claude Desktop'],
+    ['linux', { computerUseModel: 'planner' }, 'computerUseModel is the'],
+    ['darwin', { mcpDataRoot: '/run/mcp-data' }, 'pluginRoots and mcpDataRoot'],
+  ] as const)(
+    'on %s, rejects %o on the trial machine before any app is prepared',
+    async (platformName, options, message) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(platformName);
+      const prepare = vi.fn().mockResolvedValue({ dispose: mocks.dispose });
+      const client = createCoworkClient({
+        dataDirectory: () => '/prepared/session',
+        prepare,
+        recover: vi.fn(),
+        submit: mocks.submit,
+        handleHitl: mocks.hitl,
+      });
+      const batch = requests().map((r) => ({
+        ...r,
+        config: { ...clientConfig, ...options },
+      }));
+      await expect(client.runBatch!(batch, context)).rejects.toThrow(
+        `Cowork can't run this trial: ${message}`
+      );
+      expect(prepare).not.toHaveBeenCalled();
+      expect(mocks.setup).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    }
+  );
 
   it('uses the selected session bundle for both submission and HITL', async () => {
     mocks.setup.mockResolvedValueOnce({
@@ -344,7 +402,6 @@ describe('V2 Cowork client', () => {
     const check = { ...server, serverUrl: 'https://example.com/check/eval' };
     const batch = requests().map((r) => ({
       ...r,
-      config: { ...clientConfig, computerUseProvider: 'linux-desktop' },
       input: { ...r.input, checkServers: [check] },
     }));
     const result = await prepared.runBatch!(batch, { ...context, env: {} });
@@ -357,18 +414,8 @@ describe('V2 Cowork client', () => {
     expect(COWORK_CLIENT.serversPerBatch).toBe(true);
     expect(COWORK_CLIENT.toolSurfaceProxy).toBeUndefined();
   });
-  it('selects the semantic Linux driver without requiring a planner API key', async () => {
+  it('runs the semantic Linux driver on Linux without requiring a planner API key', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    expect(COWORK_CLIENT.schema.parse({ type: 'cowork' })).toMatchObject({
-      computerUseProvider: 'linux-desktop',
-    });
-    expect(
-      COWORK_CLIENT.schema.safeParse({
-        type: 'cowork',
-        computerUseProvider: 'linux-desktop',
-        computerUseModel: 'unused-model',
-      }).success
-    ).toBe(false);
     const prepared = createCoworkClient({
       dataDirectory: () => '/prepared/session',
       prepare: mocks.setup,
@@ -376,11 +423,10 @@ describe('V2 Cowork client', () => {
       submit: mocks.submit,
       handleHitl: mocks.hitl,
     });
-    const batch = requests().map((r) => ({
-      ...r,
-      config: { ...clientConfig, computerUseProvider: 'linux-desktop' },
-    }));
-    const result = await prepared.runBatch!(batch, { ...context, env: {} });
+    const result = await prepared.runBatch!(requests(), {
+      ...context,
+      env: {},
+    });
     expect(result.every((r) => !r.error)).toBe(true);
     expect(mocks.readiness).toHaveBeenCalledWith([server], expect.any(Object), {
       plugins: [],
@@ -451,17 +497,11 @@ describe('V2 Cowork client', () => {
       submit: mocks.submit,
       handleHitl: mocks.hitl,
     });
-    const [first] = await prepared.runBatch!(
-      [requests()[0]!].map((r) => ({
-        ...r,
-        config: { ...clientConfig, computerUseProvider: 'linux-desktop' },
-      })),
-      {
-        ...context,
-        evalConfig: { ...context.evalConfig, telemetry: { host: {} } },
-        env: { MST_RUN_ID: 'run-1' },
-      }
-    );
+    const [first] = await prepared.runBatch!([requests()[0]!], {
+      ...context,
+      evalConfig: { ...context.evalConfig, telemetry: { host: {} } },
+      env: { MST_RUN_ID: 'run-1' },
+    });
     expect(endpoint).toMatch(/^http:\/\/localhost:\d+\/[0-9a-f]{32}$/);
     expect(setup).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -480,12 +520,34 @@ describe('V2 Cowork client', () => {
       }),
     ]);
   });
-  it('rejects a driver/platform mismatch before any desktop action', async () => {
+  it("runs a config parsed on macOS with the trial machine's Linux driver", async () => {
+    // The coordinator, on macOS, parses the config; a Linux worker runs it.
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+    const parsed = COWORK_CLIENT.schema.parse({ type: 'cowork' }) as Record<
+      string,
+      unknown
+    >;
+    expect(parsed).not.toHaveProperty('computerUseProvider');
+    expect(JSON.stringify(parsed)).not.toMatch(/darwin|macos|anthropic/i);
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    const result = await COWORK_CLIENT.runBatch!(
+      requests().map((r) => ({ ...r, config: { ...parsed, type: 'cowork' } })),
+      { ...context, env: {} }
+    );
+    expect(result.every((r) => !r.error)).toBe(true);
+    expect(linuxPlatform.prepare).toHaveBeenCalledOnce();
+    expect(linuxPlatform.submit).toHaveBeenCalledTimes(2);
+    // Not macOS's Computer Use: no planner, no macOS setup.
+    expect(mocks.setup).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+  it('fails on an OS Cowork does not run on, before any desktop action', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     await expect(COWORK_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
-      'not supported on linux'
+      'Cowork runs on macOS or Linux, not win32.'
     );
     expect(mocks.setup).not.toHaveBeenCalled();
+    expect(linuxPlatform.prepare).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
   const driverTelemetry: ComputerUse.ComputerUseTelemetry = {
@@ -755,7 +817,6 @@ describe('V2 Cowork client', () => {
     };
     const linuxClient = (options: Record<string, unknown> = {}) => ({
       ...clientConfig,
-      computerUseProvider: 'linux-desktop',
       pluginRoots: { fake: '/opt/plugins/fake' },
       mcpDataRoot: '/run/mcp-data',
       ...options,
@@ -836,21 +897,25 @@ describe('V2 Cowork client', () => {
           plugins: [fake],
         },
         'mcp_server_unsupported',
+        'darwin',
       ],
       [
         'with an undeclared plugin root',
         linuxClient({ pluginRoots: { fake: '/opt/p', other: '/opt/o' } }),
         'mcp_server_invalid',
+        'linux',
       ],
       [
         'without a plugin root',
         linuxClient({ pluginRoots: {} }),
         'mcp_server_invalid',
+        'linux',
       ],
       [
         'without a data root',
         linuxClient({ mcpDataRoot: undefined }),
         'mcp_server_invalid',
+        'linux',
       ],
       [
         'when a blocked name shadows the eval label',
@@ -859,14 +924,10 @@ describe('V2 Cowork client', () => {
           plugins: [{ ...fake, blockMcpServers: ['fake-eval'] }],
         },
         'mcp_server_invalid',
+        'linux',
       ],
-    ])('rejects before any UI %s', async (_kind, config, code) => {
-      vi.spyOn(process, 'platform', 'get').mockReturnValue(
-        (config as { computerUseProvider?: string }).computerUseProvider ===
-          'linux-desktop'
-          ? 'linux'
-          : 'darwin'
-      );
+    ] as const)('rejects before any UI %s', async (_kind, config, code, os) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(os);
       const selected = platform();
       await expect(
         createCoworkClient(selected).runBatch!(batch(config), stdioContext)
@@ -891,13 +952,6 @@ describe('V2 Cowork client', () => {
         ];
         const plain = requests().map((r) => ({
           ...r,
-          config: {
-            ...clientConfig,
-            computerUseProvider:
-              platformName === 'linux'
-                ? 'linux-desktop'
-                : 'anthropic-computer-use',
-          },
           input: { ...r.input, servers },
         }));
         const results = await createCoworkClient(selected).runBatch!(

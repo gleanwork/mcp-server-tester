@@ -195,6 +195,7 @@ import { resolveServerSecrets } from './serverSecrets.js';
 import type { CredentialStore } from '../auth/grants/types.js';
 import {
   LOCAL_ENVIRONMENT,
+  environmentOS,
   resolveEnvironment,
   type ResolvedEnvironment,
   type RunEnvironment,
@@ -456,7 +457,8 @@ function assertCaseClients(
   evalConfig: EvalConfig,
   rawConfig: EvalConfig,
   variants: EvalVariant[],
-  datasets: EvalDataset[]
+  datasets: EvalDataset[],
+  os: NodeJS.Platform | undefined
 ): void {
   for (const variant of variants) {
     const rawVariant = rawConfig.variants?.find(
@@ -477,6 +479,7 @@ function assertCaseClients(
             tools: variant.tools ?? evalConfig.tools,
             concurrency: evalConfig.concurrency,
             context: `Case "${evalCase.id}" in variant "${variant.name}"`,
+            ...(os ? { os } : {}),
           }
         );
       }
@@ -1563,17 +1566,21 @@ async function evaluate(
   });
   let evalConfig = connectors.evalConfig;
 
+  // With the plugins loaded, so a plugin environment resolves too.
+  const resolvedEnvironment = resolveEnvironment(
+    options.env ?? LOCAL_ENVIRONMENT,
+    options.envOptions ?? {}
+  );
+  // The OS the trials run on, when the environment says: a desktop client's
+  // options it can't use fail now. Otherwise the worker checks its own. A
+  // regrade runs no client, so its traces' OS doesn't matter.
+  const trialOS = regrade ? undefined : environmentOS(resolvedEnvironment.name);
   evalConfig = validateEvalConfig(
     {
       ...evalConfig,
       client: evalConfig.client ?? DEFAULT_CLIENT,
     },
-    { namespaces }
-  );
-  // With the plugins loaded, so a plugin environment resolves too.
-  const resolvedEnvironment = resolveEnvironment(
-    options.env ?? LOCAL_ENVIRONMENT,
-    options.envOptions ?? {}
+    { namespaces, ...(trialOS ? { os: trialOS } : {}) }
   );
   const { definition: _definition, ...environment } = resolvedEnvironment;
   const inEnvironment = environment.name !== LOCAL_ENVIRONMENT;
@@ -1680,7 +1687,7 @@ async function evaluate(
     );
     for (const dataset of loaded) assertDatasetNamespaces(dataset, namespaces);
     assertNamedCases(loaded, options.cases);
-    assertCaseClients(evalConfig, rawConfig, variants, loaded);
+    assertCaseClients(evalConfig, rawConfig, variants, loaded, trialOS);
     return {
       evalConfig,
       outputDir,
@@ -1892,7 +1899,8 @@ async function evaluate(
       evalConfig,
       rawConfig,
       variants,
-      canonicalDatasets.map(({ dataset }) => dataset)
+      canonicalDatasets.map(({ dataset }) => dataset),
+      trialOS
     );
 
     // A variant's servers, client and settings, worked out once.

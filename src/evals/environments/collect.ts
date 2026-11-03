@@ -195,6 +195,8 @@ export async function collectShard(
     protocol: SHARD_PROTOCOL,
     mst: packageJson.version,
     ...(env.MST_IMAGE ? { image: env.MST_IMAGE } : {}),
+    // How a desktop client runs follows from this OS (ADR 0011).
+    platform: process.platform,
     client: { name: firstRequest?.config.type ?? 'none' },
   });
   const heartbeat = setInterval(

@@ -368,7 +368,7 @@ Runs are written locally by default:
 npx mst stores --plugins @acme/mst-plugin   # planned
 ```
 
-`run.json` records where the run ran: the environment, its options, the number of shards, and each shard's machine (its image digest and worker MST); each trial records its client app. A regrade on an environment's machines (section 8) also records where it graded, in `grading.environment`. The report shows both under _Run details_. Recording each trace's shard is planned for 2.0.
+`run.json` records where the run ran: the environment, its options, the number of shards, and each shard's machine (its image digest, worker MST and OS, which decides how a desktop client ran); each trial records its client app. A regrade on an environment's machines (section 8) also records where it graded, in `grading.environment`. The report shows both under _Run details_. Recording each trace's shard is planned for 2.0.
 
 ## 10. Read your results
 

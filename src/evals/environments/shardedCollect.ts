@@ -112,6 +112,12 @@ export interface ShardRecord {
   mst?: string;
   /** The machine's image: `ref@id`, or what the worker reported. */
   image?: string;
+  /**
+   * The OS the worker ran on (`process.platform`), which decides how a
+   * desktop client ran: Computer Use on `darwin`, the accessibility
+   * automation on `linux`.
+   */
+  platform?: string;
   client?: string;
   ok: boolean;
   collected: number;
@@ -244,7 +250,7 @@ export async function collectInEnvironment(
               if (event.type === 'hello') {
                 hellos.set(index, event);
                 log(
-                  `shard ${index + 1}/${count}: ${event.client} on MST ${event.mst}${event.image ? ` (${event.image})` : ''}`
+                  `shard ${index + 1}/${count}: ${event.client} on MST ${event.mst}${event.platform ? `, ${event.platform}` : ''}${event.image ? ` (${event.image})` : ''}`
                 );
               } else if (event.type === 'trial') {
                 giveBack(keyString(event.key));
@@ -309,6 +315,7 @@ export async function collectInEnvironment(
         shard: index + 1,
         ...(hello ? { mst: hello.mst, client: hello.client } : {}),
         ...(hello?.image ? { image: hello.image } : {}),
+        ...(hello?.platform ? { platform: hello.platform } : {}),
         ok: outcome?.ok ?? false,
         collected: outcome?.collected ?? 0,
         ...(outcome && !outcome.ok && outcome.reason

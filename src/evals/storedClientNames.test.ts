@@ -542,101 +542,139 @@ describe('a run stored when codex-app was chatgpt with the Codex surface', () =>
   });
 });
 
-describe('a tool optimization whose baseline was stored as chatgpt with the Codex surface', () => {
-  it("runs a round on codex-app: the base variant's client and options didn't change", async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
-    // codex-app can't show tool metadata, so no real round runs on it; here
-    // it can, so the baseline's setup is what the round is checked against.
-    // The leaky environment answers every trial, so no app runs.
-    const definition = getClient('codex-app') as { toolMetadata?: boolean };
-    const toolMetadata = definition.toolMetadata;
-    definition.toolMetadata = true;
-    try {
-      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-stored-opt-'));
-      dirs.push(dir);
-      const catalog = path.join(dir, 'docs.json');
-      await fs.copyFile(path.join(FIXTURES, 'catalogs', 'docs.json'), catalog);
-      await fs.writeFile(
-        path.join(dir, 'cases.json'),
-        JSON.stringify({
-          name: 'triggering',
-          cases: [
-            ...[0, 1, 2].map((i) => ({
-              id: `case-${i}`,
-              input: `Find what we know about outage ${i}`,
-              assertions: { containsText: 'outage' },
-            })),
-            {
-              id: 'no-search',
-              input: 'Say hello',
-              tags: ['regression'],
-              assertions: { containsText: 'hello' },
-            },
-          ],
-        })
-      );
-      const configPath = path.join(dir, 'eval.json');
-      await fs.writeFile(
-        configPath,
-        JSON.stringify({
-          name: 'stored-codex-optimization',
-          plugins: [mock('leakyEnvPlugin.ts')],
-          datasets: ['./cases.json'],
-          servers: {
-            docs: {
-              transport: 'stdio',
-              command: process.execPath,
-              args: [path.join(FIXTURES, 'catalogServer.mjs'), catalog],
-            },
-          },
-          client: 'codex-app',
-          model: 'gpt-test',
-          clientOptions: { requireMcpCalls: true },
-        })
-      );
-      const target = {
-        configPath,
-        rootDir: dir,
-        env: 'leaky/env/unredacted',
-      };
-      const started = await startToolOptimization({ evalConfig: target });
-      const baselineFile = path.join(
-        started.evalDirectory,
-        'runs',
-        started.record.baseline.runId,
-        'run.json'
-      );
-      const baseline = await readJson(baselineFile);
-      const variants = baseline.variants as Array<{
-        client?: string;
-        clientOptions?: Record<string, unknown>;
-      }>;
-      expect(
-        variants.map(({ client, clientOptions }) => ({ client, clientOptions }))
-      ).toEqual([
-        {
-          client: 'codex-app',
-          clientOptions: expect.objectContaining({ requireMcpCalls: true }),
-        },
-      ]);
-      variants[0]!.client = 'chatgpt';
-      variants[0]!.clientOptions = {
-        ...variants[0]!.clientOptions,
-        surface: 'codex',
-      };
-      await writeJson(baselineFile, baseline);
+type StoredVariant = {
+  client?: string;
+  clientOptions?: Record<string, unknown>;
+};
 
-      // Another process reads the baseline from its files.
-      const reopened = await openToolOptimization({ evalConfig: target });
-      const { round } = await reopened.tryCandidates([
-        { id: 'concise', tools: { search: { description: 'Search.' } } },
-      ]);
-      expect(round.candidates.map((c) => c.variant.id)).toEqual(['concise']);
-    } finally {
-      definition.toolMetadata = toolMetadata;
-    }
-  }, 120_000);
+/** How MST wrote a codex-app variant's run.json record before ADR 0011. */
+const STORED_BEFORE: Array<[string, (variant: StoredVariant) => void]> = [
+  [
+    'chatgpt with the Codex surface',
+    (variant) => {
+      variant.client = 'chatgpt';
+      variant.clientOptions = { ...variant.clientOptions, surface: 'codex' };
+    },
+  ],
+  [
+    'codex-app with computerUseProvider',
+    (variant) => {
+      variant.clientOptions = {
+        ...variant.clientOptions,
+        computerUseProvider: 'anthropic-computer-use',
+      };
+    },
+  ],
+];
+
+describe('a tool optimization whose baseline was stored before ADR 0011', () => {
+  it.each(STORED_BEFORE)(
+    "runs a round on codex-app when the baseline was stored as %s: the base variant's client and options didn't change",
+    async (_stored, rewrite) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      // codex-app can't show tool metadata, so no real round runs on it; here
+      // it can, so the baseline's setup is what the round is checked against.
+      // The leaky environment answers every trial, so no app runs.
+      const definition = getClient('codex-app') as { toolMetadata?: boolean };
+      const toolMetadata = definition.toolMetadata;
+      definition.toolMetadata = true;
+      try {
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-stored-opt-'));
+        dirs.push(dir);
+        const catalog = path.join(dir, 'docs.json');
+        await fs.copyFile(
+          path.join(FIXTURES, 'catalogs', 'docs.json'),
+          catalog
+        );
+        await fs.writeFile(
+          path.join(dir, 'cases.json'),
+          JSON.stringify({
+            name: 'triggering',
+            cases: [
+              ...[0, 1, 2].map((i) => ({
+                id: `case-${i}`,
+                input: `Find what we know about outage ${i}`,
+                assertions: { containsText: 'outage' },
+              })),
+              {
+                id: 'no-search',
+                input: 'Say hello',
+                tags: ['regression'],
+                assertions: { containsText: 'hello' },
+              },
+            ],
+          })
+        );
+        const configPath = path.join(dir, 'eval.json');
+        await fs.writeFile(
+          configPath,
+          JSON.stringify({
+            name: 'stored-codex-optimization',
+            plugins: [mock('leakyEnvPlugin.ts')],
+            datasets: ['./cases.json'],
+            servers: {
+              docs: {
+                transport: 'stdio',
+                command: process.execPath,
+                args: [path.join(FIXTURES, 'catalogServer.mjs'), catalog],
+              },
+            },
+            client: 'codex-app',
+            model: 'gpt-test',
+            clientOptions: { requireMcpCalls: true },
+          })
+        );
+        const target = {
+          configPath,
+          rootDir: dir,
+          env: 'leaky/env/unredacted',
+        };
+        const started = await startToolOptimization({ evalConfig: target });
+        const baselineFile = path.join(
+          started.evalDirectory,
+          'runs',
+          started.record.baseline.runId,
+          'run.json'
+        );
+        const baseline = await readJson(baselineFile);
+        const variants = baseline.variants as Array<{
+          client?: string;
+          clientOptions?: Record<string, unknown>;
+        }>;
+        expect(
+          variants.map(({ client, clientOptions }) => ({
+            client,
+            clientOptions,
+          }))
+        ).toEqual([
+          {
+            client: 'codex-app',
+            clientOptions: expect.objectContaining({ requireMcpCalls: true }),
+          },
+        ]);
+        const recorded = structuredClone(variants[0]!);
+        rewrite(variants[0]!);
+        await writeJson(baselineFile, baseline);
+
+        // Readers see the variant as a config written today records it.
+        const stored = await readRunDirectory(path.dirname(baselineFile));
+        expect(stored.run.variants[0]).toMatchObject(recorded);
+        expect(stored.run.variants[0]!.clientOptions).toEqual(
+          recorded.clientOptions
+        );
+        // Another process reads the baseline from its files.
+        const reopened = await openToolOptimization({ evalConfig: target });
+        const { round } = await reopened.tryCandidates([
+          { id: 'concise', tools: { search: { description: 'Search.' } } },
+        ]);
+        expect(round.candidates.map((c) => c.variant.id)).toEqual(['concise']);
+      } finally {
+        definition.toolMetadata = toolMetadata;
+      }
+    },
+    120_000
+  );
 });
 
 describe('storedClientSetup', () => {
@@ -664,6 +702,44 @@ describe('storedClientSetup', () => {
         clientOptions: { surface: 'chatgpt-work', timeout: 1 },
       })
     ).toEqual({ client: 'chatgpt', clientOptions: { timeout: 1 } });
+  });
+
+  it.each(['cowork', 'chatgpt', 'codex-app', 'mst/client/cowork'])(
+    'drops a stored %s computerUseProvider, which the OS decides now',
+    (client) => {
+      expect(
+        storedClientSetup({
+          name: 'v',
+          client,
+          clientOptions: {
+            computerUseProvider: 'linux-desktop',
+            timeout: 1,
+          },
+        })
+      ).toEqual({
+        name: 'v',
+        client: client.replace('mst/client/', ''),
+        clientOptions: { timeout: 1 },
+      });
+    }
+  );
+
+  it('drops computerUseProvider and the Codex surface together, and leaves no empty options', () => {
+    expect(
+      storedClientSetup({
+        client: 'chatgpt',
+        clientOptions: {
+          surface: 'codex',
+          computerUseProvider: 'anthropic-computer-use',
+        },
+      })
+    ).toEqual({ client: 'codex-app' });
+    // Only the desktop clients had the option.
+    const plugin = {
+      client: 'acme/client/desk',
+      clientOptions: { computerUseProvider: 'x' },
+    };
+    expect(storedClientSetup(plugin)).toBe(plugin);
   });
 
   it('leaves a plain chatgpt, and other clients, as they were', () => {

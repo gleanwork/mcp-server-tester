@@ -1026,7 +1026,13 @@ export interface RunReportEvidence {
 export interface RunReportEnvironment {
   name: string;
   shards: number;
-  machines?: Array<{ shard: number; image?: string; mst?: string }>;
+  /** Each shard's machine; `platform` is the OS its worker ran on. */
+  machines?: Array<{
+    shard: number;
+    image?: string;
+    mst?: string;
+    platform?: string;
+  }>;
 }
 
 /** Everything the run report shows: computed by `buildRunReport`, rendered as is. */

@@ -54,17 +54,15 @@ import {
 } from './cowork/driver.js';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
 import type { LLMToolCall } from './mstClient/types.js';
+import { COMPUTER_USE_PROVIDER_GONE, osName } from './desktopOS.js';
 
 const CoworkSchema = z
   .object({
     type: z.string(),
+    /** Gone: the trial's OS decides (ADR 0011). */
     computerUseProvider: z
-      .enum(['anthropic-computer-use', 'linux-desktop'])
-      .default(() =>
-        process.platform === 'linux'
-          ? 'linux-desktop'
-          : 'anthropic-computer-use'
-      ),
+      .never({ message: COMPUTER_USE_PROVIDER_GONE })
+      .optional(),
     computerUseMaxActions: z.number().int().min(1).max(64).default(24),
     hitlMaxActions: z.number().int().min(1).max(24).default(12),
     computerUseModel: z
@@ -108,37 +106,42 @@ const CoworkSchema = z
       })
       .optional(),
   })
-  .strict()
-  .superRefine((options, context) => {
-    if (
-      options.computerUseProvider !== 'linux-desktop' &&
-      (options.pluginRoots !== undefined || options.mcpDataRoot !== undefined)
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['pluginRoots'],
-        message: 'pluginRoots and mcpDataRoot require linux-desktop.',
-      });
-    if (
-      options.computerUseProvider === 'linux-desktop' &&
-      options.computerUseModel !== undefined
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['computerUseModel'],
-        message: 'linux-desktop does not use a planner model.',
-      });
-    if (
-      options.computerUseProvider === 'linux-desktop' &&
-      options.appVersion !== undefined
-    )
-      context.addIssue({
-        code: 'custom',
-        path: ['appVersion'],
-        message:
-          'appVersion requires anthropic-computer-use; linux-desktop runs the prepared desktop.',
-      });
-  });
+  .strict();
+
+/**
+ * The Cowork options that the OS a trial runs on can't use: `pluginRoots`
+ * and `mcpDataRoot` are Linux's, `computerUseModel` and `appVersion` are
+ * macOS's. Checked when the eval config loads, when MST knows the OS its
+ * trials run on, and again on the machine that runs them.
+ */
+export function coworkOptionIssues(
+  options: {
+    pluginRoots?: unknown;
+    mcpDataRoot?: unknown;
+    computerUseModel?: unknown;
+    appVersion?: unknown;
+  },
+  os: NodeJS.Platform
+): string[] {
+  const issues: string[] = [];
+  const on = osName(os);
+  if (
+    os !== 'linux' &&
+    (options.pluginRoots !== undefined || options.mcpDataRoot !== undefined)
+  )
+    issues.push(
+      `pluginRoots and mcpDataRoot are for Cowork on Linux, and this trial runs on ${on}.`
+    );
+  if (os !== 'darwin' && options.computerUseModel !== undefined)
+    issues.push(
+      `computerUseModel is the planner of Computer Use on macOS, and this trial runs on ${on}, which has no planner.`
+    );
+  if (os !== 'darwin' && options.appVersion !== undefined)
+    issues.push(
+      `appVersion pins Claude Desktop on macOS, and this trial runs on ${on}, which runs the prepared desktop.`
+    );
+  return issues;
+}
 /**
  * The evidence in a Cowork session folder, and only that: the audit log, the
  * files the agent wrote (`outputs/`), its transcripts and the tool output it
@@ -264,6 +267,13 @@ async function runBatch(
     throw new Error('Cowork cases require a non-empty input.');
   requireIdenticalClientSettings('Cowork', configs);
   const config = configs[0]!;
+  // How Cowork runs follows from this machine's OS, never the coordinator's.
+  const os = process.platform;
+  const mac = os === 'darwin';
+  const linux = os === 'linux';
+  const osIssues = coworkOptionIssues(config, os);
+  if (osIssues.length)
+    throw new Error(`Cowork can't run this trial: ${osIssues.join(' ')}`);
   const coworkSetup = resolveCoworkSetupConfig(context.evalConfig.coworkSetup);
   const approvalTask = `Approve ${coworkSetup.approveWriteTools ? 'read and write' : 'read-only'} calls only using one-time or current-task approval. Never select persistent or always-allow approval, or change settings.`;
   const plugins = config.plugins ?? [];
@@ -274,16 +284,12 @@ async function runBatch(
   const checkServers = requests[0]!.input.checkServers ?? servers;
   // Validate declarations before desktop actions. macOS resolves client-resolved
   // paths inside its leased setup transaction; Linux uses prepared runtime paths.
-  const mac = config.computerUseProvider === 'anthropic-computer-use';
   const stdioServers = clientStdioServers(servers, plugins);
   let stdioPaths = {
     ...(config.pluginRoots ? { pluginRoots: config.pluginRoots } : {}),
     ...(config.mcpDataRoot ? { dataRoot: config.mcpDataRoot } : {}),
   };
-  if (
-    config.computerUseProvider !== 'linux-desktop' &&
-    stdioServers.some((server) => server.pluginRoots.length)
-  )
+  if (!linux && stdioServers.some((server) => server.pluginRoots.length))
     throw new MarketplacePluginError(
       'mcp_server_unsupported',
       stdioServers.find((server) => server.pluginRoots.length)!.label
@@ -314,15 +320,11 @@ async function runBatch(
     paths: stdioPaths,
   });
   const env = { ...process.env, ...context.env, ...config.env };
-  if (
-    config.computerUseProvider === 'anthropic-computer-use' &&
-    !hasLLMCredential('anthropic', { env })
-  )
+  if (mac && !hasLLMCredential('anthropic', { env }))
     throw new Error(
       'Cowork Computer Use needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'
     );
-  const platform =
-    selectedPlatform ?? (await getCoworkPlatform(config.computerUseProvider));
+  const platform = selectedPlatform ?? (await getCoworkPlatform(os));
   const dataDir = platform.dataDirectory(config);
   // Pass only the selected variant. Setup intentionally rejects multi-variant eval configs.
   const { variants: _variants, ...evalConfig } = context.evalConfig;
@@ -333,7 +335,7 @@ async function runBatch(
   // in MST's Linux image, where MST writes Desktop's settings.
   const hostConfig = context.evalConfig.telemetry?.host;
   const hostReceiver =
-    hostConfig && config.computerUseProvider === 'linux-desktop'
+    hostConfig && linux
       ? await hostTelemetryReceiver(hostConfig, { host: '0.0.0.0', env })
       : undefined;
   if (hostConfig && !hostReceiver)
@@ -368,9 +370,7 @@ async function runBatch(
       // On Linux, a reset that fails once (accessibility_scan_timeout on a
       // slow desktop) would otherwise skip every later case in the batch.
       // macOS already falls back to restarting the app.
-      ...(config.computerUseProvider === 'linux-desktop'
-        ? { resetRetryDelaysMs: RESET_RETRY_DELAYS_MS }
-        : {}),
+      ...(linux ? { resetRetryDelaysMs: RESET_RETRY_DELAYS_MS } : {}),
       async prepare() {
         if (env.MST_COWORK_RECOVER === '1') await platform.recover();
         const session = await platform.prepare({
@@ -380,10 +380,7 @@ async function runBatch(
           ...(config.appVersion ? { appVersion: config.appVersion } : {}),
           ...(plugins.length ? { plugins } : {}),
           ...(otlpSettings ? { otlpSettings } : {}),
-          ...(stdioServers.length &&
-          config.computerUseProvider === 'linux-desktop'
-            ? { stdioPaths }
-            : {}),
+          ...(stdioServers.length && linux ? { stdioPaths } : {}),
         });
         if (session?.stdioPaths) stdioPaths = session.stdioPaths;
         return session;
