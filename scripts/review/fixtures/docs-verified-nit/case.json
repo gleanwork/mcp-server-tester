@@ -1,0 +1,5 @@
+{
+  "about": "Docs PR with a confirmed nit. Nits never fail the check.",
+  "reviewConclusion": "success",
+  "expect": "pass"
+}

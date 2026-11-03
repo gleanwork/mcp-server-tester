@@ -1,0 +1,5 @@
+{
+  "about": "PR that edits .github/workflows. Classified policy. Fails even when clean.",
+  "reviewConclusion": "success",
+  "expect": "fail"
+}

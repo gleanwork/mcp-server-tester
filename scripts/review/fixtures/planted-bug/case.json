@@ -1,0 +1,5 @@
+{
+  "about": "Demo PR 2: off-by-one planted in src. Both reviewers catch it and each verifies the other.",
+  "reviewConclusion": "success",
+  "expect": "fail"
+}

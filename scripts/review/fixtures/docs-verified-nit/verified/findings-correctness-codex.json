@@ -1,0 +1,20 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "codex",
+    "family": "openai",
+    "costUsd": 0.31
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "nit",
+      "file": "README.md",
+      "line": 12,
+      "claim": "Sentence is missing a period.",
+      "evidence": "Line 12 ends with `client`.",
+      "verified": true,
+      "verifiedBy": "anthropic"
+    }
+  ]
+}

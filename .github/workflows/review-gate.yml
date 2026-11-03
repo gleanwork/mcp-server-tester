@@ -1,0 +1,154 @@
+# review-gate: the trusted half of the PACT review loop (day-2 cut).
+#
+# Runs on workflow_run, which GitHub always executes from the default branch,
+# so this file, scripts/review/*.sh and agent-review.json are always main's.
+# Consequence: this workflow does nothing until it is merged to main.
+#
+# It is the only publisher of the required check "review-loop / eligibility",
+# the only thing that enables auto-merge, and the only thing that DMs.
+#
+# Script contract (proposed; agree before writing it):
+#   scripts/review/gate.sh                        (Rob)
+#     env:    PR, HEAD_SHA, REPO, CHECK_NAME, REVIEW_CONCLUSION (review-loop's
+#             conclusion), CLASSIFICATION (path), FINDINGS_DIR (dir of verified
+#             findings JSON), GH_TOKEN (GITHUB_TOKEN; check runs need an App
+#             token, which a PAT is not)
+#     does:   drops verified:false findings; fails on any blocker/should-fix,
+#             on a category other than docs/deps-*, or on REVIEW_CONCLUSION
+#             != success; publishes CHECK_NAME on HEAD_SHA via gh api
+#     writes: outcome=pass|fail and ask=<one line> to $GITHUB_OUTPUT
+#   Auto-merge and the DM are separate steps below, so gate.sh needs no merge
+#   or Slack credentials and can be tested on fixtures with a dry-run flag.
+#
+# Not in today's cut: pull_request_review / issue_comment triggers, state
+# branch, autofix, Owner: parsing from the PR body.
+
+name: review-gate
+
+on:
+  workflow_run:
+    workflows: [review-loop]
+    types: [completed]
+
+concurrency:
+  group: review-gate-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: read
+  actions: read # download artifacts from the review-loop run
+
+env:
+  CHECK_NAME: "review-loop / eligibility"
+  REPO: ${{ github.repository }}
+  HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+
+jobs:
+  # Fork PRs: review-loop skipped them; publish a neutral check so they are not
+  # stuck forever behind branch protection. A human merges them.
+  fork:
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$REPO/check-runs" \
+            -f name="$CHECK_NAME" -f head_sha="$HEAD_SHA" \
+            -f status=completed -f conclusion=neutral \
+            -f 'output[title]=Fork PR: not reviewed' \
+            -f 'output[summary]=Fork PRs get no secrets, so the review loop does not run.'
+
+  gate:
+    # Cancelled = superseded by a newer push; that run's gate will decide.
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    outputs:
+      pr: ${{ steps.pr.outputs.pr }}
+      outcome: ${{ steps.gate.outputs.outcome }}
+      ask: ${{ steps.gate.outputs.ask }}
+    steps:
+      - uses: actions/checkout@v4 # main, not the PR head
+
+      - name: Find the PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_FROM_EVENT: ${{ github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          pr="$PR_FROM_EVENT"
+          if [ -z "$pr" ]; then
+            pr=$(gh api "repos/$REPO/commits/$HEAD_SHA/pulls" --jq '.[0].number')
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      - name: Download review-loop artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      # Do not trust the label or artifact written by the PR-head run;
+      # reclassify with main's rules on GitHub's own file list.
+      - name: Classify with main's rules
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pr.outputs.pr }}
+        run: |
+          gh pr view "$PR" --json files --jq '.files[].path' \
+            | scripts/review/classify.sh > classification.json
+          cat classification.json
+
+      - name: Evaluate and publish the check
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.pr.outputs.pr }}
+          REVIEW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CLASSIFICATION: classification.json
+          FINDINGS_DIR: artifacts/verified
+        run: scripts/review/gate.sh
+
+  merge:
+    needs: gate
+    if: needs.gate.outputs.outcome == 'pass'
+    runs-on: ubuntu-latest
+    steps:
+      # Needs "Allow auto-merge" in repo settings. Without branch protection,
+      # --auto merges immediately. GitHub will not merge a draft PR.
+      - env:
+          GH_TOKEN: ${{ secrets.REVIEW_LOOP_TOKEN }}
+          PR: ${{ needs.gate.outputs.pr }}
+        run: |
+          gh pr merge "$PR" --repo "$REPO" --auto --squash \
+            --match-head-commit "$HEAD_SHA"
+
+  notify:
+    needs: gate
+    if: needs.gate.outputs.outcome == 'fail'
+    runs-on: ubuntu-latest
+    steps:
+      # SLACK_DM_USER_ID is a repo variable (Slack member ID) for the demo.
+      # Owner: parsing and a login -> Slack ID map come after today.
+      - name: Slack DM with the one-line ask
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_USER: ${{ vars.SLACK_DM_USER_ID }}
+          ASK: ${{ needs.gate.outputs.ask }}
+          PR_URL: ${{ github.server_url }}/${{ github.repository }}/pull/${{ needs.gate.outputs.pr }}
+        run: |
+          payload=$(jq -n --arg ch "$SLACK_USER" --arg text "$ASK"$'\n'"$PR_URL" \
+            '{channel: $ch, text: $text}')
+          resp=$(curl -sS https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            -d "$payload")
+          echo "$resp" | jq -e '.ok' >/dev/null || { echo "$resp"; exit 1; }

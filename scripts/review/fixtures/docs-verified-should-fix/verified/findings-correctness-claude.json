@@ -1,0 +1,20 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "claude",
+    "family": "anthropic",
+    "costUsd": 0.42
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "should-fix",
+      "file": "docs/cli.md",
+      "line": 22,
+      "claim": "The example command uses the removed `mst run` subcommand.",
+      "evidence": "`mst run` was renamed to `mst eval` in src/cli/index.ts.",
+      "verified": true,
+      "verifiedBy": "openai"
+    }
+  ]
+}

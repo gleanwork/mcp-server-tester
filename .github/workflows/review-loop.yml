@@ -1,0 +1,145 @@
+# review-loop: the untrusted half of the PACT review loop (day-2 cut).
+#
+# Runs on pull_request from the PR head. It reads the checkout, labels the PR,
+# runs two reviewer slots, cross-verifies their findings, and uploads artifacts.
+# It never publishes the eligibility check, never merges, never DMs.
+# review-gate.yml does those, from the default branch, when this run completes.
+#
+# Script contracts (proposed; agree before writing the scripts):
+#   scripts/review/classify.sh                   (Rob)
+#     stdin:  changed file paths, one per line
+#     stdout: {"category":"docs","label":"review:docs"}
+#     Path rules only. Pure function of the file list, so the gate can rerun it
+#     from main on the same list.
+#   scripts/review/run-slot.sh <claude|codex> <lens>  (David)
+#     env:    BASE (base ref, fetched as origin/$BASE), PR, ANTHROPIC_API_KEY / OPENAI_API_KEY
+#     stdout: findings JSON (agreed shape), every finding "verified": null
+#     Read-only. Non-zero exit = slot failed.
+#   scripts/review/verify-slot.sh <findings.json>      (David)
+#     Verifies with the family that did NOT author the slot.
+#     stdout: the same JSON with "verified" set to true/false on each finding.
+
+name: review-loop
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: review-loop-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write # labels
+  issues: write # create the label if it does not exist yet
+
+env:
+  PR: ${{ github.event.pull_request.number }}
+  BASE: ${{ github.event.pull_request.base.ref }}
+
+jobs:
+  # Fork PRs get no secrets. The gate publishes a neutral check for them.
+  fork:
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "fork PR; review-loop skipped, gate will publish a neutral check"
+
+  classify:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify by path rules
+        run: |
+          git fetch origin "$BASE"
+          git diff --name-only "origin/$BASE...HEAD" \
+            | scripts/review/classify.sh > classification.json
+          cat classification.json
+
+      - name: Label the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          label=$(jq -r '.label' classification.json)
+          gh label create "$label" --force --color ededed >/dev/null
+          gh pr edit "$PR" --add-label "$label"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classification
+          path: classification.json
+          retention-days: 7
+
+  review:
+    needs: classify
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lens: [correctness]
+        runner: [claude, codex]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm i -g @anthropic-ai/claude-code
+        if: matrix.runner == 'claude'
+      - run: npm i -g @openai/codex
+        if: matrix.runner == 'codex'
+
+      - name: Run one reviewer slot
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          git fetch origin "$BASE"
+          scripts/review/run-slot.sh "${{ matrix.runner }}" "${{ matrix.lens }}" \
+            > "findings-${{ matrix.lens }}-${{ matrix.runner }}.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: findings-${{ matrix.lens }}-${{ matrix.runner }}
+          path: findings-${{ matrix.lens }}-${{ matrix.runner }}.json
+          retention-days: 7
+
+  verify:
+    needs: review
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm i -g @anthropic-ai/claude-code @openai/codex
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: findings-*
+          path: findings
+          merge-multiple: true
+
+      - name: Verify each slot with the other family
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          git fetch origin "$BASE"
+          mkdir -p verified
+          for f in findings/*.json; do
+            scripts/review/verify-slot.sh "$f" > "verified/$(basename "$f")"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified
+          path: verified/*.json
+          retention-days: 7

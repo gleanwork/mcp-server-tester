@@ -1,0 +1,20 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "claude",
+    "family": "anthropic",
+    "costUsd": 0.42
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "file": "docs/cli.md",
+      "line": 40,
+      "claim": "The documented flag --timeout does not exist.",
+      "evidence": "No --timeout in the CLI options.",
+      "verified": false,
+      "verifiedBy": "openai"
+    }
+  ]
+}

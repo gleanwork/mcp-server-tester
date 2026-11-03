@@ -1,0 +1,5 @@
+{
+  "about": "Docs PR with a confirmed should-fix. Fails even though the category is docs.",
+  "reviewConclusion": "success",
+  "expect": "fail"
+}

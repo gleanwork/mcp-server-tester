@@ -1,0 +1,5 @@
+{
+  "about": "Docs PR where one reviewer claims a blocker and the other family rejects it. The finding is dropped, so the PR passes.",
+  "reviewConclusion": "success",
+  "expect": "pass"
+}

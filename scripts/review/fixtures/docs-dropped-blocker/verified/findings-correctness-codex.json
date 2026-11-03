@@ -1,0 +1,9 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "codex",
+    "family": "openai",
+    "costUsd": 0.31
+  },
+  "findings": []
+}

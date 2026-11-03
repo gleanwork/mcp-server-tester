@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Review slot findings",
+  "description": "One reviewer slot's output. run-slot.sh writes it with every verified=null and verifiedBy=null; verify-slot.sh fills both in. Strict-mode compatible (every property required, no extras) so properties.findings can be handed to codex exec --output-schema or claude --json-schema as-is.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["slot", "findings"],
+  "properties": {
+    "slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lens", "runner", "family", "costUsd"],
+      "properties": {
+        "lens": { "type": "string", "enum": ["correctness"] },
+        "runner": { "type": "string", "enum": ["claude", "codex"] },
+        "family": { "type": "string", "enum": ["anthropic", "openai"] },
+        "costUsd": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "severity",
+          "file",
+          "line",
+          "claim",
+          "evidence",
+          "verified",
+          "verifiedBy"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^F[0-9]+$" },
+          "severity": {
+            "type": "string",
+            "enum": ["blocker", "should-fix", "nit"]
+          },
+          "file": { "type": "string" },
+          "line": { "type": ["integer", "null"], "minimum": 1 },
+          "claim": { "type": "string" },
+          "evidence": { "type": "string" },
+          "verified": { "type": ["boolean", "null"] },
+          "verifiedBy": {
+            "type": ["string", "null"],
+            "enum": ["anthropic", "openai", null]
+          }
+        }
+      }
+    }
+  }
+}

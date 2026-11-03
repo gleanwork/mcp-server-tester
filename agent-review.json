@@ -1,0 +1,72 @@
+{
+  "$schema": "https://raw.githubusercontent.com/scalvert/agent-review/main/schema/policy-v1.schema.json",
+  "version": 1,
+  "review": {
+    "minDepth": "standard",
+    "deepPaths": [
+      ".github/**",
+      "scripts/**",
+      "src/**/auth/**",
+      "src/**/credential*/**"
+    ],
+    "requiredLenses": ["correctness"],
+    "minReviewers": 2
+  },
+  "independence": {
+    "minFamilies": 2,
+    "verifier": "family",
+    "secondVerifierForBlockers": true
+  },
+  "thresholds": {
+    "report": 0.7,
+    "classify": 0.8
+  },
+  "escalation": {
+    "paths": ["agent-review.json", ".github/**", "SECURITY.md", "RELEASE.md"],
+    "categories": ["policy", "security-sensitive", "feature", "deps-other"]
+  },
+  "actions": {
+    "post": false,
+    "merge": {
+      "enabled": true,
+      "disqualifying": ["blocker", "should-fix"],
+      "rules": [
+        {
+          "name": "dependabot-npm-patch",
+          "categories": ["deps-patch"],
+          "authors": ["dependabot[bot]"],
+          "requireVerifiedCommits": true,
+          "paths": ["package.json", "package-lock.json"],
+          "dependencies": "patch",
+          "minApprovals": 0
+        },
+        {
+          "name": "docs-human",
+          "categories": ["docs"],
+          "authors": [
+            "steve-calvert-glean",
+            "david-hamilton-glean",
+            "travis-hoover-glean",
+            "rwjblue-glean",
+            "chenhao-yang-glean",
+            "chris-freeman-glean",
+            "aditya-scio",
+            "sharadjain-glean",
+            "nikhil-pitta-glean"
+          ],
+          "requireVerifiedCommits": false,
+          "paths": ["docs/**", "**/*.md"],
+          "minApprovals": 0
+        },
+        {
+          "name": "agent-routine",
+          "categories": ["tests", "refactor"],
+          "authors": ["TODO-implementation-loop-bot-login"],
+          "requireVerifiedCommits": false,
+          "paths": ["src/**", "tests/**", "snippets/**", "examples/**"],
+          "minApprovals": 0
+        }
+      ]
+    }
+  }
+}

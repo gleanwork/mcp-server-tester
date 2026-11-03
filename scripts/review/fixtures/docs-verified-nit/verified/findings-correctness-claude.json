@@ -1,0 +1,9 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "claude",
+    "family": "anthropic",
+    "costUsd": 0.42
+  },
+  "findings": []
+}

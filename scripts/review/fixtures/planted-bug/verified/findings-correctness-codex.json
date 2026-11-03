@@ -1,0 +1,30 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "codex",
+    "family": "openai",
+    "costUsd": 0.31
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "file": "src/utils/retry.ts",
+      "line": 18,
+      "claim": "Off-by-one: maxAttempts=1 never calls fn.",
+      "evidence": "Loop condition `i < maxAttempts` with i starting at 1 is false on the first check when maxAttempts is 1.",
+      "verified": true,
+      "verifiedBy": "anthropic"
+    },
+    {
+      "id": "F2",
+      "severity": "nit",
+      "file": "src/utils/retry.ts",
+      "line": 4,
+      "claim": "The JSDoc still says the default is 5 attempts.",
+      "evidence": "Default parameter is `maxAttempts = 3`.",
+      "verified": true,
+      "verifiedBy": "anthropic"
+    }
+  ]
+}

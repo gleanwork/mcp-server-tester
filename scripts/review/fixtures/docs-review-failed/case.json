@@ -1,0 +1,5 @@
+{
+  "about": "Docs PR whose review-loop run failed (a slot crashed). No findings uploaded. Fails: a missing review is never a pass.",
+  "reviewConclusion": "failure",
+  "expect": "fail"
+}

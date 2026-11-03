@@ -1,0 +1,20 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "claude",
+    "family": "anthropic",
+    "costUsd": 0.42
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "file": "src/utils/retry.ts",
+      "line": 18,
+      "claim": "The retry loop runs one attempt fewer than maxAttempts.",
+      "evidence": "`for (let i = 1; i < maxAttempts; i++)` starts at 1 and uses <, so maxAttempts=3 makes 2 attempts.",
+      "verified": true,
+      "verifiedBy": "openai"
+    }
+  ]
+}
