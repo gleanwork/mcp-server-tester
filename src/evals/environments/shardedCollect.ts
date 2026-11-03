@@ -24,6 +24,7 @@ import {
 } from './protocol.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
 import { copyArtifacts } from '../trialArtifacts.js';
+import { stableJson } from '../../skills/skillEntry.js';
 
 /**
  * A trial's artifacts, where grading reads them: a worker names its copy
@@ -64,6 +65,27 @@ export function shardOf(caseId: string, count: number): number {
 export interface RequestGroup {
   variant: EvalVariant;
   requests: ClientBatchRequest[];
+}
+
+/**
+ * A variant's requests in one group per client and settings. A client that
+ * runs a batch in one app runs it with one set of settings, and a local run
+ * gives each case on a client other than its variant's a batch of its own, so
+ * cases with different settings never share a batch.
+ */
+export function requestGroups(
+  variant: EvalVariant,
+  requests: ClientBatchRequest[]
+): RequestGroup[] {
+  const bySettings = new Map<string, ClientBatchRequest[]>();
+  for (const request of requests) {
+    const key = stableJson(request.config);
+    bySettings.set(key, [...(bySettings.get(key) ?? []), request]);
+  }
+  return [...bySettings.values()].map((batch) => ({
+    variant,
+    requests: batch,
+  }));
 }
 
 export interface CollectInEnvironmentOptions {

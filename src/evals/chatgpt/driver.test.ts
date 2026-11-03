@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ComputerUseDriverError,
+  chatgptMaxActions,
   readLaunchEnvironment,
   submitChatgptQuery,
   validateChatgptConfig,
@@ -42,7 +43,7 @@ describe('ChatGPT shared Computer Use adapter', () => {
         ...config,
         options: {
           computerUseModel: 'test-planner-model',
-          computerUseMaxActions: 17,
+          maxActions: 17,
           computerUseEnvironment: { ANTHROPIC_API_KEY: 'test-override-key' },
           environment: { MST_TEST_LAUNCH_ONLY: 'app-only' },
         },
@@ -96,6 +97,30 @@ describe('ChatGPT shared Computer Use adapter', () => {
     ).toThrow('surface');
   });
 
+  it("checks maxActions against the driver's OS: Computer Use on macOS, the native budget on Linux", () => {
+    const linux = {
+      ...config,
+      driver: 'openai.chatgpt.agent.desktop-app.linux',
+    };
+    const budget = (driver: ExternalClientConfig, maxActions?: number) =>
+      chatgptMaxActions({
+        ...driver,
+        ...(maxActions !== undefined ? { options: { maxActions } } : {}),
+      });
+    // Each OS's default, and the value set.
+    expect(budget(config)).toBe(32);
+    expect(budget(linux)).toBe(24);
+    expect(budget(config, 64)).toBe(64);
+    expect(budget(linux, 7)).toBe(7);
+    expect(() => budget(linux, 65)).toThrow(
+      'Native action budget must be an integer from 1 to 64.'
+    );
+    expect(() => budget(linux, 0)).toThrow('Native action budget');
+    expect(() =>
+      validateChatgptConfig({ ...linux, options: { maxActions: 65 } })
+    ).toThrow('Native action budget');
+  });
+
   it('preserves the default action budget and does not retry a driver failure', async () => {
     const error = new ComputerUseDriverError('uncertain submission');
     vi.mocked(runAnthropicComputerUseSubmission).mockRejectedValue(error);
@@ -121,9 +146,12 @@ describe('ChatGPT shared Computer Use adapter', () => {
     expect(() =>
       validateChatgptConfig({
         ...config,
-        options: { computerUseMaxActions: 0 },
+        options: { maxActions: 0 },
       })
-    ).toThrow('action budget');
+    ).toThrow('Computer Use action budget must be an integer from 1 to 64.');
+    expect(() =>
+      validateChatgptConfig({ ...config, options: { maxActions: 65 } })
+    ).toThrow('Computer Use action budget');
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     expect(() => validateChatgptConfig(config)).toThrow('ANTHROPIC_API_KEY');
     // A gateway credential is enough for the planner.

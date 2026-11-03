@@ -4,6 +4,7 @@ import type {
 } from '../mstClient/types.js';
 import type { UsageMetrics } from '../../types/index.js';
 import type { CodexSetupConfig } from '../codexSetup/config.js';
+import type { ChatgptAppReasoningEffort } from '../reasoningEffort.js';
 import type {
   MarketplacePlugin,
   ClientPluginCredentials,
@@ -248,7 +249,7 @@ export interface ExternalClientConfig {
   timeoutMs?: number;
   /** Requested ChatGPT model ID (verified against the native turn record). */
   model?: string;
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
+  reasoningEffort?: ChatgptAppReasoningEffort;
   /**
    * Capability bindings used to compose this external client runner.
    * If omitted, the runtime may provide a built-in default for known drivers.

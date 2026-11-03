@@ -391,6 +391,8 @@ const SdkClientSchema = z
   .object({
     type: z.literal('api').optional(),
     ...GenerationOptions,
+    /** The trial's time limit in ms (default: none, the trial runs until it ends). */
+    timeout: GenerationOptions.timeout,
     provider: ProviderSchema.optional(),
     apiKeyEnvVar: z.string().min(1).optional(),
     systemPrompt: SystemPromptOption,
@@ -405,6 +407,7 @@ const CliClientSchema = z
   .object({
     type: z.literal('claude-code').optional(),
     model: GenerationOptions.model,
+    /** The trial's time limit in ms (default 180000). */
     timeout: GenerationOptions.timeout,
     systemPrompt: SystemPromptOption,
     provider: z.enum(['anthropic', 'vertex', 'vertex-anthropic']).optional(),

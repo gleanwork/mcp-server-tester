@@ -742,7 +742,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
   it('shares the Cowork planner and keeps controller accounting separate from native usage', async () => {
     const result = await run('gpt-test', {
       computerUseModel: 'claude-sonnet-4-6',
-      computerUseMaxActions: 40,
+      maxActions: 40,
     });
     expect(result.success).toBe(true);
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledWith(

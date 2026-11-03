@@ -54,7 +54,11 @@ import {
 } from './cowork/driver.js';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
 import type { LLMToolCall } from './mstClient/types.js';
-import { COMPUTER_USE_PROVIDER_GONE, osName } from './desktopOS.js';
+import {
+  COMPUTER_USE_PROVIDER_GONE,
+  maxActionsRenamed,
+  osName,
+} from './desktopOS.js';
 
 const CoworkSchema = z
   .object({
@@ -63,7 +67,21 @@ const CoworkSchema = z
     computerUseProvider: z
       .never({ message: COMPUTER_USE_PROVIDER_GONE })
       .optional(),
-    computerUseMaxActions: z.number().int().min(1).max(64).default(24),
+    /**
+     * The most actions the desktop automation may take to send a case's
+     * prompt (1 to 64, default 24), on macOS and on Linux.
+     */
+    maxActions: z.number().int().min(1).max(64).default(24),
+    /** Gone: the action budget is `maxActions`. */
+    computerUseMaxActions: z
+      .never({ message: maxActionsRenamed('computerUseMaxActions') })
+      .optional(),
+    /**
+     * The most actions, over all of a case's human-in-the-loop inspections
+     * after its prompt is sent (approving its tool calls, checking that its
+     * task finished), 1 to 24, default 12. A separate budget from
+     * `maxActions`, which covers sending the prompt.
+     */
     hitlMaxActions: z.number().int().min(1).max(24).default(12),
     computerUseModel: z
       .string()
@@ -90,6 +108,7 @@ const CoworkSchema = z
       .optional(),
     /** Linux: absolute private (0700) root; a server's `${dataDir}` is `<root>/<label>`. */
     mcpDataRoot: z.string().min(2).max(4096).optional(),
+    /** The trial's time limit in ms (default 900000). */
     timeout: z.number().int().positive().default(900_000),
     model: z
       .string()
@@ -508,7 +527,7 @@ async function runBatch(
         try {
           const submission = await platform.submit(request.input.prompt, {
             deadlineAt,
-            maxActions: config.computerUseMaxActions,
+            maxActions: config.maxActions,
             model: config.computerUseModel,
             ...(mac && config.model ? { targetModel: config.model } : {}),
             env,

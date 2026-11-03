@@ -308,6 +308,26 @@ describe('Linux ChatGPT runtime adapter', () => {
     expect(call.codexHome).toBe(join(root, '.codex'));
   });
   it.each([
+    [undefined, '24'],
+    [9, '9'],
+  ])(
+    'gives the native automation maxActions %s as its action budget (%s)',
+    async (maxActions, budget) => {
+      await helper();
+      if (maxActions !== undefined) config.options!.maxActions = maxActions;
+      await run('submit', 'q');
+      const { argv } = await record<{ argv: string[] }>();
+      expect(argv[argv.indexOf('--max-actions') + 1]).toBe(budget);
+    }
+  );
+  it('rejects maxActions above the native budget before the automation starts', async () => {
+    await helper();
+    config.options!.maxActions = 65;
+    const error = await failure('submit', 'q');
+    expect(error.message).toBe('Invalid Linux ChatGPT action budget.');
+    await expect(calls()).rejects.toThrow();
+  });
+  it.each([
     ['submit', 'exact α query\n', 'exact α query\n'],
     ['prepare', undefined, ''],
   ] as const)(

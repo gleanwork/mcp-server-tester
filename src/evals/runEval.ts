@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { RUN_FORMAT } from './resultFormat.js';
 import { writeRunReport } from './runReport.js';
 import {
@@ -67,6 +68,7 @@ import {
   clientOf,
   clientPatchOf,
 } from './clientFields.js';
+import { bareClientName } from './clientNames.js';
 import type {
   EvaluationVariantResult,
   EvaluationSummary,
@@ -129,6 +131,7 @@ import { carryLabels } from './labels.js';
 import {
   collectInEnvironment,
   gatheredQueues,
+  requestGroups,
   type GatheredResults,
   type RequestGroup,
   type ShardRecord,
@@ -450,8 +453,58 @@ function resolveClient(
 }
 
 /**
+ * The built-in clients that run a variant's cases as one batch in one app
+ * (`requireIdenticalClientSettings` checks it when the batch starts), so
+ * every case runs with the variant's client settings. A case that names one
+ * of them in a variant on another client runs on its own locally and in a
+ * batch of the cases with its settings in an environment, so it needs no
+ * check.
+ */
+const ONE_APP_PER_VARIANT: ReadonlySet<string> = new Set([
+  'cowork',
+  'chatgpt',
+  'codex-app',
+]);
+
+/**
+ * Throws when a case in a variant on a client that runs every case of a
+ * variant in one app (ADR 0011) names another client, or sets client settings
+ * that differ from the variant's. Both are as their schemas parsed them, so a
+ * case that repeats the variant's settings passes. The message names the
+ * fields that differ.
+ */
+function assertCaseUsesVariantClient(
+  variantClient: ClientConfig,
+  caseClient: ClientConfig,
+  context: string
+): void {
+  const client = bareClientName(variantClient.type);
+  if (!ONE_APP_PER_VARIANT.has(client)) return;
+  // prepareClientBatch refuses to mix client types in a batch.
+  if (bareClientName(caseClient.type) !== client)
+    throw new Error(
+      `${context} sets its own \`client\`, which client "${client}" can't honour: it runs a variant's cases in one app. Use a variant for a different client.`
+    );
+  const fields = [
+    ...new Set([...Object.keys(variantClient), ...Object.keys(caseClient)]),
+  ]
+    .filter(
+      (key) =>
+        key !== 'type' &&
+        !isDeepStrictEqual(variantClient[key], caseClient[key])
+    )
+    .map((key) => (key === 'model' ? 'model' : `clientOptions.${key}`));
+  if (!fields.length) return;
+  throw new Error(
+    `${context} sets its own ${fields.map((field) => `\`${field}\``).join(', ')}, which client "${client}" can't honour: it runs a variant's cases in one app, with the variant's settings. Use a variant for a different setting.`
+  );
+}
+
+/**
  * Every case that names its own client, in every variant: that client can honour the
- * variant's servers, tool variants and concurrency. Checked before anything runs.
+ * variant's servers, tool variants and concurrency, and a client that runs a
+ * variant's cases in one app gets the variant's settings. Checked before
+ * anything runs.
  */
 function assertCaseClients(
   evalConfig: EvalConfig,
@@ -468,20 +521,25 @@ function assertCaseClients(
       clientOf(rawConfig),
       clientPatchOf(rawVariant) ?? {}
     );
+    let variantClient: ClientConfig | undefined;
     for (const dataset of datasets) {
       for (const evalCase of dataset.cases) {
         const casePatch = clientPatchOf(evalCase);
         if (!casePatch) continue;
-        assertClientSupports(
-          parseClientConfig(inheritClient(declaration, casePatch), rawConfig),
-          {
-            servers: transportServers(variant.servers ?? evalConfig.servers),
-            tools: variant.tools ?? evalConfig.tools,
-            concurrency: evalConfig.concurrency,
-            context: `Case "${evalCase.id}" in variant "${variant.name}"`,
-            ...(os ? { os } : {}),
-          }
+        const context = `Case "${evalCase.id}" in variant "${variant.name}"`;
+        const caseClient = parseClientConfig(
+          inheritClient(declaration, casePatch),
+          rawConfig
         );
+        assertClientSupports(caseClient, {
+          servers: transportServers(variant.servers ?? evalConfig.servers),
+          tools: variant.tools ?? evalConfig.tools,
+          concurrency: evalConfig.concurrency,
+          context,
+          ...(os ? { os } : {}),
+        });
+        variantClient ??= parseClientConfig(declaration, rawConfig);
+        assertCaseUsesVariantClient(variantClient, caseClient, context);
       }
     }
   }
@@ -2053,11 +2111,7 @@ async function evaluate(
                 ]
               )
           );
-          for (const type of new Set(requests.map((r) => r.config.type)))
-            groups.push({
-              variant,
-              requests: requests.filter((r) => r.config.type === type),
-            });
+          groups.push(...requestGroups(variant, requests));
         }
       }
       const { plugins: workerPlugins, pluginPackages } = workerPluginsOf(

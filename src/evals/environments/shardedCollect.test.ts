@@ -3,11 +3,45 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { collectInEnvironment, shardOf } from './shardedCollect.js';
+import {
+  collectInEnvironment,
+  requestGroups,
+  shardOf,
+} from './shardedCollect.js';
 import { SHARD_PROTOCOL } from './protocol.js';
 import type { ResolvedEnvironment } from './builtinEnvironments.js';
 import type { EvalConfig } from '../evalConfig.js';
 import type { Environment } from '../evalFrameworkTypes.js';
+
+describe('requestGroups', () => {
+  const request = (caseId: string, config: Record<string, unknown>) => ({
+    caseId,
+    trial: 0,
+    input: {} as never,
+    config: { type: 'cowork', ...config },
+  });
+
+  it('puts requests with different client settings in different batches', () => {
+    const variant = { name: 'v' };
+    const groups = requestGroups(variant, [
+      request('a', { model: 'm' }),
+      request('b', { model: 'm', timeout: 1000 }),
+      request('c', { model: 'm' }),
+      { ...request('d', {}), config: { type: 'api', model: 'm' } },
+      // The same settings as b, written in another order.
+      {
+        ...request('e', {}),
+        config: { timeout: 1000, model: 'm', type: 'cowork' },
+      },
+    ]);
+    expect(groups.map((group) => group.requests.map((r) => r.caseId))).toEqual([
+      ['a', 'c'],
+      ['b', 'e'],
+      ['d'],
+    ]);
+    expect(groups.every((group) => group.variant === variant)).toBe(true);
+  });
+});
 
 const dirs: string[] = [];
 afterEach(async () => {

@@ -130,8 +130,7 @@ describe('options only one OS uses', () => {
     ['cowork', 'linux', { appVersion: '1.2.3' }, 'appVersion pins'],
     ['cowork', 'linux', { computerUseModel: 'planner' }, 'computerUseModel'],
     ['cowork', 'darwin', { mcpDataRoot: '/run/data' }, 'pluginRoots and'],
-    ['chatgpt', 'linux', { computerUseMaxActions: 8 }, 'computerUseModel and'],
-    ['codex-app', 'darwin', { nativeMaxActions: 8 }, 'nativeMaxActions is'],
+    ['chatgpt', 'linux', { computerUseModel: 'planner' }, 'computerUseModel'],
   ] as const)(
     "fail at load for local on the host's OS: %s on %s with %o",
     async (client, host, options, message) => {
@@ -149,7 +148,7 @@ describe('options only one OS uses', () => {
   );
 
   it("load for a plugin's environment, whose worker checks its own OS", async () => {
-    const run = await fixture('cowork', 'case', { appVersion: '1.2.3' });
+    const run = await fixture('cowork', 'variant', { appVersion: '1.2.3' });
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     await expect(run()).rejects.toThrow('appVersion pins');
     await expect(run({ env: 'test/env/vm' })).resolves.toBeDefined();

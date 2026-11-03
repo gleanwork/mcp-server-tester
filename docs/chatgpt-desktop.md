@@ -31,13 +31,26 @@ Linux uses native draft deep links and deterministic AT-SPI actions. It requires
 no Anthropic key and rejects Computer Use planner configuration. It does not fall
 back to macOS CUA.
 
-Some options apply to one OS only. `computerUseModel` and
-`computerUseMaxActions` are for Computer Use on macOS. `nativeMaxActions`, the
-Linux action budget, and `plugins`, which install into Linux's fresh profile,
-are for Linux. An option the trial's OS can't use fails when the eval config
-loads, against this machine's OS for `--env local` (the default) and against
-Linux for `--env docker`. A plugin's environment checks it on its worker, before
-the app is prepared.
+Some options apply to one OS only. `computerUseModel`, the planner, is for
+Computer Use on macOS. `plugins`, which install into Linux's fresh profile, are
+for Linux. `maxActions`, the most actions the automation may take to send a
+case's prompt, applies on both, with each OS's range: 1 to 64 (default 32) on
+macOS, and 1 to 64 (default 24) on Linux. It was `computerUseMaxActions` on
+macOS and `nativeMaxActions` on Linux; both now fail validation, naming
+`maxActions`. An option the trial's OS can't use,
+or a `maxActions` outside its range, fails when the eval config loads, against
+this machine's OS for `--env local` (the default) and against Linux for
+`--env docker`. A plugin's environment checks it on its worker, before the app
+is prepared.
+
+`timeout` is the trial's time limit in ms, default 300000. `reasoningEffort`
+is one of `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. `minimal`, which the `codex` client takes, fails here, and the message
+names the values ChatGPT accepts.
+
+Both clients run a variant's cases in one app, with one set of settings. A case
+that sets its own `model` or a `clientOptions` value that differs from its
+variant's fails when its dataset loads, before anything runs, and so does a case
+that names another client. Use a variant for a different setting.
 
 On macOS, MST starts and stops ChatGPT through a small Swift helper that it
 compiles with no caller credentials. The helper launches the app with the test
@@ -56,7 +69,7 @@ Example Linux client settings (in an eval config):
   "clientOptions": {
     "reasoningEffort": "medium",
     "timeout": 300000,
-    "nativeMaxActions": 24,
+    "maxActions": 24,
     "requireMcpCalls": true,
     "correlation": "exact_prompt"
   }

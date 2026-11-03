@@ -27,7 +27,7 @@ export MST_LLM_AUTH_COMMAND=…
 npx mst run --config chatgpt-eval.json --env docker --env-option contexts=colima-mst-kvm
 ```
 
-The eval config is the one you'd run on Linux. Two macOS-only things don't belong in it: the Computer Use options (`computerUseModel`, `computerUseMaxActions`), which fail when the config loads, since the container runs Linux, and `configPath`. Options are as for [Cowork](./cowork-docker.md#run) (`shards`, `contexts`, `image`, `readyTimeout`, `keep`), except that a Docker host isn't limited to one container: several shards can share a context.
+The eval config is the one you'd run on Linux. Two macOS-only things don't belong in it: the Computer Use planner (`computerUseModel`), which fails when the config loads, since the container runs Linux, and `configPath`. `maxActions` is Linux's action budget here (1 to 64, default 24). Options are as for [Cowork](./cowork-docker.md#run) (`shards`, `contexts`, `image`, `readyTimeout`, `keep`), except that a Docker host isn't limited to one container: several shards can share a context.
 
 ## What happens
 
