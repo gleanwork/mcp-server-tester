@@ -97,6 +97,35 @@ describe('mst clients', () => {
     });
   });
 
+  it("lists and shows an eval config's plugins' clients", async () => {
+    const config = path.join(dir, 'eval.json');
+    await fs.writeFile(
+      config,
+      JSON.stringify({
+        name: 'x',
+        plugins: ['./plugin.mjs'],
+        datasets: ['./cases.json'],
+      })
+    );
+    const list = capture();
+    await listClientCommand({ config, rootDir: dir, json: true }, list.print);
+    expect(
+      (JSON.parse(list.text()) as Array<{ ref: string }>).map(
+        (client) => client.ref
+      )
+    ).toContain('acme/client/desk');
+    const show = capture();
+    await showClient(
+      'acme/client/desk',
+      { config, rootDir: dir, json: true },
+      show.print
+    );
+    expect(JSON.parse(show.text())).toMatchObject({
+      ref: 'acme/client/desk',
+      description: 'The Acme desktop app',
+    });
+  });
+
   it("shows a client's requirements and options", async () => {
     const out = capture();
     await showClient('acme/client/desk', { plugins: [pluginPath] }, out.print);
