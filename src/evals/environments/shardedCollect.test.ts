@@ -28,10 +28,15 @@ describe('requestGroups', () => {
       request('b', { model: 'm', timeout: 1000 }),
       request('c', { model: 'm' }),
       { ...request('d', {}), config: { type: 'api', model: 'm' } },
+      // The same settings as b, written in another order.
+      {
+        ...request('e', {}),
+        config: { timeout: 1000, model: 'm', type: 'cowork' },
+      },
     ]);
     expect(groups.map((group) => group.requests.map((r) => r.caseId))).toEqual([
       ['a', 'c'],
-      ['b'],
+      ['b', 'e'],
       ['d'],
     ]);
     expect(groups.every((group) => group.variant === variant)).toBe(true);

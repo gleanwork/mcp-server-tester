@@ -24,6 +24,7 @@ import {
 } from './protocol.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
 import { copyArtifacts } from '../trialArtifacts.js';
+import { stableJson } from '../../skills/skillEntry.js';
 
 /**
  * A trial's artifacts, where grading reads them: a worker names its copy
@@ -78,7 +79,7 @@ export function requestGroups(
 ): RequestGroup[] {
   const bySettings = new Map<string, ClientBatchRequest[]>();
   for (const request of requests) {
-    const key = JSON.stringify(request.config);
+    const key = stableJson(request.config);
     bySettings.set(key, [...(bySettings.get(key) ?? []), request]);
   }
   return [...bySettings.values()].map((batch) => ({
