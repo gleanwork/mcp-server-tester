@@ -21,21 +21,21 @@ function load(evalConfig: Record<string, unknown>) {
 
 describe('client, model and clientOptions', () => {
   it('reject the old client key in an eval config, a variant and a case', () => {
-    expect(() => load({ host: { type: 'mst' } })).toThrow(HOST_IS_NOW);
+    expect(() => load({ host: { type: 'api' } })).toThrow(HOST_IS_NOW);
     expect(() =>
       load({ variants: [{ name: 'a', host: { model: 'x' } }] })
     ).toThrow(HOST_IS_NOW);
     expect(() =>
-      validateEvalCase({ id: 'c', input: 'hi', host: { type: 'mst' } })
+      validateEvalCase({ id: 'c', input: 'hi', host: { type: 'api' } })
     ).toThrow(HOST_IS_NOW);
   });
 
   it('keep the name and model out of clientOptions', () => {
     expect(() =>
-      load({ client: 'mst', clientOptions: { type: 'mst' } })
+      load({ client: 'api', clientOptions: { type: 'api' } })
     ).toThrow('Name the client with `client`, not `clientOptions.type`.');
     expect(() =>
-      load({ client: 'mst', clientOptions: { model: 'claude-haiku-4-5' } })
+      load({ client: 'api', clientOptions: { model: 'claude-haiku-4-5' } })
     ).toThrow('Set the model with `model`, not `clientOptions.model`.');
   });
 
@@ -50,15 +50,15 @@ describe('client, model and clientOptions', () => {
       timeout: 1,
     });
     expect(clientPatchOf({ model: 'm' })).toEqual({ model: 'm' });
-    expect(clientFieldsOf({ type: 'mst', model: 'm', temperature: 0 })).toEqual(
-      { client: 'mst', model: 'm', clientOptions: { temperature: 0 } }
+    expect(clientFieldsOf({ type: 'api', model: 'm', temperature: 0 })).toEqual(
+      { client: 'api', model: 'm', clientOptions: { temperature: 0 } }
     );
   });
 
   it("give a variant its own model, and drop another client's options", () => {
     const validated = validateEvalConfig(
       load({
-        client: 'mst',
+        client: 'api',
         model: 'claude-sonnet-4-6',
         clientOptions: { temperature: 0.2 },
         variants: [
@@ -68,7 +68,7 @@ describe('client, model and clientOptions', () => {
       })
     );
     expect(validated.variants?.[0]).toMatchObject({
-      client: 'mst',
+      client: 'api',
       model: 'claude-haiku-4-5',
       clientOptions: { temperature: 0.2 },
     });

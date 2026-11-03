@@ -936,7 +936,7 @@ describe('a run in docker (a fake Docker CLI)', () => {
           },
         ],
       });
-    await bundle(['codex', 'mst']);
+    await bundle(['codex', 'api']);
     expect(await shardIsHeadless(dir)).toBe(true);
     await bundle(['codex', 'cowork']);
     expect(await shardIsHeadless(dir)).toBe(false);

@@ -90,7 +90,7 @@ Test how MCP servers are **really used**: a client and its model get each case's
 test('a model picks the right tools', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./eval-dataset.json');
   const result = await runEvalDataset(
-    { dataset, client: 'mst', model: 'claude-sonnet-4-5' },
+    { dataset, client: 'api', model: 'claude-sonnet-4-5' },
     { mcp, testInfo }
   );
   expect(result.passed).toBe(result.total);

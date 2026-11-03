@@ -42,7 +42,7 @@ function options(): ClientRunOptions {
     dataset: { name: 'test', cases: [case_] },
     cases: [case_],
     servers: [{ transport: 'http', serverUrl: 'https://example.com' }],
-    client: { type: 'mst', model: 'selected' },
+    client: { type: 'api', model: 'selected' },
     evalConfig: { name: 'test', datasets: [] },
   };
 }
@@ -76,7 +76,7 @@ describe('built-in client execution', () => {
         return { success: true, response: 'OK', toolCalls: [] };
       }
     );
-    const client = getClient('mst');
+    const client = getClient('api');
     await run(client, options());
     await run(client, {
       ...options(),
@@ -94,7 +94,7 @@ describe('built-in client execution', () => {
       response: (await mcp.listTools()).map((tool) => tool.name).join(','),
       toolCalls: [],
     }));
-    const client = getClient('mst');
+    const client = getClient('api');
     expect(
       (await run(client, { ...options(), servers: [] })).response
     ).toMatchObject({ response: '' });

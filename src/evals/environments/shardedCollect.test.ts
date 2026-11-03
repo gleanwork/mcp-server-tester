@@ -48,7 +48,7 @@ async function collect(env: ResolvedEnvironment, caseIds: string[]) {
         requests: caseIds.map((caseId) => ({
           caseId,
           trial: 0,
-          config: { type: 'mst' },
+          config: { type: 'api' },
           input: { prompt: caseId, servers: [] },
         })),
       },

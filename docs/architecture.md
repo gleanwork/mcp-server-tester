@@ -36,7 +36,7 @@ The dataset-driven evaluation engine. Key files:
 - `evalRunner.ts` — `runEvalDataset()` iterates cases, calls the MCP server (or the LLM client simulator), validates results against each case's assertion block, and returns `EvalRunnerResult`. Supports multi-trial accuracy tracking and configurable concurrency.
 - `baseline.ts` — saves and loads pass/fail baselines for tracking regressions across runs.
 - `resultStore.ts` — persists eval runs, reporter runs, and comparison artifacts to local files or GCS using a shared JSON envelope.
-- `mstClient/` — the `mst` client: a model through the Vercel AI SDK, or Claude Code (see data flow below).
+- `mstClient/` — the `api` client: a model through the Vercel AI SDK, or Claude Code (see data flow below).
 
 ### `src/judge/`
 
@@ -94,10 +94,10 @@ ValidationResult (pass: boolean, message: string)
 Playwright report (the MCP reporter reports evals only)
 ```
 
-### Client Eval Case (the mst client in a Playwright test)
+### Client Eval Case (the api client in a Playwright test)
 
 ```
-EvalCase { input, assertions.toolsTriggered }, run { client: "mst", model }
+EvalCase { input, assertions.toolsTriggered }, run { client: "api", model }
    ↓  caseExecution.ts: a case with input runs on the client
    ↓  mstClient/simulation.ts: simulateMstClient()
    ↓  mstClient/adapters/vercel.ts: createVercelOrchestrator()

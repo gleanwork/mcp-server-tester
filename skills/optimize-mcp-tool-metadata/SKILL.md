@@ -32,7 +32,7 @@ Tool metadata changes what the client sees, not what the server accepts. The mod
 - A dataset of cases with `toolsTriggered` assertions (the `write-mcp-eval` skill). Several phrasings per tool, and inputs that should not trigger it.
 - Cases that work today and must keep working tagged `regression`. Without the tag, MST runs the baseline one extra time to find them.
 - Optionally, a few cases tagged `held-out`. They don't count toward ranking and your proposals never see them, so their result shows whether the winner generalizes.
-- An API key for the model (`ANTHROPIC_API_KEY` for `claude-*` models on the `mst` client).
+- An API key for the model (`ANTHROPIC_API_KEY` for `claude-*` models on the `api` client).
 
 ## Step 1: Pick the metric and diagnose
 
@@ -80,9 +80,9 @@ npx mst optimize finish -c evals/eval.json           # writes recommendation.md
 
 If `try` says the server's tools changed, someone changed the server since `start`: the baseline no longer applies, so start again.
 
-### On the `mst` client, in a Playwright test
+### On the `api` client, in a Playwright test
 
-The dataset form runs on the `mst` client over the test's MCP connection. It takes a `model`; it doesn't take `clientOptions`.
+The dataset form runs on the `api` client over the test's MCP connection. It takes a `model`; it doesn't take `clientOptions`.
 
 ```typescript
 // tests/optimize-search.spec.ts
@@ -153,7 +153,7 @@ The callback receives `round`, `baseline` (the run without variants), `metric`, 
 
 ### On any client, from an eval config
 
-Give `runToolOptimization` an eval config to run the variants on the config's client and model (`claude-code`, `cowork`, a plugin client, or `mst` with `clientOptions`), and to optimize any numeric variant metric. Each candidate runs as a copy of `baseVariant` (default: the config's baseline) with the candidate's `tools`. `chatgpt` can't show tool metadata.
+Give `runToolOptimization` an eval config to run the variants on the config's client and model (`claude-code`, `cowork`, a plugin client, or `api` with `clientOptions`), and to optimize any numeric variant metric. Each candidate runs as a copy of `baseVariant` (default: the config's baseline) with the candidate's `tools`. `chatgpt` can't show tool metadata.
 
 ```typescript
 // scripts/optimize-search.ts
@@ -185,7 +185,7 @@ For a quick side-by-side, put the rewrites in an eval config as variants and run
       "args": ["./dist/server.js"]
     }
   },
-  "client": "mst",
+  "client": "api",
   "model": "claude-haiku-4-5",
   "trials": 10,
   "variants": [

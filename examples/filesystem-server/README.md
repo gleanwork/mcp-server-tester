@@ -17,7 +17,7 @@ This is the **canonical example** showing all testing patterns organized into th
 
 ### End-to-End / Functional Testing (requires LLM API keys)
 
-4. **Evals on a model** - Single cases on the `mst` client, written in code
+4. **Evals on a model** - Single cases on the `api` client, written in code
 5. **Evals** - One test per case in `eval-dataset.json`, on a model
 
 ## Quick Start
@@ -89,7 +89,7 @@ for (const check of toolChecks.checks) {
 
 ### 3. Evals on a Model (E2E Functional)
 
-Test how MCP servers are **really used**: a model gets the tools and an input, and decides which to call. `runEvalCase` runs one case on the `mst` client:
+Test how MCP servers are **really used**: a model gets the tools and an input, and decides which to call. `runEvalCase` runs one case on the `api` client:
 
 ```typescript
 test('a model discovers and lists directory contents', async ({ mcp }) => {
@@ -103,7 +103,7 @@ test('a model discovers and lists directory contents', async ({ mcp }) => {
       },
     },
     { mcp },
-    { client: 'mst', model: 'claude-sonnet-4-5' }
+    { client: 'api', model: 'claude-sonnet-4-5' }
   );
   expect(result.pass, result.error).toBe(true);
 });
@@ -117,7 +117,7 @@ test('a model discovers and lists directory contents', async ({ mcp }) => {
 test('a model picks the right tools', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./eval-dataset.json');
   const result = await runEvalDataset(
-    { dataset, client: 'mst', model: 'claude-sonnet-4-5' },
+    { dataset, client: 'api', model: 'claude-sonnet-4-5' },
     { mcp, testInfo }
   );
   expect(result.passed).toBe(result.total);

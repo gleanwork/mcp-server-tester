@@ -39,9 +39,9 @@ function run(
     servers,
     env,
   };
-  return getClient('mst').run!(
+  return getClient('api').run!(
     input,
-    { type: 'mst', provider: 'openai', ...config },
+    { type: 'api', provider: 'openai', ...config },
     {
       evalConfig: {
         name: 'offline',
@@ -126,7 +126,7 @@ describe('SDK client through the real AI SDK', () => {
         env: { OPENAI_API_KEY: 'suite' },
       };
       const client = {
-        type: 'mst',
+        type: 'api',
         provider: 'openai',
         env: { OPENAI_API_KEY: 'host' },
       };
@@ -135,7 +135,7 @@ describe('SDK client through the real AI SDK', () => {
         env: { OPENAI_API_KEY: 'context' },
       };
       const before = structuredClone({ input, host: client, context });
-      const result = await getClient('mst').run!(input, client, context);
+      const result = await getClient('api').run!(input, client, context);
       expect(result.error).toBeUndefined();
       expect(result.finalText).toBe('done');
       expect(mocks.provider).toHaveBeenCalledWith(
@@ -389,7 +389,7 @@ describe('vercel-sdk skills', () => {
   ] as const)(
     'skills: %s gives the SDK client skills %s',
     (skills, expected) => {
-      const config = getBuiltinClientConfig('mst', {
+      const config = getBuiltinClientConfig('api', {
         provider: 'anthropic',
         skills,
       });

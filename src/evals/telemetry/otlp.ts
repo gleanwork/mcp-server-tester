@@ -106,7 +106,7 @@ export interface TrialIdentity {
 export interface RunAttributes {
   eval: string;
   runId: string;
-  /** The client type: `cowork`, `claude-code`, `mst`, ... */
+  /** The client type: `cowork`, `claude-code`, `api`, ... */
   client?: string;
 }
 

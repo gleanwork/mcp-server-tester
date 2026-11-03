@@ -267,7 +267,7 @@ export interface TrialResult {
   clientUsage?: UsageMetrics;
   /** Token usage of this trial's judges, from judges that report it. */
   judgeUsage?: Partial<UsageMetrics>;
-  /** Skills the `mst` client loaded in this trial (skills enabled). */
+  /** Skills the `api` client loaded in this trial (skills enabled). */
   skillLoads?: SkillLoad[];
   /** The client's native numeric measurements, retained after response redaction. */
   clientTelemetry?: Record<string, unknown>;

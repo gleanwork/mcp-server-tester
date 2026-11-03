@@ -294,15 +294,15 @@ Rubric judges and custom judges now share one contract. A rubric is shorthand fo
 
 MST's LLM calls now resolve their endpoint and credential in one place (`src/llm/endpoint.ts`), so they can go through an LLM gateway. See [LLM Gateways](../llm-gateways.md).
 
-- **`ANTHROPIC_AUTH_TOKEN` is a gateway credential.** With `ANTHROPIC_BASE_URL` set, it is sent as `Authorization: Bearer`, ahead of `ANTHROPIC_API_KEY`; the SDK host used to send only `x-api-key`, and the judge sent both headers. Without a base URL override it is ignored, so a gateway token never reaches the public API; the judge's SDK used to send it there too. If it was your only Anthropic credential, set `ANTHROPIC_BASE_URL` (or `ANTHROPIC_API_KEY`): the `anthropic` judge now reports a missing key, and the `mst` client's calls fail authentication.
+- **`ANTHROPIC_AUTH_TOKEN` is a gateway credential.** With `ANTHROPIC_BASE_URL` set, it is sent as `Authorization: Bearer`, ahead of `ANTHROPIC_API_KEY`; the SDK host used to send only `x-api-key`, and the judge sent both headers. Without a base URL override it is ignored, so a gateway token never reaches the public API; the judge's SDK used to send it there too. If it was your only Anthropic credential, set `ANTHROPIC_BASE_URL` (or `ANTHROPIC_API_KEY`): the `anthropic` judge now reports a missing key, and the `api` client's calls fail authentication.
 - **An explicit `apiKeyEnvVar` reads only that variable.** This was already true for the SDK host; the judge used to pick up `ANTHROPIC_AUTH_TOKEN` from the environment as well.
 - **With a base URL override, `MST_LLM_AUTH_COMMAND` wins over `*_API_KEY` and `ANTHROPIC_AUTH_TOKEN`.** It is new, so this only matters once you set it.
 - **`ANTHROPIC_BASE_URL` takes either form.** The SDK host needed the AI SDK's form (ending in `/v1`) and the judge needed the API root (the official SDK's and Claude Code's form); each failed with 404 on the other. Both now accept both.
-- **The `mst` client streams Anthropic calls.** Its agent loop uses `streamText` instead of `generateText`. Tool calls, text, steps and usage are the same; an error part in the middle of a stream now fails the case.
-- **The `mst` client sends `store: false` to OpenAI behind `OPENAI_BASE_URL`.** Multi-turn tool loops through a gateway failed with `Item with id 'rs_…' not found`, because the AI SDK refers to earlier Responses items by id. Calls to the public API are unchanged.
+- **The `api` client streams Anthropic calls.** Its agent loop uses `streamText` instead of `generateText`. Tool calls, text, steps and usage are the same; an error part in the middle of a stream now fails the case.
+- **The `api` client sends `store: false` to OpenAI behind `OPENAI_BASE_URL`.** Multi-turn tool loops through a gateway failed with `Item with id 'rs_…' not found`, because the AI SDK refers to earlier Responses items by id. Calls to the public API are unchanged.
 - **Unknown dataset keys are errors.** A key MST doesn't define in a dataset, a case or its `assertions` block fails loading. Examples are `regex` (use `matchesPattern`), `judge` (use the case's `judges`), and a misspelt `passThreshold`. 1.x ignored such keys, so the setting or assertion never applied. The error names the case.
-- **The `mst` client doesn't report cost.** `usage.totalCostUsd` is undefined for the `mst` client, which knows tokens but not prices; the 1.x SDK host reported 0. The same holds for `claude-code` output without a cost. An eval can estimate cost with its eval config's `pricing`.
-- **Clearer `mst` client errors.** Errors are classified by HTTP status as well as message text, so a 401 whose message doesn't say "401" still gets the authentication hint, and the hint now includes the provider's message: `authentication error (<provider message>)`. A plain-object stream error shows its `message` instead of `[object Object]`.
+- **The `api` client doesn't report cost.** `usage.totalCostUsd` is undefined for the `api` client, which knows tokens but not prices; the 1.x SDK host reported 0. The same holds for `claude-code` output without a cost. An eval can estimate cost with its eval config's `pricing`.
+- **Clearer `api` client errors.** Errors are classified by HTTP status as well as message text, so a 401 whose message doesn't say "401" still gets the authentication hint, and the hint now includes the provider's message: `authentication error (<provider message>)`. A plain-object stream error shows its `message` instead of `[object Object]`.
 
 ## Server comparisons are variants
 
@@ -321,7 +321,7 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
       "serverUrl": "https://staging.example.com/mcp"
     }
   },
-  "client": "mst",
+  "client": "api",
   "model": "claude-sonnet-4-6",
   "variants": [
     { "name": "production", "servers": ["prod"] },
@@ -383,7 +383,7 @@ New fields: candidates have `measurement`, `improvement` and `fixes`, and the re
 
 **Affects:** datasets with `mode: 'mcp_host'` or `mode: 'external_host'` cases, `mcpHostConfig` or `externalHost` on a case, the `mcpHostModel` option, and plugin clients that read `context.mcpHostConfig`.
 
-A case with `input` runs on the client under test, so it needs no `mode`. The run names the client and model once: `runEvalDataset` in a Playwright test, or the eval config. A case can set its own `client`, `model` and `clientOptions`. Outside an eval config, cases run on the `mst` client, on the test's MCP connection; Claude Code, Cowork, ChatGPT and plugin clients run in evals (`mst run`). The old keys fail with a message naming what replaces them.
+A case with `input` runs on the client under test, so it needs no `mode`. The run names the client and model once: `runEvalDataset` in a Playwright test, or the eval config. A case can set its own `client`, `model` and `clientOptions`. Outside an eval config, cases run on the `api` client, on the test's MCP connection; Claude Code, Cowork, ChatGPT and plugin clients run in evals (`mst run`). The old keys fail with a message naming what replaces them.
 
 ```json
 // Before
@@ -403,7 +403,7 @@ A case with `input` runs on the client under test, so it needs no `mode`. The ru
 await runEvalDataset(
   {
     dataset,
-    client: 'mst',
+    client: 'api',
     model: 'claude-sonnet-4-5',
     clientOptions: { maxToolCalls: 8 },
   },
@@ -475,7 +475,7 @@ In an eval case, a judge isn't an assertion any more: it goes in the case's `jud
 
 **Affects:** code that calls `simulateMCPHost()` or `getBuiltinHostConfig()` from `./evals`; the `MCPHostConfig`, `HostType`, `CLIConfig`, `CLIOutputFormat` and `MCPHostSimulator` types; browser and desktop hosts (`hostType: 'browser' | 'desktop'`); the external-host runtime in `./experimental/clients` (`runExternalHostScenario`, driver identity helpers, `getExternalHostConfigJsonSchema` and the driver references, and the external-host config and capability types); plugin clients with `createConfig`; dataset sources that read `context.hostConfig`; and `buildEvalDataset(raw, hostConfig, manifest)`.
 
-These were the machinery behind the `mst`, `claude-code` and `chatgpt` clients. With `mcp_host` and `external_host` cases gone, the clients are the interface:
+These were the machinery behind the `api`, `claude-code` and `chatgpt` clients. With `mcp_host` and `external_host` cases gone, the clients are the interface:
 
 ```typescript
 // Before
@@ -484,7 +484,7 @@ const result = await simulateMCPHost(mcp, 'What files are in docs?', {
   model: 'claude-sonnet-4-5',
 });
 
-// Now: a case on the mst client
+// Now: a case on the api client
 const result = await runEvalCase(
   {
     id: 'list-docs',
@@ -492,11 +492,11 @@ const result = await runEvalCase(
     assertions: { toolsTriggered: { calls: [{ name: 'list_directory' }] } },
   },
   { mcp },
-  { client: 'mst', model: 'claude-sonnet-4-5' }
+  { client: 'api', model: 'claude-sonnet-4-5' }
 );
 ```
 
-- The `mst` client's options (`provider`, `maxToolCalls`, `temperature`, `skills`, `systemPrompt`, ...) go in `clientOptions`. See [mst client options](../mst-client.md#mst-client-options).
+- The `api` client's options (`provider`, `maxToolCalls`, `temperature`, `skills`, `systemPrompt`, ...) go in `clientOptions`. See [api client options](../mst-client.md#api-client-options).
 - Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run` or `runBatch`) can drive any client application and report its trace.
 - A plugin client needs `run` or `runBatch`; `createConfig` is gone.
 - `buildEvalDataset(raw, evalConfig)` takes no host config, and `DatasetSourceContext` has no `hostConfig`.
@@ -532,7 +532,7 @@ ADR 0002's vocabulary reaches the config: an eval config compares **variants**, 
 {
   "name": "find-skills",
   "datasets": ["./cases.json"],
-  "client": "mst",
+  "client": "api",
   "variants": [
     { "name": "current" },
     {
@@ -597,7 +597,7 @@ The types follow:
 | `PairwisePreference` (`'baseline' \| 'candidate' \| 'tie'`) | `PreferredSide`                 |
 | `PairwiseCaseVerdict`                                       | `PairwiseCasePreference`        |
 
-`toolName` is optional on `EvalCaseResult`: it is set only for a tool call a Playwright test made. `request.client` is always set; a case that names no client records `mst`.
+`toolName` is optional on `EvalCaseResult`: it is set only for a tool call a Playwright test made. `request.client` is always set; a case that names no client records `api`.
 
 The `runEvalDataset`, `runEvalCase` and `runToolOptimization` options `mcpHostModel` and `toolOverrideVariantId` are now `model` and `toolVariantId`; the old names fail with the new ones.
 
@@ -758,7 +758,7 @@ The MCP Playwright reporter now writes each Playwright run's eval results as a r
 - An evaluation framework over datasets: eval configs, evals and batches (`mst run`, `mst batch`), variants, metrics, result stores, and plugins that add dataset sources, clients, judges, metrics and result stores under their own namespace, and shared configs an eval config `extends`. It's in `@gleanwork/mcp-server-tester/evals`. See [Evaluation framework](../evaluation-framework.md).
 - Desktop clients for evals: Claude Cowork (`cowork`) and the ChatGPT desktop app (`chatgpt`), driven through the desktop UI (Computer Use on macOS, AT-SPI on Linux). Their APIs are in `@gleanwork/mcp-server-tester/experimental/clients`, which may change between minor versions. See [Cowork](../cowork.md) and [ChatGPT desktop](../chatgpt-desktop.md).
 - A custom `executeCase` for `runEvalDataset()` and `runEvalCase()`, which returns a typed `CaseExecution` (`completed` or `failed`).
-- LLM gateway support for the `mst` client and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).
+- LLM gateway support for the `api` client and LLM judges: `ANTHROPIC_AUTH_TOKEN`, and `MST_LLM_AUTH_COMMAND` for short-lived tokens. See [LLM Gateways](../llm-gateways.md).
 - The CLI is also installed as `mst`. In a project that depends on the package, `npx mst <command>` and `npx mcp-server-tester <command>` run the same binary. Before the package is installed, run `init` as `npx @gleanwork/mcp-server-tester init`: `npx mcp-server-tester` and `npx mst` would download unrelated npm packages with those names. See [CLI](../cli.md).
 - `protocol` on `mcpConfig` (`'legacy'`, `'auto'`, or a revision like `'2026-07-28'`), the `mcpProtocol` fixture option, and `protocolMatrix()`. See [Protocol Versions](../protocol-versions.md). To run an existing project against both eras:
 
@@ -772,5 +772,5 @@ The MCP Playwright reporter now writes each Playwright run's eval results as a r
   ```
 
 - `runCrossEraChecks()` to check a server serves every era the same.
-- `mcp.skills`, skills conformance checks, and a `skills` option on the `mst` client, for comparing modes as variants. See [Agent Skills](../skills.md).
+- `mcp.skills`, skills conformance checks, and a `skills` option on the `api` client, for comparing modes as variants. See [Agent Skills](../skills.md).
 - Eval run metadata records the protocol (`metadata.protocol`, stored `protocolVersion` / `protocolEra`).

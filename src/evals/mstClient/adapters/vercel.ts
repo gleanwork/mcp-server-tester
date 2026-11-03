@@ -100,7 +100,7 @@ function sdkFailure(
     raw.includes('ERR_MODULE_NOT_FOUND')
   ) {
     const message =
-      `The mst client failed: required package not installed.\n` +
+      `The api client failed: required package not installed.\n` +
       `Hint: run \`getMissingDependencyMessage('${provider}')\` or check docs/mst-client.md for install instructions.`;
     return {
       message,
@@ -173,7 +173,7 @@ function sdkFailure(
     )
   ) {
     const message =
-      `The mst client failed: network error.\n` +
+      `The api client failed: network error.\n` +
       `Hint: check network connectivity and whether the provider's API endpoint is reachable from this machine.`;
     return { message, ending: infrastructureEnding('network', message) };
   }
@@ -189,7 +189,7 @@ function sdkFailure(
     )
   ) {
     const message =
-      `The mst client failed: rate limited.\n` +
+      `The api client failed: rate limited.\n` +
       `Hint: reduce concurrency, add delays between requests, or upgrade your API plan.`;
     return { message, ending: infrastructureEnding('provider', message) };
   }

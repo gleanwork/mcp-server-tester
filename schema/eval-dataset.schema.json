@@ -62,7 +62,7 @@
         "client": {
           "type": "string",
           "minLength": 1,
-          "description": "The client the case runs on: mst, claude-code, codex, cowork, chatgpt, or a plugin's <namespace>/client/<name>. Inherits the eval's (or the run's) client."
+          "description": "The client the case runs on: api, claude-code, codex, cowork, chatgpt, or a plugin's <namespace>/client/<name>. Inherits the eval's (or the run's) client."
         },
         "model": {
           "type": "string",
@@ -70,7 +70,7 @@
         },
         "clientOptions": {
           "type": "object",
-          "description": "The client's own options, such as systemPrompt or skills for mst, or appVersion for cowork."
+          "description": "The client's own options, such as systemPrompt or skills for api, or appVersion for cowork."
         },
         "trials": {
           "type": "integer",

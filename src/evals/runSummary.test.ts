@@ -29,7 +29,7 @@ import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type * as SimulationModule from './mstClient/simulation.js';
 
-// A stand-in for the mst client's model: it calls the connection's tool once
+// A stand-in for the api client's model: it calls the connection's tool once
 // and answers with the tool's text.
 vi.mock('./mstClient/simulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),

@@ -55,7 +55,7 @@ describe('eval output', () => {
             serverUrl: 'https://example.com/mcp',
           },
         },
-        client: 'mst',
+        client: 'api',
         clientOptions: { provider: 'anthropic' },
         variants: [{ name: 'a' }, { name: 'b' }],
       })

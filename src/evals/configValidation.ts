@@ -13,11 +13,8 @@ import {
   withoutRequest,
 } from './builtinDatasetSources.js';
 import { clientFieldsOf, clientOf, clientPatchOf } from './clientFields.js';
-import {
-  assertClientSupports,
-  getClient,
-  resolveClientName,
-} from './builtinClients.js';
+import { assertClientSupports, getClient } from './builtinClients.js';
+import { resolveClientName } from './clientNames.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
 import {

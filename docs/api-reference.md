@@ -382,7 +382,7 @@ Run an eval dataset. Assertions are defined per-case in the dataset's `assertion
   - `onCaseComplete?: (result: EvalCaseResult) => void` - Callback after each case completes
   - `onTrialComplete?: (result: EvalCaseResult, trial: number) => void` - Callback after each trial of a case, with the trial's result and its number from 0, before the case's `onCaseComplete`
   - `concurrency?: number` - Max parallel cases (default: `1` = sequential)
-  - `client?: string`, `model?: string`, `clientOptions?: ClientOptions` - The client cases run on, its model and options; a case's own fields change them. Outside an eval, cases run on `mst`, on the test's MCP connection (default client: `'mst'`)
+  - `client?: string`, `model?: string`, `clientOptions?: ClientOptions` - The client cases run on, its model and options; a case's own fields change them. Outside an eval, cases run on `api`, on the test's MCP connection (default client: `'api'`)
   - `defaultTrials?: number` - Default trial count for client cases (default: `1`)
   - `defaultPassThreshold?: number` - Default `passThreshold` for client cases that don't set one (default: `1`)
   - `defaultJudgeReps?: number` - Default judge evaluation count per case (default: `1`)
@@ -588,7 +588,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L130-L219
+```typescript snippet=src/evals/evalRunner.ts#L131-L220
 /**
  * Overall result of running an eval dataset
  */
@@ -729,7 +729,7 @@ if (result.proposal?.recommendation === 'apply') {
 }
 ```
 
-**On an eval config.** Pass `evalConfig` instead of a dataset and context, and the candidates run as the eval config's variants, on any client that can show tool metadata: in-process for `mst`, through MST's tool proxy for plugin clients, `claude-code` and `cowork`. The base variant (`evalConfig.baseVariant`, or the eval config's baseline) is the baseline; each candidate runs as a copy of it with the candidate's tool metadata as its `tools`.
+**On an eval config.** Pass `evalConfig` instead of a dataset and context, and the candidates run as the eval config's variants, on any client that can show tool metadata: in-process for `api`, through MST's tool proxy for plugin clients, `claude-code` and `cowork`. The base variant (`evalConfig.baseVariant`, or the eval config's baseline) is the baseline; each candidate runs as a copy of it with the candidate's tool metadata as its `tools`.
 
 ```typescript
 const result = await runToolOptimization({
@@ -779,7 +779,7 @@ test('single eval case', async ({ mcp }, testInfo) => {
       assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
     },
     { mcp, testInfo },
-    { client: 'mst', model: 'claude-haiku-4-5' }
+    { client: 'api', model: 'claude-haiku-4-5' }
   );
 
   expect(result.pass).toBe(true);
@@ -1269,7 +1269,7 @@ The following utilities are available for checking whether optional LLM provider
 
 #### `isProviderAvailable(provider)`
 
-Check whether the npm package required for a given `mst` client provider is installed in the current environment.
+Check whether the npm package required for a given `api` client provider is installed in the current environment.
 
 ```typescript
 import { isProviderAvailable } from '@gleanwork/mcp-server-tester/evals';
@@ -1290,7 +1290,7 @@ const message = getMissingDependencyMessage('openai');
 // e.g. "Provider 'openai' requires the 'openai' package. Run: npm install openai"
 ```
 
-See [LLM Client Guide](./mst-client.md) for full details on configuring the `mst` client.
+See [LLM Client Guide](./mst-client.md) for full details on configuring the `api` client.
 
 ## Conformance Functions
 

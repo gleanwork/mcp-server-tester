@@ -1,6 +1,6 @@
 ---
 name: write-mcp-eval
-description: Write evals for MCP servers with @gleanwork/mcp-server-tester (MST). An eval gives a client and model the cases of a dataset (an input, what is expected, and assertions) and grades each trial's trace. Run the cases in a Playwright test with runEvalDataset on the mst client, or with `mst run` and an eval config that compares variants (servers, client, model, system prompt, tool metadata). Use when asked to write evals, eval datasets or eval configs, to test whether a model picks the right tools, or to compare MCP server setups.
+description: Write evals for MCP servers with @gleanwork/mcp-server-tester (MST). An eval gives a client and model the cases of a dataset (an input, what is expected, and assertions) and grades each trial's trace. Run the cases in a Playwright test with runEvalDataset on the api client, or with `mst run` and an eval config that compares variants (servers, client, model, system prompt, tool metadata). Use when asked to write evals, eval datasets or eval configs, to test whether a model picks the right tools, or to compare MCP server setups.
 metadata:
   author: gleanwork
   version: '2.0.0'
@@ -20,11 +20,11 @@ A check that calls a tool with fixed arguments has no client, so it is a test, n
 
 |          | Playwright test with `runEvalDataset`    | `mst run` with an eval config                                            |
 | -------- | ---------------------------------------- | ------------------------------------------------------------------------ |
-| Client   | `mst` only, on the test's MCP connection | `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`, or a plugin's client |
+| Client   | `api` only, on the test's MCP connection | `api`, `claude-code`, `codex`, `cowork`, `chatgpt`, or a plugin's client |
 | Compares | one setup per call                       | several variants in one run, each compared with the baseline             |
 | Results  | the MCP Playwright reporter              | a run directory with its report, and a table per variant                 |
 
-Start with a Playwright test on `mst` while you write cases. Use an eval config to run them on another client or to compare variants.
+Start with a Playwright test on `api` while you write cases. Use an eval config to run them on another client or to compare variants.
 
 ## Step 1: Write the dataset
 
@@ -197,7 +197,7 @@ This case passes when at least 8 of its 10 trials pass. Its result has `passRate
 
 ## Step 5a: Run the cases in a Playwright test
 
-The `mst` client gives the model the server's tools and nothing else. In a Playwright test it uses the test's MCP connection (`mcpConfig` in `playwright.config.ts`; see `write-mcp-test`).
+The `api` client gives the model the server's tools and nothing else. In a Playwright test it uses the test's MCP connection (`mcpConfig` in `playwright.config.ts`; see `write-mcp-test`).
 
 ```bash
 npm install --save-dev ai @ai-sdk/anthropic   # usually installed already, as optional dependencies
@@ -214,7 +214,7 @@ test('search evals', async ({ mcp }, testInfo) => {
   const result = await runEvalDataset(
     {
       dataset,
-      client: 'mst',
+      client: 'api',
       model: 'claude-haiku-4-5',
       clientOptions: { maxToolCalls: 8, temperature: 0 },
       defaultTrials: 10,
@@ -230,7 +230,7 @@ test('search evals', async ({ mcp }, testInfo) => {
 | Option                                  | Meaning                                                             |
 | --------------------------------------- | ------------------------------------------------------------------- |
 | `dataset`                               | From `loadEvalDataset(path)` or `loadEvalDatasetFromObject(object)` |
-| `client`, `model`, `clientOptions`      | The client (only `mst` here), its model, and its options            |
+| `client`, `model`, `clientOptions`      | The client (only `api` here), its model, and its options            |
 | `defaultTrials`, `defaultPassThreshold` | For cases that don't set `trials` or `passThreshold`                |
 | `defaultJudgeReps`                      | For cases that don't set `judgeReps`                                |
 | `filterTags`                            | Run only cases with one of these tags                               |
@@ -238,7 +238,7 @@ test('search evals', async ({ mcp }, testInfo) => {
 | `plugins`                               | Plugin objects whose judges the cases name                          |
 | `saveResultsTo`, `baselineResultsFrom`  | Save this run, or compare with a saved earlier run                  |
 
-The `mst` client infers the API from the model id (`claude-*` is Anthropic, `claude-*@date` Vertex, `gpt-*` OpenAI, `gemini-*` Google). Its `clientOptions`: `provider` (to override that), `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout` (ms), `apiKeyEnvVar`, `systemPrompt`, and `skills` (`off`, `catalog`, `preload`, for servers that serve Agent Skills).
+The `api` client infers the API from the model id (`claude-*` is Anthropic, `claude-*@date` Vertex, `gpt-*` OpenAI, `gemini-*` Google). Its `clientOptions`: `provider` (to override that), `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout` (ms), `apiKeyEnvVar`, `systemPrompt`, and `skills` (`off`, `catalog`, `preload`, for servers that serve Agent Skills).
 
 The result has `total`, `passed`, `failed`, and `caseResults`. Each case result has `pass`, `scores` (one per grader), `toolCallTrace` (calls marked `expected` or `unexpected`, and `missed` tools), `toolPrecision` and `toolRecall`, and for several trials `passRate` and `trialResults`.
 
@@ -248,7 +248,7 @@ To see whether a change broke cases that passed before, save one run and compare
 const result = await runEvalDataset(
   {
     dataset,
-    client: 'mst',
+    client: 'api',
     model: 'claude-haiku-4-5',
     defaultTrials: 10,
     baselineResultsFrom: '.mcp-test-results/search-baseline.json',
@@ -313,7 +313,7 @@ A variant is one setup the eval tests. Every variant runs the same cases, and ea
       "serverUrl": "https://staging.example.com/mcp"
     }
   },
-  "client": "mst",
+  "client": "api",
   "model": "claude-sonnet-4-6",
   "trials": 10,
   "variants": [
@@ -430,7 +430,7 @@ test.describe('search evals', () => {
     const result = await runEvalDataset(
       {
         dataset,
-        client: 'mst',
+        client: 'api',
         model: 'claude-haiku-4-5',
         defaultTrials: 10,
         defaultPassThreshold: 0.8,
@@ -459,6 +459,6 @@ Each trial is a full model conversation with every tool's definition in the prom
 - [ ] At least two phrasings per tool, plus selectivity and negative cases
 - [ ] `trials` of 10 or more for any result you act on, with a `passThreshold` you chose on purpose
 - [ ] `$pattern` strings are valid regular expressions, with backslashes escaped
-- [ ] Playwright: `runEvalDataset(options, { mcp, testInfo })` with `client: 'mst'` and a `model`
+- [ ] Playwright: `runEvalDataset(options, { mcp, testInfo })` with `client: 'api'` and a `model`
 - [ ] Eval config: `servers` is a map, variants list server labels, `client` is set, and `npx mst run --config <path> --dry-run` passes
 - [ ] The API key for the model (and the judge) is in the environment, not in the file

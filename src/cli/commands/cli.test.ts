@@ -152,7 +152,7 @@ describe('mst CLI', () => {
         'typo.json': JSON.stringify({
           name: 'm',
           datasets: ['./cases.json'],
-          clientt: { type: 'mst' },
+          clientt: { type: 'api' },
         }),
       });
       const result = await runBin('run', '--config', 'typo.json', '--dry-run');
@@ -300,7 +300,7 @@ describe('mst CLI', () => {
       const result = await runBin('run', '--config', 'host.json', '--dry-run');
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toMatch(
-        /^mst: Client "sdk" is not available. Available: chatgpt, claude-code, codex, cowork, mst./
+        /^mst: Client "sdk" is not available. Available: api, chatgpt, claude-code, codex, cowork./
       );
       expect(result.stderr).not.toMatch(/\n\s+at /);
     });

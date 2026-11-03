@@ -26,7 +26,7 @@ MST uses these terms in its API, config keys, CLI and reports. Use them, and not
 | case           | One input for a client to act on, with what is expected                                    | scenario, test     |
 | input          | The user's request, sent to the client as its prompt                                       | scenario           |
 | expected       | A case's ground truth: an answer, rubric criteria                                          | golden             |
-| client         | The MCP client application under test: `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`  | host               |
+| client         | The MCP client application under test: `api`, `claude-code`, `codex`, `cowork`, `chatgpt`  | host               |
 | model          | The LLM the client runs, set beside the client                                             | engine             |
 | variant        | One setup an eval tests: client, model and options, servers, tool metadata                 | arm                |
 | baseline       | The variant the others are compared with (the first, unless `baseline` names one)          | control            |
@@ -154,7 +154,7 @@ For use outside Playwright, each matcher has a function that returns `{ pass, me
 
 Case keys: `id`, `input` (both required), `description`, `expected`, `assertions`, `judges`, `tags`, `trials`, `passThreshold`, `judgeReps`, `client`, `model`, `clientOptions`, `metadata`. Assertions: `toolsTriggered` (`calls` with `name`, `required`, `arguments` with `$pattern`/`$flags`, `server`, `kind`, `source`; `order`; `exclusive`), `toolCallCount`, `containsText`, `matchesPattern` (on the final answer). Judges go in `judges`, beside `assertions`. Unknown keys fail validation. Load with `loadEvalDataset(path)` or `loadEvalDatasetFromObject(object)`; check with `validateEvalDataset(object)`.
 
-Run in a Playwright test, on the `mst` client and the test's MCP connection:
+Run in a Playwright test, on the `api` client and the test's MCP connection:
 
 ```typescript
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
@@ -163,14 +163,14 @@ import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 test('search evals', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./evals/search-evals.json');
   const result = await runEvalDataset(
-    { dataset, client: 'mst', model: 'claude-haiku-4-5', defaultTrials: 10 },
+    { dataset, client: 'api', model: 'claude-haiku-4-5', defaultTrials: 10 },
     { mcp, testInfo }
   );
   expect(result.failed).toBe(0);
 });
 ```
 
-One case: `runEvalCase(evalCase, { mcp, testInfo }, { client: 'mst', model })`. With one trial, its result's `response` is the client trace that `toHaveToolCalls` reads.
+One case: `runEvalCase(evalCase, { mcp, testInfo }, { client: 'api', model })`. With one trial, its result's `response` is the client trace that `toHaveToolCalls` reads.
 
 ## Eval configs
 
@@ -206,13 +206,13 @@ One case: `runEvalCase(evalCase, { mcp, testInfo }, { client: 'mst', model })`. 
 
 | Client                      | What it is                                                           | Runs                                  |
 | --------------------------- | -------------------------------------------------------------------- | ------------------------------------- |
-| `mst`                       | MST's own client: the model gets the servers' tools and nothing else | Playwright and `mst run`              |
+| `api`                       | The model alone, through its provider's API, with the servers' tools | Playwright and `mst run`              |
 | `claude-code`               | Claude Code, with an empty config directory                          | `mst run`                             |
 | `cowork`                    | Claude Cowork in Claude Desktop                                      | `mst run` (macOS: `mst cowork setup`) |
 | `chatgpt`                   | The ChatGPT desktop app                                              | `mst run`                             |
 | `<namespace>/client/<name>` | A plugin's client                                                    | `mst run`                             |
 
-The `mst` client infers the API from the model id (`claude-*` Anthropic, `claude-*@date` Vertex, `gpt-*` OpenAI, `gemini-*` Google). It needs `ai` and the provider package (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`, `@ai-sdk/google-vertex`, `@ai-sdk/mistral`, `@ai-sdk/azure`, `@ai-sdk/deepseek`, `@ai-sdk/xai`, `@openrouter/ai-sdk-provider`), installed as optional dependencies, and the API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, ...). Its `clientOptions`: `provider`, `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout`, `apiKeyEnvVar`, `systemPrompt`, `skills` (`off`, `catalog`, `preload`), `env`. Gateways: set `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` with a gateway credential (`docs/llm-gateways.md`).
+The `api` client infers the API from the model id (`claude-*` Anthropic, `claude-*@date` Vertex, `gpt-*` OpenAI, `gemini-*` Google). It needs `ai` and the provider package (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`, `@ai-sdk/google-vertex`, `@ai-sdk/mistral`, `@ai-sdk/azure`, `@ai-sdk/deepseek`, `@ai-sdk/xai`, `@openrouter/ai-sdk-provider`), installed as optional dependencies, and the API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, ...). Its `clientOptions`: `provider`, `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout`, `apiKeyEnvVar`, `systemPrompt`, `skills` (`off`, `catalog`, `preload`), `env`. Gateways: set `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` with a gateway credential (`docs/llm-gateways.md`).
 
 ## Judges
 
@@ -298,7 +298,7 @@ Old names are errors that name their replacement, not aliases.
 | `servers: [{ "label": "x", ... }]`, server objects in a variant          | `servers: { "x": { ... } }`, variants list labels                                                            |
 | `mst run --manifest`, `--arm`; `mst batch --manifests`, `--manifest-dir` | `--config`, `--variant`; `--configs`, `--config-dir`                                                         |
 | `runEvalSuite`, `runVariantExperiment`                                   | `runEval`, `runToolOptimization` (from `./evals`)                                                            |
-| `simulateMCPHost`, `vercel-sdk`, `claude-cli`                            | the `mst` and `claude-code` clients                                                                          |
+| `simulateMCPHost`, `vercel-sdk`, `claude-cli`                            | the `api` and `claude-code` clients                                                                          |
 | `registerJudge`                                                          | a plugin's `judges`                                                                                          |
 | `acme/completeness` (two-part names)                                     | `acme/judge/completeness`                                                                                    |
 | `@modelcontextprotocol/sdk`                                              | `@modelcontextprotocol/client`                                                                               |
@@ -317,4 +317,4 @@ Full list: `docs/migrations/migration-2.0.md`.
 - **A server array.** `servers` is a map keyed by label; variants list labels.
 - **Secrets in configs.** Use `accessTokenEnv`, the environment, or `--secrets-file`.
 - **`runEvalDataset(dataset, mcp)`.** It takes two objects: `runEvalDataset({ dataset, ... }, { mcp, testInfo })`.
-- **A non-mst client in Playwright.** `runEvalDataset` runs only `mst`. Run `claude-code`, `codex`, `cowork`, `chatgpt` and plugin clients with `mst run`.
+- **A non-api client in Playwright.** `runEvalDataset` runs only `api`. Run `claude-code`, `codex`, `cowork`, `chatgpt` and plugin clients with `mst run`.

@@ -1,6 +1,6 @@
 # Traces (OpenTelemetry)
 
-MST can send each trial of a run as an [OpenTelemetry](https://opentelemetry.io/) trace to a collector, over OTLP. MST builds the traces itself, from the record it keeps of each trial, so every client is traced the same way: the `mst` client, Claude Code, Cowork, ChatGPT and plugin clients, run locally, in Docker or on a cloud VM, attached or detached. No client needs a telemetry setting of its own.
+MST can send each trial of a run as an [OpenTelemetry](https://opentelemetry.io/) trace to a collector, over OTLP. MST builds the traces itself, from the record it keeps of each trial, so every client is traced the same way: the `api` client, Claude Code, Cowork, ChatGPT and plugin clients, run locally, in Docker or on a cloud VM, attached or detached. No client needs a telemetry setting of its own.
 
 ```json
 {
@@ -63,7 +63,7 @@ The trace has what the client recorded. Every client reports its answer and tool
 
 | Client        | Model requests                                      | Times                                                                     |
 | ------------- | --------------------------------------------------- | ------------------------------------------------------------------------- |
-| `mst`         | Each step's request, with usage and response ID     | Each request's; tool calls' from the requests around them                 |
+| `api`         | Each step's request, with usage and response ID     | Each request's; tool calls' from the requests around them                 |
 | `claude-code` | Each message, with usage                            | From when each line of Claude Code's output arrived                       |
 | `codex`       | Each response in the session's rollout, with usage  | From when each of Codex's events arrived; requests' from the rollout      |
 | Cowork        | Each message in the session's audit log, with usage | From the audit log's timestamps                                           |

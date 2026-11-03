@@ -6,6 +6,7 @@
  * so they join any traces the run did send.
  */
 import { DEFAULT_CLIENT } from '../clientFields.js';
+import { storedClientName } from '../clientNames.js';
 import type { StoredRun } from '../runFormat.js';
 import {
   DEFAULT_MAX_ATTRIBUTE_CHARS,
@@ -62,9 +63,11 @@ export function storedRunTraces(
     const attributes: RunAttributes = {
       eval: run.evalName,
       runId,
-      client:
+      // As MST names the client now: a run stored before ADR 0011 says `mst`.
+      client: storedClientName(
         run.variants.find((recorded) => recorded.name === variant.name)
-          ?.client ?? DEFAULT_CLIENT,
+          ?.client ?? DEFAULT_CLIENT
+      ),
     };
     for (const caseResult of variant.result?.caseResults ?? []) {
       const result = { ...caseResult, variant: variant.name };

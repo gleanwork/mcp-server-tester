@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { getClient, providerForModel } from './builtinClients.js';
 import { validateEvalConfig } from './configValidation.js';
 import { CHATGPT_CLIENT, CHATGPT_LINUX_CLIENT } from './chatgptClient.js';
+import { storedClientName } from './clientNames.js';
+import { playwrightClientOf } from './caseExecution.js';
+import { runEvalCase } from './evalRunner.js';
 
 describe('built-in client names', () => {
   it.each([
-    ['vercel-sdk', 'mst'],
-    ['anthropic-api', 'mst'],
+    ['mst', 'api'],
+    ['vercel-sdk', 'api'],
+    ['anthropic-api', 'api'],
     ['claude-cli', 'claude-code'],
     ['chatgpt-mac', 'chatgpt'],
     ['chatgpt-linux', 'chatgpt'],
@@ -18,6 +22,125 @@ describe('built-in client names', () => {
     expect(() => getClient(old)).toThrow(
       `Client "${old}" is now "${current}".`
     );
+  });
+
+  it('an eval config or a case naming mst fails naming api', () => {
+    const config = {
+      name: 'm',
+      datasets: [{ type: 'file', path: 'x.json' }],
+    };
+    expect(() => validateEvalConfig({ ...config, client: 'mst' })).toThrow(
+      'Client "mst" is now "api".'
+    );
+    expect(() =>
+      validateEvalConfig({
+        ...config,
+        client: 'api',
+        variants: [{ name: 'old', client: 'mst' }],
+      })
+    ).toThrow('Client "mst" is now "api".');
+    // A case in a Playwright test, or the run it inherits from.
+    expect(() =>
+      playwrightClientOf({ id: 'c', input: 'hi', client: 'mst' }, undefined)
+    ).toThrow('Client "mst" is now "api".');
+    expect(() =>
+      playwrightClientOf({ id: 'c', input: 'hi' }, { client: 'mst' })
+    ).toThrow('Client "mst" is now "api".');
+  });
+
+  it('the full name mst/client/mst fails naming mst/client/api', () => {
+    const config = {
+      name: 'm',
+      datasets: [{ type: 'file', path: 'x.json' }],
+    };
+    const renamed = 'Client "mst/client/mst" is now "mst/client/api".';
+    expect(() => getClient('mst/client/mst')).toThrow(renamed);
+    expect(() =>
+      validateEvalConfig({ ...config, client: 'mst/client/mst' })
+    ).toThrow(renamed);
+    expect(() =>
+      validateEvalConfig({
+        ...config,
+        client: 'api',
+        variants: [{ name: 'old', client: 'mst/client/mst' }],
+      })
+    ).toThrow(renamed);
+    expect(() =>
+      playwrightClientOf(
+        { id: 'c', input: 'hi', client: 'mst/client/mst' },
+        undefined
+      )
+    ).toThrow(renamed);
+    // The current full name still works.
+    expect(getClient('mst/client/api')).toBe(getClient('api'));
+  });
+
+  it('a case runs on mst/client/api outside an eval, inheriting the run', () => {
+    const run = {
+      client: 'mst/client/api',
+      model: 'claude-haiku-4-5',
+      clientOptions: { temperature: 0 },
+    };
+    expect(playwrightClientOf({ id: 'c', input: 'hi' }, run)).toEqual({
+      temperature: 0,
+      model: 'claude-haiku-4-5',
+    });
+    // The case names the bare name; the run's full name is the same client.
+    expect(
+      playwrightClientOf({ id: 'c', input: 'hi', client: 'api' }, run)
+    ).toEqual({ temperature: 0, model: 'claude-haiku-4-5' });
+    expect(
+      playwrightClientOf(
+        { id: 'c', input: 'hi', client: 'mst/client/api' },
+        undefined
+      )
+    ).toEqual({});
+  });
+
+  it('a stored run that says mst reads as api', () => {
+    expect(storedClientName('mst')).toBe('api');
+    expect(storedClientName('api')).toBe('api');
+    expect(storedClientName('claude-code')).toBe('claude-code');
+    expect(storedClientName('acme/client/desk')).toBe('acme/client/desk');
+    // runEvalCase recorded a full name as it was given.
+    expect(storedClientName('mst/client/mst')).toBe('api');
+    expect(storedClientName('mst/client/api')).toBe('api');
+  });
+
+  it('a result records the client and model the case ran on, by either name', async () => {
+    async function completed() {
+      return {
+        kind: 'completed' as const,
+        response: { success: true, response: 'ok', toolCalls: [] },
+      };
+    }
+    const model = 'claude-haiku-4-5';
+    async function requestOf(
+      evalCase: { id: string; input: string; client?: string },
+      client: string | undefined
+    ) {
+      const result = await runEvalCase(
+        evalCase,
+        {},
+        { client, model, executeCase: completed, grade: false }
+      );
+      // The case ran with the model playwrightClientOf gives it.
+      expect(playwrightClientOf(evalCase, { client, model }).model).toBe(model);
+      return { client: result.request?.client, model: result.request?.model };
+    }
+    const ran = { client: 'api', model };
+    const input = 'hi';
+    expect(
+      await requestOf({ id: 'a', input, client: 'api' }, 'mst/client/api')
+    ).toEqual(ran);
+    expect(
+      await requestOf({ id: 'b', input, client: 'mst/client/api' }, 'api')
+    ).toEqual(ran);
+    expect(await requestOf({ id: 'c', input }, 'mst/client/api')).toEqual(ran);
+    // A run that names no client runs on api.
+    expect(
+      await requestOf({ id: 'd', input, client: 'api' }, undefined)
+    ).toEqual(ran);
   });
 
   it('chatgpt is the ChatGPT client for this platform', () => {
@@ -34,7 +157,7 @@ describe('built-in client names', () => {
         client: 'sdk',
       })
     ).toThrow(
-      'Client "sdk" is not available. Available: chatgpt, claude-code, codex, cowork, mst.'
+      'Client "sdk" is not available. Available: api, chatgpt, claude-code, codex, cowork.'
     );
   });
 });

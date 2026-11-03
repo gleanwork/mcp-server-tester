@@ -8,7 +8,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalResultStore } from './resultStore.js';
-import { joinCaseResults } from './runFormat.js';
+import { joinCaseResults, summaryWithCurrentClients } from './runFormat.js';
 import { readJsonFile } from '../utils/jsonFile.js';
 import {
   DEFAULT_REGRESSION_TAG,
@@ -147,7 +147,10 @@ export async function findPreviousRun(options: {
           ) &&
           eligible(artifact.data)
         )
-          return { runId: candidate.id, summary: artifact.data };
+          return {
+            runId: candidate.id,
+            summary: summaryWithCurrentClients(artifact.data),
+          };
       } catch {
         // An unreadable or half-written summary isn't a baseline.
       }
@@ -196,7 +199,7 @@ export async function findPreviousRun(options: {
   const cases = await history.cases(newest.entry).catch(() => []);
   return {
     runId: newest.runId,
-    summary: joinCaseResults(newest.summary, cases),
+    summary: summaryWithCurrentClients(joinCaseResults(newest.summary, cases)),
   };
 }
 

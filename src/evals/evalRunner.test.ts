@@ -27,7 +27,7 @@ import type * as SimulationModule from './mstClient/simulation.js';
 import { simulateMstClient } from './mstClient/simulation.js';
 import type { MstClientSimulationResult } from './mstClient/types.js';
 
-// A stand-in for the mst client's model: it calls the connection's tool once
+// A stand-in for the api client's model: it calls the connection's tool once
 // and answers with what the tool returned. A tool result shaped like a
 // simulation is taken as the client's whole run, so a test can set the calls.
 vi.mock('./mstClient/simulation.js', async (original) => ({
@@ -133,8 +133,8 @@ class MemoryEvalResultStore implements EvalResultStore {
 }
 
 describe('runEvalCase', () => {
-  describe('cases on the mst client', () => {
-    it('runs the case on the mst client and returns its answer', async () => {
+  describe('cases on the api client', () => {
+    it('runs the case on the api client and returns its answer', async () => {
       const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
       const context = createContext(mcp);
       const evalCase = createEvalCase();
@@ -324,14 +324,14 @@ describe('runEvalCase', () => {
         createEvalCase({ input: 'test scenario' }),
         createContext(),
         {
-          client: 'mst',
+          client: 'api',
           model: 'claude-haiku-4-5',
           executeCase: async () =>
             clientRunToExecution({ finalText: 'ok', events: [] }, 'structured'),
         }
       );
       expect(result.request).toMatchObject({
-        client: 'mst',
+        client: 'api',
         model: 'claude-haiku-4-5',
       });
     });

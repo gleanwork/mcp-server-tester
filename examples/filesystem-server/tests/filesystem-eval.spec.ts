@@ -216,8 +216,8 @@ function hasApiKey(provider: string): boolean {
 }
 
 test.describe('Evals on a model (E2E)', () => {
-  // The mst client: a model gets the tools and the input, and picks the calls.
-  const client = { client: 'mst', model: 'claude-sonnet-4-5' } as const;
+  // The api client: a model gets the tools and the input, and picks the calls.
+  const client = { client: 'api', model: 'claude-sonnet-4-5' } as const;
 
   test('a model discovers and lists directory contents', async ({ mcp }) => {
     test.skip(!hasApiKey('anthropic'), 'ANTHROPIC_API_KEY not set');
@@ -252,7 +252,7 @@ test.describe('Evals on a model (E2E)', () => {
 });
 
 test.describe('Eval: LLM Client Mode', () => {
-  // Every case runs on the client it names (mst).
+  // Every case runs on the client it names (api).
   const llmCases = evalDataset.cases;
 
   for (const evalCase of llmCases) {

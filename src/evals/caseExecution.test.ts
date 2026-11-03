@@ -80,7 +80,7 @@ describe('executeEvalCase', () => {
     });
   });
 
-  it("runs on the run's mst client, with the case's own fields over it", async () => {
+  it("runs on the run's api client, with the case's own fields over it", async () => {
     vi.mocked(simulateMstClient).mockResolvedValue({
       success: true,
       response: 'answer',
@@ -90,7 +90,7 @@ describe('executeEvalCase', () => {
       { ...clientCase, clientOptions: { systemPrompt: 'Case prompt.' } },
       mcp,
       {
-        client: 'mst',
+        client: 'api',
         model: 'gpt-5',
         clientOptions: { systemPrompt: 'Run prompt.', maxToolCalls: 9 },
       }
@@ -121,7 +121,7 @@ describe('executeEvalCase', () => {
   it("doesn't carry the run's options to a case's own client", () => {
     expect(
       playwrightClientOf(
-        { ...clientCase, client: 'mst', model: 'claude-haiku-4-5' },
+        { ...clientCase, client: 'api', model: 'claude-haiku-4-5' },
         {
           client: 'acme/client/other',
           model: 'x',
@@ -136,7 +136,7 @@ describe('executeEvalCase', () => {
       executeEvalCase({ id: 'd', input: 'query' }, undefined)
     ).resolves.toMatchObject({
       kind: 'failed',
-      error: 'The mst client requires an MCP connection.',
+      error: 'The api client requires an MCP connection.',
     });
   });
 });

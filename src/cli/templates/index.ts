@@ -118,7 +118,7 @@ test.describe('MCP Server Tests', () => {
     test.skip(!process.env.ANTHROPIC_API_KEY, 'Set ANTHROPIC_API_KEY to run evals');
     const dataset = await loadEvalDataset('./data/example-dataset.json');
     const result = await runEvalDataset(
-      { dataset, client: 'mst', model: 'claude-haiku-4-5' },
+      { dataset, client: 'api', model: 'claude-haiku-4-5' },
       { mcp, testInfo }
     );
     expect(result.passed).toBe(result.total);

@@ -186,7 +186,7 @@ Assertions are declared per case in the `assertions` block: which tools the clie
 
 ## Running Evals
 
-Use `runEvalDataset` in a test, naming the client and model. In a Playwright test the `mst` client runs the model against the test's MCP connection (it calls the model's API, so set its key, such as `ANTHROPIC_API_KEY`):
+Use `runEvalDataset` in a test, naming the client and model. In a Playwright test the `api` client runs the model against the test's MCP connection (it calls the model's API, so set its key, such as `ANTHROPIC_API_KEY`):
 
 ```typescript snippet=snippets/quickstart-eval-runner.ts
 import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
@@ -196,7 +196,7 @@ test('run weather evals', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
 
   const result = await runEvalDataset(
-    { dataset, client: 'mst', model: 'claude-haiku-4-5', defaultTrials: 5 },
+    { dataset, client: 'api', model: 'claude-haiku-4-5', defaultTrials: 5 },
     { mcp, testInfo }
   );
 

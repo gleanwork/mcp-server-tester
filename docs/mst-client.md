@@ -1,6 +1,6 @@
-# The mst client
+# The api client
 
-The `mst` client tests your MCP server through a real LLM (OpenAI, Anthropic, etc.), exactly as a user would interact with Claude Desktop or ChatGPT. The LLM decides which tools to call based only on their descriptions and schemas — making this the highest-fidelity test of tool discoverability, parameter clarity, and description quality.
+The `api` client tests your MCP server through a real LLM (OpenAI, Anthropic, etc.), exactly as a user would interact with Claude Desktop or ChatGPT. The LLM decides which tools to call based only on their descriptions and schemas — making this the highest-fidelity test of tool discoverability, parameter clarity, and description quality.
 
 ## When to Use
 
@@ -44,7 +44,7 @@ import { runEvalDataset, loadEvalDataset } from '@gleanwork/mcp-server-tester';
 test('LLM triggers the right tool', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
   const result = await runEvalDataset(
-    { dataset, client: 'mst', model: 'claude-haiku-4-5' },
+    { dataset, client: 'api', model: 'claude-haiku-4-5' },
     { mcp, testInfo }
   );
   expect(result.passed).toBe(result.total);
@@ -125,9 +125,9 @@ The case passes if `search` was triggered in at least 4 of 5 runs (a pass rate o
 "toolCallCount": { "min": 1, "max": 3 }
 ```
 
-## mst client options
+## api client options
 
-The `mst` client takes its options in `clientOptions`, on the run (`runEvalDataset`), an eval config, or a case:
+The `api` client takes its options in `clientOptions`, on the run (`runEvalDataset`), an eval config, or a case:
 
 | Option         | Meaning                                                                                                                                          |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -146,7 +146,7 @@ The `mst` client takes its options in `clientOptions`, on the run (`runEvalDatas
 await runEvalDataset(
   {
     dataset,
-    client: 'mst',
+    client: 'api',
     model: 'claude-haiku-4-5',
     clientOptions: { maxToolCalls: 8, temperature: 0 },
   },
@@ -154,9 +154,9 @@ await runEvalDataset(
 );
 ```
 
-**Skills:** with `skills: 'catalog'` the SDK client lists the server's [Agent Skills](./skills.md) in the system prompt and gives the model `read_skill` and `read_resource` tools; `'preload'` puts every `SKILL.md` in the prompt. Skills the model loads (and that pass verification) appear as `kind: 'skill'` entries for `toolsTriggered`, not as tool calls; preloaded skills do not. To measure whether skills help, compare eval variants that differ in the `mst` client's `skills` mode; see [Agent Skills](./skills.md#measuring-whether-skills-help).
+**Skills:** with `skills: 'catalog'` the SDK client lists the server's [Agent Skills](./skills.md) in the system prompt and gives the model `read_skill` and `read_resource` tools; `'preload'` puts every `SKILL.md` in the prompt. Skills the model loads (and that pass verification) appear as `kind: 'skill'` entries for `toolsTriggered`, not as tool calls; preloaded skills do not. To measure whether skills help, compare eval variants that differ in the `api` client's `skills` mode; see [Agent Skills](./skills.md#measuring-whether-skills-help).
 
-**Protocol:** in a Playwright test the `mst` client uses the test's MCP connection, so it follows `mcpConfig.protocol`. Claude Code, Cowork and ChatGPT open their own connections. See [Protocol Versions](./protocol-versions.md).
+**Protocol:** in a Playwright test the `api` client uses the test's MCP connection, so it follows `mcpConfig.protocol`. Claude Code, Cowork and ChatGPT open their own connections. See [Protocol Versions](./protocol-versions.md).
 
 ## Claude Code isolation
 
@@ -207,7 +207,7 @@ names from its generated MCP config.
 
 ## MstClientSimulationResult
 
-The response for a case on the `mst` client is an `MstClientSimulationResult`:
+The response for a case on the `api` client is an `MstClientSimulationResult`:
 
 ```typescript
 interface MstClientSimulationResult {

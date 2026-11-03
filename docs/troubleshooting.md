@@ -121,7 +121,7 @@ In shared or multi-user environments, consider storing tokens in a secrets manag
 
 ## "Unsupported Vercel AI SDK provider" error
 
-**Symptom:** Running a case on the `mst` client fails with an error such as `Unsupported provider: google` or `Cannot find module '@ai-sdk/google'`.
+**Symptom:** Running a case on the `api` client fails with an error such as `Unsupported provider: google` or `Cannot find module '@ai-sdk/google'`.
 
 **Cause:** LLM client providers are optional peer dependencies. The package declares them in `optionalDependencies`, but npm does not guarantee they are installed in all environments. The specific Vercel AI SDK adapter for the provider you selected is missing.
 

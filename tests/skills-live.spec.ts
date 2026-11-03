@@ -55,7 +55,7 @@ test.describe('Live skills eval (opt-in)', () => {
       const result = await runEvalDataset(
         {
           dataset,
-          client: 'mst',
+          client: 'api',
           model: process.env.MST_LIVE_SKILLS_MODEL,
           clientOptions: {
             provider: 'anthropic',

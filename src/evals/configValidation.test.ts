@@ -653,10 +653,10 @@ describe('settings a client would ignore', () => {
     ).not.toThrow();
   });
 
-  it('rejects tool metadata on the variant that sets it, and accepts it for mst', () => {
+  it('rejects tool metadata on the variant that sets it, and accepts it for api', () => {
     installTestPlugin();
     const evalConfig = base({
-      client: 'mst',
+      client: 'api',
       clientOptions: { provider: 'anthropic' },
       variants: [
         { name: 'sdk', tools: overrides },
@@ -700,17 +700,17 @@ describe('settings a client would ignore', () => {
     );
   });
 
-  it('rejects an option mst would drop', () => {
+  it('rejects an option api would drop', () => {
     expect(() =>
       validateEvalConfig(
-        base({ client: 'mst', clientOptions: { reasoningEffort: 'high' } })
+        base({ client: 'api', clientOptions: { reasoningEffort: 'high' } })
       )
     ).toThrow(/Unrecognized key.*reasoningEffort/s);
   });
 
   it.each([
-    ['mst', { provider: 'anthropic' }],
-    ['mst', {}],
+    ['api', { provider: 'anthropic' }],
+    ['api', {}],
     ['claude-code', {}],
   ])('accepts a systemPrompt for %s', (type, extra) => {
     expect(() =>
@@ -756,12 +756,12 @@ describe('settings a client would ignore: defaults, inheritance, opt-in', () => 
       evalConfig({
         model: 'claude-sonnet-4-6',
         temperature: 0.2,
-        client: 'mst',
-        variants: [{ name: 'mst' }, { name: 'code', client: 'claude-code' }],
+        client: 'api',
+        variants: [{ name: 'api' }, { name: 'code', client: 'claude-code' }],
       })
     );
     expect(clientPatchOf(validated.variants?.[0])).toMatchObject({
-      type: 'mst',
+      type: 'api',
       model: 'claude-sonnet-4-6',
       temperature: 0.2,
     });
@@ -787,7 +787,7 @@ describe('settings a client would ignore: defaults, inheritance, opt-in', () => 
   it("doesn't give a variant the options of a different client", () => {
     const validated = validateEvalConfig(
       evalConfig({
-        client: 'mst',
+        client: 'api',
         clientOptions: { provider: 'openai', apiKeyEnvVar: 'KEY' },
         variants: [{ name: 'code', client: 'claude-code' }],
       })

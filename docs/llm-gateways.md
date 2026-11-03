@@ -1,6 +1,6 @@
 # LLM Gateways
 
-MST's own LLM calls (the `mst` client and LLM judges) can go through an LLM gateway: a proxy that serves the Anthropic Messages or OpenAI APIs at its own URL, usually with its own short-lived tokens. Point MST at it with environment variables; no config changes are needed.
+MST's own LLM calls (the `api` client and LLM judges) can go through an LLM gateway: a proxy that serves the Anthropic Messages or OpenAI APIs at its own URL, usually with its own short-lived tokens. Point MST at it with environment variables; no config changes are needed.
 
 ## Configuration
 
@@ -46,7 +46,7 @@ export MST_LLM_AUTH_COMMAND=<the apiKeyHelper value>
 
 For Anthropic-shaped calls, the first that applies wins:
 
-1. `apiKeyEnvVar` from the `mst` client's options or the judge config. When set, no other credential is read; the key still goes to `ANTHROPIC_BASE_URL` if that is set.
+1. `apiKeyEnvVar` from the `api` client's options or the judge config. When set, no other credential is read; the key still goes to `ANTHROPIC_BASE_URL` if that is set.
 2. `MST_LLM_AUTH_COMMAND`, sent as `Authorization: Bearer`, **only when `ANTHROPIC_BASE_URL` is set**.
 3. `ANTHROPIC_AUTH_TOKEN`, sent as `Authorization: Bearer`, **only when `ANTHROPIC_BASE_URL` is set**.
 4. `ANTHROPIC_API_KEY`, sent as `x-api-key`.
@@ -61,8 +61,8 @@ A case's `clientOptions.env` takes part in this too, so a dataset can set `MST_L
 
 | Consumer                                     | Anthropic | OpenAI | Notes                                                                                                  |
 | -------------------------------------------- | --------- | ------ | ------------------------------------------------------------------------------------------------------ |
-| `mst` client, `provider: 'anthropic'`        | Yes       |        | Streams its responses (see below).                                                                     |
-| `mst` client, `provider: 'openai'`           |           | Yes    | Uses the Responses API; sends `store: false` behind a base URL override (see below).                   |
+| `api` client, `provider: 'anthropic'`        | Yes       |        | Streams its responses (see below).                                                                     |
+| `api` client, `provider: 'openai'`           |           | Yes    | Uses the Responses API; sends `store: false` behind a base URL override (see below).                   |
 | `anthropic` judge                            | Yes       |        |                                                                                                        |
 | `openai` judge                               |           | Yes    | Uses non-streaming Chat Completions, which some gateways don't serve. Use the `anthropic` judge there. |
 | Computer Use planner (Cowork, ChatGPT macOS) | Yes       |        | The gateway must accept the Computer Use beta tool.                                                    |

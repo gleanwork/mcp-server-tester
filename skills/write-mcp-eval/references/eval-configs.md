@@ -9,7 +9,7 @@ An eval config is the JSON file that defines one eval: its datasets, the servers
 | `name`                                                            | Required. Identifies the eval; runs with the same name share a history                                    |
 | `datasets`                                                        | Required. Paths (relative to the config) or tagged sources (below)                                        |
 | `servers`                                                         | The MCP servers under test, a map keyed by label                                                          |
-| `client`                                                          | `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`, or `<namespace>/client/<name>`. Default `claude-code` |
+| `client`                                                          | `api`, `claude-code`, `codex`, `cowork`, `chatgpt`, or `<namespace>/client/<name>`. Default `claude-code` |
 | `model`                                                           | The model the client runs. Without it, the client's default                                               |
 | `clientOptions`                                                   | The client's other options (below)                                                                        |
 | `variants`                                                        | The setups to compare. Without any, one variant named `default` runs the config as written                |
@@ -71,14 +71,14 @@ Define each server once, keyed by its label. A variant lists the labels it uses.
 
 | Client                      | What it is                                                           | Notes                                                                                     |
 | --------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `mst`                       | MST's own client: the model gets the servers' tools and nothing else | Isolates the model and your tool metadata. Options below                                  |
+| `api`                       | The model alone, through its provider's API, with the servers' tools | Isolates the model and your tool metadata. Options below                                  |
 | `claude-code`               | Claude Code                                                          | Runs with an empty config directory, so your own skills and settings don't affect results |
 | `codex`                     | OpenAI's Codex agent, headless (`@openai/codex-sdk`)                 | Needs `OPENAI_API_KEY` (or a gateway). See `docs/codex.md`                                |
 | `cowork`                    | Claude Cowork in Claude Desktop                                      | macOS (run `npx mst cowork setup` once) or a prepared Linux desktop. See `docs/cowork.md` |
 | `chatgpt`                   | The ChatGPT desktop app                                              | Needs `model`. Can't show tool metadata (`tools`). See `docs/chatgpt-desktop.md`          |
 | `<namespace>/client/<name>` | A plugin's client                                                    | Options are the plugin's                                                                  |
 
-`mst` options: `provider` (inferred from the model id unless set: `anthropic`, `openai`, `google`, `vertex-anthropic`, `mistral`, `azure`, `deepseek`, `openrouter`, `xai`), `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout`, `apiKeyEnvVar`, `systemPrompt`, `skills` (`off`, `catalog`, `preload`), `env`.
+`api` options: `provider` (inferred from the model id unless set: `anthropic`, `openai`, `google`, `vertex-anthropic`, `mistral`, `azure`, `deepseek`, `openrouter`, `xai`), `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout`, `apiKeyEnvVar`, `systemPrompt`, `skills` (`off`, `catalog`, `preload`), `env`.
 
 `claude-code` options: `provider` (`anthropic`, `vertex`, `vertex-anthropic`), `timeout`, `systemPrompt` (passed with `--append-system-prompt`), `isolate` (`false` to use your own Claude Code configuration), `env`.
 
@@ -105,7 +105,7 @@ A variant has a `name` and may set `description`, `servers` (labels), `client`, 
 
 - **Servers.** A variant that lists no servers uses every server; `[]` uses none.
 - **Client options.** A variant (or case) inherits the config's `clientOptions` only when it uses the same client. Its own `clientOptions` override the inherited options they name; the others carry over.
-- **Tool metadata.** `tools` is keyed by a tool's name on its server; with several servers, `"server.tool"` picks one. Each entry may set `name`, `description` and `inputSchema`. Calls are recorded under the tool's original name, so assertions read the same in every variant. `mst` applies tool metadata in-process; `claude-code`, `codex`, `cowork` and plugin clients get it through a local MCP proxy. A key that matches no tool, or several, is an error.
+- **Tool metadata.** `tools` is keyed by a tool's name on its server; with several servers, `"server.tool"` picks one. Each entry may set `name`, `description` and `inputSchema`. Calls are recorded under the tool's original name, so assertions read the same in every variant. `api` applies tool metadata in-process; `claude-code`, `codex`, `cowork` and plugin clients get it through a local MCP proxy. A key that matches no tool, or several, is an error.
 - **Comparisons.** Each variant is compared with the baseline: metric changes, and the cases that improved or regressed.
 
 ## Graders and metrics

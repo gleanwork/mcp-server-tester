@@ -79,7 +79,7 @@ describe('simulateMstClient', () => {
   it('throws when provider is missing for sdk client type', async () => {
     const mcp = createMockMCP();
     await expect(simulateMstClient(mcp, 'scenario', {})).rejects.toThrow(
-      'provider is required for the mst client'
+      'provider is required for the api client'
     );
   });
 });

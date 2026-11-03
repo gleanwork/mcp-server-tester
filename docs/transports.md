@@ -27,7 +27,7 @@ Choose based on your server deployment:
 
 Plain stdio is supported by these built-in evaluation client families:
 
-- Claude CLI (`claude-code`) and Vercel AI SDK (`mst`).
+- Claude CLI (`claude-code`) and Vercel AI SDK (`api`).
 - ChatGPT Work and Codex surfaces of the `chatgpt` and `chatgpt` clients.
 - Cowork (`cowork`) on macOS and Linux. The package exports
   `COWORK_STDIO_PLATFORMS` as `['darwin', 'linux']`.
