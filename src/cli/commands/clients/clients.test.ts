@@ -142,7 +142,9 @@ describe('mst clients', () => {
     );
     await expect(
       showClient('acme/judge/completeness', {}, capture().print)
-    ).rejects.toThrow('"acme/judge/completeness" is a judge, not a client.');
+    ).rejects.toThrow(
+      /^"acme\/judge\/completeness" is a judge, not a client\.$/
+    );
   });
 });
 

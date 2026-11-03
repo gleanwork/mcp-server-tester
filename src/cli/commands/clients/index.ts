@@ -12,6 +12,7 @@ import {
   resolveClientName,
 } from '../../../evals/builtinClients.js';
 import { builtinShortName } from '../../../plugins/extensions.js';
+import { parseExtensionReference } from '../../../plugins/plugin.js';
 import type {
   ClientOS,
   ClientRequirements,
@@ -121,9 +122,15 @@ export async function showClient(
     } catch (error) {
       if (error instanceof Error) problem = error.message;
     }
+    // Only a plugin's client is fixed by loading plugins, not a reference
+    // of another kind.
+    const { namespace, kind } = parseExtensionReference(wanted);
     throw new Error(
       `${problem}${
-        wanted.includes('/') && !options.plugins?.length && !options.config
+        namespace !== undefined &&
+        kind === 'client' &&
+        !options.plugins?.length &&
+        !options.config
           ? ' Plugin clients need --plugins or --config.'
           : ''
       }`
