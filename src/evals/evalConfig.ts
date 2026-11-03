@@ -150,7 +150,7 @@ export interface EvalConfig {
    */
   servers?: EvalServerConfig[];
   /**
-   * The client under test: `mst`, `claude-code`, `codex`, `cowork`, `chatgpt`, or a
+   * The client under test: `api`, `claude-code`, `codex`, `cowork`, `chatgpt`, or a
    * plugin's `<namespace>/client/<name>`. @default 'claude-code'
    */
   client?: string;
@@ -213,7 +213,7 @@ export interface EvalConfig {
   requireEvalEndpoint?: boolean;
   /** USD per million tokens, by model: estimates cost for clients that don't report it. */
   pricing?: Record<string, ModelPricing>;
-  /** Generation defaults for clients that call a model API (mst). */
+  /** Generation defaults for clients that call a model API (api). */
   temperature?: number;
   maxTokens?: number;
   /** Default share of a client case's trials that must pass (cases may set their own). */

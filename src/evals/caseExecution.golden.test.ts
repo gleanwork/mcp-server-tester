@@ -176,7 +176,7 @@ beforeEach(() => {
   vi.mocked(simulateMstClient).mockReset().mockResolvedValue(simulation);
 });
 
-describe('golden: the mst client (dataset API)', () => {
+describe('golden: the api client (dataset API)', () => {
   it('succeeds with tool evidence and a missed required tool', async () => {
     expect(stable(await runEvalCase(clientCase, context()))).toMatchSnapshot();
     expect(simulateMstClient).toHaveBeenCalledTimes(1);

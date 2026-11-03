@@ -41,7 +41,7 @@ const allProviders: readonly LLMProvider[] = ProviderSchema.options;
  * schemas, testing discoverability and parameter clarity at the level a real
  * user (via Claude Desktop, ChatGPT, etc.) would experience.
  *
- * Internal to the mst and claude-code clients: tests and evals reach it
+ * Internal to the api and claude-code clients: tests and evals reach it
  * through `runEvalDataset` / `runEvalCase` or an eval.
  *
  * @param mcp - MCP fixture API (used by the SDK client; ignored by the CLI client, which establishes its own connections)
@@ -60,7 +60,7 @@ export async function simulateMstClient(
 
   if (clientType !== 'sdk' && config.skills && config.skills !== 'off') {
     throw new Error(
-      `skills is only supported for the mst client; '${clientType}' clients manage skills themselves.`
+      `skills is only supported for the api client; '${clientType}' clients manage skills themselves.`
     );
   }
 
@@ -108,7 +108,7 @@ export async function simulateMstClient(
   // Default: SDK client via Vercel AI SDK
   if (!config.provider) {
     throw new Error(
-      `provider is required for the mst client. ` +
+      `provider is required for the api client. ` +
         `Supported: ${allProviders.join(', ')}`
     );
   }

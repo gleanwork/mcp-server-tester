@@ -16,6 +16,7 @@ import {
 import type { RunEnvironment } from './environments/builtinEnvironments.js';
 import type { ShardRecord } from './environments/shardedCollect.js';
 import type { ListedServerTools } from './toolSurface.js';
+import { storedClientName } from './clientNames.js';
 
 /**
  * The run format, `mst.run/v1`: what a run leaves behind, one directory per
@@ -1052,9 +1053,74 @@ export async function readRunDirectory(directory: string): Promise<StoredRun> {
   const results = (await read('results.json')) as { cases?: EvalCaseResult[] };
   return {
     directory,
-    run,
-    summary: joinCaseResults(summary, results.cases ?? []),
+    run: runWithCurrentClients(run),
+    summary: summaryWithCurrentClients(
+      joinCaseResults(summary, results.cases ?? [])
+    ),
   };
+}
+
+/**
+ * A stored run.json with each client it records as MST names it now
+ * (`storedClientName`): its variants' and its shards' machines'. The file
+ * keeps the names it was written with.
+ */
+export function runWithCurrentClients(run: RunRecord): RunRecord {
+  const current = <T extends { client?: string }>(item: T): T =>
+    item.client === undefined
+      ? item
+      : { ...item, client: storedClientName(item.client) };
+  const machines = run.environment.machines;
+  return {
+    ...run,
+    variants: run.variants.map(current),
+    environment: {
+      ...run.environment,
+      ...(machines ? { machines: machines.map(current) } : {}),
+    },
+  };
+}
+
+/**
+ * A stored summary with the client each case ran on (`request.client`) as
+ * MST names it now (`storedClientName`), in its results and its variants'.
+ */
+export function summaryWithCurrentClients(
+  summary: EvaluationSummary
+): EvaluationSummary {
+  return {
+    ...summary,
+    ...(Array.isArray(summary.results)
+      ? { results: casesWithCurrentClients(summary.results) }
+      : {}),
+    variants: summary.variants.map((variant) =>
+      Array.isArray(variant.result?.caseResults)
+        ? {
+            ...variant,
+            result: {
+              ...variant.result,
+              caseResults: casesWithCurrentClients(variant.result.caseResults),
+            },
+          }
+        : variant
+    ),
+  };
+}
+
+function casesWithCurrentClients(
+  cases: readonly EvalCaseResult[]
+): EvalCaseResult[] {
+  return cases.map((result) =>
+    result.request?.client === undefined
+      ? result
+      : {
+          ...result,
+          request: {
+            ...result.request,
+            client: storedClientName(result.request.client),
+          },
+        }
+  );
 }
 
 /** A trial's stored record: `traces/<variant>/<case-id>/<trial>.json`. */

@@ -26,7 +26,7 @@ async function dryRun(
     JSON.stringify({
       name: 'validation',
       datasets: ['./cases.json'],
-      client: 'mst',
+      client: 'api',
       clientOptions: { provider: 'anthropic' },
       ...evalConfig,
     })

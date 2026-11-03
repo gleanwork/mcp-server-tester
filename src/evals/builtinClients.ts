@@ -37,6 +37,7 @@ import type { ClientConfig } from './evalConfig.js';
 import { variantToolMetadata } from './evalConfig.js';
 import type { ClientDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
+import { resolveClientName } from './clientNames.js';
 import { simulationToClientRun } from './clientTrace.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT } from './coworkClient.js';
@@ -366,7 +367,7 @@ export interface BuiltinClientOptions {
   maxTokens?: number;
   apiKeyEnvVar?: string;
   systemPrompt?: string;
-  /** The mst client's Agent Skills mode. */
+  /** The api client's Agent Skills mode. */
   skills?: 'off' | 'catalog' | 'preload';
   model?: string;
   maxToolCalls?: number;
@@ -388,7 +389,7 @@ export interface BuiltinClientOptions {
  */
 const SdkClientSchema = z
   .object({
-    type: z.literal('mst').optional(),
+    type: z.literal('api').optional(),
     ...GenerationOptions,
     provider: ProviderSchema.optional(),
     apiKeyEnvVar: z.string().min(1).optional(),
@@ -436,7 +437,7 @@ const SIMULATED_CLIENTS: Record<
   string,
   Pick<ClientDefinition, 'description' | 'requirements'>
 > = {
-  mst: {
+  api: {
     description:
       "The model alone, through its provider's API, with the servers' tools: it isolates the model and your tool metadata",
     requirements: {
@@ -468,11 +469,11 @@ function builtinClientDefinitions(): Readonly<
   for (const [name, factory] of Object.entries(BUILTIN_CLIENTS)) {
     clients[name] = {
       ...SIMULATED_CLIENTS[name],
-      schema: name === 'mst' ? SdkClientSchema : CliClientSchema,
+      schema: name === 'api' ? SdkClientSchema : CliClientSchema,
       evidence: 'structured',
       headless: true,
       // The SDK client presents tool variants; the CLI only sees its servers.
-      ...(name === 'mst' ? { toolMetadata: true } : {}),
+      ...(name === 'api' ? { toolMetadata: true } : {}),
       run: (input, config, context) =>
         runBuiltinClient(input, config, context, factory),
     };
@@ -487,35 +488,7 @@ function builtinClientDefinitions(): Readonly<
   });
 }
 
-/**
- * Earlier names for built-in clients (ADR 0002). They are errors, not
- * aliases: each names its replacement.
- */
-const RENAMED_CLIENTS: Readonly<Record<string, string>> = {
-  'vercel-sdk': 'mst',
-  'anthropic-api': 'mst',
-  'claude-cli': 'claude-code',
-  'chatgpt-mac': 'chatgpt',
-  'chatgpt-linux': 'chatgpt',
-  cowork_cu: 'cowork',
-  'anthropic.claude.cowork.desktop-app.macos': 'cowork',
-  'openai.chatgpt.agent.desktop-app.macos': 'chatgpt',
-  'openai.chatgpt.agent.desktop-app.linux': 'chatgpt',
-};
-
 const clientDefinitions = extensionLookup('clients', builtinClientDefinitions);
-
-/**
- * A client reference, checked: a renamed built-in fails naming its
- * replacement; anything else is returned unchanged.
- */
-export function resolveClientName(reference: string): string {
-  if (Object.hasOwn(RENAMED_CLIENTS, reference))
-    throw new Error(
-      `Client "${reference}" is now "${RENAMED_CLIENTS[reference]}".`
-    );
-  return reference;
-}
 
 /** Built-in and installed plugins' clients, by reference, sorted. */
 export function listClients(): Array<[string, ClientDefinition]> {
@@ -528,7 +501,7 @@ export function getClient(reference: string): ClientDefinition {
 }
 
 /**
- * The simulator settings the mst or claude-code client resolves its options
+ * The simulator settings the api or claude-code client resolves its options
  * to: its defaults (such as the model) included. Throws for other clients.
  */
 export function getBuiltinClientConfig(
@@ -538,7 +511,7 @@ export function getBuiltinClientConfig(
   const config = builtinClientDefaults(name, options);
   if (!config)
     throw new Error(
-      `Client "${name}" doesn't run on MST's simulator (mst, claude-code).`
+      `Client "${name}" doesn't run on MST's simulator (api, claude-code).`
     );
   return config;
 }
@@ -559,11 +532,11 @@ const BUILTIN_CLIENTS: Record<
   (options: BuiltinClientOptions) => MstClientConfig
 > = {
   'claude-code': claudeCliClient,
-  mst: vercelSdkClient,
+  api: vercelSdkClient,
 };
 
 /**
- * The API that serves `model`, from its id: the mst client infers it, so an
+ * The API that serves `model`, from its id: the api client infers it, so an
  * eval names only the model. `provider` overrides it (for example a gateway or
  * Vertex routing).
  */
@@ -626,7 +599,7 @@ export function assertClientSupports(
   if (options.tools !== undefined && !showsToolMetadata) {
     throw new Error(
       `${options.context}: client "${clientConfig.type}" can't show tool metadata (\`tools\`); it would run with the servers' own. ` +
-        'Use a client that shows it to the model (mst), or one that connects to the servers it is given.'
+        'Use a client that shows it to the model (api), or one that connects to the servers it is given.'
     );
   }
   if (

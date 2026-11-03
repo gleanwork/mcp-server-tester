@@ -63,11 +63,11 @@ describe('mst clients', () => {
     await listClientCommand({}, out.print);
     const lines = out.text().trim().split('\n');
     expect(lines.map((line) => line.split(/\s+/)[0])).toEqual([
+      'api',
       'chatgpt',
       'claude-code',
       'codex',
       'cowork',
-      'mst',
     ]);
     expect(out.text()).toMatch(/^cowork\s+macOS, Linux\s+Claude Desktop/m);
     expect(out.text()).toMatch(/^codex\s+any OS\s+The Codex CLI/m);
@@ -82,7 +82,7 @@ describe('mst clients', () => {
       requirements: { os?: string[] };
     }>;
     expect(listed.map((client) => client.ref)).toEqual(
-      expect.arrayContaining(['acme/client/desk', 'acme/client/bare', 'mst'])
+      expect.arrayContaining(['acme/client/desk', 'acme/client/bare', 'api'])
     );
     expect(listed.find((client) => client.ref === 'acme/client/desk')).toEqual(
       expect.objectContaining({
@@ -162,7 +162,7 @@ describe('mst clients', () => {
 
   it('says what it knows when a client is unknown', async () => {
     await expect(showClient('nope', {}, capture().print)).rejects.toThrow(
-      'Client "nope" is not available. Available: chatgpt, claude-code, codex, cowork, mst.'
+      'Client "nope" is not available. Available: api, chatgpt, claude-code, codex, cowork.'
     );
     await expect(
       showClient('acme/client/desk', {}, capture().print)

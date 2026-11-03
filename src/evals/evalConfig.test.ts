@@ -507,7 +507,7 @@ describe('built-ins written in full', () => {
       {
         name: 'full-names',
         datasets: [{ type: 'mst/dataset/file', path: './cases.json' }],
-        client: 'mst/client/mst',
+        client: 'mst/client/api',
         variants: [{ name: 'cli', client: 'mst/client/claude-code' }],
         metrics: ['mst/metric/passed', { type: 'mst/metric/tool_count' }],
         judges: [{ type: 'mst/judge/rubric', rubric: 'correctness' }],
@@ -516,7 +516,7 @@ describe('built-ins written in full', () => {
       { skipDatasetValidation: true }
     );
     expect(config.datasets).toEqual([{ type: 'file', path: './cases.json' }]);
-    expect(config.client).toBe('mst');
+    expect(config.client).toBe('api');
     expect(config.variants?.[0]?.client).toBe('claude-code');
     expect(config.metrics).toEqual([
       expect.objectContaining({ type: 'passed' }),

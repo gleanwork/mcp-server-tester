@@ -142,7 +142,7 @@ This example has no evals; see the [filesystem example](../filesystem-server/) f
 {
   "id": "llm-count-users",
   "input": "How many users are in the database?",
-  "client": "mst",
+  "client": "api",
   "model": "claude-sonnet-4-5",
   "assertions": {
     "toolsTriggered": {

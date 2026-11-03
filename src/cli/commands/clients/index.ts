@@ -6,11 +6,8 @@
  *   mst clients show <ref> [--json]
  */
 import type { ZodType } from 'zod';
-import {
-  getClient,
-  listClients,
-  resolveClientName,
-} from '../../../evals/builtinClients.js';
+import { getClient, listClients } from '../../../evals/builtinClients.js';
+import { resolveClientName } from '../../../evals/clientNames.js';
 import { builtinShortName } from '../../../plugins/extensions.js';
 import { parseExtensionReference } from '../../../plugins/plugin.js';
 import type {

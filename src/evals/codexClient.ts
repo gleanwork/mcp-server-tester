@@ -189,7 +189,7 @@ export function assertCodexServers(
     const settings = unsupported(server, resolved);
     if (settings.length)
       throw new Error(
-        `${context}: codex can't take ${settings.join(', ')} for server ${mcpServerLabel(server, index)}. Remove ${settings.length > 1 ? 'them' : 'it'}, or use the mst client.`
+        `${context}: codex can't take ${settings.join(', ')} for server ${mcpServerLabel(server, index)}. Remove ${settings.length > 1 ? 'them' : 'it'}, or use the api client.`
       );
   }
 }

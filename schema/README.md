@@ -110,7 +110,7 @@ EvalDataset (root)
 
 ## Supported LLM providers
 
-The mst client infers the API from `model`. Its `clientOptions.provider` overrides that, and accepts any of these values:
+The api client infers the API from `model`. Its `clientOptions.provider` overrides that, and accepts any of these values:
 
 | Value              | Notes                                                                                                                                                 |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |

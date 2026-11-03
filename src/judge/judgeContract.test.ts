@@ -148,7 +148,7 @@ describe('buildJudgeTrial', () => {
   });
 
   it('counts a client trial without an evidence level as structured, as tool-call assertions do', () => {
-    // The mst client in a Playwright test declares no evidence.
+    // The api client in a Playwright test declares no evidence.
     const clientResponse = {
       response: 't',
       toolCalls: [{ name: 'search', arguments: {}, output: 'hit' }],

@@ -30,7 +30,7 @@ runtime validation is provided by `EvalConfigSchema`.
       "serverUrl": "https://example.com/mcp-v2"
     }
   },
-  "client": "mst",
+  "client": "api",
   "clientOptions": {
     "provider": "anthropic"
   },
@@ -742,25 +742,25 @@ The client is the MCP client application an eval tests. Built-in clients have ca
 
 | Client        | What it is                                                                                                         | Runs on      |
 | ------------- | ------------------------------------------------------------------------------------------------------------------ | ------------ |
+| `api`         | The model alone, through its provider's API, with the servers' tools: it isolates the model and your tool metadata | any OS       |
 | `chatgpt`     | The ChatGPT desktop app                                                                                            | macOS, Linux |
 | `claude-code` | The Claude Code CLI, headless                                                                                      | any OS       |
 | `codex`       | The Codex CLI, headless, through the Codex SDK                                                                     | any OS       |
 | `cowork`      | Claude Desktop in Cowork mode                                                                                      | macOS, Linux |
-| `mst`         | The model alone, through its provider's API, with the servers' tools: it isolates the model and your tool metadata | any OS       |
 
 What each one needs on the machine that runs its trials (`mst clients show <client>` prints the same, with its options):
 
+- **`api`.** Install: `ai` and the provider's AI SDK package, such as `npm install ai @ai-sdk/anthropic`. Credentials: the provider's API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, ...), or an LLM gateway (`ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` with `MST_LLM_AUTH_COMMAND`).
 - **`chatgpt`.** Install: macOS: the ChatGPT app, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's ChatGPT image (`--env docker`). Credentials: macOS: `ANTHROPIC_API_KEY` or an LLM gateway, for the Computer Use planner; Linux image: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`). Setup: Docker: `mst env setup docker --config <a ChatGPT eval>`.
 - **`claude-code`.** Install: Claude Code (`claude`) on `PATH`. Credentials: `ANTHROPIC_API_KEY`, or Google Application Default Credentials with `provider: "vertex"`.
 - **`codex`.** Install: `@openai/codex-sdk` beside MST (`npm install @openai/codex-sdk`), which brings the Codex CLI. Credentials: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`).
 - **`cowork`.** Install: macOS: Claude Desktop, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's Cowork image (`--env docker`), or a prepared desktop with Claude Desktop. Credentials: macOS: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider; `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner; Linux image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`). Setup: macOS: `mst cowork setup`, then sign in to Claude Desktop once; Docker: `mst env setup docker`.
-- **`mst`.** Install: `ai` and the provider's AI SDK package, such as `npm install ai @ai-sdk/anthropic`. Credentials: the provider's API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, ...), or an LLM gateway (`ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` with `MST_LLM_AUTH_COMMAND`).
 
 <!-- clients:end -->
 
-Each client has its own guide: [mst-client.md](./mst-client.md) for `mst` and `claude-code`, [codex.md](./codex.md), [cowork.md](./cowork.md) and [cowork-docker.md](./cowork-docker.md), and [chatgpt-desktop.md](./chatgpt-desktop.md) and [chatgpt-docker.md](./chatgpt-docker.md).
+Each client has its own guide: [mst-client.md](./mst-client.md) for `api` and `claude-code`, [codex.md](./codex.md), [cowork.md](./cowork.md) and [cowork-docker.md](./cowork-docker.md), and [chatgpt-desktop.md](./chatgpt-desktop.md) and [chatgpt-docker.md](./chatgpt-docker.md).
 
-Set the model beside the client. The `mst` client infers which API serves it from the model id (`claude-*`, `gpt-*`, `gemini-*` and so on; a `claude-*@date` id is Vertex). Set `provider` only to override that, for example to route through Vertex or a gateway.
+Set the model beside the client. The `api` client infers which API serves it from the model id (`claude-*`, `gpt-*`, `gemini-*` and so on; a `claude-*@date` id is Vertex). Set `provider` only to override that, for example to route through Vertex or a gateway.
 
 A client runs one input and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every client. A plugin client is the way to add one: plugins contribute them under `clients`. The built-in desktop drivers are composed from internal capabilities, which plugins can't provide.
 
@@ -795,7 +795,7 @@ An eval config that loads the plugin selects the client with `"client": "my/clie
 - **Tool metadata.** A client that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the run gives it `http` server configs for a local MCP proxy that applies the variant, so the client must speak Streamable HTTP (see [Tool metadata on every client](#tool-metadata-on-every-client)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's clients do. A batch client that connects to one server set for the whole batch (the first request's `input.servers`) sets `serversPerBatch: true`, and the batch shares one proxy endpoint. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the client's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A client that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
 - **What it honours.** `maxConcurrency` caps the eval config's `concurrency`.
 - **What it is and needs.** `description` says in one line what product the client is. `requirements` says what a machine needs to run its trials: `os` (`macos`, `linux`; without it, any), and short lines for what to `install`, the `credentials` it reads, and the `setup` commands that prepare a machine. `mst clients` and `mst clients show` print them. Both are optional, and MST checks their shape when it loads the plugin.
-- **Headless.** A client that runs as a process with no desktop session (a CLI or an SDK, as `mst`, `claude-code` and `codex` do) sets `headless: true`. An environment whose machines come with a desktop, such as `docker` with MST's Linux image, then runs a shard whose clients are all headless in a container without one: no desktop app, no VM and no Cowork inference. Without it, a client gets the desktop.
+- **Headless.** A client that runs as a process with no desktop session (a CLI or an SDK, as `api`, `claude-code` and `codex` do) sets `headless: true`. An environment whose machines come with a desktop, such as `docker` with MST's Linux image, then runs a shard whose clients are all headless in a container without one: no desktop app, no VM and no Cowork inference. Without it, a client gets the desktop.
 
 ### Claude Code client-native events
 
@@ -821,7 +821,7 @@ A search's `results` come from `tool_reference` blocks in its result, or, withou
 ]
 ```
 
-- **`mst`** puts it in the model's system prompt, ahead of the skills catalog when `skills` is on.
+- **`api`** puts it in the model's system prompt, ahead of the skills catalog when `skills` is on.
 - **`claude-code`** passes it with `--append-system-prompt`, so Claude Code's own system prompt stays.
 - **`codex`** sets it as Codex's `developer_instructions`, so Codex's own instructions stay.
 - **Cowork and ChatGPT** take organisation instructions from the app, not from MST, so `systemPrompt` is a validation error for them.
@@ -832,7 +832,7 @@ A plugin client that can apply one declares `systemPrompt` in its schema. A case
 
 A variant's tool metadata (`tools`: descriptions, input schemas, renames) reaches every client:
 
-- **`mst`** applies the variant in-process.
+- **`api`** applies the variant in-process.
 - **Clients that connect to their servers** (plugin clients, `claude-code`, `codex`, `cowork`) get them through a local MCP proxy. The run starts it on first use and gives each client request its own loopback Streamable HTTP endpoints, one per server, with the servers' labels. The proxy applies each server's timeouts to its own calls to that server, so an endpoint carries none of a server's connection options, and a stdio server (such as a connector's dry-run proxy) works behind it. The proxy presents the variant's tools and sends calls to a renamed tool to the original. Other requests (resources, prompts, skills) pass through; notifications, such as list changes and progress, don't.
 - **One connection per server for the variant.** The proxy connects to each server once and shares that connection across the variant's cases, where a client without tool metadata may connect per case. A server that keeps per-connection state sees one connection for a variant with tool metadata.
 - **A request whose client never lists the proxied tools fails.** Otherwise the run would report results for a variant the model never saw. Cowork sets up its servers once per batch, so it lists them once: the batch shares one endpoint, and the check is for the batch. MST's own readiness probe uses a separate endpoint and doesn't count.

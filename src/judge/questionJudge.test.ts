@@ -391,7 +391,7 @@ describe('defineQuestionJudge', () => {
       )
     ).toMatchObject({ unknown: true });
     expect(requests).toHaveLength(0);
-    // A client trial whose client declares no evidence (the mst client in a
+    // A client trial whose client declares no evidence (the api client in a
     // Playwright test) has its trace, and is asked about it.
     const clientResponse = {
       response: 'An expired certificate.',

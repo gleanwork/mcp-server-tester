@@ -2,7 +2,7 @@
  * Where MST's LLM calls go and how they authenticate.
  *
  * Every consumer that talks to an Anthropic- or OpenAI-shaped API (the
- * mst client, LLM judges) resolves its base URL and credential
+ * api client, LLM judges) resolves its base URL and credential
  * here, so a gateway is configured once with environment variables:
  *
  * - `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL`: the endpoint override. The

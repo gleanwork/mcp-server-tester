@@ -6,7 +6,7 @@
       "id": "should discover docs directory",
       "description": "LLM discovers and lists files in docs directory",
       "input": "What files are in the docs directory?",
-      "client": "mst",
+      "client": "api",
       "model": "claude-sonnet-4-5",
       "clientOptions": {
         "temperature": 0.0,
@@ -28,7 +28,7 @@
       "id": "should extract version from config using Anthropic",
       "description": "LLM (Anthropic) reads config and extracts version",
       "input": "Read the config.json file and tell me what version it is.",
-      "client": "mst",
+      "client": "api",
       "model": "claude-sonnet-4-5",
       "clientOptions": {
         "temperature": 0.0,
@@ -50,7 +50,7 @@
       "id": "should find all markdown files",
       "description": "LLM finds all markdown files",
       "input": "Find all markdown files in this project.",
-      "client": "mst",
+      "client": "api",
       "model": "claude-sonnet-4-5",
       "clientOptions": {
         "temperature": 0.0
@@ -71,7 +71,7 @@
       "id": "should analyze CSV data and count users",
       "description": "LLM reads CSV and provides analysis",
       "input": "How many users are listed in the data/users.csv file?",
-      "client": "mst",
+      "client": "api",
       "model": "claude-sonnet-4-5",
       "clientOptions": {
         "temperature": 0.0
@@ -92,7 +92,7 @@
       "id": "should list all project files",
       "description": "LLM provides complete file listing",
       "input": "Show me all files and directories in this project.",
-      "client": "mst",
+      "client": "api",
       "model": "claude-sonnet-4-5",
       "clientOptions": {
         "temperature": 0.0

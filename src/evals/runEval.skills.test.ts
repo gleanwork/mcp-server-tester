@@ -50,7 +50,7 @@ async function evalRun(caseOverrides: Record<string, unknown> = {}) {
       servers: {
         'server-1': { transport: 'http', serverUrl: 'https://example.com/mcp' },
       },
-      client: 'mst',
+      client: 'api',
       clientOptions: { provider: 'anthropic' },
       variants: [
         { name: 'off' },

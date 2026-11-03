@@ -178,7 +178,7 @@ describe('SDK client with skills', () => {
           skills: 'catalog',
           cli: { command: 'true', args: [] },
         })
-      ).rejects.toThrow(/only supported for the mst client/);
+      ).rejects.toThrow(/only supported for the api client/);
     });
   }, 30_000);
 
@@ -198,7 +198,7 @@ describe('SDK client with skills', () => {
         const result = await runEvalDataset(
           {
             dataset,
-            client: 'mst',
+            client: 'api',
             clientOptions: {
               provider: 'openai',
               ...(skills ? { skills } : {}),

@@ -5,7 +5,7 @@ import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 test('search relevance eval with judge', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
   const result = await runEvalDataset(
-    { dataset, client: 'mst', model: 'claude-haiku-4-5' },
+    { dataset, client: 'api', model: 'claude-haiku-4-5' },
     { mcp, testInfo }
   );
   expect(result.passed).toBe(result.total);

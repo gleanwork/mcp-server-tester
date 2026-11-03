@@ -5,7 +5,7 @@ test('run weather evals', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
 
   const result = await runEvalDataset(
-    { dataset, client: 'mst', model: 'claude-haiku-4-5', defaultTrials: 5 },
+    { dataset, client: 'api', model: 'claude-haiku-4-5', defaultTrials: 5 },
     { mcp, testInfo }
   );
 

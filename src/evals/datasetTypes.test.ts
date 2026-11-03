@@ -55,7 +55,7 @@ describe('datasetTypes', () => {
         id: 'test-1',
         description: 'Get weather for London',
         input: 'Get the weather for London',
-        client: 'mst',
+        client: 'api',
         model: 'claude-haiku-4-5',
         clientOptions: { systemPrompt: 'Be brief.' },
         trials: 3,

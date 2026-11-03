@@ -253,9 +253,9 @@ export interface EvalRunnerOptions {
   /**
    * The client cases run on, the model it uses and its options; a case's own
    * `client`, `model` and `clientOptions` change them. Outside an eval, cases
-   * run on `mst`, on the test's MCP connection.
+   * run on `api`, on the test's MCP connection.
    *
-   * @example { client: 'mst', model: 'claude-haiku-4-5' }
+   * @example { client: 'api', model: 'claude-haiku-4-5' }
    */
   client?: string;
   /** The model the client uses. Recorded in run metadata. */
@@ -336,7 +336,7 @@ export interface EvalRunnerOptions {
    * ```typescript
    * // Run every client case 10 times by default
    * await runEvalDataset(
-   *   { dataset, client: 'mst', model: 'claude-haiku-4-5', defaultTrials: 10 },
+   *   { dataset, client: 'api', model: 'claude-haiku-4-5', defaultTrials: 10 },
    *   { mcp }
    * );
    * ```
@@ -446,9 +446,9 @@ export interface EvalCaseOptions {
   /**
    * The client cases run on, the model it uses and its options; a case's own
    * `client`, `model` and `clientOptions` change them. Outside an eval, cases
-   * run on `mst`, on the test's MCP connection.
+   * run on `api`, on the test's MCP connection.
    *
-   * @example { client: 'mst', model: 'claude-haiku-4-5' }
+   * @example { client: 'api', model: 'claude-haiku-4-5' }
    */
   client?: string;
   /** The model the client uses. Recorded in run metadata. */
@@ -644,8 +644,8 @@ function buildRequest(
     (evalCase.client === undefined || evalCase.client === run.client
       ? run.model
       : undefined);
-  // A case that names no client runs on mst (see playwrightClientOf).
-  request.client = client ?? 'mst';
+  // A case that names no client runs on api (see playwrightClientOf).
+  request.client = client ?? 'api';
   if (model !== undefined) request.model = model;
   request.input = evalCase.input;
   if (evalCase.expected?.answer !== undefined) {

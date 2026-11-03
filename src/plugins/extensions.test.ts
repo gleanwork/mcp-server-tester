@@ -202,7 +202,7 @@ describe('extension kinds in references', () => {
   it('resolves built-ins by their full mst/<kind>/<name> name', () => {
     expect(getJudge('mst/judge/rubric')).toBe(getJudge('rubric'));
     expect(getDatasetSource('mst/dataset/file')).toBe(getDatasetSource('file'));
-    expect(getClient('mst/client/mst')).toBe(getClient('mst'));
+    expect(getClient('mst/client/api')).toBe(getClient('api'));
     expect(getMetric('mst/metric/passed')).toBe(getMetric('passed'));
     expect(getResultStore('mst/result-store/file')).toBe(
       getResultStore('file')

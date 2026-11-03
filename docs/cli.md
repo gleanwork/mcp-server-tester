@@ -727,11 +727,11 @@ npx mst clients show acme/client/desk --plugins @acme/mst-plugin --json
 ```
 
 ```text
+api          any OS        The model alone, through its provider's API, with the servers' tools: ...
 chatgpt      macOS, Linux  The ChatGPT desktop app
 claude-code  any OS        The Claude Code CLI, headless
 codex        any OS        The Codex CLI, headless, through the Codex SDK
 cowork       macOS, Linux  Claude Desktop in Cowork mode
-mst          any OS        The model alone, through its provider's API, with the servers' tools: ...
 ```
 
 `show` prints the description, the operating systems the client runs on, what must be installed, the credentials it reads, the commands that prepare a machine for it, and its options as JSON Schema. Plugins add `description` and `requirements` (`os`, `install`, `credentials`, `setup`) to a client for these commands. The clients table in [evaluation-framework.md](./evaluation-framework.md#clients) is generated from the same definitions.

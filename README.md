@@ -48,7 +48,7 @@ Available matchers:
 
 ## Eval Datasets
 
-Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `mst` client, or with `mst run` on any client (Claude Code, Cowork, ChatGPT). Checks on a single tool's response belong in Playwright tests, above.
+Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `api` client, or with `mst run` on any client (Claude Code, Cowork, ChatGPT). Checks on a single tool's response belong in Playwright tests, above.
 
 ```json snippet=snippets/eval-dataset.json
 {
@@ -95,7 +95,7 @@ import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
 test('file operations eval', async ({ mcp }, testInfo) => {
   const dataset = await loadEvalDataset('./data/evals.json');
   const result = await runEvalDataset(
-    { dataset, client: 'mst', model: 'claude-haiku-4-5', defaultTrials: 5 },
+    { dataset, client: 'api', model: 'claude-haiku-4-5', defaultTrials: 5 },
     { mcp, testInfo }
   );
   expect(result.passed).toBe(result.total);
@@ -117,7 +117,7 @@ Judges go in the case's `judges` list, beside `assertions`: each scores the answ
 
 In LLM client mode, a real LLM receives your server's tool list and a natural language prompt, then decides which tools to call. This tests whether your tool names, descriptions, and input schemas are clear enough for autonomous use — a different question from whether the tools return correct output.
 
-A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; an eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'api', model: 'claude-haiku-4-5' }`), and the `api` client uses the test's MCP connection; an eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
 
 ```json snippet=snippets/mst-client-dataset.json
 {
@@ -270,7 +270,7 @@ result stores, and other extensions are built-ins or come from plugins
       "serverUrl": "https://example.com/mcp"
     }
   },
-  "client": "mst",
+  "client": "api",
   "clientOptions": {
     "provider": "anthropic"
   },

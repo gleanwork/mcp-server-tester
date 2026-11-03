@@ -38,7 +38,7 @@ npm run format:check        # Check formatting
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
 - **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities. `auth/grants/` holds connectors and refresh grants: connector lookup and grant grouping (`connectors.ts`), sign-in, refresh and revocation (`grants.ts`), and the built-in credential store `mst/credential-store/local` (`localStore.ts`). A run stages and renews connector tokens in `evals/connectorServers.ts`
 - **`assertions/`** - Unified assertion architecture (see below)
-- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `mst` client on a Playwright test's connection, an eval's client, a custom `executeCase`) returns a typed `CaseExecution` (`completed` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTrace` view, resolves judge settings (including the eval config's judges), then calls the validators. Desktop clients (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, failure diagnosis before a reset, client-native session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop client supplies only prepare, one case, reset, an optional diagnose and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
+- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `api` client on a Playwright test's connection, an eval's client, a custom `executeCase`) returns a typed `CaseExecution` (`completed` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTrace` view, resolves judge settings (including the eval config's judges), then calls the validators. Desktop clients (Cowork, ChatGPT) run batches through `evals/desktopBatch.ts` (lease, per-case reset policy, failure diagnosis before a reset, client-native session ledger, redaction, cleanup) and share one MCP readiness rule (`isMcpServerReady` in `evals/mcpReadiness.ts`); a new desktop client supplies only prepare, one case, reset, an optional diagnose and dispose. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
 - **`llm/`** - `resolveLLMEndpoint()`: the one place MST's own LLM calls (SDK client, judges) get their base URL and credential, including gateway bearer tokens and `MST_LLM_AUTH_COMMAND`. New LLM consumers resolve through it rather than reading `*_API_KEY` themselves. See `docs/llm-gateways.md`
 - **`evals/runFormat.ts`** - The `mst.run/v1` run directory: run IDs, paths, the writer and the Zod schemas `schema/run/v1/` is generated from (`npm run schema:generate`)
 - **`judge/`** - LLM-as-a-judge. `llmJudge.ts` is the one core (prompt, verdict parser, output guard); each provider in `JUDGE_PROVIDER_KINDS` (`anthropic`, `vertex-anthropic`, `anthropic-agent-sdk`, `openai`, `google`) is a completion adapter mapped in `judgeClient.ts`. `questionJudge.ts` is the yes-or-no judge core (ADR 0009): `defineQuestionJudge` asks one question per model call about the trace that `judgeTrace.ts` renders, and each answer is yes, no or `unknown`; the prompts are files in `judge/prompts/`, and a judge's version covers them and the trace format. `judge/agentic/` holds agentic judges (`agenticJudge`, `agenticPairwiseJudge`), which run an agent over a workspace of the trial's evidence on the `claude-agent` or `codex` runtime, and `stagedPairwiseJudge` (`stagedJudge.ts`), which runs a staged judge: a serialized bundle of files, prepare programs and agent stages. `builtinJudges.ts` has the built-in `rubric` judge
@@ -146,7 +146,7 @@ Run multiple eval cases in parallel:
 
 ```typescript
 await runEvalDataset(
-  { dataset, client: 'mst', model: 'claude-haiku-4-5', concurrency: 4 },
+  { dataset, client: 'api', model: 'claude-haiku-4-5', concurrency: 4 },
   { mcp, testInfo }
 );
 ```
@@ -169,7 +169,7 @@ Validators: `validateToolCalls(response, assertion)`, `validateToolCallCount(res
 ### Tests and Evals
 
 - **Tool tests** are Playwright tests: `mcp.callTool(name, args)` (or `mcp.request(method, params, schema)`) and the matchers. Fast, deterministic, free. Use for regression testing. `mst generate` writes them as a spec. There are no direct eval cases: `toolName`, `args`, `request` and `mode` on a case fail with what replaces them, as do the tool-response assertions (`response`, `schema`, `snapshot`, `isError`, `responseSize`).
-- **Evals** run every case (`input` + `assertions`) on a client and its model. Non-deterministic, costs money, measures tool description quality. In a Playwright test, `runEvalDataset({ dataset, client: 'mst', model })` runs cases on the `mst` client over the test's connection; other clients (`claude-code`, `codex`, `cowork`, `chatgpt`, plugins) run in evals (`mst run`). A case can set its own `client`, `model` and `clientOptions`. The `mst` client's `skills: 'catalog' | 'preload'` option offers the server's Agent Skills (skills the model loads are `kind: 'skill'` events for `toolsTriggered`; preloads are not).
+- **Evals** run every case (`input` + `assertions`) on a client and its model. Non-deterministic, costs money, measures tool description quality. In a Playwright test, `runEvalDataset({ dataset, client: 'api', model })` runs cases on the `api` client over the test's connection; other clients (`claude-code`, `codex`, `cowork`, `chatgpt`, plugins) run in evals (`mst run`). A case can set its own `client`, `model` and `clientOptions`. The `api` client's `skills: 'catalog' | 'preload'` option offers the server's Agent Skills (skills the model loads are `kind: 'skill'` events for `toolsTriggered`; preloads are not).
 
 ### Snapshot Testing
 
@@ -184,9 +184,9 @@ Custom sanitizers:
 
 Update snapshots: `npx playwright test --update-snapshots`
 
-### The mst and claude-code Clients
+### The api and claude-code Clients
 
-`simulateMstClient()` (internal, in `src/evals/mstClient/`) runs the `mst` and `claude-code` clients: the `sdk` path drives a model through the Vercel AI SDK over the test's MCP connection; the `cli` path spawns Claude Code with its own connection. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or an eval. The external-client runtime in `src/evals/externalClient/` is likewise internal to the ChatGPT client; `./experimental/clients` exports only the metadata types results carry.
+`simulateMstClient()` (internal, in `src/evals/mstClient/`) runs the `api` and `claude-code` clients: the `sdk` path drives a model through the Vercel AI SDK over the test's MCP connection; the `cli` path spawns Claude Code with its own connection. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or an eval. The external-client runtime in `src/evals/externalClient/` is likewise internal to the ChatGPT client; `./experimental/clients` exports only the metadata types results carry.
 
 Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
 
@@ -221,7 +221,7 @@ Custom judges come from plugins: a plugin's `judges: { completeness: { schema, e
 - Common pitfalls:
   - Missing `testInfo` for snapshot matchers (destructure from second test arg)
   - Wrong import path — use `@gleanwork/mcp-server-tester/fixtures/mcp` for tests, not the root path
-  - Provider package not installed for the `mst` client (`npm install ai @ai-sdk/<provider>`)
+  - Provider package not installed for the `api` client (`npm install ai @ai-sdk/<provider>`)
   - Missing `await` on async matchers (`toPassToolJudge`, `toMatchToolSnapshot`, `toSatisfyToolPredicate`)
   - Importing from `@modelcontextprotocol/sdk` (v1): use `@modelcontextprotocol/client` (types, transports, auth) or `@modelcontextprotocol/server` (mock servers)
   - Pinning `protocol: '2026-07-28'` against a legacy-only server fails by design; use `'legacy'` or `'auto'`
@@ -323,9 +323,9 @@ Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSou
 2. Write a completion adapter in `src/judge/myProviderJudge.ts`: `(config: JudgeConfig) => JudgeCompletionAdapter`, which sends `{ system, prompt }` and returns `{ text, usage }`. Load the SDK with `loadJudgeSdk(() => import('pkg'), ...)` from `src/judge/adapterSupport.ts`, and type only the SDK surface you read (no `any`). Don't build prompts or parse verdicts there: `src/judge/llmJudge.ts` owns the prompt, the parser, the `maxToolOutputSize` guard and usage defaults for every provider. For an Anthropic- or OpenAI-shaped API, check the credential up front with `requireJudgeCredential` and resolve the endpoint per call with `resolveLLMEndpoint` (`src/llm/endpoint.ts`), so gateways work
 3. Add it to `JUDGE_PROVIDERS` in `src/judge/judgeClient.ts` (the record is typed by `ProviderKind`, so a missing entry is a compile error)
 
-### New LLM Client Provider (the mst client)
+### New LLM Client Provider (the api client)
 
-Supported `LLMProvider` values for the `mst` client's `provider` option (defined in `src/evals/mstClient/types.ts`):
+Supported `LLMProvider` values for the `api` client's `provider` option (defined in `src/evals/mstClient/types.ts`):
 
 `'openai' | 'anthropic' | 'azure' | 'google' | 'mistral' | 'deepseek' | 'openrouter' | 'xai' | 'vertex-anthropic'`
 

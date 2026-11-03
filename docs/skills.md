@@ -7,7 +7,7 @@ MST can:
 - read and verify skills from tests (`mcp.skills`)
 - check that a server follows SEP-2640 (`runConformanceChecks`)
 - assert on skills methods in eval datasets (`request` cases)
-- run evals where the model can load skills, and measure whether skills help (the `mst` client's `skills` option, or eval variants that set it)
+- run evals where the model can load skills, and measure whether skills help (the `api` client's `skills` option, or eval variants that set it)
 
 The extension works in both protocol eras: servers declare it in `capabilities.extensions`, which MST reads from `initialize` (legacy) or `server/discover` (2026-07-28).
 
@@ -113,7 +113,7 @@ test('an unknown skill is an invalid-params error', async ({ mcp }) => {
 
 ## Skills in evals
 
-Set the `mst` client's `skills` option (`clientOptions.skills`) to let it offer the server's skills to the model:
+Set the `api` client's `skills` option (`clientOptions.skills`) to let it offer the server's skills to the model:
 
 | `skills`          | What the model gets                                                                                                                                                    |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -135,7 +135,7 @@ Loading a skill is not an MCP tool call. Loads are reported in `skillLoads`, and
 {
   "id": "weather-uses-skill",
   "input": "Write me a short weather report for London",
-  "client": "mst",
+  "client": "api",
   "model": "claude-haiku-4-5",
   "clientOptions": { "skills": "catalog" },
   "trials": 5,
@@ -158,7 +158,7 @@ Metrics: `skill_loaded`, `skill_before_tool`, and `skill_verification_failed`. E
 
 ## Measuring whether skills help
 
-Models often skip skills they could use, and a matching tool can win over the skill written for it. To measure it, run the same dataset as eval variants that differ only in the `mst` client's `skills` mode:
+Models often skip skills they could use, and a matching tool can win over the skill written for it. To measure it, run the same dataset as eval variants that differ only in the `api` client's `skills` mode:
 
 ```json
 {
@@ -171,7 +171,7 @@ Models often skip skills they could use, and a matching tool can win over the sk
       "args": ["server.js"]
     }
   },
-  "client": "mst",
+  "client": "api",
   "clientOptions": {
     "provider": "anthropic"
   },

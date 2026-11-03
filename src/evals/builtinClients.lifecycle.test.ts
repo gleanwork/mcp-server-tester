@@ -65,12 +65,12 @@ function releaseInitialize() {
     );
 }
 function run(timeout: number) {
-  return getClient('mst').run!(
+  return getClient('api').run!(
     {
       prompt: 'hello',
       servers: [{ transport: 'http', serverUrl, label: 'local' }],
     },
-    { type: 'mst', provider: 'openai', timeout },
+    { type: 'api', provider: 'openai', timeout },
     { evalConfig: { name: 'offline', datasets: [] } }
   );
 }
@@ -199,9 +199,9 @@ describe('SDK client owned lifecycle deadline', () => {
     const startedAt = Date.now();
     let settled = false;
     // No HTTP fixture or MCP clients: only promises, imports and the real AI SDK.
-    const pending = getClient('mst').run!(
+    const pending = getClient('api').run!(
       { prompt: 'hello', servers: [] },
-      { type: 'mst', provider: 'openai', timeout: 200 },
+      { type: 'api', provider: 'openai', timeout: 200 },
       { evalConfig: { name: 'offline', datasets: [] } }
     ).finally(() => {
       settled = true;
@@ -270,7 +270,7 @@ describe('SDK client owned lifecycle deadline', () => {
       setTimeout(() => process.exit(0), 3000);
     `;
     try {
-      const result = await getClient('mst').run!(
+      const result = await getClient('api').run!(
         {
           prompt: 'hello',
           servers: [
@@ -281,7 +281,7 @@ describe('SDK client owned lifecycle deadline', () => {
             },
           ],
         },
-        { type: 'mst', provider: 'openai', timeout: 50 },
+        { type: 'api', provider: 'openai', timeout: 50 },
         { evalConfig: { name: 'offline', datasets: [] } }
       );
       expect(result.error).toContain('timed out');

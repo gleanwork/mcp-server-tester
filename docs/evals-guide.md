@@ -68,7 +68,7 @@ test('search returns results', async ({ mcp }) => {
 
 A real LLM receives your tools and a natural-language input, then decides which tools to call. You assert that it made the right choices.
 
-A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'mst', model: 'claude-haiku-4-5' }`), and the `mst` client uses the test's MCP connection; an eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'api', model: 'claude-haiku-4-5' }`), and the `api` client uses the test's MCP connection; an eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
 
 ```json snippet=snippets/evals-tools-triggered.json
 {
@@ -349,7 +349,7 @@ The killer use case for client evals is testing whether a description change act
 ```typescript
 const run = {
   dataset,
-  client: 'mst',
+  client: 'api',
   model: 'claude-haiku-4-5',
   defaultTrials: 10,
 };
@@ -403,7 +403,7 @@ Compare the pass rates per case. To decide whether a variant really is better (p
       "input": "Find recent documents about X",
       // Optional: the run (runEvalDataset or an eval) names the client and
       // model; a case can set its own
-      "client": "mst",
+      "client": "api",
       "model": "claude-haiku-4-5@20251001", // Vertex, from the @ in the id
       "clientOptions": { "maxToolCalls": 5 },
 
@@ -451,7 +451,7 @@ test('my evals', async ({ mcp }, testInfo) => {
 
       // The client the cases run on and its model. A case can set its
       // own client, model and clientOptions.
-      client: 'mst',
+      client: 'api',
       model: 'claude-haiku-4-5',
 
       // Run every client case 10 times, unless it sets its own trials
@@ -815,7 +815,7 @@ To compare two MCP servers, or two configurations of one, run the same dataset a
       "serverUrl": "https://staging.example.com/mcp"
     }
   },
-  "client": "mst",
+  "client": "api",
   "clientOptions": {
     "provider": "anthropic"
   },

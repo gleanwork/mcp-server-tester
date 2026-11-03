@@ -10,7 +10,7 @@ test('my evals', async ({ mcp }, testInfo) => {
 
       // The client the cases run on and its model. A case can set its
       // own client, model and clientOptions.
-      client: 'mst',
+      client: 'api',
       model: 'claude-haiku-4-5',
 
       // Run every client case 10 times, unless it sets its own trials

@@ -1,7 +1,7 @@
 /**
  * Case execution: the one place an eval case runs.
  *
- * Every path (the mst client on a Playwright test's connection, or an eval's
+ * Every path (the api client on a Playwright test's connection, or an eval's
  * client) produces a `CaseExecution`. The
  * runner reads its explicit fields and never inspects `response` to guess how
  * a case ran. Clients and adapters produce traces; the runner owns every score.
@@ -31,6 +31,7 @@ import type {
   ExternalClientSimulationResult,
 } from './externalClient/types.js';
 import { getBuiltinClientConfig, getClient } from './builtinClients.js';
+import { resolveClientName } from './clientNames.js';
 import { clientRunToExecution, simulationTrace } from './clientTrace.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import { withOriginalToolNames } from './toolSurface.js';
@@ -167,7 +168,7 @@ function simulationExecution(
 
 /**
  * The client a case runs on outside an eval: its own `client`, `model` and
- * `clientOptions` over the run's. Only `mst` runs there, on the test's MCP
+ * `clientOptions` over the run's. Only `api` runs there, on the test's MCP
  * connection; other clients connect to servers themselves, which an eval
  * configures. A different client's options don't carry over.
  */
@@ -175,12 +176,13 @@ export function playwrightClientOf(
   evalCase: EvalCase,
   run: ClientFields | undefined
 ): { model?: string } & Record<string, unknown> {
-  const client = evalCase.client ?? run?.client ?? 'mst';
-  if (client !== 'mst')
+  const runClient = resolveClientName(run?.client ?? 'api');
+  const client = resolveClientName(evalCase.client ?? runClient);
+  if (client !== 'api')
     throw new Error(
-      `Case "${evalCase.id}" uses client "${client}". Outside an eval, cases run on the mst client, on the test's MCP connection. Run "${client}" in an eval (mst run).`
+      `Case "${evalCase.id}" uses client "${client}". Outside an eval, cases run on the api client, on the test's MCP connection. Run "${client}" in an eval (mst run).`
     );
-  const inherits = (run?.client ?? 'mst') === 'mst';
+  const inherits = runClient === 'api';
   const model = evalCase.model ?? (inherits ? run?.model : undefined);
   return {
     ...(inherits ? run?.clientOptions : undefined),
@@ -190,7 +192,7 @@ export function playwrightClientOf(
 }
 
 /**
- * Run a case on the mst client, on the Playwright test's connection.
+ * Run a case on the api client, on the Playwright test's connection.
  * Failures become a `failed` execution.
  */
 export async function executeEvalCase(
@@ -199,11 +201,11 @@ export async function executeEvalCase(
   client?: ClientFields
 ): Promise<CaseExecution> {
   try {
-    if (!mcp) throw new Error('The mst client requires an MCP connection.');
+    if (!mcp) throw new Error('The api client requires an MCP connection.');
     if (!evalCase.input)
       throw new Error(`Eval case ${evalCase.id}: a case needs input`);
     const config = getBuiltinClientConfig(
-      'mst',
+      'api',
       playwrightClientOf(evalCase, client)
     );
     const simulation = withOriginalToolNames(
@@ -213,7 +215,7 @@ export async function executeEvalCase(
     if (simulation.success) return simulationExecution(simulation);
     // The adapter typed how it ended, or its failure kind says (a CLI that
     // didn't start); a thrown error would lose both.
-    const error = simulation.error || 'The mst client failed.';
+    const error = simulation.error || 'The api client failed.';
     return {
       kind: 'failed',
       response: undefined,
