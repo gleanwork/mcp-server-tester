@@ -133,11 +133,16 @@ describe('mst clients', () => {
 
   it('says what it knows when a client is unknown', async () => {
     await expect(showClient('nope', {}, capture().print)).rejects.toThrow(
-      /No client "nope"\. Clients: chatgpt, claude-code, codex, cowork, mst\./
+      'Client "nope" is not available. Available: chatgpt, claude-code, codex, cowork, mst.'
     );
     await expect(
       showClient('acme/client/desk', {}, capture().print)
-    ).rejects.toThrow(/Plugin clients need --plugins or --config\./);
+    ).rejects.toThrow(
+      'Client "acme/client/desk" needs the "acme" plugin, which is not loaded. Plugin clients need --plugins or --config.'
+    );
+    await expect(
+      showClient('acme/judge/completeness', {}, capture().print)
+    ).rejects.toThrow('"acme/judge/completeness" is a judge, not a client.');
   });
 });
 

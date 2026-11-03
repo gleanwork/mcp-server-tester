@@ -7,6 +7,7 @@
  */
 import type { ZodType } from 'zod';
 import {
+  getClient,
   listClients,
   resolveClientName,
 } from '../../../evals/builtinClients.js';
@@ -112,9 +113,16 @@ export async function showClient(
   const entries = await clientEntries(options);
   const entry = entries.find((candidate) => candidate.ref === wanted);
   if (!entry) {
-    const known = entries.map((candidate) => candidate.ref).join(', ');
+    // The lookup an eval config uses says what is wrong: an unknown name,
+    // a plugin that isn't loaded, or another kind of extension.
+    let problem = `No client "${ref}".`;
+    try {
+      getClient(wanted);
+    } catch (error) {
+      if (error instanceof Error) problem = error.message;
+    }
     throw new Error(
-      `No client "${ref}".${known ? ` Clients: ${known}.` : ''}${
+      `${problem}${
         wanted.includes('/') && !options.plugins?.length && !options.config
           ? ' Plugin clients need --plugins or --config.'
           : ''
