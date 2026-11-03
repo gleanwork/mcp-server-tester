@@ -7,18 +7,10 @@
 # It is the only publisher of the required check "review-loop / eligibility",
 # the only thing that enables auto-merge, and the only thing that DMs.
 #
-# Script contract (proposed; agree before writing it):
-#   scripts/review/gate.sh                        (Rob)
-#     env:    PR, HEAD_SHA, REPO, CHECK_NAME, REVIEW_CONCLUSION (review-loop's
-#             conclusion), CLASSIFICATION (path), FINDINGS_DIR (dir of verified
-#             findings JSON), GH_TOKEN (GITHUB_TOKEN; check runs need an App
-#             token, which a PAT is not)
-#     does:   drops verified:false findings; fails on any blocker/should-fix,
-#             on a category other than docs/deps-*, or on REVIEW_CONCLUSION
-#             != success; publishes CHECK_NAME on HEAD_SHA via gh api
-#     writes: outcome=pass|fail and ask=<one line> to $GITHUB_OUTPUT
-#   Auto-merge and the DM are separate steps below, so gate.sh needs no merge
-#   or Slack credentials and can be tested on fixtures with a dry-run flag.
+# Scripts and their contracts: scripts/review/README.md. The check is published
+# with GITHUB_TOKEN because check runs need an App token, which a PAT is not.
+# Auto-merge and the DM are separate jobs, so gate.sh holds no merge or Slack
+# credentials and can be tested on fixtures with GATE_DRY_RUN=1.
 #
 # Not in today's cut: pull_request_review / issue_comment triggers, state
 # branch, autofix, Owner: parsing from the PR body.
@@ -115,6 +107,7 @@ jobs:
           REVIEW_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           CLASSIFICATION: classification.json
           FINDINGS_DIR: artifacts/verified
+          DETAILS_URL: ${{ github.event.workflow_run.html_url }}
         run: scripts/review/gate.sh
 
   merge:

@@ -5,19 +5,7 @@
 # It never publishes the eligibility check, never merges, never DMs.
 # review-gate.yml does those, from the default branch, when this run completes.
 #
-# Script contracts (proposed; agree before writing the scripts):
-#   scripts/review/classify.sh                   (Rob)
-#     stdin:  changed file paths, one per line
-#     stdout: {"category":"docs","label":"review:docs"}
-#     Path rules only. Pure function of the file list, so the gate can rerun it
-#     from main on the same list.
-#   scripts/review/run-slot.sh <claude|codex> <lens>  (David)
-#     env:    BASE (base ref, fetched as origin/$BASE), PR, ANTHROPIC_API_KEY / OPENAI_API_KEY
-#     stdout: findings JSON (agreed shape), every finding "verified": null
-#     Read-only. Non-zero exit = slot failed.
-#   scripts/review/verify-slot.sh <findings.json>      (David)
-#     Verifies with the family that did NOT author the slot.
-#     stdout: the same JSON with "verified" set to true/false on each finding.
+# Scripts and their contracts: scripts/review/README.md.
 
 name: review-loop
 
@@ -37,6 +25,9 @@ permissions:
 env:
   PR: ${{ github.event.pull_request.number }}
   BASE: ${{ github.event.pull_request.base.ref }}
+  # Flags in scripts/review/model.sh were checked against these versions.
+  CLAUDE_CODE_VERSION: "2.1.317"
+  CODEX_VERSION: "0.166.0"
 
 jobs:
   # Fork PRs get no secrets. The gate publishes a neutral check for them.
@@ -90,9 +81,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm i -g @anthropic-ai/claude-code
+      - run: npm i -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
         if: matrix.runner == 'claude'
-      - run: npm i -g @openai/codex
+      - run: npm i -g "@openai/codex@$CODEX_VERSION"
         if: matrix.runner == 'codex'
 
       - name: Run one reviewer slot
@@ -120,7 +111,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm i -g @anthropic-ai/claude-code @openai/codex
+      - run: npm i -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION" "@openai/codex@$CODEX_VERSION"
       - uses: actions/download-artifact@v4
         with:
           pattern: findings-*

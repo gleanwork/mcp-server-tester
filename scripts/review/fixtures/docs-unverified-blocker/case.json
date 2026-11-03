@@ -1,0 +1,5 @@
+{
+  "about": "Docs PR with a blocker the verifier never ruled on. Fails: unverified findings are reported, not dropped.",
+  "reviewConclusion": "success",
+  "expect": "fail"
+}

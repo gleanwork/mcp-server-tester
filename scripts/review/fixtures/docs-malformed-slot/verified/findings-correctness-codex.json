@@ -1,0 +1,15 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "codex",
+    "family": "openai",
+    "costUsd": 0.3
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "major",
+      "file": "README.md"
+    }
+  ]
+}

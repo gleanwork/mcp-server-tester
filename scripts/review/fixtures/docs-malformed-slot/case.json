@@ -1,0 +1,6 @@
+{
+  "about": "Docs PR where codex's output does not match the schema. Fails: a malformed slot is a failed slot.",
+  "reviewConclusion": "success",
+  "expect": "fail",
+  "malformed": true
+}

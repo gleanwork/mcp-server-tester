@@ -1,0 +1,5 @@
+{
+  "about": "Docs PR where only claude's review arrived. Fails: both families must review.",
+  "reviewConclusion": "success",
+  "expect": "fail"
+}

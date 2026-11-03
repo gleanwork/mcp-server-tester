@@ -1,0 +1,20 @@
+{
+  "slot": {
+    "lens": "correctness",
+    "runner": "claude",
+    "family": "anthropic",
+    "costUsd": 0.42
+  },
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "file": "README.md",
+      "line": 3,
+      "claim": "The install command installs the wrong package.",
+      "evidence": "README says npm i mcp-tester; package.json name is @gleanwork/mcp-server-tester.",
+      "verified": null,
+      "verifiedBy": null
+    }
+  ]
+}

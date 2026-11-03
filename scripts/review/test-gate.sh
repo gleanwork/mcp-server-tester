@@ -4,7 +4,7 @@
 #   scripts/review/test-gate.sh
 #
 # Each fixtures/<case>/ holds what review-gate.yml hands gate.sh:
-#   case.json            {about, reviewConclusion, expect: pass|fail}
+#   case.json            {about, reviewConclusion, expect: pass|fail, malformed?}
 #   classification.json  classify.sh output
 #   verified/*.json      verify-slot.sh output (absent when the review failed)
 #
@@ -16,8 +16,13 @@ here="$(cd "$(dirname "$0")" && pwd)"
 fail=0
 
 # Fixtures must themselves be valid, or the gate tests prove nothing.
-for f in "$here"/fixtures/*/verified/*.json; do
-  "$here/validate-findings.sh" "$f" --verified || fail=1
+# A fixture that is malformed on purpose says so in case.json.
+for dir in "$here"/fixtures/*/; do
+  jq -e '.malformed == true' "$dir/case.json" >/dev/null && continue
+  for f in "$dir"verified/*.json; do
+    [ -e "$f" ] || continue
+    "$here/validate-findings.sh" "$f" || fail=1
+  done
 done
 
 for dir in "$here"/fixtures/*/; do

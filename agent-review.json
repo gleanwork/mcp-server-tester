@@ -22,7 +22,22 @@
     "classify": 0.8
   },
   "escalation": {
-    "paths": ["agent-review.json", ".github/**", "SECURITY.md", "RELEASE.md"],
+    "paths": [
+      "agent-review.json",
+      ".github/**",
+      "SECURITY.md",
+      "RELEASE.md",
+      "scripts/review/**",
+      "AGENTS.md",
+      "**/AGENTS.md",
+      "CLAUDE.md",
+      "**/CLAUDE.md",
+      "REVIEW.md",
+      ".claude/**",
+      ".codex/**",
+      "skills/**",
+      "LICENSE"
+    ],
     "categories": ["policy", "security-sensitive", "feature", "deps-other"]
   },
   "actions": {
