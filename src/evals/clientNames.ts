@@ -35,6 +35,17 @@ const STORED_CLIENT_NAMES: Readonly<Record<string, string>> = {
 const BUILTIN_CLIENT_PREFIX = 'mst/client/';
 
 /**
+ * A client reference as MST compares and records it: a built-in's full
+ * name (`mst/client/api`) is its bare name (`api`). Anything else is
+ * returned unchanged. It doesn't check renames; `resolveClientName` does.
+ */
+export function bareClientName(reference: string): string {
+  return reference.startsWith(BUILTIN_CLIENT_PREFIX)
+    ? reference.slice(BUILTIN_CLIENT_PREFIX.length)
+    : reference;
+}
+
+/**
  * A client reference, checked: a renamed built-in fails naming its
  * replacement, by its full name too (`mst/client/mst`); anything else is
  * returned unchanged.
@@ -53,11 +64,14 @@ export function resolveClientName(reference: string): string {
 
 /**
  * The client a stored run's recorded name means now: `mst` (before ADR
- * 0011) is `api`. Any other name is returned unchanged. Read stored client
- * names through this, never through `resolveClientName`, which rejects them.
+ * 0011) is `api`, by its full name `mst/client/mst` too, and a built-in's
+ * full name reads as its bare name. Any other name is returned unchanged.
+ * Read stored client names through this, never through
+ * `resolveClientName`, which rejects them.
  */
 export function storedClientName(name: string): string {
-  return Object.hasOwn(STORED_CLIENT_NAMES, name)
-    ? STORED_CLIENT_NAMES[name]!
-    : name;
+  const bare = bareClientName(name);
+  return Object.hasOwn(STORED_CLIENT_NAMES, bare)
+    ? STORED_CLIENT_NAMES[bare]!
+    : bare;
 }

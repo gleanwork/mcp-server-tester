@@ -23,6 +23,7 @@ import {
   type ClientExecution,
   type ClientResponse,
 } from './caseExecution.js';
+import { bareClientName } from './clientNames.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
 import type { TestInfo } from '@playwright/test';
 import {
@@ -637,15 +638,18 @@ function buildRequest(
     >;
   }
 
-  const client = evalCase.client ?? run.client;
+  // Names as playwrightClientOf compares them: `mst/client/api` is `api`,
+  // and a run that names no client runs on api.
+  const caseClient =
+    evalCase.client === undefined ? undefined : bareClientName(evalCase.client);
+  const runClient = bareClientName(run.client ?? 'api');
   // A case's own client doesn't take the run's model.
   const model =
     evalCase.model ??
-    (evalCase.client === undefined || evalCase.client === run.client
+    (caseClient === undefined || caseClient === runClient
       ? run.model
       : undefined);
-  // A case that names no client runs on api (see playwrightClientOf).
-  request.client = client ?? 'api';
+  request.client = caseClient ?? runClient;
   if (model !== undefined) request.model = model;
   request.input = evalCase.input;
   if (evalCase.expected?.answer !== undefined) {

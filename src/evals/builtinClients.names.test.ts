@@ -4,6 +4,7 @@ import { validateEvalConfig } from './configValidation.js';
 import { CHATGPT_CLIENT, CHATGPT_LINUX_CLIENT } from './chatgptClient.js';
 import { storedClientName } from './clientNames.js';
 import { playwrightClientOf } from './caseExecution.js';
+import { runEvalCase } from './evalRunner.js';
 
 describe('built-in client names', () => {
   it.each([
@@ -101,6 +102,45 @@ describe('built-in client names', () => {
     expect(storedClientName('api')).toBe('api');
     expect(storedClientName('claude-code')).toBe('claude-code');
     expect(storedClientName('acme/client/desk')).toBe('acme/client/desk');
+    // runEvalCase recorded a full name as it was given.
+    expect(storedClientName('mst/client/mst')).toBe('api');
+    expect(storedClientName('mst/client/api')).toBe('api');
+  });
+
+  it('a result records the client and model the case ran on, by either name', async () => {
+    async function completed() {
+      return {
+        kind: 'completed' as const,
+        response: { success: true, response: 'ok', toolCalls: [] },
+      };
+    }
+    const model = 'claude-haiku-4-5';
+    async function requestOf(
+      evalCase: { id: string; input: string; client?: string },
+      client: string | undefined
+    ) {
+      const result = await runEvalCase(
+        evalCase,
+        {},
+        { client, model, executeCase: completed, grade: false }
+      );
+      // The case ran with the model playwrightClientOf gives it.
+      expect(playwrightClientOf(evalCase, { client, model }).model).toBe(model);
+      return { client: result.request?.client, model: result.request?.model };
+    }
+    const ran = { client: 'api', model };
+    const input = 'hi';
+    expect(
+      await requestOf({ id: 'a', input, client: 'api' }, 'mst/client/api')
+    ).toEqual(ran);
+    expect(
+      await requestOf({ id: 'b', input, client: 'mst/client/api' }, 'api')
+    ).toEqual(ran);
+    expect(await requestOf({ id: 'c', input }, 'mst/client/api')).toEqual(ran);
+    // A run that names no client runs on api.
+    expect(
+      await requestOf({ id: 'd', input, client: 'api' }, undefined)
+    ).toEqual(ran);
   });
 
   it('chatgpt is the ChatGPT client for this platform', () => {

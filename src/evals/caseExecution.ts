@@ -31,8 +31,7 @@ import type {
   ExternalClientSimulationResult,
 } from './externalClient/types.js';
 import { getBuiltinClientConfig, getClient } from './builtinClients.js';
-import { resolveClientName } from './clientNames.js';
-import { builtinShortName } from '../plugins/extensions.js';
+import { bareClientName, resolveClientName } from './clientNames.js';
 import { clientRunToExecution, simulationTrace } from './clientTrace.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import { withOriginalToolNames } from './toolSurface.js';
@@ -179,7 +178,7 @@ export function playwrightClientOf(
 ): { model?: string } & Record<string, unknown> {
   // A built-in's full name (`mst/client/api`) is its bare name here.
   const clientName = (reference: string) =>
-    builtinShortName(resolveClientName(reference), 'client');
+    bareClientName(resolveClientName(reference));
   const runClient = clientName(run?.client ?? 'api');
   const client = clientName(evalCase.client ?? runClient);
   if (client !== 'api')
