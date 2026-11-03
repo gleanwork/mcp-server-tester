@@ -136,7 +136,7 @@ The `api` client takes its options in `clientOptions`, on the run (`runEvalDatas
 | `maxToolCalls` | Most tool-call steps (default 5)                                                                                                                 |
 | `temperature`  | Sampling temperature (0–1)                                                                                                                       |
 | `maxTokens`    | Most response tokens                                                                                                                             |
-| `timeout`      | Deadline in milliseconds                                                                                                                         |
+| `timeout`      | The trial's time limit in milliseconds (default: none)                                                                                           |
 | `apiKeyEnvVar` | The environment variable that holds the API key, instead of the provider's default                                                               |
 | `skills`       | Offer the server's Agent Skills: `'off'` (default), `'catalog'` or `'preload'`                                                                   |
 | `systemPrompt` | Added to the model's system prompt (organisation instructions, say)                                                                              |

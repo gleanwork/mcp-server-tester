@@ -2,8 +2,10 @@
  * A run stored before the `mst` client was renamed `api` (ADR 0011) says
  * `client: "mst"`, and one stored before the Codex surface became the
  * `codex-app` client says `client: "chatgpt"` with `clientOptions.surface:
- * "codex"`. Their files keep those names; every reader sees the current
- * client, so the run still grades, resumes and reports.
+ * "codex"`. One stored before the action budget was `maxActions` says
+ * `computerUseMaxActions` or `nativeMaxActions`. Their files keep those
+ * names; every reader sees the current client and options, so the run still
+ * grades, resumes and reports.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
@@ -547,8 +549,34 @@ type StoredVariant = {
   clientOptions?: Record<string, unknown>;
 };
 
+/** `options` with the key `from` renamed `to`, where it was. */
+const renamedKey = (
+  options: Record<string, unknown> | undefined,
+  from: string,
+  to: string
+) =>
+  Object.fromEntries(
+    Object.entries(options ?? {}).map(([key, value]) => [
+      key === from ? to : key,
+      value,
+    ])
+  );
+
 /** How MST wrote a codex-app variant's run.json record before ADR 0011. */
 const STORED_BEFORE: Array<[string, (variant: StoredVariant) => void]> = [
+  ...(['computerUseMaxActions', 'nativeMaxActions'] as const).map(
+    (old): [string, (variant: StoredVariant) => void] => [
+      `codex-app with ${old}`,
+      (variant) => {
+        expect(variant.clientOptions).toHaveProperty('maxActions');
+        variant.clientOptions = renamedKey(
+          variant.clientOptions,
+          'maxActions',
+          old
+        );
+      },
+    ]
+  ),
   [
     'chatgpt with the Codex surface',
     (variant) => {
@@ -622,7 +650,7 @@ describe('a tool optimization whose baseline was stored before ADR 0011', () => 
             },
             client: 'codex-app',
             model: 'gpt-test',
-            clientOptions: { requireMcpCalls: true },
+            clientOptions: { maxActions: 20, requireMcpCalls: true },
           })
         );
         const target = {
@@ -723,6 +751,58 @@ describe('storedClientSetup', () => {
       });
     }
   );
+
+  it.each(['cowork', 'chatgpt', 'codex-app', 'mst/client/chatgpt'])(
+    "reads a stored %s's computerUseMaxActions or nativeMaxActions as maxActions, where it was",
+    (client) => {
+      const name = client.replace('mst/client/', '');
+      for (const old of ['computerUseMaxActions', 'nativeMaxActions']) {
+        const read = storedClientSetup({
+          client,
+          clientOptions: { timeout: 1, [old]: 20, requireMcpCalls: true },
+        });
+        expect(read).toEqual({
+          client: name,
+          clientOptions: { timeout: 1, maxActions: 20, requireMcpCalls: true },
+        });
+        // In the order a config written today records them.
+        expect(Object.keys(read.clientOptions)).toEqual([
+          'timeout',
+          'maxActions',
+          'requireMcpCalls',
+        ]);
+      }
+    }
+  );
+
+  it('reads the budget a stored run ran with when it has both names, and keeps a maxActions', () => {
+    // ChatGPT on macOS used computerUseMaxActions and ignored nativeMaxActions.
+    expect(
+      storedClientSetup({
+        client: 'chatgpt',
+        clientOptions: { nativeMaxActions: 8, computerUseMaxActions: 40 },
+      })
+    ).toEqual({ client: 'chatgpt', clientOptions: { maxActions: 40 } });
+    expect(
+      storedClientSetup({
+        client: 'cowork',
+        clientOptions: { maxActions: 12, computerUseMaxActions: 40 },
+      })
+    ).toEqual({ client: 'cowork', clientOptions: { maxActions: 12 } });
+    // The Codex surface's budget, as codex-app's.
+    expect(
+      storedClientSetup({
+        client: 'chatgpt',
+        clientOptions: { surface: 'codex', nativeMaxActions: 8 },
+      })
+    ).toEqual({ client: 'codex-app', clientOptions: { maxActions: 8 } });
+    // Only the desktop clients had the names.
+    const plugin = {
+      client: 'acme/client/desk',
+      clientOptions: { computerUseMaxActions: 8 },
+    };
+    expect(storedClientSetup(plugin)).toBe(plugin);
+  });
 
   it('drops computerUseProvider and the Codex surface together, and leaves no empty options', () => {
     expect(

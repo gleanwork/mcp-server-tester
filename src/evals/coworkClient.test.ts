@@ -541,6 +541,46 @@ describe('V2 Cowork client', () => {
     expect(mocks.setup).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
   });
+  it.each(['darwin', 'linux'] as const)(
+    'gives the desktop automation maxActions on %s, 24 by default',
+    async (os) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(os);
+      const submit = os === 'darwin' ? mocks.submit : linuxPlatform.submit;
+      const run = (options: Record<string, unknown>) =>
+        COWORK_CLIENT.runBatch!(
+          [{ ...requests()[0]!, config: { ...clientConfig, ...options } }],
+          readOnlyContext
+        );
+      await run({});
+      await run({ maxActions: 64 });
+      expect(
+        submit.mock.calls.map(
+          ([, options]) => (options as { maxActions: number }).maxActions
+        )
+      ).toEqual([24, 64]);
+      // The HITL inspection keeps its own budget.
+      expect(
+        (os === 'darwin' ? mocks.hitl : linuxPlatform.handleHitl).mock
+          .calls[0]![0]
+      ).toMatchObject({ maxActions: 12 });
+    }
+  );
+  it.each([
+    [{ maxActions: 65 }, /Too big/],
+    [{ computerUseMaxActions: 8 }, /is now `maxActions`/],
+  ])(
+    'rejects Cowork options %o before any desktop action',
+    async (options, message) => {
+      await expect(
+        COWORK_CLIENT.runBatch!(
+          [{ ...requests()[0]!, config: { ...clientConfig, ...options } }],
+          readOnlyContext
+        )
+      ).rejects.toThrow(message);
+      expect(mocks.setup).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    }
+  );
   it('fails on an OS Cowork does not run on, before any desktop action', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     await expect(COWORK_CLIENT.runBatch!(requests(), context)).rejects.toThrow(

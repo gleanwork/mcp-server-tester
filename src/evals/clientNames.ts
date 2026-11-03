@@ -86,14 +86,26 @@ const STORED_CHATGPT_SURFACES: Readonly<Record<string, string>> = {
 };
 
 /**
- * The desktop clients that took `clientOptions.computerUseProvider` before
- * the OS of the trial's machine decided how they run (ADR 0011).
+ * The desktop clients, which took `clientOptions.computerUseProvider` before
+ * the OS of the trial's machine decided how they run, and named their action
+ * budget `computerUseMaxActions` or `nativeMaxActions` before it was
+ * `maxActions` (ADR 0011).
  */
-const COMPUTER_USE_PROVIDER_CLIENTS: ReadonlySet<string> = new Set([
+const DESKTOP_CLIENTS: ReadonlySet<string> = new Set([
   'cowork',
   'chatgpt',
   'codex-app',
 ]);
+
+/**
+ * The earlier names of a desktop client's `maxActions`. When a stored run
+ * has both (ChatGPT on macOS, which ignored `nativeMaxActions`), the first
+ * is the budget it ran with.
+ */
+const STORED_MAX_ACTIONS_NAMES = [
+  'computerUseMaxActions',
+  'nativeMaxActions',
+] as const;
 
 /**
  * A client and its options as a stored run recorded them (a run.json
@@ -102,8 +114,9 @@ const COMPUTER_USE_PROVIDER_CLIENTS: ReadonlySet<string> = new Set([
  * as `codex-app`, with `surface` left out of its options, so it compares
  * equal to a config written today. A stored `surface: "chatgpt-work"` is
  * left out the same way, and so is a desktop client's
- * `computerUseProvider` (before ADR 0011 too). Anything else is returned
- * unchanged.
+ * `computerUseProvider` (before ADR 0011 too). A desktop client's
+ * `computerUseMaxActions` or `nativeMaxActions` reads as `maxActions`.
+ * Anything else is returned unchanged.
  */
 export function storedClientSetup<
   T extends { client?: string; clientOptions?: Record<string, unknown> },
@@ -120,15 +133,28 @@ export function storedClientSetup<
     client = STORED_CHATGPT_SURFACES[surface]!;
     gone.add('surface');
   }
-  if (
-    COMPUTER_USE_PROVIDER_CLIENTS.has(client) &&
-    item.clientOptions &&
-    Object.hasOwn(item.clientOptions, 'computerUseProvider')
-  )
-    gone.add('computerUseProvider');
+  // The stored name `maxActions` is read from, when it has one.
+  let budget: string | undefined;
+  if (DESKTOP_CLIENTS.has(client) && item.clientOptions) {
+    const stored = item.clientOptions;
+    if (Object.hasOwn(stored, 'computerUseProvider'))
+      gone.add('computerUseProvider');
+    for (const old of STORED_MAX_ACTIONS_NAMES) {
+      if (!Object.hasOwn(stored, old)) continue;
+      gone.add(old);
+      if (!Object.hasOwn(stored, 'maxActions')) budget ??= old;
+    }
+  }
   if (!gone.size) return client === item.client ? item : { ...item, client };
+  // Renamed where it was, so the options keep the order a config gives them.
   const options = Object.fromEntries(
-    Object.entries(item.clientOptions!).filter(([key]) => !gone.has(key))
+    Object.entries(item.clientOptions!).flatMap(([key, value]) =>
+      key === budget
+        ? [['maxActions', value]]
+        : gone.has(key)
+          ? []
+          : [[key, value]]
+    )
   );
   const { clientOptions: _options, ...rest } = item;
   return {

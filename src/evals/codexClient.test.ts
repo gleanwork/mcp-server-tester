@@ -413,6 +413,26 @@ describe('codex client run', () => {
     expect(existsSync(String(sdk.thread!.workingDirectory))).toBe(false);
   });
 
+  it('gives Codex the reasoningEffort set, and rejects one it lacks before Codex starts', async () => {
+    await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex', reasoningEffort: 'minimal' },
+      context(GATEWAY)
+    );
+    expect(sdk.thread).toMatchObject({ modelReasoningEffort: 'minimal' });
+    sdk.thread = undefined;
+    await expect(
+      CODEX_CLIENT.run!(
+        { prompt: 'x', servers: [] },
+        { type: 'codex', reasoningEffort: 'max' },
+        context(GATEWAY)
+      )
+    ).rejects.toThrow(
+      "codex doesn't support reasoningEffort `max`: it accepts minimal, low, medium, high, xhigh."
+    );
+    expect(sdk.thread).toBeUndefined();
+  });
+
   it('runs in a given cwd, and keeps it', async () => {
     await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },

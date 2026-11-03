@@ -117,7 +117,7 @@ Judges go in the case's `judges` list, beside `assertions`: each scores the answ
 
 In LLM client mode, a real LLM receives your server's tool list and a natural language prompt, then decides which tools to call. This tests whether your tool names, descriptions, and input schemas are clear enough for autonomous use — a different question from whether the tools return correct output.
 
-A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'api', model: 'claude-haiku-4-5' }`), and the `api` client uses the test's MCP connection; an eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`.
+A case with `input` runs on the client. In a Playwright test, `runEvalDataset` names the client and model (`{ dataset, client: 'api', model: 'claude-haiku-4-5' }`), and the `api` client uses the test's MCP connection; an eval config names them with `client` and `model`. A case can set its own `client`, `model` and `clientOptions`, except on the desktop clients (`cowork`, `chatgpt`, `codex-app`), which run a variant's cases in one app with the variant's settings: there, a case that changes them fails when its dataset loads.
 
 ```json snippet=snippets/mst-client-dataset.json
 {

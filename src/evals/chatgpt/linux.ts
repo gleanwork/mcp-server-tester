@@ -9,7 +9,7 @@ import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
   chatgptDesktopEnvironment,
   chatgptSurface,
-  nativeMaxActions,
+  chatgptMaxActions,
 } from './driver.js';
 import { CodexSetupError } from '../codexSetup/native.js';
 import { readLinuxChatgptEnvironment } from '../chatgptSetup/linuxProfile.js';
@@ -165,7 +165,7 @@ export async function runLinuxChatgptDesktop(
   const surface = chatgptSurface(config);
   let maxActions: number;
   try {
-    maxActions = nativeMaxActions(config);
+    maxActions = chatgptMaxActions(config);
   } catch {
     throw new NativeChatgptDriverError('Invalid Linux ChatGPT action budget.');
   }

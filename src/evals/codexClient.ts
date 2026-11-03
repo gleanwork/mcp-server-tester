@@ -54,6 +54,10 @@ import {
   hostTelemetryReceiver,
   type HostTelemetryReceiver,
 } from './telemetry/hostReceiver.js';
+import {
+  CODEX_REASONING_EFFORTS,
+  reasoningEffortOption,
+} from './reasoningEffort.js';
 
 /** How long a trial may run when the eval sets no `timeout`. */
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -90,9 +94,8 @@ export const CodexClientSchema = z
     timeout: GenerationOptions.timeout,
     /** Added to Codex's own instructions (`developer_instructions`), which stay. */
     systemPrompt: SystemPromptOption,
-    reasoningEffort: z
-      .enum(['minimal', 'low', 'medium', 'high', 'xhigh'])
-      .optional(),
+    /** How hard the model reasons (`model_reasoning_effort`). */
+    reasoningEffort: reasoningEffortOption('codex', CODEX_REASONING_EFFORTS),
     /**
      * Codex's sandbox for its shell commands. Default: `read-only`, or
      * `danger-full-access` where MST_JUDGE_SANDBOX=container says the

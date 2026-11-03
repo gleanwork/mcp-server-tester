@@ -165,7 +165,8 @@ describe('ChatGPT V2 batch client', () => {
       expect(prompt).toMatch(/^Answer (one|two)$/);
       expect(external.driver).toBe('openai.chatgpt.agent.desktop-app.linux');
       expect(external.options?.surface).toBe('codex');
-      expect(external.options).not.toHaveProperty('computerUseMaxActions');
+      // The native automation's default budget.
+      expect(external.options?.maxActions).toBe(24);
       expect(external.options?.desktopEnvironment).toMatchObject({
         HOME: home.value,
       });
@@ -386,7 +387,7 @@ describe('ChatGPT V2 batch client', () => {
     batch[0]!.config = {
       ...config,
       computerUseModel: 'claude-sonnet-4-6',
-      computerUseMaxActions: 40,
+      maxActions: 40,
     };
     await CHATGPT_CLIENT.runBatch!(batch, {
       ...context,
@@ -396,7 +397,7 @@ describe('ChatGPT V2 batch client', () => {
       model: 'test-chatgpt-model',
       options: {
         computerUseModel: 'claude-sonnet-4-6',
-        computerUseMaxActions: 40,
+        maxActions: 40,
         computerUseEnvironment: { ANTHROPIC_API_KEY: 'controller-secret' },
       },
     });
@@ -449,25 +450,67 @@ describe('ChatGPT V2 batch client', () => {
     }
   );
   it('checks the options each OS uses against the OS it is given', () => {
-    const macOnly = { computerUseModel: 'planner', computerUseMaxActions: 8 };
-    const linuxOnly = { nativeMaxActions: 8, plugins: [{}] };
+    const macOnly = { computerUseModel: 'planner', maxActions: 8 };
+    const linuxOnly = { maxActions: 8, plugins: [{}] };
     expect(chatgptOptionIssues(macOnly, 'darwin')).toEqual([]);
     expect(chatgptOptionIssues(linuxOnly, 'linux')).toEqual([]);
     expect(chatgptOptionIssues(macOnly, 'linux')).toEqual([
-      'computerUseModel and computerUseMaxActions are for Computer Use on macOS, and this trial runs on Linux, which has no planner. On Linux, the action budget is nativeMaxActions.',
+      'computerUseModel is the planner of Computer Use on macOS, and this trial runs on Linux, which has no planner.',
     ]);
     expect(chatgptOptionIssues(linuxOnly, 'darwin')).toEqual([
-      'nativeMaxActions is the action budget on Linux, and this trial runs on macOS. On macOS, it is computerUseMaxActions.',
       'plugins install into the fresh profile ChatGPT runs on Linux, and this trial runs on macOS, which runs the installed app.',
     ]);
   });
+  it("checks maxActions against the trial OS's range, which says its default", () => {
+    for (const maxActions of [1, 64])
+      for (const os of ['darwin', 'linux'] as const)
+        expect(chatgptOptionIssues({ maxActions }, os)).toEqual([]);
+    expect(chatgptOptionIssues({ maxActions: 65 }, 'darwin')).toEqual([
+      'maxActions is 65, and on macOS, where this trial runs, it is 1 to 64 (default 32).',
+    ]);
+    expect(chatgptOptionIssues({ maxActions: 65 }, 'linux')).toEqual([
+      'maxActions is 65, and on Linux, where this trial runs, it is 1 to 64 (default 24).',
+    ]);
+    // An OS the app doesn't run on has no range; the platform rejects it.
+    expect(chatgptOptionIssues({ maxActions: 65 }, 'win32')).toEqual([]);
+  });
   it.each([
-    ['macOS', CODEX_APP_CLIENT, { nativeMaxActions: 8 }, 'nativeMaxActions'],
+    ['darwin', CHATGPT_CLIENT, 32],
+    ['linux', CHATGPT_LINUX_CLIENT, 24],
+  ] as const)(
+    "gives the driver the trial OS's default maxActions on %s, or the one set",
+    async (os, client, fallback) => {
+      const env = os === 'linux' ? { env: linuxEnvironment(home.value) } : {};
+      const batch = requests().slice(0, 1);
+      batch[0]!.config = { ...config, ...env };
+      await client.runBatch!(batch, context);
+      batch[0]!.config = { ...config, ...env, maxActions: 9 };
+      await client.runBatch!(batch, context);
+      expect(
+        vi
+          .mocked(runExternalClientCase)
+          .mock.calls.map(([, external]) => external.options?.maxActions)
+      ).toEqual([fallback, 9]);
+    }
+  );
+  it.each([
+    [
+      'macOS',
+      CODEX_APP_CLIENT,
+      { maxActions: 65 },
+      'maxActions is 65, and on macOS, where this trial runs, it is 1 to 64 (default 32).',
+    ],
+    [
+      'Linux',
+      CODEX_APP_LINUX_CLIENT,
+      { maxActions: 65 },
+      'maxActions is 65, and on Linux, where this trial runs, it is 1 to 64 (default 24).',
+    ],
     [
       'Linux',
       CODEX_APP_LINUX_CLIENT,
       { computerUseModel: 'planner' },
-      'computerUseModel and computerUseMaxActions',
+      'computerUseModel is the planner of Computer Use on macOS',
     ],
   ] as const)(
     'on %s, rejects an option the OS cannot use before the app is prepared',
@@ -486,6 +529,24 @@ describe('ChatGPT V2 batch client', () => {
       expect(runExternalClientCase).not.toHaveBeenCalled();
     }
   );
+  it('gives the app the reasoningEffort set, and rejects one it lacks before the app is prepared', async () => {
+    const batch = requests().slice(0, 1);
+    batch[0]!.config = {
+      ...config,
+      type: 'codex-app',
+      reasoningEffort: 'ultra',
+    };
+    await CODEX_APP_CLIENT.runBatch!(batch, context);
+    expect(
+      vi.mocked(runExternalClientCase).mock.calls[0]![1].reasoningEffort
+    ).toBe('ultra');
+    lifecycle.prepare.mockClear();
+    batch[0]!.config = { ...config, reasoningEffort: 'minimal' };
+    await expect(CHATGPT_CLIENT.runBatch!(batch, context)).rejects.toThrow(
+      "chatgpt doesn't support reasoningEffort `minimal`: it accepts low, medium, high, xhigh, max, ultra."
+    );
+    expect(lifecycle.prepare).not.toHaveBeenCalled();
+  });
   it('runs ordered cases and preserves model, evidence, timing and unknown cost', async () => {
     const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
     expect(runExternalClientCase).toHaveBeenCalledTimes(2);
@@ -503,7 +564,7 @@ describe('ChatGPT V2 batch client', () => {
       },
       options: {
         environment: { MST_CHATGPT_MCP_TOKEN_0: 'fixture-secret' },
-        computerUseMaxActions: 32,
+        maxActions: 32,
       },
     });
     expect(JSON.stringify(traces)).not.toContain('fixture-secret');

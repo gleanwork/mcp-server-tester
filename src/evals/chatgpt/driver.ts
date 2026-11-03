@@ -5,7 +5,7 @@ import {
 } from '../cowork/anthropicComputerUse.js';
 import type { ExternalClientConfig } from '../externalClient/types.js';
 import { normalizeClientDriver } from '../externalClient/driverIdentity.js';
-import { NATIVE_MAX_ACTIONS } from './linuxContract.js';
+import { CHATGPT_MAX_ACTIONS } from './maxActions.js';
 
 export { ComputerUseDriverError } from '../cowork/anthropicComputerUse.js';
 
@@ -37,7 +37,7 @@ export function submitChatgptQuery(
     targetModel: config.model,
     reasoningEffort: config.reasoningEffort,
     model: stringOption(config.options, 'computerUseModel'),
-    maxActions: Number(config.options?.computerUseMaxActions ?? 32),
+    maxActions: chatgptMaxActions(config),
     deadlineAt,
     env: plannerEnvironment(config),
     ...(workspace ? { workspace } : {}),
@@ -51,18 +51,18 @@ export function chatgptSurface(config: ExternalClientConfig): ChatgptSurface {
   return surface;
 }
 
-/** The only validation of the Linux native action budget. */
-export function nativeMaxActions(config: ExternalClientConfig): number {
-  const actions = Number(
-    config.options?.nativeMaxActions ?? NATIVE_MAX_ACTIONS.default
-  );
-  if (
-    !Number.isInteger(actions) ||
-    actions < 1 ||
-    actions > NATIVE_MAX_ACTIONS.max
-  )
+/**
+ * The action budget (`maxActions`) of the driver's OS: Computer Use's on
+ * macOS, the accessibility automation's on Linux, each with its own range
+ * and default (`CHATGPT_MAX_ACTIONS`).
+ */
+export function chatgptMaxActions(config: ExternalClientConfig): number {
+  const linux = isLinuxChatgpt(config);
+  const budget = CHATGPT_MAX_ACTIONS[linux ? 'linux' : 'darwin'];
+  const actions = Number(config.options?.maxActions ?? budget.default);
+  if (!Number.isInteger(actions) || actions < 1 || actions > budget.max)
     throw new Error(
-      `Native action budget must be an integer from 1 to ${NATIVE_MAX_ACTIONS.max}.`
+      `${linux ? 'Native' : 'Computer Use'} action budget must be an integer from 1 to ${budget.max}.`
     );
   return actions;
 }
@@ -94,25 +94,18 @@ export function validateChatgptConfig(config: ExternalClientConfig): void {
       'ChatGPT requires native transcript evidence, not UI answer extraction.'
     );
   if (isLinuxChatgpt(config)) {
-    if (
-      config.options?.computerUseModel !== undefined ||
-      config.options?.computerUseMaxActions !== undefined
-    )
+    if (config.options?.computerUseModel !== undefined)
       throw new Error(
         'Linux ChatGPT uses native AT-SPI, not a Computer Use planner.'
       );
-    nativeMaxActions(config);
+    chatgptMaxActions(config);
     return;
   }
   if (!hasLLMCredential('anthropic', { env: plannerEnvironment(config) }))
     throw new Error(
       'The Computer Use planner needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'
     );
-  const actions = config.options?.computerUseMaxActions ?? 32;
-  if (!Number.isInteger(actions) || Number(actions) < 1 || Number(actions) > 64)
-    throw new Error(
-      'Computer Use action budget must be an integer from 1 to 64.'
-    );
+  chatgptMaxActions(config);
 }
 
 export function readLaunchEnvironment(value: unknown): Record<string, string> {

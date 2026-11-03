@@ -14,6 +14,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { parse, stringify } from 'smol-toml';
+import { CHATGPT_APP_REASONING_EFFORTS } from '../reasoningEffort.js';
 
 const LABEL_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -258,7 +259,7 @@ export async function installCodexConfig(
     throw new Error('Invalid ChatGPT model ID.');
   if (
     options.reasoningEffort !== undefined &&
-    !['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(
+    !(CHATGPT_APP_REASONING_EFFORTS as readonly string[]).includes(
       options.reasoningEffort
     )
   )

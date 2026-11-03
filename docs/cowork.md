@@ -170,6 +170,19 @@ Use, with `computerUseModel` as its planner; on Linux, the accessibility
 automation, with no planner. A config that set `clientOptions.computerUseProvider`
 fails validation: remove it.
 
+`clientOptions.maxActions` is the most actions the automation may take to send
+a case's prompt, on either OS: 1 to 64, default 24. It was
+`computerUseMaxActions`, which now fails validation, naming `maxActions`.
+`hitlMaxActions` is a separate budget, for all of a case's human-in-the-loop
+inspections after its prompt is sent (approving its tool calls, checking that
+its task finished): 1 to 24, default 12. `timeout` is the trial's time limit in
+ms, default 900000.
+
+Cowork runs a variant's cases in one app, with one set of settings. A case that
+sets its own `model` or a `clientOptions` value that differs from its variant's
+fails when its dataset loads, before anything runs. Use a variant for a
+different setting.
+
 MST applies a fixed inference model list with discovery disabled. On macOS,
 managed settings can override that profile. The submission driver therefore
 selects and verifies the requested model in Cowork's visible model picker before

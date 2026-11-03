@@ -24,7 +24,14 @@ import {
   requireIdenticalClientSettings,
   runDesktopBatch,
 } from './desktopBatch.js';
-import { NATIVE_MAX_ACTIONS } from './chatgpt/linuxContract.js';
+import {
+  CHATGPT_MAX_ACTIONS,
+  chatgptMaxActionsSummary,
+} from './chatgpt/maxActions.js';
+import {
+  CHATGPT_APP_REASONING_EFFORTS,
+  reasoningEffortOption,
+} from './reasoningEffort.js';
 import {
   LINUX_CHATGPT_PLATFORM,
   MAC_CHATGPT_PLATFORM,
@@ -32,7 +39,11 @@ import {
   type ChatgptPlatform,
 } from './chatgptSetup/platform.js';
 import type { ChatgptSurface } from './chatgpt/driver.js';
-import { COMPUTER_USE_PROVIDER_GONE, osName } from './desktopOS.js';
+import {
+  COMPUTER_USE_PROVIDER_GONE,
+  maxActionsRenamed,
+  osName,
+} from './desktopOS.js';
 
 /**
  * A product the ChatGPT desktop app runs, and so a client (ADR 0011):
@@ -86,10 +97,13 @@ const schemaOf = (product: DesktopProduct) =>
     .object({
       type: z.string(),
       model: z.string().min(1),
-      reasoningEffort: z
-        .enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'])
-        .optional(),
+      /** How hard the model reasons, selected in the app. */
+      reasoningEffort: reasoningEffortOption(
+        product.client,
+        CHATGPT_APP_REASONING_EFFORTS
+      ),
       provider: z.literal('openai').optional(),
+      /** The trial's time limit in ms (default 300000). */
       timeout: z.number().int().positive().default(300_000),
       env: z.record(z.string(), z.string()).optional(),
       /** Client-owned: plugins installed into the fresh Linux profile. */
@@ -110,17 +124,32 @@ const schemaOf = (product: DesktopProduct) =>
       computerUseProvider: z
         .never({ message: COMPUTER_USE_PROVIDER_GONE })
         .optional(),
-      nativeMaxActions: z
+      /**
+       * The most actions the desktop automation may take to send a case's
+       * prompt. Its range and default depend on the OS the trial runs on
+       * (`CHATGPT_MAX_ACTIONS`), so it is checked against that OS, when the
+       * eval config loads if MST knows it, and on the trial's machine.
+       */
+      maxActions: z
         .number()
         .int()
         .min(1)
-        .max(NATIVE_MAX_ACTIONS.max)
+        .optional()
+        .describe(
+          `The most actions the desktop automation may take to send a case's prompt: ${chatgptMaxActionsSummary()}.`
+        ),
+      /** Gone: the action budget is `maxActions`. */
+      nativeMaxActions: z
+        .never({ message: maxActionsRenamed('nativeMaxActions') })
         .optional(),
       computerUseModel: z
         .string()
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional(),
-      computerUseMaxActions: z.number().int().min(1).max(64).optional(),
+      /** Gone: the action budget is `maxActions`. */
+      computerUseMaxActions: z
+        .never({ message: maxActionsRenamed('computerUseMaxActions') })
+        .optional(),
       options: z
         .never({
           message:
@@ -136,35 +165,41 @@ const SCHEMAS = {
 };
 
 /**
- * The ChatGPT app's options that the OS a trial runs on can't use. macOS runs
- * Computer Use (`computerUseModel`, `computerUseMaxActions`) on the installed
- * app; Linux runs the accessibility automation (`nativeMaxActions`) in a
- * fresh profile, the only one `plugins` install into. Checked when the eval
- * config loads, when MST knows the OS its trials run on, and again on the
- * machine that runs them.
+ * The ChatGPT app's options that the OS a trial runs on can't use, or can't
+ * use as set. macOS runs Computer Use (with `computerUseModel` as its
+ * planner) on the installed app; Linux runs the accessibility automation in a
+ * fresh profile, the only one `plugins` install into. `maxActions` is either
+ * one's budget, with that OS's range. Checked when the eval config loads,
+ * when MST knows the OS its trials run on, and again on the machine that
+ * runs them.
  */
 export function chatgptOptionIssues(
   options: {
     computerUseModel?: unknown;
-    computerUseMaxActions?: unknown;
-    nativeMaxActions?: unknown;
+    maxActions?: unknown;
     plugins?: readonly unknown[];
   },
   os: NodeJS.Platform
 ): string[] {
   const issues: string[] = [];
   const on = osName(os);
+  if (os !== 'darwin' && options.computerUseModel !== undefined)
+    issues.push(
+      `computerUseModel is the planner of Computer Use on macOS, and this trial runs on ${on}, which has no planner.`
+    );
+  const budget =
+    os === 'darwin' || os === 'linux' ? CHATGPT_MAX_ACTIONS[os] : undefined;
   if (
-    os !== 'darwin' &&
-    (options.computerUseModel !== undefined ||
-      options.computerUseMaxActions !== undefined)
+    budget &&
+    options.maxActions !== undefined &&
+    !(
+      Number.isInteger(options.maxActions) &&
+      (options.maxActions as number) >= 1 &&
+      (options.maxActions as number) <= budget.max
+    )
   )
     issues.push(
-      `computerUseModel and computerUseMaxActions are for Computer Use on macOS, and this trial runs on ${on}, which has no planner. On Linux, the action budget is nativeMaxActions.`
-    );
-  if (os !== 'linux' && options.nativeMaxActions !== undefined)
-    issues.push(
-      `nativeMaxActions is the action budget on Linux, and this trial runs on ${on}. On macOS, it is computerUseMaxActions.`
+      `maxActions is ${JSON.stringify(options.maxActions)}, and on ${on}, where this trial runs, it is 1 to ${budget.max} (default ${budget.default}).`
     );
   if (os !== 'linux' && options.plugins?.length)
     issues.push(
@@ -253,12 +288,14 @@ async function runBatch(
           environment: { ...config.env, ...serverConfig.environment },
           computerUseModel: config.computerUseModel,
           surface: product.surface,
-          nativeMaxActions: config.nativeMaxActions,
-          // macOS plans with Computer Use; Linux launches the app in the
-          // environment it is given.
-          ...(platform.os === 'darwin'
-            ? { computerUseMaxActions: config.computerUseMaxActions ?? 32 }
-            : { desktopEnvironment: environment }),
+          // The budget of the OS's automation: Computer Use on macOS, the
+          // accessibility automation on Linux.
+          maxActions:
+            config.maxActions ?? CHATGPT_MAX_ACTIONS[platform.os].default,
+          // Linux launches the app in the environment it is given.
+          ...(platform.os === 'linux'
+            ? { desktopEnvironment: environment }
+            : {}),
           computerUseEnvironment: environment,
         },
       };
