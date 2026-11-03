@@ -74,6 +74,28 @@ describe('built-in client names', () => {
     expect(getClient('mst/client/api')).toBe(getClient('api'));
   });
 
+  it('a case runs on mst/client/api outside an eval, inheriting the run', () => {
+    const run = {
+      client: 'mst/client/api',
+      model: 'claude-haiku-4-5',
+      clientOptions: { temperature: 0 },
+    };
+    expect(playwrightClientOf({ id: 'c', input: 'hi' }, run)).toEqual({
+      temperature: 0,
+      model: 'claude-haiku-4-5',
+    });
+    // The case names the bare name; the run's full name is the same client.
+    expect(
+      playwrightClientOf({ id: 'c', input: 'hi', client: 'api' }, run)
+    ).toEqual({ temperature: 0, model: 'claude-haiku-4-5' });
+    expect(
+      playwrightClientOf(
+        { id: 'c', input: 'hi', client: 'mst/client/api' },
+        undefined
+      )
+    ).toEqual({});
+  });
+
   it('a stored run that says mst reads as api', () => {
     expect(storedClientName('mst')).toBe('api');
     expect(storedClientName('api')).toBe('api');

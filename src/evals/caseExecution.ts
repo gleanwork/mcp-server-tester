@@ -32,6 +32,7 @@ import type {
 } from './externalClient/types.js';
 import { getBuiltinClientConfig, getClient } from './builtinClients.js';
 import { resolveClientName } from './clientNames.js';
+import { builtinShortName } from '../plugins/extensions.js';
 import { clientRunToExecution, simulationTrace } from './clientTrace.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import { withOriginalToolNames } from './toolSurface.js';
@@ -176,8 +177,11 @@ export function playwrightClientOf(
   evalCase: EvalCase,
   run: ClientFields | undefined
 ): { model?: string } & Record<string, unknown> {
-  const runClient = resolveClientName(run?.client ?? 'api');
-  const client = resolveClientName(evalCase.client ?? runClient);
+  // A built-in's full name (`mst/client/api`) is its bare name here.
+  const clientName = (reference: string) =>
+    builtinShortName(resolveClientName(reference), 'client');
+  const runClient = clientName(run?.client ?? 'api');
+  const client = clientName(evalCase.client ?? runClient);
   if (client !== 'api')
     throw new Error(
       `Case "${evalCase.id}" uses client "${client}". Outside an eval, cases run on the api client, on the test's MCP connection. Run "${client}" in an eval (mst run).`
