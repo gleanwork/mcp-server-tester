@@ -434,6 +434,11 @@ export interface ValidateEvalConfigOptions {
    * other namespace are rejected.
    */
   namespaces?: readonly string[];
+  /**
+   * The OS the run's trials run on, when MST knows it (`environmentOS`).
+   * When given, a desktop client's options that OS can't use fail here.
+   */
+  os?: NodeJS.Platform;
 }
 
 /**
@@ -495,6 +500,7 @@ export function validateEvalConfig(
       tools: evalConfig.tools,
       concurrency: evalConfig.concurrency,
       context: 'The eval config',
+      ...(options.os ? { os: options.os } : {}),
     });
   }
   const variantClients: ClientConfig[] = [];
@@ -513,6 +519,7 @@ export function validateEvalConfig(
         tools: variant.tools ?? evalConfig.tools,
         concurrency: evalConfig.concurrency,
         context: `Variant "${variant.name}"`,
+        ...(options.os ? { os: options.os } : {}),
       });
     }
     const { serverLabels: _labels, ...resolved } = variant;

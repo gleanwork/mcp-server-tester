@@ -88,7 +88,7 @@ describe('ChatGPT shared Computer Use adapter', () => {
     expect(() =>
       validateChatgptConfig({
         ...linux,
-        options: { computerUseProvider: 'anthropic-computer-use' },
+        options: { computerUseModel: 'claude-sonnet-4-6' },
       })
     ).toThrow('native AT-SPI');
     expect(() =>
@@ -112,12 +112,6 @@ describe('ChatGPT shared Computer Use adapter', () => {
 
   it('keeps preflight validation separate from submission and rejects unsupported modes', () => {
     expect(() => validateChatgptConfig(config)).not.toThrow();
-    expect(() =>
-      validateChatgptConfig({
-        ...config,
-        options: { computerUseProvider: 'linux-desktop' },
-      })
-    ).toThrow('macOS requires');
     expect(() =>
       validateChatgptConfig({
         ...config,

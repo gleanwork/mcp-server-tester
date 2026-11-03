@@ -164,6 +164,7 @@ export async function runShardOverChannel(
           type: 'hello',
           mst: message.mst,
           ...(message.image ? { image: message.image } : {}),
+          ...(message.platform ? { platform: message.platform } : {}),
           client: message.client.name,
         });
       } else if (message.type === 'need-tokens') {

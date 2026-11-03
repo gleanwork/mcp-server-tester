@@ -715,11 +715,13 @@ describe('a run in docker (a fake Docker CLI)', () => {
     // Both containers are gone.
     expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
     // run.json says what each shard's machine ran, and so does the report.
+    // The fake docker runs each worker here, so its OS is this one.
     const stored = await readRunDirectory(result.outputDir);
     const machines = [1, 2].map((shard) => ({
       shard,
       mst: packageJson.version,
       image: 'mst-test:1@sha256:fake-image',
+      platform: process.platform,
       client: 'dt/client/notes',
       ok: true,
       collected: expect.any(Number),
@@ -728,10 +730,11 @@ describe('a run in docker (a fake Docker CLI)', () => {
     expect(buildRunReport(stored).run.environment).toEqual({
       name: 'docker',
       shards: 2,
-      machines: machines.map(({ shard, mst, image }) => ({
+      machines: machines.map(({ shard, mst, image, platform }) => ({
         shard,
         mst,
         image,
+        platform,
       })),
     });
   }, 120_000);

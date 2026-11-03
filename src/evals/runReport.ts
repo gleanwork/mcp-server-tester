@@ -914,18 +914,26 @@ export async function writeRunReport(
 function reportEnvironment(environment: {
   name: string;
   shards?: number;
-  machines?: Array<{ shard: number; image?: string; mst?: string }>;
+  machines?: Array<{
+    shard: number;
+    image?: string;
+    mst?: string;
+    platform?: string;
+  }>;
 }): RunReportEnvironment {
   return {
     name: environment.name,
     shards: environment.shards ?? 1,
     ...(environment.machines?.length
       ? {
-          machines: environment.machines.map(({ shard, image, mst }) => ({
-            shard,
-            ...(image ? { image } : {}),
-            ...(mst ? { mst } : {}),
-          })),
+          machines: environment.machines.map(
+            ({ shard, image, mst, platform }) => ({
+              shard,
+              ...(image ? { image } : {}),
+              ...(mst ? { mst } : {}),
+              ...(platform ? { platform } : {}),
+            })
+          ),
         }
       : {}),
   };

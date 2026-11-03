@@ -2,7 +2,6 @@ import type { EvalConfig } from '../evalConfig.js';
 import type { MarketplacePlugin, ClientStdioPaths } from '../clientPlugins.js';
 import type {
   CoworkDriverOptions,
-  CoworkDriverProvider,
   CoworkSubmissionReceipt,
   CoworkHitlReceipt,
 } from './driver.js';
@@ -77,14 +76,14 @@ export interface CoworkPlatform {
   ): Promise<CoworkHitlReceipt>;
 }
 
+/**
+ * How Cowork runs on `os`, the OS of the machine that runs the trial (ADR
+ * 0011): Computer Use on macOS, the accessibility automation on Linux.
+ */
 export async function getCoworkPlatform(
-  provider: CoworkDriverProvider
+  os: NodeJS.Platform
 ): Promise<CoworkPlatform> {
-  if (process.platform === 'darwin' && provider === 'anthropic-computer-use')
-    return (await import('./macos.js')).macCoworkPlatform;
-  if (process.platform === 'linux' && provider === 'linux-desktop')
-    return (await import('./linux.js')).linuxCoworkPlatform;
-  throw new Error(
-    `Cowork driver ${provider} is not supported on ${process.platform}.`
-  );
+  if (os === 'darwin') return (await import('./macos.js')).macCoworkPlatform;
+  if (os === 'linux') return (await import('./linux.js')).linuxCoworkPlatform;
+  throw new Error(`Cowork runs on macOS or Linux, not ${os}.`);
 }

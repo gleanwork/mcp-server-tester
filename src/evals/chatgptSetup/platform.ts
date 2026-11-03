@@ -24,13 +24,6 @@ import {
   getChatgptApplicationController,
 } from './macController.js';
 
-/** Client options that differ by OS. Values are copied into ExternalClientConfig.options. */
-interface ChatgptClientOptions {
-  computerUseProvider?: string;
-  computerUseMaxActions?: number;
-  desktopEnvironment?: Record<string, string>;
-}
-
 /** Comparable application identity; `leaseKey` claims the app within this process. */
 interface ChatgptApplication {
   leaseKey: string;
@@ -45,14 +38,12 @@ interface ChatgptApplication {
  * Implementations must retain the existing fail-closed, no-resubmission contract. */
 export interface ChatgptPlatform {
   readonly name: 'macos' | 'linux';
+  /** The OS it runs on, as `process.platform` names it. */
+  readonly os: 'darwin' | 'linux';
   readonly driver: string;
   /** Linux always owns an isolated profile, so CODEX_HOME is always explicit. */
   readonly isolatedConfigHome: boolean;
   readonly permissionNotice?: string;
-  clientOptions(
-    options: { computerUseProvider?: string; computerUseMaxActions?: number },
-    environment: Record<string, string>
-  ): ChatgptClientOptions;
   /** Directory that holds the cross-process desktop lock. */
   lockHome(config: ExternalClientConfig): string;
   application(
@@ -76,17 +67,11 @@ export interface ChatgptPlatform {
 
 export const MAC_CHATGPT_PLATFORM: ChatgptPlatform = {
   name: 'macos',
+  os: 'darwin',
   driver: 'openai.chatgpt.agent.desktop-app.macos',
   isolatedConfigHome: false,
   permissionNotice:
     '[mst:chatgpt] Anthropic Computer Use requires Screen Recording and Accessibility permission. Keep ChatGPT visible and the desktop idle.\n',
-  clientOptions(options) {
-    return {
-      computerUseProvider:
-        options.computerUseProvider ?? 'anthropic-computer-use',
-      computerUseMaxActions: options.computerUseMaxActions ?? 32,
-    };
-  },
   lockHome() {
     return homedir();
   },
@@ -114,15 +99,9 @@ export const MAC_CHATGPT_PLATFORM: ChatgptPlatform = {
 
 export const LINUX_CHATGPT_PLATFORM: ChatgptPlatform = {
   name: 'linux',
+  os: 'linux',
   driver: 'openai.chatgpt.agent.desktop-app.linux',
   isolatedConfigHome: true,
-  clientOptions(options, environment) {
-    return {
-      computerUseProvider: options.computerUseProvider,
-      computerUseMaxActions: options.computerUseMaxActions,
-      desktopEnvironment: environment,
-    };
-  },
   lockHome(config) {
     return validateLinuxChatgptConfig(config).home;
   },
@@ -150,6 +129,16 @@ export const LINUX_CHATGPT_PLATFORM: ChatgptPlatform = {
     return prepared.telemetry;
   },
 };
+
+/**
+ * How the ChatGPT app runs on `os`, the OS of the machine that runs the trial
+ * (ADR 0011): Computer Use on macOS, the accessibility automation on Linux.
+ */
+export function chatgptPlatformFor(os: NodeJS.Platform): ChatgptPlatform {
+  if (os === 'darwin') return MAC_CHATGPT_PLATFORM;
+  if (os === 'linux') return LINUX_CHATGPT_PLATFORM;
+  throw new Error(`The ChatGPT app runs on macOS or Linux, not ${os}.`);
+}
 
 export function chatgptPlatform(config: ExternalClientConfig): ChatgptPlatform {
   return isLinuxChatgpt(config) ? LINUX_CHATGPT_PLATFORM : MAC_CHATGPT_PLATFORM;

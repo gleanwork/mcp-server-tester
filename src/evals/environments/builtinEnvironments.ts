@@ -41,6 +41,17 @@ function builtinEnvironments(): Readonly<
 
 const environments = extensionLookup('environments', builtinEnvironments);
 
+/**
+ * The OS the trials of the environment `name` run on, when MST knows it: this
+ * machine's for `local`, Linux for `docker` (MST's Linux image). Unknown for a
+ * plugin's environment, whose worker checks its own OS before a trial runs.
+ */
+export function environmentOS(name: string): NodeJS.Platform | undefined {
+  if (name === LOCAL_ENVIRONMENT) return process.platform;
+  if (name === 'docker') return 'linux';
+  return undefined;
+}
+
 /** Where a run collects its trials, as run.json records it. */
 export interface RunEnvironment {
   /** `local`, or `<namespace>/env/<name>`. */

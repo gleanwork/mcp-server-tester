@@ -86,30 +86,54 @@ const STORED_CHATGPT_SURFACES: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The desktop clients that took `clientOptions.computerUseProvider` before
+ * the OS of the trial's machine decided how they run (ADR 0011).
+ */
+const COMPUTER_USE_PROVIDER_CLIENTS: ReadonlySet<string> = new Set([
+  'cowork',
+  'chatgpt',
+  'codex-app',
+]);
+
+/**
  * A client and its options as a stored run recorded them (a run.json
  * variant), as MST names them now: the name through `storedClientName`,
  * and a `chatgpt` with `clientOptions.surface: "codex"` (before ADR 0011)
  * as `codex-app`, with `surface` left out of its options, so it compares
  * equal to a config written today. A stored `surface: "chatgpt-work"` is
- * left out the same way. Anything else is returned unchanged.
+ * left out the same way, and so is a desktop client's
+ * `computerUseProvider` (before ADR 0011 too). Anything else is returned
+ * unchanged.
  */
 export function storedClientSetup<
   T extends { client?: string; clientOptions?: Record<string, unknown> },
 >(item: T): T {
   if (item.client === undefined) return item;
-  const client = storedClientName(item.client);
+  let client = storedClientName(item.client);
+  const gone = new Set<string>();
   const surface = item.clientOptions?.surface;
   if (
-    client !== 'chatgpt' ||
-    typeof surface !== 'string' ||
-    !Object.hasOwn(STORED_CHATGPT_SURFACES, surface)
+    client === 'chatgpt' &&
+    typeof surface === 'string' &&
+    Object.hasOwn(STORED_CHATGPT_SURFACES, surface)
+  ) {
+    client = STORED_CHATGPT_SURFACES[surface]!;
+    gone.add('surface');
+  }
+  if (
+    COMPUTER_USE_PROVIDER_CLIENTS.has(client) &&
+    item.clientOptions &&
+    Object.hasOwn(item.clientOptions, 'computerUseProvider')
   )
-    return client === item.client ? item : { ...item, client };
-  const { surface: _surface, ...options } = item.clientOptions!;
+    gone.add('computerUseProvider');
+  if (!gone.size) return client === item.client ? item : { ...item, client };
+  const options = Object.fromEntries(
+    Object.entries(item.clientOptions!).filter(([key]) => !gone.has(key))
+  );
   const { clientOptions: _options, ...rest } = item;
   return {
     ...rest,
-    client: STORED_CHATGPT_SURFACES[surface]!,
+    client,
     ...(Object.keys(options).length ? { clientOptions: options } : {}),
   } as T;
 }

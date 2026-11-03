@@ -52,7 +52,6 @@ in the eval config:
 {
   "client": "cowork",
   "clientOptions": {
-    "computerUseProvider": "anthropic-computer-use",
     "appVersion": "1.52386.6"
   }
 }
@@ -165,8 +164,11 @@ judges according to their plugin's requirements.
 
 Use client `cowork`. The earlier names `cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` fail validation, naming `cowork`. `model` selects the Cowork
 inference model; `clientOptions.computerUseModel` independently selects the planner.
-The inference provider is `anthropic`. On macOS the desktop driver selector is
-`clientOptions.computerUseProvider: "anthropic-computer-use"`.
+The inference provider is `anthropic`. How Cowork runs follows from the OS of
+the machine that runs the trial, and no option selects it: on macOS, Computer
+Use, with `computerUseModel` as its planner; on Linux, the accessibility
+automation, with no planner. A config that set `clientOptions.computerUseProvider`
+fails validation: remove it.
 
 MST applies a fixed inference model list with discovery disabled. On macOS,
 managed settings can override that profile. The submission driver therefore
@@ -239,11 +241,13 @@ when installing the normal published package.
 
 ## Attach to a prepared Linux desktop
 
-Use `client: "cowork"` and `clientOptions.computerUseProvider: "linux-desktop"`
-with `mst run` (or `batch`). `computerUseModel` is rejected for this backend:
-there is no LLM desktop planner. If omitted, the driver defaults to the native
-backend for the current OS. Cross-platform provider combinations fail before UI
-activity rather than silently selecting another driver.
+Use `client: "cowork"` with `mst run` (or `batch`) on the Linux machine. Cowork
+runs there with the accessibility automation, because the machine runs Linux.
+`computerUseModel` and `appVersion` are macOS options and fail: there is no LLM
+desktop planner, and the prepared desktop is the app that runs. MST checks them
+when the config loads, against this machine's OS for `--env local` (the default)
+and against Linux for `--env docker`. A plugin's environment checks them on its
+worker, before any app is prepared.
 
 The caller supplies a working Claude Desktop session with the desired model/MCP
 settings. MST accesses that session through X11, D-Bus, and AT-SPI (Python `gi`),
@@ -619,7 +623,6 @@ The config has two independent parts:
 {
   "client": "cowork",
   "clientOptions": {
-    "computerUseProvider": "linux-desktop",
     "pluginRoots": {
       "acme": "/opt/example-app/plugins/acme"
     },
@@ -712,13 +715,13 @@ Resolved bearer tokens stay in private files, not settings, env, args, logs, or
 receipts. Tool calls appear as `mcp__<label>__<tool>` and are attributed to
 `label` (for example, `mcp__acme-eval__search`).
 
-Both macOS (`anthropic-computer-use`) and Linux (`linux-desktop`) support these
+Both macOS (Computer Use) and Linux (the accessibility automation) support these
 stdio forms. The package-root export `COWORK_STDIO_PLATFORMS` is
 `['darwin', 'linux']`. On macOS, `${pluginRoot:...}` is rejected because
 marketplace installation paths are unknown before Desktop starts. This is not
 a native-proxy requirement: use a known local command or adapter path instead.
 For the Linux example above, a Mac config must omit `pluginRoots` and
-`mcpDataRoot`, select the Mac provider, and replace the plugin-root argument
+`mcpDataRoot`, which are Linux options, and replace the plugin-root argument
 with a known local adapter path. The private files and URL/env substitutions
 remain supported, including in mixed HTTP/stdio server sets.
 

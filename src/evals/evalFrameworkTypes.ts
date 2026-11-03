@@ -586,7 +586,14 @@ export interface ShardSpec {
 
 /** What a shard reports while it runs. */
 export type ShardProgress =
-  | { type: 'hello'; mst: string; image?: string; client: string }
+  | {
+      type: 'hello';
+      mst: string;
+      image?: string;
+      /** The worker's OS (`process.platform`). */
+      platform?: string;
+      client: string;
+    }
   | {
       type: 'trial';
       key: TrialKey;

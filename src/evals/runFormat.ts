@@ -190,8 +190,8 @@ const RunRecordSchema = z.looseObject({
     ci: z.boolean().optional(),
     /**
      * Each shard's machine, for the shards that had work: what its worker
-     * ran (MST, the machine's image) and how it ended. `node` and
-     * `platform` are `mst run`'s.
+     * ran (MST, the machine's image, its OS) and how it ended. `node` and
+     * `platform` above are `mst run`'s.
      */
     machines: z
       .array(
@@ -199,6 +199,11 @@ const RunRecordSchema = z.looseObject({
           shard: z.number().int().positive(),
           mst: z.string().optional(),
           image: z.string().optional(),
+          /**
+           * The OS the worker ran on (`process.platform`), which decides
+           * how a desktop client ran. Runs before it don't record it.
+           */
+          platform: z.string().optional(),
           client: z.string().optional(),
           ok: z.boolean(),
           collected: z.number().int().nonnegative(),

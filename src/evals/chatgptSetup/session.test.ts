@@ -869,16 +869,6 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1]
     ).not.toHaveProperty('workspace');
   });
-  it.each(['native-macos', 'linux-desktop'])(
-    'rejects %s before any desktop change',
-    async (provider) => {
-      expect(
-        (await run('gpt-test', { computerUseProvider: provider })).success
-      ).toBe(false);
-      expect(controller.stop).not.toHaveBeenCalled();
-      expect(installCodexConfig).not.toHaveBeenCalled();
-    }
-  );
   it('rejects reserved MCP namespaces in direct external-client configuration before touching the app', async () => {
     const result = await runExternalClientCase('Say done', {
       ...testConfig(),

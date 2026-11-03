@@ -787,7 +787,11 @@ function EnvironmentDetails({
         {environment.machines?.map((machine) => (
           <div key={machine.shard} className="text-muted-foreground">
             shard {machine.shard}:{' '}
-            {[machine.image, machine.mst && `MST ${machine.mst}`]
+            {[
+              machine.image,
+              machine.platform,
+              machine.mst && `MST ${machine.mst}`,
+            ]
               .filter(Boolean)
               .join(' · ') || '—'}
           </div>

@@ -40,13 +40,8 @@ import { extensionLookup } from '../plugins/extensions.js';
 import { resolveClientName } from './clientNames.js';
 import { simulationToClientRun } from './clientTrace.js';
 import type { MstClientConfig } from './mstClient/types.js';
-import { COWORK_CLIENT } from './coworkClient.js';
-import {
-  CHATGPT_CLIENT,
-  CHATGPT_LINUX_CLIENT,
-  CODEX_APP_CLIENT,
-  CODEX_APP_LINUX_CLIENT,
-} from './chatgptClient.js';
+import { COWORK_CLIENT, coworkOptionIssues } from './coworkClient.js';
+import { CHATGPT_APP_CLIENTS, chatgptOptionIssues } from './chatgptClient.js';
 import { CODEX_CLIENT, assertCodexServers } from './codexClient.js';
 import {
   claudeCodeOtelEnv,
@@ -485,12 +480,9 @@ function builtinClientDefinitions(): Readonly<
   }
   return (builtinClients = {
     ...clients,
-    // One client per product of the ChatGPT app; the desktop driver follows
-    // the platform, as Cowork's does.
-    chatgpt:
-      process.platform === 'linux' ? CHATGPT_LINUX_CLIENT : CHATGPT_CLIENT,
-    'codex-app':
-      process.platform === 'linux' ? CODEX_APP_LINUX_CLIENT : CODEX_APP_CLIENT,
+    // One client per product of the ChatGPT app; how it runs follows from
+    // the OS of the machine that runs the trial, as Cowork's does.
+    ...CHATGPT_APP_CLIENTS,
     codex: CODEX_CLIENT,
     cowork: COWORK_CLIENT,
   });
@@ -599,9 +591,31 @@ export function assertClientSupports(
     tools?: unknown;
     concurrency?: number;
     context: string;
+    /**
+     * The OS the trials will run on, when MST knows it (the environment's):
+     * a desktop client's options that OS can't use fail now, not on the
+     * machine that runs them.
+     */
+    os?: NodeJS.Platform;
   }
 ): void {
   const definition = getClient(clientConfig.type);
+  const configured = clientConfig as Record<string, unknown>;
+  const osIssues =
+    options.os === undefined
+      ? []
+      : clientConfig.type === 'cowork'
+        ? coworkOptionIssues(configured, options.os)
+        : clientConfig.type === 'chatgpt' || clientConfig.type === 'codex-app'
+          ? chatgptOptionIssues(
+              configured as { plugins?: readonly unknown[] },
+              options.os
+            )
+          : [];
+  if (osIssues.length)
+    throw new Error(
+      `${options.context}: client "${clientConfig.type}" can't run as configured. ${osIssues.join(' ')}`
+    );
   const showsToolMetadata =
     definition.toolMetadata === true || usesToolSurfaceProxy(definition);
   if (options.tools !== undefined && !showsToolMetadata) {
