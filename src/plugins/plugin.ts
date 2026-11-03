@@ -209,6 +209,7 @@ function clientProblem(
     requirements.os !== undefined &&
     !(
       Array.isArray(requirements.os) &&
+      requirements.os.length > 0 &&
       requirements.os.every((os) => CLIENT_OS.has(os))
     )
   )

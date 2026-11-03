@@ -122,6 +122,15 @@ describe('mst clients', () => {
     expect(shown.options.type).toBe('object');
   });
 
+  it('takes a built-in by its full reference, and names a renamed one', async () => {
+    const out = capture();
+    await showClient('mst/client/cowork', { json: true }, out.print);
+    expect((JSON.parse(out.text()) as { ref: string }).ref).toBe('cowork');
+    await expect(
+      showClient('chatgpt-mac', {}, capture().print)
+    ).rejects.toThrow('Client "chatgpt-mac" is now "chatgpt".');
+  });
+
   it('says what it knows when a client is unknown', async () => {
     await expect(showClient('nope', {}, capture().print)).rejects.toThrow(
       /No client "nope"\. Clients: chatgpt, claude-code, codex, cowork, mst\./
@@ -160,6 +169,7 @@ describe("a plugin client's description and requirements", () => {
       { requirements: { os: ['windows'] } },
       'requirements.os must list macos or linux',
     ],
+    [{ requirements: { os: [] } }, 'requirements.os must list macos or linux'],
     [
       { requirements: { install: 'claude' } },
       'requirements.install must be a list of strings',

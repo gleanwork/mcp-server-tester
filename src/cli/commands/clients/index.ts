@@ -6,7 +6,11 @@
  *   mst clients show <ref> [--json]
  */
 import type { ZodType } from 'zod';
-import { listClients } from '../../../evals/builtinClients.js';
+import {
+  listClients,
+  resolveClientName,
+} from '../../../evals/builtinClients.js';
+import { builtinShortName } from '../../../plugins/extensions.js';
 import type {
   ClientOS,
   ClientRequirements,
@@ -102,13 +106,16 @@ export async function showClient(
   options: DiscoveryOptions,
   print: (text: string) => void = (text) => process.stdout.write(text)
 ): Promise<void> {
+  // A renamed client fails naming its replacement, and `mst/client/<name>`
+  // is the built-in `<name>`, as in an eval config.
+  const wanted = builtinShortName(resolveClientName(ref), 'client');
   const entries = await clientEntries(options);
-  const entry = entries.find((candidate) => candidate.ref === ref);
+  const entry = entries.find((candidate) => candidate.ref === wanted);
   if (!entry) {
     const known = entries.map((candidate) => candidate.ref).join(', ');
     throw new Error(
       `No client "${ref}".${known ? ` Clients: ${known}.` : ''}${
-        ref.includes('/') && !options.plugins?.length && !options.config
+        wanted.includes('/') && !options.plugins?.length && !options.config
           ? ' Plugin clients need --plugins or --config.'
           : ''
       }`
