@@ -46,7 +46,13 @@ interface Fixture {
   /** The variant's client options. */
   variantOptions?: Record<string, unknown>;
   /** What the one case sets of its own. */
-  caseFields?: { model?: string; clientOptions?: Record<string, unknown> };
+  caseFields?: {
+    client?: string;
+    model?: string;
+    clientOptions?: Record<string, unknown>;
+  };
+  /** The cases, each with its own fields, instead of the one case. */
+  cases?: Array<{ id: string } & Record<string, unknown>>;
 }
 
 /**
@@ -58,6 +64,7 @@ async function fixture({
   options,
   variantOptions,
   caseFields,
+  cases,
 }: Fixture) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-option-names-'));
   dirs.push(dir);
@@ -65,14 +72,11 @@ async function fixture({
     path.join(dir, 'cases.json'),
     JSON.stringify({
       name: 'cases',
-      cases: [
-        {
-          id: 'one',
-          input: 'one',
-          ...caseFields,
-          assertions: { containsText: 'OK' },
-        },
-      ],
+      cases: (cases ?? [{ id: 'one', ...caseFields }]).map((evalCase) => ({
+        input: evalCase.id,
+        ...evalCase,
+        assertions: { containsText: 'OK' },
+      })),
     })
   );
   const configPath = path.join(dir, 'eval.json');
@@ -196,7 +200,7 @@ describe('a case override a desktop client runs in one app', () => {
       const run = await fixture({ client, caseFields: { model: 'other' } });
       // A plugin's environment too: nothing about the OS decides it.
       await expect(run({ env: 'test/env/vm' })).rejects.toThrow(
-        `Case "one" in variant "only" sets its own \`model\`, which client "${client}" can't honour: it runs every case of a variant in one app, with the variant's settings. Use a variant for a different setting.`
+        `Case "one" in variant "only" sets its own \`model\`, which client "${client}" can't honour: it runs a variant's cases in one app, with one set of settings, and the variant sets them differently. Use a variant for a different setting.`
       );
     }
   );
@@ -224,6 +228,41 @@ describe('a case override a desktop client runs in one app', () => {
         caseFields: { model: 'test-model', clientOptions: { timeout: 1000 } },
       });
       await expect(run()).resolves.toBeDefined();
+    }
+  );
+
+  it.each(DESKTOP_CLIENTS)(
+    'fails at load on %s when a case names another client',
+    async (client) => {
+      const run = await fixture({ client, caseFields: { client: 'api' } });
+      await expect(run()).rejects.toThrow(
+        `Case "one" in variant "only" sets its own \`client\`, which client "${client}" can't honour: it runs a variant's cases in one app.`
+      );
+    }
+  );
+
+  it.each(DESKTOP_CLIENTS)(
+    'loads cases on %s in an api variant when they agree, and fails when they differ',
+    async (client) => {
+      const agree = await fixture({
+        client: 'api',
+        cases: [
+          { id: 'plain' },
+          { id: 'a', client, model: 'm', clientOptions: { timeout: 1000 } },
+          { id: 'b', client, model: 'm', clientOptions: { timeout: 1000 } },
+        ],
+      });
+      await expect(agree()).resolves.toBeDefined();
+      const differ = await fixture({
+        client: 'api',
+        cases: [
+          { id: 'a', client, model: 'm', clientOptions: { timeout: 1000 } },
+          { id: 'b', client, model: 'm', clientOptions: { timeout: 2000 } },
+        ],
+      });
+      await expect(differ()).rejects.toThrow(
+        `Case "b" in variant "only" sets its own \`clientOptions.timeout\`, which client "${client}" can't honour: it runs a variant's cases in one app, with one set of settings, and case "a" sets them differently.`
+      );
     }
   );
 

@@ -180,8 +180,9 @@ ms, default 900000.
 
 Cowork runs a variant's cases in one app, with one set of settings. A case that
 sets its own `model` or a `clientOptions` value that differs from its variant's
-fails when its dataset loads, before anything runs. Use a variant for a
-different setting.
+fails when its dataset loads, before anything runs, and so does a case that
+names another client. In a variant on another client, the cases that name
+`cowork` must agree on its settings. Use a variant for a different setting.
 
 MST applies a fixed inference model list with discovery disabled. On macOS,
 managed settings can override that profile. The submission driver therefore
