@@ -510,6 +510,11 @@ export function connectorTokenSource(
   /** The labels whose servers need a token. */
   labels: string[];
   tokens(labels: readonly string[]): Promise<Record<string, WorkerToken>>;
+  /**
+   * Every token handed out so far: secrets this machine replaces in the
+   * traces the workers send back, since a worker may not redact them.
+   */
+  secrets(): string[];
 } {
   const byLabel = new Map<string, CredentialSlot>();
   for (const slot of expansion.slots)
@@ -518,6 +523,7 @@ export function connectorTokenSource(
     (options.renewBeforeMs ?? RENEW_BEFORE_MS) +
     (options.minRenewDelayMs ?? MIN_RENEW_DELAY_MS);
   const pending = new Map<string, Promise<WorkerToken>>();
+  const handedOut = new Set<string>();
   const tokenFor = (slot: CredentialSlot): Promise<WorkerToken> => {
     const key = slot.target.key;
     let token = pending.get(key);
@@ -539,6 +545,7 @@ export function connectorTokenSource(
         const slot = byLabel.get(label);
         if (!slot) continue;
         const { accessToken: token, expiresAt } = await tokenFor(slot);
+        handedOut.add(token);
         tokens[label] = {
           accessToken: token,
           ...(expiresAt !== undefined ? { expiresAt } : {}),
@@ -546,6 +553,7 @@ export function connectorTokenSource(
       }
       return tokens;
     },
+    secrets: () => [...handedOut],
   };
 }
 

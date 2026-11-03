@@ -1,7 +1,8 @@
 /**
  * An environment, `leaky/env/unredacted`, whose "worker" writes every trial's
  * result itself and redacts nothing: it quotes the secrets file's
- * `ACME_API_KEY` in the answer and the error. A run must still store no
+ * `ACME_API_KEY` in the answer and the error, and any connector token it
+ * was handed in the answer. A run must still store no
  * secret, because the coordinator redacts what it receives.
  *
  * When `LEAKY_SNAPSHOT_DIR` is set, the text of every file under it, read
@@ -51,6 +52,9 @@ export default {
               reason: 'start',
             });
             const leaked = tokens.env?.ACME_API_KEY ?? 'none';
+            const connectorTokens = Object.values(tokens.byServer)
+              .map((token) => `; a token is ${token.accessToken}`)
+              .join('');
             let collected = 0;
             for (const [
               batch,
@@ -73,7 +77,7 @@ export default {
                     kind: 'client-result',
                     key,
                     result: {
-                      finalText: `the key is ${leaked}`,
+                      finalText: `the key is ${leaked}${connectorTokens}`,
                       events: [],
                       error: `failed with ${leaked}`,
                     },

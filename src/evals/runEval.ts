@@ -1844,10 +1844,17 @@ async function evaluate(
           variants: variants.map((variant) => variant.name),
         }
       );
+  // The connector tokens a shard's workers ask this machine for, once the
+  // run collects in an environment (a resume's included).
+  let workerTokens: ReturnType<typeof connectorTokenSource> | undefined;
   // What MST replaces in every client result besides the secrets in `env`
   // (the secrets file's included) and the servers': the connector tokens,
-  // every one delivered, since they renew while the run goes on.
-  const runSecrets = (): string[] => credentials.secrets();
+  // every one delivered or handed to a worker, since they renew while the
+  // run goes on.
+  const runSecrets = (): string[] => [
+    ...credentials.secrets(),
+    ...(workerTokens?.secrets() ?? []),
+  ];
   // A trace a worker sent back, with this machine's secrets replaced too
   // before it is saved, exported or graded: the worker knows only its own.
   const receivedTrace = (
@@ -2072,11 +2079,11 @@ async function evaluate(
           secrets: fileSecrets,
           ...(connectors.slots.length
             ? {
-                connectorTokens: connectorTokenSource(
+                connectorTokens: (workerTokens = connectorTokenSource(
                   connectors,
                   options.credentialStore ??
                     credentialStoreFor(options.store, evalConfig.settings)
-                ),
+                )),
               }
             : {}),
           workDir,

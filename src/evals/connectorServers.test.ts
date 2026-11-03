@@ -374,7 +374,10 @@ describe('connector servers on a shard (ADR 0004)', () => {
     ]);
     const source = connectorTokenSource(expansion, store);
     expect(source.labels.sort()).toEqual(['acme', 'drive', 'gmail']);
+    expect(source.secrets()).toEqual([]);
     const tokens = await source.tokens(['gmail', 'drive', 'unknown']);
+    // What it handed out, for redacting what the workers send back.
+    expect(source.secrets()).toEqual(['google-token']);
     // One grant, one token, for both of its servers; an unknown label gets none.
     expect(Object.keys(tokens).sort()).toEqual(['drive', 'gmail']);
     expect(tokens.gmail!.accessToken).toBe('google-token');
