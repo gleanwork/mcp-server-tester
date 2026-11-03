@@ -397,6 +397,26 @@ describe('mst CLI', () => {
     });
   });
 
+  describe('clients command', () => {
+    it('lists and shows built-in clients without plugins', async () => {
+      const list = await runBin('clients');
+      expect(list.exitCode).toBe(0);
+      expect(list.stdout).toMatch(/^cowork +macOS, Linux +Claude Desktop/m);
+      expect(list.stdout).toMatch(/^codex +any OS +The Codex CLI/m);
+
+      const show = await runBin('clients', 'show', 'codex', '--json');
+      expect(show.exitCode).toBe(0);
+      expect(JSON.parse(String(show.stdout))).toMatchObject({
+        ref: 'codex',
+        options: { type: 'object' },
+      });
+
+      const unknown = await runBin('clients', 'show', 'nope');
+      expect(unknown.exitCode).toBe(1);
+      expect(unknown.stderr).toContain('Client "nope" is not available.');
+    });
+  });
+
   describe('label command', () => {
     it('serves the page by default, and lists its commands', async () => {
       const none = await runBin('label');

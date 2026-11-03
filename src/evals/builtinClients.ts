@@ -431,6 +431,34 @@ const CliClientSchema = z
   .strict();
 let builtinClients: Record<string, ClientDefinition> | undefined;
 
+/** What the simulator's clients are and need (`mst clients`). */
+const SIMULATED_CLIENTS: Record<
+  string,
+  Pick<ClientDefinition, 'description' | 'requirements'>
+> = {
+  mst: {
+    description:
+      "The model alone, through its provider's API, with the servers' tools: it isolates the model and your tool metadata",
+    requirements: {
+      install: [
+        "`ai` and the provider's AI SDK package, such as `npm install ai @ai-sdk/anthropic`",
+      ],
+      credentials: [
+        "the provider's API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, ...), or an LLM gateway (`ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` with `MST_LLM_AUTH_COMMAND`)",
+      ],
+    },
+  },
+  'claude-code': {
+    description: 'The Claude Code CLI, headless',
+    requirements: {
+      install: ['Claude Code (`claude`) on `PATH`'],
+      credentials: [
+        '`ANTHROPIC_API_KEY`, or Google Application Default Credentials with `provider: "vertex"`',
+      ],
+    },
+  },
+};
+
 /** Built-in clients by name, including aliases. */
 function builtinClientDefinitions(): Readonly<
   Record<string, ClientDefinition>
@@ -439,6 +467,7 @@ function builtinClientDefinitions(): Readonly<
   const clients: Record<string, ClientDefinition> = {};
   for (const [name, factory] of Object.entries(BUILTIN_CLIENTS)) {
     clients[name] = {
+      ...SIMULATED_CLIENTS[name],
       schema: name === 'mst' ? SdkClientSchema : CliClientSchema,
       evidence: 'structured',
       headless: true,
@@ -486,6 +515,11 @@ export function resolveClientName(reference: string): string {
       `Client "${reference}" is now "${RENAMED_CLIENTS[reference]}".`
     );
   return reference;
+}
+
+/** Built-in and installed plugins' clients, by reference, sorted. */
+export function listClients(): Array<[string, ClientDefinition]> {
+  return clientDefinitions.list();
 }
 
 /** The client `reference` names: a built-in, or `<namespace>/client/<name>` from a plugin. */

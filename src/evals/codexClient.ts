@@ -564,6 +564,15 @@ const CODEX_SETUP_FAILURE = /status:? 40[13]\b|unauthorized|invalid api key/i;
 
 export const CODEX_CLIENT: ClientDefinition = {
   schema: CodexClientSchema,
+  description: 'The Codex CLI, headless, through the Codex SDK',
+  requirements: {
+    install: [
+      '`@openai/codex-sdk` beside MST (`npm install @openai/codex-sdk`), which brings the Codex CLI',
+    ],
+    credentials: [
+      '`OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`)',
+    ],
+  },
   evidence: 'structured',
   headless: true,
   run: runCodex,

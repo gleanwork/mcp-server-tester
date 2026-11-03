@@ -107,7 +107,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.ui.json",
     "knip": "knip",
-    "schema:generate": "node --import tsx scripts/generate-run-schemas.ts"
+    "schema:generate": "node --import tsx scripts/generate-run-schemas.ts",
+    "docs:clients": "node --import tsx scripts/generate-client-docs.ts"
   },
   "dependencies": {
     "@discoveryjs/json-ext": "^1.1.0",

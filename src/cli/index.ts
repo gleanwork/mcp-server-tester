@@ -47,6 +47,7 @@ import {
   type DatasetPullOptions,
 } from './commands/datasets/index.js';
 import { listJudgeCommand, showJudge } from './commands/judges/index.js';
+import { listClientCommand, showClient } from './commands/clients/index.js';
 import {
   checkJudgeCommand,
   type JudgeCheckCommandOptions,
@@ -222,6 +223,25 @@ discoveryOptions(
   )
 ).action((ref: string, _options: unknown, command: Command) =>
   pullDataset(ref, command.optsWithGlobals<DatasetPullOptions>())
+);
+
+// Clients command: built-in and plugin clients
+const clientsCommand = discoveryOptions(
+  program
+    .command('clients')
+    .description(
+      'List clients: built-in and from plugins, with where each one runs'
+    )
+).action((options: DiscoveryOptions) => listClientCommand(options));
+discoveryOptions(
+  clientsCommand
+    .command('show')
+    .description(
+      "A client's description, what a machine needs to run it, and its options"
+    )
+    .argument('<ref>', 'A built-in name, or namespace/client/name')
+).action((ref: string, _options: unknown, command: Command) =>
+  showClient(ref, command.optsWithGlobals<DiscoveryOptions>())
 );
 
 // Judges command: built-in and plugin judges

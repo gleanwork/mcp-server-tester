@@ -69,6 +69,8 @@ export type {
   EvaluationRunResult,
   EvaluationSummary,
   ClientDefinition,
+  ClientOS,
+  ClientRequirements,
   ClientRunOptions,
   ClientBatchRequest,
   ClientRunResult,

@@ -370,9 +370,31 @@ export interface ClientBatchRequest {
   config: ClientConfig;
 }
 
+/** An operating system a client's trials can run on. */
+export type ClientOS = 'macos' | 'linux';
+
+/**
+ * What a client needs on the machine that runs its trials, as `mst clients`
+ * shows it. Each entry is a short line a person can act on.
+ */
+export interface ClientRequirements {
+  /** The operating systems it runs on. Without it, any. */
+  readonly os?: readonly ClientOS[];
+  /** What must be installed: a CLI on `PATH`, an app, an npm package. */
+  readonly install?: readonly string[];
+  /** The credentials it reads, such as an environment variable. */
+  readonly credentials?: readonly string[];
+  /** Commands that prepare a machine for it, run once. */
+  readonly setup?: readonly string[];
+}
+
 /** Public client extension point. */
 export interface ClientDefinition {
   readonly schema: ZodType;
+  /** What the client is, in one line: the product an eval tests. */
+  readonly description?: string;
+  /** What a machine needs to run it (`mst clients show`). */
+  readonly requirements?: ClientRequirements;
   /** Missing evidence declarations are treated as unverified. */
   readonly evidence?: TraceEvidence;
   /**
