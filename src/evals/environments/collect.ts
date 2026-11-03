@@ -281,15 +281,16 @@ export async function collectShard(
     key: TrialKey,
     trace: ClientRunResult
   ): Promise<void> {
-    // The writes this machine's proxies simulated, marked in the trace.
-    const result = connectors?.simulatedWriteFiles.length
+    // The writes this machine's proxies simulated, marked in the redacted
+    // trace.
+    const redacted: ClientRunResult = connectors?.simulatedWriteFiles.length
       ? await markResultSimulatedWrites(
           trace,
           connectors.simulatedWriteFiles,
-          usedWrites
+          usedWrites,
+          [...secrets]
         )
-      : trace;
-    const redacted: ClientRunResult = redactedClientRun(result, [...secrets]);
+      : redactedClientRun(trace, [...secrets]);
     // The client's artifacts (a Cowork session folder) are on this machine:
     // copy them beside the result, which the coordinator copies back, and
     // name them relative to the results directory.

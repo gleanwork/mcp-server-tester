@@ -33,6 +33,10 @@ describe('clientSecretValues', () => {
           transport: 'stdio',
           command: 'server',
           auth: { accessTokenEnv: 'ACME_TOKEN' },
+          env: {
+            ACME_CLIENT_SECRET: 'stdio-env-secret',
+            ACME_REGION: 'us-east-1-region',
+          },
         },
       ],
       ['extra-secret']
@@ -44,6 +48,7 @@ describe('clientSecretValues', () => {
         'http-token',
         'header-value',
         'session=cookie-value',
+        'stdio-env-secret',
         'extra-secret',
       ])
     );
@@ -103,6 +108,11 @@ describe('isCredentialName', () => {
     'X-Api-Key',
     'accessToken',
     'OAuthToken',
+    'APIToken',
+    'JWTSecret',
+    'AWSSecretAccessKey',
+    'GITHUB_TOKEN2',
+    'apiKey1',
   ])('%s names a credential', (name) => {
     expect(isCredentialName(name)).toBe(true);
   });
@@ -118,6 +128,8 @@ describe('isCredentialName', () => {
     'ACME_INSTANCE',
     'PATH',
     'Accept',
+    'AUTH0_AUDIENCE',
+    'S3Bucket',
     // One word: name a credential with its own part, such as GITHUB_TOKEN.
     'GITHUBTOKEN',
   ])('%s names a setting', (name) => {
@@ -240,6 +252,26 @@ describe('redactedClientRun', () => {
     });
     // An object with no secret in it is kept, not converted.
     expect(result.events[0]!.arguments.at).toBe(at);
+  });
+
+  it('redacts a plain object in the form its own toJSON returns', () => {
+    const secret = 'sk-live-0123456789';
+    const result = redactedClientRun(
+      {
+        events: [
+          {
+            arguments: {
+              body: { toJSON: () => ({ authorization: secret }) },
+            },
+          },
+        ],
+      },
+      [secret]
+    );
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(result.events[0]!.arguments).toEqual({
+      body: { authorization: '[REDACTED]' },
+    });
   });
 
   it('redacts a secret used as a key, keeping both values when keys collide', () => {

@@ -2,7 +2,10 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
+import {
+  markResultSimulatedWrites,
+  withSimulatedWriteMarks,
+} from './simulatedWriteMarks.js';
 import { recordSimulatedWrite } from '../proxy/simulatedWrites.js';
 import type { CaseExecution } from './caseExecution.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
@@ -144,6 +147,47 @@ describe('withSimulatedWriteMarks', () => {
         trace: { events: TraceEvent[] };
       };
       expect(execution.trace.events[0]?.simulatedWrite).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks a shard worker's result, raw or already redacted, and redacts it", async () => {
+    const dir = await fs.mkdtemp(join(os.tmpdir(), 'mst-marks-'));
+    try {
+      const file = join(dir, 'acme.jsonl');
+      const secret = 'webhook-secret-0123456789';
+      for (let n = 0; n < 2; n++)
+        await recordSimulatedWrite(file, {
+          time: '',
+          server: 'acme',
+          tool: 'create_webhook',
+          arguments: { url: 'https://hooks.example.test', secret },
+          reply: '',
+        });
+      const used = new Set<string>();
+      // A desktop batch's result arrives redacted; another client's raw.
+      for (const value of ['[REDACTED]', secret]) {
+        const result = await markResultSimulatedWrites(
+          {
+            events: [
+              call(
+                'create_webhook',
+                { url: 'https://hooks.example.test', secret: value },
+                'acme'
+              ),
+            ],
+            finalText: '',
+          },
+          [file],
+          used,
+          [secret]
+        );
+        expect(result.events[0]).toMatchObject({
+          arguments: { secret: '[REDACTED]' },
+          simulatedWrite: true,
+        });
+      }
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

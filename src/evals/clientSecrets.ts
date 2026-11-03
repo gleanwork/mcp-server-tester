@@ -50,13 +50,17 @@ export function namedSecretValues(
 /**
  * Whether a name says its value is a credential, for an environment
  * variable, a secrets file entry or a header alike: one of its words, split
- * at `_`, `-`, `.` and camelCase, is a {@link CREDENTIAL_WORDS} word.
- * `ACME_API_KEY`, `Authorization`, `GITHUB_PAT` and `accessToken` are;
- * `OPENAI_BASE_URL`, `Accept` and `PATH` are not.
+ * at `_`, `-`, `.`, camelCase (an acronym too, as in `APIToken`) and the
+ * digits that end it, is a {@link CREDENTIAL_WORDS} word. `ACME_API_KEY`,
+ * `Authorization`, `GITHUB_PAT`, `accessToken`, `JWTSecret` and
+ * `GITHUB_TOKEN2` are; `OPENAI_BASE_URL`, `AUTH0_DOMAIN`, `Accept` and `PATH`
+ * are not.
  */
 export function isCredentialName(name: string): boolean {
   return name
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    .replace(/([A-Za-z])([0-9]+)$/, '$1_$2')
     .split(/[^A-Za-z0-9]+/)
     .some((word) => CREDENTIAL_WORDS.has(word.toLowerCase()));
 }
@@ -82,8 +86,10 @@ export function clientSecretValues(
     if (server.transport !== 'stdio') {
       add(server.auth?.accessToken);
       for (const value of namedSecretValues(server.headers ?? {})) add(value);
-    } else if (server.auth?.accessTokenEnv) {
-      add(env[server.auth.accessTokenEnv]);
+    } else {
+      if (server.auth?.accessTokenEnv) add(env[server.auth.accessTokenEnv]);
+      // A stdio server's own environment, named like the run's.
+      for (const value of namedSecretValues(server.env ?? {})) add(value);
     }
   for (const value of extra) add(value);
   return [...secrets];
@@ -131,6 +137,14 @@ function redactStrings(
   if (typeof value === 'string') return replaceAll(value, secrets);
   if (Array.isArray(value))
     return value.map((item) => redactStrings(item, secrets, `${path}[]`));
+  // An object with its own `toJSON` is stored as what that returns, so it
+  // is redacted in that form, even when it is a plain object.
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { toJSON?: unknown }).toJSON === 'function'
+  )
+    return redactedJsonForm(value, secrets, path);
   if (isPlainObject(value)) {
     const entries: Array<[string, unknown]> = [];
     const names = new Set<string>();
