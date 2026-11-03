@@ -6,7 +6,7 @@
  */
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
-import { redactClientSecrets } from '../clientSecrets.js';
+import { namedSecretValues, redactClientSecrets } from '../clientSecrets.js';
 import type {
   Environment,
   EnvironmentContext,
@@ -173,8 +173,7 @@ export async function runShardOverChannel(
         });
         for (const token of Object.values(tokens.byServer))
           secrets.push(token.accessToken);
-        for (const value of Object.values(tokens.env ?? {}))
-          if (value) secrets.push(value);
+        secrets.push(...namedSecretValues(tokens.env ?? {}));
         send({ type: 'tokens', ...tokens });
       } else if (message.type === 'acquire') {
         // Waiting for room mustn't stop the loop: heartbeats keep coming.

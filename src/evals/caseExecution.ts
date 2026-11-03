@@ -32,6 +32,7 @@ import type {
 } from './externalClient/types.js';
 import { getBuiltinClientConfig, getClient } from './builtinClients.js';
 import { clientRunToExecution, simulationTrace } from './clientTrace.js';
+import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import { withOriginalToolNames } from './toolSurface.js';
 import {
   settleProxiedTrace,
@@ -238,6 +239,12 @@ export interface EvalCaseExecutorOptions {
   batchTraces?: Map<string, ClientRunResult[]>;
   /** The variant's tool metadata, which `proxy` serves to clients that connect to their servers. */
   toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> };
+  /**
+   * Values no stored result may hold besides the credential-like `env` values
+   * and the servers' credentials, which the executor finds itself: a secrets
+   * file's values and connector tokens, as they are now.
+   */
+  secrets?: () => readonly string[];
 }
 
 /** How a trace a batch client returned ran: the execution the case grades. */
@@ -257,6 +264,26 @@ export function batchTraceExecution(
  * a case consumes a batch trace or calls the client's `run()`.
  */
 export function createEvalCaseExecutor(
+  options: EvalCaseExecutorOptions
+): (evalCase: EvalCase) => Promise<CaseExecution> {
+  const execute = clientExecutor(options);
+  // Every client's result, and the error a `run` throws, with no secret in
+  // it before it is graded or stored: one pass, whatever the client.
+  return async (evalCase) => {
+    let execution: CaseExecution;
+    try {
+      execution = await execute(evalCase);
+    } catch (error) {
+      execution = failedExecution(error);
+    }
+    return redactedClientRun(execution, [
+      ...clientSecretValues(options.env ?? {}, options.servers),
+      ...(options.secrets?.() ?? []),
+    ]);
+  };
+}
+
+function clientExecutor(
   options: EvalCaseExecutorOptions
 ): (evalCase: EvalCase) => Promise<CaseExecution> {
   const { servers, evalConfig, variant, env, batchTraces } = options;

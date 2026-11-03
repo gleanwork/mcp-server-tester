@@ -408,6 +408,31 @@ describe('redactStoredResponses', () => {
     expect(result.trace.finalText).toBe('private answer');
   });
 
+  it("drops a client's telemetry content, keeping the rest of its telemetry", () => {
+    const telemetry = () => ({
+      threadId: 't1',
+      toolCallCount: 2,
+      content: { conversationHistory: [{ role: 'user', content: 'private' }] },
+    });
+    const redacted = redactStoredResponses({
+      results: [
+        {
+          id: 'c1',
+          pass: true,
+          scores: {},
+          clientTelemetry: telemetry(),
+          trialResults: [{ pass: true, clientTelemetry: telemetry() }],
+        },
+      ],
+    });
+    const [result] = redacted.results;
+    for (const kept of [
+      result!.clientTelemetry,
+      result!.trialResults[0]!.clientTelemetry,
+    ])
+      expect(kept).toEqual({ threadId: 't1', toolCallCount: 2 });
+  });
+
   it("drops judges' score metadata, keeping the score and reasoning", () => {
     const score = {
       pass: true,

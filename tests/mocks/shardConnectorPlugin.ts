@@ -5,8 +5,10 @@
  * to the servers it is given, lists their tools and calls them, as a desktop
  * client would.
  */
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import type { MCPConfig } from '../../src/config/mcpConfig.js';
 import {
   closeMCPClient,
   createMCPClientForConfig,
@@ -21,6 +23,35 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const SERVER = fileURLToPath(
   new URL('./connectorNotesServer.ts', import.meta.url)
 );
+
+/**
+ * The connector token a server was launched with, read from its token
+ * file: what a client could quote when it reaches the same file.
+ */
+async function launchedToken(servers: readonly MCPConfig[]): Promise<string> {
+  for (const server of servers) {
+    if (server.transport !== 'stdio') continue;
+    const at = server.args?.indexOf('--token-file') ?? -1;
+    const file = at >= 0 ? server.args?.[at + 1] : undefined;
+    if (file)
+      return (
+        (JSON.parse(await readFile(file, 'utf8')) as { accessToken?: string })
+          .accessToken ?? ''
+      );
+  }
+  return '';
+}
+
+async function leakedTrace(
+  servers: readonly MCPConfig[]
+): Promise<ClientRunResult> {
+  const token = await launchedToken(servers);
+  return {
+    finalText: `the token is ${token}`,
+    events: [],
+    telemetry: { content: { said: `token ${token}` } },
+  };
+}
 
 /** Text of a tool result's content. */
 function text(result: unknown): string {
@@ -50,6 +81,25 @@ export default {
     },
   },
   clients: {
+    // Quote the connector's token, which MST must replace before storing.
+    leaky: {
+      schema: z.object({ type: z.string() }).passthrough(),
+      async run(input) {
+        return leakedTrace(input.servers);
+      },
+    },
+    'leaky-batch': {
+      schema: z.object({ type: z.string() }).passthrough(),
+      async runBatch(requests, context) {
+        const traces: ClientRunResult[] = [];
+        for (const [index, request] of requests.entries()) {
+          const trace = await leakedTrace(request.input.servers);
+          await context.reportResult?.(index, trace);
+          traces.push(trace);
+        }
+        return traces;
+      },
+    },
     caller: {
       schema: z.object({ type: z.string() }).passthrough(),
       evidence: 'structured',

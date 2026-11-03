@@ -47,14 +47,21 @@ async function probe(
   await sleep(Number(options.delayMs ?? options.clientOptions?.delayMs ?? 0));
   const second = await token(input);
   await mark('end', input.prompt);
-  if (input.prompt === 'flaky')
+  if (input.prompt === 'flaky') {
+    // Quotes the token, a secrets file credential, a setting beside it, and
+    // the credential its first server was resolved with.
+    const server = input.servers[0];
+    const used =
+      server && server.transport !== 'stdio' ? server.auth?.accessToken : '';
+    const message = `ECONNRESET while using ${second} for ${input.env?.ACME_INSTANCE} with ${input.env?.ACME_API_KEY} via ${used}`;
     return {
       finalText: '',
       events: [],
-      error: `ECONNRESET while using ${second}`,
+      error: message,
       // A client types what broke (ADR 0010); MST never reads the words.
-      ending: network(`ECONNRESET while using ${second}`),
+      ending: network(message),
     };
+  }
   // Throws a Node network error: the worker reads its code, as a local
   // run does, before only the message crosses the channel.
   if (input.prompt === 'thrown')
@@ -87,8 +94,12 @@ async function probe(
       error: 'The client kept only part of the prompt.',
       diagnostics: { failureKind: 'input' },
     };
+  // Reversed: the answer says which tokens the client read without holding
+  // one, which MST would redact.
+  const reversed = (value: string | undefined) =>
+    [...(value ?? 'unset')].reverse().join('');
   return {
-    finalText: `${input.prompt}: ${first} then ${second}; key ${input.env?.API_KEY ?? 'unset'}`,
+    finalText: `${input.prompt}: ${reversed(first)} then ${reversed(second)}; key ${reversed(input.env?.API_KEY)}`,
     events: [],
     // What a native-trace client records beyond its events, which a
     // resume must keep for the trials it doesn't run again.

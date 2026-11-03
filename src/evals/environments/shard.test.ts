@@ -14,6 +14,7 @@ import {
   type ShardTokens,
 } from './protocol.js';
 import type { EvalConfig } from '../evalConfig.js';
+import type { MCPConfig } from '../../config/mcpConfig.js';
 import type {
   EnvironmentContext,
   ShardEvents,
@@ -49,14 +50,15 @@ interface RequestSpec {
 async function shardIn(
   root: string,
   probe: RequestSpec[],
-  batch: RequestSpec[] = []
+  batch: RequestSpec[] = [],
+  servers: MCPConfig[] = []
 ): Promise<ShardSpec> {
   const bundleDir = path.join(root, 'bundle');
   const request = (type: string) => (spec: RequestSpec) => ({
     caseId: spec.caseId,
     trial: 0,
     config: { type, delayMs: spec.delayMs ?? 0 },
-    input: { prompt: spec.prompt, servers: [], env: { SECRET: 'leak' } },
+    input: { prompt: spec.prompt, servers, env: { SECRET: 'leak' } },
   });
   await writeShardBundle(bundleDir, {
     runId: 'run-1',
@@ -109,6 +111,23 @@ const context = (
 ): EnvironmentContext => ({ runId: 'run-1', shards: 1, keep });
 
 describe('a shard in a child-process environment', () => {
+  // The secrets file a coordinator sends: a short key, a credential, and a
+  // setting that is not a secret.
+  const secretsFile = {
+    API_KEY: 'key-1',
+    ACME_API_KEY: 'acme-key-0123456789',
+    ACME_INSTANCE: 'acme-prod',
+    ACME_SESSION: 'session-credential-0123',
+  };
+  // Its credential is in the secrets file under a name that doesn't say it
+  // is one: a secret by use.
+  const sessionServer: MCPConfig = {
+    transport: 'http',
+    label: 'session',
+    serverUrl: 'https://session.example.test/mcp',
+    auth: { accessTokenEnv: 'ACME_SESSION' },
+  };
+
   it('runs end to end, renewing a token mid-trial', async () => {
     const root = await tempDir();
     const tokensDir = path.join(root, 'tokens');
@@ -120,20 +139,21 @@ describe('a shard in a child-process environment', () => {
         { caseId: 'flaky', prompt: 'flaky' },
         { caseId: 'thrown', prompt: 'thrown' },
       ],
-      [{ caseId: 'b', prompt: 'b' }]
+      [{ caseId: 'b', prompt: 'b' }],
+      [sessionServer]
     );
     const { events, progress, reasons } = recorder([
       () => ({
         byServer: {
           acme: { accessToken: 'token-1', expiresAt: Date.now() + 2000 },
         },
-        env: { API_KEY: 'key-1' },
+        env: secretsFile,
       }),
       () => ({
         byServer: {
           acme: { accessToken: 'token-2', expiresAt: Date.now() + 3_600_000 },
         },
-        env: { API_KEY: 'key-1' },
+        env: secretsFile,
       }),
     ]);
     const environment = forkEnvironment(context(), root, {
@@ -158,19 +178,25 @@ describe('a shard in a child-process environment', () => {
     expect(reasons).toEqual(['start', 'expiring']);
     const a = await readClientResult(path.join(shard.resultsDir, '0/0.json'));
     expect(a.key).toEqual({ variant: 'baseline', caseId: 'a', trial: 0 });
-    expect(a.result.finalText).toBe('a: token-1 then token-2; key key-1');
+    // The tokens, reversed: the client read both, the second after renewal.
+    expect(a.result.finalText).toBe('a: 1-nekot then 2-nekot; key 1-yek');
     // An error never carries a token, nor does the ending's reason.
     const flaky = await readClientResult(
       path.join(shard.resultsDir, '0/1.json')
     );
+    // Nor a secrets file credential; a setting beside it stays.
+    const flakyMessage =
+      'ECONNRESET while using [REDACTED] for acme-prod with [REDACTED] via [REDACTED]';
     expect(flaky.result).toMatchObject({
-      error: 'ECONNRESET while using [REDACTED]',
+      error: flakyMessage,
       ending: {
         kind: 'infrastructure',
         broke: 'network',
-        reason: 'ECONNRESET while using [REDACTED]',
+        reason: flakyMessage,
       },
     });
+    expect(JSON.stringify(flaky)).not.toContain('acme-key-');
+    expect(JSON.stringify(flaky)).not.toContain('session-credential-');
     expect(JSON.stringify(flaky)).not.toContain('token-');
     // A client that threw a network error: typed by its code, then redacted.
     const thrown = await readClientResult(
@@ -189,7 +215,7 @@ describe('a shard in a child-process environment', () => {
     // The batch client's result, reported as it finished.
     const b = await readClientResult(path.join(shard.resultsDir, '1/0.json'));
     expect(b.key).toEqual({ variant: 'candidate', caseId: 'b', trial: 0 });
-    expect(b.result.finalText).toBe('b: token-2 then token-2; key key-1');
+    expect(b.result.finalText).toBe('b: 2-nekot then 2-nekot; key 1-yek');
 
     expect(progress[0]).toEqual({
       type: 'hello',

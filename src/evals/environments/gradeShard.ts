@@ -9,7 +9,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
-import { redactClientSecrets } from '../clientSecrets.js';
+import { namedSecretValues, redactClientSecrets } from '../clientSecrets.js';
 import { gradingErrorOf } from '../grading.js';
 import { recordingGrading, type GradeRecord } from '../gradingSource.js';
 import { gradeStoredRun } from '../runEval.js';
@@ -130,10 +130,10 @@ export async function gradeShard(options: GradeShardOptions): Promise<number> {
     // this process's environment, where judges read them.
     send({ type: 'need-tokens', servers: [], reason: 'start' });
     const received = await tokens;
-    for (const [name, value] of Object.entries(received.env ?? {})) {
+    for (const [name, value] of Object.entries(received.env ?? {}))
       processEnv[name] = value;
-      if (value) secrets.push(value);
-    }
+    // The ones named as credentials, as a collect worker replaces them.
+    secrets.push(...namedSecretValues(received.env ?? {}));
     if (!cancelled) {
       // The eval config as the coordinator's file has it: its datasets come
       // loaded in the bundle, its plugins are loaded above.

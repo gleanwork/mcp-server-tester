@@ -11,7 +11,11 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { isClientUnavailable } from './clientUnavailable.js';
-import { clientSecretValues, redactClientError } from './clientSecrets.js';
+import {
+  clientSecretValues,
+  redactClientError,
+  redactedClientRun,
+} from './clientSecrets.js';
 import {
   settleProxiedTrace,
   usesToolSurfaceProxy,
@@ -132,6 +136,12 @@ export function proxiedBatch(
 /** What else a batch does while it runs. */
 export interface ClientBatchOptions {
   /**
+   * Secrets to replace in every trace besides the environment's and the
+   * servers' (a secrets file's values, connector tokens). Read when each
+   * trace arrives, so a token renewed mid-batch is included.
+   */
+  secrets?: () => readonly string[];
+  /**
    * Receives each trace the client reports before its batch ends, settled
    * like the traces the batch returns. A failure is printed, not thrown.
    */
@@ -186,12 +196,21 @@ export async function prepareClientBatch(
       : undefined;
   const requests = proxied?.requests ?? declared;
   const { onTrace } = options;
+  // Every trace a batch client hands MST, early or at the end, has no secret
+  // in it before it is settled, saved or graded.
+  const secrets = (): string[] => [
+    ...clientSecretValues(context.env ?? {}, servers),
+    ...(options.secrets?.() ?? []),
+  ];
+  const received = (trace: ClientRunResult): ClientRunResult =>
+    redactedClientRun(trace, secrets());
   // A trace reported early is settled with the proxy's traffic so far; the
   // batch's returned traces are settled again when it ends.
   const reportResult = onTrace
-    ? async (index: number, trace: ClientRunResult): Promise<void> => {
+    ? async (index: number, reported: ClientRunResult): Promise<void> => {
         const request = requests[index];
         if (!request) return;
+        const trace = received(reported);
         try {
           await onTrace(
             request,
@@ -220,11 +239,7 @@ export async function prepareClientBatch(
   } catch (error) {
     if (!isClientUnavailable(error)) throw error;
     // The message is stored: never with a credential in it.
-    const reason = redactClientError(
-      error,
-      clientSecretValues(context.env ?? {}, servers),
-      'client unavailable'
-    );
+    const reason = redactClientError(error, secrets(), 'client unavailable');
     console.warn(
       `[mst] The ${config.type} batch${context.variant ? ` for variant "${context.variant.name}"` : ''} didn't run: ${reason}`
     );
@@ -237,12 +252,11 @@ export async function prepareClientBatch(
     throw new Error(
       'Batch client returned an incomplete trace set; refusing to resubmit.'
     );
-  requests.forEach((request, index) =>
+  requests.forEach((request, index) => {
+    const trace = received(traces[index]!);
     queues
       .get(request.caseId)!
-      .push(
-        proxied ? proxied.settle(index, traces[index]!, true) : traces[index]!
-      )
-  );
+      .push(proxied ? proxied.settle(index, trace, true) : trace);
+  });
   return queues;
 }
