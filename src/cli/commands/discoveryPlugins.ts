@@ -1,8 +1,10 @@
 /**
- * Plugins for the discovery commands (`mst datasets`, `mst judges`): an eval
- * config's (`--config`, plus `--plugins`), or `--plugins` alone.
+ * Plugins for the discovery commands (`mst datasets`, `mst judges`,
+ * `mst clients`): an eval config's (`--config`, plus `--plugins`), or
+ * `--plugins` alone.
  */
 import path from 'node:path';
+import { z, type ZodType } from 'zod';
 import { loadEvalConfig } from '../../evals/evalConfig.js';
 import { loadEvalPlugins } from '../../evals/evalPlugins.js';
 import { installPlugins } from '../../plugins/extensions.js';
@@ -68,6 +70,20 @@ export async function loadDiscoveryPlugins(options: DiscoveryOptions): Promise<{
     namespaces
   );
   return { namespaces, rootDir, ...(settings ? { settings } : {}) };
+}
+
+/**
+ * The options an extension takes, as JSON Schema (what an eval config's
+ * entry may set besides `type`). A schema JSON Schema can't express says why.
+ */
+export function optionsSchema(schema: ZodType, kind: string): unknown {
+  try {
+    return z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' });
+  } catch (error) {
+    return {
+      unavailable: `This ${kind}'s options schema can't be shown as JSON Schema (${error instanceof Error ? error.message : String(error)}).`,
+    };
+  }
 }
 
 /** Whether `reference` belongs to one of `namespaces` (bare names are built-ins). */

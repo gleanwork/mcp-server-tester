@@ -944,6 +944,22 @@ export function createCoworkClient(
 ): ClientDefinition {
   return {
     schema: CoworkSchema,
+    description: 'Claude Desktop in Cowork mode',
+    requirements: {
+      os: ['macos', 'linux'],
+      install: [
+        'macOS: Claude Desktop, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST',
+        "Linux: MST's Cowork image (`--env docker`), or a prepared desktop with Claude Desktop",
+      ],
+      credentials: [
+        'macOS: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider; `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner',
+        'Linux image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`)',
+      ],
+      setup: [
+        'macOS: `mst cowork setup`, then sign in to Claude Desktop once',
+        'Docker: `mst env setup docker`',
+      ],
+    },
     evidence: 'structured',
     // Cowork sets up its MCP servers once per batch, so a tool variant goes
     // through one proxy endpoint for the whole batch.

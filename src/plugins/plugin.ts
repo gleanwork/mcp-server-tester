@@ -188,6 +188,41 @@ function describeFunctions(names: readonly string[]): string {
   return `a ${names.slice(0, -1).join(', ')} or ${names.at(-1)} function`;
 }
 
+const CLIENT_OS: ReadonlySet<unknown> = new Set(['macos', 'linux']);
+const REQUIREMENT_LISTS = ['install', 'credentials', 'setup'] as const;
+
+/** What is wrong with a client's `description` or `requirements`, if anything. */
+function clientProblem(
+  definition: Record<string, unknown>
+): string | undefined {
+  if (
+    definition.description !== undefined &&
+    typeof definition.description !== 'string'
+  )
+    return 'description must be a string';
+  const requirements = definition.requirements;
+  if (requirements === undefined) return undefined;
+  if (!isRecord(requirements)) return 'requirements must be an object';
+  const isStrings = (value: unknown) =>
+    Array.isArray(value) && value.every((item) => typeof item === 'string');
+  if (
+    requirements.os !== undefined &&
+    !(
+      Array.isArray(requirements.os) &&
+      requirements.os.every((os) => CLIENT_OS.has(os))
+    )
+  )
+    return 'requirements.os must list macos or linux';
+  for (const key of REQUIREMENT_LISTS)
+    if (requirements[key] !== undefined && !isStrings(requirements[key]))
+      return `requirements.${key} must be a list of strings`;
+  const known = new Set<string>(['os', ...REQUIREMENT_LISTS]);
+  const unknown = Object.keys(requirements).find((key) => !known.has(key));
+  return unknown
+    ? `requirements has no "${unknown}"; it takes os, install, credentials and setup`
+    : undefined;
+}
+
 function extensionProblem(
   kind: ExtensionKind,
   name: string,
@@ -245,6 +280,10 @@ function extensionProblem(
     return `${label}: version must be a non-empty string`;
   if (kind === 'clients' && 'toolOverrides' in definition)
     return `${label}: \`toolOverrides\` is now \`toolMetadata\``;
+  if (kind === 'clients') {
+    const problem = clientProblem(definition);
+    if (problem) return `${label}: ${problem}`;
+  }
   if (
     kind === 'metrics' &&
     !(typeof definition.kind === 'string' && definition.kind in METRIC_KINDS)

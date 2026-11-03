@@ -4,13 +4,14 @@
  *   mst judges [--plugins <module...> | --config <file>] [--json]
  *   mst judges show <ref> [--json]
  */
-import { z, type ZodType } from 'zod';
+import type { ZodType } from 'zod';
 import { listJudges } from '../../../judge/builtinJudges.js';
 import { listPairwiseJudges } from '../../../evals/pairwiseComparison.js';
 import {
   formatTable,
   inNamespaces,
   loadDiscoveryPlugins,
+  optionsSchema,
   type DiscoveryOptions,
 } from '../discoveryPlugins.js';
 
@@ -91,20 +92,6 @@ export async function listJudgeCommand(
   print(`${formatTable(rows)}\n`);
 }
 
-/**
- * The options a judge takes, as JSON Schema (what an eval config's entry
- * may set besides `type`). A schema JSON Schema can't express says why.
- */
-function optionsSchema(schema: ZodType): unknown {
-  try {
-    return z.toJSONSchema(schema, { io: 'input', unrepresentable: 'any' });
-  } catch (error) {
-    return {
-      unavailable: `This judge's options schema can't be shown as JSON Schema (${error instanceof Error ? error.message : String(error)}).`,
-    };
-  }
-}
-
 /** `mst judges show <ref>`: what a judge needs and the options it takes. */
 export async function showJudge(
   ref: string,
@@ -128,7 +115,7 @@ export async function showJudge(
     ...(entry.swapPositions !== undefined
       ? { swapPositions: entry.swapPositions }
       : {}),
-    options: optionsSchema(entry.schema),
+    options: optionsSchema(entry.schema, 'judge'),
   }));
   if (options.json) {
     print(

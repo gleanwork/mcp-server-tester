@@ -13,6 +13,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [login - OAuth Authentication](#login---oauth-authentication)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
 - [datasets - Find Plugin Datasets](#datasets---find-plugin-datasets)
+- [clients - Find Clients](#clients---find-clients)
 - [judges - Find Judges](#judges---find-judges)
 - [label - Label Judge Verdicts](#label---label-judge-verdicts)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
@@ -711,6 +712,31 @@ The list shows what each dataset's `describe()` reports, without loading cases; 
 | `-o, --out <file>`       | `pull`: write here. Default: stdout.                                 |
 | `--json`                 | `datasets`, `show`: print JSON.                                      |
 | `--root-dir <dir>`       | Where relative plugin paths resolve. Default: the working directory. |
+
+## `clients` - Find Clients
+
+Lists the clients an eval can run, built-in and from plugins, and shows what a machine needs to run one and the options it takes.
+
+### Usage
+
+```bash
+npx mst clients                                # built-in clients
+npx mst clients --plugins @acme/mst-plugin     # plus the plugin's
+npx mst clients show codex
+npx mst clients show acme/client/desk --plugins @acme/mst-plugin --json
+```
+
+```text
+chatgpt      macOS, Linux  The ChatGPT desktop app
+claude-code  any OS        The Claude Code CLI, headless
+codex        any OS        The Codex CLI, headless, through the Codex SDK
+cowork       macOS, Linux  Claude Desktop in Cowork mode
+mst          any OS        The model alone, through its provider's API, with the servers' tools: ...
+```
+
+`show` prints the description, the operating systems the client runs on, what must be installed, the credentials it reads, the commands that prepare a machine for it, and its options as JSON Schema. Plugins add `description` and `requirements` (`os`, `install`, `credentials`, `setup`) to a client for these commands. The clients table in [evaluation-framework.md](./evaluation-framework.md#clients) is generated from the same definitions.
+
+Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
 
 ## `judges` - Find Judges
 
