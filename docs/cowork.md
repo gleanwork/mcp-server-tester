@@ -722,7 +722,7 @@ For the Linux example above, a Mac config must omit `pluginRoots` and
 with a known local adapter path. The private files and URL/env substitutions
 remain supported, including in mixed HTTP/stdio server sets.
 
-ChatGPT Work/Codex and direct MCP clients support plain stdio, but not Cowork's
+ChatGPT (`chatgpt` and `codex-app`) and direct MCP clients support plain stdio, but not Cowork's
 client-resolved fields. For ChatGPT plugin overrides, use `plugins[].mcp` as
 described in [chatgpt-desktop.md](chatgpt-desktop.md#linux-runtime-contract).
 

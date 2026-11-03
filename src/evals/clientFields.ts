@@ -14,8 +14,8 @@ export type ClientOptions = Record<string, unknown>;
  */
 export interface ClientFields {
   /**
-   * The client under test: `api`, `claude-code`, `codex`, `cowork`, `chatgpt`, or a
-   * plugin's `<namespace>/client/<name>`.
+   * The client under test: `api`, `claude-code`, `codex`, `cowork`, `chatgpt`,
+   * `codex-app`, or a plugin's `<namespace>/client/<name>`.
    */
   client?: string;
   /** The model the client uses. */

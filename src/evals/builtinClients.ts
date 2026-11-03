@@ -41,7 +41,12 @@ import { resolveClientName } from './clientNames.js';
 import { simulationToClientRun } from './clientTrace.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT } from './coworkClient.js';
-import { CHATGPT_CLIENT, CHATGPT_LINUX_CLIENT } from './chatgptClient.js';
+import {
+  CHATGPT_CLIENT,
+  CHATGPT_LINUX_CLIENT,
+  CODEX_APP_CLIENT,
+  CODEX_APP_LINUX_CLIENT,
+} from './chatgptClient.js';
 import { CODEX_CLIENT, assertCodexServers } from './codexClient.js';
 import {
   claudeCodeOtelEnv,
@@ -480,9 +485,12 @@ function builtinClientDefinitions(): Readonly<
   }
   return (builtinClients = {
     ...clients,
-    // One ChatGPT client; the desktop driver follows the platform, as Cowork's does.
+    // One client per product of the ChatGPT app; the desktop driver follows
+    // the platform, as Cowork's does.
     chatgpt:
       process.platform === 'linux' ? CHATGPT_LINUX_CLIENT : CHATGPT_CLIENT,
+    'codex-app':
+      process.platform === 'linux' ? CODEX_APP_LINUX_CLIENT : CODEX_APP_CLIENT,
     codex: CODEX_CLIENT,
     cowork: COWORK_CLIENT,
   });

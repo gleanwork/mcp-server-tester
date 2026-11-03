@@ -35,7 +35,7 @@ A case's ground truth that graders check against: an answer, rubric criteria, or
 _Avoid_: canonical answer, golden, target, reference
 
 **Client**:
-The MCP client application an eval tests, named canonically: `claude-code`, `codex`, `cowork`, `chatgpt`, or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. A client returns a trace, never a score.
+The MCP client application an eval tests, named canonically: `claude-code`, `codex`, `cowork`, `chatgpt`, `codex-app` (the Codex surface of the ChatGPT desktop app; it was `chatgpt` with `surface: "codex"`), or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). One client is one product: no option changes which product it is. How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. A client returns a trace, never a score.
 _Avoid_: host, harness, agent, runner, solver, provider
 
 **Model**:

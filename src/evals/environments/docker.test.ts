@@ -241,9 +241,20 @@ describe('the docker environment', () => {
 });
 
 describe('ChatGPT in the docker environment', () => {
-  it('picks the ChatGPT image only for a ChatGPT eval', () => {
-    expect(dockerClient('chatgpt')).toBe('chatgpt');
-    for (const client of ['cowork', undefined])
+  it('picks the ChatGPT image only for a ChatGPT or Codex app eval', () => {
+    for (const client of [
+      'chatgpt',
+      'codex-app',
+      'mst/client/chatgpt',
+      'mst/client/codex-app',
+    ])
+      expect(dockerClient(client)).toBe('chatgpt');
+    for (const client of [
+      'cowork',
+      'codex',
+      'acme/client/codex-app',
+      undefined,
+    ])
       expect(dockerClient(client)).toBe('cowork');
     expect(DEFAULT_CHATGPT_IMAGE).toMatch(/^mst-chatgpt-linux:/);
   });
@@ -546,6 +557,45 @@ describe('a run in docker (a fake Docker CLI)', () => {
         desktop: 'chatgpt',
       },
     ]);
+  }, 120_000);
+
+  it('builds the ChatGPT image for a Codex app eval', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { root, project, configPath, calls } = await fixture(
+      { MST_NPM: mock('fakeNpm.mjs') },
+      ['@acme/mst-dt']
+    );
+    await installPluginPackage(project, '1.2.3');
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, client: 'codex-app', model: 'gpt-test' })
+    );
+    await setupEnvironment('docker', {
+      config: configPath,
+      envOption: ['contexts=ctx-a', 'chatgptVersion=1.2.3'],
+      rootDir: project,
+    });
+    const builds = (await fs.readFile(path.join(root, 'builds.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(builds).toEqual([
+      {
+        context: 'ctx-a',
+        tag: DEFAULT_CHATGPT_IMAGE,
+        plugins: ['acme-mst-dt-1.2.3.tgz'],
+        desktop: 'chatgpt',
+      },
+    ]);
+    // The ChatGPT app's version option applies to it too.
+    const build = (await calls()).find((call) => call.args[0] === 'build');
+    expect(build?.args).toEqual(
+      expect.arrayContaining(['--build-arg', 'CHATGPT_VERSION=1.2.3'])
+    );
   }, 120_000);
 
   it("fails a build with the build's last lines, so the cause is in the error", async () => {

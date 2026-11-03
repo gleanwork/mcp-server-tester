@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { getClient, providerForModel } from './builtinClients.js';
 import { validateEvalConfig } from './configValidation.js';
-import { CHATGPT_CLIENT, CHATGPT_LINUX_CLIENT } from './chatgptClient.js';
+import { loadEvalConfigFromObject } from './evalConfig.js';
+import {
+  CHATGPT_CLIENT,
+  CHATGPT_LINUX_CLIENT,
+  CODEX_APP_CLIENT,
+  CODEX_APP_LINUX_CLIENT,
+} from './chatgptClient.js';
 import { storedClientName } from './clientNames.js';
 import { playwrightClientOf } from './caseExecution.js';
 import { runEvalCase } from './evalRunner.js';
@@ -149,6 +155,106 @@ describe('built-in client names', () => {
     );
   });
 
+  it('codex-app is the Codex app client for this platform, by either name', () => {
+    const client =
+      process.platform === 'linux' ? CODEX_APP_LINUX_CLIENT : CODEX_APP_CLIENT;
+    expect(getClient('codex-app')).toBe(client);
+    expect(getClient('mst/client/codex-app')).toBe(client);
+    expect(client).not.toBe(getClient('chatgpt'));
+    const config = {
+      name: 'm',
+      datasets: [{ type: 'file', path: 'x.json' }],
+      model: 'gpt-test',
+    };
+    // Read as an eval config is, the full name is the bare one.
+    const loaded = loadEvalConfigFromObject(
+      {
+        ...config,
+        client: 'mst/client/codex-app',
+        variants: [
+          { name: 'work', client: 'chatgpt' },
+          { name: 'codex', client: 'mst/client/codex-app' },
+        ],
+      },
+      { skipDatasetValidation: true }
+    );
+    expect(loaded.client).toBe('codex-app');
+    expect(loaded.variants?.map((variant) => variant.client)).toEqual([
+      'chatgpt',
+      'codex-app',
+    ]);
+    expect(
+      validateEvalConfig(loaded).variants?.map((variant) => variant.client)
+    ).toEqual(['chatgpt', 'codex-app']);
+    expect(() =>
+      validateEvalConfig({ ...config, client: 'mst/client/codex-app' })
+    ).not.toThrow();
+  });
+
+  describe('clientOptions.surface fails when the config loads, naming its replacement', () => {
+    const config = {
+      name: 'm',
+      datasets: [{ type: 'file', path: 'x.json' }],
+      model: 'gpt-test',
+    };
+    const toCodexApp =
+      '`clientOptions.surface` is gone: use the `codex-app` client for the Codex surface, and remove `surface`.';
+    const remove =
+      '`clientOptions.surface` is gone: remove it. `chatgpt` always drives ChatGPT Work.';
+
+    it('on the eval config', () => {
+      expect(() =>
+        validateEvalConfig({
+          ...config,
+          client: 'chatgpt',
+          clientOptions: { surface: 'codex' },
+        })
+      ).toThrow(toCodexApp);
+      expect(() =>
+        validateEvalConfig({
+          ...config,
+          client: 'mst/client/chatgpt',
+          clientOptions: { surface: 'chatgpt-work' },
+        })
+      ).toThrow(remove);
+      expect(() =>
+        validateEvalConfig({
+          ...config,
+          client: 'codex-app',
+          clientOptions: { surface: 'codex' },
+        })
+      ).toThrow(
+        '`clientOptions.surface` is gone: remove it. `codex-app` always drives the Codex surface.'
+      );
+    });
+
+    it('on a variant, its own or inherited', () => {
+      expect(() =>
+        validateEvalConfig({
+          ...config,
+          client: 'api',
+          variants: [
+            { name: 'work', client: 'chatgpt' },
+            {
+              name: 'codex',
+              client: 'chatgpt',
+              clientOptions: { surface: 'codex' },
+            },
+          ],
+        })
+      ).toThrow(toCodexApp);
+      // A variant that keeps the client inherits the eval's options.
+      expect(() =>
+        validateEvalConfig({
+          ...config,
+          client: 'chatgpt',
+          clientOptions: { surface: 'chatgpt-work' },
+          variants: [{ name: 'a' }, { name: 'b', model: 'gpt-other' }],
+        })
+      ).toThrow(remove);
+    });
+  });
+
   it('an unknown client lists only the canonical names', () => {
     expect(() =>
       validateEvalConfig({
@@ -157,7 +263,7 @@ describe('built-in client names', () => {
         client: 'sdk',
       })
     ).toThrow(
-      'Client "sdk" is not available. Available: api, chatgpt, claude-code, codex, cowork.'
+      'Client "sdk" is not available. Available: api, chatgpt, claude-code, codex, codex-app, cowork.'
     );
   });
 });

@@ -3,15 +3,23 @@
 MST submits through the authenticated ChatGPT desktop app. It does not use the
 Codex CLI, Codex APIs, or an inference API to run the evaluated query.
 
-## Surface and platform
+## Clients and platform
 
-Use `"client": "chatgpt"` on macOS and on Linux; the desktop driver follows the
-platform. The earlier names (`openai.chatgpt.agent.desktop-app.macos`,
+The desktop app has two products, and each is a client:
+
+- `"client": "chatgpt"` drives ChatGPT Work.
+- `"client": "codex-app"` drives the app's Codex surface. It is not the `codex`
+  client, which runs the Codex CLI headless ([codex.md](./codex.md)).
+
+Both run on macOS and on Linux; the desktop driver follows the platform. The
+earlier names (`openai.chatgpt.agent.desktop-app.macos`,
 `openai.chatgpt.agent.desktop-app.linux`, `chatgpt-mac` and `chatgpt-linux`)
-fail validation, naming `chatgpt`. Both platforms accept
-`clientOptions.surface: 'chatgpt-work' | 'codex'`, with `chatgpt-work` as the default. Surface selection controls UI setup and the
-expected native originator; MST does not add surface instructions to the evaluated
-prompt.
+fail validation, naming `chatgpt`. `clientOptions.surface` is gone: it fails
+validation and names the client to use. The client picks the surface, which
+controls UI setup and the expected native originator; MST does not add surface
+instructions to the evaluated prompt. Everything else on this page applies to
+both clients. Both drive the same app, so they share its desktop lease: a
+`chatgpt` variant and a `codex-app` variant never drive the app at once.
 
 macOS keeps the Anthropic Computer Use submission driver. It receives the selected
 surface and must verify the current-mode label before filling the composer. It
@@ -39,7 +47,6 @@ Example Linux client settings (in an eval config):
   "clientOptions": {
     "reasoningEffort": "medium",
     "timeout": 300000,
-    "surface": "chatgpt-work",
     "nativeMaxActions": 24,
     "requireMcpCalls": true,
     "correlation": "exact_prompt"
@@ -74,9 +81,9 @@ whose fresh profile has none.
 
 Before each case, MST chooses File > New Chat itself, since the app stays on
 the previous case's conversation, and the planner pastes the query rather than
-typing it. ChatGPT Work makes its own folder for a task. For the `codex`
-surface, MST opens the draft in an empty, trusted folder it creates for the run
-and removes afterwards.
+typing it. ChatGPT Work makes its own folder for a task. For `codex-app`, MST
+opens the draft in an empty, trusted folder it creates for the run and removes
+afterwards.
 
 When a case stalls, its chat is still mid-turn, and ChatGPT answers MST's quit
 with "Quit ChatGPT? Active local chats on this machine will be interrupted".
@@ -439,9 +446,9 @@ trigger a resubmission.
 
 Native originator acceptance is surface-specific and case-sensitive:
 
-- Default or explicit `clientOptions.surface: 'chatgpt-work'` requires exactly
+- `chatgpt` (ChatGPT Work) requires exactly
   `session_meta.payload.originator: 'codex_work_desktop'`.
-- Explicit `clientOptions.surface: 'codex'` requires exactly `'Codex Desktop'`, as
+- `codex-app` (the Codex surface) requires exactly `'Codex Desktop'`, as
   observed in preserved Linux run `35881948713` (`source: 'vscode'`).
 - Neither surface accepts the other surface's originator, CLI identities such as
   `codex_cli_rs` or `codex_cli`, case changes, whitespace changes, or name variants.

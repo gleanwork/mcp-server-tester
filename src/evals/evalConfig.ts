@@ -150,8 +150,8 @@ export interface EvalConfig {
    */
   servers?: EvalServerConfig[];
   /**
-   * The client under test: `api`, `claude-code`, `codex`, `cowork`, `chatgpt`, or a
-   * plugin's `<namespace>/client/<name>`. @default 'claude-code'
+   * The client under test: `api`, `claude-code`, `codex`, `cowork`, `chatgpt`,
+   * `codex-app`, or a plugin's `<namespace>/client/<name>`. @default 'claude-code'
    */
   client?: string;
   /** The client's own options, such as Cowork's `appVersion`. */

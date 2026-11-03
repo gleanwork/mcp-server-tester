@@ -1,6 +1,6 @@
 # ChatGPT in Docker
 
-`mst run --env docker` runs ChatGPT desktop evals in Linux containers instead of on your Mac. Each shard gets a container with its own ChatGPT desktop app, signed out, with a fresh profile for every variant. Your machine stays usable while the eval runs, and no personal account is involved.
+`mst run --env docker` runs ChatGPT desktop evals (`chatgpt` and `codex-app`) in Linux containers instead of on your Mac. Each shard gets a container with its own ChatGPT desktop app, signed out, with a fresh profile for every variant. Your machine stays usable while the eval runs, and no personal account is involved.
 
 MST provides the image as a Dockerfile that you build yourself (`mst env setup docker`). It installs the ChatGPT desktop app from OpenAI's Linux package repository at build time; MST doesn't publish an image with ChatGPT in it.
 
@@ -17,7 +17,7 @@ MST provides the image as a Dockerfile that you build yourself (`mst env setup d
 npx mst env setup docker --config chatgpt-eval.json --env-option contexts=colima-mst-kvm
 ```
 
-With a ChatGPT eval (`"client": "chatgpt"`), this builds `mst-chatgpt-linux:<MST version>` on each Docker context you name, and installs the eval's plugins, as for [Cowork](./cowork-docker.md#plugins). The build downloads the `chatgpt` package for the host's architecture and checks it against the SHA-256 and size in the repository's index. Pin a version with `--env-option chatgptVersion=<version>`; the default is the newest. Rebuild after upgrading MST.
+With a ChatGPT eval (`"client": "chatgpt"`) or a Codex app eval (`"client": "codex-app"`), this builds `mst-chatgpt-linux:<MST version>` on each Docker context you name, and installs the eval's plugins, as for [Cowork](./cowork-docker.md#plugins). The build downloads the `chatgpt` package for the host's architecture and checks it against the SHA-256 and size in the repository's index. Pin a version with `--env-option chatgptVersion=<version>`; the default is the newest. Rebuild after upgrading MST.
 
 ## Run
 
@@ -43,7 +43,7 @@ Each session's evidence (the app's log, its runtime config, and a screenshot of 
 
 ## Grading, other machines and detached runs
 
-The eval's client picks the image everywhere the docker environment runs, after the eval config's `extends`: a shared config can make an eval a ChatGPT eval.
+The eval's client picks the image everywhere the docker environment runs, after the eval config's `extends`: a shared config can make an eval a ChatGPT or Codex app eval. Both clients use the same image.
 
 - **`mst env setup <environment> --config <eval>`** passes the client to the environment's `setup` (`client` in its context), so `docker` builds `mst-chatgpt-linux:<MST version>`.
 - **`mst run`, `mst grade --env` and `--grade-env`** open the environment with the client (`client` in `EnvironmentContext`). A grade shard runs in a container of the same ChatGPT image, with no desktop.

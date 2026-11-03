@@ -7,7 +7,7 @@
 | Client                                                                  | Image                             | Container                                                                          |
 | ----------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
 | Cowork (the default)                                                    | `mst-cowork-linux:<MST version>`  | Claude Desktop and Cowork's VM, with Cowork inference (`ANTHROPIC_*`)              |
-| `chatgpt`                                                               | `mst-chatgpt-linux:<MST version>` | The ChatGPT desktop app; see [ChatGPT in Docker](./chatgpt-docker.md)              |
+| `chatgpt`, `codex-app`                                                  | `mst-chatgpt-linux:<MST version>` | The ChatGPT desktop app; see [ChatGPT in Docker](./chatgpt-docker.md)              |
 | Headless: `codex`, `api`, `claude-code`, plugin clients with `headless` | `mst-cowork-linux:<MST version>`  | No desktop, VM devices or Cowork inference ([Headless clients](#headless-clients)) |
 
 Grade shards run in the eval client's image, without a desktop.

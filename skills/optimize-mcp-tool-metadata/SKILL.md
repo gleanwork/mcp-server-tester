@@ -153,7 +153,7 @@ The callback receives `round`, `baseline` (the run without variants), `metric`, 
 
 ### On any client, from an eval config
 
-Give `runToolOptimization` an eval config to run the variants on the config's client and model (`claude-code`, `cowork`, a plugin client, or `api` with `clientOptions`), and to optimize any numeric variant metric. Each candidate runs as a copy of `baseVariant` (default: the config's baseline) with the candidate's `tools`. `chatgpt` can't show tool metadata.
+Give `runToolOptimization` an eval config to run the variants on the config's client and model (`claude-code`, `cowork`, a plugin client, or `api` with `clientOptions`), and to optimize any numeric variant metric. Each candidate runs as a copy of `baseVariant` (default: the config's baseline) with the candidate's `tools`. `chatgpt` and `codex-app` can't show tool metadata.
 
 ```typescript
 // scripts/optimize-search.ts

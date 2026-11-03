@@ -16,7 +16,7 @@ import {
 import type { RunEnvironment } from './environments/builtinEnvironments.js';
 import type { ShardRecord } from './environments/shardedCollect.js';
 import type { ListedServerTools } from './toolSurface.js';
-import { storedClientName } from './clientNames.js';
+import { storedClientName, storedClientSetup } from './clientNames.js';
 
 /**
  * The run format, `mst.run/v1`: what a run leaves behind, one directory per
@@ -1055,28 +1055,72 @@ export async function readRunDirectory(directory: string): Promise<StoredRun> {
     directory,
     run: runWithCurrentClients(run),
     summary: summaryWithCurrentClients(
-      joinCaseResults(summary, results.cases ?? [])
+      joinCaseResults(summary, results.cases ?? []),
+      run
     ),
   };
 }
 
 /**
+ * The client each of a stored run's `chatgpt` variants is now, by variant
+ * name, for those whose options made it another client
+ * (`storedClientSetup`: the Codex surface is `codex-app`). Results and
+ * shards record the client's name without its options; this says what
+ * their `chatgpt` meant.
+ */
+function renamedChatgptVariants(
+  run: Pick<RunRecord, 'variants'> | undefined
+): Map<string, string> {
+  const renamed = new Map<string, string>();
+  for (const variant of run?.variants ?? []) {
+    if (
+      variant.client === undefined ||
+      storedClientName(variant.client) !== 'chatgpt'
+    )
+      continue;
+    const current = storedClientSetup(variant).client!;
+    if (current !== 'chatgpt') renamed.set(variant.name, current);
+  }
+  return renamed;
+}
+
+/**
  * A stored run.json with each client it records as MST names it now
- * (`storedClientName`): its variants' and its shards' machines'. The file
- * keeps the names it was written with.
+ * (`storedClientSetup`): its variants', with their options, and its shards'
+ * machines'. A machine records only a client's name, so a machine's
+ * `chatgpt` is `codex-app` only when every `chatgpt` variant was the Codex
+ * surface. The file keeps the names it was written with.
  */
 export function runWithCurrentClients(run: RunRecord): RunRecord {
-  const current = <T extends { client?: string }>(item: T): T =>
-    item.client === undefined
-      ? item
-      : { ...item, client: storedClientName(item.client) };
+  const renamed = renamedChatgptVariants(run);
+  const chatgptVariants = run.variants.filter(
+    (variant) =>
+      variant.client !== undefined &&
+      storedClientName(variant.client) === 'chatgpt'
+  ).length;
+  const machineChatgpt = new Set(renamed.values());
+  const chatgptIs =
+    renamed.size === chatgptVariants && machineChatgpt.size === 1
+      ? [...machineChatgpt][0]!
+      : 'chatgpt';
   const machines = run.environment.machines;
   return {
     ...run,
-    variants: run.variants.map(current),
+    variants: run.variants.map((variant) => storedClientSetup(variant)),
     environment: {
       ...run.environment,
-      ...(machines ? { machines: machines.map(current) } : {}),
+      ...(machines
+        ? {
+            machines: machines.map((machine) => {
+              if (machine.client === undefined) return machine;
+              const client = storedClientName(machine.client);
+              return {
+                ...machine,
+                client: client === 'chatgpt' ? chatgptIs : client,
+              };
+            }),
+          }
+        : {}),
     },
   };
 }
@@ -1084,14 +1128,19 @@ export function runWithCurrentClients(run: RunRecord): RunRecord {
 /**
  * A stored summary with the client each case ran on (`request.client`) as
  * MST names it now (`storedClientName`), in its results and its variants'.
+ * A result records the client's name, not its options: with `run`, the
+ * stored run.json, a `chatgpt` result in a variant that was the Codex
+ * surface reads as `codex-app` (`storedClientSetup`).
  */
 export function summaryWithCurrentClients(
-  summary: EvaluationSummary
+  summary: EvaluationSummary,
+  run?: Pick<RunRecord, 'variants'>
 ): EvaluationSummary {
+  const renamed = renamedChatgptVariants(run);
   return {
     ...summary,
     ...(Array.isArray(summary.results)
-      ? { results: casesWithCurrentClients(summary.results) }
+      ? { results: casesWithCurrentClients(summary.results, renamed) }
       : {}),
     variants: summary.variants.map((variant) =>
       Array.isArray(variant.result?.caseResults)
@@ -1099,7 +1148,11 @@ export function summaryWithCurrentClients(
             ...variant,
             result: {
               ...variant.result,
-              caseResults: casesWithCurrentClients(variant.result.caseResults),
+              caseResults: casesWithCurrentClients(
+                variant.result.caseResults,
+                renamed,
+                variant.name
+              ),
             },
           }
         : variant
@@ -1108,19 +1161,22 @@ export function summaryWithCurrentClients(
 }
 
 function casesWithCurrentClients(
-  cases: readonly EvalCaseResult[]
+  cases: readonly EvalCaseResult[],
+  renamed: ReadonlyMap<string, string>,
+  variant?: string
 ): EvalCaseResult[] {
-  return cases.map((result) =>
-    result.request?.client === undefined
-      ? result
-      : {
-          ...result,
-          request: {
-            ...result.request,
-            client: storedClientName(result.request.client),
-          },
-        }
-  );
+  return cases.map((result) => {
+    if (result.request?.client === undefined) return result;
+    const client = storedClientName(result.request.client);
+    const current =
+      client === 'chatgpt'
+        ? (renamed.get(variant ?? result.variant ?? 'default') ?? client)
+        : client;
+    return {
+      ...result,
+      request: { ...result.request, client: current },
+    };
+  });
 }
 
 /** A trial's stored record: `traces/<variant>/<case-id>/<trial>.json`. */

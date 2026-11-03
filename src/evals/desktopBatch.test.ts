@@ -381,6 +381,25 @@ describe('runDesktopBatch', () => {
     }
   });
 
+  it('names an app whose name ends in app once', async () => {
+    const client = fakeClient({
+      name: 'Codex app',
+      async runCase() {
+        return {
+          result: { finalText: '', events: [], error: 'boom' },
+          continuation: 'reset',
+        };
+      },
+      async reset() {
+        throw new Error('reset refused');
+      },
+    });
+    const results = await runDesktopBatch(client, requests(2));
+    expect(results[1]!.error).toMatch(
+      /^Not submitted because the Codex app could not be reset after an earlier failed case: /
+    );
+  });
+
   it('stops submitting after three failed cases in a row', async () => {
     const client = fakeClient({
       async runCase(_session, request, index) {

@@ -75,3 +75,41 @@ export function storedClientName(name: string): string {
     ? STORED_CLIENT_NAMES[bare]!
     : bare;
 }
+
+/**
+ * The client a stored `chatgpt` with each `clientOptions.surface` is now
+ * (ADR 0011). `chatgpt-work` was what `chatgpt` always does.
+ */
+const STORED_CHATGPT_SURFACES: Readonly<Record<string, string>> = {
+  codex: 'codex-app',
+  'chatgpt-work': 'chatgpt',
+};
+
+/**
+ * A client and its options as a stored run recorded them (a run.json
+ * variant), as MST names them now: the name through `storedClientName`,
+ * and a `chatgpt` with `clientOptions.surface: "codex"` (before ADR 0011)
+ * as `codex-app`, with `surface` left out of its options, so it compares
+ * equal to a config written today. A stored `surface: "chatgpt-work"` is
+ * left out the same way. Anything else is returned unchanged.
+ */
+export function storedClientSetup<
+  T extends { client?: string; clientOptions?: Record<string, unknown> },
+>(item: T): T {
+  if (item.client === undefined) return item;
+  const client = storedClientName(item.client);
+  const surface = item.clientOptions?.surface;
+  if (
+    client !== 'chatgpt' ||
+    typeof surface !== 'string' ||
+    !Object.hasOwn(STORED_CHATGPT_SURFACES, surface)
+  )
+    return client === item.client ? item : { ...item, client };
+  const { surface: _surface, ...options } = item.clientOptions!;
+  const { clientOptions: _options, ...rest } = item;
+  return {
+    ...rest,
+    client: STORED_CHATGPT_SURFACES[surface]!,
+    ...(Object.keys(options).length ? { clientOptions: options } : {}),
+  } as T;
+}

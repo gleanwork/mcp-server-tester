@@ -281,12 +281,16 @@ export async function runDesktopBatch<Session>(
     await adapter.ready?.(session);
     let resetBeforeCase = false;
     let blocked: string | undefined;
+    // `the Cowork app`, and `the Codex app`, not `the Codex app app`.
+    const theApp = adapter.name.endsWith(' app')
+      ? `the ${adapter.name}`
+      : `the ${adapter.name} app`;
     let consecutiveFailures = 0;
     for (const [index, request] of requests.entries()) {
       if (resetBeforeCase && !blocked) {
         resetBeforeCase = false;
         if (!adapter.reset)
-          blocked = `Not submitted because the ${adapter.name} app could not be ${adapter.resetVerb} after an earlier failed case: this ${adapter.name} platform cannot reset between cases`;
+          blocked = `Not submitted because ${theApp} could not be ${adapter.resetVerb} after an earlier failed case: this ${adapter.name} platform cannot reset between cases`;
         else
           try {
             const reset = adapter.reset.bind(adapter);
@@ -296,7 +300,7 @@ export async function runDesktopBatch<Session>(
               adapter.resetRetryDelaysMs ?? []
             );
           } catch (error) {
-            blocked = `Not submitted because the ${adapter.name} app could not be ${adapter.resetVerb} after an earlier failed case: ${redact(
+            blocked = `Not submitted because ${theApp} could not be ${adapter.resetVerb} after an earlier failed case: ${redact(
               error,
               adapter.resetVerb === 'restarted'
                 ? 'restart failed'
