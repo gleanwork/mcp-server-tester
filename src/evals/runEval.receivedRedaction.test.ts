@@ -100,8 +100,8 @@ describe('a trial a worker sends back', () => {
     expect(stored).not.toContain(KEY);
   });
 
-  it('has the connector tokens handed to the worker redacted', async () => {
-    const f = await leakyEval(['alpha']);
+  it('has the connector tokens handed to the worker redacted, on resume too', async () => {
+    const f = await leakyEval(['alpha', 'beta']);
     vi.stubEnv('MST_TOKENS_DIR', path.join(f.dir, 'tokens'));
     // A client-credentials grant gives a new token each time: the one this
     // machine starts with, then the one the worker asks for.
@@ -137,7 +137,9 @@ describe('a trial a worker sends back', () => {
       })
     );
 
-    const result = await runEval({
+    // The first run never collects beta, so it ends partial.
+    vi.stubEnv('LEAKY_SKIP', 'beta');
+    const first = await runEval({
       configPath: f.configPath,
       rootDir: f.dir,
       outputDir: f.outputDir,
@@ -146,10 +148,30 @@ describe('a trial a worker sends back', () => {
       secretsFile: f.secretsFile,
       report: false,
     });
+    vi.stubEnv('LEAKY_SKIP', '');
+    resetPluginsForTests();
+    const resumed = await resumeRun({
+      configPath: f.configPath,
+      rootDir: f.dir,
+      outputDir: f.outputDir,
+      run: path.basename(first.outputDir),
+      plugins: [connectors],
+      secretsFile: f.secretsFile,
+      report: false,
+    });
 
-    expect(grants).toBe(2);
-    const stored = await allText(result.outputDir);
-    expect(stored).toContain('a token is [REDACTED]');
+    // The first run's two grants (this machine's own, the worker's), then
+    // the resume's worker's: a resume starts no client here.
+    expect(grants).toBe(3);
+    const stored = await allText(resumed.outputDir);
+    // Each worker got a token and quoted it: alpha's, then beta's on resume.
+    for (const caseId of ['alpha', 'beta'])
+      expect(
+        await fs.readFile(
+          path.join(resumed.outputDir, 'traces/default', caseId, '0.json'),
+          'utf8'
+        )
+      ).toContain('a token is [REDACTED]');
     expect(stored).not.toContain('connector-token-');
   });
 

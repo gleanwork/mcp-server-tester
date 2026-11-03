@@ -1844,16 +1844,9 @@ async function evaluate(
           variants: variants.map((variant) => variant.name),
         }
       );
-  // The connector tokens a shard's workers ask this machine for, when the
-  // run collects in an environment. It fetches nothing until they ask.
-  const workerTokens =
-    !replay && connectors.slots.length
-      ? connectorTokenSource(
-          connectors,
-          options.credentialStore ??
-            credentialStoreFor(options.store, evalConfig.settings)
-        )
-      : undefined;
+  // The connector tokens a shard's workers ask this machine for, once the
+  // run collects in an environment (a resume's included).
+  let workerTokens: ReturnType<typeof connectorTokenSource> | undefined;
   // What MST replaces in every client result besides the secrets in `env`
   // (the secrets file's included) and the servers': the connector tokens,
   // every one delivered or handed to a worker, since they renew while the
@@ -2084,7 +2077,15 @@ async function evaluate(
           pluginPackages,
           groups,
           secrets: fileSecrets,
-          ...(workerTokens ? { connectorTokens: workerTokens } : {}),
+          ...(connectors.slots.length
+            ? {
+                connectorTokens: (workerTokens = connectorTokenSource(
+                  connectors,
+                  options.credentialStore ??
+                    credentialStoreFor(options.store, evalConfig.settings)
+                )),
+              }
+            : {}),
           workDir,
           // Where grading reads a trial's artifacts: workDir goes before then.
           artifactsDir: async (key) =>
