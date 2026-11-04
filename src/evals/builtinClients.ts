@@ -506,7 +506,7 @@ function builtinClientDefinitions(): Readonly<
     // One client per product of the ChatGPT app; how it runs follows from
     // the OS of the machine that runs the trial, as Cowork's does.
     ...CHATGPT_APP_CLIENTS,
-    codex: CODEX_CLIENT,
+    'codex-cli': CODEX_CLIENT,
     cowork: COWORK_CLIENT,
   });
 }
@@ -656,7 +656,7 @@ export function assertClientSupports(
   }
   if (clientConfig.type === 'claude-code')
     assertClaudeCliServers(options.servers, false, options.context);
-  if (clientConfig.type === 'codex')
+  if (clientConfig.type === 'codex-cli')
     assertCodexServers(options.servers, {
       resolved: false,
       context: options.context,

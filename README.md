@@ -48,7 +48,7 @@ Available matchers:
 
 ## Eval Datasets
 
-Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `api` client, or with `mst run` on any client (Claude Code, Codex, Cowork, ChatGPT and the ChatGPT app's Codex surface). Checks on a single tool's response belong in Playwright tests, above.
+Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `api` client, or with `mst run` on any client (Claude Code, the Codex CLI, Cowork, ChatGPT and the ChatGPT app's Codex surface). Checks on a single tool's response belong in Playwright tests, above.
 
 ```json snippet=snippets/eval-dataset.json
 {
@@ -212,7 +212,7 @@ for client-specific fields, environment rules, and setup ownership.
 - [Evaluation Framework](./docs/evaluation-framework.md) — eval configs, plugins and their extension kinds, the run format
 - [Built-in Judges](./docs/judges.md) — the built-in judges measured on MST's calibration set
 - [Cowork](./docs/cowork.md) and [ChatGPT Desktop](./docs/chatgpt-desktop.md) — running evals on desktop clients
-- [Codex](./docs/codex.md) — running evals on OpenAI's Codex agent, headless
+- [Codex CLI](./docs/codex.md) — running evals on the Codex CLI (`codex-cli`), headless
 - [Design walkthrough](./docs/design/README.md) and [explainer](./docs/design/explainer.md) — how evals are meant to run end to end, and what is built so far
 - [Architecture decisions](./docs/adr/) — why MST is built as it is, including [detached runs](./docs/adr/0007-detached-runs-move-the-coordinator.md): a run on an environment that keeps going with the laptop off
 - [Glossary](./CONTEXT.md) — the terms MST uses

@@ -12,7 +12,7 @@
  * machine and is kept fresh in the container's tmpfs, never in the image.
  *
  * A shard that needs no desktop, a grade shard or a collect shard whose
- * clients are all headless (`ClientDefinition.headless`, such as `codex`),
+ * clients are all headless (`ClientDefinition.headless`, such as `codex-cli`),
  * runs in a container of the same image with no desktop: no VM devices, no
  * Cowork inference, and contexts shared, as nothing holds the vsock port.
  */

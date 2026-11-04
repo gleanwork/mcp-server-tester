@@ -20,6 +20,15 @@ const RENAMED_CLIENTS: Readonly<Record<string, string>> = {
   'anthropic.claude.cowork.desktop-app.macos': 'cowork',
   'openai.chatgpt.agent.desktop-app.macos': 'chatgpt',
   'openai.chatgpt.agent.desktop-app.linux': 'chatgpt',
+  codex: 'codex-cli',
+};
+
+/**
+ * What a renamed client's error adds after naming its replacement, when the
+ * old name could mean another client too.
+ */
+const RENAMED_CLIENT_NOTES: Readonly<Record<string, string>> = {
+  codex: 'For the Codex surface of the ChatGPT desktop app, use "codex-app".',
 };
 
 /**
@@ -29,6 +38,7 @@ const RENAMED_CLIENTS: Readonly<Record<string, string>> = {
  */
 const STORED_CLIENT_NAMES: Readonly<Record<string, string>> = {
   mst: 'api',
+  codex: 'codex-cli',
 };
 
 /** How a built-in client's full name starts: `mst/client/api` is `api`. */
@@ -55,8 +65,11 @@ export function resolveClientName(reference: string): string {
   const name = full ? reference.slice(BUILTIN_CLIENT_PREFIX.length) : reference;
   if (Object.hasOwn(RENAMED_CLIENTS, name)) {
     const current = RENAMED_CLIENTS[name]!;
+    const note = Object.hasOwn(RENAMED_CLIENT_NOTES, name)
+      ? ` ${RENAMED_CLIENT_NOTES[name]!}`
+      : '';
     throw new Error(
-      `Client "${reference}" is now "${full ? BUILTIN_CLIENT_PREFIX + current : current}".`
+      `Client "${reference}" is now "${full ? BUILTIN_CLIENT_PREFIX + current : current}".${note}`
     );
   }
   return reference;
@@ -64,7 +77,8 @@ export function resolveClientName(reference: string): string {
 
 /**
  * The client a stored run's recorded name means now: `mst` (before ADR
- * 0011) is `api`, by its full name `mst/client/mst` too, and a built-in's
+ * 0011) is `api` and `codex` is `codex-cli`, by their full names
+ * (`mst/client/mst`) too, and a built-in's
  * full name reads as its bare name. Any other name is returned unchanged.
  * Read stored client names through this, never through
  * `resolveClientName`, which rejects them.

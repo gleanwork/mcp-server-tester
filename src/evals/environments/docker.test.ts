@@ -251,7 +251,7 @@ describe('ChatGPT in the docker environment', () => {
       expect(dockerClient(client)).toBe('chatgpt');
     for (const client of [
       'cowork',
-      'codex',
+      'codex-cli',
       'acme/client/codex-app',
       undefined,
     ])
@@ -989,9 +989,9 @@ describe('a run in docker (a fake Docker CLI)', () => {
           },
         ],
       });
-    await bundle(['codex', 'api']);
+    await bundle(['codex-cli', 'api']);
     expect(await shardIsHeadless(dir)).toBe(true);
-    await bundle(['codex', 'cowork']);
+    await bundle(['codex-cli', 'cowork']);
     expect(await shardIsHeadless(dir)).toBe(false);
     await bundle(['acme/client/unknown']);
     expect(await shardIsHeadless(dir)).toBe(false);

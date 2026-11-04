@@ -66,12 +66,12 @@ describe('mst clients', () => {
       'api',
       'chatgpt',
       'claude-code',
-      'codex',
       'codex-app',
+      'codex-cli',
       'cowork',
     ]);
     expect(out.text()).toMatch(/^cowork\s+macOS, Linux\s+Claude Desktop/m);
-    expect(out.text()).toMatch(/^codex\s+any OS\s+The Codex CLI/m);
+    expect(out.text()).toMatch(/^codex-cli\s+any OS\s+The Codex CLI/m);
     expect(out.text()).toMatch(
       /^codex-app\s+macOS, Linux\s+The Codex surface of the ChatGPT desktop app$/m
     );
@@ -144,13 +144,13 @@ describe('mst clients', () => {
 
   it("shows a built-in client's options as JSON Schema", async () => {
     const out = capture();
-    await showClient('codex', { json: true }, out.print);
+    await showClient('codex-cli', { json: true }, out.print);
     const shown = JSON.parse(out.text()) as {
       ref: string;
       requirements: { install?: string[] };
       options: { type?: string; properties?: Record<string, unknown> };
     };
-    expect(shown.ref).toBe('codex');
+    expect(shown.ref).toBe('codex-cli');
     expect(shown.requirements.install?.[0]).toContain('@openai/codex-sdk');
     expect(shown.options.type).toBe('object');
   });
@@ -185,7 +185,7 @@ describe('mst clients', () => {
 
   it('says what it knows when a client is unknown', async () => {
     await expect(showClient('nope', {}, capture().print)).rejects.toThrow(
-      'Client "nope" is not available. Available: api, chatgpt, claude-code, codex, codex-app, cowork.'
+      'Client "nope" is not available. Available: api, chatgpt, claude-code, codex-app, codex-cli, cowork.'
     );
     await expect(
       showClient('acme/client/desk', {}, capture().print)

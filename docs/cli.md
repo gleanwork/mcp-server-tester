@@ -722,7 +722,7 @@ Lists the clients an eval can run, built-in and from plugins, and shows what a m
 ```bash
 npx mst clients                                # built-in clients
 npx mst clients --plugins @acme/mst-plugin     # plus the plugin's
-npx mst clients show codex
+npx mst clients show codex-cli
 npx mst clients show acme/client/desk --plugins @acme/mst-plugin --json
 ```
 
@@ -730,7 +730,7 @@ npx mst clients show acme/client/desk --plugins @acme/mst-plugin --json
 api          any OS        The model alone, through its provider's API, with the servers' tools: ...
 chatgpt      macOS, Linux  The ChatGPT desktop app
 claude-code  any OS        The Claude Code CLI, headless
-codex        any OS        The Codex CLI, headless, through the Codex SDK
+codex-cli    any OS        The Codex CLI, headless, through the Codex SDK
 codex-app    macOS, Linux  The Codex surface of the ChatGPT desktop app
 cowork       macOS, Linux  Claude Desktop in Cowork mode
 ```

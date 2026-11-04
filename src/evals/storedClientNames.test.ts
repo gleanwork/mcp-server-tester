@@ -1060,4 +1060,42 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
     ).toEqual(['api', undefined]);
     expect(read.variants[1]).toEqual({ name: 'b' });
   });
+
+  it("map a stored codex to codex-cli in variants, with their options, shards' machines and case results", () => {
+    const options = { reasoningEffort: 'low', sandbox: 'read-only' };
+    const run = {
+      variants: [
+        { name: 'a', client: 'codex', clientOptions: options },
+        { name: 'b', client: 'mst/client/codex' },
+        { name: 'c', client: 'codex-app' },
+      ],
+      environment: {
+        name: 'docker',
+        machines: [{ shard: 1, client: 'codex', ok: true, collected: 1 }],
+      },
+    } as unknown as RunRecord;
+    const current = runWithCurrentClients(run);
+    expect(current.variants).toEqual([
+      { name: 'a', client: 'codex-cli', clientOptions: options },
+      { name: 'b', client: 'codex-cli' },
+      { name: 'c', client: 'codex-app' },
+    ]);
+    expect(current.environment.machines?.[0]?.client).toBe('codex-cli');
+    expect(run.variants[0]!.client).toBe('codex');
+
+    const summary = {
+      variants: [
+        {
+          name: 'a',
+          result: { caseResults: [{ id: 'x', request: { client: 'codex' } }] },
+        },
+      ],
+      results: [{ id: 'x', request: { client: 'codex' } }],
+    } as unknown as EvaluationSummary;
+    const read = summaryWithCurrentClients(summary);
+    expect(read.results[0]!.request?.client).toBe('codex-cli');
+    expect(read.variants[0]!.result!.caseResults[0]!.request?.client).toBe(
+      'codex-cli'
+    );
+  });
 });
