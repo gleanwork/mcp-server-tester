@@ -10,7 +10,9 @@ import {
   checksServersAfterPrepare,
   READINESS_RETRY_DELAYS_MS,
   readinessRetryDelaysMs,
+  readyBatch,
 } from './readinessCheck.js';
+import { ProxyUpstreamError } from './toolSurfaceProxy.js';
 import { getClient } from './builtinClients.js';
 import { createEvalCaseExecutor, executionEnding } from './caseExecution.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
@@ -20,7 +22,10 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { EvalCase } from './datasetTypes.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
-import { readyStdioServer } from '../../tests/mocks/readyServers.js';
+import {
+  readyStdioServer,
+  startReadinessHttpServer,
+} from '../../tests/mocks/readyServers.js';
 
 const dirs: string[] = [];
 async function tempDir(): Promise<string> {
@@ -45,6 +50,20 @@ afterEach(async () => {
 async function count(log: string, method = 'initialize'): Promise<number> {
   const text = await fs.readFile(log, 'utf8').catch(() => '');
   return text.split('\n').filter((line) => line === method).length;
+}
+
+/** Whether `line` shows up in `log` within `ms`. */
+async function waitForLine(
+  log: string,
+  line: string,
+  ms: number
+): Promise<boolean> {
+  const until = Date.now() + ms;
+  for (;;) {
+    if ((await count(log, line)) > 0) return true;
+    if (Date.now() > until) return false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 
 /** A sleep that records each delay and returns at once. */
@@ -206,6 +225,51 @@ describe('checkServersReady', () => {
     });
   });
 
+  it('closes a stdio server that never answers tools/list at the deadline', async () => {
+    const log = path.join(await tempDir(), 'server.log');
+    const readiness = await checkServersReady(
+      [
+        {
+          ...readyStdioServer({
+            READINESS_LOG: log,
+            READINESS_STALL_LIST: '1',
+          }),
+          label: 'stalled',
+        },
+      ],
+      { env: { MST_MCP_READINESS_RETRY_S: '' }, timeoutMs: 300 }
+    );
+    expect(readiness).toMatchObject({
+      ready: false,
+      servers: [
+        { label: 'stalled', status: 'failed', error: 'timed out after 0.3s' },
+      ],
+    });
+    expect(await count(log, 'tools/list')).toBe(1);
+    // Its stdin is closed at once, not when the SDK's request times out.
+    expect(await waitForLine(log, 'closed', 1_000)).toBe(true);
+  });
+
+  it('drops a stalled HTTP tools/list at the deadline, without waiting on a session DELETE', async () => {
+    const log = path.join(await tempDir(), 'server.log');
+    const server = await startReadinessHttpServer({ log, stallList: true });
+    try {
+      const started = Date.now();
+      const readiness = await checkServersReady(
+        [{ transport: 'http', serverUrl: server.url, label: 'stalled' }],
+        { env: { MST_MCP_READINESS_RETRY_S: '' }, timeoutMs: 300 }
+      );
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(readiness).toMatchObject({
+        ready: false,
+        servers: [{ label: 'stalled', error: 'timed out after 0.3s' }],
+      });
+      expect(await waitForLine(log, 'closed', 1_000)).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("gives a server its longer connectTimeoutMs, plus the probe's time to list", async () => {
     const readiness = await checkServersReady(
       [
@@ -309,6 +373,92 @@ describe('batchNotReady', () => {
       ending: { kind: 'infrastructure', broke: 'setup', retryable: true },
     });
     expect(await count(log)).toBe(1);
+  });
+});
+
+describe('readyBatch', () => {
+  const plain: ClientDefinition = { schema: z.object({}) };
+  const env = { MST_MCP_READINESS_RETRY_S: '' };
+
+  it('checks the declared servers, minTools included, before it starts the proxy', async () => {
+    const log = path.join(await tempDir(), 'probes.log');
+    const docs: MCPConfig = {
+      ...readyStdioServer({ READINESS_LOG: log }),
+      label: 'docs',
+    };
+    const order: string[] = [];
+    const startProxy = vi.fn(async () => {
+      order.push(`proxy after ${await count(log)} checks`);
+      return 'proxy';
+    });
+    await expect(
+      readyBatch(plain, [docs], startProxy, { env })
+    ).resolves.toEqual({ proxy: 'proxy' });
+    expect(order).toEqual(['proxy after 1 checks']);
+
+    startProxy.mockClear();
+    const degraded = await readyBatch(
+      plain,
+      [{ ...docs, minTools: 2 }],
+      startProxy,
+      { env }
+    );
+    expect(degraded.notReady?.()).toMatchObject({
+      error:
+        'MCP server not ready, so no trial was sent: docs listed 1 tool, fewer than its minTools (2). Checked 1 time.',
+      ending: { kind: 'infrastructure', broke: 'setup', retryable: true },
+    });
+    expect(startProxy).not.toHaveBeenCalled();
+  });
+
+  it('checks a proxied batch even for a client that checks after it prepares its app', async () => {
+    const log = path.join(await tempDir(), 'probes.log');
+    const servers = [
+      readyStdioServer({ READINESS_LOG: log, READINESS_TOOLS: '0' }),
+    ];
+    const desktop = checksServersAfterPrepare({ schema: z.object({}) });
+    const startProxy = vi.fn(async () => 'proxy');
+    const ready = await readyBatch(desktop, servers, startProxy, { env });
+    expect(ready.notReady?.()).toMatchObject({
+      ending: { kind: 'infrastructure', broke: 'setup', retryable: true },
+    });
+    expect(startProxy).not.toHaveBeenCalled();
+    expect(await count(log)).toBe(1);
+    // Unproxied, it is still left to the client.
+    await expect(
+      readyBatch(desktop, servers, undefined, { env })
+    ).resolves.toEqual({ proxy: undefined });
+    expect(await count(log)).toBe(1);
+  });
+
+  it('ends the batch when the proxy still cannot reach a server, and throws any other proxy error', async () => {
+    const servers = [{ ...readyStdioServer(), label: 'docs' }];
+    const unreachable = await readyBatch(
+      plain,
+      servers,
+      async () => {
+        throw new ProxyUpstreamError('docs', new Error('connect ECONNREFUSED'));
+      },
+      { env, log: () => {} }
+    );
+    const result = unreachable.notReady?.();
+    expect(result?.error).toMatch(
+      /^MCP server not ready, so no trial was sent: docs did not connect \(.+\) when the tool-variant proxy started\.$/
+    );
+    expect(result).toMatchObject({
+      ending: { kind: 'infrastructure', broke: 'setup', retryable: true },
+      telemetry: { mcpReadiness: [{ label: 'docs', status: 'failed' }] },
+    });
+    await expect(
+      readyBatch(
+        plain,
+        servers,
+        async () => {
+          throw new Error('Tool variant "v2" names a tool no server has.');
+        },
+        { env }
+      )
+    ).rejects.toThrow('names a tool no server has');
   });
 });
 

@@ -44,7 +44,7 @@ import {
 import { simulateMstClient } from './mstClient/simulation.js';
 import type { MstClientSimulationResult } from './mstClient/types.js';
 import { endingOf, thrownEnding } from './trialEnding.js';
-import { batchNotReady } from './readinessCheck.js';
+import { readyBatch } from './readinessCheck.js';
 import { batchName } from './prepareClientBatch.js';
 
 /** The client payload validators and reports read: the simulation shape. */
@@ -295,30 +295,21 @@ function clientExecutor(
 ): (evalCase: EvalCase) => Promise<CaseExecution> {
   const { servers, evalConfig, variant, env, batchTraces } = options;
   // MST's readiness check, once for the executor's batch (a variant's cases
-  // of one dataset), before its first trial. A batch client was checked
-  // before its batch ran.
+  // of one dataset), before its first trial, and before the proxy starts
+  // when proxied. A batch client was checked before its batch ran.
   let readiness: Promise<(() => ClientRunResult) | undefined> | undefined;
   const notReady = (definition: ClientDefinition) =>
-    (readiness ??= (async () => {
-      const proxied =
-        options.toolVariant && usesToolSurfaceProxy(definition)
-          ? await options.toolVariant.proxy()
-          : undefined;
-      // Through the proxy's own scope, so it isn't counted as the client's.
-      const scope = randomUUID();
-      try {
-        return await batchNotReady(
-          definition,
-          proxied ? proxied.serversFor(scope) : servers,
-          {
-            ...(env ? { env } : {}),
-            batch: batchName(options.client.type, { variant }),
-          }
-        );
-      } finally {
-        proxied?.endScope(scope);
+    (readiness ??= readyBatch(
+      definition,
+      servers,
+      options.toolVariant && usesToolSurfaceProxy(definition)
+        ? options.toolVariant.proxy
+        : undefined,
+      {
+        ...(env ? { env } : {}),
+        batch: batchName(options.client.type, { variant }),
       }
-    })());
+    ).then((ready) => ready.notReady));
   return async (evalCase) => {
     // The eval resolves a case's own client in full (see runEval).
     const declaration =

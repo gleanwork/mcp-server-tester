@@ -22,16 +22,17 @@ import {
   ProtocolErrorCode,
   Server,
 } from '@modelcontextprotocol/server';
-import type { MCPConfig } from '../config/mcpConfig.js';
+import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
 import {
   closeMCPClient,
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
 import type { ToolOverrideVariant } from './evalRunner.js';
 import { buildToolSurface, type ToolSurface } from './toolSurface.js';
-import type {
-  ToolSurfaceProxy,
-  ToolSurfaceProxyActivity,
+import {
+  ProxyUpstreamError,
+  type ToolSurfaceProxy,
+  type ToolSurfaceProxyActivity,
 } from './toolSurfaceProxy.js';
 
 // Capabilities the proxy serves by forwarding requests. Change notifications
@@ -58,7 +59,8 @@ interface Upstream {
 /**
  * Connects to the variant's servers, applies the variant, and listens on
  * 127.0.0.1. Throws, after closing what it opened, if a server can't be
- * reached or the variant doesn't fit the servers' tools.
+ * reached or list its tools (`ProxyUpstreamError`) or the variant doesn't
+ * fit the servers' tools.
  */
 export async function startToolSurfaceProxy(
   servers: readonly MCPConfig[],
@@ -67,8 +69,21 @@ export async function startToolSurfaceProxy(
   const upstreams: Upstream[] = [];
   let http: HttpServer | undefined;
   try {
-    for (const config of servers) {
-      const client = await createMCPClientForConfig(config);
+    // An upstream that fails names its server, as the readiness check does.
+    const reaching = async <T>(index: number, work: () => Promise<T>) => {
+      try {
+        return await work();
+      } catch (error) {
+        throw new ProxyUpstreamError(
+          mcpServerLabel(servers[index]!, index),
+          error
+        );
+      }
+    };
+    for (const [index, config] of servers.entries()) {
+      const client = await reaching(index, () =>
+        createMCPClientForConfig(config)
+      );
       upstreams.push({
         config,
         client,
@@ -80,15 +95,17 @@ export async function startToolSurfaceProxy(
       });
     }
     const listed = [];
-    for (const upstream of upstreams) {
+    for (const [index, upstream] of upstreams.entries()) {
       listed.push({
         server: upstream.config.label,
         tools:
           'tools' in upstream.capabilities
             ? (
-                await upstream.client.listTools(undefined, {
-                  timeout: upstream.timeout,
-                })
+                await reaching(index, () =>
+                  upstream.client.listTools(undefined, {
+                    timeout: upstream.timeout,
+                  })
+                )
               ).tools
             : [],
       });

@@ -9,7 +9,8 @@
 //   READINESS_FAIL_TIMES   the first N launches exit before answering...
 //   READINESS_FAIL_FILE    ...counted in this file (one line per launch)
 //   READINESS_LOG          appends `initialize` and `tools/list` here, one
-//                          line per request
+//                          line per request, and `closed` when stdin ends
+//   READINESS_STALL_LIST   when `1`, never answers `tools/list`
 //
 // Over HTTP, `startReadinessHttpServer` takes the same settings as options.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -25,14 +26,18 @@ function toolList(count) {
   }));
 }
 
-/** The JSON-RPC response for a message, or null for a notification. */
-function respond(message, { tools, log }) {
+/**
+ * The JSON-RPC response for a message, or null for a notification (and for
+ * `tools/list` when `stallList` is set).
+ */
+function respond(message, { tools, log, stallList }) {
   if (
     log &&
     (message.method === 'initialize' || message.method === 'tools/list')
   )
     appendFileSync(log, `${message.method}\n`);
   if (message.id === undefined) return null;
+  if (stallList && message.method === 'tools/list') return null;
   const result = (value) => ({ jsonrpc: '2.0', id: message.id, result: value });
   switch (message.method) {
     case 'initialize':
@@ -56,24 +61,36 @@ function respond(message, { tools, log }) {
 
 /**
  * Serves over HTTP on a free local port. `failTimes` answers the first N
- * `initialize` requests with a 503. Resolves to its URL and `close`.
+ * `initialize` requests with a 503. `stallList` never answers `tools/list`
+ * or a session DELETE, and logs `closed` when the client drops a stalled
+ * request. Resolves to its URL and `close`.
  */
 export function startReadinessHttpServer({
   tools = 1,
   failTimes = 0,
   log,
+  stallList = false,
 } = {}) {
   let failures = 0;
+  const stall = (res) =>
+    res.on('close', () => {
+      if (log && !res.writableEnded) appendFileSync(log, 'closed\n');
+    });
   const server = createServer((req, res) => {
     let body = '';
     req.on('data', (chunk) => (body += chunk));
     req.on('end', () => {
       if (req.method === 'GET') return res.writeHead(405).end();
-      if (req.method === 'DELETE') return res.writeHead(200).end();
+      if (req.method === 'DELETE')
+        return stallList ? stall(res) : res.writeHead(200).end();
       const message = JSON.parse(body);
       if (message.method === 'initialize' && failures < failTimes) {
         failures++;
         return res.writeHead(503).end();
+      }
+      if (stallList && message.method === 'tools/list') {
+        respond(message, { tools, log });
+        return stall(res);
       }
       const response = respond(message, { tools, log });
       if (response === null) return res.writeHead(202).end();
@@ -118,7 +135,11 @@ function serveStdio() {
   const settings = {
     tools: Number(process.env.READINESS_TOOLS ?? 1),
     log: process.env.READINESS_LOG,
+    stallList: process.env.READINESS_STALL_LIST === '1',
   };
+  process.stdin.on('end', () => {
+    if (settings.log) appendFileSync(settings.log, 'closed\n');
+  });
   const rl = readline.createInterface({ input: process.stdin });
   rl.on('line', (line) => {
     if (!line.trim()) return;

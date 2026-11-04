@@ -33,7 +33,12 @@ export interface ReadinessHttpServer {
 
 /** The HTTP server, on a free local port. */
 export function startReadinessHttpServer(
-  options: { tools?: number; failTimes?: number; log?: string } = {}
+  options: {
+    tools?: number;
+    failTimes?: number;
+    log?: string;
+    stallList?: boolean;
+  } = {}
 ): Promise<ReadinessHttpServer> {
   return startHttp(options) as Promise<ReadinessHttpServer>;
 }

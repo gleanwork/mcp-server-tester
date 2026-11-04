@@ -305,8 +305,10 @@ async function runBatch(
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkClientPlugins(plugins);
   const servers = requests[0]!.input.servers;
-  // MST's readiness probe uses its own endpoint when the servers are proxied.
-  const checkServers = requests[0]!.input.checkServers ?? servers;
+  // A request carries `checkServers` only when its servers are proxied. MST
+  // then checked them as declared before the proxy started, so Cowork's
+  // check after prepare has nothing left to check.
+  const readinessServers = requests[0]!.input.checkServers ? [] : servers;
   // Validate declarations before desktop actions. macOS resolves client-resolved
   // paths inside its leased setup transaction; Linux uses prepared runtime paths.
   const stdioServers = clientStdioServers(servers, plugins);
@@ -413,7 +415,7 @@ async function runBatch(
       // MST's readiness check runs once setup has resolved the stdio paths.
       readiness() {
         return {
-          servers: checkServers,
+          servers: readinessServers,
           resolve: (server) =>
             coworkReadinessServer(server, env, {
               plugins,

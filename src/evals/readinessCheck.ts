@@ -7,11 +7,14 @@
  * when one still isn't, no trial of the batch is sent, and each ends as a
  * retryable `setup` infrastructure failure that names the server (ADR 0010).
  *
- * The local dispatch and the worker call {@link batchNotReady} before a
- * batch starts. A desktop client whose servers resolve only once its app is
+ * The local dispatch and the worker call {@link readyBatch} before a batch
+ * starts. A desktop client whose servers resolve only once its app is
  * prepared (Cowork's stdio paths) is marked with
  * {@link checksServersAfterPrepare}: `desktopBatch` checks its servers after
- * `prepare` instead, so each server is checked once per batch.
+ * `prepare` instead, so each server is checked once per batch. A proxied
+ * batch (a variant's tool metadata, through MST's tool-variant proxy) is
+ * checked before the proxy starts, at its declared servers, whatever its
+ * client.
  */
 import {
   mcpServerLabel,
@@ -29,6 +32,8 @@ import {
   type McpServerReadiness,
 } from './mcpReadiness.js';
 import { infrastructureEnding } from './trialEnding.js';
+import { ProxyUpstreamError } from './toolSurfaceProxy.js';
+import { formatMCPConnectionFailure } from '../mcp/connectionDiagnostics.js';
 
 /**
  * How long to wait before each recheck of servers that weren't ready. A
@@ -201,9 +206,19 @@ export function checksServersAfterPrepare<T extends ClientDefinition>(
 export async function batchNotReady(
   definition: ClientDefinition,
   servers: readonly MCPConfig[],
-  options: ReadinessCheckOptions = {}
+  options: ReadinessCheckOptions & {
+    /**
+     * The batch reaches its servers through the tool-variant proxy, which
+     * MST launches: they are checked here even for a client that checks
+     * after it prepares its app.
+     */
+    proxied?: boolean;
+  } = {}
 ): Promise<(() => ClientRunResult) | undefined> {
-  if ((definition as { [CHECKS_AFTER_PREPARE]?: true })[CHECKS_AFTER_PREPARE])
+  if (
+    !options.proxied &&
+    (definition as { [CHECKS_AFTER_PREPARE]?: true })[CHECKS_AFTER_PREPARE]
+  )
     return undefined;
   // Labeled first, so each keeps the name its place in the set gives it.
   const checkable = servers
@@ -219,4 +234,54 @@ export async function batchNotReady(
     `[mst] ${options.batch ?? 'The batch'} didn't run: ${readiness.reason}`
   );
   return () => notReadyResult(readiness);
+}
+
+/** A batch that can't run, or the proxy it runs through (when it has one). */
+export type BatchReadiness<P> =
+  | { notReady: () => ClientRunResult; proxy?: undefined }
+  | { notReady?: undefined; proxy: P | undefined };
+
+/**
+ * Readies a batch before its first trial: checks its declared servers
+ * ({@link batchNotReady}), then, for a proxied batch, starts the proxy
+ * (`startProxy`). The check runs against the declarations, never through
+ * the proxy, so each server's own `minTools` applies and no probe is taken
+ * for the client's traffic. A proxy that can't reach a server once the
+ * check passed ends the batch the same way, as a retryable setup failure
+ * naming the server; any other error starting the proxy is thrown.
+ */
+export async function readyBatch<P>(
+  definition: ClientDefinition,
+  servers: readonly MCPConfig[],
+  startProxy: (() => Promise<P>) | undefined,
+  options: ReadinessCheckOptions = {}
+): Promise<BatchReadiness<P>> {
+  const notReady = await batchNotReady(definition, servers, {
+    ...options,
+    proxied: startProxy !== undefined,
+  });
+  if (notReady) return { notReady };
+  if (!startProxy) return { proxy: undefined };
+  try {
+    return { proxy: await startProxy() };
+  } catch (error) {
+    if (!(error instanceof ProxyUpstreamError)) throw error;
+    const reason = `MCP server not ready, so no trial was sent: ${error.server} did not connect (${formatMCPConnectionFailure(error.cause)}) when the tool-variant proxy started.`;
+    logLine(options)(
+      `[mst] ${options.batch ?? 'The batch'} didn't run: ${reason}`
+    );
+    const readiness: Extract<ServersReadiness, { ready: false }> = {
+      ready: false,
+      servers: [
+        {
+          label: error.server,
+          status: 'failed',
+          elapsedMs: 0,
+          error: formatMCPConnectionFailure(error.cause),
+        },
+      ],
+      reason,
+    };
+    return { notReady: () => notReadyResult(readiness) };
+  }
 }

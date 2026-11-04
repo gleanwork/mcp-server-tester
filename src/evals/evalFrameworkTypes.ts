@@ -93,10 +93,11 @@ export interface ClientRunInput {
   prompt: string;
   servers: MCPConfig[];
   /**
-   * When `servers` go through MST's tool-variant proxy: the same servers on
-   * an endpoint for MST's own checks (such as a readiness probe), so the
-   * check's traffic isn't taken for the client's. Connect the client itself
-   * only to `servers`.
+   * Set only when `servers` go through MST's tool-variant proxy: the same
+   * servers on an endpoint for the client's own checks, so that traffic
+   * isn't taken for the client's. MST's readiness check doesn't use it: it
+   * checks the declared servers before the proxy starts. Connect the client
+   * itself only to `servers`.
    */
   checkServers?: MCPConfig[];
   /** Execution-local environment; never persisted. */

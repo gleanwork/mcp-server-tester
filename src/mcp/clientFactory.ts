@@ -508,6 +508,25 @@ async function connect(
 }
 
 /**
+ * Closes a client at once, for a caller that has given up on it: rejects its
+ * pending requests and closes its transport (ends a stdio server's stdin,
+ * aborts HTTP requests), without ending the session first, since a server
+ * that stalls can stall a DELETE too. Never throws.
+ */
+export async function abandonMCPClient(client: Client): Promise<void> {
+  try {
+    await client.close();
+  } catch (error) {
+    debugClient(
+      'Error abandoning client: %s',
+      error instanceof Error ? error.message : String(error)
+    );
+  } finally {
+    await releaseConnection(client);
+  }
+}
+
+/**
  * Safely closes an MCP client connection
  *
  * @param client - The client to close

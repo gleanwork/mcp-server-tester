@@ -1,4 +1,6 @@
+import type { Client } from '@modelcontextprotocol/client';
 import {
+  abandonMCPClient,
   closeMCPClient,
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
@@ -35,15 +37,38 @@ function probeLimitMs(
     : { connect, whole: timeoutMs };
 }
 
+/**
+ * One probe's client, and whether its time ran out. When it does, the
+ * client is abandoned at once (`abandonMCPClient`): its pending `tools/list`
+ * rejects and its transport closes, so a stalled server can't hold the
+ * connection (or a stdio process) while a retry launches another.
+ */
+class ProbeDeadline {
+  private client: Client | undefined;
+  expired = false;
+
+  /** The client the probe connected; abandoned at once if time ran out. */
+  opened(client: Client): void {
+    this.client = client;
+    if (this.expired) void abandonMCPClient(client);
+  }
+
+  expire(): void {
+    this.expired = true;
+    if (this.client) void abandonMCPClient(this.client);
+  }
+}
+
 /** The probe's own work: connect, list tools, close. Never throws. */
 async function probe(
   server: MCPConfig,
   label: string,
   started: number,
   resolve: (server: MCPConfig) => MCPConfig,
-  timeoutMs: number
+  timeoutMs: number,
+  deadline: ProbeDeadline
 ): Promise<McpServerReadiness> {
-  let client: Awaited<ReturnType<typeof createMCPClientForConfig>> | undefined;
+  let client: Client | undefined;
   try {
     const resolved = resolve(server);
     // A connect that outlives the probe gives up, and stops its server.
@@ -51,6 +76,7 @@ async function probe(
       ...resolved,
       connectTimeoutMs: probeLimitMs(resolved, timeoutMs).connect,
     });
+    deadline.opened(client);
     const tools = await client.listTools();
     // A degraded server (e.g. static tools only, after an auth failure)
     // can still list tools. Fail closed below the declared minimum.
@@ -79,7 +105,9 @@ async function probe(
       error: formatMCPConnectionFailure(error),
     };
   } finally {
-    if (client) await closeMCPClient(client).catch(() => undefined);
+    // An expired probe's client was abandoned instead.
+    if (client && !deadline.expired)
+      await closeMCPClient(client).catch(() => undefined);
   }
 }
 
@@ -98,22 +126,22 @@ export async function checkMcpServers(
       const label = mcpServerLabel(server, index);
       const started = Date.now();
       const limitMs = probeLimitMs(server, timeoutMs).whole;
+      const deadline = new ProbeDeadline();
       let timer: NodeJS.Timeout | undefined;
       try {
-        // A probe that outlives its time still closes its connection.
+        // A probe that outlives its time has its client closed at once.
         return await Promise.race([
-          probe(server, label, started, resolve, timeoutMs),
+          probe(server, label, started, resolve, timeoutMs, deadline),
           new Promise<McpServerReadiness>((settle) => {
-            timer = setTimeout(
-              () =>
-                settle({
-                  label,
-                  status: 'failed',
-                  elapsedMs: Date.now() - started,
-                  error: `timed out after ${limitMs / 1000}s`,
-                }),
-              limitMs
-            );
+            timer = setTimeout(() => {
+              deadline.expire();
+              settle({
+                label,
+                status: 'failed',
+                elapsedMs: Date.now() - started,
+                error: `timed out after ${limitMs / 1000}s`,
+              });
+            }, limitMs);
           }),
         ]);
       } finally {

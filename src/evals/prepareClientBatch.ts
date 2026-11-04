@@ -11,7 +11,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { isClientUnavailable } from './clientUnavailable.js';
-import { batchNotReady } from './readinessCheck.js';
+import { readyBatch } from './readinessCheck.js';
 import {
   clientSecretValues,
   redactClientError,
@@ -192,18 +192,6 @@ export async function prepareClientBatch(
   );
   const declared = batchRequests(cases, config, servers, context);
   if (!declared.length) return queues;
-  // Proxied clients connect to the variant's servers through the proxy.
-  const proxied =
-    toolVariant && usesToolSurfaceProxy(definition)
-      ? proxiedBatch(
-          definition,
-          declared,
-          await toolVariant.proxy(),
-          servers,
-          toolVariant.id
-        )
-      : undefined;
-  const requests = proxied?.requests ?? declared;
   const { onTrace } = options;
   // Every trace a batch client hands MST, early or at the end, has no secret
   // in it before it is settled, saved or graded.
@@ -213,6 +201,29 @@ export async function prepareClientBatch(
   ];
   const received = (trace: ClientRunResult): ClientRunResult =>
     redactedClientRun(trace, secrets());
+  // MST's readiness check, before the batch's first trial and before the
+  // proxy starts. Proxied clients connect to the variant's servers through
+  // the proxy.
+  const ready = await readyBatch(
+    definition,
+    servers,
+    toolVariant && usesToolSurfaceProxy(definition)
+      ? toolVariant.proxy
+      : undefined,
+    {
+      ...(context.env ? { env: context.env } : {}),
+      batch: batchName(config.type, context),
+    }
+  );
+  if (ready.notReady) {
+    for (const request of declared)
+      queues.get(request.caseId)!.push(received(ready.notReady()));
+    return queues;
+  }
+  const proxied = ready.proxy
+    ? proxiedBatch(definition, declared, ready.proxy, servers, toolVariant!.id)
+    : undefined;
+  const requests = proxied?.requests ?? declared;
   // A trace reported early is settled with the proxy's traffic so far; the
   // batch's returned traces are settled again when it ends.
   const reportResult = onTrace
@@ -239,22 +250,6 @@ export async function prepareClientBatch(
   const batchContext = proxied
     ? withoutToolVariant(withSettings)
     : withSettings;
-  // MST's readiness check, before the batch's first trial: through the
-  // proxy's own scope when proxied, so it isn't counted as the client's.
-  const notReady = await batchNotReady(
-    definition,
-    requests[0]!.input.checkServers ?? servers,
-    {
-      ...(context.env ? { env: context.env } : {}),
-      batch: batchName(config.type, context),
-    }
-  );
-  if (notReady) {
-    proxied?.endChecks();
-    for (const request of requests)
-      queues.get(request.caseId)!.push(received(notReady()));
-    return queues;
-  }
   let traces: ClientRunResult[];
   try {
     traces = await definition.runBatch(

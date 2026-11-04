@@ -423,7 +423,7 @@ describe('V2 Cowork client', () => {
       expect.objectContaining({ appPath: '/private/tmp/pinned/Claude.app' })
     );
   });
-  it('probes readiness on the check endpoint when its servers are proxied', async () => {
+  it("leaves a proxied batch's servers to MST's check before the proxy started", async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     const prepared = createCoworkClient({
       dataDirectory: () => '/prepared/session',
@@ -439,12 +439,9 @@ describe('V2 Cowork client', () => {
     }));
     const result = await prepared.runBatch!(batch, { ...context, env: {} });
     expect(result.every((r) => !r.error)).toBe(true);
-    expect(readinessCall().servers).toEqual([check]);
-    expect(mocks.readinessServer).toHaveBeenCalledWith(
-      check,
-      expect.any(Object),
-      { plugins: [], paths: {} }
-    );
+    // The dispatch checked the declared servers before starting the proxy.
+    expect(mocks.readiness).not.toHaveBeenCalled();
+    expect(mocks.readinessServer).not.toHaveBeenCalled();
     expect(COWORK_CLIENT.serversPerBatch).toBe(true);
     expect(COWORK_CLIENT.toolSurfaceProxy).toBeUndefined();
   });

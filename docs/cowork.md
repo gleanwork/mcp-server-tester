@@ -978,7 +978,10 @@ checked during prepare. HTTP servers get the same headers Cowork uses. Every
 server, stdio or HTTP, must connect and list at least one tool, and at least its
 `minTools`. When one doesn't, no prompt is sent: each trial of the batch ends as
 a retryable setup failure whose reason names the server, for example
-`fake-eval listed 1 tool, fewer than its minTools (4)`. An adapter with a bad
+`fake-eval listed 1 tool, fewer than its minTools (4)`. When a variant gives
+Cowork tool metadata, its servers go through MST's tool-variant proxy, which MST
+launches itself: MST checks them as declared before the proxy starts, as for any
+client, and Cowork doesn't check them again after preparation. An adapter with a bad
 token, for example, may list only its static tools. Desktop-side readiness (for example, a
 caller's own log check) should also compare each server's `toolCount` with
 `minTools`.

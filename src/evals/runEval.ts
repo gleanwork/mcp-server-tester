@@ -2272,7 +2272,8 @@ async function evaluate(
         const mcp = client
           ? createMCPFixture(client, undefined, { authType: 'api-token' })
           : undefined;
-        // Started on first use, for hosts that connect to their servers themselves.
+        // Started on first use, for hosts that connect to their servers
+        // themselves. A start that fails is tried again by the next batch.
         const toolMetadata = variantToolMetadata(evalConfig, variant);
         let proxy: Promise<ToolSurfaceProxy> | undefined;
         const toolVariant =
@@ -2283,7 +2284,10 @@ async function evaluate(
                   (proxy ??= startToolSurfaceProxy(
                     resolvedServers,
                     toolMetadata
-                  )),
+                  ).catch((error: unknown) => {
+                    proxy = undefined;
+                    throw error;
+                  })),
               }
             : undefined;
 

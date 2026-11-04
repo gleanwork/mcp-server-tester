@@ -25,11 +25,23 @@ afterEach(async () => {
   );
 });
 
+/** What else a fixture's eval sets. */
+interface FixtureOptions {
+  /** The client: `shard-test/client/probe` (run per case) by default. */
+  client?: string;
+  /** Gives the eval tool metadata, so the client gets the servers through the proxy. */
+  proxied?: boolean;
+  /** How many tools `docs` lists (1 by default). */
+  tools?: number;
+  /** The `minTools` `docs` declares. */
+  minTools?: number;
+}
+
 /**
  * Two cases on the shard-test client against `docs`, a stdio server whose
  * first `failLaunches` launches exit before answering.
  */
-async function fixture(failLaunches: number) {
+async function fixture(failLaunches: number, options: FixtureOptions = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-run-readiness-'));
   dirs.push(dir);
   const launches = path.join(dir, 'launches');
@@ -50,16 +62,23 @@ async function fixture(failLaunches: number) {
     JSON.stringify({
       name: 'readiness',
       plugins: [mock('forkEnvPlugin.ts'), mock('shardTestPlugin.ts')],
-      client: 'shard-test/client/probe',
+      client: options.client ?? 'shard-test/client/probe',
       datasets: ['./cases.json'],
+      ...(options.proxied
+        ? { tools: { tool_1: { description: 'The first tool.' } } }
+        : {}),
       servers: {
         docs: {
           transport: 'stdio',
           command: process.execPath,
           args: [READINESS_SERVER],
+          ...(options.minTools !== undefined
+            ? { minTools: options.minTools }
+            : {}),
           env: {
             READINESS_FAIL_FILE: launches,
             READINESS_FAIL_TIMES: String(failLaunches),
+            READINESS_TOOLS: String(options.tools ?? 1),
           },
         },
       },
@@ -163,5 +182,86 @@ describe('a run whose server is not ready', () => {
     expect(resumed.summary.metrics).toMatchObject({ passed: 2, total: 2 });
     expect(resumed.summary.metrics).not.toHaveProperty('incomplete');
     expect(await f.launches()).toBe(2);
+  }, 90_000);
+});
+
+/**
+ * A variant with tool metadata reaches the client through MST's
+ * tool-variant proxy. The rule is the same: its servers are checked as
+ * declared, before the proxy starts, with retries.
+ */
+describe('a proxied run whose server is not ready', () => {
+  async function expectSetupEndings(
+    f: Awaited<ReturnType<typeof fixture>>,
+    runDir: string,
+    reason: RegExp
+  ) {
+    for (const caseId of ['alpha', 'bravo']) {
+      const stored = await f.trial(runDir, caseId);
+      expect(stored).toMatchObject({
+        infrastructureError: true,
+        ending: { kind: 'infrastructure', broke: 'setup', retryable: true },
+      });
+      expect(stored.error).toMatch(reason);
+    }
+  }
+
+  it.each(['shard-test/client/probe', 'shard-test/client/batch'])(
+    'ends every trial of a %s batch as a retryable setup failure, after the retries, locally',
+    async (client) => {
+      vi.stubEnv('MST_MCP_READINESS_RETRY_S', '0,0');
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const f = await fixture(99, { client, proxied: true });
+      const result = await f.run();
+      expect(result.summary.metrics).toMatchObject({
+        passed: 0,
+        failed: 0,
+        incomplete: 2,
+      });
+      await expectSetupEndings(
+        f,
+        result.outputDir,
+        /^MCP server not ready, so no trial was sent: docs did not connect \(.+\)\. Checked 3 times\.$/
+      );
+      // Checked three times; the proxy never started.
+      expect(await f.launches()).toBe(3);
+    },
+    30_000
+  );
+
+  it.each(['shard-test/client/probe', 'shard-test/client/batch'])(
+    "holds a %s batch to its server's minTools",
+    async (client) => {
+      vi.stubEnv('MST_MCP_READINESS_RETRY_S', '');
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const f = await fixture(0, { client, proxied: true, minTools: 2 });
+      const result = await f.run();
+      expect(result.summary.metrics).toMatchObject({ incomplete: 2 });
+      await expectSetupEndings(
+        f,
+        result.outputDir,
+        /^MCP server not ready, so no trial was sent: docs listed 1 tool, fewer than its minTools \(2\)\. Checked 1 time\.$/
+      );
+    },
+    30_000
+  );
+
+  it('does the same on a worker, minTools included', async () => {
+    vi.stubEnv('MST_MCP_READINESS_RETRY_S', '');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const down = await fixture(99, { proxied: true });
+    const first = await down.run('fork/env/children');
+    expect(first.summary.metrics).toMatchObject({ incomplete: 2 });
+    await expectSetupEndings(down, first.outputDir, notReady);
+
+    const degraded = await fixture(0, { proxied: true, minTools: 2 });
+    const second = await degraded.run('fork/env/children');
+    expect(second.summary.metrics).toMatchObject({ incomplete: 2 });
+    await expectSetupEndings(
+      degraded,
+      second.outputDir,
+      /^MCP server not ready, so no trial was sent: docs listed 1 tool, fewer than its minTools \(2\)\. Checked 1 time\.$/
+    );
   }, 90_000);
 });

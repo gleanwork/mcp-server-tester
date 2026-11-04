@@ -10,6 +10,7 @@ import {
 import type { ClientRunResult } from './evalFrameworkTypes.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import {
+  ProxyUpstreamError,
   settleProxiedTrace,
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
@@ -66,6 +67,19 @@ async function start(servers: MCPConfig[]) {
 }
 
 describe('startToolSurfaceProxy', () => {
+  it('names the server it cannot reach', async () => {
+    const down: MCPConfig = {
+      transport: 'stdio',
+      command: process.execPath,
+      args: ['-e', 'process.exit(1)'],
+    };
+    const failure = await start([catalog('docs', 'docs'), down]).catch(
+      (error: unknown) => error
+    );
+    expect(failure).toBeInstanceOf(ProxyUpstreamError);
+    expect(failure).toMatchObject({ server: 'server-2' });
+  });
+
   it.each(['legacy', '2026-07-28'] as const)(
     'serves the variant to a %s client and records calls under original names',
     async (protocol) => {

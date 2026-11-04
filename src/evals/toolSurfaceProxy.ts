@@ -54,6 +54,26 @@ export interface ToolSurfaceProxy {
 }
 
 /**
+ * The proxy couldn't connect to an upstream server or list its tools. The
+ * dispatch ends the batch as not ready (`readyBatch`), as for a server that
+ * failed MST's readiness check; any other error starting the proxy (a
+ * variant that doesn't fit the tools) is thrown.
+ */
+export class ProxyUpstreamError extends Error {
+  constructor(
+    /** The server's label, as the readiness check names it. */
+    readonly server: string,
+    cause: unknown
+  ) {
+    super(
+      `The tool-variant proxy couldn't reach ${server}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause }
+    );
+    this.name = 'ProxyUpstreamError';
+  }
+}
+
+/**
  * Whether the eval gives a client a variant's tool metadata through the proxy:
  * clients that run cases themselves and don't apply variants, unless they opt
  * out with `toolSurfaceProxy: false`.
