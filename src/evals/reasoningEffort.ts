@@ -19,7 +19,7 @@ type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
 type Efforts = readonly [ReasoningEffort, ...ReasoningEffort[]];
 
-/** The values the Codex CLI (`codex`) accepts. */
+/** The values the Codex CLI (`codex-cli`) accepts. */
 export const CODEX_REASONING_EFFORTS = [
   'minimal',
   'low',

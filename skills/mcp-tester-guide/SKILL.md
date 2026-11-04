@@ -209,6 +209,7 @@ One case: `runEvalCase(evalCase, { mcp, testInfo }, { client: 'api', model })`. 
 | `api`                       | The model alone, through its provider's API, with the servers' tools | Playwright and `mst run`              |
 | `claude-code`               | Claude Code, with an empty config directory                          | `mst run`                             |
 | `cowork`                    | Claude Cowork in Claude Desktop                                      | `mst run` (macOS: `mst cowork setup`) |
+| `codex-cli`                 | The Codex CLI, headless                                              | `mst run`                             |
 | `chatgpt`                   | The ChatGPT desktop app                                              | `mst run`                             |
 | `codex-app`                 | The Codex surface of the ChatGPT desktop app                         | `mst run`                             |
 | `<namespace>/client/<name>` | A plugin's client                                                    | `mst run`                             |

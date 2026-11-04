@@ -1,5 +1,5 @@
 /**
- * The `codex` client's trace: what Codex reported while it ran (the SDK's
+ * The `codex-cli` client's trace: what Codex reported while it ran (the SDK's
  * `codex exec --experimental-json` events, each timed as it arrived), joined
  * with the session's rollout file in its `CODEX_HOME`, which records each
  * model response with its usage and the tool calls it asked for.

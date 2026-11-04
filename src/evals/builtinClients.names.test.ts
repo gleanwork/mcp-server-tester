@@ -108,6 +108,41 @@ describe('built-in client names', () => {
     expect(storedClientName('mst/client/api')).toBe('api');
   });
 
+  it('codex fails naming codex-cli, and codex-app for the Codex surface', () => {
+    const config = {
+      name: 'm',
+      datasets: [{ type: 'file', path: 'x.json' }],
+    };
+    const renamed =
+      'Client "codex" is now "codex-cli". For the Codex surface of the ChatGPT desktop app, use "codex-app".';
+    expect(() => getClient('codex')).toThrow(renamed);
+    expect(() => validateEvalConfig({ ...config, client: 'codex' })).toThrow(
+      renamed
+    );
+    expect(() =>
+      validateEvalConfig({
+        ...config,
+        client: 'api',
+        variants: [{ name: 'old', client: 'codex' }],
+      })
+    ).toThrow(renamed);
+    expect(() =>
+      playwrightClientOf({ id: 'c', input: 'hi', client: 'codex' }, undefined)
+    ).toThrow(renamed);
+    expect(() => getClient('mst/client/codex')).toThrow(
+      'Client "mst/client/codex" is now "mst/client/codex-cli". For the Codex surface of the ChatGPT desktop app, use "codex-app".'
+    );
+    // The current names still work.
+    expect(getClient('mst/client/codex-cli')).toBe(getClient('codex-cli'));
+  });
+
+  it('a stored run that says codex reads as codex-cli', () => {
+    expect(storedClientName('codex')).toBe('codex-cli');
+    expect(storedClientName('mst/client/codex')).toBe('codex-cli');
+    expect(storedClientName('codex-cli')).toBe('codex-cli');
+    expect(storedClientName('codex-app')).toBe('codex-app');
+  });
+
   it('a result records the client and model the case ran on, by either name', async () => {
     async function completed() {
       return {
@@ -255,7 +290,7 @@ describe('built-in client names', () => {
         client: 'sdk',
       })
     ).toThrow(
-      'Client "sdk" is not available. Available: api, chatgpt, claude-code, codex, codex-app, cowork.'
+      'Client "sdk" is not available. Available: api, chatgpt, claude-code, codex-app, codex-cli, cowork.'
     );
   });
 });

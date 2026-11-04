@@ -182,9 +182,9 @@ beforeEach(() => {
     (sdk as Record<string, unknown>)[key] = key === 'hang' ? false : undefined;
 });
 
-describe('codex client options', () => {
+describe('codex-cli client options', () => {
   it('is a built-in, headless client with a structured trace', () => {
-    expect(getClient('codex')).toBe(CODEX_CLIENT);
+    expect(getClient('codex-cli')).toBe(CODEX_CLIENT);
     expect(CODEX_CLIENT).toMatchObject({
       evidence: 'structured',
       headless: true,
@@ -197,7 +197,7 @@ describe('codex client options', () => {
   it('takes its options and refuses others', () => {
     expect(
       CodexClientSchema.parse({
-        type: 'codex',
+        type: 'codex-cli',
         model: 'gpt-5.5',
         timeout: 1000,
         reasoningEffort: 'high',
@@ -206,11 +206,11 @@ describe('codex client options', () => {
         systemPrompt: 'Be brief.',
       })
     ).toMatchObject({ model: 'gpt-5.5', reasoningEffort: 'high' });
-    expect(() => CodexClientSchema.parse({ type: 'codex', bogus: 1 })).toThrow(
-      /bogus/
-    );
     expect(() =>
-      CodexClientSchema.parse({ type: 'codex', sandbox: 'none' })
+      CodexClientSchema.parse({ type: 'codex-cli', bogus: 1 })
+    ).toThrow(/bogus/);
+    expect(() =>
+      CodexClientSchema.parse({ type: 'codex-cli', sandbox: 'none' })
     ).toThrow();
   });
 
@@ -223,10 +223,10 @@ describe('codex client options', () => {
     };
     expect(() =>
       assertClientSupports(
-        { type: 'codex' },
+        { type: 'codex-cli' },
         { servers: [oauth], context: 'eval "e"' }
       )
-    ).toThrow(`eval "e": codex can't take oauth for server x.`);
+    ).toThrow(`eval "e": codex-cli can't take oauth for server x.`);
     // An access token from the environment is resolved just before the run.
     const fromEnv: MCPConfig = {
       transport: 'http',
@@ -235,7 +235,7 @@ describe('codex client options', () => {
     };
     expect(() =>
       assertClientSupports(
-        { type: 'codex' },
+        { type: 'codex-cli' },
         { servers: [fromEnv], context: 'eval "e"' }
       )
     ).not.toThrow();
@@ -349,7 +349,7 @@ describe('codex config', () => {
   });
 });
 
-describe('codex client run', () => {
+describe('codex-cli client run', () => {
   let cwd: string;
   beforeEach(async () => {
     cwd = await mkdtemp(join(tmpdir(), 'mst-codex-test-'));
@@ -362,7 +362,7 @@ describe('codex client run', () => {
     const result = await CODEX_CLIENT.run!(
       { prompt: 'Find x', servers: [servers[0]!], env: { EXTRA: '1' } },
       {
-        type: 'codex',
+        type: 'codex-cli',
         model: 'gpt-5.5',
         reasoningEffort: 'low',
         env: { MY_FLAG: 'on' },
@@ -416,7 +416,7 @@ describe('codex client run', () => {
   it('gives Codex the reasoningEffort set, and rejects one it lacks before Codex starts', async () => {
     await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex', reasoningEffort: 'minimal' },
+      { type: 'codex-cli', reasoningEffort: 'minimal' },
       context(GATEWAY)
     );
     expect(sdk.thread).toMatchObject({ modelReasoningEffort: 'minimal' });
@@ -424,11 +424,11 @@ describe('codex client run', () => {
     await expect(
       CODEX_CLIENT.run!(
         { prompt: 'x', servers: [] },
-        { type: 'codex', reasoningEffort: 'max' },
+        { type: 'codex-cli', reasoningEffort: 'max' },
         context(GATEWAY)
       )
     ).rejects.toThrow(
-      "codex doesn't support reasoningEffort `max`: it accepts minimal, low, medium, high, xhigh."
+      "codex-cli doesn't support reasoningEffort `max`: it accepts minimal, low, medium, high, xhigh."
     );
     expect(sdk.thread).toBeUndefined();
   });
@@ -436,7 +436,7 @@ describe('codex client run', () => {
   it('runs in a given cwd, and keeps it', async () => {
     await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex', cwd },
+      { type: 'codex-cli', cwd },
       context(GATEWAY)
     );
     expect(sdk.thread!.workingDirectory).toBe(cwd);
@@ -446,7 +446,7 @@ describe('codex client run', () => {
   it('uses the built-in OpenAI provider without a base URL', async () => {
     await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex' },
+      { type: 'codex-cli' },
       context({ OPENAI_API_KEY: 'sk-openai', OPENAI_BASE_URL: '' })
     );
     const env = sdk.options!.env as Record<string, string>;
@@ -462,7 +462,7 @@ describe('codex client run', () => {
       await expect(
         CODEX_CLIENT.run!(
           { prompt: 'x', servers: [] },
-          { type: 'codex' },
+          { type: 'codex-cli' },
           context({})
         )
       ).rejects.toThrow(/requires an API key/);
@@ -475,10 +475,10 @@ describe('codex client run', () => {
     sdk.hang = true;
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex', timeout: 50 },
+      { type: 'codex-cli', timeout: 50 },
       context(GATEWAY)
     );
-    expect(result.error).toBe('codex client timed out after 50 ms.');
+    expect(result.error).toBe('codex-cli client timed out after 50 ms.');
     expect(result.diagnostics).toEqual({ failureKind: 'timeout' });
     // The case's own time ran out: a trial that failed (ADR 0010).
     expect(result.ending).toEqual({ kind: 'trial' });
@@ -488,10 +488,10 @@ describe('codex client run', () => {
     sdk.hangBeforeTurn = true;
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex', timeout: 50 },
+      { type: 'codex-cli', timeout: 50 },
       context(GATEWAY)
     );
-    expect(result.error).toBe('codex client timed out after 50 ms.');
+    expect(result.error).toBe('codex-cli client timed out after 50 ms.');
     expect(result.ending).toBeUndefined();
     expect(result.diagnostics).toEqual({ failureKind: 'timeout' });
   });
@@ -500,7 +500,7 @@ describe('codex client run', () => {
     sdk.fail = 'boom: Bearer sk-gateway rejected';
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex' },
+      { type: 'codex-cli' },
       context(GATEWAY)
     );
     expect(result.error).toContain('Codex exited with an error: boom');
@@ -547,7 +547,7 @@ describe('codex client run', () => {
     sdk.actedFirst = acted;
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex' },
+      { type: 'codex-cli' },
       context(GATEWAY)
     );
     expect(result.error).toContain('Codex exited with an error');
@@ -558,7 +558,7 @@ describe('codex client run', () => {
     sdk.failBeforeTurn = 'spawn codex ENOENT';
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex' },
+      { type: 'codex-cli' },
       context(GATEWAY)
     );
     expect(result.diagnostics).toEqual({ failureKind: 'startup' });
@@ -574,7 +574,7 @@ describe('codex client run', () => {
     sdk.turnFailed = 'The model refused: line 500 of the plan.';
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex' },
+      { type: 'codex-cli' },
       context(GATEWAY)
     );
     expect(result.ending).toBeUndefined();

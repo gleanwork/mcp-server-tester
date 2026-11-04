@@ -27,7 +27,7 @@ export default {
         };
       },
     },
-    /** A client that needs no desktop, as `codex`: its shards get none. */
+    /** A client that needs no desktop, as `codex-cli`: its shards get none. */
     headless: {
       schema: z.object({ type: z.string() }).passthrough(),
       evidence: 'structured',

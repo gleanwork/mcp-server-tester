@@ -300,7 +300,7 @@ describe('mst CLI', () => {
       const result = await runBin('run', '--config', 'host.json', '--dry-run');
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toMatch(
-        /^mst: Client "sdk" is not available. Available: api, chatgpt, claude-code, codex, codex-app, cowork./
+        /^mst: Client "sdk" is not available. Available: api, chatgpt, claude-code, codex-app, codex-cli, cowork./
       );
       expect(result.stderr).not.toMatch(/\n\s+at /);
     });
@@ -402,12 +402,12 @@ describe('mst CLI', () => {
       const list = await runBin('clients');
       expect(list.exitCode).toBe(0);
       expect(list.stdout).toMatch(/^cowork +macOS, Linux +Claude Desktop/m);
-      expect(list.stdout).toMatch(/^codex +any OS +The Codex CLI/m);
+      expect(list.stdout).toMatch(/^codex-cli +any OS +The Codex CLI/m);
 
-      const show = await runBin('clients', 'show', 'codex', '--json');
+      const show = await runBin('clients', 'show', 'codex-cli', '--json');
       expect(show.exitCode).toBe(0);
       expect(JSON.parse(String(show.stdout))).toMatchObject({
-        ref: 'codex',
+        ref: 'codex-cli',
         options: { type: 'object' },
       });
 

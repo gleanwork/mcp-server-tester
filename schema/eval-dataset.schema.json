@@ -62,7 +62,7 @@
         "client": {
           "type": "string",
           "minLength": 1,
-          "description": "The client the case runs on: api, claude-code, codex, cowork, chatgpt, codex-app, or a plugin's <namespace>/client/<name>. Inherits the eval's (or the run's) client."
+          "description": "The client the case runs on: api, claude-code, codex-cli, cowork, chatgpt, codex-app, or a plugin's <namespace>/client/<name>. Inherits the eval's (or the run's) client."
         },
         "model": {
           "type": "string",

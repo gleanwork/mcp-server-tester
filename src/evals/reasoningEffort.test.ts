@@ -10,7 +10,7 @@ import { REASONING_EFFORTS } from './reasoningEffort.js';
 import { showClient } from '../cli/commands/clients/index.js';
 
 const ACCEPTED = {
-  codex: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+  'codex-cli': ['minimal', 'low', 'medium', 'high', 'xhigh'],
   chatgpt: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   'codex-app': ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
 } as const;

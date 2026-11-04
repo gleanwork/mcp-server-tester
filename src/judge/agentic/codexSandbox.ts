@@ -2,7 +2,7 @@
  * Codex's sandbox mode from MST_JUDGE_SANDBOX: `os` (the default), its own
  * read-only OS sandbox; `container`, none, because the machine is a
  * disposable container that is the sandbox (see codexRuntime.ts). The Codex
- * judge and the `codex` client both read it. A module of its own, so a bundle
+ * judge and the `codex-cli` client both read it. A module of its own, so a bundle
  * that only needs this doesn't take the judge runtime's imports.
  */
 export function codexSandboxMode(

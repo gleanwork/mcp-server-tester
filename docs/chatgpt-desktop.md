@@ -8,8 +8,8 @@ Codex CLI, Codex APIs, or an inference API to run the evaluated query.
 The desktop app has two products, and each is a client:
 
 - `"client": "chatgpt"` drives ChatGPT Work.
-- `"client": "codex-app"` drives the app's Codex surface. It is not the `codex`
-  client, which runs the Codex CLI headless ([codex.md](./codex.md)).
+- `"client": "codex-app"` drives the app's Codex surface. It is not the
+  `codex-cli` client, which runs the Codex CLI headless ([codex.md](./codex.md)).
 
 Both run on macOS and on Linux. How they run follows from the OS of the machine
 that runs the trial, and no option selects it. `clientOptions.computerUseProvider`
@@ -46,7 +46,7 @@ this machine's OS for `--env local` (the default) and against Linux for
 is prepared.
 
 `timeout` is the trial's time limit in ms, default 300000. `reasoningEffort`
-is one of `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. `minimal`, which the `codex` client takes, fails here, and the message
+is one of `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. `minimal`, which the `codex-cli` client takes, fails here, and the message
 names the values ChatGPT accepts.
 
 Both clients run a variant's cases in one app, with one set of settings. A case

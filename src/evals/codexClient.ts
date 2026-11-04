@@ -1,5 +1,5 @@
 /**
- * The `codex` client: OpenAI's Codex agent, run headless through
+ * The `codex-cli` client: OpenAI's Codex agent, run headless through
  * `@openai/codex-sdk` (which runs the Codex CLI's `codex exec`), with the
  * eval's servers as its MCP servers.
  *
@@ -87,7 +87,7 @@ const PASSTHROUGH_ENV = [
 
 export const CodexClientSchema = z
   .object({
-    type: z.literal('codex').optional(),
+    type: z.literal('codex-cli').optional(),
     /** The model Codex runs. Without one, Codex's own default. */
     model: GenerationOptions.model,
     /** The trial's time limit in ms (default 300000). */
@@ -95,7 +95,10 @@ export const CodexClientSchema = z
     /** Added to Codex's own instructions (`developer_instructions`), which stay. */
     systemPrompt: SystemPromptOption,
     /** How hard the model reasons (`model_reasoning_effort`). */
-    reasoningEffort: reasoningEffortOption('codex', CODEX_REASONING_EFFORTS),
+    reasoningEffort: reasoningEffortOption(
+      'codex-cli',
+      CODEX_REASONING_EFFORTS
+    ),
     /**
      * Codex's sandbox for its shell commands. Default: `read-only`, or
      * `danger-full-access` where MST_JUDGE_SANDBOX=container says the
@@ -186,13 +189,13 @@ function unsupported(server: MCPConfig, resolved: boolean): string[] {
 /** Fails, naming what to remove, for a server Codex can't connect to as configured. */
 export function assertCodexServers(
   servers: readonly MCPConfig[],
-  { resolved, context = 'codex' }: { resolved: boolean; context?: string }
+  { resolved, context = 'codex-cli' }: { resolved: boolean; context?: string }
 ): void {
   for (const [index, server] of servers.entries()) {
     const settings = unsupported(server, resolved);
     if (settings.length)
       throw new Error(
-        `${context}: codex can't take ${settings.join(', ')} for server ${mcpServerLabel(server, index)}. Remove ${settings.length > 1 ? 'them' : 'it'}, or use the api client.`
+        `${context}: codex-cli can't take ${settings.join(', ')} for server ${mcpServerLabel(server, index)}. Remove ${settings.length > 1 ? 'them' : 'it'}, or use the api client.`
       );
   }
 }
@@ -393,7 +396,7 @@ async function runCodex(
   });
   if (!endpoint.apiKey)
     throw new Error(
-      'The codex client requires an API key: set OPENAI_API_KEY, or OPENAI_BASE_URL with MST_LLM_AUTH_COMMAND for a gateway (docs/llm-gateways.md).'
+      'The codex-cli client requires an API key: set OPENAI_API_KEY, or OPENAI_BASE_URL with MST_LLM_AUTH_COMMAND for a gateway (docs/llm-gateways.md).'
     );
   const secrets = clientSecretValues(env, input.servers, [endpoint.apiKey]);
   const redact = (text: string) => redactClientSecrets(text, secrets);
@@ -469,7 +472,7 @@ async function runCodex(
       failure = controller.signal.aborted
         ? {
             kind: 'timeout',
-            message: `codex client timed out after ${timeoutMs} ms.`,
+            message: `codex-cli client timed out after ${timeoutMs} ms.`,
           }
         : {
             kind: stream.some((e) => e.event.type === 'turn.started')
@@ -534,7 +537,7 @@ async function runCodex(
 }
 
 /**
- * The `codex` client. It connects to the servers it is given, so a variant's
+ * The `codex-cli` client. It connects to the servers it is given, so a variant's
  * tool metadata reaches it through MST's proxy; it needs no desktop.
  */
 /**

@@ -1,11 +1,13 @@
-# The Codex client
+# The Codex CLI client
 
-The `codex` client runs OpenAI's [Codex](https://developers.openai.com/codex) agent headless, through `@openai/codex-sdk` (which runs the Codex CLI's `codex exec`), with the eval's servers as its MCP servers. It is what Codex users get: Codex's own instructions, tool loading (`tool_search`) and shell, with the model you name.
+The `codex-cli` client runs OpenAI's [Codex](https://developers.openai.com/codex) agent headless, through `@openai/codex-sdk` (which runs the Codex CLI's `codex exec`), with the eval's servers as its MCP servers. It is what Codex users get: Codex's own instructions, tool loading (`tool_search`) and shell, with the model you name.
+
+It was the `codex` client; `codex` now fails validation, naming `codex-cli` ([migration](./migrations/2.0-prereleases.md#the-codex-cli-client-is-codex-cli)). The Codex surface of the ChatGPT desktop app is a different client, [`codex-app`](./chatgpt-desktop.md).
 
 ```json
 {
-  "name": "codex-smoke",
-  "client": "codex",
+  "name": "codex-cli-smoke",
+  "client": "codex-cli",
   "model": "gpt-5.5",
   "datasets": ["./cases.json"],
   "servers": {
@@ -14,7 +16,7 @@ The `codex` client runs OpenAI's [Codex](https://developers.openai.com/codex) ag
 }
 ```
 
-Install the SDK beside MST (`npm install @openai/codex-sdk`); it brings the Codex CLI for your platform. MST's Linux image has it, so `--env docker` and environments built on it run `codex` too.
+Install the SDK beside MST (`npm install @openai/codex-sdk`); it brings the Codex CLI for your platform. MST's Linux image has it, so `--env docker` and environments built on it run `codex-cli` too.
 
 ## Model access
 
@@ -44,7 +46,7 @@ For `--env` and `--detach` runs, put these in the `--secrets-file`: workers get 
 
 - **A fresh, private `CODEX_HOME`** (also its `HOME`), holding only the `config.toml` MST writes (mode 0600): the model provider, the servers and their credentials, and settings that keep extras out of the result. Codex's plugins, apps, memories, bundled skills, history, update check, analytics and OpenAI-bound metrics are off. Nothing secret is on Codex's command line. The directory is removed after the trial.
 - **Its environment** is only what Codex needs (`PATH`, locale, proxy and CA settings), the model key, and the client's `env`. Codex's shell gets only core variables (`shell_environment_policy.inherit = "core"`).
-- **Servers.** Each server is required: one that doesn't start fails the trial with Codex's reason, instead of Codex answering without it. Tool calls are approved (`approval_policy = "never"`, tools `approve`): the servers, or a connector's dry-run proxy, decide what a write does. A server's `connectTimeoutMs` is Codex's startup timeout (default 60 s). Codex can't forward OAuth, client credentials, mTLS, a proxy, `retryAttempts` or client capabilities; an eval that sets them for a `codex` server fails validation.
+- **Servers.** Each server is required: one that doesn't start fails the trial with Codex's reason, instead of Codex answering without it. Tool calls are approved (`approval_policy = "never"`, tools `approve`): the servers, or a connector's dry-run proxy, decide what a write does. A server's `connectTimeoutMs` is Codex's startup timeout (default 60 s). Codex can't forward OAuth, client credentials, mTLS, a proxy, `retryAttempts` or client capabilities; an eval that sets them for a `codex-cli` server fails validation.
 - **Server labels** become Codex `mcp_servers` keys (characters other than letters, digits, `_` and `-` become `_`); the trace keeps the eval's labels.
 - **Tool metadata** (`tools`) reaches Codex through MST's local MCP proxy, as for other clients that connect to their servers.
 
