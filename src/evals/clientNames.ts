@@ -108,13 +108,28 @@ const STORED_MAX_ACTIONS_NAMES = [
 ] as const;
 
 /**
+ * Options each built-in client accepted and never used, until they failed
+ * validation (ADR 0011): the api and claude-code clients' servers (they run
+ * with the eval's) and Claude Code's legacy plugin settings, and the desktop
+ * clients' fixed `provider`. A stored run that recorded one ran without it.
+ */
+const STORED_UNUSED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+  api: ['server', 'servers'],
+  'claude-code': ['server', 'servers', 'apiToken', 'pluginDir', 'pluginMcpUrl'],
+  cowork: ['provider'],
+  chatgpt: ['provider'],
+  'codex-app': ['provider'],
+};
+
+/**
  * A client and its options as a stored run recorded them (a run.json
  * variant), as MST names them now: the name through `storedClientName`,
  * and a `chatgpt` with `clientOptions.surface: "codex"` (before ADR 0011)
  * as `codex-app`, with `surface` left out of its options, so it compares
  * equal to a config written today. A stored `surface: "chatgpt-work"` is
  * left out the same way, and so is a desktop client's
- * `computerUseProvider` (before ADR 0011 too). A desktop client's
+ * `computerUseProvider` (before ADR 0011 too), and an option the client
+ * never used (`STORED_UNUSED_OPTIONS`). A desktop client's
  * `computerUseMaxActions` or `nativeMaxActions` reads as `maxActions`.
  * Anything else is returned unchanged.
  */
@@ -145,6 +160,12 @@ export function storedClientSetup<
       if (!Object.hasOwn(stored, 'maxActions')) budget ??= old;
     }
   }
+  const unused = Object.hasOwn(STORED_UNUSED_OPTIONS, client)
+    ? STORED_UNUSED_OPTIONS[client]!
+    : [];
+  for (const key of unused)
+    if (item.clientOptions && Object.hasOwn(item.clientOptions, key))
+      gone.add(key);
   if (!gone.size) return client === item.client ? item : { ...item, client };
   // Renamed where it was, so the options keep the order a config gives them.
   const options = Object.fromEntries(

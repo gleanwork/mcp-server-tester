@@ -121,7 +121,7 @@ describe('a case systemPrompt', () => {
             clientOptions: { systemPrompt: 'Case prompt.' },
           },
         ],
-        { client: 'cowork' }
+        { client: 'cowork', clientOptions: undefined }
       )
     ).rejects.toThrow(/systemPrompt/);
   });

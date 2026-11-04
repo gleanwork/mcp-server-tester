@@ -41,9 +41,11 @@ import {
 import type { ChatgptSurface } from './chatgpt/driver.js';
 import {
   COMPUTER_USE_PROVIDER_GONE,
+  fixedProviderGone,
   maxActionsRenamed,
   osName,
 } from './desktopOS.js';
+import { removedClientOptions } from './renamedKeys.js';
 
 /**
  * A product the ChatGPT desktop app runs, and so a client (ADR 0011):
@@ -102,7 +104,10 @@ const schemaOf = (product: DesktopProduct) =>
         product.client,
         CHATGPT_APP_REASONING_EFFORTS
       ),
-      provider: z.literal('openai').optional(),
+      /** Gone: the client fixes its provider. */
+      ...removedClientOptions({
+        provider: fixedProviderGone(product.client, 'openai'),
+      }),
       /** The trial's time limit in ms (default 300000). */
       timeout: z.number().int().positive().default(300_000),
       env: z.record(z.string(), z.string()).optional(),

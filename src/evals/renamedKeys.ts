@@ -34,6 +34,28 @@ export function removedKeys<const T extends Record<string, string>>(
 }
 
 /**
+ * Schema fields for client options that a client accepted but never used
+ * (ADR 0011). An old option is still recognized, so a config that sets one
+ * fails with `reason` (what to do instead) rather than as an unrecognized
+ * key. A field like this doesn't take an eval config default of the same
+ * name.
+ */
+export function removedClientOptions<const T extends Record<string, string>>(
+  reasons: T
+): { [K in keyof T]: z.ZodOptional<z.ZodNever> } {
+  return Object.fromEntries(
+    Object.entries(reasons).map(([key, reason]) => [
+      key,
+      z
+        .never({
+          message: `\`clientOptions.${key}\` is gone: remove it. ${reason}`,
+        })
+        .optional(),
+    ])
+  ) as { [K in keyof T]: z.ZodOptional<z.ZodNever> };
+}
+
+/**
  * Throw for an option 2.0 renamed (ADR 0002) that a JavaScript caller still
  * passes, naming its replacement, rather than ignoring it or failing later.
  */

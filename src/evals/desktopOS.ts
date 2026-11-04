@@ -19,6 +19,17 @@ export function maxActionsRenamed(
   return `\`clientOptions.${old}\` is now \`maxActions\`: a desktop client's action budget has one name, whatever OS the trial runs on.`;
 }
 
+/**
+ * Why `clientOptions.provider` fails on a desktop client: the client fixes
+ * it, so the option, which took only that one value, did nothing.
+ */
+export function fixedProviderGone(
+  client: string,
+  provider: 'anthropic' | 'openai'
+): string {
+  return `\`${client}\` fixes its own provider (\`${provider}\`). Its credentials and any LLM gateway come from the environment: \`mst clients show ${client}\` lists them.`;
+}
+
 /** An OS as messages name it. */
 export function osName(os: NodeJS.Platform): string {
   return os === 'darwin' ? 'macOS' : os === 'linux' ? 'Linux' : os;

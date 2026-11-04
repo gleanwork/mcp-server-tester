@@ -281,14 +281,27 @@ const HOST_DEFAULTS = [
   'maxTokens',
 ] as const;
 
-/** Whether a client's schema takes `key`: declared, or accepted by a loose schema. */
+/**
+ * Whether a client's schema takes `key`: declared, or accepted by a loose
+ * schema. A key it declares only to reject (`z.never`, an option that is
+ * gone) isn't taken, so an eval config default never reaches it.
+ */
 function takesOption(schema: ZodType, key: string): boolean {
   if (!(schema instanceof z.ZodObject)) return true;
-  if (key in schema.shape) return true;
+  const shape = schema.shape as Record<string, ZodType>;
+  if (Object.hasOwn(shape, key)) return !rejectsEveryValue(shape[key]!);
   const catchall = (
     schema._zod.def as { catchall?: { _zod: { def: { type: string } } } }
   ).catchall?._zod.def.type;
   return catchall !== undefined && catchall !== 'never';
+}
+
+/** Whether a schema field is `z.never()`, under any optional or default. */
+function rejectsEveryValue(field: ZodType): boolean {
+  let def = field._zod.def as { type: string; innerType?: ZodType };
+  while (def.innerType && def.type !== 'never')
+    def = def.innerType._zod.def as typeof def;
+  return def.type === 'never';
 }
 
 /**

@@ -440,15 +440,17 @@ function resolveClient(
   const declaration = (clientPatchOf(variant) ??
     clientPatchOf(evalConfig) ?? { type: DEFAULT_CLIENT }) as ClientConfig;
   const definition: ClientDefinition = getClient(declaration.type);
-  const config = builtinClientDefaults(declaration.type, {
-    ...declaration,
-    servers,
-    server: servers[0],
-    env: clientEnvironment(
-      { env: declaration.env as ClientEnvironment | undefined },
-      { env }
-    ),
-  });
+  const config = builtinClientDefaults(
+    declaration.type,
+    {
+      ...declaration,
+      env: clientEnvironment(
+        { env: declaration.env as ClientEnvironment | undefined },
+        { env }
+      ),
+    },
+    servers
+  );
   return { definition, declaration, config };
 }
 

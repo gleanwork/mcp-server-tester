@@ -337,11 +337,9 @@ describe('CLI connection policy preflight', () => {
     'rejects unsupported HTTP policy before config generation: %j',
     (policy) => {
       expect(() =>
-        getBuiltinClientConfig('claude-code', {
-          servers: [
-            { transport: 'http', serverUrl: 'https://test.invalid', ...policy },
-          ],
-        })
+        getBuiltinClientConfig('claude-code', {}, [
+          { transport: 'http', serverUrl: 'https://test.invalid', ...policy },
+        ])
       ).toThrow("claude-code can't forward");
     }
   );
@@ -358,17 +356,15 @@ describe('CLI connection policy preflight', () => {
     expect(process.env.GOOGLE_VERTEX_PROJECT).toBe(before);
   });
   it('serializes supported static token and headers', () => {
-    const config = getBuiltinClientConfig('claude-code', {
-      servers: [
-        {
-          transport: 'http',
-          label: 'a',
-          serverUrl: 'https://test.invalid',
-          auth: { accessToken: 'token' },
-          headers: { 'X-Test': 'yes' },
-        },
-      ],
-    });
+    const config = getBuiltinClientConfig('claude-code', {}, [
+      {
+        transport: 'http',
+        label: 'a',
+        serverUrl: 'https://test.invalid',
+        auth: { accessToken: 'token' },
+        headers: { 'X-Test': 'yes' },
+      },
+    ]);
     expect(config.mcpServers?.a).toMatchObject({
       headers: { Authorization: 'Bearer token', 'X-Test': 'yes' },
     });
