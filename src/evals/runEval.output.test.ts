@@ -26,8 +26,9 @@ afterEach(async () => {
 
 describe('eval output', () => {
   it('prints no reporter hint, and the trials warning once across variants', async () => {
+    // One tool, so MST's readiness check passes.
     vi.mocked(createMCPClientForConfig).mockResolvedValue({
-      listTools: vi.fn(async () => ({ tools: [] })),
+      listTools: vi.fn(async () => ({ tools: [{ name: 'weather' }] })),
     } as unknown as Awaited<ReturnType<typeof createMCPClientForConfig>>);
     vi.mocked(simulateMstClient).mockResolvedValue({
       success: true,

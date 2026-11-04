@@ -2,6 +2,9 @@
  * The batch rules every desktop client (Cowork, ChatGPT) follows, in one place:
  *
  * - one desktop per run, claimed with a cross-process lease file;
+ * - for a client whose servers resolve only once its app is prepared, MST's
+ *   readiness check runs after `prepare` and before the first case; when a
+ *   server isn't ready, no case is sent;
  * - cases run one at a time, each self-contained: a case that leaves the app
  *   in an unknown state resets it before the next case, and if it can't be
  *   reset, the remaining cases are not submitted (never retried or resent);
@@ -37,6 +40,8 @@ import {
 } from './clientSecrets.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
 import { stableJson } from '../skills/skillEntry.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
+import { checkServersReady, notReadyResult } from './readinessCheck.js';
 
 /**
  * Failed cases in a row after which a batch stops submitting. A reset that
@@ -72,6 +77,15 @@ interface NativeSessionLedger {
   claim(sessionId: string): boolean;
 }
 
+/** What a desktop batch checks after `prepare`. */
+interface ReadinessTarget {
+  servers: MCPConfig[];
+  /** Each server as the app will launch it. */
+  resolve?: (server: MCPConfig) => MCPConfig;
+  /** The client's environment, where the retry setting is read first. */
+  env?: Readonly<Record<string, string | undefined>>;
+}
+
 export interface DesktopClientAdapter<Session> {
   /** Client name in messages, e.g. 'Cowork'. */
   readonly name: string;
@@ -84,14 +98,17 @@ export interface DesktopClientAdapter<Session> {
   /** Sets up the desktop (settings, app launch). */
   prepare(): Promise<Session>;
   /**
-   * The MCP readiness gate (`checkMcpServers` with the shared
-   * `isMcpServerReady` rule) for servers that only become resolvable after
-   * `prepare`. Runs before the first case; a failure
-   * stops the batch with nothing submitted, and the session is still disposed.
-   * Clients that can check readiness before touching the desktop (ChatGPT, before
-   * it stops the user's app) run the same gate inside `prepare` instead.
+   * The servers MST checks before the first case, as the app will launch
+   * them, for a client whose servers resolve only once `prepare` has run
+   * (Cowork's stdio paths). The batch checks them right after `prepare`
+   * (`checkServersReady`, with its retries); when one isn't ready, no case
+   * is sent and each ends as a retryable setup failure. Such a client's
+   * definition is marked with `checksServersAfterPrepare`, so the dispatch
+   * doesn't also check them before the batch. A client whose servers need
+   * no preparation (ChatGPT) leaves this out: the dispatch checks them
+   * before the batch starts, before anything touches the desktop.
    */
-  ready?(session: Session): Promise<void>;
+  readiness?(session: Session): ReadinessTarget | undefined;
   runCase(
     session: Session,
     request: ClientBatchRequest,
@@ -279,15 +296,29 @@ export async function runDesktopBatch<Session>(
   let cleanupError: Error | undefined;
   try {
     session = await adapter.prepare();
-    await adapter.ready?.(session);
     let resetBeforeCase = false;
     let blocked: string | undefined;
+    const target = adapter.readiness?.(session);
+    const readiness = target?.servers.length
+      ? await checkServersReady(target.servers, {
+          ...(target.resolve ? { resolve: target.resolve } : {}),
+          ...(target.env ? { env: target.env } : {}),
+        })
+      : undefined;
+    // No case is sent: each ends as a setup failure a retry can help.
+    if (readiness && !readiness.ready) {
+      console.warn(
+        `[mst] The ${adapter.name} batch didn't run: ${redactClientSecrets(readiness.reason, secrets)}`
+      );
+      results.push(...requests.map(() => notReadyResult(readiness)));
+    }
+    const toRun = readiness && !readiness.ready ? [] : requests;
     // `the Cowork app`, and `the Codex app`, not `the Codex app app`.
     const theApp = adapter.name.endsWith(' app')
       ? `the ${adapter.name}`
       : `the ${adapter.name} app`;
     let consecutiveFailures = 0;
-    for (const [index, request] of requests.entries()) {
+    for (const [index, request] of toRun.entries()) {
       if (resetBeforeCase && !blocked) {
         resetBeforeCase = false;
         if (!adapter.reset)

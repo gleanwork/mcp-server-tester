@@ -11,6 +11,7 @@ import { runEval } from '../src/evals/runEval.js';
 import { startLabelPage } from '../src/evals/labelPage.js';
 import { readLabels } from '../src/evals/labels.js';
 import type { Plugin } from '../src/plugins/plugin.js';
+import { readyStdioServer } from './mocks/readyServers.js';
 
 const plugin: Plugin = {
   meta: { name: 'label-page-spec', namespace: 'lps' },
@@ -82,7 +83,7 @@ async function storedRun(): Promise<string> {
       datasets: ['./cases.json'],
       client: 'lps/client/scripted',
       redactStoredResponses: false,
-      servers: { docs: { transport: 'stdio', command: 'docs-server' } },
+      servers: { docs: readyStdioServer() },
       judges: ['lps/judge/keyword'],
       pairwiseJudges: ['lps/pairwise-judge/longer'],
       variants: [

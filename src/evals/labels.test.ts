@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +23,17 @@ import {
 } from './runFormat.js';
 import { labelExport, labelImport } from '../cli/commands/label/index.js';
 import { resolveRunArgument } from '../cli/runArgument.js';
+import {
+  startReadinessHttpServer,
+  type ReadinessHttpServer,
+} from '../../tests/mocks/readyServers.js';
+
+// A server MST's readiness check reaches, in process: no spawn per batch.
+let docsServer: ReadinessHttpServer;
+beforeAll(async () => {
+  docsServer = await startReadinessHttpServer();
+});
+afterAll(() => docsServer.close());
 
 const dirs: string[] = [];
 
@@ -117,7 +128,7 @@ async function storedRun(
       client: 'lb/client/scripted',
       trials: 2,
       redactStoredResponses: options.redact ?? false,
-      servers: { docs: { transport: 'stdio', command: 'docs-server' } },
+      servers: { docs: { transport: 'http', serverUrl: docsServer.url } },
       judges: [
         { type: 'lb/judge/keyword', keyword: 'certificate' },
         ...(options.brokenJudge ? [{ type: 'lb/judge/broken' }] : []),

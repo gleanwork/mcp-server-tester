@@ -842,6 +842,17 @@ A variant's tool metadata (`tools`: descriptions, input schemas, renames) reache
 
 The ChatGPT desktop client opts out until it is verified with the proxy, so an eval config that gives it `tools` fails validation.
 
+### Server readiness
+
+Every client's trials wait for one readiness check ([ADR 0011](./adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md)). Before the first trial of a batch (a variant's trials of one dataset, on one client), MST connects to each of the variant's servers, lists its tools and closes the connection. A server is ready when it connects and lists at least one tool, and at least its `minTools` for a stdio server. Each probe has 30 seconds for all of that; a server that sets a longer `connectTimeoutMs` gets that to connect, plus 30 seconds.
+
+- **Every client.** It runs for `api`, `claude-code`, `codex`, `chatgpt`, `codex-app`, `cowork` and plugin clients, on the machine that runs the trials: in the `mst run` process for a local run, and on the worker in an environment. A client's own startup checks (Claude Code's MCP startup, Codex's `required` servers, the ChatGPT app's status probe on Linux) still run after it.
+- **When.** MST checks before the batch starts, before anything touches a desktop app. Cowork's stdio servers resolve only once the app is prepared, so Cowork's servers are checked after preparation and before its first prompt instead. A server is checked once per batch.
+- **Retries.** A server that isn't ready is checked again after 10 seconds and then after 30 more. Only the servers that failed are checked again. `MST_MCP_READINESS_RETRY_S` sets other delays as comma-separated seconds (`5,20`); an empty value turns retries off. The old name, `MST_COWORK_MCP_PREFLIGHT_RETRY_S`, fails the run when it starts.
+- **Isolated traffic.** For a client that gets [tool metadata](#tool-metadata-on-every-client) through the proxy, the check uses the endpoint for checks (`input.checkServers`), so it doesn't count as the client listing the variant's tools.
+- **When a server isn't ready.** No trial of the batch is sent. Each trial ends as an [infrastructure failure](./adr/0010-a-trial-ending-is-decided-where-it-ends.md) with `broke: 'setup'` and `retryable: true`, and a reason that names the server and what failed, for example `MCP server not ready, so no trial was sent: search listed no tools. Checked 3 times.` Its case is incomplete, the run goes on with its other batches, and `mst run --resume` collects those trials again.
+- **Not checked.** A stdio server with client-resolved fields (`url`, `auth`, `files`, or `${...}` placeholders) has no launch until its client resolves it; only Cowork checks it, after preparation. `runEvalDataset` in a Playwright test isn't checked either: the test's fixture already connected.
+
 ## Execution lifecycle
 
 ```text
@@ -850,7 +861,8 @@ EvalConfig
   -> validate tagged blocks, extension names and namespaces, schemas, and server labels
   -> resolve DatasetSource entries into EvalDataset values
   -> derive one or more variants from the eval config (baseline first)
-  -> run each variant through its client (built-in or plugin) with its MCPConfig[] server set
+  -> check each batch's servers are ready, then run each variant through its
+     client (built-in or plugin) with its MCPConfig[] server set
   -> compute metrics and judges
   -> write per-variant results through the ResultStore
   -> save a RunSummary with the config's identity, content hash, variant aggregates,

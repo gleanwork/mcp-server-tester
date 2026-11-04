@@ -1,7 +1,15 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from 'vitest';
 import { z } from 'zod';
 import { runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
@@ -21,6 +29,20 @@ import { installPlugins } from '../plugins/extensions.js';
 import { loadEvalConfigFromObject } from './evalConfig.js';
 import { fakeAuthServer } from '../auth/grants/fakeAuthServer.js';
 import { recordSimulatedWrite } from '../proxy/simulatedWrites.js';
+import {
+  READINESS_SERVER,
+  startReadinessHttpServer,
+} from '../../tests/mocks/readyServers.js';
+
+// The Acme connector's server: one MST's readiness check reaches.
+let acmeUrl = '';
+let acmeServer: { close: () => Promise<void> } | undefined;
+beforeAll(async () => {
+  const server = await startReadinessHttpServer();
+  acmeUrl = server.url;
+  acmeServer = server;
+});
+afterAll(() => acmeServer?.close());
 
 let dir: string;
 let store: CredentialStore;
@@ -60,15 +82,17 @@ function testPlugin(): Plugin {
   return {
     meta: { name: 'acme-plugin', namespace: 'acme' },
     connectors: {
-      acme: { url: 'https://acme.example/mcp', auth: { type: 'oauth' } },
+      acme: { url: acmeUrl, auth: { type: 'oauth' } },
       slack: {
         url: 'https://slack.example/mcp',
         auth: { type: 'oauth', refreshScope: null },
         minTools: 10,
         launch: ({ url, label, tokenFile }) => ({
           transport: 'stdio',
-          command: '/usr/bin/true',
+          command: process.execPath,
+          env: { READINESS_TOOLS: '10' },
           args: [
+            READINESS_SERVER,
             '--upstream',
             url,
             '--name',
@@ -84,8 +108,8 @@ function testPlugin(): Plugin {
         auth: { type: 'oauth', client: async () => ({ clientId: 'g' }) },
         launch: ({ url, tokenFile }) => ({
           transport: 'stdio',
-          command: '/usr/bin/true',
-          args: [url, tokenFile!],
+          command: process.execPath,
+          args: [READINESS_SERVER, url, tokenFile!],
         }),
       },
       gdrive: {
@@ -94,8 +118,8 @@ function testPlugin(): Plugin {
         auth: { type: 'oauth', client: async () => ({ clientId: 'g' }) },
         launch: ({ url, tokenFile }) => ({
           transport: 'stdio',
-          command: '/usr/bin/true',
-          args: [url, tokenFile!],
+          command: process.execPath,
+          args: [READINESS_SERVER, url, tokenFile!],
         }),
       },
     },
@@ -171,7 +195,7 @@ describe('connector servers in a run', () => {
       {
         transport: 'http',
         label: 'acme',
-        serverUrl: 'https://acme.example/mcp',
+        serverUrl: acmeUrl,
         auth: { accessToken: 'acme-token' },
       },
     ]);
@@ -359,7 +383,7 @@ describe('connector servers on a shard (ADR 0004)', () => {
       {
         connector: 'acme/connector/acme',
         label: 'acme',
-        url: 'https://acme.example/mcp',
+        url: acmeUrl,
       },
       {
         connector: 'acme/connector/gmail',
@@ -539,10 +563,14 @@ describe('simulateWrites', () => {
             launches.push({ ...context });
             return {
               transport: 'stdio',
-              command: '/usr/bin/true',
+              command: process.execPath,
               args: context.simulateWrites
-                ? ['--simulate-writes', context.simulateWrites.file]
-                : [],
+                ? [
+                    READINESS_SERVER,
+                    '--simulate-writes',
+                    context.simulateWrites.file,
+                  ]
+                : [READINESS_SERVER],
             };
           },
         },
@@ -550,7 +578,11 @@ describe('simulateWrites', () => {
         legacy: {
           url: 'https://legacy.example/mcp',
           auth: { type: 'none' },
-          launch: () => ({ transport: 'stdio', command: '/usr/bin/true' }),
+          launch: () => ({
+            transport: 'stdio',
+            command: process.execPath,
+            args: [READINESS_SERVER],
+          }),
         },
       },
       clients: {
@@ -561,7 +593,7 @@ describe('simulateWrites', () => {
           run: async (input) => {
             const notes = input.servers.find((s) => s.label === 'notes');
             const file =
-              notes?.transport === 'stdio' ? notes.args?.[1] : undefined;
+              notes?.transport === 'stdio' ? notes.args?.[2] : undefined;
             if (file)
               await recordSimulatedWrite(file, {
                 time: new Date().toISOString(),

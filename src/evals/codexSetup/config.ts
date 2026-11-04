@@ -29,8 +29,6 @@ const CodexStdioServerSchema = z
     args: z.array(z.string()).optional(),
     cwd: z.string().optional(),
     env: z.record(z.string(), z.string()).optional(),
-    /** MST's readiness rule, checked by the direct preflight; not written to config.toml. */
-    minTools: z.number().int().min(1).max(10_000).optional(),
   })
   .strict();
 

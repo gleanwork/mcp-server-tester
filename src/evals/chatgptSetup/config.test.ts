@@ -55,7 +55,7 @@ describe('ChatGPT server translation', () => {
       )
     ).toThrow('ChatGPT does not support client-resolved stdio eval servers');
   });
-  it("keeps a plain stdio server's minTools for the preflight, as for a dry-run proxy", () => {
+  it("leaves a stdio server's minTools to MST's readiness check", () => {
     const mapped = chatgptServers(
       [
         {
@@ -68,8 +68,7 @@ describe('ChatGPT server translation', () => {
       ],
       {}
     );
-    expect(mapped.servers[0]).toMatchObject({ label: 'slack', minTools: 4 });
-    // MST's readiness rule only: never written for the app.
+    expect(mapped.servers[0]).not.toHaveProperty('minTools');
     expect(renderCodexConfig(mapped.servers)).not.toContain('minTools');
   });
   it.each(['cua_repl', 'codex'])(

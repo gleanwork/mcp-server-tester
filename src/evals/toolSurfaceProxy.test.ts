@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import {
@@ -14,10 +14,22 @@ import {
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 import { startToolSurfaceProxy } from './toolSurfaceProxyServer.js';
+import { startReadinessHttpServer } from '../../tests/mocks/readyServers.js';
 import {
   createCoworkMcpPlan,
   resolveCoworkMcpHeaders,
 } from './coworkSetup/config.js';
+
+// Where the stub proxy's endpoints are: a server MST's readiness check
+// reaches before a batch runs.
+let stubOrigin = '';
+let stubServer: { close: () => Promise<void> } | undefined;
+beforeAll(async () => {
+  const server = await startReadinessHttpServer();
+  stubOrigin = new URL(server.url).origin;
+  stubServer = server;
+});
+afterAll(() => stubServer?.close());
 
 const FIXTURES = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -170,7 +182,7 @@ function stubProxy(
   return {
     started: 0,
     serversFor: (scope) => [
-      { transport: 'http', serverUrl: `http://127.0.0.1:1/t/${scope}/0/mcp` },
+      { transport: 'http', serverUrl: `${stubOrigin}/t/${scope}/0/mcp` },
     ],
     activity: () => ({ listedTools, calls: [] }),
     endScope: (scope) => {
@@ -271,9 +283,7 @@ describe('prepareClientBatch with a tool variant', () => {
       { id: 'v', proxy: async () => proxy }
     );
     expect(new Set(seen).size).toBe(3);
-    expect(seen.every((url) => url.startsWith('http://127.0.0.1:1/'))).toBe(
-      true
-    );
+    expect(seen.every((url) => url.startsWith(`${stubOrigin}/`))).toBe(true);
     expect(queues?.get('a')?.[0]?.events).toMatchObject([
       { name: 'find_skills', rawName: 'find_more' },
     ]);

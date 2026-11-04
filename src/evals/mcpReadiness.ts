@@ -11,90 +11,121 @@ export interface McpServerReadiness {
   label: string;
   status: 'connected' | 'failed';
   toolCount?: number;
+  /** The server's declared `minTools`, when it listed fewer. */
+  minTools?: number;
   elapsedMs: number;
   error?: string;
 }
 
-export const MCP_PREFLIGHT_TIMEOUT_MS = 30_000;
+/**
+ * How long one probe may take: connect, list tools and close. A server whose
+ * `connectTimeoutMs` is longer gets that to connect, plus this to list and
+ * close (`probeLimitMs`).
+ */
+export const MCP_READINESS_TIMEOUT_MS = 30_000;
 
-async function withTimeout<T>(
-  promise: Promise<T>,
+/** One server's whole probe limit, and how long its connect may take. */
+function probeLimitMs(
+  server: MCPConfig,
   timeoutMs: number
-): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
+): { connect: number; whole: number } {
+  const connect = server.connectTimeoutMs ?? timeoutMs;
+  return connect > timeoutMs
+    ? { connect, whole: connect + timeoutMs }
+    : { connect, whole: timeoutMs };
+}
+
+/** The probe's own work: connect, list tools, close. Never throws. */
+async function probe(
+  server: MCPConfig,
+  label: string,
+  started: number,
+  resolve: (server: MCPConfig) => MCPConfig,
+  timeoutMs: number
+): Promise<McpServerReadiness> {
+  let client: Awaited<ReturnType<typeof createMCPClientForConfig>> | undefined;
   try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('MCP preflight timed out')),
-          timeoutMs
-        );
-      }),
-    ]);
+    const resolved = resolve(server);
+    // A connect that outlives the probe gives up, and stops its server.
+    client = await createMCPClientForConfig({
+      ...resolved,
+      connectTimeoutMs: probeLimitMs(resolved, timeoutMs).connect,
+    });
+    const tools = await client.listTools();
+    // A degraded server (e.g. static tools only, after an auth failure)
+    // can still list tools. Fail closed below the declared minimum.
+    const minTools =
+      resolved.transport === 'stdio' ? resolved.minTools : undefined;
+    if (minTools !== undefined && tools.tools.length < minTools)
+      return {
+        label,
+        status: 'failed',
+        toolCount: tools.tools.length,
+        minTools,
+        elapsedMs: Date.now() - started,
+        error: `too few tools (${tools.tools.length} < ${minTools})`,
+      };
+    return {
+      label,
+      status: 'connected',
+      toolCount: tools.tools.length,
+      elapsedMs: Date.now() - started,
+    };
+  } catch (error) {
+    return {
+      label,
+      status: 'failed',
+      elapsedMs: Date.now() - started,
+      error: formatMCPConnectionFailure(error),
+    };
   } finally {
-    if (timer) clearTimeout(timer);
+    if (client) await closeMCPClient(client).catch(() => undefined);
   }
 }
 
 /**
- * Connect to every configured server and list tools before any client prompt.
- * Shared by desktop clients. Callers decide how to fail; this never throws for a
- * server failure and never retries.
+ * Connect to every server, list its tools and close, before any client
+ * prompt. `timeoutMs` bounds each server's whole probe. Never throws for a
+ * server failure and never retries: `readinessCheck.ts` decides that.
  */
 export async function checkMcpServers(
   servers: MCPConfig[],
-  resolve: (server: MCPConfig) => MCPConfig = (server) => server
+  resolve: (server: MCPConfig) => MCPConfig = (server) => server,
+  timeoutMs = MCP_READINESS_TIMEOUT_MS
 ): Promise<McpServerReadiness[]> {
   return Promise.all(
     servers.map(async (server, index): Promise<McpServerReadiness> => {
       const label = mcpServerLabel(server, index);
       const started = Date.now();
-      let client:
-        | Awaited<ReturnType<typeof createMCPClientForConfig>>
-        | undefined;
+      const limitMs = probeLimitMs(server, timeoutMs).whole;
+      let timer: NodeJS.Timeout | undefined;
       try {
-        const resolved = resolve(server);
-        client = await createMCPClientForConfig(resolved);
-        const tools = await withTimeout(
-          client.listTools(),
-          MCP_PREFLIGHT_TIMEOUT_MS
-        );
-        // A degraded server (e.g. static tools only, after an auth failure)
-        // can still list tools. Fail closed below the declared minimum.
-        const minTools =
-          resolved.transport === 'stdio' ? resolved.minTools : undefined;
-        if (minTools !== undefined && tools.tools.length < minTools)
-          return {
-            label,
-            status: 'failed',
-            toolCount: tools.tools.length,
-            elapsedMs: Date.now() - started,
-            error: `too few tools (${tools.tools.length} < ${minTools})`,
-          };
-        return {
-          label,
-          status: 'connected',
-          toolCount: tools.tools.length,
-          elapsedMs: Date.now() - started,
-        };
-      } catch (error) {
-        return {
-          label,
-          status: 'failed',
-          elapsedMs: Date.now() - started,
-          error: formatMCPConnectionFailure(error),
-        };
+        // A probe that outlives its time still closes its connection.
+        return await Promise.race([
+          probe(server, label, started, resolve, timeoutMs),
+          new Promise<McpServerReadiness>((settle) => {
+            timer = setTimeout(
+              () =>
+                settle({
+                  label,
+                  status: 'failed',
+                  elapsedMs: Date.now() - started,
+                  error: `timed out after ${limitMs / 1000}s`,
+                }),
+              limitMs
+            );
+          }),
+        ]);
       } finally {
-        if (client) await closeMCPClient(client).catch(() => undefined);
+        clearTimeout(timer);
       }
     })
   );
 }
 
 /**
- * The one readiness rule for every desktop client: the server connects and
- * lists at least one tool (and at least its declared `minTools`, which
+ * The one readiness rule for every client: the server connects and lists at
+ * least one tool (and at least its declared `minTools`, which
  * `checkMcpServers` already enforces). A server with no tools can't be
  * evaluated, so it fails before any prompt is sent.
  */
@@ -102,33 +133,14 @@ export function isMcpServerReady(server: McpServerReadiness): boolean {
   return server.status === 'connected' && (server.toolCount ?? 0) > 0;
 }
 
-/** One-line, credential-free summary, e.g. `search=connected(12 tools)`. */
-export function describeMcpReadiness(
-  servers: readonly McpServerReadiness[]
-): string {
-  return servers
-    .map((server) => {
-      const detail =
-        server.error ??
-        (server.status === 'connected' ? `${server.toolCount ?? 0} tools` : '');
-      return `${server.label}=${server.status}${detail ? `(${detail})` : ''}`;
-    })
-    .join(', ');
-}
-
-/** Some configured MCP server isn't ready, so nothing was sent to the client. */
-export class McpReadinessError extends Error {
-  readonly servers: McpServerReadiness[];
-
-  constructor(
-    client: string,
-    servers: McpServerReadiness[],
-    submission: 'prompt' | 'task' = 'prompt'
-  ) {
-    super(
-      `${client} MCP preflight failed; no ${submission} was submitted. ${describeMcpReadiness(servers)}`
-    );
-    this.name = 'McpReadinessError';
-    this.servers = servers;
-  }
+/**
+ * What is wrong with a server that isn't ready, in words a person reads:
+ * `search did not connect (network_error)`, `search listed no tools`, or
+ * `search listed 2 tools, fewer than its minTools (4)`.
+ */
+export function describeNotReady(server: McpServerReadiness): string {
+  if (server.status === 'connected') return `${server.label} listed no tools`;
+  if (server.minTools !== undefined)
+    return `${server.label} listed ${server.toolCount ?? 0} tool${server.toolCount === 1 ? '' : 's'}, fewer than its minTools (${server.minTools})`;
+  return `${server.label} did not connect${server.error ? ` (${server.error})` : ''}`;
 }

@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { forkEnvironment } from '../../../tests/mocks/forkEnvironment.js';
+import { startReadinessHttpServer } from '../../../tests/mocks/readyServers.js';
 import { machineEnvironment, runShardOverChannel } from './channel.js';
 import { collectShard } from './collect.js';
 import {
@@ -121,12 +122,18 @@ describe('a shard in a child-process environment', () => {
   };
   // Its credential is in the secrets file under a name that doesn't say it
   // is one: a secret by use.
-  const sessionServer: MCPConfig = {
+  // It serves tools, so MST's readiness check on the worker passes.
+  let session: { url: string; close: () => Promise<void> };
+  beforeAll(async () => {
+    session = await startReadinessHttpServer();
+  });
+  afterAll(() => session.close());
+  const sessionServer = (): MCPConfig => ({
     transport: 'http',
     label: 'session',
-    serverUrl: 'https://session.example.test/mcp',
+    serverUrl: session.url,
     auth: { accessTokenEnv: 'ACME_SESSION' },
-  };
+  });
 
   it('runs end to end, renewing a token mid-trial', async () => {
     const root = await tempDir();
@@ -140,7 +147,7 @@ describe('a shard in a child-process environment', () => {
         { caseId: 'thrown', prompt: 'thrown' },
       ],
       [{ caseId: 'b', prompt: 'b' }],
-      [sessionServer]
+      [sessionServer()]
     );
     const { events, progress, reasons } = recorder([
       () => ({

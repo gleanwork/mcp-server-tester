@@ -28,6 +28,7 @@ import type {
   CodexConfigInstallOptions,
   CodexExecutionPolicy,
   CodexBuiltinToolPolicy,
+  CodexMcpServerConfig,
   ResolvedCodexSetup,
 } from '../codexSetup/config.js';
 import {
@@ -35,8 +36,6 @@ import {
   type CodexSetupErrorCode,
 } from '../codexSetup/native.js';
 import type { ExternalClientConfig } from '../externalClient/types.js';
-import type { McpServerReadiness } from '../mcpReadiness.js';
-import { preflightChatgptMcpServers } from './mcpPreflight.js';
 import {
   codexPluginReadinessTargets,
   installCodexPlugins,
@@ -258,7 +257,6 @@ export interface LinuxChatgptReadiness {
   inference: LinuxChatgptInference['mode'];
   /** API-key sign-in, or the gateway check. */
   login: 'not-run' | 'verified' | 'failed';
-  mcpPreflight: McpServerReadiness[];
   mcpStatus?: AppServerStatus;
   /** Installed client plugins; no paths, URLs, or credentials. */
   plugins?: ClientPluginReceipt[];
@@ -286,6 +284,20 @@ export interface ChatgptPlatformProfile {
     credentials?: ClientPluginCredentials
   ): Promise<void>;
   dispose(): Promise<void>;
+}
+
+/** Each HTTP server's bearer token in `launch`, by its env var name. */
+function bearerTokens(
+  servers: readonly CodexMcpServerConfig[],
+  launch: Record<string, string | undefined>
+): Record<string, string> {
+  const tokens: Record<string, string> = {};
+  for (const server of servers) {
+    if (server.transport !== 'http' || !server.bearerTokenEnvVar) continue;
+    const token = launch[server.bearerTokenEnvVar];
+    if (token) tokens[server.bearerTokenEnvVar] = token;
+  }
+  return tokens;
 }
 
 /** Fresh MST-owned profile inside the caller-provided HOME. Fails closed. */
@@ -330,7 +342,6 @@ export async function createLinuxChatgptProfile(
     },
     inference: environment.inference.mode,
     login: 'not-run',
-    mcpPreflight: [],
   };
   const { inference } = environment;
   const fail = (code: CodexSetupErrorCode) => {
@@ -387,10 +398,9 @@ export async function createLinuxChatgptProfile(
           error instanceof CodexSetupError ? error.code : 'login_failed';
         throw error;
       }
-      const preflight = await preflightChatgptMcpServers(setup.servers, launch);
-      readiness.mcpPreflight = preflight.servers;
-      if (!preflight.passed) throw fail('mcp_preflight_failed');
-      const { tokens } = preflight;
+      // MST checked the servers before the batch started. The app-server
+      // status probe below gets their bearer tokens, by env var name.
+      const tokens = bearerTokens(setup.servers, launch);
       // Plugin MCP servers run under their own names and are eval servers too.
       if (plugins.length) {
         try {

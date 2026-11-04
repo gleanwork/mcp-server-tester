@@ -16,8 +16,9 @@ const dirs: string[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // One tool, so MST's readiness check passes.
   vi.mocked(createMCPClientForConfig).mockResolvedValue({
-    listTools: vi.fn(async () => ({ tools: [] })),
+    listTools: vi.fn(async () => ({ tools: [{ name: 'weather' }] })),
   } as unknown as Awaited<ReturnType<typeof createMCPClientForConfig>>);
   vi.mocked(simulateMstClient).mockResolvedValue({
     success: true,

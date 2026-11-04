@@ -27,7 +27,12 @@ import {
   type EvalServerConfig,
 } from '../evalConfig.js';
 import { isInfrastructure, thrownEnding } from '../trialEnding.js';
-import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
+import {
+  batchName,
+  proxiedBatch,
+  type ProxiedBatch,
+} from '../prepareClientBatch.js';
+import { batchNotReady, readinessRetryDelaysMs } from '../readinessCheck.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
@@ -354,6 +359,9 @@ export async function collectShard(
       // Which run a host's own telemetry belongs to (`telemetry.host`).
       MST_RUN_ID: bundle.runId,
     };
+    // A malformed or retired readiness setting fails the shard before any
+    // batch starts.
+    readinessRetryDelaysMs(runtimeEnv);
     // Servers arrive as declared; their secrets come from this machine's
     // environment and the coordinator's `tokens`.
     const serverEnv = { ...process.env, ...runtimeEnv };
@@ -436,6 +444,23 @@ export async function collectShard(
         final: boolean
       ) => (proxied ? proxied.settle(index, result, final) : result);
       try {
+        // MST's readiness check on this machine, before the batch's first
+        // trial, as in a local run: through the proxy's own scope when
+        // proxied. When a server isn't ready, no trial of the batch runs.
+        const notReady = await batchNotReady(
+          definition,
+          requests[0]!.input.checkServers ?? requests[0]!.input.servers,
+          {
+            env: runtimeEnv,
+            batch: batchName(batch.requests[0]!.config.type, batch),
+          }
+        );
+        if (notReady) {
+          proxied?.endChecks();
+          for (const index of requests.keys())
+            await save(batchIndex, index, keyOf(index), notReady());
+          continue;
+        }
         if (definition.runBatch) {
           const reported = new Set<number>();
           const results = await definition.runBatch(requests, {

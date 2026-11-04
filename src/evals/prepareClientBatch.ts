@@ -11,6 +11,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { isClientUnavailable } from './clientUnavailable.js';
+import { batchNotReady } from './readinessCheck.js';
 import {
   clientSecretValues,
   redactClientError,
@@ -37,6 +38,14 @@ function batchFailure(client: string, reason: string): ClientRunResult {
       caseExecution: { status: 'not-submitted', continuation: 'blocked' },
     },
   };
+}
+
+/** A batch in messages: `The api batch for variant "baseline"`. */
+export function batchName(
+  client: string,
+  context: Pick<ClientRunContext, 'variant'>
+): string {
+  return `The ${client} batch${context.variant ? ` for variant "${context.variant.name}"` : ''}`;
 }
 
 /**
@@ -230,6 +239,22 @@ export async function prepareClientBatch(
   const batchContext = proxied
     ? withoutToolVariant(withSettings)
     : withSettings;
+  // MST's readiness check, before the batch's first trial: through the
+  // proxy's own scope when proxied, so it isn't counted as the client's.
+  const notReady = await batchNotReady(
+    definition,
+    requests[0]!.input.checkServers ?? servers,
+    {
+      ...(context.env ? { env: context.env } : {}),
+      batch: batchName(config.type, context),
+    }
+  );
+  if (notReady) {
+    proxied?.endChecks();
+    for (const request of requests)
+      queues.get(request.caseId)!.push(received(notReady()));
+    return queues;
+  }
   let traces: ClientRunResult[];
   try {
     traces = await definition.runBatch(
@@ -241,7 +266,7 @@ export async function prepareClientBatch(
     // The message is stored: never with a credential in it.
     const reason = redactClientError(error, secrets(), 'client unavailable');
     console.warn(
-      `[mst] The ${config.type} batch${context.variant ? ` for variant "${context.variant.name}"` : ''} didn't run: ${reason}`
+      `[mst] ${batchName(config.type, context)} didn't run: ${reason}`
     );
     for (const request of requests)
       queues.get(request.caseId)!.push(batchFailure(config.type, reason));

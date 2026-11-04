@@ -12,7 +12,7 @@ import type {
   ClientBatchRequest,
   ClientRunResult,
 } from './evalFrameworkTypes.js';
-import { McpReadinessError } from './mcpReadiness.js';
+import { readyStdioServer } from '../../tests/mocks/readyServers.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
 
 const SECRET = 'sk-desktop-secret';
@@ -632,35 +632,110 @@ describe('runDesktopBatch', () => {
     expect(results[0]?.telemetry?.batchCase).toMatchObject({ index: 0 });
   });
 
-  it('disposes the prepared session when readiness fails, and throws redacted', async () => {
+  it('disposes and releases the lease when prepare fails, and throws redacted', async () => {
     const client = fakeClient({
-      async ready() {
-        throw new Error(`MCP not ready (${SECRET})`);
+      async prepare() {
+        client.events.push('prepare');
+        throw new Error(`app would not start (${SECRET})`);
       },
     });
     const failure = await runDesktopBatch(client, requests(2)).catch(
       (error: unknown) => error
     );
-    expect(String(failure)).toContain('MCP not ready');
+    expect(String(failure)).toContain('app would not start');
     expect(String(failure)).not.toContain(SECRET);
-    expect(client.events).toEqual(['prepare', 'dispose session']);
+    expect(client.events).toEqual(['prepare', 'dispose none']);
     expect(await exists(leasePath())).toBe(false);
   });
 
   it('surfaces a secret-free error as is, keeping its class and fields', async () => {
-    const readiness = new McpReadinessError('Fake', [
-      { label: 'acme', status: 'connected', toolCount: 0, elapsedMs: 1 },
-    ]);
+    class SetupError extends Error {
+      readonly code = 'app_missing';
+    }
+    const setup = new SetupError('no app');
     const failure = await runDesktopBatch(
       fakeClient({
-        async ready() {
-          throw readiness;
+        async prepare() {
+          throw setup;
         },
       }),
       requests(1)
     ).catch((error: unknown) => error);
-    expect(failure).toBe(readiness);
-    expect((failure as McpReadinessError).servers).toHaveLength(1);
+    expect(failure).toBe(setup);
+    expect((failure as SetupError).code).toBe('app_missing');
+  });
+
+  describe("MST's readiness check after prepare", () => {
+    async function server(tools: number) {
+      const log = path.join(leaseDirectory, `probes-${tools}.log`);
+      const config = {
+        ...readyStdioServer({
+          READINESS_LOG: log,
+          READINESS_TOOLS: String(tools),
+        }),
+        label: 'docs',
+      };
+      const probes = async () =>
+        (await fs.readFile(log, 'utf8').catch(() => ''))
+          .split('\n')
+          .filter((line) => line === 'initialize').length;
+      return { config, probes };
+    }
+
+    it('checks the servers once, after prepare and before the first case', async () => {
+      const docs = await server(1);
+      const client = fakeClient({
+        readiness(session) {
+          client.events.push(`check after ${session.id}`);
+          return {
+            servers: [docs.config],
+            env: { MST_MCP_READINESS_RETRY_S: '' },
+          };
+        },
+        async runCase(_session, request, index) {
+          client.events.push(`case ${index + 1} after ${await docs.probes()}`);
+          return ok(request.caseId);
+        },
+      });
+      const results = await runDesktopBatch(client, requests(2));
+      expect(results.map((r) => r.finalText)).toEqual(['case-1', 'case-2']);
+      expect(client.events).toEqual([
+        'prepare',
+        'check after session',
+        'case 1 after 1',
+        'case 2 after 1',
+        'dispose session',
+      ]);
+    });
+
+    it('sends no case when a server is not ready, and still disposes', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const docs = await server(0);
+      const client = fakeClient({
+        readiness: () => ({
+          servers: [docs.config],
+          env: { MST_MCP_READINESS_RETRY_S: '' },
+        }),
+      });
+      const results = await runDesktopBatch(client, requests(2));
+      const reason =
+        'MCP server not ready, so no trial was sent: docs listed no tools. Checked 1 time.';
+      expect(results).toHaveLength(2);
+      for (const result of results)
+        expect(result).toMatchObject({
+          error: reason,
+          ending: {
+            kind: 'infrastructure',
+            broke: 'setup',
+            retryable: true,
+            reason,
+          },
+          telemetry: { batchCase: { count: 2 } },
+        });
+      expect(client.events).toEqual(['prepare', 'dispose session']);
+      expect(await docs.probes()).toBe(1);
+      expect(await exists(leasePath())).toBe(false);
+    });
   });
 
   it('keeps results and the lease when cleanup fails', async () => {
