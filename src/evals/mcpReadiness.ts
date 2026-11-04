@@ -2,7 +2,7 @@ import type { Client } from '@modelcontextprotocol/client';
 import {
   abandonMCPClient,
   closeMCPClient,
-  createMCPClientForConfig,
+  openMCPClient,
 } from '../mcp/clientFactory.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { formatMCPConnectionFailure } from '../mcp/connectionDiagnostics.js';
@@ -38,14 +38,22 @@ function probeLimitMs(
 }
 
 /**
- * One probe's client, and whether its time ran out. When it does, the
- * client is abandoned at once (`abandonMCPClient`): its pending `tools/list`
- * rejects and its transport closes, so a stalled server can't hold the
- * connection (or a stdio process) while a retry launches another.
+ * One probe's client, and whether its time ran out. When it does, a connect
+ * still opening is aborted (`openMCPClient` closes its transport), and a
+ * connected client is abandoned at once (`abandonMCPClient`): its pending
+ * `tools/list` rejects and its transport closes. Either way a stalled server
+ * can't hold the connection (or a stdio process) while a retry launches
+ * another.
  */
 class ProbeDeadline {
   private client: Client | undefined;
+  private readonly controller = new AbortController();
   expired = false;
+
+  /** Aborts the probe's connect when time runs out. */
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
 
   /** The client the probe connected; abandoned at once if time ran out. */
   opened(client: Client): void {
@@ -55,6 +63,7 @@ class ProbeDeadline {
 
   expire(): void {
     this.expired = true;
+    this.controller.abort(new Error('The readiness probe ran out of time.'));
     if (this.client) void abandonMCPClient(this.client);
   }
 }
@@ -71,11 +80,16 @@ async function probe(
   let client: Client | undefined;
   try {
     const resolved = resolve(server);
-    // A connect that outlives the probe gives up, and stops its server.
-    client = await createMCPClientForConfig({
-      ...resolved,
-      connectTimeoutMs: probeLimitMs(resolved, timeoutMs).connect,
-    });
+    // A connect that outlives its own limit gives up, and one still opening
+    // at the probe's deadline is aborted; either stops its server.
+    client = await openMCPClient(
+      {
+        ...resolved,
+        connectTimeoutMs: probeLimitMs(resolved, timeoutMs).connect,
+      },
+      undefined,
+      deadline.signal
+    );
     deadline.opened(client);
     const tools = await client.listTools();
     // A degraded server (e.g. static tools only, after an auth failure)

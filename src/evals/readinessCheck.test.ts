@@ -12,7 +12,10 @@ import {
   readinessRetryDelaysMs,
   readyBatch,
 } from './readinessCheck.js';
-import { ProxyUpstreamError } from './toolSurfaceProxy.js';
+import {
+  ProxyUpstreamError,
+  type ToolSurfaceProxy,
+} from './toolSurfaceProxy.js';
 import { getClient } from './builtinClients.js';
 import { createEvalCaseExecutor, executionEnding } from './caseExecution.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
@@ -40,6 +43,7 @@ beforeEach(() => {
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   resetPluginsForTests();
   await Promise.all(
     dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))
@@ -268,6 +272,38 @@ describe('checkServersReady', () => {
     } finally {
       await server.close();
     }
+  });
+
+  it('aborts a connect still opening at the deadline: the stalled SSE fallback request is cancelled', async () => {
+    // Rejects Streamable HTTP, then never sends the SSE endpoint event.
+    const requests: Array<{ method: string; signal: AbortSignal | null }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: unknown, init: RequestInit = {}) => {
+        const method = init.method ?? 'GET';
+        requests.push({ method, signal: init.signal ?? null });
+        if (method === 'POST') return new Response('', { status: 405 });
+        return new Promise<Response>(() => {});
+      })
+    );
+    const readiness = await checkServersReady(
+      [
+        {
+          transport: 'http',
+          serverUrl: 'https://example.test/mcp',
+          label: 'stalled',
+        },
+      ],
+      { env: { MST_MCP_READINESS_RETRY_S: '' }, timeoutMs: 300 }
+    );
+    expect(readiness).toMatchObject({
+      ready: false,
+      servers: [{ label: 'stalled', error: 'timed out after 0.3s' }],
+    });
+    const fallback = requests.filter((request) => request.method === 'GET');
+    expect(fallback).toHaveLength(1);
+    // Cancelled at the deadline, not left open while a retry opens another.
+    expect(fallback[0]!.signal?.aborted).toBe(true);
   });
 
   it("gives a server its longer connectTimeoutMs, plus the probe's time to list", async () => {
@@ -505,7 +541,7 @@ describe('the readiness check before a batch', () => {
     return `readiness-test/client/${name}`;
   }
 
-  it.each(['api', 'claude-code', 'codex'])(
+  it.each(['api', 'claude-code', 'codex-cli'])(
     'checks the %s client once, and sends no trial to an empty server',
     async (type) => {
       const definition = getClient(type);
@@ -630,5 +666,178 @@ describe('the readiness check before a batch', () => {
     expect(runBatch).not.toHaveBeenCalled();
     expect(queues?.get('two')).toMatchObject([{ ending: setupEnding }]);
     expect(await count(empty.log)).toBe(1);
+  });
+});
+
+/**
+ * A case can name its own client (runEval resolves it in full). The check
+ * and the proxy follow the client the case runs on, not the variant's, and
+ * each distinct setup (through the proxy or not) is checked once per batch.
+ */
+describe('a case on its own client', () => {
+  const evalConfig = { name: 'readiness', datasets: [] };
+  const env = { MST_MCP_READINESS_RETRY_S: '' };
+  const ran: ClientRunResult = { finalText: 'ran', events: [] };
+  const setupEnding = {
+    kind: 'infrastructure',
+    broke: 'setup',
+    retryable: true,
+  };
+
+  async function docs(tools = 1): Promise<{ server: MCPConfig; log: string }> {
+    const log = path.join(await tempDir(), 'probes.log');
+    return {
+      server: {
+        ...readyStdioServer({
+          READINESS_LOG: log,
+          READINESS_TOOLS: String(tools),
+        }),
+        label: 'docs',
+      },
+      log,
+    };
+  }
+
+  /** A proxy whose upstream can't be reached once the check passed. */
+  function unreachableProxy() {
+    return vi.fn(async (): Promise<ToolSurfaceProxy> => {
+      throw new ProxyUpstreamError('docs', new Error('connect ECONNREFUSED'));
+    });
+  }
+
+  it("ends a claude-code case in an api variant as setup when its proxy can't reach a server", async () => {
+    const run = vi
+      .spyOn(getClient('claude-code'), 'run')
+      .mockResolvedValue(ran);
+    const { server } = await docs();
+    const proxy = unreachableProxy();
+    const execute = createEvalCaseExecutor({
+      servers: [server],
+      client: { type: 'api' },
+      evalConfig,
+      env,
+      toolVariant: { id: 'v2', proxy },
+    });
+    for (const id of ['one', 'two']) {
+      const execution = await execute({ id, input: id, client: 'claude-code' });
+      expect(execution.error).toMatch(
+        /^MCP server not ready, so no trial was sent: docs did not connect \(.+\) when the tool-variant proxy started\.$/
+      );
+      expect(executionEnding(execution)).toMatchObject(setupEnding);
+    }
+    expect(run).not.toHaveBeenCalled();
+    // Started once for the batch's proxied setup.
+    expect(proxy).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs an api case in a claude-code variant without the proxy it never uses', async () => {
+    const run = vi.spyOn(getClient('api'), 'run').mockResolvedValue(ran);
+    const { server, log } = await docs();
+    const proxy = unreachableProxy();
+    const execute = createEvalCaseExecutor({
+      servers: [server],
+      client: { type: 'claude-code' },
+      evalConfig,
+      env,
+      toolVariant: { id: 'v2', proxy },
+    });
+    await expect(
+      execute({ id: 'one', input: 'one', client: 'api' })
+    ).resolves.toMatchObject({ kind: 'completed' });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(proxy).not.toHaveBeenCalled();
+    expect(await count(log)).toBe(1);
+  });
+
+  it('checks each setup of a batch once', async () => {
+    const apiRun = vi.spyOn(getClient('api'), 'run').mockResolvedValue(ran);
+    const claudeRun = vi
+      .spyOn(getClient('claude-code'), 'run')
+      .mockResolvedValue(ran);
+    const mixed: EvalCase[] = [
+      { id: 'a', input: 'a', client: 'api' },
+      { id: 'b', input: 'b' },
+      { id: 'c', input: 'c', client: 'api' },
+      { id: 'd', input: 'd' },
+    ];
+    // Proxied: the claude-code cases go through the proxy and the api cases
+    // don't, so the server is checked once for each setup.
+    const proxiedServer = await docs(0);
+    const proxy = unreachableProxy();
+    const proxied = createEvalCaseExecutor({
+      servers: [proxiedServer.server],
+      client: { type: 'claude-code' },
+      evalConfig,
+      env,
+      toolVariant: { id: 'v2', proxy },
+    });
+    for (const evalCase of mixed)
+      expect(executionEnding(await proxied(evalCase))).toMatchObject({
+        ...setupEnding,
+        reason:
+          'MCP server not ready, so no trial was sent: docs listed no tools. Checked 1 time.',
+      });
+    expect(await count(proxiedServer.log)).toBe(2);
+    expect(proxy).not.toHaveBeenCalled();
+
+    // Without a proxy, both clients reach the server the same way: once.
+    const directServer = await docs(0);
+    const direct = createEvalCaseExecutor({
+      servers: [directServer.server],
+      client: { type: 'claude-code' },
+      evalConfig,
+      env,
+    });
+    for (const evalCase of mixed)
+      expect(executionEnding(await direct(evalCase))).toMatchObject(
+        setupEnding
+      );
+    expect(await count(directServer.log)).toBe(1);
+    expect(apiRun).not.toHaveBeenCalled();
+    expect(claudeRun).not.toHaveBeenCalled();
+  });
+
+  it('leaves a cowork case in an api variant to the check Cowork runs after prepare', async () => {
+    const coworkRun = vi
+      .spyOn(getClient('cowork'), 'run')
+      .mockResolvedValue(ran);
+    const apiRun = vi.spyOn(getClient('api'), 'run').mockResolvedValue(ran);
+    const { server, log } = await docs(0);
+    const execute = createEvalCaseExecutor({
+      servers: [server],
+      client: { type: 'api' },
+      evalConfig,
+      env,
+    });
+    await expect(
+      execute({ id: 'one', input: 'one', client: 'cowork' })
+    ).resolves.toMatchObject({ kind: 'completed' });
+    expect(coworkRun).toHaveBeenCalledTimes(1);
+    expect(await count(log)).toBe(0);
+    // The variant's own client is still checked before its first trial.
+    expect(
+      executionEnding(await execute({ id: 'two', input: 'two' }))
+    ).toMatchObject(setupEnding);
+    expect(apiRun).not.toHaveBeenCalled();
+    expect(await count(log)).toBe(1);
+
+    // Through the proxy, MST checks it before the proxy starts.
+    const proxiedServer = await docs(0);
+    const proxy = unreachableProxy();
+    const proxied = createEvalCaseExecutor({
+      servers: [proxiedServer.server],
+      client: { type: 'api' },
+      evalConfig,
+      env,
+      toolVariant: { id: 'v2', proxy },
+    });
+    expect(
+      executionEnding(
+        await proxied({ id: 'one', input: 'one', client: 'cowork' })
+      )
+    ).toMatchObject(setupEnding);
+    expect(coworkRun).toHaveBeenCalledTimes(1);
+    expect(proxy).not.toHaveBeenCalled();
+    expect(await count(proxiedServer.log)).toBe(1);
   });
 });

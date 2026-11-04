@@ -14,7 +14,9 @@
  * `prepare` instead, so each server is checked once per batch. A proxied
  * batch (a variant's tool metadata, through MST's tool-variant proxy) is
  * checked before the proxy starts, at its declared servers, whatever its
- * client.
+ * client. The check follows the client each trial runs on, which a case can
+ * name itself: cases of one batch on clients with different setups
+ * ({@link readinessSetup}) get one check per setup.
  */
 import {
   mcpServerLabel,
@@ -193,6 +195,24 @@ export function checksServersAfterPrepare<T extends ClientDefinition>(
 }
 
 /**
+ * How a client reaches a batch's servers, which decides the check it gets
+ * before its first trial: through the tool-variant proxy (`proxied`),
+ * directly (`direct`), or directly by a client that checks them itself after
+ * it prepares its app (`after-prepare`, no check here). Clients with the
+ * same setup share one check, so a batch whose cases name different clients
+ * checks each server once per setup.
+ */
+export function readinessSetup(
+  definition: ClientDefinition,
+  proxied: boolean
+): 'proxied' | 'direct' | 'after-prepare' {
+  if (proxied) return 'proxied';
+  return (definition as { [CHECKS_AFTER_PREPARE]?: true })[CHECKS_AFTER_PREPARE]
+    ? 'after-prepare'
+    : 'direct';
+}
+
+/**
  * Checks a batch's servers before its first trial. Returns the result for
  * each of its trials when they aren't ready, or `undefined` when the batch
  * can run: its servers are ready, it has none, or its client checks them
@@ -215,10 +235,7 @@ export async function batchNotReady(
     proxied?: boolean;
   } = {}
 ): Promise<(() => ClientRunResult) | undefined> {
-  if (
-    !options.proxied &&
-    (definition as { [CHECKS_AFTER_PREPARE]?: true })[CHECKS_AFTER_PREPARE]
-  )
+  if (readinessSetup(definition, options.proxied === true) === 'after-prepare')
     return undefined;
   // Labeled first, so each keeps the name its place in the set gives it.
   const checkable = servers

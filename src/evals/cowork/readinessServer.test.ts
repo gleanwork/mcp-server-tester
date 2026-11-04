@@ -2,15 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { coworkReadinessServer } from './readinessServer.js';
 import { checkServersReady } from '../readinessCheck.js';
 import { MCPHttpConnectionError } from '../../mcp/connectionDiagnostics.js';
-import {
-  closeMCPClient,
-  createMCPClientForConfig,
-} from '../../mcp/clientFactory.js';
+import { closeMCPClient, openMCPClient } from '../../mcp/clientFactory.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 
+// The probe opens each server with `openMCPClient`.
 vi.mock('../../mcp/clientFactory.js', () => ({
   closeMCPClient: vi.fn(),
-  createMCPClientForConfig: vi.fn(),
+  openMCPClient: vi.fn(),
 }));
 
 /** MST's readiness check, with each server resolved as Cowork launches it. */
@@ -39,9 +37,7 @@ describe('Cowork servers in the readiness check', () => {
   });
 
   it('fails closed on connection failure even when native readiness is claimed', async () => {
-    vi.mocked(createMCPClientForConfig).mockRejectedValue(
-      new Error('fetch failed')
-    );
+    vi.mocked(openMCPClient).mockRejectedValue(new Error('fetch failed'));
     await expect(
       verify([acme()], {
         MST_COWORK_NATIVE_MCP_READY: '1',
@@ -51,11 +47,11 @@ describe('Cowork servers in the readiness check', () => {
       ready: false,
       servers: [{ label: 'acme', status: 'failed', error: 'network_error' }],
     });
-    expect(createMCPClientForConfig).toHaveBeenCalledOnce();
+    expect(openMCPClient).toHaveBeenCalledOnce();
   });
 
   it('fails a server that connects but lists no tools (the shared rule)', async () => {
-    vi.mocked(createMCPClientForConfig).mockResolvedValue({
+    vi.mocked(openMCPClient).mockResolvedValue({
       listTools: vi.fn().mockResolvedValue({ tools: [] }),
     } as never);
     await expect(verify([acme()], { TOKEN: 'secret' })).resolves.toMatchObject({
@@ -66,7 +62,7 @@ describe('Cowork servers in the readiness check', () => {
   });
 
   it('connects with Cowork headers and lists tools for every configured server', async () => {
-    vi.mocked(createMCPClientForConfig).mockResolvedValue({
+    vi.mocked(openMCPClient).mockResolvedValue({
       listTools: vi.fn().mockResolvedValue({ tools: [{ name: 'search' }] }),
     } as never);
 
@@ -78,17 +74,21 @@ describe('Cowork servers in the readiness check', () => {
       ready: true,
       servers: [{ label: 'acme', status: 'connected', toolCount: 1 }],
     });
-    expect(createMCPClientForConfig).toHaveBeenCalledWith({
-      transport: 'http',
-      label: 'acme',
-      serverUrl: 'https://example.test/mcp',
-      auth: undefined,
-      headers: {
-        Authorization: 'Bearer secret',
-        'X-Custom-Header': 'custom-value',
+    expect(openMCPClient).toHaveBeenCalledWith(
+      {
+        transport: 'http',
+        label: 'acme',
+        serverUrl: 'https://example.test/mcp',
+        auth: undefined,
+        headers: {
+          Authorization: 'Bearer secret',
+          'X-Custom-Header': 'custom-value',
+        },
+        connectTimeoutMs: 30_000,
       },
-      connectTimeoutMs: 30_000,
-    });
+      undefined,
+      expect.any(AbortSignal)
+    );
     expect(closeMCPClient).toHaveBeenCalledOnce();
   });
 
@@ -98,7 +98,7 @@ describe('Cowork servers in the readiness check', () => {
         .fn()
         .mockRejectedValue(new Error('Authorization token=secret')),
     };
-    vi.mocked(createMCPClientForConfig).mockResolvedValue(client as never);
+    vi.mocked(openMCPClient).mockResolvedValue(client as never);
 
     await expect(verify([acme()], { TOKEN: 'secret' })).resolves.toMatchObject({
       ready: false,
@@ -115,13 +115,13 @@ describe('Cowork servers in the readiness check', () => {
       await expect(
         verify([acme()], { MST_COWORK_NATIVE_MCP_READY: '1', TOKEN: token })
       ).resolves.toMatchObject({ ready: false });
-      expect(createMCPClientForConfig).not.toHaveBeenCalled();
+      expect(openMCPClient).not.toHaveBeenCalled();
     }
   );
 
   it('reports both transport classifications without request or credential content', async () => {
     const secret = 'sensitive-bearer-value';
-    vi.mocked(createMCPClientForConfig).mockRejectedValue(
+    vi.mocked(openMCPClient).mockRejectedValue(
       new MCPHttpConnectionError(
         new Error(
           `HTTP 403 POST https://example.test/mcp?key=${secret} Authorization: Bearer ${secret} request-body`
@@ -145,7 +145,7 @@ describe('Cowork servers in the readiness check', () => {
   });
 
   it('does not copy arbitrary errors into readiness reports', async () => {
-    vi.mocked(createMCPClientForConfig).mockRejectedValue(
+    vi.mocked(openMCPClient).mockRejectedValue(
       new Error(
         'Authorization: Bearer sensitive-value Cookie: session=private request-body'
       )
@@ -156,7 +156,7 @@ describe('Cowork servers in the readiness check', () => {
   });
 
   it('checks servers independently', async () => {
-    vi.mocked(createMCPClientForConfig)
+    vi.mocked(openMCPClient)
       .mockRejectedValueOnce(new Error('fetch failed'))
       .mockResolvedValueOnce({
         listTools: vi.fn().mockResolvedValue({ tools: [] }),
@@ -179,6 +179,6 @@ describe('Cowork servers in the readiness check', () => {
         {}
       )
     ).resolves.toMatchObject({ ready: false });
-    expect(createMCPClientForConfig).toHaveBeenCalledTimes(2);
+    expect(openMCPClient).toHaveBeenCalledTimes(2);
   });
 });

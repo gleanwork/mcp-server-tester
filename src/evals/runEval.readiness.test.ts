@@ -35,6 +35,8 @@ interface FixtureOptions {
   tools?: number;
   /** The `minTools` `docs` declares. */
   minTools?: number;
+  /** Every launch of `docs` after the first `failAfter` exits before answering. */
+  failAfter?: number;
 }
 
 /**
@@ -79,6 +81,9 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
             READINESS_FAIL_FILE: launches,
             READINESS_FAIL_TIMES: String(failLaunches),
             READINESS_TOOLS: String(options.tools ?? 1),
+            ...(options.failAfter !== undefined
+              ? { READINESS_FAIL_AFTER: String(options.failAfter) }
+              : {}),
           },
         },
       },
@@ -95,6 +100,7 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
       )
     ) as { ending?: unknown; error?: string; infrastructureError?: boolean };
   return {
+    configPath,
     launches: async () =>
       (await fs.readFile(launches, 'utf8').catch(() => ''))
         .split('\n')
@@ -245,6 +251,51 @@ describe('a proxied run whose server is not ready', () => {
     },
     30_000
   );
+
+  /**
+   * The check passes (the first launch of `docs`), and the proxy's own
+   * connection to it (the second) fails.
+   */
+  const proxyNotReady =
+    /^MCP server not ready, so no trial was sent: docs did not connect \(.+\) when the tool-variant proxy started\.$/;
+
+  it.each(['shard-test/client/probe', 'shard-test/client/batch'])(
+    'ends every trial of a %s batch as a retryable setup failure when the proxy cannot reach a server that passed the check, locally',
+    async (client) => {
+      vi.stubEnv('MST_MCP_READINESS_RETRY_S', '');
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const f = await fixture(0, { client, proxied: true, failAfter: 1 });
+      // The client marks each trial it runs here.
+      const marks = path.join(path.dirname(f.configPath), 'marks.log');
+      vi.stubEnv('SHARD_TEST_LOG', marks);
+      const result = await f.run();
+      expect(result.summary.metrics).toMatchObject({
+        passed: 0,
+        failed: 0,
+        incomplete: 2,
+      });
+      await expectSetupEndings(f, result.outputDir, proxyNotReady);
+      // One check, one proxy start; the client never ran.
+      expect(await f.launches()).toBe(2);
+      await expect(fs.readFile(marks, 'utf8')).rejects.toThrow();
+    },
+    30_000
+  );
+
+  it('does the same on a worker when the proxy cannot reach a server that passed the check', async () => {
+    vi.stubEnv('MST_MCP_READINESS_RETRY_S', '');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const f = await fixture(0, { proxied: true, failAfter: 1 });
+    const result = await f.run('fork/env/children');
+    expect(result.summary.metrics).toMatchObject({
+      passed: 0,
+      failed: 0,
+      incomplete: 2,
+    });
+    await expectSetupEndings(f, result.outputDir, proxyNotReady);
+    expect(await f.launches()).toBe(2);
+  }, 90_000);
 
   it('does the same on a worker, minTools included', async () => {
     vi.stubEnv('MST_MCP_READINESS_RETRY_S', '');

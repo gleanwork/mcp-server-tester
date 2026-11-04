@@ -6,12 +6,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createMCPClientForConfig } from '../mcp/clientFactory.js';
+import { openMCPClient } from '../mcp/clientFactory.js';
 import { simulateMstClient } from './mstClient/simulation.js';
 import { runEval } from './runEval.js';
 
 vi.mock('../mcp/clientFactory.js', () => ({
   createMCPClientForConfig: vi.fn(),
+  // What MST's readiness check opens each server with.
+  openMCPClient: vi.fn(),
   closeMCPClient: vi.fn(async () => {}),
 }));
 vi.mock('./mstClient/simulation.js', () => ({ simulateMstClient: vi.fn() }));
@@ -27,9 +29,9 @@ afterEach(async () => {
 describe('eval output', () => {
   it('prints no reporter hint, and the trials warning once across variants', async () => {
     // One tool, so MST's readiness check passes.
-    vi.mocked(createMCPClientForConfig).mockResolvedValue({
+    vi.mocked(openMCPClient).mockResolvedValue({
       listTools: vi.fn(async () => ({ tools: [{ name: 'weather' }] })),
-    } as unknown as Awaited<ReturnType<typeof createMCPClientForConfig>>);
+    } as unknown as Awaited<ReturnType<typeof openMCPClient>>);
     vi.mocked(simulateMstClient).mockResolvedValue({
       success: true,
       response: 'OK',

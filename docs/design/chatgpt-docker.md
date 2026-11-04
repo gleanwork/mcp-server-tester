@@ -47,7 +47,7 @@ refresh_interval_ms = 60000
 ```
 
 - **The token never enters the config or the environment.** `mst run` resolves it on the host (`MST_LLM_AUTH_COMMAND`, then `OPENAI_API_KEY`) and writes it into the container's tmpfs over `docker exec` stdin. It refreshes the file every 4 minutes, as for Cowork. The token command only reads that file.
-- **Readiness replaces login.** Instead of `codex login status`, MST checks the gateway before the app starts: `GET <base>/models` with the token, and fails with `inference_unavailable` if that fails. The existing MCP preflight and app-server probe are unchanged.
+- **Readiness replaces login.** Instead of `codex login status`, MST checks the gateway before the app starts: `GET <base>/models` with the token, and fails with `inference_unavailable` if that fails. MST's shared readiness check, which runs before the batch for every client, replaced the direct Linux MCP preflight. The app-server probe stays.
 - **API-key mode stays** for runs without a gateway: `MST_CHATGPT_API_KEY_FILE`, as today.
 - **The run records the mode** in `nativeReadiness` (`inference: gateway | api-key`), with no URL or token.
 

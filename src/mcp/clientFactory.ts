@@ -6,7 +6,10 @@ import {
   StreamableHTTPClientTransport,
   UnsupportedProtocolVersionError,
 } from '@modelcontextprotocol/client';
-import type { OAuthClientProvider } from '@modelcontextprotocol/client';
+import type {
+  OAuthClientProvider,
+  Transport,
+} from '@modelcontextprotocol/client';
 import {
   StdioClientTransport,
   getDefaultEnvironment,
@@ -292,6 +295,30 @@ export async function createMCPClientForConfig(
   config: MCPConfig,
   options?: CreateMCPClientOptions
 ): Promise<Client> {
+  return openMCPClient(config, options);
+}
+
+/** The error an aborted open rejects with: the signal's reason, if an Error. */
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error('The MCP connection was aborted before it opened.');
+}
+
+/**
+ * Opens a client as {@link createMCPClientForConfig} does, until `signal`
+ * aborts. Aborting closes the transport the open has started (and a stdio
+ * server's process), even while connect is still waiting on it, and the open
+ * rejects with the signal's reason. A client that connects anyway after the
+ * abort is closed. Internal: the readiness probe aborts at its deadline, so a
+ * server that stalls its connect can't keep the connection open.
+ */
+export async function openMCPClient(
+  config: MCPConfig,
+  options?: CreateMCPClientOptions,
+  signal?: AbortSignal
+): Promise<Client> {
+  if (signal?.aborted) throw abortError(signal);
   // Validate config
   const validatedConfig = validateMCPConfig(config);
   const protocol =
@@ -319,12 +346,48 @@ export async function createMCPClientForConfig(
     }
   );
   const connection = beginConnection(client, protocol);
+  // The transport connect is starting, so an abort can close it; one
+  // started after the abort is closed at once.
+  let transport: Transport | undefined;
+  const closeTransport = () => {
+    void transport?.close().catch(() => undefined);
+  };
+  const opening = (started: Transport) => {
+    transport = started;
+    if (signal?.aborted) closeTransport();
+  };
+  let onAbort: (() => void) | undefined;
+  const aborted = signal
+    ? new Promise<never>((_, reject) => {
+        onAbort = () => {
+          closeTransport();
+          reject(abortError(signal));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      })
+    : undefined;
+  const connecting = connect(
+    client,
+    connection,
+    validatedConfig,
+    options,
+    opening
+  );
   try {
-    await connect(client, connection, validatedConfig, options);
+    await (aborted ? Promise.race([connecting, aborted]) : connecting);
   } catch (error) {
+    // The connect may still settle after an abort: a client it connects
+    // anyway is closed, and its failure is expected.
+    if (signal?.aborted)
+      void connecting.then(
+        () => abandonMCPClient(client),
+        () => undefined
+      );
     // A failed connect never returns the client, so close what it opened.
     await releaseConnection(client);
     throw error;
+  } finally {
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
   }
   debugClient('Connected successfully');
   const serverInfo = client.getServerVersion();
@@ -340,7 +403,9 @@ async function connect(
   client: Client,
   connection: MCPConnection,
   validatedConfig: MCPConfig,
-  options: CreateMCPClientOptions | undefined
+  options: CreateMCPClientOptions | undefined,
+  /** Receives each transport before connect starts it. */
+  opening: (transport: Transport) => void
 ): Promise<void> {
   const protocol = connection.requestedProtocol;
   // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
@@ -380,6 +445,7 @@ async function connect(
       cwd: validatedConfig.cwd,
     });
 
+    opening(transport);
     try {
       await client.connect(
         transport,
@@ -457,6 +523,7 @@ async function connect(
           requestInit,
           ...(authProvider ? { authProvider } : {}),
         });
+        opening(streamableTransport);
         await client.connect(streamableTransport, connectOptions);
         debugClient('Connected via Streamable HTTP');
         debugHttp('Connection established via streamableHttp');
@@ -482,6 +549,7 @@ async function connect(
             requestInit,
             ...(authProvider ? { authProvider } : {}),
           });
+          opening(sseTransport);
           await client.connect(sseTransport, connectOptions);
         } catch (sseError) {
           throw new MCPHttpConnectionError(
