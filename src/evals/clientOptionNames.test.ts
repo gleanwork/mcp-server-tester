@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { runEval, type RunEvalOptions } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
-import { maxActionsRenamed } from './desktopOS.js';
+import { fixedProviderGone, maxActionsRenamed } from './desktopOS.js';
 
 const dirs: string[] = [];
 
@@ -146,6 +146,59 @@ describe('the earlier names of maxActions', () => {
 
   it.each(DESKTOP_CLIENTS)('%s takes maxActions', async (client) => {
     const run = await at('variant', client, { maxActions: 8 });
+    await expect(run()).resolves.toBeDefined();
+  });
+});
+
+describe('options a client never used', () => {
+  const servers = [{ transport: 'http', serverUrl: 'https://example.com/mcp' }];
+  const SERVERS =
+    "A client runs with the eval config's `servers` (or its variant's), and in a Playwright test with the test's MCP connection.";
+  const PLUGIN =
+    "It never changed the servers Claude Code runs with, which are the eval config's `servers`: add a plugin's MCP server there.";
+  const GONE = [
+    ['api', 'server', servers[0], SERVERS],
+    ['api', 'servers', servers, SERVERS],
+    ['claude-code', 'server', servers[0], SERVERS],
+    ['claude-code', 'servers', servers, SERVERS],
+    [
+      'claude-code',
+      'apiToken',
+      'token',
+      "A server's token is in its own `auth` in the eval config's `servers` (`auth.accessToken` or `auth.accessTokenEnv`).",
+    ],
+    ['claude-code', 'pluginDir', './plugin', PLUGIN],
+    ['claude-code', 'pluginMcpUrl', 'https://example.com/mcp', PLUGIN],
+    [
+      'cowork',
+      'provider',
+      'anthropic',
+      fixedProviderGone('cowork', 'anthropic'),
+    ],
+    ['chatgpt', 'provider', 'openai', fixedProviderGone('chatgpt', 'openai')],
+    [
+      'codex-app',
+      'provider',
+      'openai',
+      fixedProviderGone('codex-app', 'openai'),
+    ],
+  ] as const;
+  it.each(
+    GONE.flatMap(([client, key, value, reason]) =>
+      LEVELS.map((level) => [client, key, level, value, reason] as const)
+    )
+  )(
+    'fail on %s: %s, set in the %s, says what to do instead',
+    async (client, key, level, value, reason) => {
+      const run = await at(level, client, { [key]: value });
+      await expect(run()).rejects.toThrow(
+        `\`clientOptions.${key}\` is gone: remove it. ${reason}`
+      );
+    }
+  );
+
+  it("loads the provider that picks claude-code's API", async () => {
+    const run = await at('variant', 'claude-code', { provider: 'vertex' });
     await expect(run()).resolves.toBeDefined();
   });
 });

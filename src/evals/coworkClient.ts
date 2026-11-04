@@ -56,9 +56,11 @@ import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
 import type { LLMToolCall } from './mstClient/types.js';
 import {
   COMPUTER_USE_PROVIDER_GONE,
+  fixedProviderGone,
   maxActionsRenamed,
   osName,
 } from './desktopOS.js';
+import { removedClientOptions } from './renamedKeys.js';
 
 const CoworkSchema = z
   .object({
@@ -114,7 +116,10 @@ const CoworkSchema = z
       .string()
       .regex(/^[A-Za-z0-9._:-]+$/)
       .optional(),
-    provider: z.literal('anthropic').optional(),
+    /** Gone: the client fixes its provider. */
+    ...removedClientOptions({
+      provider: fixedProviderGone('cowork', 'anthropic'),
+    }),
     env: z.record(z.string(), z.string()).optional(),
     /** Client-owned: installed through managed allowedPluginMarketplaces. */
     plugins: MarketplacePluginsSchema.optional(),

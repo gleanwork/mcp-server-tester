@@ -774,6 +774,63 @@ describe('settings a client would ignore: defaults, inheritance, opt-in', () => 
     );
   });
 
+  it('gives no shared default to a client whose schema rejects the option', () => {
+    // Cowork rejects `provider`: the client fixes it.
+    const validated = validateEvalConfig(
+      evalConfig({
+        provider: 'anthropic',
+        client: 'api',
+        variants: [{ name: 'api' }, { name: 'desktop', client: 'cowork' }],
+      })
+    );
+    expect(clientPatchOf(validated.variants?.[0])).toMatchObject({
+      type: 'api',
+      provider: 'anthropic',
+    });
+    expect(clientPatchOf(validated.variants?.[1])).toMatchObject({
+      type: 'cowork',
+    });
+    expect(clientPatchOf(validated.variants?.[1])).not.toHaveProperty(
+      'provider'
+    );
+    expect(() =>
+      validateEvalConfig(
+        evalConfig({ provider: 'anthropic', client: 'cowork' })
+      )
+    ).toThrow(
+      `The eval config sets "provider", but none of its clients (cowork) takes it.`
+    );
+    // A plugin client's schema that rejects `timeout` doesn't take one either.
+    installTestPlugin({
+      clients: {
+        untimed: {
+          schema: z
+            .object({
+              type: z.string(),
+              timeout: z.never({ message: 'no timeout' }).optional(),
+            })
+            .strict(),
+          run: async () => ({ finalText: '', events: [] }),
+        },
+      },
+    });
+    const untimed = validateEvalConfig(
+      evalConfig({
+        timeout: 1000,
+        client: 'api',
+        variants: [
+          { name: 'api' },
+          { name: 'plugin', client: 'test/client/untimed' },
+        ],
+      }),
+      { namespaces: ['test'] }
+    );
+    expect(clientPatchOf(untimed.variants?.[0])).toMatchObject({
+      timeout: 1000,
+    });
+    expect(clientPatchOf(untimed.variants?.[1])).not.toHaveProperty('timeout');
+  });
+
   it('rejects a default that none of the clients takes', () => {
     expect(() =>
       validateEvalConfig(

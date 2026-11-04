@@ -16,7 +16,9 @@ that runs the trial, and no option selects it. `clientOptions.computerUseProvide
 is gone: it fails validation. The earlier names (`openai.chatgpt.agent.desktop-app.macos`,
 `openai.chatgpt.agent.desktop-app.linux`, `chatgpt-mac` and `chatgpt-linux`)
 fail validation, naming `chatgpt`. `clientOptions.surface` is gone: it fails
-validation and names the client to use. The client picks the surface, which
+validation and names the client to use. `clientOptions.provider`, which took
+only `openai`, is gone too: each client fixes its provider, so it fails
+validation. The client picks the surface, which
 controls UI setup and the expected native originator; MST does not add surface
 instructions to the evaluated prompt. Everything else on this page applies to
 both clients. Both drive the same app, so they share its desktop lease: a

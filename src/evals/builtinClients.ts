@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
+import { removedClientOptions } from './renamedKeys.js';
 import { usesToolSurfaceProxy } from './toolSurfaceProxy.js';
 import {
   buildToolSurface,
@@ -77,7 +78,7 @@ async function runBuiltinClient(
   input: ClientRunInput,
   clientConfig: ClientConfig,
   context: ClientRunContext,
-  factory: (options: BuiltinClientOptions) => MstClientConfig
+  factory: BuiltinClientFactory
 ): Promise<ClientRunResult> {
   const startedAt = Date.now();
   // Runtime values are fallbacks; the client's own env wins.
@@ -89,7 +90,7 @@ async function runBuiltinClient(
   if (!input.prompt) throw new Error('Clients require an input.');
   const prompt = input.prompt;
   const config = {
-    ...factory({ ...options.client, servers: options.servers, env }),
+    ...factory({ ...options.client, env }, options.servers),
     env,
   };
   const clients: Array<Awaited<ReturnType<typeof createMCPClientForConfig>>> =
@@ -373,15 +374,31 @@ export interface BuiltinClientOptions {
   maxToolCalls?: number;
   timeout?: number;
   provider?: string;
-  server?: MCPConfig;
-  servers?: MCPConfig[];
-  apiToken?: string;
-  pluginDir?: string;
-  pluginMcpUrl?: string;
   /** claude-code: the directory Claude Code runs in. */
   cwd?: string;
-  mcpServers?: Record<string, Record<string, unknown>>;
 }
+
+/**
+ * A simulated client's settings from its options and the servers it runs
+ * with. The servers are the eval's (`input.servers`), never a client option.
+ */
+type BuiltinClientFactory = (
+  options: BuiltinClientOptions,
+  servers?: readonly MCPConfig[]
+) => MstClientConfig;
+
+/** Why a client option that never chose the servers fails (ADR 0011). */
+const SERVERS_ARE_THE_EVALS =
+  "A client runs with the eval config's `servers` (or its variant's), and in a Playwright test with the test's MCP connection.";
+
+/**
+ * Options the api and claude-code clients accepted and never used: the
+ * servers they run with are the eval's. Each fails naming what to use.
+ */
+const UNUSED_SERVER_OPTIONS = removedClientOptions({
+  server: SERVERS_ARE_THE_EVALS,
+  servers: SERVERS_ARE_THE_EVALS,
+});
 
 /**
  * Built-in client configs. Organization-specific plugin wiring stays
@@ -399,8 +416,7 @@ const SdkClientSchema = z
     /** Offer the server's Agent Skills: as a catalog the model loads from, or preloaded. */
     skills: z.enum(['off', 'catalog', 'preload']).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
-    server: MCPConfigSchema.optional(),
-    servers: z.array(MCPConfigSchema).optional(),
+    ...UNUSED_SERVER_OPTIONS,
   })
   .strict();
 const CliClientSchema = z
@@ -411,9 +427,14 @@ const CliClientSchema = z
     timeout: GenerationOptions.timeout,
     systemPrompt: SystemPromptOption,
     provider: z.enum(['anthropic', 'vertex', 'vertex-anthropic']).optional(),
-    apiToken: z.string().optional(),
-    pluginDir: z.string().optional(),
-    pluginMcpUrl: z.string().optional(),
+    ...removedClientOptions({
+      apiToken:
+        "A server's token is in its own `auth` in the eval config's `servers` (`auth.accessToken` or `auth.accessTokenEnv`).",
+      pluginDir:
+        "It never changed the servers Claude Code runs with, which are the eval config's `servers`: add a plugin's MCP server there.",
+      pluginMcpUrl:
+        "It never changed the servers Claude Code runs with, which are the eval config's `servers`: add a plugin's MCP server there.",
+    }),
     /**
      * Run Claude Code with an empty config directory (the default), so the
      * operator's skills, plugins and settings don't affect results. Set false
@@ -429,8 +450,7 @@ const CliClientSchema = z
      */
     cwd: z.string().min(1).optional(),
     env: z.record(z.string(), z.string().optional()).optional(),
-    server: MCPConfigSchema.optional(),
-    servers: z.array(MCPConfigSchema).optional(),
+    ...UNUSED_SERVER_OPTIONS,
   })
   .strict();
 let builtinClients: Record<string, ClientDefinition> | undefined;
@@ -509,9 +529,10 @@ export function getClient(reference: string): ClientDefinition {
  */
 export function getBuiltinClientConfig(
   name: string,
-  options: BuiltinClientOptions = {}
+  options: BuiltinClientOptions = {},
+  servers?: readonly MCPConfig[]
 ): MstClientConfig {
-  const config = builtinClientDefaults(name, options);
+  const config = builtinClientDefaults(name, options, servers);
   if (!config)
     throw new Error(
       `Client "${name}" doesn't run on MST's simulator (api, claude-code).`
@@ -522,18 +543,16 @@ export function getBuiltinClientConfig(
 /** As getBuiltinClientConfig, or undefined for a client that isn't simulated. */
 export function builtinClientDefaults(
   name: string,
-  options: BuiltinClientOptions = {}
+  options: BuiltinClientOptions = {},
+  servers?: readonly MCPConfig[]
 ): MstClientConfig | undefined {
   const factory = Object.hasOwn(BUILTIN_CLIENTS, name)
     ? BUILTIN_CLIENTS[name]
     : undefined;
-  return factory?.(options);
+  return factory?.(options, servers);
 }
 
-const BUILTIN_CLIENTS: Record<
-  string,
-  (options: BuiltinClientOptions) => MstClientConfig
-> = {
+const BUILTIN_CLIENTS: Record<string, BuiltinClientFactory> = {
   'claude-code': claudeCliClient,
   api: vercelSdkClient,
 };
@@ -677,107 +696,40 @@ function assertClaudeCliServers(
   }
 }
 
-function claudeCliClient(options: BuiltinClientOptions): MstClientConfig {
+function claudeCliClient(
+  options: BuiltinClientOptions,
+  servers: readonly MCPConfig[] = []
+): MstClientConfig {
   CliClientSchema.parse(options);
   const env = { ...process.env, ...options.env };
-  assertClaudeCliServers(
-    [...(options.servers ?? []), ...(options.server ? [options.server] : [])],
-    true
-  );
+  assertClaudeCliServers([...servers], true);
   const provider =
     options.provider === 'vertex-anthropic'
       ? 'vertex'
       : (options.provider ?? 'anthropic');
 
-  const server = options.server;
-  const defaultServerUrl =
-    server?.transport === 'http' ? server.serverUrl : env.MCP_SERVER_URL;
-  const apiToken =
-    options.apiToken ??
-    (server?.transport === 'http' ? server.auth?.accessToken : undefined) ??
-    env.MCP_ACCESS_TOKEN ??
-    '';
-  const pluginDir = options.pluginDir ?? env.MCP_PLUGIN_DIR ?? '';
-
-  const mcpServers: Record<string, unknown> = server
-    ? server.transport === 'http'
-      ? {
-          [server.label ?? 'mcp-server']: {
+  // Claude Code gets exactly the eval's servers (`--strict-mcp-config`).
+  const mcpServers: Record<string, Record<string, unknown>> = {};
+  for (const entry of servers) {
+    const label = entry.label ?? 'mcp-server';
+    mcpServers[label] =
+      entry.transport === 'http'
+        ? {
             type: 'http',
-            url: server.serverUrl,
+            url: entry.serverUrl,
             headers: {
-              ...server.headers,
-              ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
+              ...entry.headers,
+              ...(entry.auth?.accessToken
+                ? { Authorization: `Bearer ${entry.auth.accessToken}` }
+                : {}),
             },
-          },
-        }
-      : {
-          [server.label ?? 'mcp-server']: {
-            command: server.command,
-            args: server.args,
-            cwd: server.cwd,
-            env: server.env,
-          },
-        }
-    : defaultServerUrl
-      ? {
-          'mcp-server': {
-            type: 'http',
-            url: defaultServerUrl,
-            headers: apiToken
-              ? { Authorization: `Bearer ${apiToken}` }
-              : undefined,
-          },
-        }
-      : {};
-
-  if (pluginDir) {
-    const dataDir =
-      env.MCP_PLUGIN_DATA_DIR ??
-      path.join(os.homedir(), '.mcp-server-tester', 'plugins');
-    const serverUrl = options.pluginMcpUrl ?? env.MCP_PLUGIN_SERVER_URL ?? '';
-    fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(dataDir, 'mcp-server-url.json'),
-      `${JSON.stringify({ serverUrl }, null, 2)}\n`
-    );
-    if (serverUrl) {
-      mcpServers['plugin'] = {
-        command: 'bash',
-        args: [path.join(pluginDir, 'start.sh')],
-        env: {
-          MCP_PLUGIN_SERVER_URL: serverUrl,
-          ENABLE_HITL: 'false',
-          CLAUDE_PLUGIN_DATA: dataDir,
-        },
-        alwaysLoad: env.MCP_PLUGIN_ALWAYS_LOAD !== '0',
-      };
-    }
-  }
-
-  if (options.servers) {
-    for (const key of Object.keys(mcpServers)) delete mcpServers[key];
-    for (const entry of options.servers) {
-      const label = entry.label ?? 'mcp-server';
-      mcpServers[label] =
-        entry.transport === 'http'
-          ? {
-              type: 'http',
-              url: entry.serverUrl,
-              headers: {
-                ...entry.headers,
-                ...(entry.auth?.accessToken
-                  ? { Authorization: `Bearer ${entry.auth.accessToken}` }
-                  : {}),
-              },
-            }
-          : {
-              command: entry.command,
-              args: entry.args,
-              cwd: entry.cwd,
-              env: entry.env,
-            };
-    }
+          }
+        : {
+            command: entry.command,
+            args: entry.args,
+            cwd: entry.cwd,
+            env: entry.env,
+          };
   }
   const mcpConfigFile = JSON.stringify({ mcpServers });
 
@@ -808,7 +760,7 @@ function claudeCliClient(options: BuiltinClientOptions): MstClientConfig {
     provider: (provider === 'vertex'
       ? 'vertex-anthropic'
       : provider) as MstClientConfig['provider'],
-    mcpServers: mcpServers as Record<string, Record<string, unknown>>,
+    mcpServers,
     ...(model !== undefined ? { model } : {}),
     ...(options.systemPrompt !== undefined
       ? { systemPrompt: options.systemPrompt }

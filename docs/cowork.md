@@ -164,7 +164,8 @@ judges according to their plugin's requirements.
 
 Use client `cowork`. The earlier names `cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` fail validation, naming `cowork`. `model` selects the Cowork
 inference model; `clientOptions.computerUseModel` independently selects the planner.
-The inference provider is `anthropic`. How Cowork runs follows from the OS of
+The inference provider is `anthropic`, and no option changes it:
+`clientOptions.provider` fails validation. How Cowork runs follows from the OS of
 the machine that runs the trial, and no option selects it: on macOS, Computer
 Use, with `computerUseModel` as its planner; on Linux, the accessibility
 automation, with no planner. A config that set `clientOptions.computerUseProvider`

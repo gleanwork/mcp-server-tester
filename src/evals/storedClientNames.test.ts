@@ -593,6 +593,12 @@ const STORED_BEFORE: Array<[string, (variant: StoredVariant) => void]> = [
       };
     },
   ],
+  [
+    'codex-app with provider',
+    (variant) => {
+      variant.clientOptions = { ...variant.clientOptions, provider: 'openai' };
+    },
+  ],
 ];
 
 describe('a tool optimization whose baseline was stored before ADR 0011', () => {
@@ -751,6 +757,54 @@ describe('storedClientSetup', () => {
       });
     }
   );
+
+  it.each([
+    ['api', { server: 'hmac:1', servers: 'hmac:2' }],
+    ['mst', { server: 'hmac:1', servers: 'hmac:2' }],
+    [
+      'claude-code',
+      {
+        server: 'hmac:1',
+        servers: 'hmac:2',
+        apiToken: 'hmac:3',
+        pluginDir: './plugin',
+        pluginMcpUrl: 'hmac:4',
+      },
+    ],
+    ['cowork', { provider: 'anthropic' }],
+    ['chatgpt', { provider: 'openai' }],
+    ['codex-app', { provider: 'openai' }],
+    ['mst/client/cowork', { provider: 'anthropic' }],
+  ] as const)(
+    'drops the options a stored %s never used: %j',
+    (client, unused) => {
+      const name = client === 'mst' ? 'api' : client.replace('mst/client/', '');
+      expect(
+        storedClientSetup({
+          name: 'v',
+          client,
+          clientOptions: { timeout: 1, ...unused },
+        })
+      ).toEqual({ name: 'v', client: name, clientOptions: { timeout: 1 } });
+      expect(storedClientSetup({ client, clientOptions: unused })).toEqual({
+        client: name,
+      });
+    }
+  );
+
+  it('keeps the options a client still takes by those names', () => {
+    // The api and claude-code clients choose their API with `provider`.
+    for (const client of ['api', 'claude-code'])
+      expect(
+        storedClientSetup({ client, clientOptions: { provider: 'anthropic' } })
+      ).toEqual({ client, clientOptions: { provider: 'anthropic' } });
+    // A plugin client's options are its own.
+    const plugin = {
+      client: 'acme/client/x',
+      clientOptions: { servers: 'hmac:1', provider: 'openai', pluginDir: 'd' },
+    };
+    expect(storedClientSetup(plugin)).toBe(plugin);
+  });
 
   it.each(['cowork', 'chatgpt', 'codex-app', 'mst/client/chatgpt'])(
     "reads a stored %s's computerUseMaxActions or nativeMaxActions as maxActions, where it was",
