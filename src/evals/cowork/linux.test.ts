@@ -678,6 +678,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
           headersHelper: '/opt/mst/primary-headers.sh',
         },
       ],
+      toolSearchEnabled: true,
       isLocalDevMcpEnabled: false,
       isDesktopExtensionEnabled: false,
       disabledBuiltinTools: ['AskUserQuestion'],
@@ -731,6 +732,35 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     expect(await egressOf(image, ['docs.example.com'])).toEqual([
       'docs.example.com',
     ]);
+  });
+
+  it('turns tool search on unless the eval turns it off', async () => {
+    const toolSearchOf = async (toolSearch?: boolean): Promise<unknown> => {
+      const file = join(directory, 'settings.json');
+      await writeFile(file, `${JSON.stringify(image)}\n`);
+      const prepared = await linuxCoworkPlatform.prepare({
+        evalConfig: {
+          ...evalConfig,
+          ...(toolSearch !== undefined ? { coworkSetup: { toolSearch } } : {}),
+        },
+        model: 'test-model',
+        env: {
+          ...session,
+          MST_COWORK_SETTINGS_FILE: file,
+          MST_DESKTOP_OWNED: '1',
+          MST_DESKTOP_RESTART: RESTART,
+        },
+      });
+      const written = JSON.parse(await readFile(file, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      await prepared.dispose();
+      return written.toolSearchEnabled;
+    };
+    expect(await toolSearchOf()).toBe(true);
+    expect(await toolSearchOf(true)).toBe(true);
+    expect(await toolSearchOf(false)).toBe(false);
   });
 
   it("keeps the image's own disabled built-in tools beside AskUserQuestion", async () => {

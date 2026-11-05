@@ -21,6 +21,16 @@ export const CoworkSetupConfigSchema = z
      * `AskUserQuestion`, which stay off. Not applied to a macOS desktop.
      */
     disabledBuiltinTools: z.array(z.string().min(1)).max(100).optional(),
+    /**
+     * Tool search (Claude Desktop's `toolSearchEnabled`), on MST's Linux
+     * desktop and in the macOS eval profile: Cowork lists MCP tools by name
+     * and loads their definitions when the model asks for them, instead of
+     * sending every connector's tools in every request. On unless set to
+     * `false`, to match Cowork signed in to claude.ai, whose cloud sessions
+     * have it on; Desktop leaves it off with a third-party provider
+     * otherwise.
+     */
+    toolSearch: z.boolean().optional(),
   })
   .strict();
 
@@ -42,11 +52,13 @@ export function resolveCoworkSetupConfig(
       variant.egressAllowedHosts ?? base.egressAllowedHosts;
     const disabledBuiltinTools =
       variant.disabledBuiltinTools ?? base.disabledBuiltinTools;
+    const toolSearch = variant.toolSearch ?? base.toolSearch;
     return {
       approveWriteTools:
         variant.approveWriteTools ?? base.approveWriteTools ?? false,
       ...(egressAllowedHosts ? { egressAllowedHosts } : {}),
       ...(disabledBuiltinTools ? { disabledBuiltinTools } : {}),
+      ...(toolSearch !== undefined ? { toolSearch } : {}),
     };
   } catch {
     throw new Error('Invalid Cowork setup options.');

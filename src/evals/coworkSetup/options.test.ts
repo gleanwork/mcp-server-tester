@@ -53,11 +53,26 @@ describe('Cowork setup approval options', () => {
     ).toEqual({ approveWriteTools: false, disabledBuiltinTools: [] });
   });
 
+  it("takes a variant's tool search over the eval's, and leaves it out when neither sets it", () => {
+    expect(resolveCoworkSetupConfig({ toolSearch: false }, {})).toEqual({
+      approveWriteTools: false,
+      toolSearch: false,
+    });
+    expect(
+      resolveCoworkSetupConfig({ toolSearch: false }, { toolSearch: true })
+    ).toEqual({ approveWriteTools: false, toolSearch: true });
+    expect(resolveCoworkSetupConfig({}, {})).toEqual({
+      approveWriteTools: false,
+    });
+  });
+
   it.each([
     null,
     true,
     [],
     'all',
+    { toolSearch: 'true' },
+    { toolSearch: 1 },
     { egressAllowedHosts: '*' },
     { egressAllowedHosts: [''] },
     { disabledBuiltinTools: 'WebSearch' },

@@ -50,6 +50,8 @@ Cowork can reach any public host: its web fetch, and the commands it runs in its
 
 To turn off Cowork built-in tools, set `coworkSetup.disabledBuiltinTools` (in the eval or a variant; a variant's list replaces the eval's), e.g. `["WebSearch"]` when the model's provider can't run Anthropic's server-side web search, as with an LLM gateway that serves Claude through Snowflake, Bedrock or Vertex: every search returns a 400 there. That's Claude Desktop's `disabledBuiltinTools`; the eval's tools are added to the image's own and `AskUserQuestion`, which stay off. Cowork's model doesn't see a disabled tool.
 
+Tool search is on, here and in the macOS eval profile: Cowork lists each MCP server's tools by name and loads a tool's definition when the model searches for it, rather than sending every connector's tools in every request. That's Claude Desktop's `toolSearchEnabled` (Claude Desktop 1.21459.0 or later), which Desktop leaves off in gateway mode unless the settings turn it on; Cowork signed in to claude.ai has it on. Set `coworkSetup.toolSearch: false` (in the eval or a variant; a variant's value wins) to send every tool in every request, as before. The gateway must accept what tool search adds to each request, such as the `tool-search-tool-2025-10-19` beta, or every request fails with HTTP 400. A trace with tool search on shows `ToolSearch` calls, and `tool_search_hit_rate` counts them.
+
 Options (`--env-option key=value`):
 
 | Option                 | Meaning                                                                                                                      |

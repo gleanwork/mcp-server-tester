@@ -112,6 +112,11 @@ Two separate model clients run during a macOS case:
 So on a Mac whose managed preferences route Claude Desktop through a gateway,
 setting the gateway variables for the planner is enough; no API key is needed.
 
+The temporary profile turns on tool search (`toolSearchEnabled`), as on the
+Linux desktop: Cowork loads an MCP tool's definition when the model searches for
+it. Set `coworkSetup.toolSearch: false` to send every tool in every request. See
+[Cowork in Docker](./cowork-docker.md).
+
 `MST_COWORK_APP_PATH=/absolute/path/to/Claude.app` runs an app installed
 somewhere other than `/Applications`. MST neither downloads nor deletes
 caller-owned bundles, and records their version too. Don't combine it with

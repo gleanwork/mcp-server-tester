@@ -478,6 +478,7 @@ describe('Mac Cowork settings transaction', () => {
     expect(await readJson(profile(result.id))).toEqual({
       disableAutoUpdates: true,
       disabledBuiltinTools: ['AskUserQuestion'],
+      toolSearchEnabled: true,
       managedMcpServers: [
         {
           name: 'Search',
@@ -599,6 +600,32 @@ describe('Mac Cowork settings transaction', () => {
     ).mockResolvedValue({ setsProvider: false });
     await rejectInstall({ env: { TOKEN_Search: MCP_TOKEN } });
     await expectClean();
+  });
+
+  it("turns tool search off only where the eval or the variant's setup does", async () => {
+    const input = evalConfig();
+    input.coworkSetup = { toolSearch: false };
+    input.variants = [
+      { name: 'inherits' },
+      { name: 'on', coworkSetup: { toolSearch: true } },
+    ];
+    for (const [variant, expected] of [
+      [undefined, false],
+      ['inherits', false],
+      ['on', true],
+    ] as const) {
+      const result = await installMacCoworkSettings(
+        options({
+          evalConfig: input,
+          ...(variant ? { variant } : {}),
+        })
+      );
+      expect((await readJson(profile(result.id))).toolSearchEnabled).toBe(
+        expected
+      );
+      await result.restore();
+      await expectClean();
+    }
   });
 
   it('selects an explicit empty variant', async () => {
