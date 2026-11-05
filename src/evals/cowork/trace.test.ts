@@ -7,16 +7,8 @@ import {
   getClaudeDataDir,
   snapshotClaudeSessions,
   waitForClaudeTrace,
-} from './claudeSessions.js';
-import { parseClaudeTrace, type SessionCandidate } from './claudeTrace.js';
-
-const COWORK_DRIVER = {
-  provider: 'anthropic',
-  product: 'claude',
-  surface: 'cowork',
-  runtime: 'desktop-app',
-  platform: 'macos',
-} as const;
+} from './sessions.js';
+import { parseClaudeTrace, type SessionCandidate } from './trace.js';
 
 async function writeJsonl(path: string, events: unknown[]): Promise<void> {
   await writeFile(
@@ -855,7 +847,6 @@ describe('Claude local-agent trace parsing', () => {
           correlation: {
             strategy: 'prompt_marker',
             includedInPrompt: true,
-            marker,
           },
         });
         expect(trace.finalAnswer).toBe('READY');
@@ -1089,16 +1080,9 @@ describe('Claude local-agent trace parsing', () => {
     expect(trace.transcriptParsed).toBe(false);
   });
 
-  it('allows capability-local Claude data directory options to override driver-wide options', () => {
-    expect(
-      getClaudeDataDir(
-        {
-          driver: COWORK_DRIVER,
-          options: { dataDir: '/global/claude' },
-        },
-        { with: { dataDir: '/capability/claude' } }
-      )
-    ).toBe('/capability/claude');
+  it('uses a configured Claude data directory over the default', () => {
+    expect(getClaudeDataDir('/configured/claude')).toBe('/configured/claude');
+    expect(getClaudeDataDir()).toMatch(/local-agent-mode-sessions$/);
   });
 
   it('matches sessions by marker instead of timing alone', async () => {
@@ -1446,7 +1430,6 @@ describe('Claude local-agent trace parsing', () => {
       marker: 'MCP_SERVER_TESTER_WAIT',
       correlation: {
         strategy: 'prompt_marker',
-        marker: 'MCP_SERVER_TESTER_WAIT',
         includedInPrompt: true,
       },
       snapshot: new Map(),
@@ -1495,7 +1478,6 @@ describe('Claude local-agent trace parsing', () => {
       marker: 'MCP_SERVER_TESTER_TRANSCRIPT',
       correlation: {
         strategy: 'prompt_marker',
-        marker: 'MCP_SERVER_TESTER_TRANSCRIPT',
         includedInPrompt: true,
       },
       snapshot: new Map(),
@@ -1577,7 +1559,6 @@ describe('Claude local-agent trace parsing', () => {
       marker: 'MCP_SERVER_TESTER_NOT_IN_PROMPT',
       correlation: {
         strategy: 'none',
-        marker: 'MCP_SERVER_TESTER_NOT_IN_PROMPT',
         includedInPrompt: false,
       },
       snapshot: new Map(),

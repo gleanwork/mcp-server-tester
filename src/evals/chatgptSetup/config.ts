@@ -3,7 +3,7 @@ import {
   type MCPConfig,
 } from '../../config/mcpConfig.js';
 import type { CodexMcpServerConfig } from '../codexSetup/config.js';
-import { isChatgptBuiltinServer } from '../externalClient/builtins/chatgptTrace.js';
+import { isChatgptBuiltinServer } from '../chatgpt/trace.js';
 
 /** Adapt resolved V2 servers without writing HTTP credentials into config.toml. */
 export function chatgptServers(

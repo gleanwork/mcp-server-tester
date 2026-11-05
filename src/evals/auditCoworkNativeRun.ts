@@ -19,7 +19,7 @@ import {
   parseClaudeTrace,
   type ClaudeTrace,
   awaitingUserAnswer,
-} from './externalClient/builtins/claudeTrace.js';
+} from './cowork/trace.js';
 import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
 import { matchesPersistedPreview } from './persistedToolOutput.js';
 

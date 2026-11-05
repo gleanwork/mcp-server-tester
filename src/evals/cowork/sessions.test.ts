@@ -7,7 +7,7 @@ import {
   snapshotClaudeSessions,
   waitForClaudeSession,
   waitForClaudeTrace,
-} from './claudeSessions.js';
+} from './sessions.js';
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'claude-exact-prompt-'));

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { mkdtemp, open, readFile, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
-import type { ClientArtifact } from '../types.js';
+import type { ClientArtifact } from '../externalClient/types.js';
 
 const MAX_TRANSCRIPT_BYTES = 32 * 1024 * 1024;
 

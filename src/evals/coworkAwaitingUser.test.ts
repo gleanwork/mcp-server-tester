@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { awaitingUserAnswer } from './externalClient/builtins/claudeTrace.js';
+import { awaitingUserAnswer } from './cowork/trace.js';
 
 const ask = { name: 'AskUserQuestion', source: 'builtin' };
 

@@ -3,12 +3,12 @@ import { join } from 'node:path';
 import {
   mstScratchRoots,
   resolvePersistedOutput,
-} from '../../persistedToolOutput.js';
+} from '../persistedToolOutput.js';
 import { Readable } from 'node:stream';
 import { parse as parseNdjson } from 'ndjson';
-import type { LLMToolCall } from '../../mstClient/types.js';
-import type { UsageMetrics } from '../../../types/index.js';
-import type { ModelCall } from '../../evalFrameworkTypes.js';
+import type { LLMToolCall } from '../mstClient/types.js';
+import type { UsageMetrics } from '../../types/index.js';
+import type { ModelCall } from '../evalFrameworkTypes.js';
 import {
   claudeModelCalls,
   splitClaudeMcpName,
@@ -17,12 +17,12 @@ import {
   claudeThinkingTokens,
   withFinalUsage,
   type ClaudeMessageEvent,
-} from '../../claudeCodeEvents.js';
-import { formatError } from './claudeCommon.js';
-import { findFile } from './claudeCommon.js';
+} from '../claudeCodeEvents.js';
+import { formatError } from './sessionFiles.js';
+import { findFile } from './sessionFiles.js';
 
 // The session-store types live with the parser: parseClaudeTrace reads a
-// SessionCandidate's files, and claudeSessions depends on this module.
+// SessionCandidate's files, and sessions.ts depends on this module.
 export interface ClaudeSessionMetadata {
   sessionId?: string;
   cliSessionId?: string;

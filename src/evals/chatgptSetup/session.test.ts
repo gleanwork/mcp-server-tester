@@ -13,15 +13,15 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ControllerModule from './macController.js';
 import type * as ConfigModule from '../codexSetup/config.js';
-import type * as TraceModule from '../externalClient/builtins/chatgptTrace.js';
+import type * as TraceModule from '../chatgpt/trace.js';
 import type * as ComputerUseModule from '../cowork/anthropicComputerUse.js';
 import {
   findChatgptTrace,
   parseChatgptTrace,
   snapshotChatgptSessions,
-} from '../externalClient/builtins/chatgptTrace.js';
+} from '../chatgpt/trace.js';
 import { runExternalClientCase } from '../externalClient/runtime.js';
-import { NativeTraceError } from '../externalClient/nativeTraceError.js';
+import { NativeTraceError } from '../nativeTraceError.js';
 import { ChatgptAppSession } from './session.js';
 import type { ExternalClientConfig } from '../externalClient/types.js';
 import { getChatgptApplicationController } from './macController.js';
@@ -52,7 +52,7 @@ vi.mock('../mcpReadiness.js', async (original) => ({
   ...(await original<typeof ReadinessModule>()),
   checkMcpServers: vi.fn(),
 }));
-vi.mock('../externalClient/builtins/chatgptTrace.js', async (original) => ({
+vi.mock('../chatgpt/trace.js', async (original) => ({
   ...(await original<typeof TraceModule>()),
   findChatgptTrace: vi.fn(),
   snapshotChatgptSessions: vi.fn(),

@@ -7,8 +7,11 @@ import type {
   ExternalClientFailureKind,
 } from '../types.js';
 import { normalizeClientDriver } from '../driverIdentity.js';
-import { findChatgptTrace, PendingChatgptRecordError } from './chatgptTrace.js';
-import type * as TraceModule from './chatgptTrace.js';
+import {
+  findChatgptTrace,
+  PendingChatgptRecordError,
+} from '../../chatgpt/trace.js';
+import type * as TraceModule from '../../chatgpt/trace.js';
 import {
   chatgptBindingDeadline,
   chatgptRunState,
@@ -21,7 +24,7 @@ import type * as DriverModule from '../../chatgpt/driver.js';
 import { runLinuxChatgptDesktop } from '../../chatgpt/linux.js';
 import type * as LinuxModule from '../../chatgpt/linux.js';
 import { ChatgptAppSession } from '../../chatgptSetup/session.js';
-import { NativeTraceError } from '../nativeTraceError.js';
+import { NativeTraceError } from '../../nativeTraceError.js';
 import { NativeChatgptDriverError } from '../../chatgpt/linux.js';
 import { validateLinuxChatgptConfig } from '../../chatgptSetup/linuxProfile.js';
 import type * as LinuxProfileModule from '../../chatgptSetup/linuxProfile.js';
@@ -43,7 +46,7 @@ vi.mock('../../chatgpt/stallScreenshot.js', async (original) => ({
   ...(await original<object>()),
   saveStallScreenshot: screenshots.saveStallScreenshot,
 }));
-vi.mock('./chatgptTrace.js', async (original) => ({
+vi.mock('../../chatgpt/trace.js', async (original) => ({
   ...(await original<typeof TraceModule>()),
   findChatgptTrace: vi.fn(),
 }));
@@ -234,8 +237,9 @@ describe('bounded native binding wait and failure classification', () => {
     async (linux, surface, originator) => {
       const home = await mkdtemp(join(tmpdir(), 'chatgpt-origin-'));
       try {
-        const actual =
-          await vi.importActual<typeof TraceModule>('./chatgptTrace.js');
+        const actual = await vi.importActual<typeof TraceModule>(
+          '../../chatgpt/trace.js'
+        );
         vi.mocked(findChatgptTrace).mockImplementation(actual.findChatgptTrace);
         const ctx = context(home, linux);
         ctx.config.options!.surface = surface;
@@ -308,8 +312,9 @@ describe('bounded native binding wait and failure classification', () => {
   it('binds the preserved Codex abort shape as client_run_failed, never completed success', async () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-codex-abort-'));
     try {
-      const actual =
-        await vi.importActual<typeof TraceModule>('./chatgptTrace.js');
+      const actual = await vi.importActual<typeof TraceModule>(
+        '../../chatgpt/trace.js'
+      );
       vi.mocked(findChatgptTrace).mockImplementation(actual.findChatgptTrace);
       clock.now = Date.parse('2026-09-23T15:34:00Z');
       const ctx = context(home, true);
@@ -322,7 +327,10 @@ describe('bounded native binding wait and failure classification', () => {
       await mkdir(root, { recursive: true });
       await mkdir(join(home, 'evidence'), { mode: 0o700 });
       const content = await readFile(
-        new URL('./fixtures/codexDesktopAborted.jsonl', import.meta.url),
+        new URL(
+          '../../chatgpt/fixtures/codexDesktopAborted.jsonl',
+          import.meta.url
+        ),
         'utf8'
       );
       await writeFile(join(root, 'rollout-aborted.jsonl'), content);
