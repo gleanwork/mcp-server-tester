@@ -35,6 +35,7 @@ import {
   infrastructureEnding,
 } from '../../trialEnding.js';
 import {
+  API_CLIENT_DEFAULTS,
   GenerationOptions,
   ProviderSchema,
   type ClientEnvironment,
@@ -731,7 +732,7 @@ export async function runVercelClient(
           prompt: input,
           tools,
           stopWhen: stepCountIs(Math.max(1, maxSteps)),
-          temperature: config.temperature ?? 0,
+          temperature: config.temperature ?? API_CLIENT_DEFAULTS.temperature,
           maxOutputTokens: config.maxTokens,
           abortSignal: controller.signal,
           ...(providerOptions ? { providerOptions } : {}),

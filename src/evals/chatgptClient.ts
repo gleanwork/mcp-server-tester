@@ -52,6 +52,7 @@ import {
   osName,
 } from './desktopOS.js';
 import { removedClientOptions } from './renamedKeys.js';
+import { DEFAULT_COMPUTER_USE_MODEL } from './cowork/computerUseLoop.js';
 
 /**
  * Why `clientOptions.surface` fails: the surface is the client now (ADR
@@ -83,21 +84,33 @@ const schemaOf = (product: DesktopProduct) =>
       reasoningEffort: reasoningEffortOption(
         product.client,
         CHATGPT_APP_REASONING_EFFORTS
-      ),
+      ).meta({ 'x-defaultDescription': 'app default' }),
       /** Gone: the client fixes its provider. */
       ...removedClientOptions({
         provider: fixedProviderGone(product.client, 'openai'),
       }),
       /** The trial's time limit in ms (default 300000). */
       timeout: z.number().int().positive().default(300_000),
-      env: z.record(z.string(), z.string()).optional(),
+      env: z.record(z.string(), z.string()).optional().meta({
+        'x-defaultDescription': 'inherited environment; no extra variables',
+      }),
       /** Client-owned: plugins installed into the fresh Linux profile. */
-      plugins: MarketplacePluginsSchema.optional().refine(
-        (plugins) => !plugins?.some((p) => p.blockMcpServers?.length),
-        'ChatGPT does not support plugins[].blockMcpServers; use plugins[].mcp.'
-      ),
-      configPath: z.string().min(1).optional(),
-      requireMcpCalls: z.boolean().optional(),
+      plugins: MarketplacePluginsSchema.optional()
+        .refine(
+          (plugins) => !plugins?.some((p) => p.blockMcpServers?.length),
+          'ChatGPT does not support plugins[].blockMcpServers; use plugins[].mcp.'
+        )
+        .meta({
+          'x-defaultDescription': 'no marketplace plugins (Linux only)',
+        }),
+      configPath: z.string().min(1).optional().meta({
+        'x-defaultDescription':
+          'app profile config.toml on the trial machine (OS-specific)',
+      }),
+      requireMcpCalls: z
+        .boolean()
+        .optional()
+        .meta({ 'x-defaultDescription': 'not set (currently unused)' }),
       /** Gone: the surface is the client (`chatgpt` or `codex-app`). */
       surface: z
         .never({ error: (issue) => surfaceGone(product, issue.input) })
@@ -122,7 +135,10 @@ const schemaOf = (product: DesktopProduct) =>
         .optional()
         .describe(
           `The most actions the desktop automation may take to send a case's prompt: ${chatgptMaxActionsSummary()}.`
-        ),
+        )
+        .meta({
+          'x-defaultDescription': `macOS: ${CHATGPT_MAX_ACTIONS.darwin.default}; Linux: ${CHATGPT_MAX_ACTIONS.linux.default}`,
+        }),
       /** Gone: the action budget is `maxActions`. */
       nativeMaxActions: z
         .never({ message: maxActionsRenamed('nativeMaxActions') })
@@ -130,7 +146,10 @@ const schemaOf = (product: DesktopProduct) =>
       computerUseModel: z
         .string()
         .regex(/^[A-Za-z0-9._:-]+$/)
-        .optional(),
+        .optional()
+        .meta({
+          'x-defaultDescription': `macOS: MST_COWORK_CUA_MODEL or ${DEFAULT_COMPUTER_USE_MODEL}; Linux: no planner`,
+        }),
       /** Gone: the action budget is `maxActions`. */
       computerUseMaxActions: z
         .never({ message: maxActionsRenamed('computerUseMaxActions') })

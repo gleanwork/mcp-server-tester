@@ -31,6 +31,27 @@ describe('assertPlugin', () => {
     expect(assertPlugin(value, './acme.js')).toBe(value);
   });
 
+  it.each(['macos', 'linux', undefined])('accepts environment OS %s', (os) => {
+    const value = plugin({
+      environments: { vm: { schema, os, open: async () => ({}) } },
+    });
+    expect(assertPlugin(value, './acme.js')).toBe(value);
+  });
+
+  it.each(['darwin', 'windows', '', ['linux'], null, 1])(
+    'rejects invalid environment OS %j',
+    (os) => {
+      expect(() =>
+        assertPlugin(
+          plugin({
+            environments: { vm: { schema, os, open: async () => ({}) } },
+          }),
+          './acme.js'
+        )
+      ).toThrow('environments.vm: os must be macos or linux');
+    }
+  );
+
   it('accepts a scoped namespace', () => {
     const value = plugin({ meta: { name: 'x', namespace: '@acme/tools' } });
     expect(() => assertPlugin(value, 'x')).not.toThrow();

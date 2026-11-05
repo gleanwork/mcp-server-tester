@@ -811,6 +811,12 @@ export interface EnvironmentDefinition {
    */
   readonly schema: ZodType;
   readonly description?: string;
+  /**
+   * The OS of every machine that collects trials: `macos` or `linux`.
+   * Omit it when unknown or mixed. MST checks client requirements at config
+   * load when this is declared; it never opens a machine to discover it.
+   */
+  readonly os?: ClientOS;
   /** The most shards it can run. Default: no limit. */
   readonly maxShards?: number;
   open(

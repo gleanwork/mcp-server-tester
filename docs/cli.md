@@ -715,7 +715,7 @@ The list shows what each dataset's `describe()` reports, without loading cases; 
 
 ## `clients` - Find Clients
 
-Lists the clients an eval can run, built-in and from plugins, and shows what a machine needs to run one and the options it takes.
+Lists the clients an eval can run, built-in and from plugins, with their requirements, every option and its default. `show <client>` prints the same information for one client.
 
 ### Usage
 
@@ -726,16 +726,29 @@ npx mst clients show codex-cli
 npx mst clients show acme/client/desk --plugins @acme/mst-plugin --json
 ```
 
+For example, `mst clients show claude-code` prints:
+
 ```text
-api          any OS        The model alone, through its provider's API, with the servers' tools: ...
-chatgpt      macOS, Linux  The ChatGPT desktop app
-claude-code  any OS        The Claude Code CLI, headless
-codex-cli    any OS        The Codex CLI, headless, through the Codex SDK
-codex-app    macOS, Linux  The Codex surface of the ChatGPT desktop app
-cowork       macOS, Linux  Claude Desktop in Cowork mode
+claude-code  The Claude Code CLI, headless
+  runs on      any OS
+  install      Claude Code (`claude`) on `PATH`
+  credentials  `ANTHROPIC_API_KEY`, or Google Application Default Credentials with `provider: "vertex"`
+  setup        -
+  options (defaults; timeout in ms)
+    model         Claude Code default
+    timeout       180000
+    systemPrompt  not set (no additional instructions)
+    provider      "anthropic"
+    isolate       true
+    cwd           empty temporary directory, removed after the trial
+    env           inherited environment; no extra variables
 ```
 
-`show` prints the description, the operating systems the client runs on, what must be installed, the credentials it reads, the commands that prepare a machine for it, and its options as JSON Schema. Plugins add `description` and `requirements` (`os`, `install`, `credentials`, `setup`) to a client for these commands. The clients table in [evaluation-framework.md](./evaluation-framework.md#clients) is generated from the same definitions.
+`--json` adds the same `options` JSON Schema to each listed client that `show --json` returns. Literal defaults use `default`; defaults that depend on the model, OS or environment use `x-defaultDescription`. The same field marks an option as `required` or its default as `not declared`. A missing plugin declaration stays unknown; MST does not run the plugin to infer it. Removed options remain rejected in the JSON Schema and are omitted from the text option table. A plugin schema that cannot form one table, such as a union, prints as JSON Schema in text mode too.
+
+`timeout` is in milliseconds. The API client has no default timeout, which is not `0` or `null`; omit it to leave the trial without that limit. The other built-in defaults and all OS-dependent defaults appear in the [generated client tables](./evaluation-framework.md#clients). Listing options does not fill in missing config values or resolve defaults using the coordinator's OS.
+
+Plugins add `description` and `requirements` (`os`, `install`, `credentials`, `setup`) to a client for these commands. The client tables and defaults in the docs are generated from the same definitions and schemas.
 
 Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
 

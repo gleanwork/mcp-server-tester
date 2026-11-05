@@ -413,6 +413,23 @@ describe('codex-cli client run', () => {
     expect(existsSync(String(sdk.thread!.workingDirectory))).toBe(false);
   });
 
+  it.each([
+    [undefined, 300],
+    [1_234, 1.234],
+  ])(
+    'uses timeout %s for the trial and its default tool deadline',
+    async (timeout, seconds) => {
+      await CODEX_CLIENT.run!(
+        { prompt: 'x', servers: [servers[0]!] },
+        { type: 'codex-cli', ...(timeout === undefined ? {} : { timeout }) },
+        context(GATEWAY)
+      );
+      expect(parse(sdk.config!)).toMatchObject({
+        mcp_servers: { notes: { tool_timeout_sec: seconds } },
+      });
+    }
+  );
+
   it('gives Codex the reasoningEffort set, and rejects one it lacks before Codex starts', async () => {
     await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },

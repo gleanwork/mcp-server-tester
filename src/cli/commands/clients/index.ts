@@ -5,7 +5,6 @@
  *   mst clients [--plugins <module...> | --config <file>] [--json]
  *   mst clients show <ref> [--json]
  */
-import type { ZodType } from 'zod';
 import { getClient, listClients } from '../../../evals/builtinClients.js';
 import { resolveClientName } from '../../../evals/clientNames.js';
 import { builtinShortName } from '../../../plugins/extensions.js';
@@ -18,18 +17,15 @@ import {
   formatTable,
   inNamespaces,
   loadDiscoveryPlugins,
-  optionsSchema,
   type DiscoveryOptions,
 } from '../discoveryPlugins.js';
+import { clientOptionsSchema, clientOptionRows } from './options.js';
 
 interface ListedClient {
   ref: string;
   description?: string;
   requirements: ClientRequirements;
-}
-
-interface ClientEntry extends ListedClient {
-  schema: ZodType;
+  options: ReturnType<typeof clientOptionsSchema>;
 }
 
 const OS_NAMES: Record<ClientOS, string> = { macos: 'macOS', linux: 'Linux' };
@@ -44,7 +40,7 @@ export function clientOS(requirements: ClientRequirements): string {
 /** Every client visible with `options`: built-ins and the loaded plugins'. */
 async function clientEntries(
   options: DiscoveryOptions
-): Promise<ClientEntry[]> {
+): Promise<ListedClient[]> {
   // Built-in clients need no plugin.
   const { namespaces } =
     options.plugins?.length || options.config
@@ -58,36 +54,21 @@ async function clientEntries(
         ? { description: definition.description }
         : {}),
       requirements: definition.requirements ?? {},
-      schema: definition.schema,
+      options: clientOptionsSchema(definition.schema),
     }));
 }
 
-const listed = ({
-  ref,
-  description,
-  requirements,
-}: ClientEntry): ListedClient => ({
-  ref,
-  ...(description !== undefined ? { description } : {}),
-  requirements,
-});
-
-/** `mst clients`: each client, where it runs, and what it is. */
+/** `mst clients`: each client's requirements, options and defaults. */
 export async function listClientCommand(
   options: DiscoveryOptions,
   print: (text: string) => void = (text) => process.stdout.write(text)
 ): Promise<void> {
   const entries = await clientEntries(options);
   if (options.json) {
-    print(`${JSON.stringify(entries.map(listed), null, 2)}\n`);
+    print(`${JSON.stringify(entries, null, 2)}\n`);
     return;
   }
-  const rows = entries.map((entry) => [
-    entry.ref,
-    clientOS(entry.requirements),
-    entry.description ?? '',
-  ]);
-  print(`${formatTable(rows)}\n`);
+  print(`${entries.map(clientText).join('\n\n')}\n`);
 }
 
 /** Lines under a heading, the heading on the first. */
@@ -97,6 +78,29 @@ function section(heading: string, lines: readonly string[] = []): string[] {
   return lines.map(
     (line, index) => `  ${index === 0 ? label : ' '.repeat(12)} ${line}`
   );
+}
+
+function clientText(entry: ListedClient): string {
+  const { requirements } = entry;
+  const rows = clientOptionRows(entry.options);
+  // A union or other non-object plugin schema cannot be a flat option table.
+  const optionText = rows.length
+    ? formatTable(rows)
+    : (entry.options.unavailable ??
+      (entry.options.properties
+        ? '(none declared)'
+        : JSON.stringify(entry.options, null, 2)));
+  return [
+    entry.description !== undefined
+      ? `${entry.ref}  ${entry.description}`
+      : entry.ref,
+    ...section('runs on', [clientOS(requirements)]),
+    ...section('install', requirements.install),
+    ...section('credentials', requirements.credentials),
+    ...section('setup', requirements.setup),
+    '  options (defaults; timeout in ms)',
+    ...optionText.split('\n').map((line) => `    ${line}`),
+  ].join('\n');
 }
 
 /** `mst clients show <ref>`: what a client needs and the options it takes. */
@@ -133,28 +137,7 @@ export async function showClient(
       }`
     );
   }
-  const shown = {
-    ...listed(entry),
-    options: optionsSchema(entry.schema, 'client'),
-  };
-  if (options.json) {
-    print(`${JSON.stringify(shown, null, 2)}\n`);
-    return;
-  }
-  const { requirements } = entry;
   print(
-    `${[
-      entry.description !== undefined
-        ? `${entry.ref}  ${entry.description}`
-        : entry.ref,
-      ...section('runs on', [clientOS(requirements)]),
-      ...section('install', requirements.install),
-      ...section('credentials', requirements.credentials),
-      ...section('setup', requirements.setup),
-      '  options',
-      ...JSON.stringify(shown.options, null, 2)
-        .split('\n')
-        .map((line) => `    ${line}`),
-    ].join('\n')}\n`
+    `${options.json ? JSON.stringify(entry, null, 2) : clientText(entry)}\n`
   );
 }

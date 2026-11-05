@@ -13,6 +13,8 @@ import {
   type ListedServerTools,
 } from './toolSurface.js';
 import {
+  API_CLIENT_DEFAULTS,
+  CLAUDE_CODE_DEFAULTS,
   GenerationOptions,
   ProviderSchema,
   SystemPromptOption,
@@ -39,6 +41,7 @@ import { variantToolMetadata } from './evalConfig.js';
 import type { ClientDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { resolveClientName } from './clientNames.js';
+import { osName } from './desktopOS.js';
 import { attributeBuiltinEvents } from './clientTrace.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT, coworkOptionIssues } from './coworkClient.js';
@@ -237,7 +240,8 @@ async function runBuiltinClient(
         )?.CLAUDE_CONFIG_DIR;
         if (
           clientConfig.type === 'claude-code' &&
-          (clientConfig as { isolate?: boolean }).isolate !== false &&
+          ((clientConfig as { isolate?: boolean }).isolate ??
+            CLAUDE_CODE_DEFAULTS.isolate) &&
           explicitConfigDir === undefined
         ) {
           claudeConfigDir = fs.mkdtempSync(
@@ -409,25 +413,55 @@ const SdkClientSchema = z
   .object({
     type: z.literal('api').optional(),
     ...GenerationOptions,
-    /** The trial's time limit in ms (default: none, the trial runs until it ends). */
-    timeout: GenerationOptions.timeout,
-    provider: ProviderSchema.optional(),
-    apiKeyEnvVar: z.string().min(1).optional(),
+    model: GenerationOptions.model.meta({ default: API_CLIENT_DEFAULTS.model }),
+    maxToolCalls: GenerationOptions.maxToolCalls.meta({
+      default: API_CLIENT_DEFAULTS.maxToolCalls,
+    }),
+    temperature: GenerationOptions.temperature.meta({
+      default: API_CLIENT_DEFAULTS.temperature,
+    }),
+    maxTokens: GenerationOptions.maxTokens.meta({
+      'x-defaultDescription': 'not set (provider default)',
+    }),
+    /** Metadata documents runtime fallbacks without filling in omitted options. */
+    timeout: GenerationOptions.timeout.meta({
+      'x-defaultDescription': 'none (no time limit)',
+    }),
+    provider: ProviderSchema.optional().meta({
+      'x-defaultDescription': `inferred from model; otherwise ${API_CLIENT_DEFAULTS.provider}`,
+    }),
+    apiKeyEnvVar: z
+      .string()
+      .min(1)
+      .optional()
+      .meta({ 'x-defaultDescription': 'provider credential or LLM gateway' }),
     systemPrompt: SystemPromptOption,
     /** Offer the server's Agent Skills: as a catalog the model loads from, or preloaded. */
-    skills: z.enum(['off', 'catalog', 'preload']).optional(),
-    env: z.record(z.string(), z.string().optional()).optional(),
+    skills: z
+      .enum(['off', 'catalog', 'preload'])
+      .optional()
+      .meta({ default: API_CLIENT_DEFAULTS.skills }),
+    env: z.record(z.string(), z.string().optional()).optional().meta({
+      'x-defaultDescription': 'inherited environment; no extra variables',
+    }),
     ...UNUSED_SERVER_OPTIONS,
   })
   .strict();
 const CliClientSchema = z
   .object({
     type: z.literal('claude-code').optional(),
-    model: GenerationOptions.model,
-    /** The trial's time limit in ms (default 180000). */
-    timeout: GenerationOptions.timeout,
+    model: GenerationOptions.model.meta({
+      'x-defaultDescription': 'Claude Code default',
+    }),
+    /** The trial's time limit in ms. Omission stays distinct from an override. */
+    timeout: GenerationOptions.timeout.meta({
+      default: CLAUDE_CODE_DEFAULTS.timeout,
+    }),
     systemPrompt: SystemPromptOption,
-    provider: z.enum(['anthropic', 'vertex', 'vertex-anthropic']).optional(),
+    provider: z
+      .enum(['anthropic', 'vertex', 'vertex-anthropic'])
+      .optional()
+      .meta({ default: CLAUDE_CODE_DEFAULTS.provider }),
     ...removedClientOptions({
       apiToken:
         "A server's token is in its own `auth` in the eval config's `servers` (`auth.accessToken` or `auth.accessTokenEnv`).",
@@ -441,7 +475,10 @@ const CliClientSchema = z
      * operator's skills, plugins and settings don't affect results. Set false
      * to use your own, for example to sign in with a claude.ai account.
      */
-    isolate: z.boolean().optional(),
+    isolate: z
+      .boolean()
+      .optional()
+      .meta({ default: CLAUDE_CODE_DEFAULTS.isolate }),
     /**
      * The directory Claude Code runs in, relative to the working directory
      * of the process running the eval. By default it runs in an empty
@@ -449,8 +486,13 @@ const CliClientSchema = z
      * permission there (bypassPermissions), so name only a directory it may
      * read and change.
      */
-    cwd: z.string().min(1).optional(),
-    env: z.record(z.string(), z.string().optional()).optional(),
+    cwd: z.string().min(1).optional().meta({
+      'x-defaultDescription':
+        'empty temporary directory, removed after the trial',
+    }),
+    env: z.record(z.string(), z.string().optional()).optional().meta({
+      'x-defaultDescription': 'inherited environment; no extra variables',
+    }),
     ...UNUSED_SERVER_OPTIONS,
   })
   .strict();
@@ -589,13 +631,14 @@ function vercelSdkClient(options: BuiltinClientOptions): MstClientConfig {
     provider:
       (options.provider as MstClientConfig['provider']) ??
       providerForModel(options.model) ??
-      'anthropic',
-    model: options.model ?? 'claude-sonnet-4-20250514',
-    maxToolCalls: options.maxToolCalls ?? 5,
+      API_CLIENT_DEFAULTS.provider,
+    model: options.model ?? API_CLIENT_DEFAULTS.model,
+    maxToolCalls: options.maxToolCalls ?? API_CLIENT_DEFAULTS.maxToolCalls,
     ...(options.systemPrompt !== undefined
       ? { systemPrompt: options.systemPrompt }
       : {}),
-    ...(options.skills !== undefined && options.skills !== 'off'
+    ...(options.skills !== undefined &&
+    options.skills !== API_CLIENT_DEFAULTS.skills
       ? { skills: options.skills }
       : {}),
   };
@@ -620,9 +663,24 @@ export function assertClientSupports(
      * machine that runs them.
      */
     os?: NodeJS.Platform;
+    /** The selected environment's name, for config-load errors. */
+    environment?: string;
   }
 ): void {
   const definition = getClient(clientConfig.type);
+  const supported = definition.requirements?.os;
+  if (
+    options.os !== undefined &&
+    supported &&
+    !supported.some((os) => (os === 'macos' ? 'darwin' : os) === options.os)
+  ) {
+    const where = options.environment
+      ? `in environment "${options.environment}" (${osName(options.os)})`
+      : `on ${osName(options.os)}`;
+    throw new Error(
+      `${options.context}: client "${clientConfig.type}" can't run ${where}; supported OS: ${supported.map((os) => osName(os === 'macos' ? 'darwin' : os)).join(', ')}. Choose an environment with a supported OS.`
+    );
+  }
   const configured = clientConfig as Record<string, unknown>;
   const osIssues =
     options.os === undefined
@@ -707,7 +765,7 @@ function claudeCliClient(
   const provider =
     options.provider === 'vertex-anthropic'
       ? 'vertex'
-      : (options.provider ?? 'anthropic');
+      : (options.provider ?? CLAUDE_CODE_DEFAULTS.provider);
 
   // Claude Code gets exactly the eval's servers (`--strict-mcp-config`).
   const mcpServers: Record<string, Record<string, unknown>> = {};
@@ -772,7 +830,7 @@ function claudeCliClient(
       args: baseArgs,
       ...(options.cwd !== undefined ? { cwd: path.resolve(options.cwd) } : {}),
       outputFormat: 'stream-json',
-      timeout: options.timeout ?? 180_000,
+      timeout: options.timeout ?? CLAUDE_CODE_DEFAULTS.timeout,
       env: {
         ...env,
         MCP_CONNECTION_NONBLOCKING: 'false',
