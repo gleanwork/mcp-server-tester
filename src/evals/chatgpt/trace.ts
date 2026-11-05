@@ -8,7 +8,7 @@ import type {
   LLMToolCall,
   MstClientSimulationResult,
 } from '../mstClient/types.js';
-import type { ExternalClientTelemetry } from '../externalClient/types.js';
+import type { ExternalClientTelemetry } from '../clientTelemetryTypes.js';
 import { NativeTraceError } from '../nativeTraceError.js';
 import type { ChatgptSurface } from './driver.js';
 

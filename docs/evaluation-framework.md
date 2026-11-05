@@ -764,7 +764,7 @@ Each client has its own guide: [mst-client.md](./mst-client.md) for `api` and `c
 
 Set the model beside the client. The `api` client infers which API serves it from the model id (`claude-*`, `gpt-*`, `gemini-*` and so on; a `claude-*@date` id is Vertex). Set `provider` only to override that, for example to route through Vertex or a gateway.
 
-A client runs one input and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every client. A plugin client is the way to add one: plugins contribute them under `clients`. The built-in desktop drivers are composed from internal capabilities, which plugins can't provide.
+A client runs one input and returns its trace. It doesn't repeat cases, run judges or decide pass/fail; `runEvalDataset` does that for every client. A plugin client is the way to add one: plugins contribute them under `clients`.
 
 ```typescript
 import type { Plugin } from '@gleanwork/mcp-server-tester';

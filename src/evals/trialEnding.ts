@@ -9,7 +9,7 @@
 import type { ClientDiagnostics } from '../types/clientDiagnostics.js';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { InfrastructureBreak, TrialEnding } from '../types/trialEnding.js';
-import type { ExternalClientFailureKind } from './externalClient/types.js';
+import type { ExternalClientFailureKind } from './clientTelemetryTypes.js';
 
 /** Every value an infrastructure failure can name, for schemas. */
 export const INFRASTRUCTURE_BREAKS = [

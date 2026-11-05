@@ -11,7 +11,7 @@ import {
   CODEX_APP_LINUX_CLIENT,
   chatgptOptionIssues,
 } from './chatgptClient.js';
-import { runExternalClientCase } from './externalClient/runtime.js';
+import { runChatgptTurn } from './chatgpt/turn.js';
 import { clientRunToExecution } from './clientTrace.js';
 import type { ClientBatchRequest } from './evalFrameworkTypes.js';
 import { linuxEnvironment } from './chatgpt/linuxEnvironment.fixture.js';
@@ -34,8 +34,8 @@ vi.mock('node:os', async (original) => ({
   ...(await original<typeof OsModule>()),
   homedir: () => home.value,
 }));
-vi.mock('./externalClient/runtime.js', () => ({
-  runExternalClientCase: vi.fn(),
+vi.mock('./chatgpt/turn.js', () => ({
+  runChatgptTurn: vi.fn(),
 }));
 const context = { evalConfig: { name: 'test', datasets: [], concurrency: 1 } };
 const config = {
@@ -61,18 +61,6 @@ const requests = (): ClientBatchRequest[] =>
     },
   }));
 const metadata = {
-  driver: {
-    provider: 'openai',
-    product: 'chatgpt',
-    surface: 'agent',
-    runtime: 'desktop-app',
-    platform: 'macos',
-  },
-  driverSlug: 'openai.chatgpt.agent.desktop-app.macos',
-  displayName: 'ChatGPT',
-  clientName: 'ChatGPT',
-  clientType: 'desktop' as const,
-  capabilitiesUsed: [],
   traceSource: 'client-local-transcript' as const,
   traceConfidence: 'high' as const,
   artifacts: [],
@@ -89,7 +77,7 @@ beforeEach(async () => {
   lifecycle.prepare.mockReset().mockResolvedValue(undefined);
   lifecycle.restart.mockReset().mockResolvedValue(undefined);
   lifecycle.dispose.mockReset().mockResolvedValue(undefined);
-  vi.mocked(runExternalClientCase)
+  vi.mocked(runChatgptTurn)
     .mockReset()
     .mockImplementation(async () => ({
       success: true,
@@ -99,9 +87,9 @@ beforeEach(async () => {
         session: {
           ...metadata.session,
           id:
-            vi.mocked(runExternalClientCase).mock.calls.length === 1
+            vi.mocked(runChatgptTurn).mock.calls.length === 1
               ? 'session'
-              : `session-${vi.mocked(runExternalClientCase).mock.calls.length}`,
+              : `session-${vi.mocked(runChatgptTurn).mock.calls.length}`,
         },
       },
       usage: {
@@ -159,11 +147,10 @@ describe('ChatGPT V2 batch client', () => {
     await CODEX_APP_LINUX_CLIENT.runBatch!(batch, context);
     expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
-    expect(runExternalClientCase).toHaveBeenCalledTimes(2);
-    for (const [prompt, external] of vi.mocked(runExternalClientCase).mock
-      .calls) {
+    expect(runChatgptTurn).toHaveBeenCalledTimes(2);
+    for (const [prompt, external] of vi.mocked(runChatgptTurn).mock.calls) {
       expect(prompt).toMatch(/^Answer (one|two)$/);
-      expect(external.driver).toBe('openai.chatgpt.agent.desktop-app.linux');
+      expect(external.os).toBe('linux');
       expect(external.options?.surface).toBe('codex');
       // The native automation's default budget.
       expect(external.options?.maxActions).toBe(24);
@@ -179,7 +166,7 @@ describe('ChatGPT V2 batch client', () => {
       CHATGPT_LINUX_CLIENT.runBatch!(requests(), context)
     ).rejects.toThrow('environment_invalid');
     expect(lifecycle.prepare).not.toHaveBeenCalled();
-    expect(runExternalClientCase).not.toHaveBeenCalled();
+    expect(runChatgptTurn).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -197,11 +184,12 @@ describe('ChatGPT V2 batch client', () => {
         ...(platform === 'Linux' ? { env: linuxEnvironment(home.value) } : {}),
       };
       await client.runBatch!(batch, context);
-      expect(runExternalClientCase).toHaveBeenCalledWith(
+      expect(runChatgptTurn).toHaveBeenCalledWith(
         'Answer one',
         expect.objectContaining({
           options: expect.objectContaining({ surface }),
         }),
+        expect.anything(),
         expect.anything()
       );
     }
@@ -235,7 +223,7 @@ describe('ChatGPT V2 batch client', () => {
       batch[0]!.config = { ...config, type, surface };
       await expect(client.runBatch!(batch, context)).rejects.toThrow(message);
       expect(lifecycle.prepare).not.toHaveBeenCalled();
-      expect(runExternalClientCase).not.toHaveBeenCalled();
+      expect(runChatgptTurn).not.toHaveBeenCalled();
     }
   );
   it('names the Codex app in its errors', async () => {
@@ -279,7 +267,7 @@ describe('ChatGPT V2 batch client', () => {
     batch[0]!.input.prompt =
       '  Find snake_case docs — α\nDo not change this.  ';
     await CHATGPT_CLIENT.runBatch!(batch, context);
-    const [prompt, actual] = vi.mocked(runExternalClientCase).mock.calls[0]!;
+    const [prompt, actual] = vi.mocked(runChatgptTurn).mock.calls[0]!;
     expect(prompt).toBe(batch[0]!.input.prompt);
     expect(prompt).not.toContain('Evaluation MCP routing');
     expect(actual.correlation).toEqual({
@@ -291,24 +279,23 @@ describe('ChatGPT V2 batch client', () => {
     const batch = requests().slice(0, 1);
     batch[0]!.config = { ...config, correlation: 'prompt_marker' };
     await CHATGPT_CLIENT.runBatch!(batch, context);
-    expect(
-      vi.mocked(runExternalClientCase).mock.calls[0]![1].correlation
-    ).toEqual({ strategy: 'prompt_marker', includeInPrompt: true });
+    expect(vi.mocked(runChatgptTurn).mock.calls[0]![1].correlation).toEqual({
+      strategy: 'prompt_marker',
+      includeInPrompt: true,
+    });
   });
   it('prepares once before cases, shares only app state, and disposes once after them', async () => {
     const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
     expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
     expect(lifecycle.prepare.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(runExternalClientCase).mock.invocationCallOrder[0]!
+      vi.mocked(runChatgptTurn).mock.invocationCallOrder[0]!
     );
     expect(lifecycle.dispose.mock.invocationCallOrder[0]).toBeGreaterThan(
-      vi.mocked(runExternalClientCase).mock.invocationCallOrder[1]!
+      vi.mocked(runChatgptTurn).mock.invocationCallOrder[1]!
     );
-    const calls = vi.mocked(runExternalClientCase).mock.calls;
-    expect(calls[0]![1].options?.managedChatgptSession).toBe(
-      calls[1]![1].options?.managedChatgptSession
-    );
+    const calls = vi.mocked(runChatgptTurn).mock.calls;
+    expect(calls[0]![2]).toBe(calls[1]![2]);
     expect(traces.map((r) => r.telemetry?.batchCase)).toEqual([
       { index: 0, caseId: 'one', count: 2 },
       { index: 1, caseId: 'two', count: 2 },
@@ -340,7 +327,7 @@ describe('ChatGPT V2 batch client', () => {
     }
   );
   it('rejects duplicate native sessions and restarts before the next query', async () => {
-    vi.mocked(runExternalClientCase).mockResolvedValue({
+    vi.mocked(runChatgptTurn).mockResolvedValue({
       success: true,
       response: 'answer',
       toolCalls: [],
@@ -352,7 +339,7 @@ describe('ChatGPT V2 batch client', () => {
     // The reused session id stays claimed, so case three is also refused.
     // Restarts happen only before a later case, never after the last one.
     expect(traces[2]!.error).toContain('duplicate attribution');
-    expect(runExternalClientCase).toHaveBeenCalledTimes(3);
+    expect(runChatgptTurn).toHaveBeenCalledTimes(3);
     expect(lifecycle.restart).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
   });
@@ -376,7 +363,7 @@ describe('ChatGPT V2 batch client', () => {
     await expect(CHATGPT_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
       'launch failed'
     );
-    expect(runExternalClientCase).not.toHaveBeenCalled();
+    expect(runChatgptTurn).not.toHaveBeenCalled();
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
     await expect(
       access(join(home.value, '.mcp-server-tester/chatgpt-desktop.lock'))
@@ -393,7 +380,7 @@ describe('ChatGPT V2 batch client', () => {
       ...context,
       env: { ANTHROPIC_API_KEY: 'controller-secret' },
     });
-    expect(vi.mocked(runExternalClientCase).mock.calls[0]![1]).toMatchObject({
+    expect(vi.mocked(runChatgptTurn).mock.calls[0]![1]).toMatchObject({
       model: 'test-chatgpt-model',
       options: {
         computerUseModel: 'claude-sonnet-4-6',
@@ -402,7 +389,7 @@ describe('ChatGPT V2 batch client', () => {
       },
     });
     expect(
-      vi.mocked(runExternalClientCase).mock.calls[0]![1].options?.environment
+      vi.mocked(runChatgptTurn).mock.calls[0]![1].options?.environment
     ).not.toHaveProperty('ANTHROPIC_API_KEY');
   });
   it.each([
@@ -419,15 +406,12 @@ describe('ChatGPT V2 batch client', () => {
         '`clientOptions.computerUseProvider` is gone: remove it. The OS of the machine that runs the trial decides how a desktop client runs'
       );
       expect(lifecycle.prepare).not.toHaveBeenCalled();
-      expect(runExternalClientCase).not.toHaveBeenCalled();
+      expect(runChatgptTurn).not.toHaveBeenCalled();
     }
   );
-  it.each([
-    ['darwin', 'openai.chatgpt.agent.desktop-app.macos'],
-    ['linux', 'openai.chatgpt.agent.desktop-app.linux'],
-  ] as const)(
-    "runs a config parsed on another OS with the trial machine's driver, on %s",
-    async (platformName, driver) => {
+  it.each(['darwin', 'linux'] as const)(
+    "runs a config parsed on another OS on the trial machine's OS, %s",
+    async (platformName) => {
       // The coordinator parses the config on the other OS.
       vi.spyOn(process, 'platform', 'get').mockReturnValue(
         platformName === 'linux' ? 'darwin' : 'linux'
@@ -442,9 +426,10 @@ describe('ChatGPT V2 batch client', () => {
       const batch = requests().slice(0, 1);
       batch[0]!.config = { ...parsed, type: 'chatgpt' };
       await CHATGPT_APP_CLIENTS.chatgpt.runBatch!(batch, context);
-      expect(runExternalClientCase).toHaveBeenCalledWith(
+      expect(runChatgptTurn).toHaveBeenCalledWith(
         'Answer one',
-        expect.objectContaining({ driver }),
+        expect.objectContaining({ os: platformName }),
+        expect.anything(),
         expect.anything()
       );
     }
@@ -480,7 +465,7 @@ describe('ChatGPT V2 batch client', () => {
     ['darwin', 'codex-app', CODEX_APP_CLIENT, 32],
     ['linux', 'codex-app', CODEX_APP_LINUX_CLIENT, 24],
   ] as const)(
-    "gives the driver the trial OS's default maxActions on %s for %s, or the one set",
+    "gives the automation the trial OS's default maxActions on %s for %s, or the one set",
     async (os, type, client, fallback) => {
       const env = os === 'linux' ? { env: linuxEnvironment(home.value) } : {};
       const batch = requests().slice(0, 1);
@@ -490,7 +475,7 @@ describe('ChatGPT V2 batch client', () => {
       await client.runBatch!(batch, context);
       expect(
         vi
-          .mocked(runExternalClientCase)
+          .mocked(runChatgptTurn)
           .mock.calls.map(([, external]) => external.options?.maxActions)
       ).toEqual([fallback, 9]);
     }
@@ -528,7 +513,7 @@ describe('ChatGPT V2 batch client', () => {
         `Codex app can't run this trial: ${message}`
       );
       expect(lifecycle.prepare).not.toHaveBeenCalled();
-      expect(runExternalClientCase).not.toHaveBeenCalled();
+      expect(runChatgptTurn).not.toHaveBeenCalled();
     }
   );
   it('gives the app the reasoningEffort set, and rejects one it lacks before the app is prepared', async () => {
@@ -539,9 +524,9 @@ describe('ChatGPT V2 batch client', () => {
       reasoningEffort: 'ultra',
     };
     await CODEX_APP_CLIENT.runBatch!(batch, context);
-    expect(
-      vi.mocked(runExternalClientCase).mock.calls[0]![1].reasoningEffort
-    ).toBe('ultra');
+    expect(vi.mocked(runChatgptTurn).mock.calls[0]![1].reasoningEffort).toBe(
+      'ultra'
+    );
     lifecycle.prepare.mockClear();
     batch[0]!.config = { ...config, reasoningEffort: 'minimal' };
     await expect(CHATGPT_CLIENT.runBatch!(batch, context)).rejects.toThrow(
@@ -551,8 +536,8 @@ describe('ChatGPT V2 batch client', () => {
   });
   it('runs ordered cases and preserves model, evidence, timing and unknown cost', async () => {
     const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
-    expect(runExternalClientCase).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(runExternalClientCase).mock.calls[0]![1]).toMatchObject({
+    expect(runChatgptTurn).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(runChatgptTurn).mock.calls[0]![1]).toMatchObject({
       model: 'test-chatgpt-model',
       reasoningEffort: 'medium',
       codexSetup: {
@@ -592,7 +577,7 @@ describe('ChatGPT V2 batch client', () => {
     ).resolves.toHaveLength(1);
   });
   it('subtracts native cache reads from V2 uncached input, retaining native totals', async () => {
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: true,
       response: 'answer',
       toolCalls: [],
@@ -624,7 +609,7 @@ describe('ChatGPT V2 batch client', () => {
       { role: 'user' as const, content: 'the prompt' },
       { role: 'assistant' as const, content: 'answer' },
     ];
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: true,
       response: 'answer',
       toolCalls: [],
@@ -639,7 +624,7 @@ describe('ChatGPT V2 batch client', () => {
     expect(trace!.telemetry).not.toHaveProperty('conversationHistory');
   });
   it('fails out-of-selection MCP calls without blocking later completed measurements', async () => {
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: true,
       response: 'plausible answer',
       clientMetadata: metadata,
@@ -654,7 +639,7 @@ describe('ChatGPT V2 batch client', () => {
     });
     const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
     expect(traces[0]!.error).toContain('outside');
-    expect(runExternalClientCase).toHaveBeenCalledTimes(2);
+    expect(runChatgptTurn).toHaveBeenCalledTimes(2);
     expect(traces[1]!.error).toBeUndefined();
     expect(traces[0]!.telemetry?.caseExecution).toEqual({
       status: 'completed',
@@ -666,7 +651,7 @@ describe('ChatGPT V2 batch client', () => {
     });
   });
   it('measures three cases despite client-tool-only and wrong-server failures', async () => {
-    vi.mocked(runExternalClientCase)
+    vi.mocked(runChatgptTurn)
       .mockResolvedValueOnce({
         success: true,
         response: 'Cannot access the desktop app',
@@ -705,7 +690,7 @@ describe('ChatGPT V2 batch client', () => {
       })
     );
     const traces = await CHATGPT_CLIENT.runBatch!(batch, context);
-    expect(runExternalClientCase).toHaveBeenCalledTimes(3);
+    expect(runChatgptTurn).toHaveBeenCalledTimes(3);
     expect(traces.map((r) => r.telemetry?.caseExecution)).toEqual(
       Array(3).fill({ status: 'completed', continuation: 'allowed' })
     );
@@ -741,7 +726,7 @@ describe('ChatGPT V2 batch client', () => {
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
   });
   it('allows built-in tools alongside configured MCP calls without relaxing the MCP requirement', async () => {
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: true,
       response: 'answer',
       clientMetadata: metadata,
@@ -767,7 +752,7 @@ describe('ChatGPT V2 batch client', () => {
     });
   });
   it('restarts the app after a failed case and runs later cases independently', async () => {
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: true,
       response: 'answer',
       toolCalls: [],
@@ -795,10 +780,10 @@ describe('ChatGPT V2 batch client', () => {
     });
     // One restart, before case 2 only; the failed case is never resent.
     expect(lifecycle.restart).toHaveBeenCalledTimes(1);
-    expect(runExternalClientCase).toHaveBeenCalledTimes(3);
-    expect(
-      vi.mocked(runExternalClientCase).mock.calls.map((call) => call[0])
-    ).toEqual(batch.map((request) => request.input.prompt));
+    expect(runChatgptTurn).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(runChatgptTurn).mock.calls.map((call) => call[0])).toEqual(
+      batch.map((request) => request.input.prompt)
+    );
     for (const trace of traces.slice(1)) {
       expect(trace.error).toBeUndefined();
       expect(trace.telemetry?.caseExecution).toEqual({
@@ -808,7 +793,7 @@ describe('ChatGPT V2 batch client', () => {
     }
   });
   it('ends a failed turn as its failure kind says (ADR 0010)', async () => {
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: false,
       error: 'No fresh ChatGPT session matched the prompt.',
       toolCalls: [],
@@ -826,7 +811,7 @@ describe('ChatGPT V2 batch client', () => {
   });
 
   it('sends nothing more when the app cannot be restarted after a failed case', async () => {
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: false,
       error: 'surface_mismatch',
       toolCalls: [],
@@ -843,13 +828,13 @@ describe('ChatGPT V2 batch client', () => {
         continuation: 'blocked',
       });
     }
-    expect(runExternalClientCase).toHaveBeenCalledTimes(1);
+    expect(runChatgptTurn).toHaveBeenCalledTimes(1);
     expect(lifecycle.restart).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
   });
   it('counts plugin MCP servers as eval servers when no direct server is configured', async () => {
     vi.stubEnv('ACME_TOKEN', 'plugin-secret');
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: true,
       response: 'answer',
       clientMetadata: metadata,
@@ -943,7 +928,7 @@ describe('ChatGPT V2 batch client', () => {
     ).toBe(false);
   });
   it('requires MCP calls when the eval explicitly requests them', async () => {
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: true,
       response: 'no tools',
       clientMetadata: metadata,
@@ -963,7 +948,7 @@ describe('ChatGPT V2 batch client', () => {
     await expect(CHATGPT_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
       'locked'
     );
-    expect(runExternalClientCase).not.toHaveBeenCalled();
+    expect(runChatgptTurn).not.toHaveBeenCalled();
   });
   it('rejects concurrency and mixed model configurations', async () => {
     await expect(
@@ -976,12 +961,12 @@ describe('ChatGPT V2 batch client', () => {
     await expect(CHATGPT_CLIENT.runBatch!(mixed, context)).rejects.toThrow(
       'identical'
     );
-    expect(runExternalClientCase).not.toHaveBeenCalled();
+    expect(runChatgptTurn).not.toHaveBeenCalled();
   });
   it.each([undefined, null, 'primitive failure'])(
     'does not silently accept a non-Error rejection: %s',
     async (reason) => {
-      vi.mocked(runExternalClientCase).mockRejectedValueOnce(reason);
+      vi.mocked(runChatgptTurn).mockRejectedValueOnce(reason);
       await expect(
         CHATGPT_CLIENT.runBatch!(requests(), context)
       ).rejects.toThrow();
@@ -993,7 +978,7 @@ describe('ChatGPT V2 batch client', () => {
   );
   it('redacts MCP and environment secrets from case and recovery errors', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'env-api-key-value');
-    vi.mocked(runExternalClientCase).mockResolvedValueOnce({
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: false,
       error: 'upstream 401 for fixture-secret using env-api-key-value',
       toolCalls: [],
@@ -1014,7 +999,7 @@ describe('ChatGPT V2 batch client', () => {
     );
   });
   it('redacts secrets from cleanup and unexpected execution errors', async () => {
-    vi.mocked(runExternalClientCase).mockRejectedValueOnce(
+    vi.mocked(runChatgptTurn).mockRejectedValueOnce(
       new Error('crash with fixture-secret')
     );
     lifecycle.dispose.mockRejectedValueOnce(
@@ -1032,7 +1017,7 @@ describe('ChatGPT V2 batch client', () => {
     expect(messages[1]).toContain('dispose saw [REDACTED]');
   });
   it('releases its lease after unexpected execution errors', async () => {
-    vi.mocked(runExternalClientCase).mockRejectedValueOnce(new Error('crash'));
+    vi.mocked(runChatgptTurn).mockRejectedValueOnce(new Error('crash'));
     await expect(CHATGPT_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
       'crash'
     );

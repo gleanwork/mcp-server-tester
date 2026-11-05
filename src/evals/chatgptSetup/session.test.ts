@@ -20,10 +20,10 @@ import {
   parseChatgptTrace,
   snapshotChatgptSessions,
 } from '../chatgpt/trace.js';
-import { runExternalClientCase } from '../externalClient/runtime.js';
+import { runChatgptTurn, type ChatgptTurn } from '../chatgpt/turn.js';
 import { NativeTraceError } from '../nativeTraceError.js';
 import { ChatgptAppSession } from './session.js';
-import type { ExternalClientConfig } from '../externalClient/types.js';
+import type { ChatgptAppConfig } from '../chatgpt/config.js';
 import { getChatgptApplicationController } from './macController.js';
 import {
   installCodexConfig,
@@ -269,9 +269,9 @@ function testConfig(
   model = 'gpt-test',
   options: Record<string, unknown> = {},
   reasoningEffort: 'low' | 'medium' = 'low'
-): ExternalClientConfig {
+): ChatgptAppConfig {
   return {
-    driver: 'openai.chatgpt.agent.desktop-app.macos',
+    os: 'darwin',
     timeoutMs: 1000,
     model,
     reasoningEffort,
@@ -296,15 +296,48 @@ function testConfig(
   };
 }
 
+/**
+ * One trial the way a batch runs it: prepare the app session, run one turn
+ * on it, then dispose, whatever failed. A failed prepare sends nothing; a
+ * failed prepare or dispose is the batch's error, not the turn's.
+ */
+async function batchOfOne(
+  prompt: string,
+  config: ChatgptAppConfig
+): Promise<{ turn?: ChatgptTurn; error?: unknown }> {
+  const session = new ChatgptAppSession();
+  let turn: ChatgptTurn | undefined;
+  let error: unknown;
+  try {
+    await session.prepare(config);
+    turn = await runChatgptTurn(prompt, config, session);
+  } catch (caught) {
+    error = caught;
+  }
+  try {
+    await session.dispose();
+  } catch (caught) {
+    error ??= caught;
+  }
+  return { turn, error };
+}
+
 function run(
   model = 'gpt-test',
   options: Record<string, unknown> = {},
   reasoningEffort: 'low' | 'medium' = 'low'
 ) {
-  return runExternalClientCase(
-    'Say done',
-    testConfig(model, options, reasoningEffort)
-  );
+  return batchOfOne('Say done', testConfig(model, options, reasoningEffort));
+}
+
+/** The turn of a batch of one whose session prepared and disposed. */
+async function turnOf(
+  batch: Promise<{ turn?: ChatgptTurn; error?: unknown }>
+): Promise<ChatgptTurn> {
+  const { turn, error } = await batch;
+  if (error !== undefined)
+    throw new Error('The batch of one failed.', { cause: error });
+  return turn!;
 }
 
 describe('ChatGPT batch app lifecycle', () => {
@@ -314,9 +347,7 @@ describe('ChatGPT batch app lifecycle', () => {
     try {
       await session.prepare(testConfig());
       for (let i = 0; i < 3; i++) {
-        const result = await run('gpt-test', {
-          managedChatgptSession: session,
-        });
+        const result = await runChatgptTurn('Say done', testConfig(), session);
         expect(result.success).toBe(true);
         markers.add(result.clientMetadata.correlation.marker);
       }
@@ -375,7 +406,7 @@ describe('ChatGPT batch app lifecycle', () => {
       vi.mocked(runAnthropicComputerUseSubmission).mockRejectedValueOnce(
         new Error('uncertain submit')
       );
-      const result = await run('gpt-test', { managedChatgptSession: session });
+      const result = await runChatgptTurn('Say done', testConfig(), session);
       expect(result.success).toBe(false);
       expect(restore).not.toHaveBeenCalled();
       expect(controller.stop).toHaveBeenCalledTimes(1);
@@ -389,8 +420,15 @@ describe('ChatGPT batch app lifecycle', () => {
     const session = new ChatgptAppSession();
     try {
       await session.prepare(testConfig());
-      const result = await run('gpt-other', { managedChatgptSession: session });
-      expect(result.success).toBe(false);
+      const result = await runChatgptTurn(
+        'Say done',
+        testConfig('gpt-other'),
+        session
+      );
+      expect(result).toMatchObject({
+        success: false,
+        clientMetadata: { failureKind: 'app_unavailable' },
+      });
       expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
       expect(restore).not.toHaveBeenCalled();
     } finally {
@@ -402,7 +440,7 @@ describe('ChatGPT batch app lifecycle', () => {
     await session.prepare(testConfig());
     await session.dispose();
     expect(
-      (await run('gpt-test', { managedChatgptSession: session })).success
+      (await runChatgptTurn('Say done', testConfig(), session)).success
     ).toBe(false);
     expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
   });
@@ -410,11 +448,11 @@ describe('ChatGPT batch app lifecycle', () => {
 
 describe('ChatGPT Linux native lifecycle', () => {
   let home: string;
-  function linuxConfig(): ExternalClientConfig {
+  function linuxConfig(): ChatgptAppConfig {
     const base = testConfig();
     return {
       ...base,
-      driver: 'openai.chatgpt.agent.desktop-app.linux',
+      os: 'linux',
       codexSetup: { ...base.codexSetup, configPath: undefined },
       options: {
         ...base.options,
@@ -492,13 +530,9 @@ describe('ChatGPT Linux native lifecycle', () => {
       await session.prepare(config);
       expect(session.telemetry.nativeSetup).toEqual(linuxTelemetry().telemetry);
       for (let i = 0; i < 2; i++) {
-        const result = await runExternalClientCase('exact query', {
-          ...config,
-          options: { ...config.options, managedChatgptSession: session },
-        });
+        const result = await runChatgptTurn('exact query', config, session);
         expect(result.success).toBe(true);
         expect(result.clientMetadata).toMatchObject({
-          driver: { platform: 'linux' },
           computerUse: undefined,
           nativeController: {
             provider: 'linux-atspi',
@@ -627,8 +661,9 @@ describe('ChatGPT Linux native lifecycle', () => {
     vi.mocked(runLinuxChatgptDesktop).mockRejectedValueOnce(
       new NativeChatgptDriverError('surface failed')
     );
-    const result = await runExternalClientCase('query', linuxConfig());
-    expect(result.success).toBe(false);
+    const { turn, error } = await batchOfOne('query', linuxConfig());
+    expect(turn).toBeUndefined();
+    expect(error).toEqual(new NativeChatgptDriverError('surface failed'));
     expect(runLinuxChatgptDesktop).toHaveBeenCalledTimes(1);
     expect(snapshotChatgptSessions).not.toHaveBeenCalled();
     expect(restore).toHaveBeenCalledTimes(1);
@@ -646,7 +681,7 @@ describe('ChatGPT Linux native lifecycle', () => {
         throw new NativeChatgptDriverError('uncertain send', { draftState });
       return linuxTelemetry(0);
     });
-    const result = await runExternalClientCase('query', linuxConfig());
+    const result = await turnOf(batchOfOne('query', linuxConfig()));
     expect(result.success).toBe(false);
     expect(result.clientMetadata.nativeController?.submission).toMatchObject({
       status: 'failed',
@@ -730,10 +765,12 @@ describe('ChatGPT quit prompt after a stalled case', () => {
 
 describe('ChatGPT AI-driven macOS lifecycle', () => {
   it('shares the Cowork planner and keeps controller accounting separate from native usage', async () => {
-    const result = await run('gpt-test', {
-      computerUseModel: 'claude-sonnet-4-6',
-      maxActions: 40,
-    });
+    const result = await turnOf(
+      run('gpt-test', {
+        computerUseModel: 'claude-sonnet-4-6',
+        maxActions: 40,
+      })
+    );
     expect(result.success).toBe(true);
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledWith(
       expect.stringContaining('Say done'),
@@ -768,10 +805,12 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     expect(JSON.stringify(result)).not.toContain('test-controller-key');
   });
   it('supports opt-in markers without changing the default', async () => {
-    const result = await runExternalClientCase('Say done', {
-      ...testConfig(),
-      correlation: { strategy: 'prompt_marker' },
-    });
+    const result = await turnOf(
+      batchOfOne('Say done', {
+        ...testConfig(),
+        correlation: { strategy: 'prompt_marker' },
+      })
+    );
     expect(result.success).toBe(true);
     expect(
       vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![0]
@@ -786,14 +825,20 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     );
   });
   it.each(['none', 'client_session_metadata'] as const)(
-    'rejects unsupported %s correlation before touching the app',
+    'rejects unsupported %s correlation before using the app',
     async (strategy) => {
-      const result = await runExternalClientCase('Say done', {
-        ...testConfig(),
-        correlation: { strategy },
+      // Checked before the trial uses the session: this one was never prepared.
+      const result = await runChatgptTurn(
+        'Say done',
+        { ...testConfig(), correlation: { strategy } },
+        new ChatgptAppSession()
+      );
+      expect(result).toMatchObject({
+        success: false,
+        clientMetadata: { failureKind: 'submission_failed' },
       });
-      expect(result.success).toBe(false);
       expect(controller.stop).not.toHaveBeenCalled();
+      expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
     }
   );
   it('binds the session and turn on the first observation before waiting for completion', async () => {
@@ -803,7 +848,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       match!.trace.complete = false;
       return match;
     });
-    const result = await run();
+    const result = await turnOf(run());
     expect(result.success).toBe(true);
     expect(vi.mocked(findChatgptTrace).mock.calls[1]![4]?.bound).toEqual({
       path: '/tmp/native-session.jsonl',
@@ -813,7 +858,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
   });
   it('opens Codex-surface tasks in an empty, trusted workspace it removes after', async () => {
     // A Codex task needs a folder; ChatGPT Work makes its own.
-    const result = await run('gpt-test', { surface: 'codex' });
+    const result = await turnOf(run('gpt-test', { surface: 'codex' }));
     const { trustedProject } = vi.mocked(installCodexConfig).mock
       .calls[0]![1] as {
       trustedProject?: string;
@@ -826,7 +871,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     expect(result.clientMetadata).toBeDefined();
   });
   it('stops before config install, submits once, and restores before restarting', async () => {
-    expect((await run()).success).toBe(true);
+    expect((await turnOf(run())).success).toBe(true);
     expect(events).toEqual([
       'state',
       'stop',
@@ -859,8 +904,8 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       vi.mocked(runAnthropicComputerUseSubmission).mock.calls[0]![1]
     ).not.toHaveProperty('workspace');
   });
-  it('rejects reserved MCP namespaces in direct external-client configuration before touching the app', async () => {
-    const result = await runExternalClientCase('Say done', {
+  it('rejects reserved MCP namespaces before touching the app', async () => {
+    const { turn, error } = await batchOfOne('Say done', {
       ...testConfig(),
       codexSetup: {
         configPath: '/tmp/chatgpt-test/config.toml',
@@ -868,20 +913,24 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       },
       options: {},
     });
-    expect(result.success).toBe(false);
+    expect(turn).toBeUndefined();
+    expect(String(error)).toContain('must not collide');
     expect(controller.stop).not.toHaveBeenCalled();
     expect(installCodexConfig).not.toHaveBeenCalled();
   });
   it('requires planner credentials before stopping the app', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
-    const result = await run();
-    expect(result.success).toBe(false);
+    const { turn, error } = await run();
+    expect(turn).toBeUndefined();
+    expect(String(error)).toContain('Computer Use planner needs');
     expect(controller.stop).not.toHaveBeenCalled();
   });
   it('does not use UI answer extraction as a fallback', async () => {
-    expect(
-      (await run('gpt-test', { chatgptTrace: 'accessibility' })).success
-    ).toBe(false);
+    const { turn, error } = await run('gpt-test', {
+      chatgptTrace: 'accessibility',
+    });
+    expect(turn).toBeUndefined();
+    expect(String(error)).toContain('not UI answer extraction');
     expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
   });
   it.each([
@@ -890,7 +939,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
   ] as const)(
     'fails mismatched native model/effort %s/%s',
     async (model, effort) => {
-      const result = await run(model, {}, effort);
+      const result = await turnOf(run(model, {}, effort));
       expect(result.success).toBe(false);
       expect(result.clientMetadata.failureKind).toBe('client_run_failed');
       expect(restore).toHaveBeenCalledTimes(1);
@@ -903,7 +952,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
         'Ambiguous matching ChatGPT sessions for this query.'
       )
     );
-    expect((await run()).clientMetadata.failureKind).toBe(
+    expect((await turnOf(run())).clientMetadata.failureKind).toBe(
       'ambiguous_matching_sessions'
     );
     expect(restore).toHaveBeenCalledTimes(1);
@@ -915,7 +964,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
         accounting: 'partial',
       })
     );
-    const result = await run();
+    const result = await turnOf(run());
     expect(result.success).toBe(false);
     expect(
       result.clientMetadata.computerUse?.submission.telemetry?.accounting
@@ -926,19 +975,19 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
   });
   it('preserves initially stopped app state', async () => {
     controller.state.mockResolvedValue({ running: false });
-    expect((await run()).success).toBe(true);
+    expect((await turnOf(run())).success).toBe(true);
     expect(controller.start).toHaveBeenCalledTimes(1);
     expect(controller.stop).toHaveBeenCalledTimes(1);
   });
   it('does not install after a failed graceful stop', async () => {
     controller.stop.mockRejectedValue(new Error('declined termination'));
-    expect((await run()).success).toBe(false);
+    expect((await run()).error).toEqual(new Error('declined termination'));
     expect(installCodexConfig).not.toHaveBeenCalled();
     expect(controller.start).not.toHaveBeenCalled();
   });
   it('restores after a failed launch and restarts the previous app', async () => {
     controller.start.mockRejectedValueOnce(new Error('launch failed'));
-    expect((await run()).success).toBe(false);
+    expect((await run()).error).toEqual(new Error('launch failed'));
     expect(restore).toHaveBeenCalledTimes(1);
     expect(controller.start).toHaveBeenCalledTimes(2);
   });
@@ -946,13 +995,15 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     controller.stop
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('still running'));
-    const result = await run();
-    expect(result.clientMetadata.failureKind).toBe('cleanup_failed');
+    // The trial completed; the batch's cleanup is what failed.
+    const { turn, error } = await run();
+    expect(turn?.success).toBe(true);
+    expect(error).toEqual(new Error('still running'));
     expect(restore).not.toHaveBeenCalled();
   });
   it('does not restart after a restoration failure', async () => {
     restore.mockRejectedValueOnce(new Error('archive failed'));
-    expect((await run()).success).toBe(false);
+    expect((await run()).error).toEqual(new Error('archive failed'));
     expect(controller.start).toHaveBeenCalledTimes(1);
   });
 });

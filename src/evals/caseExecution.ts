@@ -29,7 +29,7 @@ import type {
 import type {
   ClientMetadata,
   ExternalClientSimulationResult,
-} from './externalClient/types.js';
+} from './clientTelemetryTypes.js';
 import { getBuiltinClientConfig, getClient } from './builtinClients.js';
 import { bareClientName, resolveClientName } from './clientNames.js';
 import { clientRunToExecution, simulationTrace } from './clientTrace.js';
