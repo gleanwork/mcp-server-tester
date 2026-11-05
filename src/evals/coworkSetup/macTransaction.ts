@@ -579,6 +579,8 @@ function profileBytes(
     blocked: ReturnType<typeof coworkBlockedMcpEntries>;
     /** Managed preferences own inference; the profile sets no provider. */
     managedInference: boolean;
+    /** Claude Desktop's `toolSearchEnabled` (`coworkSetup.toolSearch`). */
+    toolSearch: boolean;
   }
 ): Buffer {
   if (
@@ -597,6 +599,9 @@ function profileBytes(
     disableAutoUpdates: true,
     // MST drives this profile without a user to answer clarifying questions.
     ...coworkHeadlessSettings(),
+    // Tool search, as Cowork signed in to claude.ai has it: Desktop leaves
+    // it off with a third-party provider unless the profile turns it on.
+    toolSearchEnabled: options.toolSearch,
     // The plugin's own servers would bypass the eval endpoint; block them.
     ...(options.blocked.length
       ? { managedMcpServers: [...entries, ...options.blocked] }
@@ -650,14 +655,21 @@ async function validateInstall(options: InstallOptions) {
     inference = jsonBytes({ ANTHROPIC_API_KEY: key });
     if (inference.length > 64 * 1024) fail();
   }
-  const { plan, settings, privateFiles, stdioDirectories, serverLabels } =
-    createCoworkBundlePlan({
-      evalConfig: options.evalConfig,
-      variant: options.variant,
-      runtimeDirectory: directory,
-      plugins,
-      env,
-    });
+  const {
+    plan,
+    setup,
+    settings,
+    privateFiles,
+    stdioDirectories,
+    serverLabels,
+  } = createCoworkBundlePlan({
+    evalConfig: options.evalConfig,
+    variant: options.variant,
+    runtimeDirectory: directory,
+    plugins,
+    env,
+  });
+  const toolSearch = setup.toolSearch ?? true;
   // Include every profile-only field before a session takes ownership or stops Desktop.
   profileBytes(settings, {
     directory,
@@ -665,6 +677,7 @@ async function validateInstall(options: InstallOptions) {
     marketplaces,
     blocked,
     managedInference,
+    toolSearch,
   });
   // A blocked plugin server must never shadow an eval server (any case).
   const labels = new Set(serverLabels);
@@ -739,6 +752,7 @@ async function validateInstall(options: InstallOptions) {
     env,
     inference,
     managedInference,
+    toolSearch,
     original,
     sourcePath,
     source,

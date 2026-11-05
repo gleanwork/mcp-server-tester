@@ -108,12 +108,13 @@ afterEach(async () => {
 
 async function prepare(
   value: unknown = settings,
-  plugins?: MarketplacePlugin[]
+  plugins?: MarketplacePlugin[],
+  config: EvalConfig = evalConfig
 ) {
   const file = join(directory, 'settings.json');
   await writeFile(file, JSON.stringify(value));
   return linuxCoworkPlatform.prepare({
-    evalConfig,
+    evalConfig: config,
     model: 'test-model',
     env: { ...session, MST_COWORK_SETTINGS_FILE: file },
     ...(plugins ? { plugins } : {}),
@@ -251,14 +252,27 @@ describe('caller-owned Linux Cowork desktop', () => {
     ],
     ['not a list', { ...settings, disabledBuiltinTools: 'AskUserQuestion' }],
   ])(
-    'fails before UI when headless built-in tools are %s',
+    'with clarifying questions disabled, fails before UI when headless built-in tools are %s',
     async (_kind, value) => {
-      await expect(prepare(value)).rejects.toThrow(
-        'Prepared Linux desktop settings do not match'
-      );
+      await expect(
+        prepare(value, undefined, {
+          ...evalConfig,
+          coworkSetup: { clarifyingQuestions: 'disabled' },
+        })
+      ).rejects.toThrow('Prepared Linux desktop settings do not match');
       expect(child.exec).not.toHaveBeenCalled();
     }
   );
+  it('takes a desktop with AskUserQuestion on when HITL answers clarifying questions (the default)', async () => {
+    const { disabledBuiltinTools: _omit, ...on } = settings as Record<
+      string,
+      unknown
+    >;
+    await (await prepare(on)).dispose();
+    // Or off: then Cowork never asks.
+    await (await prepare(settings)).dispose();
+    expect(child.exec).toHaveBeenCalledTimes(2);
+  });
   it('builds the exact headless settings it requires', () => {
     expect(coworkHeadlessSettings()).toEqual({
       disabledBuiltinTools: ['AskUserQuestion'],
@@ -523,6 +537,98 @@ describe('caller-owned Linux Cowork desktop', () => {
     // No approval click is attempted for a question.
     expect(child.exec).not.toHaveBeenCalled();
   });
+  it('answers a clarifying question with its first option, one page per pass, then waits for the task', async () => {
+    const asked = {
+      id: 'toolu_1',
+      questions: [
+        { labels: ['Table', 'Paragraph'], multiSelect: false },
+        { labels: ['Weekly', 'Monthly'], multiSelect: false },
+      ],
+    };
+    for (const answered of ['option', 'option'])
+      child.responses.push({
+        value: {
+          status: 'hitl_checked',
+          action_count: 1,
+          duration_ms: 1,
+          answered,
+        },
+      });
+    let pending = 2;
+    let checks = 0;
+    const result = await linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete: async () => ++checks > 3,
+      pendingQuestion: async () => (pending-- > 0 ? asked : undefined),
+    });
+    // Two answers, and the fake approval pass's one action.
+    expect(result).toMatchObject({
+      status: 'hitl_checked',
+      action_count: 3,
+      telemetry: { accounting: 'complete', questions_answered: 2 },
+    });
+    // Two answer passes with the questions as asked, then the usual HITL check.
+    const modes = child.exec.mock.calls.map((call) => {
+      const args = call[1] as string[];
+      return [
+        args[args.indexOf('--mode') + 1],
+        args[args.indexOf('--max-actions') + 1],
+      ];
+    });
+    expect(modes).toEqual([
+      ['answer', '1'],
+      ['answer', '1'],
+      ['hitl', expect.any(String)],
+    ]);
+    expect(child.payloads.slice(0, 2)).toEqual([
+      JSON.stringify({ questions: asked.questions }),
+      JSON.stringify({ questions: asked.questions }),
+    ]);
+  });
+  it('fails a clarifying question that offers no usable options without acting', async () => {
+    const pending = linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete: async () => false,
+      pendingQuestion: async () => ({ id: 'toolu_1', questions: [] }),
+    });
+    await expect(pending).rejects.toBeInstanceOf(CoworkUserQuestionError);
+    await expect(pending).rejects.toThrow('offers no usable options');
+    expect(child.exec).not.toHaveBeenCalled();
+  });
+  it("fails a clarifying question whose form doesn't take its first option in time", async () => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      // The form never shows an unambiguous first option.
+      for (let pass = 0; pass < 3; pass++)
+        child.responses.push({
+          value: {
+            status: 'hitl_checked',
+            action_count: 0,
+            duration_ms: 1,
+            question: 'not_found',
+          },
+        });
+      const pending = linuxCoworkPlatform.handleHitl({
+        deadlineAt: now + 600_000,
+        env: session,
+        isComplete: async () => false,
+        pendingQuestion: async () => {
+          now += 31_000;
+          return {
+            id: 'toolu_1',
+            questions: [{ labels: ['A', 'B'], multiSelect: false }],
+          };
+        },
+      });
+      await expect(pending).rejects.toBeInstanceOf(CoworkUserQuestionError);
+      await expect(pending).rejects.toThrow("didn't take its first option");
+      // Two passes found nothing and acted on nothing; the third saw the time.
+      expect(child.exec).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it('says why HITL failed, and that a failed completion check touched nothing', async () => {
     const pending = linuxCoworkPlatform.handleHitl({
       ...options(),
@@ -678,9 +784,11 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
           headersHelper: '/opt/mst/primary-headers.sh',
         },
       ],
+      toolSearchEnabled: true,
       isLocalDevMcpEnabled: false,
       isDesktopExtensionEnabled: false,
-      disabledBuiltinTools: ['AskUserQuestion'],
+      // HITL answers clarifying questions: AskUserQuestion stays on.
+      disabledBuiltinTools: [],
       coworkEgressAllowedHosts: ['*'],
     });
     // The restart, then the usual probe.
@@ -733,7 +841,36 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     ]);
   });
 
-  it("keeps the image's own disabled built-in tools beside AskUserQuestion", async () => {
+  it('turns tool search on unless the eval turns it off', async () => {
+    const toolSearchOf = async (toolSearch?: boolean): Promise<unknown> => {
+      const file = join(directory, 'settings.json');
+      await writeFile(file, `${JSON.stringify(image)}\n`);
+      const prepared = await linuxCoworkPlatform.prepare({
+        evalConfig: {
+          ...evalConfig,
+          ...(toolSearch !== undefined ? { coworkSetup: { toolSearch } } : {}),
+        },
+        model: 'test-model',
+        env: {
+          ...session,
+          MST_COWORK_SETTINGS_FILE: file,
+          MST_DESKTOP_OWNED: '1',
+          MST_DESKTOP_RESTART: RESTART,
+        },
+      });
+      const written = JSON.parse(await readFile(file, 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      await prepared.dispose();
+      return written.toolSearchEnabled;
+    };
+    expect(await toolSearchOf()).toBe(true);
+    expect(await toolSearchOf(true)).toBe(true);
+    expect(await toolSearchOf(false)).toBe(false);
+  });
+
+  it("keeps the image's own disabled built-in tools, except the AskUserQuestion HITL answers", async () => {
     const { file, lifecycle } = await prepareOwned(
       {},
       { ...image, disabledBuiltinTools: ['WebFetch', 'AskUserQuestion'] }
@@ -741,34 +878,51 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     const prepared = await lifecycle;
     expect(
       JSON.parse(await readFile(file, 'utf8')).disabledBuiltinTools
-    ).toEqual(['WebFetch', 'AskUserQuestion']);
+    ).toEqual(['WebFetch']);
     await prepared.dispose();
   });
 
-  it("adds the eval's disabled built-in tools to the image's and AskUserQuestion", async () => {
-    const file = join(directory, 'settings.json');
-    await writeFile(
-      file,
-      `${JSON.stringify({ ...image, disabledBuiltinTools: ['WebFetch'] })}\n`
-    );
-    const prepared = await linuxCoworkPlatform.prepare({
-      evalConfig: {
-        ...evalConfig,
-        coworkSetup: { disabledBuiltinTools: ['WebSearch', 'WebFetch'] },
-      },
-      model: 'test-model',
-      env: {
-        ...session,
-        MST_COWORK_SETTINGS_FILE: file,
-        MST_DESKTOP_OWNED: '1',
-        MST_DESKTOP_RESTART: RESTART,
-      },
-    });
-    expect(
-      JSON.parse(await readFile(file, 'utf8')).disabledBuiltinTools
-    ).toEqual(['WebFetch', 'AskUserQuestion', 'WebSearch']);
-    await prepared.dispose();
-  });
+  it.each([
+    [{}, ['WebFetch', 'WebSearch']],
+    // An eval that turns it off itself keeps it off.
+    [
+      { disabledBuiltinTools: ['WebSearch', 'AskUserQuestion'] },
+      ['WebFetch', 'WebSearch', 'AskUserQuestion'],
+    ],
+    [
+      { clarifyingQuestions: 'disabled' as const },
+      ['WebFetch', 'AskUserQuestion', 'WebSearch'],
+    ],
+  ])(
+    "adds the eval's disabled built-in tools to the image's (%j)",
+    async (setup, expected) => {
+      const file = join(directory, 'settings.json');
+      await writeFile(
+        file,
+        `${JSON.stringify({ ...image, disabledBuiltinTools: ['WebFetch'] })}\n`
+      );
+      const prepared = await linuxCoworkPlatform.prepare({
+        evalConfig: {
+          ...evalConfig,
+          coworkSetup: {
+            disabledBuiltinTools: ['WebSearch', 'WebFetch'],
+            ...setup,
+          },
+        },
+        model: 'test-model',
+        env: {
+          ...session,
+          MST_COWORK_SETTINGS_FILE: file,
+          MST_DESKTOP_OWNED: '1',
+          MST_DESKTOP_RESTART: RESTART,
+        },
+      });
+      expect(
+        JSON.parse(await readFile(file, 'utf8')).disabledBuiltinTools
+      ).toEqual(expected);
+      await prepared.dispose();
+    }
+  );
 
   it("points Claude Desktop's OpenTelemetry at MST's receiver, in place of the image's", async () => {
     const file = join(directory, 'settings.json');

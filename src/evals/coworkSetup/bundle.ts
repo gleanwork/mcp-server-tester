@@ -120,6 +120,7 @@ export function createCoworkBundlePlan(options: BundlePlanOptions) {
     throw new Error(ERROR_MESSAGE);
   return {
     servers,
+    setup,
     plan,
     headers,
     privateFiles,
