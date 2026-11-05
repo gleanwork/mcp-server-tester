@@ -280,7 +280,7 @@ npm run test:eval-foundation # Public evaluation foundation contracts
 npm run test:eval-review    # CLI smoke
 npm run test:usecases       # Use cases through the CLI (tests/usecases)
 npm test                    # Unit tests (Vitest)
-npx playwright install --with-deps
+npx playwright install --with-deps chromium
 npm run test:playwright     # Integration tests (Playwright)
 ```
 
