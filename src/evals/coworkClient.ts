@@ -5,6 +5,7 @@ import type {
   ClientBatchRequest,
   ClientRunContext,
   ClientRunResult,
+  ClientSessionOptions,
 } from './evalFrameworkTypes.js';
 import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
 import { coworkReadinessServer } from './cowork/readinessServer.js';
@@ -12,9 +13,11 @@ import { checksServersAfterPrepare } from './readinessCheck.js';
 import { clientSecretValues, redactClientError } from './clientSecrets.js';
 import {
   RESET_RETRY_DELAYS_MS,
+  openDesktopSession,
   requireIdenticalClientSettings,
   runDesktopBatch,
   type DesktopCaseOutcome,
+  type DesktopClientAdapter,
   type DesktopContinuation,
 } from './desktopBatch.js';
 import { createHash } from 'node:crypto';
@@ -277,17 +280,26 @@ const failure = (error: string): ClientRunResult => ({
   error,
 });
 
-/** Shared desktop, one managed transaction, then ordinary V2 trace evaluation. */
-async function runBatch(
-  requests: ClientBatchRequest[],
+type CoworkSession = Awaited<ReturnType<CoworkPlatform['prepare']>> | undefined;
+
+/** Fixed desktop settings and the one native trial body, for open and runBatch. */
+async function desktopAdapter(
+  requests: ClientSessionOptions[],
   context: ClientRunContext,
-  selectedPlatform?: CoworkPlatform
-): Promise<ClientRunResult[]> {
-  if (!requests.length) return [];
+  selectedPlatform?: CoworkPlatform,
+  caseCount?: number
+): Promise<DesktopClientAdapter<CoworkSession>> {
+  requests = structuredClone(requests);
   const configs = requests.map((r) => CoworkSchema.parse(r.config));
-  if (requests.some((r) => !r.input.prompt.trim()))
-    throw new Error('Cowork cases require a non-empty input.');
   requireIdenticalClientSettings('Cowork', configs);
+  requireIdenticalClientSettings(
+    'Cowork',
+    requests.map((r) => ({
+      servers: r.input.servers,
+      checkServers: r.input.checkServers,
+      env: r.input.env,
+    }))
+  );
   const config = configs[0]!;
   // How Cowork runs follows from this machine's OS, never the coordinator's.
   const os = process.platform;
@@ -353,7 +365,6 @@ async function runBatch(
   // Pass only the selected variant. Setup intentionally rejects multi-variant eval configs.
   const { variants: _variants, ...evalConfig } = context.evalConfig;
   const managedConfig = { ...evalConfig, coworkSetup, servers };
-  type Session = Awaited<ReturnType<CoworkPlatform['prepare']>> | undefined;
   // `telemetry.host`: Claude Desktop exports to MST's receiver, which Cowork's
   // VM reaches through its host's address (so not on loopback alone). Only
   // in MST's Linux image, where MST writes Desktop's settings.
@@ -378,536 +389,537 @@ async function runBatch(
   const secrets = clientSecretValues(env, servers);
   const safeError = (error: unknown): string =>
     redactClientError(error, secrets, 'Cowork operation failed.');
-  return runDesktopBatch<Session>(
-    {
-      name: 'Cowork',
-      // One desktop per run, across processes.
-      // One run per desktop, across processes. The desktop is identified by
-      // the native data directory it runs from, so separate desktops (e.g.
-      // several Linux displays) don't block each other.
-      lease: {
-        directory: join(homedir(), '.mcp-server-tester'),
-        file: `cowork-desktop-${createHash('sha256').update(dataDir).digest('hex').slice(0, 12)}.lock`,
-      },
-      secrets,
-      resetVerb: 'reset',
-      // On Linux, a reset that fails once (accessibility_scan_timeout on a
-      // slow desktop) would otherwise skip every later case in the batch.
-      // macOS already falls back to restarting the app.
-      ...(linux ? { resetRetryDelaysMs: RESET_RETRY_DELAYS_MS } : {}),
-      async prepare() {
-        if (env.MST_COWORK_RECOVER === '1') await platform.recover();
-        const session = await platform.prepare({
-          evalConfig: managedConfig,
-          env,
-          model: config.model,
-          ...(config.appVersion ? { appVersion: config.appVersion } : {}),
-          ...(plugins.length ? { plugins } : {}),
-          ...(otlpSettings ? { otlpSettings } : {}),
-          ...(stdioServers.length && linux ? { stdioPaths } : {}),
-        });
-        if (session?.stdioPaths) stdioPaths = session.stdioPaths;
-        return session;
-      },
-      // MST's readiness check runs once setup has resolved the stdio paths.
-      readiness() {
-        return {
-          servers: readinessServers,
-          resolve: (server) =>
-            coworkReadinessServer(server, env, {
-              plugins,
-              paths: stdioPaths,
-            }),
-          env,
-        };
-      },
-      ...(platform.reset
-        ? {
-            async reset(session: Session, index: number) {
-              process.stderr.write(
-                `[mst:cowork] resetting the app before case ${index + 1}\n`
-              );
-              // Each platform bounds its own reset (one action within 10
-              // seconds on Linux, eight Computer Use actions on macOS); this
-              // deadline only stops a stuck driver.
-              await platform.reset!({
-                deadlineAt: Date.now() + 180_000,
-                model: config.computerUseModel,
-                env,
-                ...(session?.appPath ? { appPath: session.appPath } : {}),
-                ...(session?.restart
-                  ? { restartApp: () => session.restart!() }
-                  : {}),
-              });
-            },
-          }
-        : {}),
-      ...(platform.diagnose
-        ? {
-            async diagnose(_session: Session, dir: string) {
-              await platform.diagnose!({ dir, dataDir, env });
-            },
-          }
-        : {}),
-      async dispose(session) {
-        await session?.dispose();
-      },
-      async runCase(session, request, index, ledger) {
-        const caseStartedAt = Date.now();
-        const computerUse: Record<
-          'submission' | 'hitl',
-          { status: string; telemetry?: CoworkDriverTelemetry }
-        > = {
-          submission: { status: 'not-attempted' },
-          hitl: { status: 'not-attempted' },
-        };
-        let hitlActions = 0;
-        const hitlFollowups: Array<{
-          status: string;
-          telemetry?: CoworkDriverTelemetry;
-        }> = [];
-        let result: ClientRunResult = failure(
-          'Cowork submission was not attempted.'
-        );
-        let continuation: DesktopContinuation = 'allowed';
-        // The sessions the task's own telemetry names, once bound.
-        let hostSessions: string[] = [];
-        const finishCase = async (): Promise<DesktopCaseOutcome> => {
-          const hostTelemetry =
-            hostReceiver && hostSessions.length
-              ? await hostReceiver.collect(hostSessions).catch(() => undefined)
-              : undefined;
-          result = {
-            ...result,
-            ...(hostTelemetry
-              ? {
-                  hostTelemetry,
-                  ...(result.modelCalls
-                    ? {
-                        modelCalls: withHostRequestIds(
-                          result.modelCalls,
-                          hostTelemetry
-                        ),
-                      }
-                    : {}),
-                }
-              : {}),
-            durationMs: Date.now() - caseStartedAt,
-            telemetry: {
-              ...result.telemetry,
-              // What actually ran, pinned or not, so results show app drift.
-              ...(session?.app ? { clientApp: session.app } : {}),
-              computerUse: {
-                ...computerUse,
-                ...(hitlFollowups.length ? { hitlFollowups } : {}),
-              },
-            },
-          };
-          return { result, continuation };
-        };
-        // Bind each fresh task before another submission can create an identical prompt.
-        const snapshot = await snapshotClaudeSessions(dataDir);
-        const startedAtMs = Date.now();
-        const deadlineAt = startedAtMs + config.timeout;
-        let hitlError: string | undefined;
-        // The HITL check failed without acting on the app (CoworkHitlError).
-        let hitlUntouched = false;
-        let hitlWarning: string | undefined;
-        let awaitingUser = false;
-        let sessionPath: string;
-        const match = {
-          dataDir,
-          exactPrompt: request.input.prompt,
-          snapshot,
-          startedAtMs,
-        };
-        process.stderr.write(
-          `[mst:cowork] case ${index + 1}/${requests.length}: submitting unchanged prompt\n`
-        );
-        try {
-          const submission = await platform.submit(request.input.prompt, {
-            deadlineAt,
-            maxActions: config.maxActions,
-            model: config.computerUseModel,
-            ...(mac && config.model ? { targetModel: config.model } : {}),
-            env,
-            ...(session?.appPath ? { appPath: session.appPath } : {}),
-          });
-          computerUse.submission = {
-            status: 'completed',
-            ...(submission.telemetry
-              ? { telemetry: submission.telemetry }
-              : {}),
-          };
-          const bound = await waitForClaudeSession({
-            ...match,
-            timeoutMs: Math.max(0, Math.min(30_000, deadlineAt - Date.now())),
-          });
-          sessionPath = bound.candidate.metadataPath;
-          if (!ledger.claim(sessionPath))
-            throw new Error(
-              'Native session matched more than one case; refusing duplicate attribution.'
-            );
-        } catch (error) {
-          if (computerUse.submission.status !== 'completed') {
-            computerUse.submission = {
-              status: 'failed',
-              ...(error instanceof CoworkDriverError && error.telemetry
-                ? { telemetry: error.telemetry }
-                : {}),
-            };
-          }
-          // Cowork didn't take the prompt, or its Claude session never bound
-          // to the case: not the model. Computer Use types why it stopped
-          // (a permission, the planner's provider, the deadline); anything
-          // else is the client app.
-          const message = safeError(error);
-          result = {
-            ...failure(message),
-            ending: computerUseEnding(error, message),
-          };
-          continuation = 'reset';
-          return finishCase();
-        }
-        process.stderr.write(
-          '[mst:cowork] bounded HITL check for the bound native session\n'
-        );
-        try {
-          const native = await findMatchingClaudeSessions({
-            ...match,
-            sessionPath,
-          });
-          if (native.length > 1)
-            throw new Error(
-              'Ambiguous native sessions; no HITL action attempted.'
-            );
-          if (!native.length)
-            throw new Error(
-              'Bound native session is missing; no HITL action attempted.'
-            );
-          if (native[0]?.isComplete) {
-            computerUse.hitl = { status: 'skipped-native-complete' };
+  return {
+    name: 'Cowork',
+    // One desktop per run, across processes.
+    // One run per desktop, across processes. The desktop is identified by
+    // the native data directory it runs from, so separate desktops (e.g.
+    // several Linux displays) don't block each other.
+    lease: {
+      directory: join(homedir(), '.mcp-server-tester'),
+      file: `cowork-desktop-${createHash('sha256').update(dataDir).digest('hex').slice(0, 12)}.lock`,
+    },
+    secrets,
+    resetVerb: 'reset',
+    // On Linux, a reset that fails once (accessibility_scan_timeout on a
+    // slow desktop) would otherwise skip every later case in the batch.
+    // macOS already falls back to restarting the app.
+    ...(linux ? { resetRetryDelaysMs: RESET_RETRY_DELAYS_MS } : {}),
+    async prepare() {
+      if (env.MST_COWORK_RECOVER === '1') await platform.recover();
+      const session = await platform.prepare({
+        evalConfig: managedConfig,
+        env,
+        model: config.model,
+        ...(config.appVersion ? { appVersion: config.appVersion } : {}),
+        ...(plugins.length ? { plugins } : {}),
+        ...(otlpSettings ? { otlpSettings } : {}),
+        ...(stdioServers.length && linux ? { stdioPaths } : {}),
+      });
+      if (session?.stdioPaths) stdioPaths = session.stdioPaths;
+      return session;
+    },
+    // MST's readiness check runs once setup has resolved the stdio paths.
+    readiness() {
+      return {
+        servers: readinessServers,
+        resolve: (server) =>
+          coworkReadinessServer(server, env, {
+            plugins,
+            paths: stdioPaths,
+          }),
+        env,
+      };
+    },
+    ...(platform.reset
+      ? {
+          async reset(session: CoworkSession, index: number) {
             process.stderr.write(
-              `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
+              `[mst:cowork] resetting the app before case ${index + 1}\n`
             );
-          } else if (mac && coworkSetup.approveWriteTools) {
-            // Staged connector defaults must work without a click-through fallback.
-            computerUse.hitl = { status: 'not-attempted' };
-          } else {
-            const hitl = await platform.handleHitl({
-              deadlineAt: deadlineAt,
-              maxActions: config.hitlMaxActions,
+            // Each platform bounds its own reset (one action within 10
+            // seconds on Linux, eight Computer Use actions on macOS); this
+            // deadline only stops a stuck driver.
+            await platform.reset!({
+              deadlineAt: Date.now() + 180_000,
               model: config.computerUseModel,
               env,
               ...(session?.appPath ? { appPath: session.appPath } : {}),
-              approveWriteTools: coworkSetup.approveWriteTools,
-              isComplete: async () => {
-                const current = await findMatchingClaudeSessions({
-                  ...match,
-                  sessionPath,
-                });
-                if (current.length !== 1)
-                  throw new Error(
-                    'Bound native session is missing or ambiguous.'
-                  );
-                return current[0]!.isComplete;
-              },
-              awaitingUser: async () => {
-                const current = await findMatchingClaudeSessions({
-                  ...match,
-                  sessionPath,
-                });
-                return current.length === 1 && awaitingUserAnswer(current[0]!);
-              },
-              task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
+              ...(session?.restart
+                ? { restartApp: () => session.restart!() }
+                : {}),
             });
-            hitlActions += hitl.action_count;
-            computerUse.hitl = {
-              status: 'completed',
-              ...(hitl.telemetry ? { telemetry: hitl.telemetry } : {}),
-            };
-          }
-        } catch (error) {
-          computerUse.hitl = {
-            status:
-              error instanceof CoworkDriverError &&
-              error.kind === 'hitl-budget-exhausted'
-                ? 'budget-exhausted'
-                : 'failed',
+          },
+        }
+      : {}),
+    ...(platform.diagnose
+      ? {
+          async diagnose(_session: CoworkSession, dir: string) {
+            await platform.diagnose!({ dir, dataDir, env });
+          },
+        }
+      : {}),
+    async dispose(session) {
+      await session?.dispose();
+    },
+    async runCase(session, request, index, ledger) {
+      const caseStartedAt = Date.now();
+      const computerUse: Record<
+        'submission' | 'hitl',
+        { status: string; telemetry?: CoworkDriverTelemetry }
+      > = {
+        submission: { status: 'not-attempted' },
+        hitl: { status: 'not-attempted' },
+      };
+      let hitlActions = 0;
+      const hitlFollowups: Array<{
+        status: string;
+        telemetry?: CoworkDriverTelemetry;
+      }> = [];
+      let result: ClientRunResult = failure(
+        'Cowork submission was not attempted.'
+      );
+      let continuation: DesktopContinuation = 'continue';
+      // The sessions the task's own telemetry names, once bound.
+      let hostSessions: string[] = [];
+      const finishCase = async (): Promise<DesktopCaseOutcome> => {
+        const hostTelemetry =
+          hostReceiver && hostSessions.length
+            ? await hostReceiver.collect(hostSessions).catch(() => undefined)
+            : undefined;
+        result = {
+          ...result,
+          ...(hostTelemetry
+            ? {
+                hostTelemetry,
+                ...(result.modelCalls
+                  ? {
+                      modelCalls: withHostRequestIds(
+                        result.modelCalls,
+                        hostTelemetry
+                      ),
+                    }
+                  : {}),
+              }
+            : {}),
+          durationMs: Date.now() - caseStartedAt,
+          telemetry: {
+            ...result.telemetry,
+            // What actually ran, pinned or not, so results show app drift.
+            ...(session?.app ? { clientApp: session.app } : {}),
+            computerUse: {
+              ...computerUse,
+              ...(hitlFollowups.length ? { hitlFollowups } : {}),
+            },
+          },
+        };
+        return { result, continuation };
+      };
+      // Bind each fresh task before another submission can create an identical prompt.
+      const snapshot = await snapshotClaudeSessions(dataDir);
+      const startedAtMs = Date.now();
+      const deadlineAt = startedAtMs + config.timeout;
+      let hitlError: string | undefined;
+      // The HITL check failed without acting on the app (CoworkHitlError).
+      let hitlUntouched = false;
+      let hitlWarning: string | undefined;
+      let awaitingUser = false;
+      let sessionPath: string;
+      const match = {
+        dataDir,
+        exactPrompt: request.input.prompt,
+        snapshot,
+        startedAtMs,
+      };
+      process.stderr.write(
+        `[mst:cowork] case ${index + 1}${caseCount === undefined ? '' : `/${caseCount}`}: submitting unchanged prompt\n`
+      );
+      try {
+        const submission = await platform.submit(request.input.prompt, {
+          deadlineAt,
+          maxActions: config.maxActions,
+          model: config.computerUseModel,
+          ...(mac && config.model ? { targetModel: config.model } : {}),
+          env,
+          ...(session?.appPath ? { appPath: session.appPath } : {}),
+        });
+        computerUse.submission = {
+          status: 'completed',
+          ...(submission.telemetry ? { telemetry: submission.telemetry } : {}),
+        };
+        const bound = await waitForClaudeSession({
+          ...match,
+          timeoutMs: Math.max(0, Math.min(30_000, deadlineAt - Date.now())),
+        });
+        sessionPath = bound.candidate.metadataPath;
+        if (!ledger.claim(sessionPath))
+          throw new Error(
+            'Native session matched more than one case; refusing duplicate attribution.'
+          );
+      } catch (error) {
+        if (computerUse.submission.status !== 'completed') {
+          computerUse.submission = {
+            status: 'failed',
             ...(error instanceof CoworkDriverError && error.telemetry
               ? { telemetry: error.telemetry }
               : {}),
           };
-          const message = safeError(error);
-          if (
+        }
+        // Cowork didn't take the prompt, or its Claude session never bound
+        // to the case: not the model. Computer Use types why it stopped
+        // (a permission, the planner's provider, the deadline); anything
+        // else is the client app.
+        const message = safeError(error);
+        result = {
+          ...failure(message),
+          ending: computerUseEnding(error, message),
+        };
+        continuation = 'reset';
+        return finishCase();
+      }
+      process.stderr.write(
+        '[mst:cowork] bounded HITL check for the bound native session\n'
+      );
+      try {
+        const native = await findMatchingClaudeSessions({
+          ...match,
+          sessionPath,
+        });
+        if (native.length > 1)
+          throw new Error(
+            'Ambiguous native sessions; no HITL action attempted.'
+          );
+        if (!native.length)
+          throw new Error(
+            'Bound native session is missing; no HITL action attempted.'
+          );
+        if (native[0]?.isComplete) {
+          computerUse.hitl = { status: 'skipped-native-complete' };
+          process.stderr.write(
+            `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
+          );
+        } else if (mac && coworkSetup.approveWriteTools) {
+          // Staged connector defaults must work without a click-through fallback.
+          computerUse.hitl = { status: 'not-attempted' };
+        } else {
+          const hitl = await platform.handleHitl({
+            deadlineAt: deadlineAt,
+            maxActions: config.hitlMaxActions,
+            model: config.computerUseModel,
+            env,
+            ...(session?.appPath ? { appPath: session.appPath } : {}),
+            approveWriteTools: coworkSetup.approveWriteTools,
+            isComplete: async () => {
+              const current = await findMatchingClaudeSessions({
+                ...match,
+                sessionPath,
+              });
+              if (current.length !== 1)
+                throw new Error(
+                  'Bound native session is missing or ambiguous.'
+                );
+              return current[0]!.isComplete;
+            },
+            awaitingUser: async () => {
+              const current = await findMatchingClaudeSessions({
+                ...match,
+                sessionPath,
+              });
+              return current.length === 1 && awaitingUserAnswer(current[0]!);
+            },
+            task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
+          });
+          hitlActions += hitl.action_count;
+          computerUse.hitl = {
+            status: 'completed',
+            ...(hitl.telemetry ? { telemetry: hitl.telemetry } : {}),
+          };
+        }
+      } catch (error) {
+        computerUse.hitl = {
+          status:
             error instanceof CoworkDriverError &&
             error.kind === 'hitl-budget-exhausted'
-          ) {
-            hitlWarning = message;
-          } else {
-            hitlError = message;
-            hitlUntouched =
-              error instanceof CoworkHitlError && !error.touchedUi;
-          }
-          if (
-            error instanceof CoworkDriverError &&
-            error.kind === 'awaiting-user'
-          )
-            awaitingUser = true;
+              ? 'budget-exhausted'
+              : 'failed',
+          ...(error instanceof CoworkDriverError && error.telemetry
+            ? { telemetry: error.telemetry }
+            : {}),
+        };
+        const message = safeError(error);
+        if (
+          error instanceof CoworkDriverError &&
+          error.kind === 'hitl-budget-exhausted'
+        ) {
+          hitlWarning = message;
+        } else {
+          hitlError = message;
+          hitlUntouched = error instanceof CoworkHitlError && !error.touchedUi;
         }
-        if (awaitingUser) {
-          // Waiting on a question nobody can answer: fail now, not at the deadline.
-          // Keep the bound session so the auditor can verify the unanswered
-          // AskUserQuestion from the native transcript (a model outcome, not a
-          // missing-evidence failure).
-          const [pending] = await findMatchingClaudeSessions({
-            ...match,
-            sessionPath,
-          }).catch(() => []);
-          hostSessions = sessionIdsOf(pending);
-          result = {
-            ...failure(hitlError ?? 'Cowork is waiting for an answer.'),
-            ...(pending
-              ? {
-                  toolCalls: pending.toolCalls,
-                  telemetry: {
-                    source: 'claude-native',
-                    costScope: 'native-inference-only',
-                    ...pending.telemetry,
-                    nativeSessionId: pending.candidate.id,
-                    ...correlationTelemetry(pending),
-                    awaitingUser: 'AskUserQuestion',
-                  },
-                }
-              : {}),
-          };
-          if (platform.reset) continuation = 'reset';
-          return finishCase();
-        }
-        try {
-          const remaining = deadlineAt - Date.now();
-          if (remaining <= 0)
-            throw new Error(
-              'Native Claude trace deadline exceeded. No resubmission attempted.'
-            );
-          process.stderr.write(
-            `[mst:cowork] collecting case ${index + 1}/${requests.length}\n`
-          );
-          let inspections = 0;
-          let nextInspection = 0;
-          const trace = await waitForClaudeTrace({
-            ...match,
-            sessionPath,
-            timeoutMs: remaining,
-            ...(mac && !coworkSetup.approveWriteTools
-              ? {
-                  onPending: async (pending) => {
-                    // A tool request can arrive after the initial visual check. Revisit
-                    // only a bound trace with an outstanding native tool call, within
-                    // the same per-case action budget. Never resubmit the prompt.
-                    if (
-                      hitlError ||
-                      inspections >= 3 ||
-                      hitlActions >= config.hitlMaxActions ||
-                      Date.now() < nextInspection ||
-                      !pending.toolCalls.some(
-                        (call) => call.output === undefined
-                      )
-                    )
-                      return;
-                    if (pending.candidate.metadataPath !== sessionPath)
-                      throw new Error(
-                        'Native session identity changed before HITL.'
-                      );
-                    inspections++;
-                    nextInspection = Date.now() + 5_000;
-                    try {
-                      const followup = await platform.handleHitl({
-                        deadlineAt: Math.min(deadlineAt, Date.now() + 60_000),
-                        maxActions: config.hitlMaxActions - hitlActions,
-                        model: config.computerUseModel,
-                        env,
-                        ...(session?.appPath
-                          ? { appPath: session.appPath }
-                          : {}),
-                        approveWriteTools: coworkSetup.approveWriteTools,
-                        task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks, type, or resubmit a query. If the current task cannot be identified uniquely, stop without an action.`,
-                      });
-                      hitlActions += followup.action_count;
-                      hitlFollowups.push({
-                        status: 'completed',
-                        ...(followup.telemetry
-                          ? { telemetry: followup.telemetry }
-                          : {}),
-                      });
-                    } catch (error) {
-                      hitlFollowups.push({
-                        status: 'failed',
-                        ...(error instanceof CoworkDriverError &&
-                        error.telemetry
-                          ? { telemetry: error.telemetry }
-                          : {}),
-                      });
-                      throw error;
-                    }
-                  },
-                }
-              : {}),
-          });
-          if (trace.candidate.metadataPath !== sessionPath)
-            throw new Error(
-              'Native session identity changed; refusing attribution.'
-            );
-          hostSessions = sessionIdsOf(trace);
-          process.stderr.write(
-            `[mst:cowork] case ${index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
-          );
-          if (config.model && !trace.telemetry.models.includes(config.model)) {
-            throw new Error(
-              `Cowork model mismatch: requested ${config.model}, observed ${trace.telemetry.models.join(', ') || 'unavailable'}.`
-            );
-          }
-          const nativeResult: ClientRunResult = {
-            finalText: trace.finalAnswer ?? '',
-            events: toolCallEvents(
-              coworkOwnToolCalls(trace.toolCalls, servers),
-              servers
-            ),
-            ...(trace.modelCalls?.length
-              ? { modelCalls: trace.modelCalls }
-              : {}),
-            usage: trace.usage,
-            error: trace.isError
-              ? 'Native Claude task failed.'
-              : trace.finalAnswer === undefined
-                ? 'Native trace has no final answer.'
-                : undefined,
-          };
-          result = {
-            ...nativeResult,
-            ...taskTimes(trace),
-            // The session folder: audit log, spilled tool output, written files.
-            ...(trace.candidate.sessionDir
-              ? {
-                  artifacts: {
-                    dir: trace.candidate.sessionDir,
-                    include: COWORK_SESSION_EVIDENCE,
-                  },
-                }
-              : {}),
-            // A HITL check that failed without acting on the app can't have
-            // changed a task that went on to finish: its answer stands, and
-            // the failure is kept as a warning. One that may have acted fails
-            // the case.
-            error:
-              nativeResult.error ?? (hitlUntouched ? undefined : hitlError),
-            telemetry: {
-              source: 'claude-native',
-              costScope: 'native-inference-only',
-              ...trace.telemetry,
-              nativeSessionId: trace.candidate.id,
-              ...correlationTelemetry(trace),
-              ...(hitlWarning
-                ? { hitlWarning }
-                : hitlUntouched && hitlError && !nativeResult.error
-                  ? { hitlWarning: hitlError }
-                  : {}),
-            },
-            llmDurationMs: trace.llmDurationMs,
-          };
-          const unavailable = coworkWorkspaceUnavailable(trace.toolCalls);
-          if (unavailable !== undefined) {
-            // Cowork's VM didn't start, so the task ran without its shell:
-            // an infrastructure failure, kept with its evidence. Cowork
-            // starts the VM again for the next task.
-            const error = `Cowork's workspace was unavailable: ${unavailable}`;
-            result = {
-              ...result,
-              error,
-              ending: infrastructureEnding('workspace', error),
-              diagnostics: { ...result.diagnostics, failureKind: 'startup' },
-            };
-            if (platform.reset) continuation = 'reset';
-          }
-          const truncated = truncatedPrompt(trace);
-          if (truncated !== undefined) {
-            // The model answered the beginning of the prompt, not the case:
-            // never graded, kept with its evidence. A retry gets the same
-            // part, so the case needs a shorter prompt.
-            const error = `Claude kept ${truncated.storedChars} of the prompt's ${truncated.promptChars} characters: the model got only its beginning. No resubmission attempted.`;
-            result = {
-              ...result,
-              error,
-              ending: infrastructureEnding('setup', error, false),
-              diagnostics: { ...result.diagnostics, failureKind: 'input' },
-            };
-          }
-        } catch (error) {
-          // Trace collection or attribution failed: the app state is unknown.
-          const message = safeError(error);
-          // The bound session never finished or went away: the client app
-          // failed, not the model. Any other error here is the trial's.
-          const lostSession =
-            error instanceof NativeTraceError &&
-            (error.failureKind === 'timeout' ||
-              error.failureKind === 'no_matching_session');
-          const ending = lostSession
-            ? infrastructureEnding('client-app', message)
-            : undefined;
-          result = { ...failure(message), ...(ending ? { ending } : {}) };
-          if (Date.now() >= deadlineAt) {
-            // Past the deadline the task may still be running: keep what
-            // its bound session did by now, as a failed case's evidence.
-            const [partial] = await findMatchingClaudeSessions({
-              ...match,
-              sessionPath,
-            }).catch(() => []);
-            const wait =
-              partial?.candidate.metadataPath === sessionPath
-                ? deadlineWait(partial)
-                : undefined;
-            if (partial?.candidate.metadataPath === sessionPath)
-              hostSessions = sessionIdsOf(partial);
-            if (partial?.candidate.metadataPath === sessionPath)
-              result = {
-                finalText: partial.finalAnswer ?? '',
-                events: toolCallEvents(
-                  coworkOwnToolCalls(partial.toolCalls, servers),
-                  servers
-                ),
-                ...(partial.modelCalls?.length
-                  ? { modelCalls: partial.modelCalls }
-                  : {}),
-                usage: partial.usage,
-                error:
-                  (wait
-                    ? `${result.error} ${describeDeadlineWait(wait)}`
-                    : result.error) ?? 'Client execution failed.',
-                ...(ending ? { ending } : {}),
-                ...taskTimes(partial),
-                artifacts: {
-                  dir: partial.candidate.sessionDir,
-                  include: COWORK_SESSION_EVIDENCE,
-                },
+        if (
+          error instanceof CoworkDriverError &&
+          error.kind === 'awaiting-user'
+        )
+          awaitingUser = true;
+      }
+      if (awaitingUser) {
+        // Waiting on a question nobody can answer: fail now, not at the deadline.
+        // Keep the bound session so the auditor can verify the unanswered
+        // AskUserQuestion from the native transcript (a model outcome, not a
+        // missing-evidence failure).
+        const [pending] = await findMatchingClaudeSessions({
+          ...match,
+          sessionPath,
+        }).catch(() => []);
+        hostSessions = sessionIdsOf(pending);
+        result = {
+          ...failure(hitlError ?? 'Cowork is waiting for an answer.'),
+          ...(pending
+            ? {
+                toolCalls: pending.toolCalls,
                 telemetry: {
                   source: 'claude-native',
                   costScope: 'native-inference-only',
-                  ...partial.telemetry,
-                  nativeSessionId: partial.candidate.id,
-                  ...correlationTelemetry(partial),
-                  deadlineExceeded: true,
-                  ...(wait ? { deadlineWait: wait } : {}),
-                  ...(hitlWarning ? { hitlWarning } : {}),
+                  ...pending.telemetry,
+                  nativeSessionId: pending.candidate.id,
+                  ...correlationTelemetry(pending),
+                  awaitingUser: 'AskUserQuestion',
                 },
-              };
-          }
+              }
+            : {}),
+        };
+        if (platform.reset) continuation = 'reset';
+        return finishCase();
+      }
+      try {
+        const remaining = deadlineAt - Date.now();
+        if (remaining <= 0)
+          throw new Error(
+            'Native Claude trace deadline exceeded. No resubmission attempted.'
+          );
+        process.stderr.write(
+          `[mst:cowork] collecting case ${index + 1}${caseCount === undefined ? '' : `/${caseCount}`}\n`
+        );
+        let inspections = 0;
+        let nextInspection = 0;
+        const trace = await waitForClaudeTrace({
+          ...match,
+          sessionPath,
+          timeoutMs: remaining,
+          ...(mac && !coworkSetup.approveWriteTools
+            ? {
+                onPending: async (pending) => {
+                  // A tool request can arrive after the initial visual check. Revisit
+                  // only a bound trace with an outstanding native tool call, within
+                  // the same per-case action budget. Never resubmit the prompt.
+                  if (
+                    hitlError ||
+                    inspections >= 3 ||
+                    hitlActions >= config.hitlMaxActions ||
+                    Date.now() < nextInspection ||
+                    !pending.toolCalls.some((call) => call.output === undefined)
+                  )
+                    return;
+                  if (pending.candidate.metadataPath !== sessionPath)
+                    throw new Error(
+                      'Native session identity changed before HITL.'
+                    );
+                  inspections++;
+                  nextInspection = Date.now() + 5_000;
+                  try {
+                    const followup = await platform.handleHitl({
+                      deadlineAt: Math.min(deadlineAt, Date.now() + 60_000),
+                      maxActions: config.hitlMaxActions - hitlActions,
+                      model: config.computerUseModel,
+                      env,
+                      ...(session?.appPath ? { appPath: session.appPath } : {}),
+                      approveWriteTools: coworkSetup.approveWriteTools,
+                      task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks, type, or resubmit a query. If the current task cannot be identified uniquely, stop without an action.`,
+                    });
+                    hitlActions += followup.action_count;
+                    hitlFollowups.push({
+                      status: 'completed',
+                      ...(followup.telemetry
+                        ? { telemetry: followup.telemetry }
+                        : {}),
+                    });
+                  } catch (error) {
+                    hitlFollowups.push({
+                      status: 'failed',
+                      ...(error instanceof CoworkDriverError && error.telemetry
+                        ? { telemetry: error.telemetry }
+                        : {}),
+                    });
+                    throw error;
+                  }
+                },
+              }
+            : {}),
+        });
+        if (trace.candidate.metadataPath !== sessionPath)
+          throw new Error(
+            'Native session identity changed; refusing attribution.'
+          );
+        hostSessions = sessionIdsOf(trace);
+        process.stderr.write(
+          `[mst:cowork] case ${index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
+        );
+        if (config.model && !trace.telemetry.models.includes(config.model)) {
+          throw new Error(
+            `Cowork model mismatch: requested ${config.model}, observed ${trace.telemetry.models.join(', ') || 'unavailable'}.`
+          );
+        }
+        const nativeResult: ClientRunResult = {
+          finalText: trace.finalAnswer ?? '',
+          events: toolCallEvents(
+            coworkOwnToolCalls(trace.toolCalls, servers),
+            servers
+          ),
+          ...(trace.modelCalls?.length ? { modelCalls: trace.modelCalls } : {}),
+          usage: trace.usage,
+          error: trace.isError
+            ? 'Native Claude task failed.'
+            : trace.finalAnswer === undefined
+              ? 'Native trace has no final answer.'
+              : undefined,
+        };
+        result = {
+          ...nativeResult,
+          ...taskTimes(trace),
+          // The session folder: audit log, spilled tool output, written files.
+          ...(trace.candidate.sessionDir
+            ? {
+                artifacts: {
+                  dir: trace.candidate.sessionDir,
+                  include: COWORK_SESSION_EVIDENCE,
+                },
+              }
+            : {}),
+          // A HITL check that failed without acting on the app can't have
+          // changed a task that went on to finish: its answer stands, and
+          // the failure is kept as a warning. One that may have acted fails
+          // the case.
+          error: nativeResult.error ?? (hitlUntouched ? undefined : hitlError),
+          telemetry: {
+            source: 'claude-native',
+            costScope: 'native-inference-only',
+            ...trace.telemetry,
+            nativeSessionId: trace.candidate.id,
+            ...correlationTelemetry(trace),
+            ...(hitlWarning
+              ? { hitlWarning }
+              : hitlUntouched && hitlError && !nativeResult.error
+                ? { hitlWarning: hitlError }
+                : {}),
+          },
+          llmDurationMs: trace.llmDurationMs,
+        };
+        const unavailable = coworkWorkspaceUnavailable(trace.toolCalls);
+        if (unavailable !== undefined) {
+          // Cowork's VM didn't start, so the task ran without its shell:
+          // an infrastructure failure, kept with its evidence. Cowork
+          // starts the VM again for the next task.
+          const error = `Cowork's workspace was unavailable: ${unavailable}`;
+          result = {
+            ...result,
+            error,
+            ending: infrastructureEnding('workspace', error),
+            diagnostics: { ...result.diagnostics, failureKind: 'startup' },
+          };
           if (platform.reset) continuation = 'reset';
         }
-        // A HITL failure may leave a prompt open; reset before the next task.
-        if (hitlError && platform.reset) continuation = 'reset';
-        return finishCase();
-      },
+        const truncated = truncatedPrompt(trace);
+        if (truncated !== undefined) {
+          // The model answered the beginning of the prompt, not the case:
+          // never graded, kept with its evidence. A retry gets the same
+          // part, so the case needs a shorter prompt.
+          const error = `Claude kept ${truncated.storedChars} of the prompt's ${truncated.promptChars} characters: the model got only its beginning. No resubmission attempted.`;
+          result = {
+            ...result,
+            error,
+            ending: infrastructureEnding('setup', error, false),
+            diagnostics: { ...result.diagnostics, failureKind: 'input' },
+          };
+        }
+      } catch (error) {
+        // Trace collection or attribution failed: the app state is unknown.
+        const message = safeError(error);
+        // The bound session never finished or went away: the client app
+        // failed, not the model. Any other error here is the trial's.
+        const lostSession =
+          error instanceof NativeTraceError &&
+          (error.failureKind === 'timeout' ||
+            error.failureKind === 'no_matching_session');
+        const ending = lostSession
+          ? infrastructureEnding('client-app', message)
+          : undefined;
+        result = { ...failure(message), ...(ending ? { ending } : {}) };
+        if (Date.now() >= deadlineAt) {
+          // Past the deadline the task may still be running: keep what
+          // its bound session did by now, as a failed case's evidence.
+          const [partial] = await findMatchingClaudeSessions({
+            ...match,
+            sessionPath,
+          }).catch(() => []);
+          const wait =
+            partial?.candidate.metadataPath === sessionPath
+              ? deadlineWait(partial)
+              : undefined;
+          if (partial?.candidate.metadataPath === sessionPath)
+            hostSessions = sessionIdsOf(partial);
+          if (partial?.candidate.metadataPath === sessionPath)
+            result = {
+              finalText: partial.finalAnswer ?? '',
+              events: toolCallEvents(
+                coworkOwnToolCalls(partial.toolCalls, servers),
+                servers
+              ),
+              ...(partial.modelCalls?.length
+                ? { modelCalls: partial.modelCalls }
+                : {}),
+              usage: partial.usage,
+              error:
+                (wait
+                  ? `${result.error} ${describeDeadlineWait(wait)}`
+                  : result.error) ?? 'Client execution failed.',
+              ...(ending ? { ending } : {}),
+              ...taskTimes(partial),
+              artifacts: {
+                dir: partial.candidate.sessionDir,
+                include: COWORK_SESSION_EVIDENCE,
+              },
+              telemetry: {
+                source: 'claude-native',
+                costScope: 'native-inference-only',
+                ...partial.telemetry,
+                nativeSessionId: partial.candidate.id,
+                ...correlationTelemetry(partial),
+                deadlineExceeded: true,
+                ...(wait ? { deadlineWait: wait } : {}),
+                ...(hitlWarning ? { hitlWarning } : {}),
+              },
+            };
+        }
+        if (platform.reset) continuation = 'reset';
+      }
+      // A HITL failure may leave a prompt open; reset before the next task.
+      if (hitlError && platform.reset) continuation = 'reset';
+      return finishCase();
     },
+  };
+}
+
+/** Transitional dispatch wrapper; open and the batch share one lifecycle. */
+async function runBatch(
+  requests: ClientBatchRequest[],
+  context: ClientRunContext,
+  platform?: CoworkPlatform
+): Promise<ClientRunResult[]> {
+  if (!requests.length) return [];
+  if (requests.some((request) => !request.input.prompt.trim()))
+    throw new Error('Cowork cases require a non-empty input.');
+  return runDesktopBatch(
+    await desktopAdapter(requests, context, platform, requests.length),
     requests,
     context.reportResult,
     context.acquire
@@ -981,6 +993,11 @@ export function createCoworkClient(
     // Cowork sets up its MCP servers once per batch, so a tool variant goes
     // through one proxy endpoint for the whole batch.
     serversPerBatch: true,
+    async open(options, context) {
+      return openDesktopSession(
+        await desktopAdapter([options], context, platform)
+      );
+    },
     runBatch: (requests, context) => runBatch(requests, context, platform),
     run: async (input, config, context) =>
       (

@@ -799,6 +799,20 @@ An eval config that loads the plugin selects the client with `"client": "my/clie
 - **What it is and needs.** `description` says in one line what product the client is. `requirements` says what a machine needs to run its trials: `os` (`macos`, `linux`; without it, any), and short lines for what to `install`, the `credentials` it reads, and the `setup` commands that prepare a machine. `mst clients` and `mst clients show` print them. Both are optional, and MST checks their shape when it loads the plugin.
 - **Headless.** A client that runs as a process with no desktop session (a CLI or an SDK, as `api`, `claude-code` and `codex-cli` do) sets `headless: true`. An environment whose machines come with a desktop, such as `docker` with MST's Linux image, then runs a shard whose clients are all headless in a container without one: no desktop app, no VM and no Cowork inference. Without it, a client gets the desktop.
 
+### Client sessions (transitional)
+
+`ClientDefinition.open(options, context)` opens a client once for several trials. Cowork, ChatGPT and Codex app implement it. Their `runBatch` wrappers still serve local and worker dispatch through the same lifecycle and trial body. Plugin validation still requires `run` or `runBatch`; do not replace a plugin's batch entry point with `open` alone yet. Run-only clients need no change.
+
+The session types are exported from `@gleanwork/mcp-server-tester/evals`:
+
+- `ClientSessionOptions` fixes `config` (client options and model) and `input` (servers, optional `checkServers`, and environment) at open. The context supplies the eval, variant and runtime environment as before.
+- `ClientSessionTrial` has only `caseId`, zero-based `trial`, and `input: { prompt }`. A trial cannot change the model, options, servers or environment. The desktop wrappers reject incompatible batches before app setup.
+- `ClientSession.run(trial)` returns `ClientSessionResult`: `{ result: ClientRunResult, continuation: 'continue' | 'reset' | 'stop' }`. The result shape is unchanged. `reset` requires a reset before another submission; `stop` forbids later submissions on this session. Neither means that the trial passed or failed.
+- `reset()` returns the app to a fresh state without sending a prompt. Optional `diagnose()` returns failure artifacts, or `undefined` when capture fails. It reads the app before a reset changes it. `close()` releases the app; failed cleanup retains the desktop lease for inspection.
+- Optional `readiness` lists servers that resolve only after open, with their resolver and retry environment. MST checks them before the first trial. `lifecycle` exposes the client's setup and cleanup telemetry; MST reads it after close for `telemetry.batchLifecycle` on each result.
+
+Call session operations sequentially and always close in `finally`. An open that throws cleans up its own partial setup. Direct session calls do not run the batch policy: the caller must perform readiness checks and honor continuation. MST's compatibility loop still owns readiness order, reset retries, diagnosis, consecutive-failure limits, early reporting and run limits. This step adds no timeout or retry policy.
+
 ### Claude Code client-native events
 
 The Claude CLI and Cowork clients read Claude Code transcripts, where skills, commands, subagents and tool search are calls to built-in tools. They are recorded as typed events:

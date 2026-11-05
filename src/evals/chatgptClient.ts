@@ -7,6 +7,7 @@ import type {
   ClientDefinition,
   ClientRunContext,
   ClientRunResult,
+  ClientSessionOptions,
 } from './evalFrameworkTypes.js';
 import { toolCallEvents } from './clientTrace.js';
 import { runChatgptTurn, type ChatgptTurn } from './chatgpt/turn.js';
@@ -22,8 +23,10 @@ import type { MCPConfig } from '../config/mcpConfig.js';
 import { endingOf } from './trialEnding.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import {
+  openDesktopSession,
   requireIdenticalClientSettings,
   runDesktopBatch,
+  type DesktopClientAdapter,
 } from './desktopBatch.js';
 import {
   CHATGPT_MAX_ACTIONS,
@@ -232,13 +235,13 @@ function turnRunResult(
   };
 }
 
-async function runBatch(
-  requests: ClientBatchRequest[],
+function desktopAdapter(
+  requests: ClientSessionOptions[],
   context: ClientRunContext,
   platform: ChatgptPlatform,
   product: DesktopProduct
-): Promise<ClientRunResult[]> {
-  if (!requests.length) return [];
+): DesktopClientAdapter<ChatgptAppSession> {
+  requests = structuredClone(requests);
   const { label } = product;
   if ((context.evalConfig.concurrency ?? 1) !== 1)
     throw new Error(`${label} desktop requires concurrency 1.`);
@@ -248,8 +251,6 @@ async function runBatch(
     );
   const schema = SCHEMAS[product.client];
   const configs = requests.map((request) => schema.parse(request.config));
-  if (requests.some((request) => !request.input.prompt.trim()))
-    throw new Error(`${label} requires a non-empty input.`);
   requireIdenticalClientSettings(label, configs);
   const osIssues = chatgptOptionIssues(configs[0]!, platform.os);
   if (osIssues.length)
@@ -329,147 +330,156 @@ async function runBatch(
   // another process must not stop the active app. `chatgpt` and
   // `codex-app` drive the same app, so they claim the same lease.
   const appSession = new ChatgptAppSession('batch');
-  return runDesktopBatch<ChatgptAppSession>(
-    {
-      name: label,
-      lease: {
-        directory: join(
-          platform.lockHome(appConfigs[0]!),
-          '.mcp-server-tester'
-        ),
-        file: 'chatgpt-desktop.lock',
-      },
-      secrets,
-      resetVerb: 'restarted',
-      async prepare() {
-        await appSession.prepare(appConfigs[0]!);
-        return appSession;
-      },
-      reset: () => appSession.restart(),
-      dispose: () => appSession.dispose(),
-      batchTelemetry: () => appSession.telemetry,
-      async runCase(_session, request, index, ledger) {
-        const config = configs[index]!;
-        const serverConfig = prepared[index]!;
-        const started = Date.now();
-        // Plugin MCP servers are eval servers under their own names.
-        const serverLabels = new Set([
-          ...serverConfig.servers.map((server) => server.label),
-          ...clientPluginMcpServers(config.plugins ?? []).map(
-            (target) => target.server
-          ),
-        ]);
-        // Eval prompts stay unchanged. Server selection is verified from native calls,
-        // not enforced by adding evaluator instructions to the model's context.
-        const result = await runChatgptTurn(
-          request.input.prompt,
-          appConfigs[index]!,
-          appSession,
-          { caseId: request.caseId }
-        );
-        const trace = turnRunResult(result, request.input.servers);
-        if (trace.error)
-          trace.error = redactClientSecrets(trace.error, secrets);
-        if (result.success) {
-          const id = result.clientMetadata.session.id;
-          if (!id || !result.clientMetadata.session.turnId || !ledger.claim(id))
-            trace.error = `${label} requires a distinct native session and turn for each fresh query; refusing duplicate attribution.`;
-        }
-        if (trace.usage) {
-          // Native OpenAI input totals include cache reads; V2 counts cache separately.
-          const uncached =
-            trace.usage.inputTokens -
-            (trace.usage.cacheReadInputTokens ?? 0) -
-            (trace.usage.cacheCreationInputTokens ?? 0);
-          if (uncached < 0)
-            trace.error = 'Native cached input exceeds total input tokens.';
-          else trace.usage = { ...trace.usage, inputTokens: uncached };
-        }
-        // Native/controller/evidence failures restart the app before the next case.
-        // A completed, attributed turn can fail the MCP measurement without a restart.
-        const executionTrusted = result.success && !trace.error;
-        const mcpCalls = result.toolCalls.filter(
-          (call) => call.source !== 'builtin'
-        );
-        const selectedCalls = mcpCalls.filter(
-          (call) => call.server && serverLabels.has(call.server)
-        );
-        const unexpectedServers = [
-          ...new Set(
-            mcpCalls
-              .filter((call) => !call.server || !serverLabels.has(call.server))
-              .map((call) => call.server ?? '(unattributed)')
-          ),
-        ];
-        let measurementError: string | undefined;
-        if (executionTrusted && unexpectedServers.length)
-          measurementError = `${label} called an MCP server outside the configured evaluation server selection.`;
-        else if (
-          executionTrusted &&
-          config.requireMcpCalls &&
-          !selectedCalls.length
-        )
-          measurementError = `${label} completed without calling a required evaluation MCP tool on the configured server selection.`;
-        if (measurementError) trace.error = measurementError;
-        const session = result.clientMetadata?.session;
-        // How a failed turn ended, from the failure kind the turn typed
-        // (ADR 0010): the metadata goes under telemetry, where no reader
-        // looks. A completed turn that missed the servers is a trial.
-        const ending =
-          trace.ending ??
-          (result.success
-            ? undefined
-            : endingOf({
-                error: trace.error,
-                clientMetadata: result.clientMetadata,
-              }));
-        const caseResult: ClientRunResult = {
-          ...trace,
-          ...(ending ? { ending } : {}),
-          // The native turn's own times, when it was bound.
-          ...(session?.startedAt ? { startedAt: session.startedAt } : {}),
-          ...(session?.completedAt ? { completedAt: session.completedAt } : {}),
-          durationMs: Date.now() - started,
-          ...(result.success ? { llmDurationMs: result.llmDurationMs } : {}),
-          telemetry: {
-            caseExecution: {
-              status: executionTrusted ? 'completed' : 'failed',
-              continuation: executionTrusted ? 'allowed' : 'restart',
-            },
-            mcpSelection: {
-              status: !executionTrusted
-                ? 'not-evaluated'
-                : measurementError
-                  ? 'failed'
-                  : 'passed',
-              required: config.requireMcpCalls === true,
-              selectedServers: [...serverLabels],
-              configuredMcpCallCount: selectedCalls.length,
-              externalMcpCallCount: mcpCalls.length,
-              builtinToolCallCount: result.toolCalls.filter(
-                (call) => call.source === 'builtin'
-              ).length,
-              unexpectedServers,
-              ...(measurementError ? { error: measurementError } : {}),
-            },
-            clientMetadata: result.clientMetadata,
-            computerUse: result.clientMetadata.computerUse,
-            nativeController: result.clientMetadata.nativeController,
-            // Failed bound turns keep their partial native history. It
-            // quotes the prompt and the answer, so it is content, which
-            // stored results drop unless they keep full traces.
-            ...(result.conversationHistory
-              ? { content: { conversationHistory: result.conversationHistory } }
-              : {}),
-            ...(result.success ? { mcpDurationMs: result.mcpDurationMs } : {}),
-          },
-        };
-        return {
-          result: caseResult,
-          continuation: executionTrusted ? 'allowed' : 'reset',
-        };
-      },
+  return {
+    name: label,
+    lease: {
+      directory: join(platform.lockHome(appConfigs[0]!), '.mcp-server-tester'),
+      file: 'chatgpt-desktop.lock',
     },
+    secrets,
+    resetVerb: 'restarted',
+    async prepare() {
+      await appSession.prepare(appConfigs[0]!);
+      return appSession;
+    },
+    reset: () => appSession.restart(),
+    dispose: () => appSession.dispose(),
+    batchTelemetry: () => appSession.telemetry,
+    async runCase(_session, request, _index, ledger) {
+      const config = configs[0]!;
+      const serverConfig = prepared[0]!;
+      const started = Date.now();
+      // Plugin MCP servers are eval servers under their own names.
+      const serverLabels = new Set([
+        ...serverConfig.servers.map((server) => server.label),
+        ...clientPluginMcpServers(config.plugins ?? []).map(
+          (target) => target.server
+        ),
+      ]);
+      // Eval prompts stay unchanged. Server selection is verified from native calls,
+      // not enforced by adding evaluator instructions to the model's context.
+      const result = await runChatgptTurn(
+        request.input.prompt,
+        appConfigs[0]!,
+        appSession,
+        { caseId: request.caseId }
+      );
+      const trace = turnRunResult(result, requests[0]!.input.servers);
+      if (trace.error) trace.error = redactClientSecrets(trace.error, secrets);
+      if (result.success) {
+        const id = result.clientMetadata.session.id;
+        if (!id || !result.clientMetadata.session.turnId || !ledger.claim(id))
+          trace.error = `${label} requires a distinct native session and turn for each fresh query; refusing duplicate attribution.`;
+      }
+      if (trace.usage) {
+        // Native OpenAI input totals include cache reads; V2 counts cache separately.
+        const uncached =
+          trace.usage.inputTokens -
+          (trace.usage.cacheReadInputTokens ?? 0) -
+          (trace.usage.cacheCreationInputTokens ?? 0);
+        if (uncached < 0)
+          trace.error = 'Native cached input exceeds total input tokens.';
+        else trace.usage = { ...trace.usage, inputTokens: uncached };
+      }
+      // Native/controller/evidence failures restart the app before the next case.
+      // A completed, attributed turn can fail the MCP measurement without a restart.
+      const executionTrusted = result.success && !trace.error;
+      const mcpCalls = result.toolCalls.filter(
+        (call) => call.source !== 'builtin'
+      );
+      const selectedCalls = mcpCalls.filter(
+        (call) => call.server && serverLabels.has(call.server)
+      );
+      const unexpectedServers = [
+        ...new Set(
+          mcpCalls
+            .filter((call) => !call.server || !serverLabels.has(call.server))
+            .map((call) => call.server ?? '(unattributed)')
+        ),
+      ];
+      let measurementError: string | undefined;
+      if (executionTrusted && unexpectedServers.length)
+        measurementError = `${label} called an MCP server outside the configured evaluation server selection.`;
+      else if (
+        executionTrusted &&
+        config.requireMcpCalls &&
+        !selectedCalls.length
+      )
+        measurementError = `${label} completed without calling a required evaluation MCP tool on the configured server selection.`;
+      if (measurementError) trace.error = measurementError;
+      const session = result.clientMetadata?.session;
+      // How a failed turn ended, from the failure kind the turn typed
+      // (ADR 0010): the metadata goes under telemetry, where no reader
+      // looks. A completed turn that missed the servers is a trial.
+      const ending =
+        trace.ending ??
+        (result.success
+          ? undefined
+          : endingOf({
+              error: trace.error,
+              clientMetadata: result.clientMetadata,
+            }));
+      const caseResult: ClientRunResult = {
+        ...trace,
+        ...(ending ? { ending } : {}),
+        // The native turn's own times, when it was bound.
+        ...(session?.startedAt ? { startedAt: session.startedAt } : {}),
+        ...(session?.completedAt ? { completedAt: session.completedAt } : {}),
+        durationMs: Date.now() - started,
+        ...(result.success ? { llmDurationMs: result.llmDurationMs } : {}),
+        telemetry: {
+          caseExecution: {
+            status: executionTrusted ? 'completed' : 'failed',
+            continuation: executionTrusted ? 'allowed' : 'restart',
+          },
+          mcpSelection: {
+            status: !executionTrusted
+              ? 'not-evaluated'
+              : measurementError
+                ? 'failed'
+                : 'passed',
+            required: config.requireMcpCalls === true,
+            selectedServers: [...serverLabels],
+            configuredMcpCallCount: selectedCalls.length,
+            externalMcpCallCount: mcpCalls.length,
+            builtinToolCallCount: result.toolCalls.filter(
+              (call) => call.source === 'builtin'
+            ).length,
+            unexpectedServers,
+            ...(measurementError ? { error: measurementError } : {}),
+          },
+          clientMetadata: result.clientMetadata,
+          computerUse: result.clientMetadata.computerUse,
+          nativeController: result.clientMetadata.nativeController,
+          // Failed bound turns keep their partial native history. It
+          // quotes the prompt and the answer, so it is content, which
+          // stored results drop unless they keep full traces.
+          ...(result.conversationHistory
+            ? { content: { conversationHistory: result.conversationHistory } }
+            : {}),
+          ...(result.success ? { mcpDurationMs: result.mcpDurationMs } : {}),
+        },
+      };
+      return {
+        result: caseResult,
+        continuation: executionTrusted ? 'continue' : 'reset',
+      };
+    },
+  };
+}
+
+/** Transitional dispatch wrapper; the session and the batch use one trial body. */
+async function runBatch(
+  requests: ClientBatchRequest[],
+  context: ClientRunContext,
+  platform: ChatgptPlatform,
+  product: DesktopProduct
+): Promise<ClientRunResult[]> {
+  if (!requests.length) return [];
+  if (requests.some((request) => !request.input.prompt.trim()))
+    throw new Error(`${product.label} requires a non-empty input.`);
+  return runDesktopBatch(
+    desktopAdapter(requests, context, platform, product),
     requests,
     context.reportResult,
     context.acquire
@@ -530,6 +540,11 @@ function desktopClient(
     toolSurfaceProxy: false,
     // One ChatGPT app window drives one conversation at a time.
     maxConcurrency: 1,
+    async open(options, context) {
+      return openDesktopSession(
+        desktopAdapter([options], context, platformNow(), product)
+      );
+    },
     runBatch(requests, context) {
       return runBatch(requests, context, platformNow(), product);
     },

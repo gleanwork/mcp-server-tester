@@ -23,6 +23,15 @@ describe('assertPlugin', () => {
     expect(assertPlugin(value, './acme.js')).toBe(value);
   });
 
+  it('accepts open alongside the existing batch entry point', () => {
+    const value = plugin({
+      clients: {
+        desk: { schema, open: async () => ({}), runBatch: async () => [] },
+      },
+    });
+    expect(assertPlugin(value, './acme.js')).toBe(value);
+  });
+
   it('accepts a scoped namespace', () => {
     const value = plugin({ meta: { name: 'x', namespace: '@acme/tools' } });
     expect(() => assertPlugin(value, 'x')).not.toThrow();
@@ -81,6 +90,12 @@ describe('assertPlugin', () => {
   it.each([
     ['datasetSources', { schema }, 'datasetSources.x needs a load function'],
     ['clients', { schema }, 'clients.x needs a run or runBatch function'],
+    // Session dispatch is transitional: open-only plugins cannot load yet.
+    [
+      'clients',
+      { schema, open: async () => ({}) },
+      'clients.x needs a run or runBatch function',
+    ],
     [
       'clients',
       {

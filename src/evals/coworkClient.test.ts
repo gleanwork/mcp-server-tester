@@ -235,6 +235,142 @@ afterEach(async () => {
     await fs.rm(dir, { recursive: true, force: true });
 });
 
+describe('Cowork sessions', () => {
+  function client() {
+    return createCoworkClient({
+      dataDirectory: () => '/fixture/cowork',
+      prepare: mocks.setup,
+      recover: async () => {},
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+      async reset() {
+        await mocks.reset();
+      },
+      async diagnose({ dir }) {
+        mocks.order.push('diagnose');
+        await fs.writeFile(path.join(dir, 'screen.txt'), 'failed task');
+      },
+    });
+  }
+
+  it('opens, exposes resolved readiness, runs, diagnoses, resets and closes', async () => {
+    const options = { config: clientConfig, input: { servers: [server] } };
+    const session = await client().open!(options, context);
+    try {
+      expect(mocks.order).toEqual(['setup']);
+      // Opening resolves the target; MST, not the app, owns the probe.
+      expect(mocks.readiness).not.toHaveBeenCalled();
+      const target = session.readiness!;
+      expect(target.servers).toEqual([server]);
+      await mocks.readiness(target.servers, {
+        resolve: target.resolve,
+        env: target.env,
+      });
+      expect(mocks.readinessServer).toHaveBeenCalledOnce();
+      options.input.servers.length = 0;
+      const outcome = await session.run({
+        caseId: 'direct',
+        trial: 3,
+        input: { prompt: 'exact original prompt' },
+      });
+      expect(outcome).toMatchObject({
+        continuation: 'continue',
+        result: {
+          finalText: 'answer',
+          events: [{ name: 'search', server: 'primary' }],
+        },
+      });
+      expect(mocks.submit).toHaveBeenCalledWith(
+        'exact original prompt',
+        expect.anything()
+      );
+      const diagnosis = await session.diagnose!();
+      dirs.push(diagnosis!.dir);
+      expect(
+        await fs.readFile(path.join(diagnosis!.dir, 'screen.txt'), 'utf8')
+      ).toBe('failed task');
+      await session.reset();
+      await session.run({
+        caseId: 'next',
+        trial: 0,
+        input: { prompt: 'next' },
+      });
+      expect(mocks.setup).toHaveBeenCalledOnce();
+      expect(mocks.submit).toHaveBeenCalledTimes(2);
+      expect(mocks.order.indexOf('diagnose')).toBeLessThan(
+        mocks.order.indexOf('reset')
+      );
+    } finally {
+      await session.close();
+    }
+    expect(mocks.dispose).toHaveBeenCalledOnce();
+    expect(
+      await fs.readdir(path.join(lockHome.value, '.mcp-server-tester'))
+    ).toEqual([]);
+  });
+
+  it('preserves the ledger across direct resets without resubmission', async () => {
+    mocks.bind.mockResolvedValue({
+      candidate: { metadataPath: '/fixture/one-native-session' },
+    });
+    const session = await client().open!(
+      { config: clientConfig, input: { servers: [server] } },
+      context
+    );
+    const trial = {
+      caseId: 'direct',
+      trial: 0,
+      input: { prompt: 'original prompt' },
+    };
+    try {
+      expect((await session.run(trial)).continuation).toBe('continue');
+      const duplicate = await session.run({ ...trial, trial: 1 });
+      expect(duplicate.continuation).toBe('reset');
+      expect(duplicate.result.error).toContain('duplicate attribution');
+      await expect(session.run(trial)).rejects.toThrow('requires reset');
+      await session.reset();
+      expect((await session.run(trial)).result.error).toContain(
+        'duplicate attribution'
+      );
+      expect(mocks.submit).toHaveBeenCalledTimes(3);
+      expect(mocks.trace).toHaveBeenCalledOnce();
+    } finally {
+      await session.close();
+    }
+  });
+
+  it.each(['servers', 'environment'] as const)(
+    'rejects mixed %s before setup',
+    async (setting) => {
+      const batch = requests();
+      if (setting === 'servers') batch[1]!.input.servers = [];
+      else batch[1]!.input.env = { SESSION_ENV: 'different' };
+      await expect(client().runBatch!(batch, context)).rejects.toThrow(
+        'identical client settings'
+      );
+      expect(mocks.setup).not.toHaveBeenCalled();
+      expect(mocks.submit).not.toHaveBeenCalled();
+    }
+  );
+
+  it('releases a failed-open lease and retains a failed-close lease', async () => {
+    const definition = client();
+    const options = { config: clientConfig, input: { servers: [server] } };
+    mocks.setup.mockRejectedValueOnce(new Error('setup failed'));
+    await expect(definition.open!(options, context)).rejects.toThrow(
+      'setup failed'
+    );
+    expect(
+      await fs.readdir(path.join(lockHome.value, '.mcp-server-tester'))
+    ).toEqual([]);
+    const session = await definition.open!(options, context);
+    mocks.dispose.mockRejectedValueOnce(new Error('cleanup failed'));
+    await expect(session.close()).rejects.toThrow('lock retained');
+    await expect(definition.open!(options, context)).rejects.toThrow('locked');
+    expect(mocks.setup).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('V2 Cowork client', () => {
   it.each([false, undefined])(
     'uses policy %s for initial and late task-scoped approval without resubmitting',

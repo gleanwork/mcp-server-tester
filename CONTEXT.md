@@ -38,6 +38,10 @@ _Avoid_: canonical answer, golden, target, reference
 The MCP client application an eval tests, named canonically: `claude-code`, `codex-cli` (the Codex CLI; it was `codex`), `cowork`, `chatgpt`, `codex-app` (the Codex surface of the ChatGPT desktop app; it was `chatgpt` with `surface: "codex"`), or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). One client is one product: no option changes which product it is. How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. A client returns a trace, never a score. Built-in and plugin clients return the same `ClientRunResult`: a final answer, ordered events and optional usage, diagnostics and telemetry. MST derives the assertion/report view from it.
 _Avoid_: host, harness, agent, runner, solver, provider
 
+**Client session**:
+One client kept open with fixed options, model, servers and environment. Each trial supplies its identity and prompt. The session returns a `ClientRunResult` and says whether MST can continue, must reset, or must stop. MST owns the readiness, reset and diagnosis policy. Desktop clients expose this through `open()`; dispatch still uses their temporary `runBatch` wrappers.
+_Avoid_: driver, capability pipeline
+
 **Model**:
 The LLM a client runs a case with, set beside the client (for example `claude-sonnet-4-6`); without it, the client's default.
 _Avoid_: provider, engine

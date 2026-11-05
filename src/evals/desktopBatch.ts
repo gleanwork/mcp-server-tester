@@ -28,9 +28,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ALL_ARTIFACTS } from './allArtifacts.js';
 import type {
+  ClientArtifacts,
   ClientBatchRequest,
+  ClientContinuation,
   ClientRunContext,
   ClientRunResult,
+  ClientSession,
+  ClientSessionReadiness,
+  ClientSessionResult,
+  ClientSessionTrial,
 } from './evalFrameworkTypes.js';
 import {
   redactClientError,
@@ -40,7 +46,6 @@ import {
 } from './clientSecrets.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
 import { stableJson } from '../skills/skillEntry.js';
-import type { MCPConfig } from '../config/mcpConfig.js';
 import { checkServersReady, notReadyResult } from './readinessCheck.js';
 
 /**
@@ -56,17 +61,9 @@ const MAX_CONSECUTIVE_FAILURES = 3;
  */
 const DIAGNOSE_TIMEOUT_MS = 30_000;
 
-/** How a case left the app. */
-export type DesktopContinuation =
-  /** The app is in a known state; the next case can run as is. */
-  | 'allowed'
-  /** The app state is unknown; reset it before the next case. */
-  | 'reset';
-
-export interface DesktopCaseOutcome {
-  result: ClientRunResult;
-  continuation: DesktopContinuation;
-}
+/** The desktop trial body uses the public session result unchanged. */
+export type DesktopContinuation = ClientContinuation;
+export type DesktopCaseOutcome = ClientSessionResult;
 
 /** Native sessions already attributed to a case in this batch. */
 interface NativeSessionLedger {
@@ -75,15 +72,6 @@ interface NativeSessionLedger {
    * earlier case already claimed it, so the case must not be attributed.
    */
   claim(sessionId: string): boolean;
-}
-
-/** What a desktop batch checks after `prepare`. */
-interface ReadinessTarget {
-  servers: MCPConfig[];
-  /** Each server as the app will launch it. */
-  resolve?: (server: MCPConfig) => MCPConfig;
-  /** The client's environment, where the retry setting is read first. */
-  env?: Readonly<Record<string, string | undefined>>;
 }
 
 export interface DesktopClientAdapter<Session> {
@@ -108,10 +96,10 @@ export interface DesktopClientAdapter<Session> {
    * no preparation (ChatGPT) leaves this out: the dispatch checks them
    * before the batch starts, before anything touches the desktop.
    */
-  readiness?(session: Session): ReadinessTarget | undefined;
+  readiness?(session: Session): ClientSessionReadiness | undefined;
   runCase(
     session: Session,
-    request: ClientBatchRequest,
+    request: ClientSessionTrial,
     index: number,
     ledger: NativeSessionLedger
   ): Promise<DesktopCaseOutcome>;
@@ -191,19 +179,12 @@ function surfaceable(
   return redactedClientError(error, secrets, fallback);
 }
 
-/**
- * `result` with the adapter's failure diagnosis, in a temporary directory
- * that copying the artifacts removes: its artifacts, or, when the case keeps
- * artifacts of its own (a timed-out task's session folder), beside them
- * (`artifacts.diagnosis`). Unchanged when the adapter has none, or the
- * diagnosis fails or times out. Never throws.
- */
-async function withDiagnosis<Session>(
+/** The existing bounded, best-effort diagnosis, exposed by the session. */
+async function captureDiagnosis<Session>(
   adapter: DesktopClientAdapter<Session>,
-  session: Session,
-  result: ClientRunResult
-): Promise<ClientRunResult> {
-  if (!adapter.diagnose || result.artifacts?.diagnosis) return result;
+  session: Session
+): Promise<ClientArtifacts | undefined> {
+  if (!adapter.diagnose) return undefined;
   let dir: string | undefined;
   let timer: NodeJS.Timeout | undefined;
   try {
@@ -217,19 +198,30 @@ async function withDiagnosis<Session>(
         );
       }),
     ]);
-    return {
-      ...result,
-      artifacts: result.artifacts
-        ? { ...result.artifacts, diagnosis: dir }
-        : { dir, include: ALL_ARTIFACTS, temporary: true },
-    };
+    return { dir, include: ALL_ARTIFACTS, temporary: true };
   } catch {
     // Never fails the batch: the case keeps only its error.
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
-    return result;
+    return undefined;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Keep the diagnosis beside a trial's own artifacts, when it has any. */
+async function withDiagnosis(
+  session: ClientSession,
+  result: ClientRunResult
+): Promise<ClientRunResult> {
+  if (result.artifacts?.diagnosis) return result;
+  const diagnosis = await session.diagnose?.();
+  if (!diagnosis) return result;
+  return {
+    ...result,
+    artifacts: result.artifacts
+      ? { ...result.artifacts, diagnosis: diagnosis.dir }
+      : diagnosis,
+  };
 }
 
 /** Two reset retries, after 10 s then 20 s, for clients that opt in. */
@@ -265,6 +257,162 @@ function notSubmitted(message: string): ClientRunResult {
 }
 
 /**
+ * Opens the same leased lifecycle used by the compatibility batch loop.
+ * The concrete app state stays in this closure, never in a registry. Trial
+ * scheduling, readiness and reset retries stay in MST's loop below.
+ */
+export async function openDesktopSession<Session>(
+  adapter: DesktopClientAdapter<Session>
+): Promise<ClientSession> {
+  const secrets = [...adapter.secrets];
+  const lease = await claimLease(adapter);
+  let state: Session | undefined;
+  let closed = false;
+  let closing: Promise<void> | undefined;
+  let index = 0;
+  let continuation: ClientContinuation = 'continue';
+  const attributed = new Set<string>();
+  const ledger: NativeSessionLedger = {
+    claim(sessionId) {
+      if (attributed.has(sessionId)) return false;
+      attributed.add(sessionId);
+      return true;
+    },
+  };
+
+  function assertOpen() {
+    if (closed) throw new Error(`${adapter.name} session is closed.`);
+  }
+
+  async function dispose(): Promise<void> {
+    let failed = false;
+    try {
+      await adapter.dispose(state);
+    } catch (error) {
+      failed = true;
+      const reason = redactClientError(
+        error,
+        secrets,
+        redactClientSecrets(String(error), secrets)
+      );
+      const message = `${adapter.name} batch cleanup failed; desktop lock retained for inspection: ${reason}`;
+      console.warn(`[mst] ${message}`);
+      throw new Error(message);
+    } finally {
+      await lease.release(failed);
+    }
+  }
+
+  try {
+    state = await adapter.prepare();
+    const current = state;
+    const readiness = adapter.readiness?.(current);
+    return {
+      readiness,
+      get lifecycle() {
+        return redactedClientRun(adapter.batchTelemetry?.(current), secrets);
+      },
+      async run(trial) {
+        assertOpen();
+        if (continuation === 'stop')
+          throw new Error(`${adapter.name} session has stopped.`);
+        if (continuation === 'reset')
+          throw new Error(
+            `${adapter.name} session requires reset before another trial.`
+          );
+        // TypeScript excludes these settings; reject them at runtime too,
+        // rather than silently running a trial against different settings.
+        if (
+          Object.keys(trial).some(
+            (key) => !['caseId', 'trial', 'input'].includes(key)
+          ) ||
+          Object.keys(trial.input).some((key) => key !== 'prompt')
+        )
+          throw new Error(
+            `${adapter.name} session trials accept only identity and prompt; settings are fixed at open.`
+          );
+        if (!trial.input.prompt.trim())
+          throw new Error(`${adapter.name} requires a non-empty input.`);
+        try {
+          const outcome = await adapter.runCase(
+            current,
+            trial,
+            index++,
+            ledger
+          );
+          continuation = outcome.continuation;
+          return {
+            ...outcome,
+            result: redactedClientRun(outcome.result, secrets),
+          };
+        } catch (error) {
+          continuation = 'stop';
+          throw typeof error === 'string'
+            ? redactClientSecrets(error, secrets)
+            : surfaceable(
+                error,
+                secrets,
+                `${adapter.name} batch execution failed.`
+              );
+        }
+      },
+      async reset() {
+        assertOpen();
+        if (continuation === 'stop')
+          throw new Error(`${adapter.name} session has stopped.`);
+        if (!adapter.reset)
+          throw new Error(
+            `this ${adapter.name} platform cannot reset between cases`
+          );
+        try {
+          await adapter.reset(current, index);
+          continuation = 'continue';
+        } catch (error) {
+          continuation = 'reset';
+          throw surfaceable(
+            error,
+            secrets,
+            adapter.resetVerb === 'restarted'
+              ? 'restart failed'
+              : 'reset failed'
+          );
+        }
+      },
+      ...(adapter.diagnose
+        ? {
+            async diagnose() {
+              assertOpen();
+              return captureDiagnosis(adapter, current);
+            },
+          }
+        : {}),
+      close() {
+        closed = true;
+        closing ??= dispose();
+        return closing;
+      },
+    };
+  } catch (error) {
+    const safeError = surfaceable(
+      error,
+      secrets,
+      typeof error === 'string'
+        ? error
+        : `${adapter.name} batch execution failed.`
+    );
+    try {
+      await dispose();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [safeError, cleanupError],
+        `${adapter.name} execution and batch cleanup failed.`
+      );
+    }
+    throw safeError;
+  }
+}
+
+/**
  * Runs a desktop batch under the rules above. `reportResult` (the batch
  * context's) receives a redacted copy of each case's result as it finishes.
  */
@@ -279,26 +427,15 @@ export async function runDesktopBatch<Session>(
   const secrets = [...adapter.secrets];
   const redact = (error: unknown, fallback: string): string =>
     redactClientError(error, secrets, fallback);
-  const lease = await claimLease(adapter);
-
+  const session = await openDesktopSession(adapter);
   const results: ClientRunResult[] = [];
-  const attributed = new Set<string>();
-  const ledger: NativeSessionLedger = {
-    claim(sessionId) {
-      if (attributed.has(sessionId)) return false;
-      attributed.add(sessionId);
-      return true;
-    },
-  };
-  let session: Session | undefined;
   let executionError: unknown;
   let executionFailed = false;
   let cleanupError: Error | undefined;
   try {
-    session = await adapter.prepare();
     let resetBeforeCase = false;
     let blocked: string | undefined;
-    const target = adapter.readiness?.(session);
+    const target = session.readiness;
     const readiness = target?.servers.length
       ? await checkServersReady(target.servers, {
           ...(target.resolve ? { resolve: target.resolve } : {}),
@@ -325,10 +462,8 @@ export async function runDesktopBatch<Session>(
           blocked = `Not submitted because ${theApp} could not be ${adapter.resetVerb} after an earlier failed case: this ${adapter.name} platform cannot reset between cases`;
         else
           try {
-            const reset = adapter.reset.bind(adapter);
-            const current = session;
             await withRetries(
-              () => reset(current, index),
+              () => session.reset(),
               adapter.resetRetryDelaysMs ?? []
             );
           } catch (error) {
@@ -346,16 +481,22 @@ export async function runDesktopBatch<Session>(
         continue;
       }
       await acquire?.(index);
-      const outcome = await adapter.runCase(session, request, index, ledger);
+      const outcome = await session.run({
+        caseId: request.caseId,
+        trial: request.trial,
+        input: { prompt: request.input.prompt },
+      });
       resetBeforeCase = outcome.continuation === 'reset';
       // Before the reset changes what the desktop shows.
       const result =
         resetBeforeCase && outcome.result.error
-          ? await withDiagnosis(adapter, session, outcome.result)
+          ? await withDiagnosis(session, outcome.result)
           : outcome.result;
       results.push(result);
       // A copy: the batch adds to its results when it ends.
       await reportResult?.(index, redactedClientRun(result, secrets));
+      if (outcome.continuation === 'stop')
+        blocked = `Not submitted because the ${adapter.name} session stopped after an earlier case.`;
       consecutiveFailures = result.error ? consecutiveFailures + 1 : 0;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
         blocked = `Not submitted because the last ${MAX_CONSECUTIVE_FAILURES} ${adapter.name} cases failed in a row (latest: ${redactClientSecrets(result.error ?? '', secrets)}). Check the desktop before running again.`;
@@ -374,11 +515,7 @@ export async function runDesktopBatch<Session>(
           },
         };
         // The desktop is still up: keep what it showed.
-        results.push(
-          session === undefined
-            ? failed
-            : await withDiagnosis(adapter, session, failed)
-        );
+        results.push(await withDiagnosis(session, failed));
       }
       while (results.length < requests.length)
         results.push(
@@ -391,13 +528,10 @@ export async function runDesktopBatch<Session>(
       executionError = error;
     }
   } finally {
-    let cleanupFailed = false;
     try {
-      await adapter.dispose(session);
+      await session.close();
     } catch (error) {
-      cleanupFailed = true;
-      const message = `${adapter.name} batch cleanup failed; desktop lock retained for inspection: ${redact(error, redactClientSecrets(String(error), secrets))}`;
-      console.warn(`[mst] ${message}`);
+      const message = redact(error, `${adapter.name} batch cleanup failed.`);
       for (const result of results) {
         // The desktop's state is unknown, so no case counts; but this is the
         // desktop failing, not the client: an infrastructure failure.
@@ -413,7 +547,7 @@ export async function runDesktopBatch<Session>(
       }
       cleanupError = new Error(message);
     } finally {
-      const lifecycle = adapter.batchTelemetry?.(session);
+      const lifecycle = session.lifecycle;
       for (const [index, result] of results.entries()) {
         // Nothing the client reports leaves unredacted: the whole result,
         // with the batch's own telemetry, is what the batch returns.
@@ -433,7 +567,6 @@ export async function runDesktopBatch<Session>(
           secrets
         );
       }
-      await lease.release(cleanupFailed);
     }
   }
   if (executionFailed) {

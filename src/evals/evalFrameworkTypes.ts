@@ -371,6 +371,66 @@ export interface ClientBatchRequest {
   config: ClientConfig;
 }
 
+/** Fixed settings for one open client session. Trials cannot override them. */
+export interface ClientSessionOptions {
+  /** Client options, including the evaluated model. */
+  config: ClientConfig;
+  /** The session's servers and execution-local environment, without a prompt. */
+  input: Omit<ClientRunInput, 'prompt'>;
+}
+
+/** Only the identity and prompt of one trial on an already configured session. */
+export interface ClientSessionTrial {
+  caseId: string;
+  /** Which trial of the case this is, from 0. */
+  trial: number;
+  input: Pick<ClientRunInput, 'prompt'>;
+}
+
+/** How the trial left the client, not whether the trial passed. */
+export type ClientContinuation =
+  | 'continue'
+  /** MST must reset the session before sending another trial. */
+  | 'reset'
+  /** No later trial may be submitted to this session. */
+  | 'stop';
+
+export interface ClientSessionResult {
+  result: ClientRunResult;
+  continuation: ClientContinuation;
+}
+
+/** Servers that MST can check only after the client opens its app. */
+export interface ClientSessionReadiness {
+  servers: MCPConfig[];
+  /** Each server as the app will launch it, including resolved stdio paths. */
+  resolve?: (server: MCPConfig) => MCPConfig;
+  /** Where MST reads the existing readiness retry setting first. */
+  env?: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * One configured client, kept open across trials. MST owns readiness, reset
+ * retries, diagnosis policy, reporting and limits; these operations do not
+ * schedule or resubmit trials. Calls are sequential. Always close, even when
+ * a trial throws. An open that throws cleans up its own partial setup.
+ */
+export interface ClientSession {
+  /** MST checks these after open, before the first trial. */
+  readonly readiness?: ClientSessionReadiness;
+  /**
+   * Client-defined setup/cleanup timings and statuses. Read after close and
+   * copy to each result's `telemetry.batchLifecycle`, not into the trace.
+   */
+  readonly lifecycle?: Record<string, unknown>;
+  run(trial: ClientSessionTrial): Promise<ClientSessionResult>;
+  reset(): Promise<void>;
+  /** Read-only failure evidence, captured before reset changes the app. */
+  diagnose?(): Promise<ClientArtifacts | undefined>;
+  /** Releases the app; failed cleanup retains its lease for inspection. */
+  close(): Promise<void>;
+}
+
 /** An operating system a client's trials can run on. */
 export type ClientOS = 'macos' | 'linux';
 
@@ -430,7 +490,17 @@ export interface ClientDefinition {
    * Without it, a client gets the desktop.
    */
   readonly headless?: boolean;
-  /** Ordered traces for all selected trials. The framework owns scores. */
+  /**
+   * Opens one session with fixed options/model/servers/environment. During
+   * the dispatch migration, clients with open must also keep run or runBatch:
+   * plugin validation and dispatch still use those existing entry points.
+   * Run-only clients need no change.
+   */
+  open?(
+    options: ClientSessionOptions,
+    context: ClientRunContext
+  ): Promise<ClientSession>;
+  /** Transitional batch entry point. The framework owns scores. */
   runBatch?(
     requests: ClientBatchRequest[],
     context: ClientRunContext
