@@ -1,6 +1,6 @@
 import { rejectRenamedOptions } from './renamedKeys.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import { simulationTrace } from './clientTrace.js';
+import { responseTrace } from './clientTrace.js';
 import {
   completeCases,
   endingOf,
@@ -722,7 +722,7 @@ function caseTrace(
     evidence: _evidence,
     error: _error,
     ...trace
-  } = client.trace ?? simulationTrace(client.response);
+  } = client.trace ?? responseTrace(client.response);
   return {
     ...trace,
     ...(evidence !== undefined ? { evidence } : {}),

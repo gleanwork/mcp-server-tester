@@ -99,13 +99,14 @@ Playwright report (the MCP reporter reports evals only)
 ```
 EvalCase { input, assertions.toolsTriggered }, run { client: "api", model }
    ↓  caseExecution.ts: a case with input runs on the client
-   ↓  mstClient/simulation.ts: simulateMstClient()
-   ↓  mstClient/adapters/vercel.ts: createVercelOrchestrator()
+   ↓  mstClient/run.ts: runApiClient()
+   ↓  mstClient/adapters/vercel.ts: runVercelClient()
       - Lists MCP tools via mcp.listTools()
       - Sends tools + input to the configured LLM provider (via Vercel AI SDK)
       - LLM generates text and calls tools autonomously (multi-turn, up to maxSteps)
       - Each tool call is forwarded to the MCP server via mcp.callTool()
-MstClientSimulationResult (.toolCallsMade[], .success, .finalText)
+ClientRunResult (.events[], .finalText, .error)
+   ↓  clientTrace.ts: clientRunToExecution() — assertion view and trace
    ↓  validators/: validateToolCalls(), validateToolCallCount()
 ValidationResult
    ↓  evalRunner.ts: rolled into EvalCaseResult (with a pass rate over N trials)

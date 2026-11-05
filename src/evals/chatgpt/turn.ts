@@ -43,10 +43,7 @@ import type {
   ExternalClientCorrelationMetadata,
   ExternalClientFailureKind,
 } from '../clientTelemetryTypes.js';
-import type {
-  LLMToolCall,
-  MstClientSimulationResult,
-} from '../mstClient/types.js';
+import type { LLMToolCall } from '../mstClient/types.js';
 import type { UsageMetrics } from '../../types/index.js';
 import type { ModelCall } from '../evalFrameworkTypes.js';
 
@@ -93,7 +90,7 @@ interface ChatgptTurnSuccess {
   response?: string;
   toolCalls: LLMToolCall[];
   modelCalls?: ModelCall[];
-  conversationHistory?: MstClientSimulationResult['conversationHistory'];
+  conversationHistory?: ChatgptTrace['conversationHistory'];
   usage?: UsageMetrics;
   llmDurationMs?: number;
   mcpDurationMs?: number;
@@ -106,7 +103,7 @@ interface ChatgptTurnFailure {
   toolCalls: LLMToolCall[];
   modelCalls?: ModelCall[];
   /** Partial native evidence from a bound turn that did not complete. */
-  conversationHistory?: MstClientSimulationResult['conversationHistory'];
+  conversationHistory?: ChatgptTrace['conversationHistory'];
   usage?: UsageMetrics;
   clientMetadata: ClientMetadata;
 }

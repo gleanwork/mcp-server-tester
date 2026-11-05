@@ -357,7 +357,6 @@ export type {
   VariantGrouping,
   LLMProvider,
   LLMToolCall,
-  MstClientSimulationResult,
 } from './evals.js';
 
 export type {

@@ -207,23 +207,13 @@ direct-child cancellation.
 These controls apply to the `claude-code` client, which supplies the server
 names from its generated MCP config.
 
-## MstClientSimulationResult
+## Client results
 
-The response for a case on the `api` client is an `MstClientSimulationResult`:
+`api` and `claude-code` return `ClientRunResult`, the same contract as other clients. Import its type from `@gleanwork/mcp-server-tester/evals`. The result contains `finalText`, ordered `events`, and optional `error`, `ending`, `usage`, `modelCalls`, `diagnostics` and `telemetry`.
 
-```typescript
-interface MstClientSimulationResult {
-  success: boolean;
-  toolCalls: Array<{ name: string; arguments: Record<string, unknown> }>;
-  response?: string; // Final LLM response text
-  error?: string; // Error message if success=false
-  llmDurationMs?: number; // Time in LLM calls (excludes tool execution)
-  mcpDurationMs?: number; // Time in MCP tool execution
-  conversationHistory?: Array<{ role: string; content: string }>;
-  skillLoads?: SkillLoad[]; // Skills the client loaded (when skills are enabled)
-  events?: TraceEvent[]; // Ordered tool calls and skill loads (when skills are enabled)
-}
-```
+MST derives the assertion view once from that result. A successful `runEvalCase` in Playwright and an eval client both expose `response.success`, `response.response`, `response.toolCalls`, `response.events` and `response.evidence` to validators and judges. The case's `trace` retains non-tool events, such as skills and commands.
+
+For `api`, `llmDurationMs` measures model time excluding tool execution. MCP time is `telemetry.mcpDurationMs`. Input and conversation history are in `telemetry.content`; stored results omit that content unless `redactStoredResponses: false`. Skill-load measurements remain available in the assertion view's `skillLoads` and in per-trial records.
 
 ## Cost Considerations
 

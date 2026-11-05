@@ -11,6 +11,7 @@ import type { MCPConfig } from '../config/mcpConfig.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import type {
   ClientDiagnostics,
+  SkillLoad,
   TrialEnding,
   UsageMetrics,
 } from '../types/index.js';
@@ -24,15 +25,14 @@ import type {
   ClientDefinition,
   ClientArtifacts,
   ClientRunResult,
+  HostTelemetry,
+  ModelCall,
   Trace,
 } from './evalFrameworkTypes.js';
-import type {
-  ClientMetadata,
-  ExternalClientSimulationResult,
-} from './clientTelemetryTypes.js';
+import type { ClientMetadata } from './clientTelemetryTypes.js';
 import { getBuiltinClientConfig, getClient } from './builtinClients.js';
 import { bareClientName, resolveClientName } from './clientNames.js';
-import { clientRunToExecution, simulationTrace } from './clientTrace.js';
+import { clientRunToExecution } from './clientTrace.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import { withOriginalToolNames } from './toolSurface.js';
 import {
@@ -41,20 +41,40 @@ import {
   withoutToolVariant,
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
-import { simulateMstClient } from './mstClient/simulation.js';
-import type { MstClientSimulationResult } from './mstClient/types.js';
+import { runApiClient } from './mstClient/run.js';
+import type { LLMToolCall } from './mstClient/types.js';
 import { endingOf, thrownEnding } from './trialEnding.js';
 import { readinessSetup, readyBatch } from './readinessCheck.js';
 import { batchName } from './prepareClientBatch.js';
 
-/** The client payload validators and reports read: the simulation shape. */
-export type ClientResponse = MstClientSimulationResult & {
+/** The assertion/report view. Custom executors may return this view directly. */
+export interface ClientResponse {
+  success: boolean;
+  response?: string;
+  toolCalls: LLMToolCall[];
   events?: TraceEvent[];
   evidence?: TraceEvidence;
+  error?: string;
+  ending?: TrialEnding;
+  usage?: UsageMetrics;
+  modelCalls?: ModelCall[];
+  hostTelemetry?: HostTelemetry;
+  llmDurationMs?: number;
+  mcpDurationMs?: number;
+  skillLoads?: SkillLoad[];
+  telemetry?: Record<string, unknown>;
+  diagnostics?: ClientDiagnostics;
   clientMetadata?: ClientMetadata;
+  /** Legacy custom-executor content; built-in clients use telemetry.content. */
+  input?: string;
+  conversationHistory?: Array<{
+    role: 'user' | 'assistant' | 'tool';
+    content?: string;
+    toolCallId?: string;
+  }>;
   /** See `ClientRunResult.artifacts`. Never stored in results. */
   artifacts?: ClientArtifacts;
-};
+}
 
 interface ExecutionBase {
   /** Set when execution failed; assertions are not evaluated. */
@@ -68,7 +88,7 @@ interface ExecutionBase {
   ending?: TrialEnding;
 }
 
-/** An LLM or desktop client run, adapted to the simulation-shaped response. */
+/** A client run with its assertion/report view. */
 export interface ClientExecution extends ExecutionBase {
   kind: 'completed';
   response: ClientResponse;
@@ -77,7 +97,7 @@ export interface ClientExecution extends ExecutionBase {
    * the runner then derives it from `response`.
    */
   trace?: Trace;
-  /** Declared trace evidence. Undefined for the legacy simulated client. */
+  /** Declared trace evidence. Custom executors may omit it. */
   evidence?: TraceEvidence;
   usage?: UsageMetrics;
   telemetry?: Record<string, unknown>;
@@ -149,25 +169,6 @@ export function executionEnding(execution: CaseExecution): TrialEnding {
   });
 }
 
-/** Adapt a simulated (SDK/CLI/browser) or external client result. */
-function simulationExecution(
-  result: MstClientSimulationResult | ExternalClientSimulationResult,
-  error?: string
-): ClientExecution {
-  return {
-    kind: 'completed',
-    response: result,
-    trace: simulationTrace(result),
-    ...(error !== undefined ? { error } : {}),
-    ...(result.ending ? { ending: result.ending } : {}),
-    usage: result.usage,
-    ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
-    ...('clientMetadata' in result && result.clientMetadata
-      ? { clientMetadata: result.clientMetadata }
-      : {}),
-  };
-}
-
 /**
  * The client a case runs on outside an eval: its own `client`, `model` and
  * `clientOptions` over the run's. Only `api` runs there, on the test's MCP
@@ -213,24 +214,23 @@ export async function executeEvalCase(
       'api',
       playwrightClientOf(evalCase, client)
     );
-    const simulation = withOriginalToolNames(
-      await simulateMstClient(mcp, evalCase.input, config),
+    const run = withOriginalToolNames(
+      await runApiClient(mcp, evalCase.input, config),
       mcp
     );
-    if (simulation.success) return simulationExecution(simulation);
-    // The adapter typed how it ended, or its failure kind says (a CLI that
-    // didn't start); a thrown error would lose both.
-    const error = simulation.error || 'The api client failed.';
+    if (!run.error) return clientRunToExecution(run, 'structured');
+    // Keep the Playwright API's failed-execution contract and the producer's
+    // ending. Eval clients retain failed runs and their partial traces.
     return {
       kind: 'failed',
       response: undefined,
-      error,
+      error: run.error,
       ending:
-        simulation.ending ??
-        endingOf({ error, diagnostics: simulation.diagnostics }),
+        run.ending ??
+        endingOf({ error: run.error, diagnostics: run.diagnostics }),
     };
   } catch (error) {
-    // Simulation errors are already enriched by the adapter; pass them through.
+    // Client errors are already enriched by the producer; pass them through.
     return failedExecution(error);
   }
 }

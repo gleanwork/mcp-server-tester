@@ -7,8 +7,8 @@ import type {
   ClientDefinition,
   ClientRunContext,
   ClientRunResult,
-  TraceEvent,
 } from './evalFrameworkTypes.js';
+import { toolCallEvents } from './clientTrace.js';
 import { runChatgptTurn, type ChatgptTurn } from './chatgpt/turn.js';
 import type { ChatgptAppConfig } from './chatgpt/config.js';
 import { ChatgptAppSession } from './chatgptSetup/session.js';
@@ -223,42 +223,12 @@ function turnRunResult(
   turn: ChatgptTurn,
   servers: MCPConfig[]
 ): ClientRunResult {
-  const events: TraceEvent[] = turn.toolCalls.map((call) => {
-    const server = servers.find(
-      (server) => server.label && call.name.startsWith(`${server.label}.`)
-    );
-    const source =
-      call.source ?? (server || servers.length === 1 ? 'mcp' : 'builtin');
-    return {
-      kind: call.kind ?? 'tool_call',
-      source,
-      name:
-        server && call.source !== 'builtin'
-          ? call.name.slice(server.label!.length + 1)
-          : call.name,
-      server:
-        source === 'builtin'
-          ? undefined
-          : (call.server ??
-            server?.label ??
-            (servers.length === 1 ? servers[0]?.label : undefined)),
-      arguments: call.arguments,
-      output: call.output,
-      ...(call.isError !== undefined ? { isError: call.isError } : {}),
-      ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
-      id: call.id,
-      ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
-      ...(call.startedAt ? { startedAt: call.startedAt } : {}),
-      ...(call.completedAt ? { completedAt: call.completedAt } : {}),
-      ...(call.results !== undefined ? { results: call.results } : {}),
-    };
-  });
   return {
     finalText: (turn.success ? turn.response : undefined) ?? '',
     error: turn.success ? undefined : turn.error,
     usage: turn.usage,
     ...(turn.modelCalls?.length ? { modelCalls: turn.modelCalls } : {}),
-    events,
+    events: toolCallEvents(turn.toolCalls, servers),
   };
 }
 

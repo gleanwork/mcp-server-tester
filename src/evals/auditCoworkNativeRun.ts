@@ -20,7 +20,7 @@ import {
   type ClaudeTrace,
   awaitingUserAnswer,
 } from './cowork/trace.js';
-import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
+import { clientRunToExecution, toolCallEvents } from './clientTrace.js';
 import { matchesPersistedPreview } from './persistedToolOutput.js';
 
 export interface AuditCoworkNativeRunOptions {
@@ -581,15 +581,15 @@ async function auditCase(
   }
   const replay = object(
     clientRunToExecution(
-      simulationToClientRun(
-        {
-          success: !trace.isError && trace.finalAnswer !== undefined,
-          response: trace.finalAnswer,
-          toolCalls: trace.toolCalls,
-          usage: trace.usage,
-        },
-        servers
-      ),
+      {
+        finalText: trace.finalAnswer ?? '',
+        events: toolCallEvents(trace.toolCalls, servers),
+        usage: trace.usage,
+        error:
+          !trace.isError && trace.finalAnswer !== undefined
+            ? undefined
+            : 'Client execution failed.',
+      },
       'structured',
       servers
     ).response

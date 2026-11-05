@@ -4,10 +4,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { UsageMetrics } from '../../types/index.js';
 import type { ModelCall } from '../evalFrameworkTypes.js';
-import type {
-  LLMToolCall,
-  MstClientSimulationResult,
-} from '../mstClient/types.js';
+import type { LLMToolCall } from '../mstClient/types.js';
 import type { ExternalClientTelemetry } from '../clientTelemetryTypes.js';
 import { NativeTraceError } from '../nativeTraceError.js';
 import type { ChatgptSurface } from './driver.js';
@@ -239,9 +236,11 @@ export interface ChatgptTrace {
   toolCalls: LLMToolCall[];
   /** The turn's model responses, one per native usage record. */
   modelCalls?: ModelCall[];
-  conversationHistory: NonNullable<
-    MstClientSimulationResult['conversationHistory']
-  >;
+  conversationHistory: Array<{
+    role: 'user' | 'assistant' | 'tool';
+    content?: string;
+    toolCallId?: string;
+  }>;
   usage?: UsageMetrics;
   telemetry: ExternalClientTelemetry;
   mcpDurationMs?: number;

@@ -5,7 +5,7 @@ import {
   createMCPClientForConfig,
   closeMCPClient,
 } from '../mcp/clientFactory.js';
-import { simulateMstClient } from './mstClient/simulation.js';
+import { runApiClient, runClaudeCodeClient } from './mstClient/run.js';
 import { getBuiltinClientConfig } from './builtinClients.js';
 import { getClient } from './builtinClients.js';
 import type {
@@ -32,7 +32,10 @@ vi.mock('../mcp/clientFactory.js', () => ({
   createMCPClientForConfig: vi.fn(),
   closeMCPClient: vi.fn(async () => {}),
 }));
-vi.mock('./mstClient/simulation.js', () => ({ simulateMstClient: vi.fn() }));
+vi.mock('./mstClient/run.js', () => ({
+  runApiClient: vi.fn(),
+  runClaudeCodeClient: vi.fn(),
+}));
 const case_ = {
   id: 'one',
   input: 'Find documents',
@@ -59,21 +62,20 @@ beforeEach(() => {
       ],
     })),
   } as unknown as Awaited<ReturnType<typeof createMCPClientForConfig>>);
-  vi.mocked(simulateMstClient).mockResolvedValue({
-    success: true,
-    response: 'OK',
-    toolCalls: [],
+  vi.mocked(runApiClient).mockResolvedValue({
+    finalText: 'OK',
+    events: [],
   });
 });
 afterEach(() => vi.unstubAllEnvs());
 describe('built-in client execution', () => {
   it('exposes different descriptions to SDK variants and retains the selected model', async () => {
     const descriptions: string[] = [];
-    vi.mocked(simulateMstClient).mockImplementation(
+    vi.mocked(runApiClient).mockImplementation(
       async (mcp, _scenario, config) => {
         descriptions.push((await mcp.listTools())[0]!.description!);
         expect(config.model).toBe('selected');
-        return { success: true, response: 'OK', toolCalls: [] };
+        return { finalText: 'OK', events: [] };
       }
     );
     const client = getClient('api');
@@ -89,10 +91,9 @@ describe('built-in client execution', () => {
     expect(closeMCPClient).toHaveBeenCalledTimes(2);
   });
   it('allows zero servers and exposes all servers with labels in SDK execution', async () => {
-    vi.mocked(simulateMstClient).mockImplementation(async (mcp) => ({
-      success: true,
-      response: (await mcp.listTools()).map((tool) => tool.name).join(','),
-      toolCalls: [],
+    vi.mocked(runApiClient).mockImplementation(async (mcp) => ({
+      finalText: (await mcp.listTools()).map((tool) => tool.name).join(','),
+      events: [],
     }));
     const client = getClient('api');
     expect(
@@ -111,6 +112,85 @@ describe('built-in client execution', () => {
       ).response
     ).toMatchObject({ response: 'a.search,b.search' });
   });
+  it('restores qualified API names before attributing events to their servers', async () => {
+    vi.mocked(runApiClient).mockImplementation(async (mcp) => {
+      await mcp.listTools();
+      return {
+        finalText: 'found',
+        events: [
+          {
+            kind: 'tool_call',
+            source: 'mcp',
+            name: 'a.find',
+            arguments: { q: 'docs' },
+          },
+        ],
+      };
+    });
+    const execution = await run(getClient('api'), {
+      ...options(),
+      servers: ['a', 'b'].map((label) => ({
+        transport: 'http',
+        label,
+        serverUrl: 'https://example.com',
+      })),
+      variant: { name: 'renamed', tools: { 'a.search': { name: 'find' } } },
+    });
+    expect(execution.trace?.events).toMatchObject([
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        server: 'a',
+        name: 'search',
+        rawName: 'a.find',
+      },
+    ]);
+    expect(execution.response.toolCalls).toMatchObject([{ name: 'a.search' }]);
+  });
+
+  it('retains a failed Claude Code run and its partial native evidence', async () => {
+    const trace = {
+      finalText: 'partial',
+      events: [
+        {
+          kind: 'command' as const,
+          source: 'builtin' as const,
+          name: 'Bash',
+          arguments: { command: 'true' },
+        },
+      ],
+      error: 'process stopped',
+      ending: {
+        kind: 'infrastructure' as const,
+        broke: 'client-app' as const,
+        retryable: true,
+        reason: 'process stopped',
+      },
+      diagnostics: { failureKind: 'startup' as const },
+      modelCalls: [{ model: 'claude', inputTokens: 2, outputTokens: 3 }],
+      usage: { inputTokens: 2, outputTokens: 3, durationMs: 4 },
+      llmDurationMs: 4,
+      telemetry: { content: { input: 'query', conversationHistory: [] } },
+    };
+    vi.mocked(runClaudeCodeClient).mockResolvedValue(trace);
+    const execution = await run(getClient('claude-code'), {
+      ...options(),
+      client: { type: 'claude-code' },
+      servers: [],
+    });
+    expect(execution).toMatchObject({
+      kind: 'completed',
+      error: trace.error,
+      ending: trace.ending,
+      diagnostics: trace.diagnostics,
+      usage: trace.usage,
+      telemetry: trace.telemetry,
+      trace: { events: trace.events, modelCalls: trace.modelCalls },
+      response: { success: false, llmDurationMs: 4 },
+    });
+    expect(runApiClient).not.toHaveBeenCalled();
+  });
+
   it('keeps provider configuration in child env and removes its temporary credential file', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'do-not-change');
     vi.stubEnv('CLAUDE_CODE_USE_VERTEX', 'original');
@@ -121,8 +201,8 @@ describe('built-in client execution', () => {
     expect(process.env.ANTHROPIC_API_KEY).toBe('do-not-change');
     expect(process.env.CLAUDE_CODE_USE_VERTEX).toBe('original');
     let file = '';
-    vi.mocked(simulateMstClient).mockImplementation(
-      async (_mcp, _scenario, cfg) => {
+    vi.mocked(runClaudeCodeClient).mockImplementation(
+      async (_scenario, cfg) => {
         file = cfg.cli!.args[cfg.cli!.args.indexOf('--mcp-config') + 1]!;
         const content: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
         expect(
@@ -133,7 +213,7 @@ describe('built-in client execution', () => {
             .safeParse(content).success
         ).toBe(true);
         expect(fs.statSync(file).mode & 0o777).toBe(0o600);
-        return { success: true, toolCalls: [] };
+        return { finalText: '', events: [] };
       }
     );
     await run(getClient('claude-code'), {

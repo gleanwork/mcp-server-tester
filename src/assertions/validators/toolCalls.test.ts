@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { validateToolCalls, validateToolCallCount } from './toolCalls.js';
-import type { MstClientSimulationResult } from '../../evals/mstClient/types.js';
+import type { ClientResponse } from '../../evals/caseExecution.js';
 
 function makeResult(
   toolCalls: Array<{ name: string; arguments?: Record<string, unknown> }>
-): MstClientSimulationResult {
+): ClientResponse {
   return {
     success: true,
     toolCalls: toolCalls.map((c) => ({ ...c, arguments: c.arguments ?? {} })),

@@ -906,7 +906,7 @@ Validates the tool calls in a client case's trace. Only applicable to client cas
 
 **Parameters:**
 
-- `response: unknown` — Must be an `MstClientSimulationResult`
+- `response: unknown` — The client's assertion view, with `toolCalls` and optional ordered `events`
 - `assertion: ToolCallAssertion` — Expected tool call specification
 
 ```typescript
@@ -918,7 +918,7 @@ const assertion: ToolCallAssertion = {
   exclusive: false,
 };
 
-const result = validateToolCalls(simulationResult, assertion);
+const result = validateToolCalls(caseResult.response, assertion);
 // result.metrics contains { precision, recall }
 ```
 
@@ -928,11 +928,11 @@ Validates the number of tool calls in a client case's trace. Only applicable to 
 
 **Parameters:**
 
-- `response: unknown` — Must be an `MstClientSimulationResult`
+- `response: unknown` — The client's assertion view, with `toolCalls` and optional ordered `events`
 - `options: ToolCallCountOptions` — `{ min?: number; max?: number; exact?: number }`
 
 ```typescript
-const result = validateToolCallCount(simulationResult, { min: 1, max: 3 });
+const result = validateToolCallCount(caseResult.response, { min: 1, max: 3 });
 ```
 
 ### `validateJudge(response, config, run?)` (async)

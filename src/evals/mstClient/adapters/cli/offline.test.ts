@@ -1,14 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { simulateMstClient } from '../../simulation.js';
-import {
-  simulationToClientRun,
-  clientRunToExecution,
-} from '../../../clientTrace.js';
+import { runClaudeCodeClient } from '../../run.js';
+import { clientRunToExecution } from '../../../clientTrace.js';
 import { runEvalDataset } from '../../../evalRunner.js';
 import { executionEnding } from '../../../caseExecution.js';
-import type { MCPFixtureApi } from '../../../../mcp/fixtures/mcpFixture.js';
-
-const unusedMcp = {} as MCPFixtureApi;
 
 /**
  * Claude Code as a child process (`claudeMcpServers` makes the runner treat
@@ -19,7 +13,7 @@ async function claudeExiting(lines: object[], code: number) {
   const script = `${lines
     .map((line) => `console.log(${JSON.stringify(JSON.stringify(line))});`)
     .join('')}process.exitCode = ${code};`;
-  return simulateMstClient(unusedMcp, 'hello', {
+  return runClaudeCodeClient('hello', {
     clientType: 'cli',
     cli: {
       command: process.execPath,
@@ -48,8 +42,8 @@ describe('how a Claude Code run that exited with an error ended (ADR 0010)', () 
       ],
       1
     );
-    expect(result.success).toBe(false);
     expect(result.error).toBe('Claude Code reached its turn limit (3 turns).');
+    expect(result.finalText).toBe('');
     expect(result.ending).toEqual({ kind: 'trial' });
     // Not the client app failing: no `process` failure kind.
     expect(result.diagnostics?.failureKind).toBeUndefined();
@@ -106,7 +100,7 @@ describe('how a Claude Code run that exited with an error ended (ADR 0010)', () 
     ]
       .map((line) => `${JSON.stringify(line)}\n`)
       .join('');
-    const result = await simulateMstClient(unusedMcp, 'hello', {
+    const result = await runClaudeCodeClient('hello', {
       clientType: 'cli',
       cli: {
         command: process.execPath,
@@ -118,24 +112,20 @@ describe('how a Claude Code run that exited with an error ended (ADR 0010)', () 
         timeout: 5000,
       },
     });
-    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
     expect(result.ending).toBeUndefined();
     expect(
-      executionEnding(
-        clientRunToExecution(simulationToClientRun(result, []), 'structured')
-      )
+      executionEnding(clientRunToExecution(result, 'structured'))
     ).toMatchObject({ kind: 'infrastructure', broke: 'client-app' });
   });
 
   it('is the client app when Claude Code exits without saying why', async () => {
     const result = await claudeExiting([answered], 1);
-    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
     expect(result.ending).toBeUndefined();
     expect(result.diagnostics?.failureKind).toBe('process');
     expect(
-      executionEnding(
-        clientRunToExecution(simulationToClientRun(result, []), 'structured')
-      )
+      executionEnding(clientRunToExecution(result, 'structured'))
     ).toMatchObject({ kind: 'infrastructure', broke: 'client-app' });
   });
 });
@@ -158,27 +148,26 @@ describe('offline CLI public execution path', () => {
         })),
       },
     });
-    const result = await simulateMstClient(unusedMcp, 'hello', {
+    const result = await runClaudeCodeClient('hello', {
       clientType: 'cli',
       cli: {
         command: process.execPath,
         args: ['-e', `console.log(${JSON.stringify(event)})`],
       },
     });
-    expect(result.success).toBe(true);
-    expect(result.toolCalls).toMatchObject([
+    expect(result.error).toBeUndefined();
+    expect(result.events).toMatchObject([
       { name: 'search', source: 'mcp', server: 'a', rawName: 'mcp__a__search' },
       { name: 'search', source: 'mcp', server: 'b', rawName: 'mcp__b__search' },
       { name: 'search', source: 'mcp', server: 'server_with_underscores' },
       { name: 'Bash', source: 'builtin', rawName: 'Bash' },
     ]);
-    expect(result.toolCalls[3]).not.toHaveProperty('server');
+    expect(result.events[3]?.server).toBeUndefined();
     const servers = ['a', 'b'].map((label) => ({
       transport: 'http' as const,
       serverUrl: 'https://example.com',
       label,
     }));
-    const trace = simulationToClientRun(result, servers);
     const scored = await runEvalDataset(
       {
         dataset: {
@@ -200,7 +189,7 @@ describe('offline CLI public execution path', () => {
           ],
         },
         executeCase: async () =>
-          clientRunToExecution(trace, 'structured', servers),
+          clientRunToExecution(result, 'structured', servers),
       },
       {}
     );
@@ -208,7 +197,7 @@ describe('offline CLI public execution path', () => {
   });
   it('passes per-execution environment to the child without changing process.env', async () => {
     const before = process.env.HOST_OFFLINE_TEST;
-    const result = await simulateMstClient(unusedMcp, 'hello', {
+    const result = await runClaudeCodeClient('hello', {
       clientType: 'cli',
       env: { HOST_OFFLINE_TEST: 'isolated' },
       cli: {
@@ -220,7 +209,7 @@ describe('offline CLI public execution path', () => {
         outputFormat: 'json',
       },
     });
-    expect(result.response).toBe('isolated');
+    expect(result.finalText).toBe('isolated');
     expect(process.env.HOST_OFFLINE_TEST).toBe(before);
   });
 });

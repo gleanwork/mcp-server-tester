@@ -576,6 +576,136 @@ describe('ChatGPT V2 batch client', () => {
       CHATGPT_CLIENT.runBatch!(requests().slice(0, 1), context)
     ).resolves.toHaveLength(1);
   });
+  it('returns native events, times and telemetry directly without a result envelope', async () => {
+    const startedAt = '2026-11-05T15:00:00.000Z';
+    const completedAt = '2026-11-05T15:00:00.200Z';
+    const modelCalls = [
+      { id: 'request-1', model: config.model, durationMs: 150 },
+    ];
+    const search = {
+      name: 'primary.search',
+      source: 'mcp' as const,
+      server: 'primary',
+      rawName: 'mcp__primary__search',
+      arguments: { query: 'test' },
+      output: '',
+      isError: false,
+      id: 'call-1',
+      durationMs: 0,
+      startedAt,
+      completedAt,
+    };
+    const discovery = {
+      kind: 'tool_search' as const,
+      name: 'find_tools',
+      source: 'builtin' as const,
+      arguments: {},
+      results: [{ name: 'search', server: 'primary' }],
+    };
+    const clientMetadata = {
+      ...metadata,
+      session: { ...metadata.session, startedAt, completedAt },
+    };
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+      success: true,
+      response: '',
+      clientMetadata,
+      toolCalls: [search, discovery],
+      modelCalls,
+      usage: { inputTokens: 10, outputTokens: 5, durationMs: 200 },
+      llmDurationMs: 150,
+      mcpDurationMs: 0,
+    });
+    const [result] = await CHATGPT_CLIENT.runBatch!(
+      requests().slice(0, 1),
+      context
+    );
+    expect(result).toMatchObject({
+      finalText: '',
+      events: [{ ...search, kind: 'tool_call', name: 'search' }, discovery],
+      modelCalls,
+      startedAt,
+      completedAt,
+      usage: { inputTokens: 10, outputTokens: 5, durationMs: 200 },
+      llmDurationMs: 150,
+      telemetry: {
+        clientMetadata,
+        mcpDurationMs: 0,
+        caseExecution: { status: 'completed', continuation: 'allowed' },
+        mcpSelection: { status: 'passed', configuredMcpCallCount: 1 },
+      },
+    });
+    expect(result!.error).toBeUndefined();
+    expect(result!.ending).toBeUndefined();
+    expect(result).not.toHaveProperty('toolCalls');
+    expect(result).not.toHaveProperty('success');
+  });
+  it('keeps failed native turns as partial client results without evaluating server selection', async () => {
+    const startedAt = '2026-11-05T15:00:00.000Z';
+    const completedAt = '2026-11-05T15:00:00.200Z';
+    const modelCalls = [{ id: 'partial-request', model: config.model }];
+    const conversationHistory = [
+      { role: 'assistant' as const, content: 'partial answer' },
+    ];
+    const call = {
+      name: 'search',
+      source: 'mcp' as const,
+      server: 'external',
+      rawName: 'mcp__external__search',
+      arguments: {},
+      output: 'failed',
+      isError: true,
+      id: 'call-1',
+      durationMs: 20,
+    };
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+      success: false,
+      error: 'Native turn timed out.',
+      clientMetadata: {
+        ...metadata,
+        failureKind: 'timeout',
+        session: { ...metadata.session, startedAt, completedAt },
+      },
+      toolCalls: [call],
+      modelCalls,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 2,
+        cacheReadInputTokens: 6,
+        durationMs: 200,
+      },
+      conversationHistory,
+    });
+    const [result] = await CHATGPT_CLIENT.runBatch!(
+      requests().slice(0, 1),
+      context
+    );
+    expect(result).toMatchObject({
+      finalText: '',
+      error: 'Native turn timed out.',
+      events: [{ ...call, kind: 'tool_call' }],
+      modelCalls,
+      startedAt,
+      completedAt,
+      usage: {
+        inputTokens: 4,
+        outputTokens: 2,
+        cacheReadInputTokens: 6,
+        durationMs: 200,
+      },
+      telemetry: {
+        caseExecution: { status: 'failed', continuation: 'restart' },
+        mcpSelection: {
+          status: 'not-evaluated',
+          unexpectedServers: ['external'],
+        },
+        content: { conversationHistory },
+      },
+    });
+    expect(result).not.toHaveProperty('llmDurationMs');
+    expect(result!.telemetry).not.toHaveProperty('mcpDurationMs');
+    expect(result!.telemetry).not.toHaveProperty('conversationHistory');
+  });
   it('subtracts native cache reads from V2 uncached input, retaining native totals', async () => {
     vi.mocked(runChatgptTurn).mockResolvedValueOnce({
       success: true,

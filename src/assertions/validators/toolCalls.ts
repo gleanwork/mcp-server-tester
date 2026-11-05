@@ -1,7 +1,7 @@
 /**
  * Tool call validators for a client case's trace.
  *
- * These validators extract the tool call trace from an MstClientSimulationResult
+ * These validators extract the tool call trace from a client's assertion view
  * and apply assertions against expected call lists and counts.
  */
 import type { ValidationResult } from './types.js';
@@ -192,9 +192,9 @@ export function matchToolCalls(
 }
 
 /**
- * Validates tool calls made during a client simulation.
+ * Validates tool calls made during a client trial.
  *
- * @param response - Must be an MstClientSimulationResult-compatible response
+ * @param response - The assertion view, with toolCalls and optional events
  * @param assertion - Expected tool call specification
  */
 export function validateToolCalls(
@@ -305,9 +305,9 @@ export function validateToolCalls(
 }
 
 /**
- * Validates the number of tool calls made during a client simulation.
+ * Validates the number of tool calls made during a client trial.
  *
- * @param response - Must be an MstClientSimulationResult-compatible response
+ * @param response - The assertion view, with toolCalls and optional events
  * @param options - Count constraints (min, max, exact)
  */
 export function validateToolCallCount(

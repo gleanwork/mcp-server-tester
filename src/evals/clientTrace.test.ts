@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
+import { clientRunToExecution, toolCallEvents } from './clientTrace.js';
 import { runEvalDataset } from './evalRunner.js';
 import { executionEnding } from './caseExecution.js';
 import { infrastructureEnding } from './trialEnding.js';
-import type { ClientDefinition, TraceEvidence } from './evalFrameworkTypes.js';
+import type {
+  ClientDefinition,
+  ClientRunResult,
+  TraceEvidence,
+} from './evalFrameworkTypes.js';
+import type { LLMToolCall } from './mstClient/types.js';
 import { z } from 'zod';
 
 describe('clientRunToExecution', () => {
@@ -21,19 +26,15 @@ describe('clientRunToExecution', () => {
     ).toThrow("it is now `source: 'builtin'`");
   });
 
-  it("keeps the producer's ending from a simulation to the execution (ADR 0010)", () => {
+  it("keeps the producer's ending from the client run to the execution (ADR 0010)", () => {
     // The words name no network failure: only the producer's ending does.
     const ending = infrastructureEnding('provider', 'The model was busy.');
-    const run = simulationToClientRun(
-      {
-        success: false,
-        toolCalls: [],
-        error: 'The model was busy.',
-        ending,
-      },
-      []
-    );
-    expect(run.ending).toEqual(ending);
+    const run: ClientRunResult = {
+      finalText: '',
+      events: [],
+      error: 'The model was busy.',
+      ending,
+    };
     expect(executionEnding(clientRunToExecution(run, 'structured'))).toEqual(
       ending
     );
@@ -41,7 +42,7 @@ describe('clientRunToExecution', () => {
 });
 
 describe('per-scenario client traces', () => {
-  it('retains tool-result evidence and error status through both adapters', () => {
+  it('retains tool-result evidence and error status through the runner boundary', () => {
     const toolCalls = [
       {
         name: 'search',
@@ -55,7 +56,10 @@ describe('per-scenario client traces', () => {
       },
       { name: 'Read', arguments: {}, source: 'builtin' as const, id: 'call-2' },
     ];
-    const trace = simulationToClientRun({ success: true, toolCalls }, []);
+    const trace: ClientRunResult = {
+      finalText: '',
+      events: toolCallEvents(toolCalls),
+    };
     expect(trace.events[0]).toMatchObject(toolCalls[0]!);
     expect(trace.events[1]).not.toHaveProperty('isError');
     const execution = clientRunToExecution(trace, 'structured');
@@ -73,17 +77,11 @@ describe('per-scenario client traces', () => {
     const telemetry = { source: 'claude-native', models: ['test-model'] };
     const execution = clientRunToExecution(
       {
-        ...simulationToClientRun(
-          {
-            success: false,
-            error: 'Client timed out',
-            response: 'partial answer',
-            toolCalls: [],
-            diagnostics,
-            usage,
-          },
-          []
-        ),
+        finalText: 'partial answer',
+        error: 'Client timed out',
+        events: [],
+        diagnostics,
+        usage,
         telemetry,
         llmDurationMs: 123,
       },
@@ -122,19 +120,16 @@ describe('per-scenario client traces', () => {
     });
   });
   it('preserves explicit native and MCP provenance regardless of server count', () => {
-    const result = simulationToClientRun(
-      {
-        success: true,
-        toolCalls: [
-          { name: 'Bash', arguments: {}, source: 'builtin' },
-          { name: 'search', arguments: {}, source: 'mcp', server: 'a' },
-          { name: 'search', arguments: {}, source: 'mcp', server: 'b' },
-        ],
-      },
+    const events = toolCallEvents(
+      [
+        { name: 'Bash', arguments: {}, source: 'builtin' },
+        { name: 'search', arguments: {}, source: 'mcp', server: 'a' },
+        { name: 'search', arguments: {}, source: 'mcp', server: 'b' },
+      ],
       [{ transport: 'http', serverUrl: 'https://example.com', label: 'a' }]
     );
     expect(
-      result.events.map(({ name, source, server }) => ({
+      events.map(({ name, source, server }) => ({
         name,
         source,
         server,
@@ -155,14 +150,13 @@ describe('per-scenario client traces', () => {
           label: 'agg',
         },
       ];
-      const trace = simulationToClientRun(
-        {
-          success: true,
-          response: 'OK',
-          toolCalls: [{ name: 'native_search', arguments: { query: 'docs' } }],
-        },
-        servers
-      );
+      const trace: ClientRunResult = {
+        finalText: 'OK',
+        events: toolCallEvents(
+          [{ name: 'native_search', arguments: { query: 'docs' } }],
+          servers
+        ),
+      };
       trace.events.unshift({
         kind: 'skill',
         source: 'builtin',
@@ -332,14 +326,10 @@ describe('per-scenario client traces', () => {
         label: 'acme',
       },
     ];
-    const trace = simulationToClientRun(
-      {
-        success: true,
-        response: 'OK',
-        toolCalls: [{ name: 'search', arguments: {} }],
-      },
-      servers
-    );
+    const trace: ClientRunResult = {
+      finalText: 'OK',
+      events: toolCallEvents([{ name: 'search', arguments: {} }], servers),
+    };
     expect(trace.events[0]).toMatchObject({
       source: 'mcp',
       server: 'acme',
@@ -356,31 +346,115 @@ describe('per-scenario client traces', () => {
   });
 });
 
-describe('simulationToClientRun with skill loads', () => {
-  it('emits skill events in order with tool calls', () => {
-    const trace = simulationToClientRun(
-      {
-        success: true,
-        response: 'done',
-        toolCalls: [{ name: 'get_weather', arguments: { city: 'London' } }],
-        skillLoads: [
-          {
-            name: 'weather-report',
-            uri: 'skill://weather-report/SKILL.md',
-            server: 'mcp',
-            kind: 'skill',
-            via: 'read_skill',
-            verified: true,
-            afterToolCalls: 0,
-          },
-        ],
-      },
-      []
-    );
-    expect(trace.events.map((e) => `${e.kind}:${e.name}`)).toEqual([
-      'skill:weather-report',
-      'tool_call:get_weather',
+describe('toolCallEvents', () => {
+  const servers = [
+    { transport: 'stdio' as const, command: 'node', label: 'docs' },
+    { transport: 'stdio' as const, command: 'node', label: 'tickets' },
+  ];
+
+  it('keeps parser provenance over prefixes and strips only MCP server prefixes', () => {
+    const calls: readonly LLMToolCall[] = [
+      { name: 'docs.search', arguments: {} },
+      { name: 'docs.Read', arguments: {}, source: 'builtin', server: 'docs' },
+      { name: 'docs.search', arguments: {}, source: 'mcp', server: 'tickets' },
+      { name: 'search', arguments: {}, source: 'mcp', server: 'external' },
+      { name: 'unknown', arguments: {} },
+    ];
+    expect(
+      toolCallEvents(calls, servers).map(({ name, source, server }) => ({
+        name,
+        source,
+        server,
+      }))
+    ).toEqual([
+      { name: 'search', source: 'mcp', server: 'docs' },
+      { name: 'docs.Read', source: 'builtin', server: undefined },
+      { name: 'search', source: 'mcp', server: 'tickets' },
+      { name: 'search', source: 'mcp', server: 'external' },
+      { name: 'unknown', source: 'builtin', server: undefined },
     ]);
+    expect(calls[0]!.name).toBe('docs.search');
+  });
+
+  it('uses the one-server fallback only when the parser did not name a source', () => {
+    const calls: readonly LLMToolCall[] = [
+      { name: 'search', arguments: {} },
+      { name: 'Read', arguments: {}, source: 'builtin' },
+      { name: 'search', arguments: {}, source: 'mcp' },
+    ];
+    expect(toolCallEvents(calls).map((event) => event.source)).toEqual([
+      'builtin',
+      'builtin',
+      'mcp',
+    ]);
+    expect(
+      toolCallEvents(calls, servers.slice(0, 1)).map(({ source, server }) => ({
+        source,
+        server,
+      }))
+    ).toEqual([
+      { source: 'mcp', server: 'docs' },
+      { source: 'builtin', server: undefined },
+      { source: 'mcp', server: 'docs' },
+    ]);
+  });
+
+  it('retains native event kinds, results, zero timing and empty output without filling absent evidence', () => {
+    const call: LLMToolCall = {
+      kind: 'tool_search',
+      name: 'docs.find_tools',
+      rawName: 'mcp__docs__find_tools',
+      source: 'mcp',
+      arguments: { query: 'search' },
+      output: '',
+      isError: false,
+      id: 'call-1',
+      durationMs: 0,
+      startedAt: '2026-11-05T15:00:00.000Z',
+      completedAt: '2026-11-05T15:00:00.000Z',
+      results: [{ name: 'search', server: 'docs' }],
+    };
+    const [event, absent] = toolCallEvents(
+      [call, { name: 'Read', arguments: {} }],
+      servers
+    );
+    expect(event).toEqual({ ...call, name: 'find_tools', server: 'docs' });
+    for (const key of [
+      'rawName',
+      'isError',
+      'durationMs',
+      'startedAt',
+      'completedAt',
+      'results',
+    ])
+      expect(absent).not.toHaveProperty(key);
+  });
+});
+
+describe('client-native skill events', () => {
+  it('retains their order and telemetry without turning skills into tool calls', () => {
+    const run: ClientRunResult = {
+      finalText: 'done',
+      events: [
+        { kind: 'skill', source: 'mcp', name: 'weather-report' },
+        {
+          kind: 'tool_call',
+          source: 'mcp',
+          name: 'get_weather',
+          arguments: { city: 'London' },
+        },
+      ],
+      telemetry: { source: 'native-client' },
+    };
+    const execution = clientRunToExecution(run, 'structured');
+    expect(execution.trace?.events).toEqual(run.events);
+    expect(execution.response).toMatchObject({
+      success: true,
+      response: 'done',
+      events: run.events,
+      toolCalls: [{ name: 'get_weather' }],
+      telemetry: run.telemetry,
+    });
   });
 });
 

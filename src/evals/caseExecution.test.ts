@@ -21,8 +21,10 @@ import type {
   ClientRunResult,
 } from './evalFrameworkTypes.js';
 import type { ToolSurfaceProxy } from './toolSurfaceProxy.js';
-import { simulateMstClient } from './mstClient/simulation.js';
-import type * as SimulationModule from './mstClient/simulation.js';
+import type { SkillLoad } from '../types/index.js';
+import { clientRunToExecution } from './clientTrace.js';
+import { runApiClient } from './mstClient/run.js';
+import type * as ClientRunModule from './mstClient/run.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import {
@@ -30,9 +32,9 @@ import {
   startReadinessHttpServer,
 } from '../../tests/mocks/readyServers.js';
 
-vi.mock('./mstClient/simulation.js', async (original) => ({
-  ...(await original<typeof SimulationModule>()),
-  simulateMstClient: vi.fn(),
+vi.mock('./mstClient/run.js', async (original) => ({
+  ...(await original<typeof ClientRunModule>()),
+  runApiClient: vi.fn(),
 }));
 
 const mcp = { authType: 'none' } as MCPFixtureApi;
@@ -42,14 +44,13 @@ const clientCase: EvalCase = {
 };
 const evalConfig = { name: 'm', datasets: [] };
 
-beforeEach(() => vi.mocked(simulateMstClient).mockReset());
+beforeEach(() => vi.mocked(runApiClient).mockReset());
 
 describe('executeEvalCase', () => {
-  it('adapts a successful simulation to a client execution', async () => {
-    vi.mocked(simulateMstClient).mockResolvedValue({
-      success: true,
-      response: 'answer',
-      toolCalls: [],
+  it('adapts a successful api run to a client execution', async () => {
+    vi.mocked(runApiClient).mockResolvedValue({
+      finalText: 'answer',
+      events: [],
       usage: { inputTokens: 1, outputTokens: 2, durationMs: 3 },
     });
     await expect(executeEvalCase(clientCase, mcp)).resolves.toMatchObject({
@@ -59,10 +60,10 @@ describe('executeEvalCase', () => {
     });
   });
 
-  it('fails a simulation failure without keeping its response', async () => {
-    vi.mocked(simulateMstClient).mockResolvedValue({
-      success: false,
-      toolCalls: [],
+  it('fails an api failure without keeping its response', async () => {
+    vi.mocked(runApiClient).mockResolvedValue({
+      finalText: '',
+      events: [],
       error: 'rejected',
     });
     await expect(executeEvalCase(clientCase, mcp)).resolves.toEqual({
@@ -74,11 +75,11 @@ describe('executeEvalCase', () => {
     });
   });
 
-  it('keeps what a simulation failure says broke', async () => {
+  it('keeps what a client failure says broke', async () => {
     // A CLI that didn't start says so with its failure kind (ADR 0010).
-    vi.mocked(simulateMstClient).mockResolvedValue({
-      success: false,
-      toolCalls: [],
+    vi.mocked(runApiClient).mockResolvedValue({
+      finalText: '',
+      events: [],
       error: 'CLI client process failed: exit 1',
       diagnostics: { failureKind: 'startup' },
     });
@@ -94,10 +95,9 @@ describe('executeEvalCase', () => {
   });
 
   it("runs on the run's api client, with the case's own fields over it", async () => {
-    vi.mocked(simulateMstClient).mockResolvedValue({
-      success: true,
-      response: 'answer',
-      toolCalls: [],
+    vi.mocked(runApiClient).mockResolvedValue({
+      finalText: 'answer',
+      events: [],
     });
     await executeEvalCase(
       { ...clientCase, clientOptions: { systemPrompt: 'Case prompt.' } },
@@ -108,7 +108,7 @@ describe('executeEvalCase', () => {
         clientOptions: { systemPrompt: 'Run prompt.', maxToolCalls: 9 },
       }
     );
-    expect(simulateMstClient).toHaveBeenCalledWith(
+    expect(runApiClient).toHaveBeenCalledWith(
       mcp,
       'query',
       expect.objectContaining({
@@ -128,7 +128,7 @@ describe('executeEvalCase', () => {
       kind: 'failed',
       error: expect.stringContaining('Run "claude-code" in an eval (mst run).'),
     });
-    expect(simulateMstClient).not.toHaveBeenCalled();
+    expect(runApiClient).not.toHaveBeenCalled();
   });
 
   it("doesn't carry the run's options to a case's own client", () => {
@@ -155,6 +155,64 @@ describe('executeEvalCase', () => {
 });
 
 describe('custom executeCase results', () => {
+  it('derives a trace from the existing response view without changing provenance', async () => {
+    const result = await runEvalCase(
+      { id: 'custom', input: 'query' },
+      {},
+      {
+        executeCase: async () => ({
+          kind: 'completed',
+          response: {
+            success: true,
+            response: 'answer',
+            toolCalls: [
+              { name: 'search', arguments: { q: 'query' }, output: 'found' },
+              { name: 'Bash', source: 'builtin', arguments: {}, id: 'native' },
+            ],
+          },
+        }),
+      }
+    );
+    expect(result.pass).toBe(true);
+    expect(result.trace).toMatchObject({
+      finalText: 'answer',
+      events: [
+        { kind: 'tool_call', source: 'mcp', name: 'search', output: 'found' },
+        { kind: 'tool_call', source: 'builtin', name: 'Bash', id: 'native' },
+      ],
+    });
+    expect(result.traceEvidence).toBeUndefined();
+  });
+
+  it('keeps explicit native events instead of rebuilding them from toolCalls', async () => {
+    const events: ClientRunResult['events'] = [
+      { kind: 'skill', source: 'builtin', name: 'review' },
+      {
+        kind: 'tool_search',
+        source: 'builtin',
+        name: 'ToolSearch',
+        results: [{ name: 'search', server: 'docs' }],
+      },
+    ];
+    const result = await runEvalCase(
+      { id: 'custom-events', input: 'query' },
+      {},
+      {
+        executeCase: async () => ({
+          kind: 'completed',
+          response: {
+            success: true,
+            toolCalls: [],
+            events,
+            evidence: 'structured',
+          },
+        }),
+      }
+    );
+    expect(result.trace?.events).toEqual(events);
+    expect(result.traceEvidence).toBe('structured');
+  });
+
   it('fails a pre-2.0 untyped result loudly', async () => {
     const result = await runEvalCase(
       {
@@ -190,6 +248,65 @@ describe('custom executeCase results', () => {
     );
     expect(result.pass).toBe(false);
     expect(result.error).toContain("kind 'completed' or 'failed'");
+  });
+});
+
+describe('client skill loads at the result boundary', () => {
+  const load: SkillLoad = {
+    name: 'weather',
+    uri: 'skill://weather/SKILL.md',
+    server: 'weather',
+    kind: 'skill',
+    via: 'read_skill',
+    verified: true,
+    afterToolCalls: 0,
+  };
+
+  it('keeps skill loads per trial without requiring a stored response', async () => {
+    vi.mocked(runApiClient)
+      .mockResolvedValueOnce({
+        finalText: 'answer',
+        events: [],
+        telemetry: { skillLoads: [load] },
+      })
+      .mockResolvedValueOnce({
+        finalText: 'answer',
+        events: [],
+        telemetry: { skillLoads: [] },
+      });
+    const result = await runEvalCase({ ...clientCase, trials: 2 }, { mcp });
+    expect(result.trialResults?.map((trial) => trial.skillLoads)).toEqual([
+      [load],
+      [],
+    ]);
+    expect(result.passRate).toBe(1);
+  });
+
+  it.each([
+    undefined,
+    null,
+    {},
+    [null],
+    [{ name: 'incomplete' }],
+    [{ ...load, problems: [5] }],
+  ])('does not expose malformed telemetry.skillLoads: %j', (skillLoads) => {
+    const execution = clientRunToExecution(
+      { finalText: '', events: [], telemetry: { skillLoads } },
+      'structured'
+    );
+    expect(execution.response).not.toHaveProperty('skillLoads');
+  });
+
+  it('preserves empty versus absent skill loads', () => {
+    expect(
+      clientRunToExecution(
+        { finalText: '', events: [], telemetry: { skillLoads: [] } },
+        'structured'
+      ).response.skillLoads
+    ).toEqual([]);
+    expect(
+      clientRunToExecution({ finalText: '', events: [] }, 'structured').response
+    ).not.toHaveProperty('skillLoads');
   });
 });
 

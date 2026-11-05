@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createVercelOrchestrator, stepModelCalls } from './vercel.js';
+import { runVercelClient, stepModelCalls } from './vercel.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../../../mcp/fixtures/fixtureExtensions.js';
 
@@ -80,7 +80,7 @@ function createMockMCP(
   };
 }
 
-describe('createVercelOrchestrator', () => {
+describe('runVercelClient', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
 
@@ -111,43 +111,40 @@ describe('createVercelOrchestrator', () => {
     );
   });
 
-  it('should return a simulation result with tool calls', async () => {
-    const orchestrator = createVercelOrchestrator();
-    const result = await orchestrator.simulate(
+  it('returns a common result with model and MCP timing', async () => {
+    const result = await runVercelClient(
       createMockMCP(),
       'What is the weather in London?',
       { provider: 'openai', model: 'gpt-4o' }
     );
 
-    expect(result.success).toBe(true);
-    expect(result.response).toBe('Final answer');
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe('Final answer');
     expect(result.llmDurationMs).toBeGreaterThanOrEqual(0);
-    expect(result.mcpDurationMs).toBeGreaterThanOrEqual(0);
+    expect(result.telemetry?.mcpDurationMs).toBeGreaterThanOrEqual(0);
+    expect(result.telemetry?.content).toMatchObject({
+      input: 'What is the weather in London?',
+      conversationHistory: [{ role: 'tool' }],
+    });
   });
 
   it('points the anthropic provider at the public API with its /v1 base URL by default', async () => {
     const { createAnthropic } = await import('@ai-sdk/anthropic');
     const { generateText, streamText } = await import('ai');
     vi.mocked(generateText).mockClear();
-    const result = await createVercelOrchestrator().simulate(
-      createMockMCP(),
-      'scenario',
-      {
-        provider: 'anthropic',
-        model: 'claude',
-        env: { ANTHROPIC_API_KEY: 'key' },
-      }
-    );
+    const result = await runVercelClient(createMockMCP(), 'scenario', {
+      provider: 'anthropic',
+      model: 'claude',
+      env: { ANTHROPIC_API_KEY: 'key' },
+    });
 
     expect(createAnthropic).toHaveBeenCalledWith({
       baseURL: 'https://api.anthropic.com/v1',
       apiKey: 'key',
     });
     // The anthropic provider runs its agent loop with streamText.
-    expect(result).toMatchObject({
-      success: true,
-      response: 'Streamed answer',
-    });
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe('Streamed answer');
     expect(streamText).toHaveBeenCalledTimes(1);
     expect(generateText).not.toHaveBeenCalled();
   });
@@ -155,7 +152,7 @@ describe('createVercelOrchestrator', () => {
   it('drops ANTHROPIC_AUTH_TOKEN without a base URL override', async () => {
     const { createAnthropic } = await import('@ai-sdk/anthropic');
     vi.mocked(createAnthropic).mockClear();
-    await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {
+    await runVercelClient(createMockMCP(), 'scenario', {
       provider: 'anthropic',
       model: 'claude',
       env: { ANTHROPIC_AUTH_TOKEN: 'gateway-token', ANTHROPIC_API_KEY: 'key' },
@@ -169,7 +166,7 @@ describe('createVercelOrchestrator', () => {
 
   it('keeps OpenAI response storage on for the public API', async () => {
     const { generateText } = await import('ai');
-    await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {
+    await runVercelClient(createMockMCP(), 'scenario', {
       provider: 'openai',
       model: 'gpt-4o',
     });
@@ -182,7 +179,7 @@ describe('createVercelOrchestrator', () => {
 
   it('turns OpenAI response storage off behind a base URL override', async () => {
     const { generateText } = await import('ai');
-    await createVercelOrchestrator().simulate(createMockMCP(), 'scenario', {
+    await runVercelClient(createMockMCP(), 'scenario', {
       provider: 'openai',
       model: 'gpt-4o',
       env: { OPENAI_BASE_URL: 'https://gateway.example/openai/v1' },
@@ -195,8 +192,7 @@ describe('createVercelOrchestrator', () => {
   });
 
   it('should capture token usage from SDK response', async () => {
-    const orchestrator = createVercelOrchestrator();
-    const result = await orchestrator.simulate(
+    const result = await runVercelClient(
       createMockMCP(),
       'What is the weather?',
       { provider: 'openai', model: 'gpt-4o' }
@@ -217,29 +213,91 @@ describe('createVercelOrchestrator', () => {
       steps: [],
     } as never);
 
-    const orchestrator = createVercelOrchestrator();
-    const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
+    const result = await runVercelClient(createMockMCP(), 'scenario', {
       provider: 'openai',
       model: 'gpt-4o',
     });
 
-    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
     expect(result.usage).toBeUndefined();
   });
 
-  it('should return success:false on error', async () => {
+  it('returns an error on a failed run', async () => {
     const { generateText } = await import('ai');
     vi.mocked(generateText).mockRejectedValueOnce(new Error('API error'));
 
-    const orchestrator = createVercelOrchestrator();
-    const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
+    const result = await runVercelClient(createMockMCP(), 'scenario', {
       provider: 'openai',
       model: 'gpt-4o',
     });
 
-    expect(result.success).toBe(false);
+    expect(result.finalText).toBe('');
     expect(result.error).toContain('API error');
   });
+
+  it('retains completed MCP calls when the next model request fails', async () => {
+    const { generateText } = await import('ai');
+    vi.mocked(generateText).mockImplementationOnce((async (options: {
+      tools: Record<
+        string,
+        {
+          execute(
+            args: Record<string, unknown>,
+            options: { toolCallId: string }
+          ): Promise<string>;
+        }
+      >;
+    }) => {
+      await options.tools.get_weather!.execute(
+        { city: 'London' },
+        { toolCallId: 'weather-1' }
+      );
+      throw Object.assign(new Error('Overloaded'), { statusCode: 529 });
+    }) as never);
+    const result = await runVercelClient(createMockMCP(), 'Weather?', {
+      provider: 'openai',
+    });
+    expect(result.finalText).toBe('');
+    expect(result.error).toContain('Overloaded');
+    expect(result.ending).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'provider',
+      retryable: true,
+    });
+    expect(result.events).toMatchObject([
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        name: 'get_weather',
+        rawName: 'get_weather',
+        id: 'weather-1',
+        arguments: { city: 'London' },
+        output: 'Sunny, 20°C',
+      },
+    ]);
+    expect(result.telemetry).toBeUndefined();
+  });
+
+  it.each([false, true])(
+    'keeps an empty skill-load array when a skill session ran (failed: %s)',
+    async (failed) => {
+      const mcp = createMockMCP();
+      vi.spyOn(mcp.skills, 'supported').mockReturnValue(true);
+      vi.spyOn(mcp.skills, 'list').mockResolvedValue([]);
+      if (failed) {
+        const { generateText } = await import('ai');
+        vi.mocked(generateText).mockRejectedValueOnce(new Error('API error'));
+      }
+      const result = await runVercelClient(mcp, 'Weather?', {
+        provider: 'openai',
+        skills: 'catalog',
+      });
+      expect(result.telemetry).toHaveProperty('skillLoads', []);
+      expect(result.events).toEqual([]);
+      if (failed) expect(result.error).toContain('API error');
+      else expect(result.error).toBeUndefined();
+    }
+  );
 
   describe('MCP tool schema conversion', () => {
     it('converts a required-field MCP tool to Vercel tool format with inputSchema', async () => {
@@ -255,8 +313,7 @@ describe('createVercelOrchestrator', () => {
         },
       ]);
 
-      const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'Search for docs', {
+      await runVercelClient(mcp, 'Search for docs', {
         provider: 'openai',
         model: 'gpt-4o',
       });
@@ -283,8 +340,7 @@ describe('createVercelOrchestrator', () => {
         },
       ]);
 
-      const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'List all items', {
+      await runVercelClient(mcp, 'List all items', {
         provider: 'openai',
         model: 'gpt-4o',
       });
@@ -315,8 +371,7 @@ describe('createVercelOrchestrator', () => {
         },
       ]);
 
-      const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'Run batch search', {
+      await runVercelClient(mcp, 'Run batch search', {
         provider: 'openai',
         model: 'gpt-4o',
       });
@@ -349,8 +404,7 @@ describe('createVercelOrchestrator', () => {
         },
       ]);
 
-      const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'Get status', {
+      await runVercelClient(mcp, 'Get status', {
         provider: 'openai',
         model: 'gpt-4o',
       });
@@ -379,8 +433,7 @@ describe('createVercelOrchestrator', () => {
         },
       ]);
 
-      const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'scenario', {
+      await runVercelClient(mcp, 'scenario', {
         provider: 'openai',
         model: 'gpt-4o',
       });
@@ -412,8 +465,7 @@ describe('createVercelOrchestrator', () => {
         },
       ]);
 
-      const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'scenario', {
+      await runVercelClient(mcp, 'scenario', {
         provider: 'openai',
         model: 'gpt-4o',
       });
@@ -431,8 +483,7 @@ describe('createVercelOrchestrator', () => {
         },
       ]);
 
-      const orchestrator = createVercelOrchestrator();
-      await orchestrator.simulate(mcp, 'scenario', {
+      await runVercelClient(mcp, 'scenario', {
         provider: 'openai',
         model: 'gpt-4o',
       });
@@ -452,13 +503,11 @@ describe('createVercelOrchestrator', () => {
         new Error('401 Unauthorized: Invalid API key')
       );
 
-      const orchestrator = createVercelOrchestrator();
-      const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
+      const result = await runVercelClient(createMockMCP(), 'scenario', {
         provider: 'openai',
         model: 'gpt-4o',
       });
 
-      expect(result.success).toBe(false);
       expect(result.error).toContain('authentication error');
     });
 
@@ -468,13 +517,11 @@ describe('createVercelOrchestrator', () => {
         new Error('429 Too Many Requests')
       );
 
-      const orchestrator = createVercelOrchestrator();
-      const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
+      const result = await runVercelClient(createMockMCP(), 'scenario', {
         provider: 'openai',
         model: 'gpt-4o',
       });
 
-      expect(result.success).toBe(false);
       expect(result.error).toContain('rate limited');
     });
 
@@ -484,13 +531,12 @@ describe('createVercelOrchestrator', () => {
         new Error('404 Not Found: model not found')
       );
 
-      const orchestrator = createVercelOrchestrator();
-      const result = await orchestrator.simulate(createMockMCP(), 'scenario', {
+      const result = await runVercelClient(createMockMCP(), 'scenario', {
         provider: 'openai',
         model: 'gpt-4o',
       });
 
-      expect(result.success).toBe(false);
+      expect(result.error).toBeTruthy();
       // Raw provider error is preserved, not collapsed to a misleading guess.
       expect(result.error).toContain('404 Not Found: model not found');
       // Hint points at the real causes (model id / base-URL override).
@@ -592,12 +638,11 @@ describe('createVercelOrchestrator', () => {
     ])('types %s', async (_, error, expected) => {
       const { generateText } = await import('ai');
       vi.mocked(generateText).mockRejectedValueOnce(error);
-      const result = await createVercelOrchestrator().simulate(
-        createMockMCP(),
-        'scenario',
-        { provider: 'openai', model: 'gpt-4o' }
-      );
-      expect(result.success).toBe(false);
+      const result = await runVercelClient(createMockMCP(), 'scenario', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
+      expect(result.error).toBeTruthy();
       expect(result.ending).toMatchObject(expected);
     });
 
@@ -613,12 +658,10 @@ describe('createVercelOrchestrator', () => {
           'prompt is too long: 210000 tokens > 200000 maximum'
         );
       }) as never);
-      const result = await createVercelOrchestrator().simulate(
-        createMockMCP(),
-        'scenario',
-        { provider: 'openai', model: 'gpt-4o' }
-      );
-      expect(result.success).toBe(false);
+      const result = await runVercelClient(createMockMCP(), 'scenario', {
+        provider: 'openai',
+        model: 'gpt-4o',
+      });
       expect(result.error).toContain('prompt is too long');
       expect(result.ending).toEqual({ kind: 'trial' });
     });

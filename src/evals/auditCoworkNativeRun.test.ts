@@ -15,7 +15,7 @@ import {
   type CoworkNativeAuditIssue,
 } from './auditCoworkNativeRun.js';
 import { parseClaudeTrace } from './cowork/trace.js';
-import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
+import { clientRunToExecution, toolCallEvents } from './clientTrace.js';
 
 const sessionId = 'local_11111111-1111-4111-8111-111111111111';
 const cliSessionId = '22222222-2222-4222-8222-222222222222';
@@ -135,15 +135,9 @@ async function fixture(
   };
   const replay = clientRunToExecution(
     {
-      ...simulationToClientRun(
-        {
-          success: true,
-          response: trace.finalAnswer,
-          usage: trace.usage,
-          toolCalls: trace.toolCalls,
-        },
-        []
-      ),
+      finalText: trace.finalAnswer ?? '',
+      usage: trace.usage,
+      events: toolCallEvents(trace.toolCalls),
       telemetry,
       llmDurationMs: trace.llmDurationMs,
     },

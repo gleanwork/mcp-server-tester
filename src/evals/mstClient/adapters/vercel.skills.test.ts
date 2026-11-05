@@ -8,7 +8,8 @@ import {
 import { createMCPFixture } from '../../../mcp/fixtures/mcpFixture.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { validateToolCalls } from '../../../assertions/validators/toolCalls.js';
-import { simulateMstClient } from '../simulation.js';
+import { runApiClient, runClaudeCodeClient } from '../run.js';
+import { clientRunToExecution } from '../../clientTrace.js';
 import { runEvalDataset } from '../../evalRunner.js';
 import { computeMetrics } from '../../metrics.js';
 import type { EvalDataset } from '../../datasetTypes.js';
@@ -97,15 +98,19 @@ beforeEach(async () => {
 describe('SDK client with skills', () => {
   it('catalog: the model loads the skill with read_skill before using the tool', async () => {
     await withFixture(async (mcp) => {
-      const result = await simulateMstClient(mcp, 'Weather in London?', {
+      const result = await runApiClient(mcp, 'Weather in London?', {
         provider: 'openai',
         skills: 'catalog',
       });
 
-      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
       // read_skill is a built-in tool, not an MCP tool call.
-      expect(result.toolCalls.map((c) => c.name)).toEqual(['get_weather']);
-      expect(result.skillLoads).toEqual([
+      expect(
+        result.events
+          .filter((event) => event.kind === 'tool_call')
+          .map((event) => event.name)
+      ).toEqual(['get_weather']);
+      expect(result.telemetry?.skillLoads).toEqual([
         expect.objectContaining({
           name: 'weather-report',
           verified: true,
@@ -116,12 +121,21 @@ describe('SDK client with skills', () => {
         'skill:weather-report',
         'tool_call:get_weather',
       ]);
-      expect(validateToolCalls(result, SKILL_THEN_TOOL).pass).toBe(true);
       expect(
-        result.conversationHistory?.some((turn) =>
-          turn.content?.startsWith('[client] read_skill')
-        )
+        validateToolCalls(
+          clientRunToExecution(result, 'structured').response,
+          SKILL_THEN_TOOL
+        ).pass
       ).toBe(true);
+      expect(result.telemetry?.content).toMatchObject({
+        input: 'Weather in London?',
+        conversationHistory: expect.arrayContaining([
+          expect.objectContaining({
+            role: 'tool',
+            content: expect.stringMatching(/^\[client\] read_skill/),
+          }),
+        ]),
+      });
 
       const { generateText } = await import('ai');
       const call = vi.mocked(generateText).mock.calls[0]![0] as {
@@ -131,11 +145,48 @@ describe('SDK client with skills', () => {
     });
   }, 30_000);
 
+  it('retains skill loads and completed MCP evidence when the model then fails', async () => {
+    const { generateText } = await import('ai');
+    vi.mocked(generateText).mockImplementationOnce((async ({
+      tools,
+    }: {
+      tools: ToolSet;
+    }) => {
+      await tools.read_skill!.execute({
+        server: 'mcp',
+        uri: 'skill://weather-report/SKILL.md',
+      });
+      await tools.get_weather!.execute({ city: 'London' });
+      throw new Error('API error after tools');
+    }) as never);
+    await withFixture(async (mcp) => {
+      const result = await runApiClient(mcp, 'Weather in London?', {
+        provider: 'openai',
+        skills: 'catalog',
+      });
+      expect(result.error).toContain('API error after tools');
+      expect(result.ending).toEqual({ kind: 'trial' });
+      expect(result.finalText).toBe('');
+      expect(
+        result.events.map((event) => `${event.kind}:${event.name}`)
+      ).toEqual(['skill:weather-report', 'tool_call:get_weather']);
+      expect(result.events[1]?.output).toContain('London');
+      expect(result.telemetry?.skillLoads).toEqual([
+        expect.objectContaining({
+          name: 'weather-report',
+          verified: true,
+          afterToolCalls: 0,
+        }),
+      ]);
+      expect(result.telemetry).not.toHaveProperty('content');
+    });
+  }, 30_000);
+
   it.each(['catalog', 'preload'] as const)(
     '%s: a systemPrompt comes first, then the skills',
     async (skills) => {
       await withFixture(async (mcp) => {
-        await simulateMstClient(mcp, 'Weather in London?', {
+        await runApiClient(mcp, 'Weather in London?', {
           provider: 'openai',
           skills,
           systemPrompt: 'Org instructions.',
@@ -153,14 +204,20 @@ describe('SDK client with skills', () => {
 
   it('off (default): no skills, no system prompt, unchanged tool trace', async () => {
     await withFixture(async (mcp) => {
-      const result = await simulateMstClient(mcp, 'Weather in London?', {
+      const result = await runApiClient(mcp, 'Weather in London?', {
         provider: 'openai',
       });
 
-      expect(result.skillLoads).toBeUndefined();
-      expect(result.events).toBeUndefined();
-      expect(result.toolCalls.map((c) => c.name)).toEqual(['get_weather']);
-      expect(validateToolCalls(result, SKILL_THEN_TOOL).pass).toBe(false);
+      expect(result.telemetry).not.toHaveProperty('skillLoads');
+      expect(
+        result.events.map((event) => `${event.kind}:${event.name}`)
+      ).toEqual(['tool_call:get_weather']);
+      expect(
+        validateToolCalls(
+          clientRunToExecution(result, 'structured').response,
+          SKILL_THEN_TOOL
+        ).pass
+      ).toBe(false);
 
       const { generateText } = await import('ai');
       const call = vi.mocked(generateText).mock.calls[0]![0] as {
@@ -171,9 +228,9 @@ describe('SDK client with skills', () => {
   }, 30_000);
 
   it('rejects skills on non-SDK clients', async () => {
-    await withFixture(async (mcp) => {
+    await withFixture(async () => {
       await expect(
-        simulateMstClient(mcp, 'x', {
+        runClaudeCodeClient('x', {
           clientType: 'cli',
           skills: 'catalog',
           cli: { command: 'true', args: [] },

@@ -17,6 +17,10 @@
 
 
 
+## Unreleased
+
+- Built-in clients return `ClientRunResult` directly. Removed `MstClientSimulationResult`; Playwright evals use the same assertion response as `mst run`. See [the migration guide](docs/migrations/2.0-prereleases.md#built-in-clients-return-the-common-result).
+
 ## v2.0.0-beta.14 (2026-10-23)
 
 #### :rocket: Enhancement
