@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 import { freemem, homedir, loadavg, totalmem, uptime } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { CoworkPlatform } from './platform.js';
+import type { CoworkDesktop } from './desktop.js';
 import { transportServers } from '../evalConfig.js';
 import { credentialHelperScript } from '../coworkSetup/credentialHelper.js';
 import { resolveCoworkMcpHeaders } from '../coworkSetup/config.js';
@@ -58,7 +58,7 @@ import {
   type CoworkDriverOptions,
   type CoworkPendingQuestion,
   type SemanticDesktopTelemetry,
-} from './driver.js';
+} from './interaction.js';
 
 /**
  * How long HITL waits for Cowork's form for one clarifying question to take
@@ -491,7 +491,6 @@ function telemetry(
   }
 ): SemanticDesktopTelemetry {
   return {
-    driver: 'linux-desktop',
     accounting,
     duration_ms: Math.max(0, Date.now() - started),
     action_count: actions,
@@ -758,7 +757,7 @@ async function systemState(dataDir: string): Promise<object> {
 }
 
 /** Attach to caller-owned resources. Never create, authenticate, or stop a desktop. */
-export const linuxCoworkPlatform: CoworkPlatform = {
+export const coworkLinux: CoworkDesktop = {
   dataDirectory: (options) =>
     options.dataDir ??
     join(

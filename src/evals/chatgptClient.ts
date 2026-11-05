@@ -35,13 +35,16 @@ import {
   CHATGPT_APP_REASONING_EFFORTS,
   reasoningEffortOption,
 } from './reasoningEffort.js';
+import type { ChatgptDesktop } from './chatgpt/desktop.js';
+import { chatgptMacos } from './chatgpt/macos.js';
+import { chatgptLinux } from './chatgpt/linux.js';
+import { codexAppMacos } from './codex-app/macos.js';
+import { codexAppLinux } from './codex-app/linux.js';
 import {
-  LINUX_CHATGPT_PLATFORM,
-  MAC_CHATGPT_PLATFORM,
-  chatgptPlatformFor,
-  type ChatgptPlatform,
-} from './chatgptSetup/platform.js';
-import type { ChatgptSurface } from './chatgpt/driver.js';
+  CHATGPT_PRODUCT,
+  CODEX_APP_PRODUCT,
+  type DesktopProduct,
+} from './chatgpt/product.js';
 import {
   COMPUTER_USE_PROVIDER_GONE,
   fixedProviderGone,
@@ -49,32 +52,6 @@ import {
   osName,
 } from './desktopOS.js';
 import { removedClientOptions } from './renamedKeys.js';
-
-/**
- * A product the ChatGPT desktop app runs, and so a client (ADR 0011):
- * ChatGPT's work surface (`chatgpt`) or Codex (`codex-app`). Both drive the
- * same app, so they share its desktop lease.
- */
-interface DesktopProduct {
-  /** The client's name. */
-  readonly client: 'chatgpt' | 'codex-app';
-  /** The surface the drivers select. */
-  readonly surface: ChatgptSurface;
-  /** The product in messages: `ChatGPT`, `Codex app`. */
-  readonly label: string;
-}
-
-const CHATGPT_PRODUCT: DesktopProduct = {
-  client: 'chatgpt',
-  surface: 'chatgpt-work',
-  label: 'ChatGPT',
-};
-
-const CODEX_APP_PRODUCT: DesktopProduct = {
-  client: 'codex-app',
-  surface: 'codex',
-  label: 'Codex app',
-};
 
 /**
  * Why `clientOptions.surface` fails: the surface is the client now (ADR
@@ -237,10 +214,10 @@ function turnRunResult(
 function desktopAdapter(
   requests: ClientSessionOptions[],
   context: ClientRunContext,
-  platform: ChatgptPlatform,
-  product: DesktopProduct
+  platform: ChatgptDesktop
 ): DesktopClientAdapter<ChatgptAppSession> {
   requests = structuredClone(requests);
+  const { product } = platform;
   const { label } = product;
   if ((context.evalConfig.concurrency ?? 1) !== 1)
     throw new Error(`${label} desktop requires concurrency 1.`);
@@ -328,7 +305,7 @@ function desktopAdapter(
   // One desktop per run: claimed before any lifecycle operation, because
   // another process must not stop the active app. `chatgpt` and
   // `codex-app` drive the same app, so they claim the same lease.
-  const appSession = new ChatgptAppSession('batch');
+  const appSession = new ChatgptAppSession(platform, 'batch');
   return {
     name: label,
     lease: {
@@ -510,9 +487,18 @@ const PRODUCT_DEFINITIONS: Record<
  */
 function desktopClient(
   product: DesktopProduct,
-  platform?: ChatgptPlatform
+  platform?: ChatgptDesktop
 ): ClientDefinition {
-  const platformNow = () => platform ?? chatgptPlatformFor(process.platform);
+  // Resolve once when the batch opens, never while loading coordinator config.
+  function desktopNow(): ChatgptDesktop {
+    if (platform) return platform;
+    const os = process.platform;
+    if (os === 'darwin')
+      return product.client === 'chatgpt' ? chatgptMacos : codexAppMacos;
+    if (os === 'linux')
+      return product.client === 'chatgpt' ? chatgptLinux : codexAppLinux;
+    throw new Error(`The ChatGPT app runs on macOS or Linux, not ${os}.`);
+  }
   const definition: ClientDefinition = {
     schema: SCHEMAS[product.client],
     ...PRODUCT_DEFINITIONS[product.client],
@@ -523,7 +509,7 @@ function desktopClient(
     maxConcurrency: 1,
     async open(options, context) {
       return openDesktopSession(
-        desktopAdapter([options], context, platformNow(), product)
+        desktopAdapter([options], context, desktopNow())
       );
     },
     async run(input, config, context) {
@@ -550,17 +536,11 @@ export const CHATGPT_APP_CLIENTS = {
 // Each product pinned to one OS, whatever this machine runs.
 export const CHATGPT_LINUX_CLIENT = desktopClient(
   CHATGPT_PRODUCT,
-  LINUX_CHATGPT_PLATFORM
+  chatgptLinux
 );
-export const CHATGPT_CLIENT = desktopClient(
-  CHATGPT_PRODUCT,
-  MAC_CHATGPT_PLATFORM
-);
+export const CHATGPT_CLIENT = desktopClient(CHATGPT_PRODUCT, chatgptMacos);
 export const CODEX_APP_LINUX_CLIENT = desktopClient(
   CODEX_APP_PRODUCT,
-  LINUX_CHATGPT_PLATFORM
+  codexAppLinux
 );
-export const CODEX_APP_CLIENT = desktopClient(
-  CODEX_APP_PRODUCT,
-  MAC_CHATGPT_PLATFORM
-);
+export const CODEX_APP_CLIENT = desktopClient(CODEX_APP_PRODUCT, codexAppMacos);

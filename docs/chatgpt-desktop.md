@@ -560,4 +560,15 @@ MCP calls; unexpected or unattributed MCP servers fail measurement, and
 Linux controller accounting is in `clientMetadata.nativeController`, with
 `provider: 'linux-atspi'`, the selected surface, and planner/cost marked
 `not-applicable`. It is separate from native model usage and from macOS
-`clientMetadata.computerUse` planner accounting.
+`clientMetadata.computerUse` planner accounting. New Linux receipts omit the old
+`driver` identity; readers still accept it in stored results.
+
+## Implementation
+
+`chatgptClient.ts` selects `chatgpt/macos.ts`, `chatgpt/linux.ts`,
+`codex-app/macos.ts` or `codex-app/linux.ts` from the product and worker OS when
+its batch opens. Codex app reuses ChatGPT's native operations with its own product
+identity. All four entry points use the same app transaction
+(`chatgptSetup/session.ts`) and turn body (`chatgpt/turn.ts`). The Linux AT-SPI
+helper remains in `chatgpt/linuxDesktop.ts`; macOS uses the existing shared
+Computer Use loop. There is no separate platform-selector module.

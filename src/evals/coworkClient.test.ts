@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { collectClientBatch } from './desktopBatch.js';
-import type { CoworkPlatform } from './cowork/platform.js';
+import type { CoworkDesktop as CoworkPlatform } from './cowork/desktop.js';
 import { runEvalBatch } from './runEvalBatch.js';
 import {
   COWORK_CLIENT,
@@ -18,7 +18,7 @@ import {
 import { endingOf, isInfrastructure } from './trialEnding.js';
 import { NativeTraceError } from './nativeTraceError.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
-import { CoworkHitlError } from './cowork/driver.js';
+import { CoworkHitlError } from './cowork/interaction.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { ClaudeTrace } from './cowork/trace.js';
@@ -78,7 +78,7 @@ const linuxPlatform = vi.hoisted(() => ({
   submit: vi.fn(),
   handleHitl: vi.fn(),
 }));
-vi.mock('./cowork/linux.js', () => ({ linuxCoworkPlatform: linuxPlatform }));
+vi.mock('./cowork/linux.js', () => ({ coworkLinux: linuxPlatform }));
 
 vi.mock('./coworkSetup/recoverSession.js', () => ({
   recoverMacCoworkSession: vi.fn(),

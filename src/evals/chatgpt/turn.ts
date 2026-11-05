@@ -33,8 +33,11 @@ import {
   stringOption,
   validateChatgptConfig,
 } from './driver.js';
-import { NativeChatgptDriverError, runLinuxChatgptDesktop } from './linux.js';
-import { validateLinuxChatgptConfig } from '../chatgptSetup/linuxProfile.js';
+import {
+  NativeChatgptDriverError,
+  runLinuxChatgptDesktop,
+} from './linuxDesktop.js';
+import type { ChatgptDesktop } from './desktop.js';
 import { clientPluginMcpServers } from '../clientPlugins.js';
 import { CHATGPT_STALL_MS, saveStallScreenshot } from './stallScreenshot.js';
 import type { ChatgptAppConfig } from './config.js';
@@ -67,6 +70,8 @@ export interface ChatgptTrial {
 
 /** What one trial's steps share. */
 export interface ChatgptTurnState {
+  /** The concrete entry point selected when this batch opened. */
+  desktop: ChatgptDesktop;
   config: ChatgptAppConfig;
   trial: ChatgptTrial;
   /** The resolved native config name, from the settings check. */
@@ -115,48 +120,13 @@ interface ChatgptTurnFailure {
  */
 export type ChatgptTurn = ChatgptTurnSuccess | ChatgptTurnFailure;
 
-/**
- * What differs between the macOS and Linux ChatGPT desktops. Chosen once per
- * trial from the trial machine's OS; the steps never branch on the OS
- * themselves.
- */
-interface ChatgptOsSteps {
-  validate(config: ChatgptAppConfig): void;
-  /** How long a fresh native session may take to appear after submission. */
-  bindingWindowMs: number;
-  /** Whether native transcripts escape Markdown in the recorded prompt. */
-  nativeMarkdownEscapes: boolean;
-  submit(state: ChatgptTurnState): Promise<ChatgptTurn | void>;
-}
-
-const MACOS_STEPS: ChatgptOsSteps = {
-  validate() {
-    /* macOS needs no validation beyond the shared config checks. */
-  },
-  bindingWindowMs: 30_000,
-  nativeMarkdownEscapes: false,
-  submit: submitWithComputerUse,
-};
-
-/** Cold Linux first turns need time to flush. */
-const LINUX_STEPS: ChatgptOsSteps = {
-  validate: validateLinuxChatgptConfig,
-  bindingWindowMs: 120_000,
-  nativeMarkdownEscapes: true,
-  submit: submitNatively,
-};
-
-function osSteps(config: ChatgptAppConfig): ChatgptOsSteps {
-  return isLinuxChatgpt(config) ? LINUX_STEPS : MACOS_STEPS;
-}
-
 /** When a fresh native session must have appeared; never after the run deadline. */
 export function chatgptBindingDeadline(
-  config: ChatgptAppConfig,
+  desktop: ChatgptDesktop,
   now: number,
   runDeadline: number
 ): number {
-  return Math.min(now + osSteps(config).bindingWindowMs, runDeadline);
+  return Math.min(now + desktop.bindingWindowMs, runDeadline);
 }
 
 /**
@@ -170,6 +140,7 @@ export async function runChatgptTurn(
   options: { caseId?: string } = {}
 ): Promise<ChatgptTurn> {
   const state: ChatgptTurnState = {
+    desktop: session.desktop,
     config,
     trial: chatgptTrial(prompt, config, options.caseId ?? 'unknown'),
     promptSubmitted: false,
@@ -233,7 +204,7 @@ export function checkChatgptSettings(
   const { config, trial } = state;
   try {
     validateChatgptConfig(config);
-    osSteps(config).validate(config);
+    state.desktop.validate(config);
     if (trial.correlation.strategy === 'exact_prompt') {
       if (
         trial.correlation.includedInPrompt ||
@@ -308,11 +279,11 @@ async function snapshotBeforeSubmission(
 export async function submitChatgptPrompt(
   state: ChatgptTurnState
 ): Promise<ChatgptTurn | void> {
-  return osSteps(state.config).submit(state);
+  return state.desktop.submit(state);
 }
 
 /** Linux: deterministic AT-SPI actions through the MST-owned app session. */
-async function submitNatively(
+export async function submitNatively(
   state: ChatgptTurnState
 ): Promise<ChatgptTurn | void> {
   const { config, trial } = state;
@@ -382,7 +353,7 @@ async function submitNatively(
 }
 
 /** macOS: Anthropic Computer Use fills and submits the composer. */
-async function submitWithComputerUse(
+export async function submitWithComputerUse(
   state: ChatgptTurnState
 ): Promise<ChatgptTurn | void> {
   const { config, trial } = state;
@@ -496,7 +467,7 @@ export async function captureChatgptTurn(
   let matched = false;
   let bound: ChatgptTraceBinding | undefined;
   let latest: { path: string; trace: ChatgptTrace } | undefined;
-  const steps = osSteps(config);
+  const steps = state.desktop;
   const runDeadline = trial.startedAtMs + trial.timeoutMs;
   // Transcript growth is the only progress signal; a silent turn is stalled.
   let pendingRecordSince: number | undefined;
@@ -513,7 +484,7 @@ export async function captureChatgptTurn(
       ? { strategy: 'exact_prompt', prompt: trial.submittedInput }
       : trial.marker;
   const bindingDeadline = chatgptBindingDeadline(
-    config,
+    steps,
     Date.now(),
     runDeadline
   );

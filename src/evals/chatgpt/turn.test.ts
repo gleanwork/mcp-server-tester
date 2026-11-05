@@ -23,18 +23,20 @@ import type { ChatgptAppConfig } from './config.js';
 import { linuxEnvironment } from './linuxEnvironment.fixture.js';
 import { submitChatgptQuery } from './driver.js';
 import type * as DriverModule from './driver.js';
-import { runLinuxChatgptDesktop } from './linux.js';
-import type * as LinuxModule from './linux.js';
+import { runLinuxChatgptDesktop } from './linuxDesktop.js';
+import type * as LinuxModule from './linuxDesktop.js';
+import { chatgptMacos } from './macos.js';
+import { chatgptLinux } from './linux.js';
 import { ChatgptAppSession } from '../chatgptSetup/session.js';
 import { NativeTraceError } from '../nativeTraceError.js';
-import { NativeChatgptDriverError } from './linux.js';
+import { NativeChatgptDriverError } from './linuxDesktop.js';
 import { validateLinuxChatgptConfig } from '../chatgptSetup/linuxProfile.js';
 import type * as LinuxProfileModule from '../chatgptSetup/linuxProfile.js';
 import { endingOf } from '../trialEnding.js';
 import type {
   ComputerUseTelemetry,
   SemanticDesktopTelemetry,
-} from '../cowork/driver.js';
+} from '../cowork/interaction.js';
 
 const clock = vi.hoisted(() => ({ now: 1000 }));
 vi.mock('node:timers/promises', () => ({
@@ -58,7 +60,7 @@ vi.mock('./driver.js', async (original) => ({
   ...(await original<typeof DriverModule>()),
   submitChatgptQuery: vi.fn(),
 }));
-vi.mock('./linux.js', async (original) => ({
+vi.mock('./linuxDesktop.js', async (original) => ({
   ...(await original<typeof LinuxModule>()),
   runLinuxChatgptDesktop: vi.fn(),
 }));
@@ -86,6 +88,7 @@ function turnState(
   timeoutMs = 180_000
 ): ChatgptTurnState {
   return {
+    desktop: linux ? chatgptLinux : chatgptMacos,
     config: appConfig(home, linux),
     trial: {
       caseId: 'case',
@@ -131,6 +134,7 @@ function fakeSession(
     ChatgptAppSession.prototype
   ) as ChatgptAppSession;
   return Object.assign(session, {
+    desktop: chatgptMacos,
     assertCompatible: vi.fn(),
     noteSubmission: vi.fn(),
     openPrompt: vi.fn(async () => {}),
@@ -158,7 +162,6 @@ const computerUseTelemetry: ComputerUseTelemetry = {
   cost: { status: 'unavailable' },
 };
 const semanticTelemetry: SemanticDesktopTelemetry = {
-  driver: 'linux-desktop',
   accounting: 'complete',
   duration_ms: 5,
   action_count: 1,
@@ -408,8 +411,8 @@ describe('one trial, in order', () => {
 
 describe('bounded native binding wait and failure classification', () => {
   it('keeps Mac at 30s, gives Linux 120s, and never exceeds the run deadline', () => {
-    const mac = appConfig('/home/synthetic', false);
-    const linux = appConfig('/home/synthetic', true);
+    const mac = chatgptMacos;
+    const linux = chatgptLinux;
     expect(chatgptBindingDeadline(mac, 1000, 200_000)).toBe(31_000);
     expect(chatgptBindingDeadline(linux, 1000, 200_000)).toBe(121_000);
     expect(chatgptBindingDeadline(linux, 1000, 41_234)).toBe(41_234);

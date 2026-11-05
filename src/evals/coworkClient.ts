@@ -6,7 +6,7 @@ import type {
   ClientRunResult,
   ClientSessionOptions,
 } from './evalFrameworkTypes.js';
-import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
+import type { CoworkDesktop } from './cowork/desktop.js';
 import { coworkReadinessServer } from './cowork/readinessServer.js';
 import { checksServersAfterPrepare } from './readinessCheck.js';
 import { clientSecretValues, redactClientError } from './clientSecrets.js';
@@ -55,7 +55,7 @@ import {
   CoworkDriverError,
   CoworkHitlError,
   type CoworkDriverTelemetry,
-} from './cowork/driver.js';
+} from './cowork/interaction.js';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
 import type { LLMToolCall } from './mstClient/types.js';
 import {
@@ -283,13 +283,13 @@ const failure = (error: string): ClientRunResult => ({
   error,
 });
 
-type CoworkSession = Awaited<ReturnType<CoworkPlatform['prepare']>> | undefined;
+type CoworkSession = Awaited<ReturnType<CoworkDesktop['prepare']>> | undefined;
 
 /** Fixed desktop settings and the native trial body for an open session. */
 async function desktopAdapter(
   requests: ClientSessionOptions[],
   context: ClientRunContext,
-  selectedPlatform?: CoworkPlatform
+  selectedDesktop?: CoworkDesktop
 ): Promise<DesktopClientAdapter<CoworkSession>> {
   requests = structuredClone(requests);
   const configs = requests.map((r) => CoworkSchema.parse(r.config));
@@ -362,7 +362,15 @@ async function desktopAdapter(
     throw new Error(
       'Cowork Computer Use needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'
     );
-  const platform = selectedPlatform ?? (await getCoworkPlatform(os));
+  // Select the concrete entry point here, on the machine running this batch.
+  let platform = selectedDesktop;
+  if (!platform) {
+    if (os === 'darwin')
+      platform = (await import('./cowork/macos.js')).coworkMacos;
+    else if (os === 'linux')
+      platform = (await import('./cowork/linux.js')).coworkLinux;
+    else throw new Error(`Cowork runs on macOS or Linux, not ${os}.`);
+  }
   const dataDir = platform.dataDirectory(config);
   // Pass only the selected variant. Setup intentionally rejects multi-variant eval configs.
   const { variants: _variants, ...evalConfig } = context.evalConfig;
@@ -964,9 +972,7 @@ export function coworkWorkspaceUnavailable(
   return (reason ?? (failed.output ?? '').trim().split('\n')[0]!).slice(0, 300);
 }
 
-export function createCoworkClient(
-  platform?: CoworkPlatform
-): ClientDefinition {
+export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
   // Its stdio servers resolve only once the app is prepared, so its batch
   // checks them after `prepare`, not the dispatch before it.
   const definition: ClientDefinition = checksServersAfterPrepare({

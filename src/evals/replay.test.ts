@@ -12,6 +12,7 @@ import {
 import { RUN_FORMAT } from './resultFormat.js';
 import { replayExecutor, runReplay } from './replay.js';
 import { endingOf, resumeCollects } from './trialEnding.js';
+import type { SemanticDesktopTelemetry } from '../entries/experimentalClients.js';
 
 const trial = (fields: Partial<TrialRecord> = {}) =>
   ({ infrastructureError: false, ...fields }) as unknown as TrialRecord;
@@ -84,6 +85,15 @@ describe('resumeCollects (what mst run --resume collects)', () => {
 });
 
 describe('stored ChatGPT trials from earlier versions', () => {
+  // The public receipt type still accepts identities from old stored runs.
+  const oldNativeTelemetry = {
+    driver: 'linux-desktop',
+    accounting: 'partial',
+    duration_ms: 5,
+    action_count: 1,
+    planner: { status: 'not-applicable' },
+    cost: { status: 'not-applicable' },
+  } satisfies SemanticDesktopTelemetry;
   // Earlier versions recorded the driver and its capability bindings; new
   // results don't, and old runs still read, regrade and end as recorded.
   const oldMetadata = {
@@ -109,6 +119,11 @@ describe('stored ChatGPT trials from earlier versions', () => {
       includedInPrompt: false,
     },
     failureKind: 'no_matching_session',
+    nativeController: {
+      provider: 'linux-atspi',
+      surface: 'chatgpt-work',
+      submission: { status: 'completed', telemetry: oldNativeTelemetry },
+    },
   };
   const error =
     'No unique fresh native ChatGPT session matched the submitted query within the binding deadline.';
@@ -125,7 +140,15 @@ describe('stored ChatGPT trials from earlier versions', () => {
     infrastructureError: true,
     error,
     trace: { events: [], finalText: '', error },
-    clientTelemetry: { clientMetadata: oldMetadata },
+    clientTelemetry: {
+      clientMetadata: oldMetadata,
+      // Cowork used these same receipts for submission and HITL.
+      computerUse: {
+        submission: { status: 'submitted', telemetry: oldNativeTelemetry },
+        hitl: { status: 'failed', telemetry: oldNativeTelemetry },
+      },
+      batch: { nativeSetup: oldNativeTelemetry },
+    },
     clientMetadata: oldMetadata,
   };
 
@@ -138,7 +161,7 @@ describe('stored ChatGPT trials from earlier versions', () => {
       await fs.writeFile(file, JSON.stringify(record));
       const [stored] = await readRunTrials(dir);
       expect(stored).toMatchObject({
-        clientTelemetry: { clientMetadata: oldMetadata },
+        clientTelemetry: record.clientTelemetry,
         clientMetadata: oldMetadata,
       });
       expect(endingOf(stored!)).toEqual({
@@ -164,9 +187,10 @@ describe('stored ChatGPT trials from earlier versions', () => {
         kind: 'completed',
         error,
         clientMetadata: oldMetadata,
-        telemetry: { clientMetadata: oldMetadata },
+        telemetry: record.clientTelemetry,
         ending: { kind: 'infrastructure', broke: 'client-app' },
       });
+      expect(await fs.readFile(file, 'utf8')).toBe(JSON.stringify(record));
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
