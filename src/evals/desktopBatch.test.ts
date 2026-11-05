@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  openDesktopSession,
   requireIdenticalClientSettings,
   runDesktopBatch,
   type DesktopCaseOutcome,
@@ -11,6 +12,7 @@ import {
 import type {
   ClientBatchRequest,
   ClientRunResult,
+  ClientSessionTrial,
 } from './evalFrameworkTypes.js';
 import { readyStdioServer } from '../../tests/mocks/readyServers.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
@@ -36,7 +38,7 @@ function requests(count: number): ClientBatchRequest[] {
 
 const ok = (text: string): DesktopCaseOutcome => ({
   result: { finalText: text, events: [] },
-  continuation: 'allowed',
+  continuation: 'continue',
 });
 
 /** A fake desktop client that records its lifecycle. */
@@ -163,7 +165,7 @@ describe('runDesktopBatch', () => {
     ) =>
       async function runCase(
         _session: { id: string },
-        request: ClientBatchRequest,
+        request: ClientSessionTrial,
         index: number
       ): Promise<DesktopCaseOutcome> {
         client.events.push(`case ${index + 1}`);
@@ -213,7 +215,7 @@ describe('runDesktopBatch', () => {
     it('takes none for a case that passed or one that left the app known', async () => {
       const diagnose = vi.fn(async () => undefined);
       const known = fakeClient({ diagnose });
-      known.runCase = failing(known, {}, 'allowed');
+      known.runCase = failing(known, {}, 'continue');
       await runDesktopBatch(known, requests(2));
       expect(diagnose).not.toHaveBeenCalled();
     });
@@ -441,6 +443,26 @@ describe('runDesktopBatch', () => {
     }
   });
 
+  it('reports a stop result but never acquires or submits later cases', async () => {
+    const client = fakeClient({
+      async runCase(_session, request) {
+        client.events.push('case');
+        return { ...ok(request.caseId), continuation: 'stop' };
+      },
+    });
+    const report = vi.fn(async () => {});
+    const acquire = vi.fn(async () => {});
+    const results = await runDesktopBatch(client, requests(3), report, acquire);
+    expect(results[0]!.finalText).toBe('case-1');
+    for (const result of results.slice(1)) {
+      expect(result.diagnostics?.failureKind).toBe('not-submitted');
+      expect(result.error).toContain('session stopped');
+    }
+    expect(client.events).toEqual(['prepare', 'case', 'dispose session']);
+    expect(report).toHaveBeenCalledOnce();
+    expect(acquire).toHaveBeenCalledOnce();
+  });
+
   it('keeps the cases that ran when a later case throws', async () => {
     const client = fakeClient({
       async runCase(_session, request, index) {
@@ -482,7 +504,7 @@ describe('runDesktopBatch', () => {
                 events: [],
                 error: `failed with ${SECRET}`,
               },
-              continuation: 'allowed',
+              continuation: 'continue',
             }
           : ok(request.caseId);
       },
@@ -594,7 +616,7 @@ describe('runDesktopBatch', () => {
               events: [],
               error: `failed with ${SECRET}`,
             },
-            continuation: 'allowed',
+            continuation: 'continue',
           };
         },
       }),
@@ -620,7 +642,7 @@ describe('runDesktopBatch', () => {
               ],
               telemetry: { content: { answer: SECRET } },
             },
-            continuation: 'allowed',
+            continuation: 'continue',
           };
         },
         batchTelemetry: () => ({ session: SECRET }),
@@ -790,6 +812,159 @@ describe('runDesktopBatch', () => {
       { setupMs: 12 },
       { setupMs: 12 },
     ]);
+  });
+});
+
+describe('openDesktopSession', () => {
+  const trial = (caseId = 'one'): ClientSessionTrial => ({
+    caseId,
+    trial: 0,
+    input: { prompt: `Answer ${caseId}` },
+  });
+
+  it('leases before setup, runs, diagnoses, resets and closes once', async () => {
+    const client = fakeClient({
+      async prepare() {
+        expect(await exists(leasePath())).toBe(true);
+        client.events.push('prepare');
+        return { id: 'session' };
+      },
+      async diagnose(_state, dir) {
+        client.events.push('diagnose');
+        await fs.writeFile(path.join(dir, 'screen.txt'), 'failure evidence');
+      },
+      batchTelemetry: () => ({ cleanup: client.events.at(-1), secret: SECRET }),
+    });
+    const session = await openDesktopSession(client);
+    expect(await session.run(trial())).toEqual({
+      result: { finalText: 'one', events: [] },
+      continuation: 'continue',
+    });
+    const diagnosis = await session.diagnose!();
+    expect(diagnosis).toMatchObject({ include: ['**'], temporary: true });
+    expect(
+      await fs.readFile(path.join(diagnosis!.dir, 'screen.txt'), 'utf8')
+    ).toBe('failure evidence');
+    await fs.rm(diagnosis!.dir, { recursive: true });
+    await session.reset();
+    await session.run(trial('two'));
+    await session.close();
+    await session.close();
+    expect(client.events).toEqual([
+      'prepare',
+      'case 1',
+      'diagnose',
+      'reset before 2',
+      'case 2',
+      'dispose session',
+    ]);
+    expect(session.lifecycle).toEqual({
+      cleanup: 'dispose session',
+      secret: '[REDACTED]',
+    });
+    expect(await exists(leasePath())).toBe(false);
+    await expect(session.run(trial())).rejects.toThrow('session is closed');
+    await expect(session.reset()).rejects.toThrow('session is closed');
+    await expect(session.diagnose!()).rejects.toThrow('session is closed');
+  });
+
+  it('requires an explicit reset without resubmitting the failed trial', async () => {
+    const runCase = vi.fn(
+      async (): Promise<DesktopCaseOutcome> => ({
+        result: {
+          finalText: SECRET,
+          events: [],
+          error: `failed with ${SECRET}`,
+        },
+        continuation: 'reset',
+      })
+    );
+    const session = await openDesktopSession(fakeClient({ runCase }));
+    try {
+      const outcome = await session.run(trial());
+      expect(outcome.continuation).toBe('reset');
+      expect(JSON.stringify(outcome)).not.toContain(SECRET);
+      await expect(session.run(trial('two'))).rejects.toThrow('requires reset');
+      expect(runCase).toHaveBeenCalledTimes(1);
+      await session.reset();
+      await session.run(trial('two'));
+      expect(runCase).toHaveBeenCalledTimes(2);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('cannot submit or reset after a stop continuation', async () => {
+    const runCase = vi.fn(
+      async (): Promise<DesktopCaseOutcome> => ({
+        result: { finalText: 'partial', events: [], error: 'app stopped' },
+        continuation: 'stop',
+      })
+    );
+    const session = await openDesktopSession(fakeClient({ runCase }));
+    try {
+      expect((await session.run(trial())).continuation).toBe('stop');
+      await expect(session.run(trial('two'))).rejects.toThrow('has stopped');
+      await expect(session.reset()).rejects.toThrow('has stopped');
+      expect(runCase).toHaveBeenCalledTimes(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('rejects settings on a trial instead of silently ignoring them', async () => {
+    const client = fakeClient();
+    const session = await openDesktopSession(client);
+    try {
+      await expect(
+        session.run({
+          ...trial(),
+          config: { type: 'other' },
+        } as ClientSessionTrial)
+      ).rejects.toThrow('settings are fixed at open');
+      await expect(
+        session.run({
+          ...trial(),
+          input: { prompt: 'query', servers: [] },
+        } as ClientSessionTrial)
+      ).rejects.toThrow('settings are fixed at open');
+      expect(client.events).toEqual(['prepare']);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('cleans up failed prepare and preserves both failures with a retained lease', async () => {
+    const client = fakeClient({
+      async prepare() {
+        throw new Error(`prepare ${SECRET}`);
+      },
+      async dispose(state) {
+        expect(state).toBeUndefined();
+        throw new Error(`dispose ${SECRET}`);
+      },
+    });
+    const error: unknown = await openDesktopSession(client).catch(
+      (error: unknown) => error
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors.map(String)).toEqual([
+      'Error: prepare [REDACTED]',
+      'Error: Fake batch cleanup failed; desktop lock retained for inspection: dispose [REDACTED]',
+    ]);
+    expect(await exists(leasePath())).toBe(true);
+  });
+
+  it('retains the lease after failed close and does not dispose twice', async () => {
+    const dispose = vi.fn(async () => {
+      throw new Error(`cleanup ${SECRET}`);
+    });
+    const session = await openDesktopSession(fakeClient({ dispose }));
+    await session.run(trial());
+    await expect(session.close()).rejects.toThrow('cleanup [REDACTED]');
+    await expect(session.close()).rejects.toThrow('cleanup [REDACTED]');
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(await exists(leasePath())).toBe(true);
   });
 });
 

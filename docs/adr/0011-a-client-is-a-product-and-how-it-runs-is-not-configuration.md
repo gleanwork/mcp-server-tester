@@ -37,7 +37,7 @@ Every client returns one trace, and the same graders score it. Nothing in gradin
   - One redaction pass covers everything MST stores, client telemetry included.
   - How a trial ended follows ADR 0010.
 
-- **One contract for every client, built-ins included.** A `ClientDefinition` has a name, a description, its requirements (OS, credentials, setup command), an options schema, and `run(trial)`. A client that keeps an app open across trials also has `open()`, which returns a session with `run`, `reset` and `close`. MST calls them under the rules above. Built-in clients use no private layer: the external-client capability pipeline and the simulation result shape that `mst` and `claude-code` convert through are removed.
+- **One contract for every client, built-ins included.** A `ClientDefinition` has a name, a description, its requirements (OS, credentials, setup command), an options schema, and `run`, `open`, or both. Run-only clients need no change; MST wraps a one-shot session when needed. `open` receives fixed client options, model, servers and environment. Its session has `run`, `reset`, optional `diagnose`, and `close`. Each trial supplies its identity and prompt, and returns its result plus `continue`, `reset`, or `stop`. A session can list servers that resolve only after opening; MST checks them then. Different fixed settings use separate sessions. MST calls these operations under the rules above. Built-in clients use no private layer: the external-client capability pipeline and the simulation result shape that `mst` and `claude-code` convert through are removed.
 
 - **One idea has one option name, and a config that can't run fails when it loads.** The shared names are `timeout`, `maxActions`, `reasoningEffort` (one list of values) and `appVersion`. An option that a client can't use fails validation. So does a case override that a client can't honor, such as a different `model` per case in one desktop batch.
 
@@ -52,3 +52,7 @@ Every client returns one trace, and the same graders score it. Nothing in gradin
 - Some differences stay, because the products differ. Computer Use on macOS has a planner model and its cost; the Linux automation has neither. Results show which one ran.
 - `CONTEXT.md` changes with the renames, not before them.
 - It ships as separate pull requests: `mst clients` and the generated table; the renames and option changes; the MST-owned trial rules, with redaction first; then the contract change and the removals.
+
+## Implementation status
+
+The desktop clients expose sessions. Their existing `runBatch` wrappers still serve dispatch; open-only plugin support and removal of those wrappers are the next step. This ADR remains proposed until the implementation sequence is complete.

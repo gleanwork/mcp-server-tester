@@ -19,6 +19,7 @@
 
 ## Unreleased
 
+- Cowork, ChatGPT and Codex app expose the `open` session contract, with types in `./evals`. Their `runBatch` wrappers and existing plugin validation remain during the dispatch migration. See [the migration guide](docs/migrations/2.0-prereleases.md#desktop-clients-expose-sessions-batch-entry-points-remain).
 - Built-in clients return `ClientRunResult` directly. Removed `MstClientSimulationResult`; Playwright evals use the same assertion response as `mst run`. See [the migration guide](docs/migrations/2.0-prereleases.md#built-in-clients-return-the-common-result).
 
 ## v2.0.0-beta.14 (2026-10-23)

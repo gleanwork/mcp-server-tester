@@ -498,7 +498,7 @@ const result = await runEvalCase(
 
 - The `api` client's options (`provider`, `maxToolCalls`, `temperature`, `skills`, `systemPrompt`, ...) go in `clientOptions`. See [api client options](../mst-client.md#api-client-options).
 - Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run` or `runBatch`) can drive any client application and report its trace.
-- A plugin client needs `run` or `runBatch`; `createConfig` is gone.
+- A plugin client still needs `run` or `runBatch`; `createConfig` is gone. The new `open` session contract is transitional: desktop built-ins expose it but retain their batch wrappers until dispatch migrates. Keep existing plugin entry points; run-only clients do not change. See [Client sessions](../evaluation-framework.md#client-sessions-transitional).
 - `buildEvalDataset(raw, evalConfig)` takes no host config, and `DatasetSourceContext` has no `hostConfig`.
 - The ChatGPT client still records what it saw on each result (now `clientMetadata`; see [Result fields use the eval vocabulary](#result-fields-use-the-eval-vocabulary)), and `./experimental/clients` still exports the types for it (`ClientMetadata` and the types it uses).
 - The external-host drivers for the Claude desktop chat and Cowork surfaces (driven through Accessibility) are gone; the `cowork` client covers Cowork.

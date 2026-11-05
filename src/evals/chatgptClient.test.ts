@@ -117,6 +117,129 @@ afterEach(async () => {
   await rm(home.value, { recursive: true, force: true });
 });
 
+describe('ChatGPT and Codex app sessions', () => {
+  it.each([
+    ['chatgpt', CHATGPT_CLIENT, 'chatgpt-work'],
+    ['codex-app', CODEX_APP_CLIENT, 'codex'],
+    ['chatgpt', CHATGPT_LINUX_CLIENT, 'chatgpt-work'],
+    ['codex-app', CODEX_APP_LINUX_CLIENT, 'codex'],
+  ] as const)(
+    '%s opens once and runs the same native turn body',
+    async (type, client, surface) => {
+      const request = requests()[0]!;
+      const linux =
+        client === CHATGPT_LINUX_CLIENT || client === CODEX_APP_LINUX_CLIENT;
+      const options = {
+        config: {
+          ...config,
+          type,
+          ...(linux ? { env: linuxEnvironment(home.value) } : {}),
+        },
+        input: { servers: request.input.servers },
+      };
+      const session = await client.open!(options, context);
+      try {
+        expect(lifecycle.prepare).toHaveBeenCalledOnce();
+        expect(session.readiness).toBeUndefined(); // Dispatch checks before opening this app.
+        expect(session.diagnose).toBeUndefined(); // No new diagnosis policy for ChatGPT.
+        // Mutating the caller's settings cannot change an already opened session.
+        options.config.model = 'changed-after-open';
+        options.input.servers.length = 0;
+        const result = await session.run({
+          caseId: 'direct',
+          trial: 2,
+          input: { prompt: '  original prompt\n' },
+        });
+        expect(result.continuation).toBe('continue');
+        expect(result.result).toMatchObject({
+          finalText: 'answer',
+          events: [{ server: 'primary', name: 'search' }],
+        });
+        expect(runChatgptTurn).toHaveBeenLastCalledWith(
+          '  original prompt\n',
+          expect.objectContaining({
+            model: config.model,
+            options: expect.objectContaining({ surface }),
+          }),
+          expect.anything(),
+          { caseId: 'direct' }
+        );
+        await session.reset();
+        await session.run({
+          caseId: 'next',
+          trial: 0,
+          input: { prompt: 'next prompt' },
+        });
+        expect(lifecycle.restart).toHaveBeenCalledOnce();
+        expect(runChatgptTurn).toHaveBeenCalledTimes(2);
+        expect(lifecycle.prepare).toHaveBeenCalledOnce();
+      } finally {
+        await session.close();
+      }
+      expect(lifecycle.dispose).toHaveBeenCalledOnce();
+      expect(session.lifecycle).toEqual({ scope: 'batch', id: 'test-batch' });
+    }
+  );
+
+  it('keeps duplicate-native-session protection across direct resets', async () => {
+    vi.mocked(runChatgptTurn).mockResolvedValue({
+      success: true,
+      response: 'answer',
+      toolCalls: [],
+      clientMetadata: metadata,
+    });
+    const request = requests()[0]!;
+    const session = await CHATGPT_CLIENT.open!(
+      { config, input: { servers: request.input.servers } },
+      context
+    );
+    const trial = {
+      caseId: 'same',
+      trial: 0,
+      input: { prompt: 'same prompt' },
+    };
+    try {
+      expect((await session.run(trial)).continuation).toBe('continue');
+      const duplicate = await session.run({ ...trial, trial: 1 });
+      expect(duplicate.continuation).toBe('reset');
+      expect(duplicate.result.error).toContain('duplicate attribution');
+      await expect(session.run(trial)).rejects.toThrow('requires reset');
+      await session.reset();
+      expect((await session.run(trial)).result.error).toContain(
+        'duplicate attribution'
+      );
+      expect(runChatgptTurn).toHaveBeenCalledTimes(3);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('cleans up a failed direct open before releasing the shared lease', async () => {
+    lifecycle.prepare.mockRejectedValueOnce(new Error('launch failed'));
+    await expect(
+      CHATGPT_CLIENT.open!({ config, input: { servers: [] } }, context)
+    ).rejects.toThrow('launch failed');
+    expect(lifecycle.dispose).toHaveBeenCalledOnce();
+    expect(runChatgptTurn).not.toHaveBeenCalled();
+    await expect(
+      access(join(home.value, '.mcp-server-tester/chatgpt-desktop.lock'))
+    ).rejects.toThrow();
+  });
+
+  it('retains the shared lease on failed direct close', async () => {
+    const session = await CODEX_APP_CLIENT.open!(
+      { config: { ...config, type: 'codex-app' }, input: { servers: [] } },
+      context
+    );
+    lifecycle.dispose.mockRejectedValueOnce(new Error('restore failed'));
+    await expect(session.close()).rejects.toThrow('desktop lock retained');
+    await expect(
+      CHATGPT_CLIENT.open!({ config, input: { servers: [] } }, context)
+    ).rejects.toThrow('locked');
+    expect(lifecycle.prepare).toHaveBeenCalledOnce();
+  });
+});
+
 describe('ChatGPT V2 batch client', () => {
   it('takes its options directly, not nested under options', () => {
     expect(
