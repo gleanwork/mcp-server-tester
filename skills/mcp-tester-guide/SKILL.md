@@ -120,7 +120,7 @@ Use them on a `callTool` result in a Playwright test.
 | `toHaveToolResponseSize({ minBytes?, maxBytes? })` | Text size in UTF-8 bytes is within bounds                            |
 | `toSatisfyToolPredicate(fn, description?)`         | `fn(response, text)` returns `true` or `{ pass: true }`. Async       |
 | `toPassToolJudge(rubric, options?)`                | A judge's mean score reaches `passingThreshold` (default 0.7). Async |
-| `toHaveToolCalls(assertion)`                       | A client trace (`MstClientSimulationResult`) has the calls           |
+| `toHaveToolCalls(assertion)`                       | A client response has the expected calls                             |
 | `toHaveToolCallCount({ min?, max?, exact? })`      | A client trace has that many calls                                   |
 
 Sanitizers: `'uuid'`, `'iso-date'`, `'timestamp'`, `'jwt'`, `'objectId'`, `{ pattern, replacement }`, `{ remove: ['field', 'nested.field'] }`. Update snapshots with `npx playwright test --update-snapshots`.

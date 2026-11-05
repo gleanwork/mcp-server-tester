@@ -28,7 +28,7 @@ import { callToolNormalized } from '../mcp/callTool.js';
 import { DEFAULT_PROTOCOL_SETTING, getProtocolInfo } from '../mcp/protocol.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type { Client } from '@modelcontextprotocol/client';
-import { simulateMstClient } from './mstClient/simulation.js';
+import { runApiClient, runClaudeCodeClient } from './mstClient/run.js';
 import type {
   ClientRunInput,
   ClientRunContext,
@@ -39,7 +39,7 @@ import { variantToolMetadata } from './evalConfig.js';
 import type { ClientDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { resolveClientName } from './clientNames.js';
-import { simulationToClientRun } from './clientTrace.js';
+import { attributeBuiltinEvents } from './clientTrace.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT, coworkOptionIssues } from './coworkClient.js';
 import { CHATGPT_APP_CLIENTS, chatgptOptionIssues } from './chatgptClient.js';
@@ -307,13 +307,11 @@ async function runBuiltinClient(
         );
       checkDeadline();
       registerPresentedTools(mcp, (name) => routes.get(name)?.original);
+      const signal = timeout === undefined ? undefined : controller.signal;
       const response = withOriginalToolNames(
-        await simulateMstClient(
-          mcp,
-          prompt,
-          config,
-          timeout === undefined ? undefined : controller.signal
-        ),
+        config.clientType === 'cli'
+          ? await runClaudeCodeClient(prompt, config, signal)
+          : await runApiClient(mcp, prompt, config, signal),
         mcp
       );
       if (hostReceiver && hostSessionId) {
@@ -323,7 +321,10 @@ async function runBuiltinClient(
           response.modelCalls = withHostRequestIds(response.modelCalls, host);
         }
       }
-      return simulationToClientRun(response, input.servers);
+      return {
+        ...response,
+        events: attributeBuiltinEvents(response.events, input.servers),
+      };
     } finally {
       await Promise.allSettled(clients.map(closeOwnedClient));
     }
@@ -379,7 +380,7 @@ export interface BuiltinClientOptions {
 }
 
 /**
- * A simulated client's settings from its options and the servers it runs
+ * A built-in client's settings from its options and the servers it runs
  * with. The servers are the eval's (`input.servers`), never a client option.
  */
 type BuiltinClientFactory = (

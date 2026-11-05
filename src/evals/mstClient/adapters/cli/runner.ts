@@ -1,14 +1,12 @@
 import { spawn } from 'node:child_process';
-import type {
-  CLIConfig,
-  LLMToolCall,
-  MstClientSimulationResult,
-} from '../../types.js';
+import type { CLIConfig } from '../../types.js';
+import type { ClientRunResult } from '../../../evalFrameworkTypes.js';
 import {
   parseStreamJson,
   createJsonParser,
   LineClock,
   claudeTranscriptModelCalls,
+  InvalidCliOutput,
 } from './parsers.js';
 import { withFinalUsage } from '../../../claudeCodeEvents.js';
 import { ClaudeStartup } from './claudeStartup.js';
@@ -31,10 +29,7 @@ const MAX_BUFFER = 10 * 1024 * 1024; // 10MB
  */
 function getParser(
   format: CLIConfig['outputFormat']
-): (
-  stdout: string,
-  lineTimes?: readonly number[]
-) => MstClientSimulationResult {
+): (stdout: string, lineTimes?: readonly number[]) => ClientRunResult {
   switch (format ?? 'stream-json') {
     case 'stream-json':
       return parseStreamJson;
@@ -76,7 +71,7 @@ export async function runCLIClient(
   input: string,
   signal?: AbortSignal,
   systemPrompt?: string
-): Promise<MstClientSimulationResult> {
+): Promise<ClientRunResult> {
   const timeout = cliConfig.timeout ?? DEFAULT_TIMEOUT;
   const args = interpolateArgs(cliConfig.args, input, systemPrompt);
 
@@ -84,8 +79,8 @@ export async function runCLIClient(
   const isClaude = cliConfig.claudeMcpServers !== undefined;
   if (isClaude && cliConfig.outputFormat === 'json') {
     return {
-      success: false,
-      toolCalls: [],
+      finalText: '',
+      events: [],
       error: 'Claude MCP startup validation requires stream-json output.',
       diagnostics: { failureKind: 'output' },
     };
@@ -129,9 +124,9 @@ export async function runCLIClient(
     const elapsed = Date.now() - startTime;
     const message = err instanceof Error ? err.message : String(err);
     if (isClaude) {
-      let partial: MstClientSimulationResult = {
-        success: false,
-        toolCalls: [],
+      let partial: ClientRunResult = {
+        finalText: '',
+        events: [],
       };
       if (err instanceof ProcessFailure) {
         try {
@@ -152,7 +147,6 @@ export async function runCLIClient(
       )
         return {
           ...partial,
-          success: false,
           ...(startup ? { diagnostics: startup.diagnostics } : {}),
         };
       return {
@@ -163,7 +157,6 @@ export async function runCLIClient(
         // ended, whatever Claude Code reported before.
         ending:
           timedOut && startup?.error === undefined ? TRIAL_ENDING : undefined,
-        success: false,
         error: timedOut
           ? `CLI client timed out after ${elapsed}ms (limit: ${timeout}ms).`
           : `CLI client process failed: ${message}`,
@@ -182,8 +175,8 @@ export async function runCLIClient(
 
     if (message.includes('TIMEOUT') || message.includes('timed out')) {
       return {
-        success: false,
-        toolCalls: [],
+        finalText: '',
+        events: [],
         error:
           `CLI client timed out after ${elapsed}ms (limit: ${timeout}ms). ` +
           `Increase clientOptions.cli.timeout.`,
@@ -191,15 +184,15 @@ export async function runCLIClient(
     }
 
     return {
-      success: false,
-      toolCalls: [],
+      finalText: '',
+      events: [],
       error: `CLI client process failed: ${message}`,
     };
   }
 
   const parse = getParser(cliConfig.outputFormat);
 
-  let result: MstClientSimulationResult;
+  let result: ClientRunResult;
   try {
     result = parse(stdout, clock?.end());
     // Claude Code's stream has each message's usage as it started; its
@@ -212,30 +205,17 @@ export async function runCLIClient(
       );
   } catch (err) {
     return {
-      success: false,
-      toolCalls: [],
+      finalText: '',
+      events: [],
       error:
-        (isClaude
-          ? 'Failed to parse Claude CLI output.'
-          : `Failed to parse CLI client output: ${err instanceof Error ? err.message : String(err)}`) +
-        (isClaude ? '' : `\nstdout (first 500 chars): ${stdout.slice(0, 500)}`),
-      ...(isClaude
-        ? {
-            diagnostics: {
-              ...startup?.diagnostics,
-              failureKind: 'output' as const,
-            },
-          }
-        : {}),
-    };
-  }
-
-  const validationError = validateSimulationResult(result);
-  if (validationError) {
-    return {
-      success: false,
-      toolCalls: [],
-      error: `CLI client returned invalid result: ${validationError}`,
+        err instanceof InvalidCliOutput
+          ? `CLI client returned invalid result: ${err.message}`
+          : (isClaude
+              ? 'Failed to parse Claude CLI output.'
+              : `Failed to parse CLI client output: ${err instanceof Error ? err.message : String(err)}`) +
+            (isClaude
+              ? ''
+              : `\nstdout (first 500 chars): ${stdout.slice(0, 500)}`),
       ...(isClaude
         ? {
             diagnostics: {
@@ -248,14 +228,13 @@ export async function runCLIClient(
   }
 
   // An error result the parser couldn't type is the client app failing.
-  if (isClaude && !result.success && result.ending === undefined)
+  if (isClaude && result.error !== undefined && result.ending === undefined)
     result.diagnostics = { failureKind: 'process' };
   if (startup) {
     result.diagnostics = { ...result.diagnostics, ...startup.diagnostics };
     if (startup.error)
       return {
         ...result,
-        success: false,
         error: startup.error,
         // An MCP server didn't start: whatever Claude Code said next is moot.
         ending: undefined,
@@ -263,34 +242,6 @@ export async function runCLIClient(
       };
   }
   return result;
-}
-
-export function validateSimulationResult(result: unknown): string | null {
-  if (result === null || typeof result !== 'object') {
-    return `Expected object, got ${typeof result}`;
-  }
-
-  const obj = result as Record<string, unknown>;
-
-  if (typeof obj.success !== 'boolean') {
-    return `"success" must be a boolean, got ${typeof obj.success}`;
-  }
-
-  if (!Array.isArray(obj.toolCalls)) {
-    return `"toolCalls" must be an array, got ${typeof obj.toolCalls}`;
-  }
-
-  for (let i = 0; i < obj.toolCalls.length; i++) {
-    const tc = obj.toolCalls[i] as LLMToolCall;
-    if (typeof tc.name !== 'string') {
-      return `toolCalls[${i}].name must be a string, got ${typeof tc.name}`;
-    }
-    if (typeof tc.arguments !== 'object' || tc.arguments === null) {
-      return `toolCalls[${i}].arguments must be an object, got ${typeof tc.arguments}`;
-    }
-  }
-
-  return null;
 }
 
 /**

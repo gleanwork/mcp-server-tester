@@ -1,4 +1,5 @@
 import type { Tool } from '@modelcontextprotocol/client';
+import type { TraceEvent } from './evalFrameworkTypes.js';
 import type { ToolOverrideVariant } from './evalRunner.js';
 
 /** One server's tools as it listed them. `server` is its label, if it has one. */
@@ -161,30 +162,21 @@ export function registerPresentedTools(
  * original names, so assertions and comparisons read the same names in
  * every variant. `rawName` keeps the name the model used.
  */
-export function withOriginalToolNames<
-  T extends {
-    toolCalls: Array<{ name: string; rawName?: string; kind?: string }>;
-    events?: Array<{ kind: string; name?: string; rawName?: string }>;
-  },
->(result: T, mcp: object): T {
+export function withOriginalToolNames<T extends { events: TraceEvent[] }>(
+  result: T,
+  mcp: object
+): T {
   const originalName = presentedFixtures.get(mcp);
   if (!originalName) return result;
-  function restore<
-    C extends { name?: string; rawName?: string; kind?: string },
-  >(call: C): C {
-    // Typed client events (skills, searches) are not calls to a tool.
-    if (call.name === undefined || (call.kind ?? 'tool_call') !== 'tool_call')
-      return call;
-    const original = originalName!(call.name);
-    return original === undefined || original === call.name
-      ? call
-      : { ...call, name: original, rawName: call.rawName ?? call.name };
-  }
   return {
     ...result,
-    toolCalls: result.toolCalls.map(restore),
-    ...(result.events !== undefined && {
-      events: result.events.map(restore),
+    events: result.events.map((event) => {
+      // Native skills and searches are not calls to a presented tool.
+      if (event.kind !== 'tool_call') return event;
+      const original = originalName(event.name);
+      return original === undefined || original === event.name
+        ? event
+        : { ...event, name: original, rawName: event.rawName ?? event.name };
     }),
   };
 }

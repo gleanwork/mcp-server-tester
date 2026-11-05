@@ -50,7 +50,7 @@ describe('parseStreamJson and large tool results', () => {
         .map((event) => JSON.stringify(event))
         .join('\n');
       const result = parseStreamJson(stdout);
-      expect(result.toolCalls?.[0]?.output).toBe('FULL RESULT');
+      expect(result.events[0]?.output).toBe('FULL RESULT');
     } finally {
       rmSync(config, { recursive: true, force: true });
     }
@@ -80,9 +80,10 @@ describe('parseStreamJson', () => {
     ].join('\n');
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(true);
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0]).toEqual({
+    expect(result.error).toBeUndefined();
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toEqual({
+      kind: 'tool_call',
       name: 'search',
       source: 'builtin',
       rawName: 'search',
@@ -100,8 +101,8 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(true);
-    expect(result.response).toBe('Hello world');
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe('Hello world');
   });
 
   it('skips non-JSON lines', () => {
@@ -117,8 +118,8 @@ describe('parseStreamJson', () => {
     ].join('\n');
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(true);
-    expect(result.response).toBe('response');
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe('response');
   });
 
   it('handles error events', () => {
@@ -129,8 +130,8 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(false);
     expect(result.error).toBe('Something went wrong');
+    expect(result.finalText).toBe('');
   });
 
   it('handles error events with non-string result', () => {
@@ -140,8 +141,8 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(false);
     expect(result.error).toBe('CLI client reported an error');
+    expect(result.finalText).toBe('');
     // Claude Code didn't say why: the client app failed.
     expect(result.ending).toMatchObject({
       kind: 'infrastructure',
@@ -227,7 +228,7 @@ describe('parseStreamJson', () => {
     const result = parseStreamJson(
       lines.map((line) => JSON.stringify(line)).join('\n')
     );
-    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
     expect(result.ending).toMatchObject(expected);
   }
 
@@ -238,9 +239,9 @@ describe('parseStreamJson', () => {
     ].join('\n');
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(true);
-    expect(result.toolCalls).toHaveLength(0);
-    expect(result.response).toBeUndefined();
+    expect(result.error).toBeUndefined();
+    expect(result.events).toHaveLength(0);
+    expect(result.finalText).toBe('');
   });
 
   it('strips mcp__servername__toolname prefix to just toolname', () => {
@@ -258,8 +259,8 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0]!.name).toBe('search');
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]!.name).toBe('search');
   });
 
   it('preserves tool names that do not match the mcp__ prefix', () => {
@@ -271,7 +272,7 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.toolCalls[0]!.name).toBe('plain_tool');
+    expect(result.events[0]!.name).toBe('plain_tool');
   });
 
   it('parses result events as fallback response', () => {
@@ -281,8 +282,8 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(true);
-    expect(result.response).toBe('Final answer from CLI');
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe('Final answer from CLI');
   });
 
   it('does not overwrite text blocks with result event', () => {
@@ -297,14 +298,14 @@ describe('parseStreamJson', () => {
     ].join('\n');
 
     const result = parseStreamJson(stdout);
-    expect(result.response).toBe('From text block');
+    expect(result.finalText).toBe('From text block');
   });
 
   it('returns empty result for empty input', () => {
     const result = parseStreamJson('');
-    expect(result.success).toBe(true);
-    expect(result.toolCalls).toHaveLength(0);
-    expect(result.response).toBeUndefined();
+    expect(result.error).toBeUndefined();
+    expect(result.events).toHaveLength(0);
+    expect(result.finalText).toBe('');
   });
 
   it('extracts usage metrics from result event', () => {
@@ -331,7 +332,7 @@ describe('parseStreamJson', () => {
     ].join('\n');
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
     expect(result.usage).toEqual({
       inputTokens: 150,
       outputTokens: 42,
@@ -371,7 +372,7 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
     expect(result.usage).toEqual({
       inputTokens: 50,
       outputTokens: 0,
@@ -390,7 +391,7 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
     expect(result.usage).toBeUndefined();
   });
 
@@ -403,10 +404,8 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.conversationHistory).toHaveLength(1);
-    expect(result.conversationHistory![0]).toEqual({
-      role: 'tool',
-      content: 'tool output here',
+    expect(result.telemetry?.content).toEqual({
+      conversationHistory: [{ role: 'tool', content: 'tool output here' }],
     });
   });
 
@@ -441,7 +440,8 @@ describe('parseStreamJson', () => {
 
     const result = parseStreamJson(stdout);
     // Payload stored once, on the call.
-    expect(result.toolCalls[0]).toEqual({
+    expect(result.events[0]).toEqual({
+      kind: 'tool_call',
       name: 'search',
       source: 'builtin',
       rawName: 'search',
@@ -450,9 +450,8 @@ describe('parseStreamJson', () => {
       output: '{"abc":"xyz"}',
     });
     // Transcript references the call by id, without duplicating the payload.
-    expect(result.conversationHistory![0]).toEqual({
-      role: 'tool',
-      toolCallId: 'call_1',
+    expect(result.telemetry?.content).toEqual({
+      conversationHistory: [{ role: 'tool', toolCallId: 'call_1' }],
     });
   });
 
@@ -475,7 +474,7 @@ describe('parseStreamJson', () => {
     ].join('\n');
 
     const result = parseStreamJson(stdout);
-    expect(result.toolCalls[0]!.output).toBe('{"abc":"xyz"}');
+    expect(result.events[0]!.output).toBe('{"abc":"xyz"}');
   });
 
   it('leaves output undefined when tool_result has no matching tool_use_id', () => {
@@ -487,8 +486,10 @@ describe('parseStreamJson', () => {
     });
 
     const result = parseStreamJson(stdout);
-    expect(result.toolCalls).toHaveLength(0);
-    expect(result.conversationHistory).toHaveLength(1);
+    expect(result.events).toHaveLength(0);
+    expect(result.telemetry?.content).toEqual({
+      conversationHistory: [{ role: 'tool', content: 'orphan output' }],
+    });
   });
 });
 
@@ -507,10 +508,10 @@ describe('createJsonParser', () => {
     });
 
     const result = parser(stdout);
-    expect(result.success).toBe(true);
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0]!.name).toBe('search');
-    expect(result.response).toBe('Found results');
+    expect(result.error).toBeUndefined();
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]!.name).toBe('search');
+    expect(result.finalText).toBe('Found results');
   });
 
   it('handles missing fields gracefully', () => {
@@ -522,9 +523,9 @@ describe('createJsonParser', () => {
     const stdout = JSON.stringify({ data: {} });
 
     const result = parser(stdout);
-    expect(result.success).toBe(true);
-    expect(result.toolCalls).toHaveLength(0);
-    expect(result.response).toBeUndefined();
+    expect(result.error).toBeUndefined();
+    expect(result.events).toHaveLength(0);
+    expect(result.finalText).toBe('');
   });
 
   it('defaults success to true when no success path is provided', () => {
@@ -539,7 +540,7 @@ describe('createJsonParser', () => {
     });
 
     const result = parser(stdout);
-    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
   });
 
   it('supports custom nested paths', () => {
@@ -558,10 +559,10 @@ describe('createJsonParser', () => {
     });
 
     const result = parser(stdout);
-    expect(result.success).toBe(true);
-    expect(result.toolCalls).toHaveLength(1);
-    expect(result.toolCalls[0]!.name).toBe('fetch');
-    expect(result.response).toBe('Done');
+    expect(result.error).toBeUndefined();
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]!.name).toBe('fetch');
+    expect(result.finalText).toBe('Done');
   });
 
   it('uses args as fallback for arguments', () => {
@@ -576,7 +577,7 @@ describe('createJsonParser', () => {
     });
 
     const result = parser(stdout);
-    expect(result.toolCalls[0]!.arguments).toEqual({ key: 'value' });
+    expect(result.events[0]!.arguments).toEqual({ key: 'value' });
   });
 });
 
@@ -640,7 +641,7 @@ describe('parseStreamJson with line times', () => {
 
   it('times tool calls and model requests from when each line arrived', () => {
     const result = parseStreamJson(stdout, [0, 2, 3, 5, 6, 6].map(at));
-    expect(result.toolCalls[0]).toMatchObject({
+    expect(result.events[0]).toMatchObject({
       id: 'toolu_1',
       startedAt: iso(3),
       completedAt: iso(5),
@@ -676,7 +677,7 @@ describe('parseStreamJson with line times', () => {
   it('reports model requests without times when it has none, or the wrong number', () => {
     for (const times of [undefined, [at(0)]]) {
       const result = parseStreamJson(stdout, times);
-      expect(result.toolCalls[0]!.startedAt).toBeUndefined();
+      expect(result.events[0]!.startedAt).toBeUndefined();
       expect(result.modelCalls?.map((call) => call.id)).toEqual([
         'msg_1',
         'msg_2',

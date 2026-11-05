@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { createVercelOrchestrator } from './vercel.js';
+import { runVercelClient } from './vercel.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../../../mcp/fixtures/fixtureExtensions.js';
 
@@ -294,38 +294,30 @@ function gatewayEnv(
 
 async function simulate(env: Record<string, string | undefined>) {
   seen.length = 0;
-  return createVercelOrchestrator().simulate(
-    createMockMCP(),
-    'What is the weather in London?',
-    {
-      provider: 'anthropic',
-      model: 'claude-test',
-      env: gatewayEnv(env),
-      timeout: 10_000,
-    }
-  );
+  return runVercelClient(createMockMCP(), 'What is the weather in London?', {
+    provider: 'anthropic',
+    model: 'claude-test',
+    env: gatewayEnv(env),
+    timeout: 10_000,
+  });
 }
 
 describe('SDK client through a bearer-only LLM gateway', () => {
   it('sends openai calls to the Responses API with the command token as a bearer token', async () => {
     seen.length = 0;
-    const result = await createVercelOrchestrator().simulate(
-      createMockMCP(),
-      'Say hello.',
-      {
-        provider: 'openai',
-        model: 'gpt-test',
-        env: {
-          OPENAI_API_KEY: undefined,
-          OPENAI_BASE_URL: `${origin}/openai/v1`,
-          MST_LLM_AUTH_COMMAND: `node -e "process.stdout.write('${GOOD_TOKEN}')"`,
-        },
-        timeout: 10_000,
-      }
-    );
+    const result = await runVercelClient(createMockMCP(), 'Say hello.', {
+      provider: 'openai',
+      model: 'gpt-test',
+      env: {
+        OPENAI_API_KEY: undefined,
+        OPENAI_BASE_URL: `${origin}/openai/v1`,
+        MST_LLM_AUTH_COMMAND: `node -e "process.stdout.write('${GOOD_TOKEN}')"`,
+      },
+      timeout: 10_000,
+    });
 
     expect(result.error).toBeUndefined();
-    expect(result.response).toBe('Hello from Responses.');
+    expect(result.finalText).toBe('Hello from Responses.');
     expect(seen).toEqual([
       {
         path: '/openai/v1/responses',
@@ -341,9 +333,8 @@ describe('SDK client through a bearer-only LLM gateway', () => {
     const result = await simulate({ ANTHROPIC_AUTH_TOKEN: GOOD_TOKEN });
 
     expect(result.error).toBeUndefined();
-    expect(result.success).toBe(true);
-    expect(result.response).toBe('Sunny in London.');
-    expect(result.toolCalls).toEqual([
+    expect(result.finalText).toBe('Sunny in London.');
+    expect(result.events).toEqual([
       expect.objectContaining({
         name: 'get_weather',
         arguments: { city: 'London' },
@@ -379,7 +370,6 @@ describe('SDK client through a bearer-only LLM gateway', () => {
     });
 
     expect(result.error).toBeUndefined();
-    expect(result.success).toBe(true);
     expect(seen.map((request) => request.authorization)).toEqual([
       `Bearer ${GOOD_TOKEN}`,
       `Bearer ${GOOD_TOKEN}`,
@@ -389,8 +379,8 @@ describe('SDK client through a bearer-only LLM gateway', () => {
   it('reports the gateway rejecting an x-api-key credential with a bearer hint', async () => {
     const result = await simulate({ ANTHROPIC_API_KEY: GOOD_TOKEN });
 
-    expect(result.success).toBe(false);
     expect(result.error).toContain('authentication error');
+    expect(result.finalText).toBe('');
     expect(result.error).toContain('ANTHROPIC_AUTH_TOKEN');
     expect(seen[0]).toMatchObject({
       authorization: undefined,
@@ -401,8 +391,8 @@ describe('SDK client through a bearer-only LLM gateway', () => {
   it('fails the run on a mid-stream error instead of returning an empty answer', async () => {
     const result = await simulate({ ANTHROPIC_AUTH_TOKEN: OVERLOAD_TOKEN });
 
-    expect(result.success).toBe(false);
     expect(result.error).toContain('Overloaded');
+    expect(result.finalText).toBe('');
     // The provider's API failed, not the model: a retry can help.
     expect(result.ending).toMatchObject({
       kind: 'infrastructure',

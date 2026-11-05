@@ -181,38 +181,59 @@ describe('buildToolSurface', () => {
 });
 
 describe('withOriginalToolNames', () => {
-  it('records calls and tool events under the original name', () => {
+  it('records tool events under the original name without changing other kinds', () => {
     const mcp = {};
     registerPresentedTools(mcp, (name) =>
       name === 'find' ? 'search' : undefined
     );
     const result = withOriginalToolNames(
       {
-        toolCalls: [
-          { name: 'find', arguments: {} },
-          { name: 'other', arguments: {} },
-          { name: 'find', rawName: 'a__find', arguments: {} },
-        ],
         events: [
-          { kind: 'tool_call', name: 'find' },
-          { kind: 'skill', name: 'find' },
+          { kind: 'tool_call', source: 'mcp', name: 'find', arguments: {} },
+          { kind: 'tool_call', source: 'mcp', name: 'other', arguments: {} },
+          {
+            kind: 'tool_call',
+            source: 'mcp',
+            name: 'find',
+            rawName: 'a__find',
+            arguments: {},
+          },
+          { kind: 'skill', source: 'builtin', name: 'find' },
         ],
       },
       mcp
     );
-    expect(result.toolCalls).toEqual([
-      { name: 'search', rawName: 'find', arguments: {} },
-      { name: 'other', arguments: {} },
-      { name: 'search', rawName: 'a__find', arguments: {} },
-    ]);
     expect(result.events).toEqual([
-      { kind: 'tool_call', name: 'search', rawName: 'find' },
-      { kind: 'skill', name: 'find' },
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        name: 'search',
+        rawName: 'find',
+        arguments: {},
+      },
+      { kind: 'tool_call', source: 'mcp', name: 'other', arguments: {} },
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        name: 'search',
+        rawName: 'a__find',
+        arguments: {},
+      },
+      { kind: 'skill', source: 'builtin', name: 'find' },
     ]);
   });
 
   it('leaves results from an unregistered fixture alone', () => {
-    const result = { toolCalls: [{ name: 'find', arguments: {} }] };
+    const result = {
+      events: [
+        {
+          kind: 'tool_call' as const,
+          source: 'mcp' as const,
+          name: 'find',
+          arguments: {},
+        },
+      ],
+    };
     expect(withOriginalToolNames(result, {})).toBe(result);
   });
 });

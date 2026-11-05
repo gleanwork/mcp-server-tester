@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { interpolateArgs, validateSimulationResult } from './runner.js';
+import { interpolateArgs, runCLIClient } from './runner.js';
+import { validateCliOutput } from './parsers.js';
 
 describe('interpolateArgs', () => {
   it('replaces {{prompt}} in args', () => {
@@ -29,85 +30,119 @@ describe('interpolateArgs', () => {
   });
 });
 
-describe('validateSimulationResult', () => {
-  it('returns null for a valid result', () => {
-    const result = validateSimulationResult({
-      success: true,
-      toolCalls: [{ name: 'search', arguments: { q: 'test' } }],
+describe('validateCliOutput', () => {
+  it('returns null for a valid wire result', () => {
+    expect(
+      validateCliOutput({
+        success: true,
+        toolCalls: [{ name: 'search', arguments: { q: 'test' } }],
+      })
+    ).toBeNull();
+  });
+
+  it('returns null for a valid wire result with empty toolCalls', () => {
+    expect(validateCliOutput({ success: false, toolCalls: [] })).toBeNull();
+  });
+
+  it.each([
+    [{ toolCalls: [] }, '"success" must be a boolean'],
+    [{ success: 'yes', toolCalls: [] }, '"success" must be a boolean'],
+    [{ success: true }, '"toolCalls" must be an array'],
+    [
+      { success: true, toolCalls: 'not-an-array' },
+      '"toolCalls" must be an array',
+    ],
+    [
+      { success: true, toolCalls: [{ arguments: {} }] },
+      'toolCalls[0].name must be a string',
+    ],
+    [
+      { success: true, toolCalls: [{ name: 'tool', arguments: 'not-object' }] },
+      'toolCalls[0].arguments must be an object',
+    ],
+    [
+      { success: true, toolCalls: [{ name: 'tool', arguments: null }] },
+      'toolCalls[0].arguments must be an object',
+    ],
+    [null, 'Expected object'],
+    ['string', 'Expected object'],
+  ])('rejects malformed wire fields %j', (value, error) => {
+    expect(validateCliOutput(value)).toContain(error);
+  });
+});
+
+describe('CLI wire validation before common results', () => {
+  it.each(['stream-json', 'json'] as const)(
+    'rejects invalid tool arguments from %s',
+    async (outputFormat) => {
+      const wire =
+        outputFormat === 'json'
+          ? {
+              success: true,
+              toolCalls: [{ name: 'search', arguments: 'invalid' }],
+              response: 'answer',
+            }
+          : {
+              type: 'assistant',
+              message: {
+                content: [
+                  { type: 'tool_use', name: 'search', input: 'invalid' },
+                ],
+              },
+            };
+      const result = await runCLIClient(
+        {
+          command: process.execPath,
+          args: ['-e', `console.log(${JSON.stringify(JSON.stringify(wire))})`],
+          outputFormat,
+        },
+        'request'
+      );
+      expect(result).toMatchObject({
+        finalText: '',
+        events: [],
+        error:
+          'CLI client returned invalid result: toolCalls[0].arguments must be an object, got string',
+      });
+    }
+  );
+
+  it('retains output failure classification for malformed Claude tool arguments', async () => {
+    const wire = {
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', name: 'search', input: 'invalid' }],
+      },
+    };
+    const result = await runCLIClient(
+      {
+        command: process.execPath,
+        args: ['-e', `console.log(${JSON.stringify(JSON.stringify(wire))})`],
+        claudeMcpServers: [],
+      },
+      'request'
+    );
+    expect(result.error).toContain('CLI client returned invalid result');
+    expect(result.diagnostics?.failureKind).toBe('output');
+  });
+
+  it('maps an unsuccessful JSON wire result to a failed common result', async () => {
+    const result = await runCLIClient(
+      {
+        command: process.execPath,
+        args: [
+          '-e',
+          'console.log(JSON.stringify({success:false, toolCalls:[], response:"partial"}))',
+        ],
+        outputFormat: 'json',
+      },
+      'request'
+    );
+    expect(result).toEqual({
+      finalText: 'partial',
+      events: [],
+      error: 'Client execution failed.',
     });
-    expect(result).toBeNull();
-  });
-
-  it('returns null for valid result with empty toolCalls', () => {
-    const result = validateSimulationResult({
-      success: false,
-      toolCalls: [],
-    });
-    expect(result).toBeNull();
-  });
-
-  it('returns error when success is missing', () => {
-    const result = validateSimulationResult({
-      toolCalls: [],
-    });
-    expect(result).toContain('"success" must be a boolean');
-  });
-
-  it('returns error when success is non-boolean', () => {
-    const result = validateSimulationResult({
-      success: 'yes',
-      toolCalls: [],
-    });
-    expect(result).toContain('"success" must be a boolean');
-  });
-
-  it('returns error when toolCalls is missing', () => {
-    const result = validateSimulationResult({
-      success: true,
-    });
-    expect(result).toContain('"toolCalls" must be an array');
-  });
-
-  it('returns error when toolCalls is not an array', () => {
-    const result = validateSimulationResult({
-      success: true,
-      toolCalls: 'not-an-array',
-    });
-    expect(result).toContain('"toolCalls" must be an array');
-  });
-
-  it('returns error for invalid toolCall entry (missing name)', () => {
-    const result = validateSimulationResult({
-      success: true,
-      toolCalls: [{ arguments: {} }],
-    });
-    expect(result).toContain('toolCalls[0].name must be a string');
-  });
-
-  it('returns error for invalid toolCall entry (bad arguments)', () => {
-    const result = validateSimulationResult({
-      success: true,
-      toolCalls: [{ name: 'tool', arguments: 'not-object' }],
-    });
-    expect(result).toContain('toolCalls[0].arguments must be an object');
-  });
-
-  it('returns error for null arguments', () => {
-    const result = validateSimulationResult({
-      success: true,
-      toolCalls: [{ name: 'tool', arguments: null }],
-    });
-    expect(result).toContain('toolCalls[0].arguments must be an object');
-  });
-
-  it('returns error for null input', () => {
-    const result = validateSimulationResult(null);
-    expect(result).toContain('Expected object');
-  });
-
-  it('returns error for non-object input', () => {
-    const result = validateSimulationResult('string');
-    expect(result).toContain('Expected object');
   });
 });
 

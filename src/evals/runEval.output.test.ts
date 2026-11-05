@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openMCPClient } from '../mcp/clientFactory.js';
-import { simulateMstClient } from './mstClient/simulation.js';
+import { runApiClient } from './mstClient/run.js';
 import { runEval } from './runEval.js';
 
 vi.mock('../mcp/clientFactory.js', () => ({
@@ -16,7 +16,7 @@ vi.mock('../mcp/clientFactory.js', () => ({
   openMCPClient: vi.fn(),
   closeMCPClient: vi.fn(async () => {}),
 }));
-vi.mock('./mstClient/simulation.js', () => ({ simulateMstClient: vi.fn() }));
+vi.mock('./mstClient/run.js', () => ({ runApiClient: vi.fn() }));
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -32,10 +32,9 @@ describe('eval output', () => {
     vi.mocked(openMCPClient).mockResolvedValue({
       listTools: vi.fn(async () => ({ tools: [{ name: 'weather' }] })),
     } as unknown as Awaited<ReturnType<typeof openMCPClient>>);
-    vi.mocked(simulateMstClient).mockResolvedValue({
-      success: true,
-      response: 'OK',
-      toolCalls: [],
+    vi.mocked(runApiClient).mockResolvedValue({
+      finalText: 'OK',
+      events: [],
     });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-output-'));

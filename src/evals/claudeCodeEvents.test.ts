@@ -8,7 +8,6 @@ import {
   typeClaudeCodeCall,
   withFinalUsage,
 } from './claudeCodeEvents.js';
-import { simulationTrace } from './clientTrace.js';
 import { parseStreamJson } from './mstClient/adapters/cli/parsers.js';
 import type { LLMToolCall } from './mstClient/types.js';
 
@@ -252,7 +251,7 @@ describe('Claude CLI stream-json', () => {
     const result = parseStreamJson(
       lines.map((line) => JSON.stringify(line)).join('\n')
     );
-    expect(simulationTrace(result).events).toMatchObject([
+    expect(result.events).toMatchObject([
       {
         kind: 'tool_search',
         source: 'builtin',
@@ -309,7 +308,7 @@ describe('Claude Code event edge cases', () => {
         },
       })
     );
-    expect(stream.toolCalls[0]).toMatchObject({ server: 'a', name: 'b__c' });
+    expect(stream.events[0]).toMatchObject({ server: 'a', name: 'b__c' });
   });
 
   it('lets toolsTriggered require a tool search', () => {

@@ -784,6 +784,77 @@ describe('V2 Cowork client', () => {
     expect(failed[0]!.error).toContain('Cowork model mismatch');
     expect(mocks.dispose).toHaveBeenCalledTimes(2);
   });
+  it.each([
+    { finalAnswer: 'answer', isError: false, error: undefined },
+    { finalAnswer: '', isError: false, error: undefined },
+    {
+      finalAnswer: undefined,
+      isError: false,
+      error: 'Native trace has no final answer.',
+    },
+    {
+      finalAnswer: 'partial answer',
+      isError: true,
+      error: 'Native Claude task failed.',
+    },
+  ])(
+    'returns native result fields for $finalAnswer / $isError',
+    async ({ finalAnswer, isError, error }) => {
+      const startedAt = '2026-11-05T15:00:00.000Z';
+      const completedAt = '2026-11-05T15:00:00.200Z';
+      const modelCalls = [
+        { id: 'request-1', model: 'native-model', durationMs: 150 },
+      ];
+      const call = {
+        name: 'primary.search',
+        source: 'mcp' as const,
+        server: 'primary',
+        rawName: 'mcp__primary__search',
+        arguments: { query: 'test' },
+        output: '',
+        isError: true,
+        id: 'call-1',
+        durationMs: 0,
+        startedAt,
+        completedAt,
+      };
+      const original = mocks.trace.getMockImplementation()!;
+      mocks.trace.mockImplementationOnce(async (options) => ({
+        ...((await original(options)) as ClaudeTrace),
+        finalAnswer,
+        isError,
+        startedAt,
+        completedAt,
+        modelCalls,
+        toolCalls: [call],
+      }));
+      const [result] = await COWORK_CLIENT.runBatch!(
+        requests().slice(0, 1),
+        context
+      );
+      expect(result).toMatchObject({
+        finalText: finalAnswer ?? '',
+        events: [{ ...call, kind: 'tool_call', name: 'search' }],
+        usage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          totalCostUsd: 0.01,
+          durationMs: 200,
+          durationApiMs: 150,
+          cacheReadInputTokens: 20,
+        },
+        modelCalls,
+        startedAt,
+        completedAt,
+        llmDurationMs: 150,
+        telemetry: { source: 'claude-native', models: ['native-model'] },
+      });
+      expect(result!.error).toBe(error);
+      expect(result!.ending).toBeUndefined();
+      expect(result).not.toHaveProperty('toolCalls');
+      expect(result).not.toHaveProperty('success');
+    }
+  );
   it('serializes marker-free cases, collects native telemetry, then restores', async () => {
     const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
     expect(mocks.order).toEqual([
@@ -1570,6 +1641,9 @@ describe('V2 Cowork client', () => {
   });
 
   it('keeps what the task did by its deadline as a failed case, not an empty one', async () => {
+    const startedAt = '2026-11-05T15:00:00.000Z';
+    const lastEventAt = new Date(Date.now() - 90_000).toISOString();
+    const modelCalls = [{ id: 'partial-request', model: 'native-model' }];
     const partial = (sessionPath: string) =>
       ({
         candidate: {
@@ -1582,8 +1656,10 @@ describe('V2 Cowork client', () => {
           { name: 'search', arguments: { query: 'test' }, output: 'found' },
         ],
         usage: { inputTokens: 10, outputTokens: 4 },
+        modelCalls,
         isComplete: false,
-        lastEventAt: new Date(Date.now() - 90_000).toISOString(),
+        startedAt,
+        lastEventAt,
         telemetry: {
           resultCount: 0,
           observationSource: 'claude-native-audit-and-transcript',
@@ -1615,7 +1691,23 @@ describe('V2 Cowork client', () => {
     // The client ran out of its own time: a trial (ADR 0010).
     expect(isInfrastructure(result!)).toBe(false);
     expect(result!.finalText).toBe('answer so far');
-    expect(result!.events.map((event) => event.name)).toEqual(['search']);
+    expect(result!.events).toEqual([
+      {
+        kind: 'tool_call',
+        source: 'mcp',
+        server: 'primary',
+        name: 'search',
+        arguments: { query: 'test' },
+        output: 'found',
+      },
+    ]);
+    expect(result).toMatchObject({
+      usage: { inputTokens: 10, outputTokens: 4 },
+      modelCalls,
+      startedAt,
+      completedAt: lastEventAt,
+    });
+    expect(result).not.toHaveProperty('llmDurationMs');
     expect(result!.artifacts?.dir).toBe('/fixture/local_partial');
     expect(result!.telemetry).toMatchObject({
       nativeSessionId: 'local_partial',

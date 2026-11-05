@@ -186,7 +186,7 @@ Update snapshots: `npx playwright test --update-snapshots`
 
 ### The api and claude-code Clients
 
-`simulateMstClient()` (internal, in `src/evals/mstClient/`) runs the `api` and `claude-code` clients: the `sdk` path drives a model through the Vercel AI SDK over the test's MCP connection; the `cli` path spawns Claude Code with its own connection. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or an eval. The ChatGPT app's clients (`chatgpt`, `codex-app`) are ordinary client code: `chatgptClient.ts` runs each trial through `src/evals/chatgpt/turn.ts` (check settings, use the batch's app session, snapshot native sessions, submit once, capture and attribute the native turn). `./experimental/clients` exports only the metadata types results carry (`src/evals/clientTelemetryTypes.ts`).
+`runApiClient()` and `runClaudeCodeClient()` (internal, in `src/evals/mstClient/run.ts`) return `ClientRunResult` directly: the API client drives a model through the Vercel AI SDK over the test's MCP connection; Claude Code runs as a CLI with its own connection. `clientTrace.ts` derives the assertion/report view once at the runner boundary; native parsers use its `toolCallEvents` helper for event attribution, not a second result envelope. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or an eval. The ChatGPT app's clients (`chatgpt`, `codex-app`) are ordinary client code: `chatgptClient.ts` runs each trial through `src/evals/chatgpt/turn.ts` (check settings, use the batch's app session, snapshot native sessions, submit once, capture and attribute the native turn). `./experimental/clients` exports only the metadata types results carry (`src/evals/clientTelemetryTypes.ts`).
 
 Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
 
@@ -332,7 +332,7 @@ Supported `LLMProvider` values for the `api` client's `provider` option (defined
 To add a new provider:
 
 1. Add to `LLMProvider` union in `src/evals/mstClient/types.ts`
-2. Add to `ProviderSchema` in `src/evals/mstClient/clientOptions.ts` (the dataset schema and the simulator's supported set derive from it)
+2. Add to `ProviderSchema` in `src/evals/mstClient/clientOptions.ts` (the dataset schema and the API client's supported set derive from it)
 3. Create an adapter in `src/evals/mstClient/adapters/`
 4. Register in `src/evals/mstClient/adapter.ts`
 

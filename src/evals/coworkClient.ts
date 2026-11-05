@@ -31,7 +31,7 @@ import { awaitingUserAnswer, type ClaudeTrace } from './cowork/trace.js';
 import { infrastructureEnding } from './trialEnding.js';
 import { computerUseEnding } from './cowork/anthropicComputerUse.js';
 import { NativeTraceError } from './nativeTraceError.js';
-import { simulationToClientRun } from './clientTrace.js';
+import { toolCallEvents } from './clientTrace.js';
 import {
   claudeDesktopOtlpSettings,
   hostTelemetryReceiver,
@@ -767,21 +767,22 @@ async function runBatch(
               `Cowork model mismatch: requested ${config.model}, observed ${trace.telemetry.models.join(', ') || 'unavailable'}.`
             );
           }
-          const nativeResult = simulationToClientRun(
-            {
-              success: !trace.isError && trace.finalAnswer !== undefined,
-              response: trace.finalAnswer,
-              toolCalls: coworkOwnToolCalls(trace.toolCalls, servers),
-              ...(trace.modelCalls ? { modelCalls: trace.modelCalls } : {}),
-              usage: trace.usage,
-              error: trace.isError
-                ? 'Native Claude task failed.'
-                : trace.finalAnswer === undefined
-                  ? 'Native trace has no final answer.'
-                  : undefined,
-            },
-            servers
-          );
+          const nativeResult: ClientRunResult = {
+            finalText: trace.finalAnswer ?? '',
+            events: toolCallEvents(
+              coworkOwnToolCalls(trace.toolCalls, servers),
+              servers
+            ),
+            ...(trace.modelCalls?.length
+              ? { modelCalls: trace.modelCalls }
+              : {}),
+            usage: trace.usage,
+            error: trace.isError
+              ? 'Native Claude task failed.'
+              : trace.finalAnswer === undefined
+                ? 'Native trace has no final answer.'
+                : undefined,
+          };
           result = {
             ...nativeResult,
             ...taskTimes(trace),
@@ -869,21 +870,19 @@ async function runBatch(
               hostSessions = sessionIdsOf(partial);
             if (partial?.candidate.metadataPath === sessionPath)
               result = {
-                ...simulationToClientRun(
-                  {
-                    success: false,
-                    response: partial.finalAnswer,
-                    toolCalls: coworkOwnToolCalls(partial.toolCalls, servers),
-                    ...(partial.modelCalls
-                      ? { modelCalls: partial.modelCalls }
-                      : {}),
-                    usage: partial.usage,
-                    error: wait
-                      ? `${result.error} ${describeDeadlineWait(wait)}`
-                      : result.error,
-                  },
+                finalText: partial.finalAnswer ?? '',
+                events: toolCallEvents(
+                  coworkOwnToolCalls(partial.toolCalls, servers),
                   servers
                 ),
+                ...(partial.modelCalls?.length
+                  ? { modelCalls: partial.modelCalls }
+                  : {}),
+                usage: partial.usage,
+                error:
+                  (wait
+                    ? `${result.error} ${describeDeadlineWait(wait)}`
+                    : result.error) ?? 'Client execution failed.',
                 ...(ending ? { ending } : {}),
                 ...taskTimes(partial),
                 artifacts: {

@@ -23,30 +23,28 @@ import type { CaseExecution } from './caseExecution.js';
 import { clientRunToExecution } from './clientTrace.js';
 import { caseIncompleteness } from './trialEnding.js';
 import { passRate } from './evalRunComparison.js';
-import type * as SimulationModule from './mstClient/simulation.js';
-import { simulateMstClient } from './mstClient/simulation.js';
-import type { MstClientSimulationResult } from './mstClient/types.js';
+import type * as ClientRunModule from './mstClient/run.js';
+import { runApiClient } from './mstClient/run.js';
+import type { ClientRunResult } from './evalFrameworkTypes.js';
 
 // A stand-in for the api client's model: it calls the connection's tool once
-// and answers with what the tool returned. A tool result shaped like a
-// simulation is taken as the client's whole run, so a test can set the calls.
-vi.mock('./mstClient/simulation.js', async (original) => ({
-  ...(await original<typeof SimulationModule>()),
-  simulateMstClient: vi.fn(
-    async (mcp: MCPFixtureApi): Promise<MstClientSimulationResult> => {
-      const result = (await mcp.callTool('test-tool', {
-        input: 'test',
-      })) as unknown as Record<string, unknown>;
-      if ('success' in result && 'toolCalls' in result)
-        return result as unknown as MstClientSimulationResult;
-      const text = ((result.content as Array<{ text?: string }>) ?? [])
-        .map((block) => block.text ?? '')
-        .join('');
-      return result.isError
-        ? { success: false, toolCalls: [], error: text }
-        : { success: true, toolCalls: [], response: text };
-    }
-  ),
+// and answers with what the tool returned. A ClientRunResult is taken as the
+// client's whole run, so a test can set the events.
+vi.mock('./mstClient/run.js', async (original) => ({
+  ...(await original<typeof ClientRunModule>()),
+  runApiClient: vi.fn(async (mcp: MCPFixtureApi): Promise<ClientRunResult> => {
+    const result = (await mcp.callTool('test-tool', {
+      input: 'test',
+    })) as unknown as Record<string, unknown>;
+    if ('finalText' in result && 'events' in result)
+      return result as unknown as ClientRunResult;
+    const text = ((result.content as Array<{ text?: string }>) ?? [])
+      .map((block) => block.text ?? '')
+      .join('');
+    return result.isError
+      ? { finalText: '', events: [], error: text }
+      : { finalText: text, events: [] };
+  }),
 }));
 
 function createMockMCP(callToolResponse?: {
@@ -141,7 +139,7 @@ describe('runEvalCase', () => {
 
       const result = await runEvalCase(evalCase, context);
 
-      expect(simulateMstClient).toHaveBeenCalledWith(
+      expect(runApiClient).toHaveBeenCalledWith(
         mcp,
         'test',
         expect.objectContaining({ clientType: 'sdk' })
@@ -532,15 +530,19 @@ describe('defaultJudgeReps', () => {
 });
 
 describe('toolsTriggered and toolCallCount assertions in eval runner', () => {
-  it('populates toolsTriggered assertion result when simulation result contains expected tool', async () => {
-    // callTool returns an object that itself has the MstClientSimulationResult shape.
-    // After the fix, response = full callTool return value, so isSimulationResult
-    // checks the top-level object directly.
+  it('populates toolsTriggered when the client called the expected tool', async () => {
+    // The mocked API client returns these events directly.
     const mcp = createMockMCP();
     vi.mocked(mcp.callTool).mockResolvedValue({
-      success: true,
-      toolCalls: [{ name: 'search', arguments: { query: 'hello' } }],
-      response: 'Done',
+      events: [
+        {
+          kind: 'tool_call',
+          source: 'mcp',
+          name: 'search',
+          arguments: { query: 'hello' },
+        },
+      ],
+      finalText: 'Done',
     } as unknown as Awaited<ReturnType<typeof mcp.callTool>>);
 
     const evalCase = createEvalCase({
@@ -559,9 +561,10 @@ describe('toolsTriggered and toolCallCount assertions in eval runner', () => {
   it('fails toolsTriggered when required tool was not called', async () => {
     const mcp = createMockMCP();
     vi.mocked(mcp.callTool).mockResolvedValue({
-      success: true,
-      toolCalls: [{ name: 'other', arguments: {} }],
-      response: 'Done',
+      events: [
+        { kind: 'tool_call', source: 'mcp', name: 'other', arguments: {} },
+      ],
+      finalText: 'Done',
     } as unknown as Awaited<ReturnType<typeof mcp.callTool>>);
 
     const evalCase = createEvalCase({
@@ -593,15 +596,14 @@ describe('toolsTriggered and toolCallCount assertions in eval runner', () => {
     );
   });
 
-  it('validates toolCallCount correctly from simulation result', async () => {
+  it('validates toolCallCount from client events', async () => {
     const mcp = createMockMCP();
     vi.mocked(mcp.callTool).mockResolvedValue({
-      success: true,
-      toolCalls: [
-        { name: 'a', arguments: {} },
-        { name: 'b', arguments: {} },
+      events: [
+        { kind: 'tool_call', source: 'mcp', name: 'a', arguments: {} },
+        { kind: 'tool_call', source: 'mcp', name: 'b', arguments: {} },
       ],
-      response: 'Done',
+      finalText: 'Done',
     } as unknown as Awaited<ReturnType<typeof mcp.callTool>>);
 
     const evalCase = createEvalCase({
@@ -1531,9 +1533,12 @@ describe('dataset-level tool precision/recall/F1 aggregation', () => {
   ): MCPFixtureApi {
     const mcp = createMockMCP();
     vi.mocked(mcp.callTool).mockResolvedValue({
-      success: true,
-      toolCalls,
-      response: 'Done',
+      events: toolCalls.map((call) => ({
+        ...call,
+        kind: 'tool_call',
+        source: 'mcp',
+      })),
+      finalText: 'Done',
     } as unknown as Awaited<ReturnType<typeof mcp.callTool>>);
     return mcp;
   }

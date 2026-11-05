@@ -8,21 +8,19 @@ import { MockLanguageModelV3 } from 'ai/test';
 import { getClient } from './builtinClients.js';
 
 // The model provider is fake; the AI SDK and client cancellation path are real.
-// A barrier before simulation models setup time without HTTP under fake timers.
+// A barrier before the client runs models setup time without HTTP under fake timers.
 const mocks = vi.hoisted(() => ({
   provider: vi.fn(),
   beforeSimulation: vi.fn<() => Promise<void>>(),
 }));
 vi.mock('@ai-sdk/openai', () => ({ createOpenAI: mocks.provider }));
-vi.mock(import('./mstClient/simulation.js'), async (importOriginal) => {
+vi.mock(import('./mstClient/run.js'), async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    async simulateMstClient(
-      ...args: Parameters<typeof actual.simulateMstClient>
-    ) {
+    async runApiClient(...args: Parameters<typeof actual.runApiClient>) {
       await mocks.beforeSimulation();
-      return actual.simulateMstClient(...args);
+      return actual.runApiClient(...args);
     },
   };
 });

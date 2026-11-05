@@ -4,7 +4,6 @@
  * native telemetry, on each result's `clientMetadata`. Exported from
  * `./experimental/clients`.
  */
-import type { MstClientSimulationResult } from './mstClient/types.js';
 import type {
   ComputerUseTelemetry,
   SemanticDesktopTelemetry,
@@ -210,10 +209,6 @@ export interface ClientMetadata {
     usage?: EvidenceSource;
     cost?: EvidenceSource;
   };
-}
-
-export interface ExternalClientSimulationResult extends MstClientSimulationResult {
-  clientMetadata: ClientMetadata;
 }
 
 export interface EvidenceSource {

@@ -6,13 +6,11 @@ import type {
 } from './evalFrameworkTypes.js';
 import { withSkillEvents } from './mstClient/skills.js';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
-import type { MstClientSimulationResult } from './mstClient/types.js';
-import type { ClientExecution } from './caseExecution.js';
+import type { LLMToolCall } from './mstClient/types.js';
+import type { SkillLoad } from '../types/index.js';
+import type { ClientExecution, ClientResponse } from './caseExecution.js';
 
-/**
- * On a one-server variant, an MCP event that names no server came from that
- * server; give it the server's label so every call is attributable.
- */
+/** Fill a missing server on one-server runs, without changing client names. */
 function attributed(events: TraceEvent[], servers: MCPConfig[]): TraceEvent[] {
   // 1.x and 2.0 beta clients marked built-in calls `source: 'host'`.
   if (events.some((event) => (event.source as string) === 'host'))
@@ -28,6 +26,29 @@ function attributed(events: TraceEvent[], servers: MCPConfig[]): TraceEvent[] {
   );
 }
 
+/** Only built-in fixtures qualify tool names with their server label. */
+export function attributeBuiltinEvents(
+  events: TraceEvent[],
+  servers: MCPConfig[]
+): TraceEvent[] {
+  return attributed(
+    events.map((event) => {
+      if (event.source !== 'mcp' || event.server !== undefined) return event;
+      const server = servers.find(
+        (server) => server.label && event.name.startsWith(`${server.label}.`)
+      );
+      return server
+        ? {
+            ...event,
+            name: event.name.slice(server.label!.length + 1),
+            server: server.label,
+          }
+        : event;
+    }),
+    servers
+  );
+}
+
 /** Adapt a client run once at the runner boundary, retaining original events for reporting. */
 export function clientRunToExecution(
   run: ClientRunResult,
@@ -35,6 +56,7 @@ export function clientRunToExecution(
   servers: MCPConfig[] = []
 ): ClientExecution {
   const trace = { ...run, events: attributed(run.events, servers) };
+  const skillLoads = checkedSkillLoads(trace.telemetry?.skillLoads);
   return {
     kind: 'completed',
     trace: {
@@ -72,6 +94,7 @@ export function clientRunToExecution(
           ...(event.completedAt ? { completedAt: event.completedAt } : {}),
         })),
       usage: trace.usage,
+      ...(skillLoads !== undefined ? { skillLoads } : {}),
       ...(trace.telemetry ? { telemetry: trace.telemetry } : {}),
       ...(trace.llmDurationMs !== undefined
         ? { llmDurationMs: trace.llmDurationMs }
@@ -88,6 +111,33 @@ export function clientRunToExecution(
   };
 }
 
+/** Keep the existing per-trial skill-load field only for well-formed records. */
+function checkedSkillLoads(value: unknown): SkillLoad[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.every((load: unknown): load is SkillLoad => {
+    if (typeof load !== 'object' || load === null) return false;
+    const item = load as Record<string, unknown>;
+    return (
+      typeof item.name === 'string' &&
+      typeof item.uri === 'string' &&
+      typeof item.server === 'string' &&
+      (item.kind === 'skill' || item.kind === 'file') &&
+      (item.via === 'read_skill' ||
+        item.via === 'read_resource' ||
+        item.via === 'preload') &&
+      (item.verified === null || typeof item.verified === 'boolean') &&
+      typeof item.afterToolCalls === 'number' &&
+      (item.problems === undefined ||
+        (Array.isArray(item.problems) &&
+          item.problems.every(
+            (problem: unknown) => typeof problem === 'string'
+          )))
+    );
+  })
+    ? value
+    : undefined;
+}
+
 /** A client run's model requests, task times and host telemetry, for its trace. */
 function timing(
   run: ClientRunResult
@@ -100,12 +150,12 @@ function timing(
   };
 }
 
-/** Compatibility shim for existing SDK/CLI simulators, not a second evaluator. */
-export function simulationToClientRun(
-  result: MstClientSimulationResult,
-  servers: MCPConfig[]
-): ClientRunResult {
-  const toolEvents: TraceEvent[] = result.toolCalls.map((call) => {
+/** Attribute parser/SDK tool calls without converting a client result. */
+export function toolCallEvents(
+  calls: readonly LLMToolCall[],
+  servers: MCPConfig[] = []
+): TraceEvent[] {
+  return calls.map((call) => {
     const server = servers.find(
       (server) => server.label && call.name.startsWith(`${server.label}.`)
     );
@@ -136,47 +186,18 @@ export function simulationToClientRun(
       ...(call.results !== undefined ? { results: call.results } : {}),
     };
   });
-  return {
-    finalText: result.response ?? '',
-    error: result.success
-      ? undefined
-      : (result.error ?? 'Client execution failed.'),
-    ...(result.ending ? { ending: result.ending } : {}),
-    usage: result.usage,
-    ...(result.modelCalls?.length ? { modelCalls: result.modelCalls } : {}),
-    ...(result.hostTelemetry ? { hostTelemetry: result.hostTelemetry } : {}),
-    ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
-    // Skill loads by the simulated client become ordered `skill` events.
-    events: result.skillLoads
-      ? withSkillEvents(toolEvents, result.skillLoads)
-      : toolEvents,
-  };
 }
 
-/**
- * The trace of a simulated (SDK/CLI/browser) or external client result. Its
- * tool calls came through the MCP fixture unless they say otherwise.
- */
-export function simulationTrace(result: MstClientSimulationResult): Trace {
-  // The simulated client only sees the fixture's tools; CLI parsers that also
-  // see built-in tools mark those calls `source: 'builtin'`.
+/** Only legacy custom executors need a trace derived from their assertion view. */
+export function responseTrace(result: ClientResponse): Trace {
   const events: TraceEvent[] = (result.toolCalls ?? []).map((call) => ({
+    ...call,
     kind: call.kind ?? 'tool_call',
     source: call.source ?? 'mcp',
-    name: call.name,
-    ...(call.server !== undefined ? { server: call.server } : {}),
     arguments: call.arguments ?? {},
-    ...(call.output !== undefined ? { output: call.output } : {}),
-    ...(call.isError !== undefined ? { isError: call.isError } : {}),
-    ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
-    ...(call.id !== undefined ? { id: call.id } : {}),
-    ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
-    ...(call.startedAt ? { startedAt: call.startedAt } : {}),
-    ...(call.completedAt ? { completedAt: call.completedAt } : {}),
-    ...(call.results !== undefined ? { results: call.results } : {}),
   }));
   return {
-    // A response that already carries client events (an eval client) keeps them.
+    // Explicit events retain native kinds, provenance and ordering.
     events: Array.isArray(result.events)
       ? result.events
       : result.skillLoads

@@ -27,18 +27,18 @@ import path from 'node:path';
 import { saveBaseline } from './baseline.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
-import type * as SimulationModule from './mstClient/simulation.js';
+import type * as ClientRunModule from './mstClient/run.js';
 
 // A stand-in for the api client's model: it calls the connection's tool once
 // and answers with the tool's text.
-vi.mock('./mstClient/simulation.js', async (original) => ({
-  ...(await original<typeof SimulationModule>()),
-  simulateMstClient: vi.fn(async (mcp: MCPFixtureApi) => {
+vi.mock('./mstClient/run.js', async (original) => ({
+  ...(await original<typeof ClientRunModule>()),
+  runApiClient: vi.fn(async (mcp: MCPFixtureApi) => {
     const result = (await mcp.callTool('tool', {})) as {
       content?: Array<{ text?: string }>;
     };
     const text = (result.content ?? []).map((b) => b.text ?? '').join('');
-    return { success: true, toolCalls: [], response: text };
+    return { finalText: text, events: [] };
   }),
 }));
 

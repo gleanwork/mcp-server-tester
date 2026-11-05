@@ -282,8 +282,8 @@ setInterval(() => {}, 1000);
       },
       'test'
     );
-    expect(result.success).toBe(true);
-    expect(result.response).toBe('generic');
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe('generic');
     expect(result.diagnostics).toBeUndefined();
   });
 });

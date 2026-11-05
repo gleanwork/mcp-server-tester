@@ -23,7 +23,7 @@ import { buildRunReport } from './runReport.js';
 import { storedRunTraces } from './telemetry/runTraces.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
-import { simulateMstClient } from './mstClient/simulation.js';
+import { runApiClient } from './mstClient/run.js';
 import {
   openToolOptimization,
   startToolOptimization,
@@ -34,7 +34,7 @@ import { storedClientSetup } from './clientNames.js';
 import { getClient } from './builtinClients.js';
 
 // The api client's model: it answers without calling a tool.
-vi.mock('./mstClient/simulation.js', () => ({ simulateMstClient: vi.fn() }));
+vi.mock('./mstClient/run.js', () => ({ runApiClient: vi.fn() }));
 
 const FIXTURES = fileURLToPath(
   new URL('../../tests/usecases/fixtures', import.meta.url)
@@ -232,10 +232,9 @@ describe('a run stored when the api client was mst', () => {
 
 describe('a tool optimization whose baseline was stored with mst', () => {
   it("runs a round on api: the base variant's client didn't change", async () => {
-    vi.mocked(simulateMstClient).mockResolvedValue({
-      success: true,
-      response: 'No idea.',
-      toolCalls: [],
+    vi.mocked(runApiClient).mockResolvedValue({
+      finalText: 'No idea.',
+      events: [],
     });
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-stored-opt-'));
     dirs.push(dir);

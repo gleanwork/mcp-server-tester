@@ -654,6 +654,26 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
         "input": "Is it sunny in London?",
       },
       "response": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -661,14 +681,18 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -704,6 +728,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
             "source": "mcp",
           },
         ],
+        "evidence": "structured",
         "finalText": "It is sunny in London.",
         "usage": {
           "durationMs": "<time>",
@@ -711,6 +736,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
           "outputTokens": 20,
         },
       },
+      "traceEvidence": "structured",
     },
     {
       "authType": "none",
@@ -751,6 +777,26 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
         "input": "Weather in London?",
       },
       "response": {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -758,14 +804,18 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -834,6 +884,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
             "source": "mcp",
           },
         ],
+        "evidence": "structured",
         "finalText": "It is sunny in London.",
         "usage": {
           "durationMs": "<time>",
@@ -841,6 +892,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
           "outputTokens": 20,
         },
       },
+      "traceEvidence": "structured",
     },
   ],
   "summary": {
@@ -876,6 +928,26 @@ exports[`golden: judges > judges a client response 1`] = `
     [
       "golden-case-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -883,14 +955,18 @@ exports[`golden: judges > judges a client response 1`] = `
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -928,6 +1004,26 @@ exports[`golden: judges > judges a client response 1`] = `
       ],
     },
     "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "evidence": "structured",
       "response": "It is sunny in London.",
       "success": true,
       "toolCalls": [
@@ -935,14 +1031,18 @@ exports[`golden: judges > judges a client response 1`] = `
           "arguments": {
             "city": "London",
           },
+          "kind": "tool_call",
           "name": "get_weather",
           "output": "sunny",
+          "source": "mcp",
         },
         {
           "arguments": {
             "q": "London",
           },
+          "kind": "tool_call",
           "name": "search",
+          "source": "mcp",
         },
       ],
       "usage": {
@@ -983,6 +1083,7 @@ exports[`golden: judges > judges a client response 1`] = `
           "source": "mcp",
         },
       ],
+      "evidence": "structured",
       "finalText": "It is sunny in London.",
       "usage": {
         "durationMs": "<time>",
@@ -990,6 +1091,7 @@ exports[`golden: judges > judges a client response 1`] = `
         "outputTokens": 20,
       },
     },
+    "traceEvidence": "structured",
   },
 }
 `;
@@ -1000,6 +1102,26 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     [
       "golden-case-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1007,14 +1129,18 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1029,6 +1155,26 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
     [
       "golden-case-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1036,14 +1182,18 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1083,6 +1233,26 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
       "reference": "sunny",
     },
     "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "evidence": "structured",
       "response": "It is sunny in London.",
       "success": true,
       "toolCalls": [
@@ -1090,14 +1260,18 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
           "arguments": {
             "city": "London",
           },
+          "kind": "tool_call",
           "name": "get_weather",
           "output": "sunny",
+          "source": "mcp",
         },
         {
           "arguments": {
             "q": "London",
           },
+          "kind": "tool_call",
           "name": "search",
+          "source": "mcp",
         },
       ],
       "usage": {
@@ -1138,6 +1312,7 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
           "source": "mcp",
         },
       ],
+      "evidence": "structured",
       "finalText": "It is sunny in London.",
       "usage": {
         "durationMs": "<time>",
@@ -1145,6 +1320,7 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
         "outputTokens": 20,
       },
     },
+    "traceEvidence": "structured",
   },
 }
 `;
@@ -1155,6 +1331,26 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     [
       "golden-case-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1162,14 +1358,18 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1184,6 +1384,26 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     [
       "golden-strict-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1191,14 +1411,18 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1212,6 +1436,26 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     [
       "golden-strict-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1219,14 +1463,18 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1240,6 +1488,26 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
     [
       "golden-strict-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1247,14 +1515,18 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1299,6 +1571,26 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
       "reference": "unused",
     },
     "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "evidence": "structured",
       "response": "It is sunny in London.",
       "success": true,
       "toolCalls": [
@@ -1306,14 +1598,18 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
           "arguments": {
             "city": "London",
           },
+          "kind": "tool_call",
           "name": "get_weather",
           "output": "sunny",
+          "source": "mcp",
         },
         {
           "arguments": {
             "q": "London",
           },
+          "kind": "tool_call",
           "name": "search",
+          "source": "mcp",
         },
       ],
       "usage": {
@@ -1369,6 +1665,7 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
           "source": "mcp",
         },
       ],
+      "evidence": "structured",
       "finalText": "It is sunny in London.",
       "usage": {
         "durationMs": "<time>",
@@ -1376,6 +1673,7 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         "outputTokens": 20,
       },
     },
+    "traceEvidence": "structured",
   },
 }
 `;
@@ -1390,6 +1688,26 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
     [
       "llm.evaluate",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1397,14 +1715,18 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1444,6 +1766,26 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
       "reference": "sunny",
     },
     "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "evidence": "structured",
       "response": "It is sunny in London.",
       "success": true,
       "toolCalls": [
@@ -1451,14 +1793,18 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
           "arguments": {
             "city": "London",
           },
+          "kind": "tool_call",
           "name": "get_weather",
           "output": "sunny",
+          "source": "mcp",
         },
         {
           "arguments": {
             "q": "London",
           },
+          "kind": "tool_call",
           "name": "search",
+          "source": "mcp",
         },
       ],
       "usage": {
@@ -1499,6 +1845,7 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
           "source": "mcp",
         },
       ],
+      "evidence": "structured",
       "finalText": "It is sunny in London.",
       "usage": {
         "durationMs": "<time>",
@@ -1506,6 +1853,7 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
         "outputTokens": 20,
       },
     },
+    "traceEvidence": "structured",
   },
 }
 `;
@@ -1527,6 +1875,26 @@ exports[`golden: rubric judges > a custom-text rubric with provider, model, LLM 
     [
       "llm.evaluate",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1534,14 +1902,18 @@ exports[`golden: rubric judges > a custom-text rubric with provider, model, LLM 
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1591,6 +1963,26 @@ Answer carefully.",
       ],
     },
     "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "evidence": "structured",
       "response": "It is sunny in London.",
       "success": true,
       "toolCalls": [
@@ -1598,14 +1990,18 @@ Answer carefully.",
           "arguments": {
             "city": "London",
           },
+          "kind": "tool_call",
           "name": "get_weather",
           "output": "sunny",
+          "source": "mcp",
         },
         {
           "arguments": {
             "q": "London",
           },
+          "kind": "tool_call",
           "name": "search",
+          "source": "mcp",
         },
       ],
       "usage": {
@@ -1647,6 +2043,7 @@ Answer carefully.",
           "source": "mcp",
         },
       ],
+      "evidence": "structured",
       "finalText": "It is sunny in London.",
       "usage": {
         "durationMs": "<time>",
@@ -1654,6 +2051,7 @@ Answer carefully.",
         "outputTokens": 20,
       },
     },
+    "traceEvidence": "structured",
   },
 }
 `;
@@ -1668,6 +2066,26 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
     [
       "llm.evaluate",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1675,14 +2093,18 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1723,6 +2145,26 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
       ],
     },
     "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "evidence": "structured",
       "response": "It is sunny in London.",
       "success": true,
       "toolCalls": [
@@ -1730,14 +2172,18 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
           "arguments": {
             "city": "London",
           },
+          "kind": "tool_call",
           "name": "get_weather",
           "output": "sunny",
+          "source": "mcp",
         },
         {
           "arguments": {
             "q": "London",
           },
+          "kind": "tool_call",
           "name": "search",
+          "source": "mcp",
         },
       ],
       "usage": {
@@ -1775,6 +2221,7 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
           "source": "mcp",
         },
       ],
+      "evidence": "structured",
       "finalText": "It is sunny in London.",
       "usage": {
         "durationMs": "<time>",
@@ -1782,6 +2229,7 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
         "outputTokens": 20,
       },
     },
+    "traceEvidence": "structured",
   },
 }
 `;
@@ -1796,6 +2244,26 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     [
       "llm.evaluate",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1803,14 +2271,18 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1825,6 +2297,26 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     [
       "golden-case-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1832,14 +2324,18 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1854,6 +2350,26 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     [
       "golden-case-judge",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1861,14 +2377,18 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1887,6 +2407,26 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
     [
       "llm.evaluate",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -1894,14 +2434,18 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -1944,6 +2488,26 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
       ],
     },
     "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "evidence": "structured",
       "response": "It is sunny in London.",
       "success": true,
       "toolCalls": [
@@ -1951,14 +2515,18 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
           "arguments": {
             "city": "London",
           },
+          "kind": "tool_call",
           "name": "get_weather",
           "output": "sunny",
+          "source": "mcp",
         },
         {
           "arguments": {
             "q": "London",
           },
+          "kind": "tool_call",
           "name": "search",
+          "source": "mcp",
         },
       ],
       "usage": {
@@ -2013,6 +2581,7 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
           "source": "mcp",
         },
       ],
+      "evidence": "structured",
       "finalText": "It is sunny in London.",
       "usage": {
         "durationMs": "<time>",
@@ -2020,6 +2589,7 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
         "outputTokens": 20,
       },
     },
+    "traceEvidence": "structured",
   },
 }
 `;
@@ -2034,6 +2604,26 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     [
       "llm.evaluate",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -2041,14 +2631,18 @@ exports[`golden: rubric judges > reps average the scores and report their spread
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -2067,6 +2661,26 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     [
       "llm.evaluate",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -2074,14 +2688,18 @@ exports[`golden: rubric judges > reps average the scores and report their spread
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -2100,6 +2718,26 @@ exports[`golden: rubric judges > reps average the scores and report their spread
     [
       "llm.evaluate",
       {
+        "events": [
+          {
+            "arguments": {
+              "city": "London",
+            },
+            "kind": "tool_call",
+            "name": "get_weather",
+            "output": "sunny",
+            "source": "mcp",
+          },
+          {
+            "arguments": {
+              "q": "London",
+            },
+            "kind": "tool_call",
+            "name": "search",
+            "source": "mcp",
+          },
+        ],
+        "evidence": "structured",
         "response": "It is sunny in London.",
         "success": true,
         "toolCalls": [
@@ -2107,14 +2745,18 @@ exports[`golden: rubric judges > reps average the scores and report their spread
             "arguments": {
               "city": "London",
             },
+            "kind": "tool_call",
             "name": "get_weather",
             "output": "sunny",
+            "source": "mcp",
           },
           {
             "arguments": {
               "q": "London",
             },
+            "kind": "tool_call",
             "name": "search",
+            "source": "mcp",
           },
         ],
         "usage": {
@@ -2154,6 +2796,26 @@ exports[`golden: rubric judges > reps average the scores and report their spread
       ],
     },
     "response": {
+      "events": [
+        {
+          "arguments": {
+            "city": "London",
+          },
+          "kind": "tool_call",
+          "name": "get_weather",
+          "output": "sunny",
+          "source": "mcp",
+        },
+        {
+          "arguments": {
+            "q": "London",
+          },
+          "kind": "tool_call",
+          "name": "search",
+          "source": "mcp",
+        },
+      ],
+      "evidence": "structured",
       "response": "It is sunny in London.",
       "success": true,
       "toolCalls": [
@@ -2161,14 +2823,18 @@ exports[`golden: rubric judges > reps average the scores and report their spread
           "arguments": {
             "city": "London",
           },
+          "kind": "tool_call",
           "name": "get_weather",
           "output": "sunny",
+          "source": "mcp",
         },
         {
           "arguments": {
             "q": "London",
           },
+          "kind": "tool_call",
           "name": "search",
+          "source": "mcp",
         },
       ],
       "usage": {
@@ -2209,6 +2875,7 @@ exports[`golden: rubric judges > reps average the scores and report their spread
           "source": "mcp",
         },
       ],
+      "evidence": "structured",
       "finalText": "It is sunny in London.",
       "usage": {
         "durationMs": "<time>",
@@ -2216,6 +2883,7 @@ exports[`golden: rubric judges > reps average the scores and report their spread
         "outputTokens": 20,
       },
     },
+    "traceEvidence": "structured",
   },
 }
 `;
@@ -3133,6 +3801,26 @@ exports[`golden: the api client (dataset API) > maps native tool names through t
     "input": "Weather in London?",
   },
   "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "evidence": "structured",
     "response": "It is sunny in London.",
     "success": true,
     "toolCalls": [
@@ -3140,14 +3828,18 @@ exports[`golden: the api client (dataset API) > maps native tool names through t
         "arguments": {
           "city": "London",
         },
+        "kind": "tool_call",
         "name": "get_weather",
         "output": "sunny",
+        "source": "mcp",
       },
       {
         "arguments": {
           "q": "London",
         },
+        "kind": "tool_call",
         "name": "search",
+        "source": "mcp",
       },
     ],
     "usage": {
@@ -3212,6 +3904,7 @@ exports[`golden: the api client (dataset API) > maps native tool names through t
         "source": "mcp",
       },
     ],
+    "evidence": "structured",
     "finalText": "It is sunny in London.",
     "usage": {
       "durationMs": "<time>",
@@ -3219,6 +3912,7 @@ exports[`golden: the api client (dataset API) > maps native tool names through t
       "outputTokens": 20,
     },
   },
+  "traceEvidence": "structured",
 }
 `;
 
@@ -3302,6 +3996,26 @@ exports[`golden: the api client (dataset API) > succeeds with tool evidence and 
     "input": "Weather in London?",
   },
   "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "evidence": "structured",
     "response": "It is sunny in London.",
     "success": true,
     "toolCalls": [
@@ -3309,14 +4023,18 @@ exports[`golden: the api client (dataset API) > succeeds with tool evidence and 
         "arguments": {
           "city": "London",
         },
+        "kind": "tool_call",
         "name": "get_weather",
         "output": "sunny",
+        "source": "mcp",
       },
       {
         "arguments": {
           "q": "London",
         },
+        "kind": "tool_call",
         "name": "search",
+        "source": "mcp",
       },
     ],
     "usage": {
@@ -3385,6 +4103,7 @@ exports[`golden: the api client (dataset API) > succeeds with tool evidence and 
         "source": "mcp",
       },
     ],
+    "evidence": "structured",
     "finalText": "It is sunny in London.",
     "usage": {
       "durationMs": "<time>",
@@ -3392,6 +4111,7 @@ exports[`golden: the api client (dataset API) > succeeds with tool evidence and 
       "outputTokens": 20,
     },
   },
+  "traceEvidence": "structured",
 }
 `;
 
@@ -3441,6 +4161,26 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
     "trials": 3,
   },
   "response": {
+    "events": [
+      {
+        "arguments": {
+          "city": "London",
+        },
+        "kind": "tool_call",
+        "name": "get_weather",
+        "output": "sunny",
+        "source": "mcp",
+      },
+      {
+        "arguments": {
+          "q": "London",
+        },
+        "kind": "tool_call",
+        "name": "search",
+        "source": "mcp",
+      },
+    ],
+    "evidence": "structured",
     "response": "cloudy",
     "success": true,
     "toolCalls": [
@@ -3448,14 +4188,18 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
         "arguments": {
           "city": "London",
         },
+        "kind": "tool_call",
         "name": "get_weather",
         "output": "sunny",
+        "source": "mcp",
       },
       {
         "arguments": {
           "q": "London",
         },
+        "kind": "tool_call",
         "name": "search",
+        "source": "mcp",
       },
     ],
     "usage": {
@@ -3504,6 +4248,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
   },
   "toolPrecision": 0.5,
   "toolRecall": 0.5,
+  "traceEvidence": "structured",
   "trialResults": [
     {
       "clientUsage": {
@@ -3574,6 +4319,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
             "source": "mcp",
           },
         ],
+        "evidence": "structured",
         "finalText": "It is sunny in London.",
         "usage": {
           "durationMs": "<time>",
@@ -3581,6 +4327,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
           "outputTokens": 20,
         },
       },
+      "traceEvidence": "structured",
     },
     {
       "durationMs": "<time>",
@@ -3664,6 +4411,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
             "source": "mcp",
           },
         ],
+        "evidence": "structured",
         "finalText": "cloudy",
         "usage": {
           "durationMs": "<time>",
@@ -3671,6 +4419,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
           "outputTokens": 20,
         },
       },
+      "traceEvidence": "structured",
     },
   ],
 }

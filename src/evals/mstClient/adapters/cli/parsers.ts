@@ -1,7 +1,11 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { MstClientSimulationResult, LLMToolCall } from '../../types.js';
-import type { ModelCall } from '../../../evalFrameworkTypes.js';
+import type { LLMToolCall } from '../../types.js';
+import type {
+  ClientRunResult,
+  ModelCall,
+} from '../../../evalFrameworkTypes.js';
+import { toolCallEvents } from '../../../clientTrace.js';
 import {
   mstScratchRoots,
   resolvePersistedOutput,
@@ -88,7 +92,7 @@ export class LineClock {
 export function parseStreamJson(
   stdout: string,
   lineTimes?: readonly number[]
-): MstClientSimulationResult {
+): ClientRunResult {
   const lines = stdout.split('\n').filter((line) => line.trim().length > 0);
   const timed = lineTimes !== undefined && lineTimes.length === lines.length;
   const messages: ClaudeMessageEvent[] = [];
@@ -199,8 +203,8 @@ export function parseStreamJson(
       const modelCalls = claudeModelCalls(messages);
       const { error, ending } = claudeResultEnding(event, acted);
       return {
-        success: false,
-        toolCalls: toolCalls.map(typeClaudeCodeCall),
+        finalText: '',
+        events: cliEvents(toolCalls.map(typeClaudeCodeCall)),
         ...(modelCalls.length ? { modelCalls } : {}),
         error,
         ending,
@@ -217,12 +221,12 @@ export function parseStreamJson(
 
   const modelCalls = claudeModelCalls(messages);
   return {
-    success: true,
-    toolCalls: toolCalls.map(typeClaudeCodeCall),
+    finalText: response,
+    events: cliEvents(toolCalls.map(typeClaudeCodeCall)),
     ...(modelCalls.length ? { modelCalls } : {}),
-    response: response || undefined,
-    conversationHistory:
-      conversationHistory.length > 0 ? conversationHistory : undefined,
+    ...(conversationHistory.length > 0
+      ? { telemetry: { content: { conversationHistory } } }
+      : {}),
     usage,
   };
 }
@@ -232,8 +236,8 @@ export function createJsonParser(paths: {
   toolCalls: string;
   response: string;
   success?: string;
-}): (stdout: string) => MstClientSimulationResult {
-  return (stdout: string): MstClientSimulationResult => {
+}): (stdout: string) => ClientRunResult {
+  return (stdout: string): ClientRunResult => {
     const data = JSON.parse(stdout) as Record<string, unknown>;
 
     const rawToolCalls = getNestedValue(data, paths.toolCalls);
@@ -257,11 +261,44 @@ export function createJsonParser(paths: {
       : true;
 
     return {
-      success,
-      toolCalls,
-      response: typeof response === 'string' ? response : undefined,
+      finalText: typeof response === 'string' ? response : '',
+      events: cliEvents(toolCalls),
+      ...(success ? {} : { error: 'Client execution failed.' }),
     };
   };
+}
+
+/** Malformed CLI wire output, distinct from invalid JSON. */
+export class InvalidCliOutput extends Error {}
+
+/** Validate normalized CLI wire fields before making common trace events. */
+export function validateCliOutput(result: unknown): string | null {
+  if (result === null || typeof result !== 'object') {
+    return `Expected object, got ${typeof result}`;
+  }
+  const obj = result as Record<string, unknown>;
+  if (typeof obj.success !== 'boolean') {
+    return `"success" must be a boolean, got ${typeof obj.success}`;
+  }
+  if (!Array.isArray(obj.toolCalls)) {
+    return `"toolCalls" must be an array, got ${typeof obj.toolCalls}`;
+  }
+  for (let i = 0; i < obj.toolCalls.length; i++) {
+    const tc = obj.toolCalls[i] as LLMToolCall;
+    if (typeof tc.name !== 'string') {
+      return `toolCalls[${i}].name must be a string, got ${typeof tc.name}`;
+    }
+    if (typeof tc.arguments !== 'object' || tc.arguments === null) {
+      return `toolCalls[${i}].arguments must be an object, got ${typeof tc.arguments}`;
+    }
+  }
+  return null;
+}
+
+function cliEvents(calls: LLMToolCall[]): ClientRunResult['events'] {
+  const error = validateCliOutput({ success: true, toolCalls: calls });
+  if (error) throw new InvalidCliOutput(error);
+  return toolCallEvents(calls);
 }
 
 interface ContentBlock {

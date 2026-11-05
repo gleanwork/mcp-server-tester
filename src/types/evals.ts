@@ -57,8 +57,4 @@ export type {
 
 export type { SaveBaselineOptions } from '../evals/baseline.js';
 
-export type {
-  LLMProvider,
-  LLMToolCall,
-  MstClientSimulationResult,
-} from '../evals/mstClient/index.js';
+export type { LLMProvider, LLMToolCall } from '../evals/mstClient/index.js';

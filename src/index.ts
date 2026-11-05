@@ -79,7 +79,6 @@ export type {
   ToolOverrideVariant,
   LLMProvider,
   LLMToolCall,
-  MstClientSimulationResult,
   JudgeConfig,
   Judge,
   JudgeResult,

@@ -1,23 +1,12 @@
 /**
- * Types and interfaces for client simulation mode
+ * Types and interfaces for API and Claude Code execution
  *
  * This module provides types for testing MCP servers through clients,
  * validating tool descriptions, parameter clarity, and discoverability.
  */
 
-import type { MCPFixtureApi } from '../../mcp/fixtures/mcpFixture.js';
-import type {
-  ClientDiagnostics,
-  ClientSkillsMode,
-  SkillLoad,
-  UsageMetrics,
-} from '../../types/index.js';
-import type {
-  HostTelemetry,
-  ModelCall,
-  TraceEvent,
-} from '../evalFrameworkTypes.js';
-import type { TrialEnding } from '../../types/trialEnding.js';
+import type { ClientSkillsMode } from '../../types/index.js';
+import type { TraceEvent } from '../evalFrameworkTypes.js';
 
 /**
  * Client type for client simulation.
@@ -252,105 +241,4 @@ export interface LLMToolCall {
   kind?: TraceEvent['kind'];
   /** `tool_search` only: the tools the search returned. */
   results?: TraceEvent['results'];
-}
-
-/**
- * Result from a client simulation
- */
-export interface MstClientSimulationResult {
-  /** Sanitized startup evidence, retained even when execution fails. */
-  diagnostics?: ClientDiagnostics;
-  /** Whether the simulation succeeded */
-  success: boolean;
-
-  /** Tool calls made by the LLM */
-  toolCalls: Array<LLMToolCall>;
-
-  /** The model requests, in order, when the simulator sees them. */
-  modelCalls?: ModelCall[];
-
-  /** The host's own OpenTelemetry for the run (`telemetry.host`). */
-  hostTelemetry?: HostTelemetry;
-
-  /** Final response from the LLM */
-  response?: string;
-
-  /** Error message if simulation failed */
-  error?: string;
-
-  /**
-   * How the attempt ended, when something around the client broke (ADR
-   * 0010): the adapter types it from its provider's or CLI's failure. A
-   * failed simulation without one is a trial that failed.
-   */
-  ending?: TrialEnding;
-
-  /** The case's input, as given to the model */
-  input?: string;
-
-  /**
-   * The conversation turns for attribution analysis.
-   *
-   * Tool turns reference their call via `toolCallId` rather than inlining the
-   * (potentially large) result — hydrate the output from the matching
-   * `toolCalls[]` entry. `content` holds assistant/user text.
-   */
-  conversationHistory?: Array<{
-    role: 'user' | 'assistant' | 'tool';
-    content?: string;
-    toolCallId?: string;
-  }>;
-
-  /**
-   * Milliseconds spent waiting for LLM responses
-   * (excludes MCP tool execution time)
-   */
-  llmDurationMs?: number;
-
-  /**
-   * Milliseconds spent executing MCP tool calls
-   * (excludes LLM response time)
-   */
-  mcpDurationMs?: number;
-
-  /**
-   * Token usage from the LLM during simulation.
-   * Populated by SDK-based clients from the AI SDK response.
-   */
-  usage?: UsageMetrics;
-
-  /** Skills the client loaded for the model (when `skills` is enabled). */
-  skillLoads?: SkillLoad[];
-
-  /**
-   * Ordered trace of MCP tool calls and skill loads. Present when skills are
-   * enabled; tool-call assertions read it so `kind: 'skill'` entries and
-   * strict ordering work.
-   */
-  events?: TraceEvent[];
-}
-
-/**
- * Interface for client simulators.
- *
- * The only built-in implementation is the Vercel AI SDK orchestrator
- * (src/evals/mstClient/adapters/vercel.ts). Custom implementations can be
- * created for specialised testing needs.
- */
-export interface MstClientSimulator {
-  /**
-   * Simulates a client interacting with an MCP server
-   *
-   * @param mcp - MCP fixture API
-   * @param input - The case's input: what the user asks the client to do
-   * @param config - client configuration
-   * @returns Simulation result with tool calls and response
-   */
-  simulate(
-    mcp: MCPFixtureApi,
-    input: string,
-    config: MstClientConfig,
-    /** Optional enclosing client deadline; does not cover caller-owned fixtures. */
-    signal?: AbortSignal
-  ): Promise<MstClientSimulationResult>;
 }

@@ -1,5 +1,3 @@
-import { simulationToClientRun } from './clientTrace.js';
-import type { MstClientSimulationResult } from './mstClient/types.js';
 import {
   afterAll,
   afterEach,
@@ -31,6 +29,7 @@ import type {
   ClientRunOptions,
   ClientRunInput,
   ClientRunContext,
+  ClientRunResult,
   JudgeDefinition,
 } from './evalFrameworkTypes.js';
 
@@ -111,11 +110,8 @@ afterEach(async () => {
 async function fixture(
   cases: EvalCase[],
   extra: Record<string, unknown> = {},
-  // The fixture client's simulation-shaped result, adapted to a trace below.
-  run = vi.fn<(options: ClientRunOptions) => Promise<{ response: unknown }>>(
-    async () => ({
-      response: { success: true, response: 'WRONG', toolCalls: [] },
-    })
+  run = vi.fn<(options: ClientRunOptions) => Promise<ClientRunResult>>(
+    async () => ({ finalText: 'WRONG', events: [] })
   )
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'suite-review-'));
@@ -132,7 +128,7 @@ async function fixture(
     evidence: 'structured',
     async run(input, config, context) {
       observe(input, context);
-      const result = await run({
+      return run({
         dataset: { name: 'canonical', cases },
         cases,
         servers: input.servers,
@@ -140,10 +136,6 @@ async function fixture(
         evalConfig: context.evalConfig,
         variant: context.variant,
       });
-      return simulationToClientRun(
-        result.response as MstClientSimulationResult,
-        input.servers
-      );
     },
   });
   const source = addDatasetSource(`review-source-${sequence++}`, {
@@ -719,11 +711,8 @@ describe('eval review regressions', () => {
       })
     );
     f.run.mockImplementation(async (options) => ({
-      response: {
-        success: true,
-        response: options.client.model === 'base' ? 'EXPECTED' : 'WRONG',
-        toolCalls: [],
-      },
+      finalText: options.client.model === 'base' ? 'EXPECTED' : 'WRONG',
+      events: [],
     }));
     const result = await runEvalConfig({
       configPath: f.configPath,
@@ -762,22 +751,30 @@ describe('eval review regressions', () => {
       { toolMap: { search: ['github.search', 'chat.search'] } }
     );
     f.run.mockResolvedValue({
-      response: {
-        success: true,
-        response: 'OK',
-        toolCalls: [{ name: 'chat.search', arguments: { query: 'wrong' } }],
-      },
+      finalText: 'OK',
+      events: [
+        {
+          kind: 'tool_call',
+          source: 'builtin',
+          name: 'chat.search',
+          arguments: { query: 'wrong' },
+        },
+      ],
     });
     expect(
       (await runEvalConfig({ configPath: f.configPath, rootDir: f.dir }))
         .summary.results[0]?.pass
     ).toBe(false);
     f.run.mockResolvedValue({
-      response: {
-        success: true,
-        response: 'OK',
-        toolCalls: [{ name: 'github.search', arguments: { query: 'wanted' } }],
-      },
+      finalText: 'OK',
+      events: [
+        {
+          kind: 'tool_call',
+          source: 'builtin',
+          name: 'github.search',
+          arguments: { query: 'wanted' },
+        },
+      ],
     });
     expect(
       (await runEvalConfig({ configPath: f.configPath, rootDir: f.dir }))
@@ -855,11 +852,8 @@ describe('eval review regressions', () => {
     async (redact) => {
       const f = await fixture([{ ...scenario, trials: 2 }]);
       f.run.mockResolvedValue({
-        response: {
-          success: true,
-          response: 'PRIVATE_RESPONSE_MARKER',
-          toolCalls: [],
-        },
+        finalText: 'PRIVATE_RESPONSE_MARKER',
+        events: [],
       });
       const storeDir = path.join(f.dir, 'store');
       await fs.writeFile(

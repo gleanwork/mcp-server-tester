@@ -8,17 +8,16 @@
  * Requires the `ai` package (v6+) as an optional peer dependency.
  * Additional providers require their respective @ai-sdk/* packages.
  */
-import type {
-  MstClientConfig,
-  MstClientSimulationResult,
-  MstClientSimulator,
-  LLMProvider,
-  LLMToolCall,
-} from '../types.js';
+import type { MstClientConfig, LLMProvider, LLMToolCall } from '../types.js';
 import type { UsageMetrics } from '../../../types/index.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { extractText } from '../../../mcp/response.js';
-import type { ModelCall, TraceEvent } from '../../evalFrameworkTypes.js';
+import type {
+  ClientRunResult,
+  ModelCall,
+  TraceEvent,
+} from '../../evalFrameworkTypes.js';
+import { toolCallEvents } from '../../clientTrace.js';
 import {
   createClientSkillsSession,
   HOST_SKILL_TOOL_NAMES,
@@ -55,7 +54,7 @@ const SdkConfigSchema = z
   })
   .strict();
 
-/** A failed simulation's message, and how its attempt ended. */
+/** A failed API run's message, and how its attempt ended. */
 interface SdkFailure {
   message: string;
   ending: TrialEnding;
@@ -555,302 +554,276 @@ function toError(value: unknown): Error {
   return type !== undefined ? Object.assign(error, { type }) : error;
 }
 
-/** Skill loads and the ordered tool/skill event trace, when skills ran. */
-function skillsTrace(
+/** The ordered tool/skill events, with explicit MCP provenance for API tools. */
+function apiEvents(
   toolCalls: LLMToolCall[],
   skills: ClientSkillsSession | null
-): Pick<MstClientSimulationResult, 'skillLoads' | 'events'> {
-  if (!skills) return {};
-  const toolEvents: TraceEvent[] = toolCalls.map((call) => ({
-    kind: 'tool_call',
-    source: 'mcp',
-    name: call.name,
-    arguments: call.arguments,
-    ...(call.output !== undefined ? { output: call.output } : {}),
-    ...(call.isError !== undefined ? { isError: call.isError } : {}),
-    ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
-    ...(call.id !== undefined ? { id: call.id } : {}),
-    ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
-    ...(call.startedAt ? { startedAt: call.startedAt } : {}),
-    ...(call.completedAt ? { completedAt: call.completedAt } : {}),
-  }));
-  return {
-    skillLoads: skills.loads,
-    events: withSkillEvents(toolEvents, skills.loads),
-  };
+): TraceEvent[] {
+  const events = toolCallEvents(toolCalls);
+  return skills ? withSkillEvents(events, skills.loads) : events;
 }
 
 /**
- * Creates a Vercel AI SDK-based client simulator.
- *
- * Uses generateText (streamText for streaming providers) with stopWhen (ai v6)
- * to handle multi-turn tool calling. Produces llmDurationMs and mcpDurationMs
- * for latency decomposition.
+ * Runs the API client's multi-turn tool loop through the Vercel AI SDK.
+ * Keeps model and MCP latency separate.
  */
-export function createVercelOrchestrator(): MstClientSimulator {
-  return {
-    async simulate(
-      mcp: MCPFixtureApi,
-      input: string,
-      config: MstClientConfig,
-      signal?: AbortSignal
-    ): Promise<MstClientSimulationResult> {
-      const controller = new AbortController();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let abortFromClient: (() => void) | undefined;
-      const allToolCalls: LLMToolCall[] = [];
-      // Whether the model has answered: what running out of context means.
-      let stepsFinished = 0;
-      let skills: ClientSkillsSession | null = null;
-      let expired: Promise<never>;
-      function withinDeadline<T>(promise: Promise<T>): Promise<T> {
-        return Promise.race([promise, expired]);
-      }
-      try {
-        SdkConfigSchema.parse(config);
-        expired = new Promise<never>((_, reject) => {
-          if (signal) {
-            abortFromClient = function abortFromClient() {
-              const reason: unknown = signal.reason;
-              const error =
-                reason instanceof Error
-                  ? reason
-                  : new Error(
-                      typeof reason === 'string'
-                        ? reason
-                        : 'SDK client aborted.'
-                    );
-              controller.abort(error);
-              reject(error);
-            };
-            signal.addEventListener('abort', abortFromClient, { once: true });
-            if (signal.aborted) abortFromClient();
-          } else if (config.timeout !== undefined)
-            timer = setTimeout(() => {
-              const error = new Error(
-                `SDK client timed out after ${config.timeout} ms.`
-              );
-              controller.abort(error);
-              reject(error);
-            }, config.timeout);
-        });
-        const ai = await withinDeadline(import('ai'));
-        const { stepCountIs } = ai;
-        // jsonSchema from @ai-sdk/provider-utils creates a proper Schema object
-        // (with .jsonSchema property) that ai's prepareToolsAndToolChoice can read.
-        // Do NOT use jsonSchema from 'ai' — in v6 it produces the wrong shape.
-        const { jsonSchema } = await withinDeadline(
-          import('@ai-sdk/provider-utils')
-        );
-
-        if (!config.provider) {
-          throw new Error('provider is required for SDK client type');
-        }
-
-        const modelId = config.model ?? defaultModel(config.provider);
-        const { model, providerOptions, streams } = await withinDeadline(
-          loadModel(config.provider, modelId, config)
-        );
-
-        // Get available MCP tools and wrap them for Vercel AI SDK
-        const mcpTools = await withinDeadline(mcp.listTools());
-        let mcpDurationMs = 0;
-        let attemptedToolCalls = 0;
-        // For each model request's span: when steps end and tools start.
-        const stepEnds: number[] = [];
-        const toolStarts: number[] = [];
-        let budgetError: Error | undefined;
-
-        // Build tool definitions in Vercel AI SDK format.
-        // Uses any because the tool() generic requires inferred parameter types
-        // which aren't available from MCP's JSON Schema at compile time.
-        // Build tool definitions using explicit inputSchema (a Schema object with .jsonSchema).
-        // We bypass the tool() helper because ai v6 tool() stores schema as .parameters
-        // but prepareToolsAndToolChoice reads .inputSchema — they're inconsistent in v6.
-        // Using jsonSchema() from @ai-sdk/provider-utils produces the correct Schema object.
-        const tools: Record<string, any> = {};
-        for (const mcpTool of mcpTools) {
-          const toolName = mcpTool.name;
-          // Ensure type:'object' is present — Anthropic requires it, some servers omit it.
-          const rawSchema = {
-            type: 'object',
-            ...(mcpTool.inputSchema as Record<string, unknown>),
-          };
-          const encodedName = toolName.replaceAll('.', '__');
-          if (tools[encodedName])
-            throw new Error(`Duplicate encoded tool name: ${encodedName}`);
-          tools[encodedName] = {
-            description: mcpTool.description ?? '',
-            inputSchema: jsonSchema(rawSchema),
-            execute: async (
-              args: Record<string, unknown>,
-              opts?: { toolCallId?: string }
-            ) => {
-              if (controller.signal.aborted) throw controller.signal.reason;
-              if (attemptedToolCalls >= (config.maxToolCalls ?? 10)) {
-                budgetError = new Error(
-                  `Tool call budget exhausted (${config.maxToolCalls ?? 10}).`
+export async function runVercelClient(
+  mcp: MCPFixtureApi,
+  input: string,
+  config: MstClientConfig,
+  signal?: AbortSignal
+): Promise<ClientRunResult> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let abortFromClient: (() => void) | undefined;
+  const allToolCalls: LLMToolCall[] = [];
+  // Whether the model has answered: what running out of context means.
+  let stepsFinished = 0;
+  let skills: ClientSkillsSession | null = null;
+  let expired: Promise<never>;
+  function withinDeadline<T>(promise: Promise<T>): Promise<T> {
+    return Promise.race([promise, expired]);
+  }
+  try {
+    SdkConfigSchema.parse(config);
+    expired = new Promise<never>((_, reject) => {
+      if (signal) {
+        abortFromClient = function abortFromClient() {
+          const reason: unknown = signal.reason;
+          const error =
+            reason instanceof Error
+              ? reason
+              : new Error(
+                  typeof reason === 'string' ? reason : 'SDK client aborted.'
                 );
-                throw budgetError;
-              }
-              attemptedToolCalls++;
-              const mcpStart = Date.now();
-              toolStarts.push(mcpStart);
-              const result = await withinDeadline(mcp.callTool(toolName, args));
-              mcpDurationMs += Date.now() - mcpStart;
-
-              const output = extractText(result);
-              allToolCalls.push({
-                id: opts?.toolCallId,
-                name: toolName,
-                source: 'mcp',
-                rawName: encodedName,
-                arguments: args,
-                output,
-              });
-              return output;
-            },
-          };
-        }
-
-        // Agent Skills (SEP-2640): built-in tools and system prompt, when enabled.
-        skills = await withinDeadline(
-          createClientSkillsSession(mcp, config.skills, {
-            countToolCalls: () => allToolCalls.length,
-          })
-        );
-        for (const [name, clientTool] of Object.entries(skills?.tools ?? {})) {
-          if (tools[name]) {
-            throw new Error(
-              `MCP tool "${name}" collides with the client skills tool of the same name; set skills: 'off' for this server.`
-            );
-          }
-          tools[name] = {
-            description: clientTool.description,
-            inputSchema: jsonSchema(clientTool.inputSchema),
-            execute: async (args: Record<string, unknown>) => {
-              if (controller.signal.aborted) throw controller.signal.reason;
-              const mcpStart = Date.now();
-              toolStarts.push(mcpStart);
-              const output = await withinDeadline(clientTool.execute(args));
-              mcpDurationMs += Date.now() - mcpStart;
-              return output;
-            },
-          };
-        }
-
-        const maxSteps = config.maxToolCalls ?? 10;
-        // The caller's instructions, then the skills catalog.
-        const system = [config.systemPrompt, skills?.system]
-          .filter((part): part is string => Boolean(part))
-          .join('\n\n');
-        const llmStart = Date.now();
-
-        const result = await withinDeadline(
-          runAgentLoop(
-            ai,
-            {
-              model,
-              ...(system ? { system } : {}),
-              prompt: input,
-              tools,
-              stopWhen: stepCountIs(Math.max(1, maxSteps)),
-              temperature: config.temperature ?? 0,
-              maxOutputTokens: config.maxTokens,
-              abortSignal: controller.signal,
-              ...(providerOptions ? { providerOptions } : {}),
-              onStepFinish: () => {
-                stepsFinished++;
-                stepEnds.push(Date.now());
-              },
-            },
-            streams === true
-          )
-        );
-        if (budgetError) throw budgetError;
-
-        const totalDurationMs = Date.now() - llmStart;
-        const llmDurationMs = totalDurationMs - mcpDurationMs;
-
-        const usage = result.usage;
-        const clientUsage: UsageMetrics | undefined = usage
-          ? {
-              inputTokens: usage.inputTokens ?? 0,
-              outputTokens: usage.outputTokens ?? 0,
-              // The SDK reports tokens, not cost.
-              durationMs: llmDurationMs,
-            }
-          : undefined;
-
-        const conversationHistory: Array<{
-          role: 'tool' | 'assistant';
-          content?: string;
-          toolCallId?: string;
-        }> = (result.steps ?? []).flatMap<{
-          role: 'tool' | 'assistant';
-          content?: string;
-          toolCallId?: string;
-        }>((step) => {
-          if (step.toolCalls?.length > 0) {
-            // Reference each call by id; the payload lives once on allToolCalls.
-            // Client skills tools are not MCP tool calls, so describe them inline.
-            return (
-              step.toolCalls as Array<{
-                toolCallId?: string;
-                toolName?: string;
-                input?: unknown;
-              }>
-            ).map((tc) =>
-              tc.toolName && HOST_SKILL_TOOL_NAMES.has(tc.toolName)
-                ? {
-                    role: 'tool' as const,
-                    content: `[client] ${tc.toolName} ${JSON.stringify(tc.input ?? {})}`,
-                  }
-                : { role: 'tool' as const, toolCallId: tc.toolCallId }
-            );
-          }
-          return step.text
-            ? [{ role: 'assistant' as const, content: step.text as string }]
-            : [];
-        });
-
-        const modelCalls = stepModelCalls(
-          result.steps ?? [],
-          llmStart,
-          stepEnds,
-          toolStarts
-        );
-        return {
-          success: true,
-          toolCalls: allToolCalls,
-          ...(modelCalls.length ? { modelCalls } : {}),
-          response: result.text as string,
-          input,
-          llmDurationMs,
-          mcpDurationMs,
-          conversationHistory,
-          usage: clientUsage,
-          ...skillsTrace(allToolCalls, skills),
+          controller.abort(error);
+          reject(error);
         };
-      } catch (err) {
-        const failure = sdkFailure(
-          err,
-          config.provider ?? 'unknown',
-          stepsFinished > 0 || allToolCalls.length > 0
+        signal.addEventListener('abort', abortFromClient, { once: true });
+        if (signal.aborted) abortFromClient();
+      } else if (config.timeout !== undefined)
+        timer = setTimeout(() => {
+          const error = new Error(
+            `SDK client timed out after ${config.timeout} ms.`
+          );
+          controller.abort(error);
+          reject(error);
+        }, config.timeout);
+    });
+    const ai = await withinDeadline(import('ai'));
+    const { stepCountIs } = ai;
+    // jsonSchema from @ai-sdk/provider-utils creates a proper Schema object
+    // (with .jsonSchema property) that ai's prepareToolsAndToolChoice can read.
+    // Do NOT use jsonSchema from 'ai' — in v6 it produces the wrong shape.
+    const { jsonSchema } = await withinDeadline(
+      import('@ai-sdk/provider-utils')
+    );
+
+    if (!config.provider) {
+      throw new Error('provider is required for SDK client type');
+    }
+
+    const modelId = config.model ?? defaultModel(config.provider);
+    const { model, providerOptions, streams } = await withinDeadline(
+      loadModel(config.provider, modelId, config)
+    );
+
+    // Get available MCP tools and wrap them for Vercel AI SDK
+    const mcpTools = await withinDeadline(mcp.listTools());
+    let mcpDurationMs = 0;
+    let attemptedToolCalls = 0;
+    // For each model request's span: when steps end and tools start.
+    const stepEnds: number[] = [];
+    const toolStarts: number[] = [];
+    let budgetError: Error | undefined;
+
+    // Build tool definitions in Vercel AI SDK format.
+    // Uses any because the tool() generic requires inferred parameter types
+    // which aren't available from MCP's JSON Schema at compile time.
+    // Build tool definitions using explicit inputSchema (a Schema object with .jsonSchema).
+    // We bypass the tool() helper because ai v6 tool() stores schema as .parameters
+    // but prepareToolsAndToolChoice reads .inputSchema — they're inconsistent in v6.
+    // Using jsonSchema() from @ai-sdk/provider-utils produces the correct Schema object.
+    const tools: Record<string, any> = {};
+    for (const mcpTool of mcpTools) {
+      const toolName = mcpTool.name;
+      // Ensure type:'object' is present — Anthropic requires it, some servers omit it.
+      const rawSchema = {
+        type: 'object',
+        ...(mcpTool.inputSchema as Record<string, unknown>),
+      };
+      const encodedName = toolName.replaceAll('.', '__');
+      if (tools[encodedName])
+        throw new Error(`Duplicate encoded tool name: ${encodedName}`);
+      tools[encodedName] = {
+        description: mcpTool.description ?? '',
+        inputSchema: jsonSchema(rawSchema),
+        execute: async (
+          args: Record<string, unknown>,
+          opts?: { toolCallId?: string }
+        ) => {
+          if (controller.signal.aborted) throw controller.signal.reason;
+          if (attemptedToolCalls >= (config.maxToolCalls ?? 10)) {
+            budgetError = new Error(
+              `Tool call budget exhausted (${config.maxToolCalls ?? 10}).`
+            );
+            throw budgetError;
+          }
+          attemptedToolCalls++;
+          const mcpStart = Date.now();
+          toolStarts.push(mcpStart);
+          const result = await withinDeadline(mcp.callTool(toolName, args));
+          mcpDurationMs += Date.now() - mcpStart;
+
+          const output = extractText(result);
+          allToolCalls.push({
+            id: opts?.toolCallId,
+            name: toolName,
+            source: 'mcp',
+            rawName: encodedName,
+            arguments: args,
+            output,
+          });
+          return output;
+        },
+      };
+    }
+
+    // Agent Skills (SEP-2640): built-in tools and system prompt, when enabled.
+    skills = await withinDeadline(
+      createClientSkillsSession(mcp, config.skills, {
+        countToolCalls: () => allToolCalls.length,
+      })
+    );
+    for (const [name, clientTool] of Object.entries(skills?.tools ?? {})) {
+      if (tools[name]) {
+        throw new Error(
+          `MCP tool "${name}" collides with the client skills tool of the same name; set skills: 'off' for this server.`
         );
-        return {
-          success: false,
-          toolCalls: allToolCalls,
-          error: failure.message,
-          ending: failure.ending,
-          ...skillsTrace(allToolCalls, skills),
-        };
-      } finally {
-        clearTimeout(timer);
-        if (abortFromClient)
-          signal?.removeEventListener('abort', abortFromClient);
-        controller.abort();
       }
-    },
-  };
+      tools[name] = {
+        description: clientTool.description,
+        inputSchema: jsonSchema(clientTool.inputSchema),
+        execute: async (args: Record<string, unknown>) => {
+          if (controller.signal.aborted) throw controller.signal.reason;
+          const mcpStart = Date.now();
+          toolStarts.push(mcpStart);
+          const output = await withinDeadline(clientTool.execute(args));
+          mcpDurationMs += Date.now() - mcpStart;
+          return output;
+        },
+      };
+    }
+
+    const maxSteps = config.maxToolCalls ?? 10;
+    // The caller's instructions, then the skills catalog.
+    const system = [config.systemPrompt, skills?.system]
+      .filter((part): part is string => Boolean(part))
+      .join('\n\n');
+    const llmStart = Date.now();
+
+    const result = await withinDeadline(
+      runAgentLoop(
+        ai,
+        {
+          model,
+          ...(system ? { system } : {}),
+          prompt: input,
+          tools,
+          stopWhen: stepCountIs(Math.max(1, maxSteps)),
+          temperature: config.temperature ?? 0,
+          maxOutputTokens: config.maxTokens,
+          abortSignal: controller.signal,
+          ...(providerOptions ? { providerOptions } : {}),
+          onStepFinish: () => {
+            stepsFinished++;
+            stepEnds.push(Date.now());
+          },
+        },
+        streams === true
+      )
+    );
+    if (budgetError) throw budgetError;
+
+    const totalDurationMs = Date.now() - llmStart;
+    const llmDurationMs = totalDurationMs - mcpDurationMs;
+
+    const usage = result.usage;
+    const clientUsage: UsageMetrics | undefined = usage
+      ? {
+          inputTokens: usage.inputTokens ?? 0,
+          outputTokens: usage.outputTokens ?? 0,
+          // The SDK reports tokens, not cost.
+          durationMs: llmDurationMs,
+        }
+      : undefined;
+
+    const conversationHistory: Array<{
+      role: 'tool' | 'assistant';
+      content?: string;
+      toolCallId?: string;
+    }> = (result.steps ?? []).flatMap<{
+      role: 'tool' | 'assistant';
+      content?: string;
+      toolCallId?: string;
+    }>((step) => {
+      if (step.toolCalls?.length > 0) {
+        // Reference each call by id; the payload lives once on allToolCalls.
+        // Client skills tools are not MCP tool calls, so describe them inline.
+        return (
+          step.toolCalls as Array<{
+            toolCallId?: string;
+            toolName?: string;
+            input?: unknown;
+          }>
+        ).map((tc) =>
+          tc.toolName && HOST_SKILL_TOOL_NAMES.has(tc.toolName)
+            ? {
+                role: 'tool' as const,
+                content: `[client] ${tc.toolName} ${JSON.stringify(tc.input ?? {})}`,
+              }
+            : { role: 'tool' as const, toolCallId: tc.toolCallId }
+        );
+      }
+      return step.text
+        ? [{ role: 'assistant' as const, content: step.text as string }]
+        : [];
+    });
+
+    const modelCalls = stepModelCalls(
+      result.steps ?? [],
+      llmStart,
+      stepEnds,
+      toolStarts
+    );
+    return {
+      events: apiEvents(allToolCalls, skills),
+      ...(modelCalls.length ? { modelCalls } : {}),
+      finalText: result.text,
+      llmDurationMs,
+      usage: clientUsage,
+      telemetry: {
+        mcpDurationMs,
+        content: { input, conversationHistory },
+        ...(skills ? { skillLoads: skills.loads } : {}),
+      },
+    };
+  } catch (err) {
+    const failure = sdkFailure(
+      err,
+      config.provider ?? 'unknown',
+      stepsFinished > 0 || allToolCalls.length > 0
+    );
+    return {
+      finalText: '',
+      events: apiEvents(allToolCalls, skills),
+      error: failure.message,
+      ending: failure.ending,
+      ...(skills ? { telemetry: { skillLoads: skills.loads } } : {}),
+    };
+  } finally {
+    clearTimeout(timer);
+    if (abortFromClient) signal?.removeEventListener('abort', abortFromClient);
+    controller.abort();
+  }
 }

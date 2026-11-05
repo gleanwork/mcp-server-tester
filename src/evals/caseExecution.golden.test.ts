@@ -20,12 +20,11 @@ import {
 import type { EvalCase } from './datasetTypes.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
-import { simulateMstClient } from './mstClient/simulation.js';
-import type * as SimulationModule from './mstClient/simulation.js';
+import { runApiClient } from './mstClient/run.js';
+import type * as ClientRunModule from './mstClient/run.js';
 import type * as JudgeClientModule from '../judge/judgeClient.js';
 import { createJudge } from '../judge/judgeClient.js';
 import type { JudgeConfig, JudgeResult } from '../judge/judgeTypes.js';
-import type { MstClientSimulationResult } from './mstClient/types.js';
 import { clientRunToExecution } from './clientTrace.js';
 import type { ClientRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
 import { runEval } from './runEval.js';
@@ -33,9 +32,9 @@ import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { JudgeInput } from '../judge/judgeContract.js';
 
-vi.mock('./mstClient/simulation.js', async (original) => ({
-  ...(await original<typeof SimulationModule>()),
-  simulateMstClient: vi.fn(),
+vi.mock('./mstClient/run.js', async (original) => ({
+  ...(await original<typeof ClientRunModule>()),
+  runApiClient: vi.fn(),
 }));
 vi.mock('../judge/judgeClient.js', async (original) => ({
   ...(await original<typeof JudgeClientModule>()),
@@ -85,12 +84,22 @@ function context(mcp: MCPFixtureApi = mockMCP()): EvalContext {
   };
 }
 
-const simulation: MstClientSimulationResult = {
-  success: true,
-  response: 'It is sunny in London.',
-  toolCalls: [
-    { name: 'get_weather', arguments: { city: 'London' }, output: 'sunny' },
-    { name: 'search', arguments: { q: 'London' } },
+const apiRun: ClientRunResult = {
+  finalText: 'It is sunny in London.',
+  events: [
+    {
+      kind: 'tool_call',
+      source: 'mcp',
+      name: 'get_weather',
+      arguments: { city: 'London' },
+      output: 'sunny',
+    },
+    {
+      kind: 'tool_call',
+      source: 'mcp',
+      name: 'search',
+      arguments: { q: 'London' },
+    },
   ],
   usage: { inputTokens: 100, outputTokens: 20, durationMs: 5 },
 };
@@ -173,13 +182,13 @@ afterEach(() => resetPluginsForTests());
 beforeEach(() => {
   installPlugins([goldenPlugin()]);
   calls.length = 0;
-  vi.mocked(simulateMstClient).mockReset().mockResolvedValue(simulation);
+  vi.mocked(runApiClient).mockReset().mockResolvedValue(apiRun);
 });
 
 describe('golden: the api client (dataset API)', () => {
   it('succeeds with tool evidence and a missed required tool', async () => {
     expect(stable(await runEvalCase(clientCase, context()))).toMatchSnapshot();
-    expect(simulateMstClient).toHaveBeenCalledTimes(1);
+    expect(runApiClient).toHaveBeenCalledTimes(1);
   });
 
   it('maps native tool names through toolMap', async () => {
@@ -192,22 +201,22 @@ describe('golden: the api client (dataset API)', () => {
   });
 
   it('simulation failure', async () => {
-    vi.mocked(simulateMstClient).mockResolvedValue({
-      success: false,
-      toolCalls: [],
+    vi.mocked(runApiClient).mockResolvedValue({
+      finalText: '',
+      events: [],
       error: 'provider rejected the request',
     });
     expect(stable(await runEvalCase(clientCase, context()))).toMatchSnapshot();
   });
 
   it('trials exclude infrastructure errors from the pass rate', async () => {
-    vi.mocked(simulateMstClient)
-      .mockResolvedValueOnce(simulation)
+    vi.mocked(runApiClient)
+      .mockResolvedValueOnce(apiRun)
       // A Node network error, as a socket reports it: by its `code`.
       .mockRejectedValueOnce(
         Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
       )
-      .mockResolvedValueOnce({ ...simulation, response: 'cloudy' });
+      .mockResolvedValueOnce({ ...apiRun, finalText: 'cloudy' });
     const result = await runEvalCase(
       { ...clientCase, trials: 3, passThreshold: 0.5 },
       context()
