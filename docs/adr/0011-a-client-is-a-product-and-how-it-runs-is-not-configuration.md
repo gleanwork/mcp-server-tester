@@ -32,6 +32,7 @@ Every client returns one trace, and the same graders score it. Nothing in gradin
 
 - **MST owns the rules around a trial, the same for every client.**
   - `timeout` means one thing: the time from the prompt to the trace, without app setup. Each client's definition states its default.
+  - Dataset loading rejects empty or whitespace-only inputs for every client, including run-only plugins, before opening a client or submitting any trial. Valid prompt text is preserved exactly, without trimming. Direct native-session calls retain their blank-input guard before submission.
   - One readiness check runs before the first trial: each server connects and lists at least one tool.
   - One reset and diagnosis policy applies to a client that keeps an app open across trials.
   - One redaction pass covers everything MST stores, client telemetry included.
@@ -47,7 +48,7 @@ Every client returns one trace, and the same graders score it. Nothing in gradin
 
 - The eval config changes before 2.0. `mst` becomes `api`, `codex` becomes `codex-cli`, `chatgpt` with `surface: "codex"` becomes `codex-app`, `computerUseProvider` goes, and the option names above change. Each earlier name fails validation and names its replacement, and the migration guide lists them.
 - A stored run keeps the client names it was written with. Readers treat `mst` as `api`, `codex` as `codex-cli`, and `chatgpt` with the Codex surface as `codex-app`.
-- Plugin clients that implement `runBatch` move to `open()`. A plugin client with only `run` doesn't change.
+- Plugin clients that implement `runBatch` move to `open()`. A plugin client with only `run` needs no definition change. Its datasets now reject whitespace-only inputs too; a blank later case cannot be discovered after earlier cases have already run.
 - Code goes: the capability pipeline in `src/evals/externalClient/` (about 1,100 lines, used only by ChatGPT), the simulation result shape, and `externalClient/builtins/macosDesktop.ts`, which nothing uses. ChatGPT's own steps move into its client. Native trace readers move out of `externalClient/`.
 - Some differences stay, because the products differ. Computer Use on macOS has a planner model and its cost; the Linux automation has neither. Results show which one ran.
 - `CONTEXT.md` changes with the renames, not before them.
@@ -55,4 +56,4 @@ Every client returns one trace, and the same graders score it. Nothing in gradin
 
 ## Implementation status
 
-The desktop clients expose sessions. Their existing `runBatch` wrappers still serve dispatch; open-only plugin support and removal of those wrappers are the next step. This ADR remains proposed until the implementation sequence is complete.
+Local and worker collection now use the shared session loop. Built-in and plugin clients may implement `run`, `open`, or both; collection prefers `open`, and run-only clients remain unchanged. The client extension's `runBatch` and the desktop wrappers are removed. Declared-server readiness runs before opening, and Cowork's preparation-dependent readiness runs after opening. Reset retries, diagnosis deadlines, leases and cleanup policy remain unchanged. File, plugin and in-memory datasets reject blank inputs before any client opens or trial runs, for all clients; valid prompt text is unchanged. The canonical dataset input schema owns this rule, with no client validation hook. Per-OS entry points and driver identity removal, then option defaults and OS validation, remain for later steps. This ADR remains proposed until the implementation sequence is complete.

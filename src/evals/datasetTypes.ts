@@ -30,7 +30,8 @@ export interface EvalCase extends ClientFields {
   description?: string;
 
   /**
-   * The user's request the client acts on, sent as its prompt.
+   * The user's request the client acts on, sent as its prompt unchanged.
+   * Must contain at least one non-whitespace character for every client.
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */
@@ -412,7 +413,10 @@ export const EvalCaseSchema = z
     id: z.string().min(1, 'id must not be empty'),
     description: z.string().optional(),
     ...clientFieldSchemas,
-    input: z.string().min(1, 'input must not be empty'),
+    input: z
+      .string()
+      .min(1, 'input must not be empty')
+      .regex(/\S/, 'input must contain at least one non-whitespace character'),
     ...removedKeys({
       mode: 'every case runs on the client. Remove `mode`; write a direct tool call as a Playwright test (`mcp.callTool()` with the matchers)',
       toolName: DIRECT_CALLS,
@@ -464,6 +468,21 @@ export const EvalDatasetSchema = z
     metadata: z.record(z.string(), z.unknown()).optional(),
   })
   .strict();
+
+/**
+ * Check inputs at typed ingestion boundaries too: plugin sources and in-memory
+ * datasets need not have passed through the serialized dataset schema. Reuse
+ * its rule without transforming prompts or changing source-owned metadata.
+ */
+export function assertDatasetInputs(dataset: EvalDataset): void {
+  for (const evalCase of dataset.cases) {
+    const result = EvalCaseSchema.shape.input.safeParse(evalCase.input);
+    if (!result.success)
+      throw new Error(
+        `Dataset "${dataset.name}" case "${evalCase.id}": ${result.error.issues[0]!.message}`
+      );
+  }
+}
 
 /**
  * Type for serialized eval dataset (without Zod schemas)

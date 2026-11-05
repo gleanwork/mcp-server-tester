@@ -26,7 +26,8 @@ import {
   type ConnectorServerConfig,
   type EvalServerConfig,
 } from '../evalConfig.js';
-import { isInfrastructure, thrownEnding } from '../trialEnding.js';
+import { isInfrastructure } from '../trialEnding.js';
+import { collectClientBatch } from '../desktopBatch.js';
 import {
   batchName,
   proxiedBatch,
@@ -286,8 +287,9 @@ export async function collectShard(
     batch: number,
     index: number,
     key: TrialKey,
-    trace: ClientRunResult
-  ): Promise<void> {
+    trace: ClientRunResult,
+    previous?: { trace: ClientRunResult; stored: ClientRunResult }
+  ): Promise<ClientRunResult> {
     // The writes this machine's proxies simulated, marked in the redacted
     // trace.
     const redacted: ClientRunResult = connectors?.simulatedWriteFiles.length
@@ -301,8 +303,33 @@ export async function collectShard(
     // The client's artifacts (a Cowork session folder) are on this machine:
     // copy them beside the result, which the coordinator copies back, and
     // name them relative to the results directory.
+    const relative = `${batch}/${index}.json`;
     let stored = redacted;
-    if (redacted.artifacts) {
+    if (
+      redacted.artifacts &&
+      previous?.trace.artifacts?.dir === redacted.artifacts.dir
+    ) {
+      // An early save may have consumed temporary diagnosis files. Reuse its
+      // copy, or retain its copy failure, rather than recopying missing files.
+      const { artifacts: _source, ...rest } = redacted;
+      stored = {
+        ...rest,
+        ...(previous.stored.artifacts
+          ? { artifacts: previous.stored.artifacts }
+          : {}),
+        ...(previous.stored.diagnostics?.failureKind === 'artifacts'
+          ? {
+              diagnostics: {
+                ...rest.diagnostics,
+                failureKind: 'artifacts' as const,
+              },
+              error: [
+                ...new Set([previous.stored.error, rest.error].filter(Boolean)),
+              ].join(' '),
+            }
+          : {}),
+      };
+    } else if (redacted.artifacts) {
       const dir = `${batch}/${index}.artifacts`;
       const { artifacts, ...rest } = redacted;
       try {
@@ -316,13 +343,16 @@ export async function collectShard(
         };
       }
     }
-    const relative = `${batch}/${index}.json`;
     await writeFileAtomically(
       path.join(options.resultsDir, relative),
       `${JSON.stringify({ format: SHARD_PROTOCOL, kind: 'client-result', key, result: stored })}\n`
     );
     // The runner's rule, so the worker and the coordinator agree (ADR 0010).
     const isInfra = isInfrastructure(stored);
+    if (previous) {
+      if (isInfrastructure(previous.stored)) infra--;
+      else collected--;
+    }
     if (isInfra) infra++;
     else collected++;
     send({
@@ -331,6 +361,7 @@ export async function collectShard(
       status: isInfra ? 'infra' : 'collected',
       path: relative,
     });
+    return stored;
   }
 
   try {
@@ -456,63 +487,40 @@ export async function collectShard(
         final: boolean
       ) => (proxied ? proxied.settle(index, result, final) : result);
       try {
-        if (definition.runBatch) {
-          const reported = new Set<number>();
-          const results = await definition.runBatch(requests, {
+        const reported = new Map<
+          number,
+          { trace: ClientRunResult; stored: ClientRunResult }
+        >();
+        const results = await collectClientBatch(
+          definition,
+          requests,
+          {
             ...context,
             acquire: async (index) => {
               if (requests[index]) await acquire(keyOf(index));
             },
             reportResult: async (index, result) => {
               if (reported.has(index) || !requests[index]) return;
-              reported.add(index);
+              const trace = settled(index, result, false);
               // The batch's scope stays open for the requests still running.
-              await save(
-                batchIndex,
-                index,
-                keyOf(index),
-                settled(index, result, false)
-              );
+              const stored = await save(batchIndex, index, keyOf(index), trace);
+              reported.set(index, { trace, stored });
             },
-          });
-          proxied?.endChecks();
-          // What the client didn't report as it went.
-          for (const [index, result] of results.entries())
-            if (!reported.has(index) && requests[index])
-              await save(
-                batchIndex,
-                index,
-                keyOf(index),
-                settled(index, result, true)
-              );
-          continue;
+          },
+          [...secrets],
+          () => cancelled
+        );
+        // Finalize every result: close can add a cleanup failure, lifecycle
+        // timings can change, and the proxy must settle its final scope.
+        for (const [index, result] of results.entries()) {
+          if (!result || !requests[index]) continue;
+          const trace = settled(index, result, true);
+          const previous = reported.get(index);
+          if (JSON.stringify(trace) !== JSON.stringify(previous?.trace))
+            await save(batchIndex, index, keyOf(index), trace, previous);
         }
-        for (const [index, request] of requests.entries()) {
-          if (cancelled) break;
-          await acquire(keyOf(index));
-          if (cancelled) break;
-          let result: ClientRunResult;
-          try {
-            result = settled(
-              index,
-              await definition.run!(request.input, request.config, context),
-              true
-            );
-          } catch (error) {
-            // Read how it ended from the error itself (a network code, an
-            // abort), as a local run does: only its message crosses the
-            // channel. `save` redacts both.
-            result = {
-              finalText: '',
-              events: [],
-              error: error instanceof Error ? error.message : String(error),
-              ending: thrownEnding(error),
-            };
-          }
-          await save(batchIndex, index, keyOf(index), result);
-        }
-        proxied?.endChecks();
       } finally {
+        proxied?.endChecks();
         await proxy?.close();
       }
     }

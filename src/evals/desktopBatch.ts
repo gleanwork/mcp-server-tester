@@ -31,6 +31,7 @@ import type {
   ClientArtifacts,
   ClientBatchRequest,
   ClientContinuation,
+  ClientDefinition,
   ClientRunContext,
   ClientRunResult,
   ClientSession,
@@ -47,6 +48,7 @@ import {
 import { ClientUnavailableError } from './clientUnavailable.js';
 import { stableJson } from '../skills/skillEntry.js';
 import { checkServersReady, notReadyResult } from './readinessCheck.js';
+import { thrownEnding } from './trialEnding.js';
 
 /**
  * Failed cases in a row after which a batch stops submitting. A reset that
@@ -214,7 +216,24 @@ async function withDiagnosis(
   result: ClientRunResult
 ): Promise<ClientRunResult> {
   if (result.artifacts?.diagnosis) return result;
-  const diagnosis = await session.diagnose?.();
+  let diagnosis: ClientArtifacts | undefined;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    diagnosis = await Promise.race([
+      session.diagnose?.(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('the failure diagnosis timed out')),
+          DIAGNOSE_TIMEOUT_MS
+        );
+      }),
+    ]);
+  } catch {
+    // Diagnosis never costs the trial its result or prevents cleanup.
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!diagnosis) return result;
   return {
     ...result,
@@ -257,9 +276,9 @@ function notSubmitted(message: string): ClientRunResult {
 }
 
 /**
- * Opens the same leased lifecycle used by the compatibility batch loop.
- * The concrete app state stays in this closure, never in a registry. Trial
- * scheduling, readiness and reset retries stay in MST's loop below.
+ * Opens a leased desktop lifecycle. Concrete app state, the native-session
+ * ledger and the existing client's reset retries stay in this closure.
+ * MST's collection loop below owns trial scheduling, readiness and diagnosis.
  */
 export async function openDesktopSession<Session>(
   adapter: DesktopClientAdapter<Session>
@@ -310,7 +329,10 @@ export async function openDesktopSession<Session>(
     return {
       readiness,
       get lifecycle() {
-        return redactedClientRun(adapter.batchTelemetry?.(current), secrets);
+        return redactedClientRun(
+          adapter.batchTelemetry?.(current) ?? {},
+          secrets
+        );
       },
       async run(trial) {
         assertOpen();
@@ -365,7 +387,10 @@ export async function openDesktopSession<Session>(
             `this ${adapter.name} platform cannot reset between cases`
           );
         try {
-          await adapter.reset(current, index);
+          await withRetries(
+            () => adapter.reset!(current, index),
+            adapter.resetRetryDelaysMs ?? []
+          );
           continuation = 'continue';
         } catch (error) {
           continuation = 'reset';
@@ -423,11 +448,117 @@ export async function runDesktopBatch<Session>(
   /** The batch context's `acquire`: room for a case under the run's limits. */
   acquire?: ClientRunContext['acquire']
 ): Promise<ClientRunResult[]> {
+  return runSessionBatch(
+    () => openDesktopSession(adapter),
+    adapter.name,
+    requests,
+    { reportResult, acquire },
+    adapter.secrets
+  );
+}
+
+/**
+ * Collects fixed-settings sessions with the same loop as the leased desktop
+ * helper. Run-only clients get one one-shot session per trial when a worker
+ * needs sessions; local run-only clients keep their concurrent per-case path.
+ */
+export async function collectClientBatch(
+  definition: ClientDefinition,
+  requests: ClientBatchRequest[],
+  context: ClientRunContext,
+  secrets: readonly string[] = [],
+  cancelled?: () => boolean
+): Promise<ClientRunResult[]> {
+  const groups = new Map<string, number[]>();
+  for (const [index, request] of requests.entries()) {
+    const { prompt: _prompt, ...input } = request.input;
+    const key = definition.open
+      ? stableJson({ config: request.config, input })
+      : String(index);
+    const group = groups.get(key) ?? [];
+    group.push(index);
+    groups.set(key, group);
+  }
+  const results: ClientRunResult[] = [];
+  for (const indices of groups.values()) {
+    if (cancelled?.()) break;
+    const group = indices.map((index) => requests[index]!);
+    const first = group[0]!;
+    const collected = await runSessionBatch(
+      async () => {
+        if (definition.open) {
+          const { prompt: _prompt, ...input } = first.input;
+          return definition.open({ config: first.config, input }, context);
+        }
+        if (!definition.run)
+          throw new Error(`Client ${first.config.type} needs run() or open().`);
+        return {
+          async run(trial) {
+            try {
+              return {
+                result: await definition.run!(
+                  { ...first.input, prompt: trial.input.prompt },
+                  first.config,
+                  context
+                ),
+                continuation: 'continue',
+              };
+            } catch (error) {
+              return {
+                result: {
+                  finalText: '',
+                  events: [],
+                  error: error instanceof Error ? error.message : String(error),
+                  ending: thrownEnding(error),
+                },
+                continuation: 'continue',
+              };
+            }
+          },
+          async reset() {},
+          async close() {},
+        };
+      },
+      first.config.type,
+      group,
+      {
+        acquire: context.acquire
+          ? (index) => context.acquire!(indices[index]!)
+          : undefined,
+        reportResult: context.reportResult
+          ? (index, result) => context.reportResult!(indices[index]!, result)
+          : undefined,
+      },
+      secrets,
+      cancelled
+    );
+    for (const [index, result] of collected.entries())
+      results[indices[index]!] = result;
+  }
+  return results;
+}
+
+/** One orchestration loop, for built-in and plugin sessions alike. */
+async function runSessionBatch(
+  openSession: () => Promise<ClientSession>,
+  name: string,
+  requests: ClientBatchRequest[],
+  context: Pick<ClientRunContext, 'reportResult' | 'acquire'>,
+  secrets: readonly string[],
+  cancelled?: () => boolean
+): Promise<ClientRunResult[]> {
   if (!requests.length) return [];
-  const secrets = [...adapter.secrets];
+  const { reportResult, acquire } = context;
   const redact = (error: unknown, fallback: string): string =>
     redactClientError(error, secrets, fallback);
-  const session = await openDesktopSession(adapter);
+  let session: ClientSession;
+  try {
+    session = await openSession();
+  } catch (error) {
+    // A failed open owns its partial cleanup. No credential leaves MST in
+    // the error that the dispatch surfaces, even for a plugin's setup.
+    throw surfaceable(error, secrets, `${name} session could not open.`);
+  }
   const results: ClientRunResult[] = [];
   let executionError: unknown;
   let executionFailed = false;
@@ -445,35 +576,22 @@ export async function runDesktopBatch<Session>(
     // No case is sent: each ends as a setup failure a retry can help.
     if (readiness && !readiness.ready) {
       console.warn(
-        `[mst] The ${adapter.name} batch didn't run: ${redactClientSecrets(readiness.reason, secrets)}`
+        `[mst] The ${name} batch didn't run: ${redactClientSecrets(readiness.reason, secrets)}`
       );
       results.push(...requests.map(() => notReadyResult(readiness)));
     }
     const toRun = readiness && !readiness.ready ? [] : requests;
-    // `the Cowork app`, and `the Codex app`, not `the Codex app app`.
-    const theApp = adapter.name.endsWith(' app')
-      ? `the ${adapter.name}`
-      : `the ${adapter.name} app`;
+    const theApp = name.endsWith(' app') ? `the ${name}` : `the ${name} app`;
     let consecutiveFailures = 0;
     for (const [index, request] of toRun.entries()) {
+      if (cancelled?.()) break;
       if (resetBeforeCase && !blocked) {
         resetBeforeCase = false;
-        if (!adapter.reset)
-          blocked = `Not submitted because ${theApp} could not be ${adapter.resetVerb} after an earlier failed case: this ${adapter.name} platform cannot reset between cases`;
-        else
-          try {
-            await withRetries(
-              () => session.reset(),
-              adapter.resetRetryDelaysMs ?? []
-            );
-          } catch (error) {
-            blocked = `Not submitted because ${theApp} could not be ${adapter.resetVerb} after an earlier failed case: ${redact(
-              error,
-              adapter.resetVerb === 'restarted'
-                ? 'restart failed'
-                : 'reset failed'
-            )}`;
-          }
+        try {
+          await session.reset();
+        } catch (error) {
+          blocked = `Not submitted because ${theApp} could not be reset after an earlier failed case: ${redact(error, 'reset failed')}`;
+        }
       }
       if (blocked) {
         // Without an app in a known state, nothing can be sent safely.
@@ -481,6 +599,7 @@ export async function runDesktopBatch<Session>(
         continue;
       }
       await acquire?.(index);
+      if (cancelled?.()) break;
       const outcome = await session.run({
         caseId: request.caseId,
         trial: request.trial,
@@ -496,19 +615,19 @@ export async function runDesktopBatch<Session>(
       // A copy: the batch adds to its results when it ends.
       await reportResult?.(index, redactedClientRun(result, secrets));
       if (outcome.continuation === 'stop')
-        blocked = `Not submitted because the ${adapter.name} session stopped after an earlier case.`;
+        blocked = `Not submitted because the ${name} session stopped after an earlier case.`;
       consecutiveFailures = result.error ? consecutiveFailures + 1 : 0;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
-        blocked = `Not submitted because the last ${MAX_CONSECUTIVE_FAILURES} ${adapter.name} cases failed in a row (latest: ${redactClientSecrets(result.error ?? '', secrets)}). Check the desktop before running again.`;
+        blocked = `Not submitted because the last ${MAX_CONSECUTIVE_FAILURES} ${name} cases failed in a row (latest: ${redactClientSecrets(result.error ?? '', secrets)}). Check the desktop before running again.`;
     }
   } catch (error) {
     if (results.length > 0) {
       // Cases already ran: keep their traces, and say why the rest didn't.
-      const reason = redact(error, `${adapter.name} batch execution failed.`);
+      const reason = redact(error, `${name} batch execution failed.`);
       // The case that threw may have been submitted: its outcome is unknown.
       if (results.length < requests.length) {
         const failed: ClientRunResult = {
-          ...notSubmitted(`The ${adapter.name} case failed: ${reason}`),
+          ...notSubmitted(`The ${name} case failed: ${reason}`),
           diagnostics: { failureKind: 'process' },
           telemetry: {
             caseExecution: { status: 'failed', continuation: 'blocked' },
@@ -520,7 +639,7 @@ export async function runDesktopBatch<Session>(
       while (results.length < requests.length)
         results.push(
           notSubmitted(
-            `Not submitted because the ${adapter.name} batch stopped: ${reason}`
+            `Not submitted because the ${name} batch stopped: ${reason}`
           )
         );
     } else {
@@ -531,7 +650,7 @@ export async function runDesktopBatch<Session>(
     try {
       await session.close();
     } catch (error) {
-      const message = redact(error, `${adapter.name} batch cleanup failed.`);
+      const message = redact(error, `${name} batch cleanup failed.`);
       for (const result of results) {
         // The desktop's state is unknown, so no case counts; but this is the
         // desktop failing, not the client: an infrastructure failure.
@@ -554,15 +673,21 @@ export async function runDesktopBatch<Session>(
         results[index] = redactedClientRun(
           {
             ...result,
-            telemetry: {
-              ...result.telemetry,
-              ...(lifecycle ? { batchLifecycle: lifecycle } : {}),
-              batchCase: {
-                index,
-                caseId: requests[index]!.caseId,
-                count: requests.length,
-              },
-            },
+            ...(lifecycle
+              ? {
+                  telemetry: {
+                    ...result.telemetry,
+                    ...(Object.keys(lifecycle).length
+                      ? { batchLifecycle: lifecycle }
+                      : {}),
+                    batchCase: {
+                      index,
+                      caseId: requests[index]!.caseId,
+                      count: requests.length,
+                    },
+                  },
+                }
+              : {}),
           },
           secrets
         );
@@ -575,12 +700,12 @@ export async function runDesktopBatch<Session>(
       secrets,
       typeof executionError === 'string'
         ? executionError
-        : `${adapter.name} batch execution failed.`
+        : `${name} batch execution failed.`
     );
     if (cleanupError)
       throw new AggregateError(
         [safeExecutionError, cleanupError],
-        `${adapter.name} execution and batch cleanup failed.`
+        `${name} execution and batch cleanup failed.`
       );
     throw safeExecutionError;
   }

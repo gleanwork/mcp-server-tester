@@ -62,6 +62,27 @@ describe('canonical built-in dataset sources', () => {
           expect(gcs.download).toHaveBeenCalledTimes(1);
         }
       });
+      it('rejects a later blank prompt before selecting cases', async () => {
+        await expect(
+          load({
+            name: 'blank-input',
+            cases: [
+              { id: 'valid', input: 'Find it' },
+              { id: 'blank', input: ' \t\r\n\u00a0' },
+            ],
+          })
+        ).rejects.toThrow(
+          'case "blank" input: input must contain at least one non-whitespace character'
+        );
+      });
+      it('preserves valid prompt whitespace and Unicode', async () => {
+        const input = '\u00a0 \tFind café 📚\r\n第二行 \n';
+        const dataset = await load({
+          name: 'preserved-input',
+          cases: [{ id: 'valid', input }],
+        });
+        expect(dataset.cases[0]?.input).toBe(input);
+      });
       it('preserves canonical client mode, per-case client, trials and judges', async () => {
         const case_ = {
           id: 'question',

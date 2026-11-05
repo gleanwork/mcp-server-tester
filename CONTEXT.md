@@ -27,7 +27,7 @@ One input for a client to act on, with what is expected of the result.
 _Avoid_: example, sample, task, test, scenario
 
 **Input**:
-What a case gives the client to act on: the user's request, sent to the client as its prompt.
+What a case gives the client to act on: the user's request, sent to the client as its prompt unchanged. Dataset loading rejects empty or whitespace-only inputs for every client, including run-only plugins, before opening a session or submitting any trial.
 _Avoid_: scenario, query
 
 **Expected**:
@@ -39,7 +39,7 @@ The MCP client application an eval tests, named canonically: `claude-code`, `cod
 _Avoid_: host, harness, agent, runner, solver, provider
 
 **Client session**:
-One client kept open with fixed options, model, servers and environment. Each trial supplies its identity and prompt. The session returns a `ClientRunResult` and says whether MST can continue, must reset, or must stop. MST owns the readiness, reset and diagnosis policy. Desktop clients expose this through `open()`; dispatch still uses their temporary `runBatch` wrappers.
+One client kept open with fixed options, model, servers and environment. Each trial supplies its identity and prompt. The session returns a `ClientRunResult` and says whether MST can continue, must reset, or must stop. MST owns the readiness, reset and diagnosis policy. Built-in and plugin clients expose this through `open()`; local and worker dispatch use the same session loop. A client may supply `run`, `open`, or both. Run-only clients keep their concurrency and use one-shot sessions where needed. Different fixed settings get separate sessions.
 _Avoid_: driver, capability pipeline
 
 **Model**:

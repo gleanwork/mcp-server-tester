@@ -471,6 +471,10 @@ In an eval case, a judge isn't an assertion any more: it goes in the case's `jud
 - `executeCase` returns `kind: 'completed'` or `'failed'`; `'direct'` fails. Results no longer carry `request.mode`. `JudgeCase.input.tool` is gone (judges see `input.prompt`).
 - `defaultTrials` and `defaultPassThreshold` now apply to every case.
 
+## Case inputs must contain non-whitespace text
+
+Every client's datasets, including run-only plugins, must give each case an `input` with at least one non-whitespace character. MST rejects empty or whitespace-only inputs in file, plugin and in-memory datasets before opening a client or submitting any trial. Replace a blank input with the intended prompt or remove the case. Valid prompts keep their exact whitespace, line endings and Unicode; validation does not trim them. Direct native-session calls retain their blank-input guard before submission.
+
 ## The simulator and the external-host runtime are internal
 
 **Affects:** code that calls `simulateMCPHost()` or `getBuiltinHostConfig()` from `./evals`; the `MCPHostConfig`, `HostType`, `CLIConfig`, `CLIOutputFormat` and `MCPHostSimulator` types; browser and desktop hosts (`hostType: 'browser' | 'desktop'`); the external-host runtime in `./experimental/clients` (`runExternalHostScenario`, driver identity helpers, `getExternalHostConfigJsonSchema` and the driver references, and the external-host config and capability types); plugin clients with `createConfig`; dataset sources that read `context.hostConfig`; and `buildEvalDataset(raw, hostConfig, manifest)`.
@@ -497,8 +501,8 @@ const result = await runEvalCase(
 ```
 
 - The `api` client's options (`provider`, `maxToolCalls`, `temperature`, `skills`, `systemPrompt`, ...) go in `clientOptions`. See [api client options](../mst-client.md#api-client-options).
-- Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run` or `runBatch`) can drive any client application and report its trace.
-- A plugin client still needs `run` or `runBatch`; `createConfig` is gone. The new `open` session contract is transitional: desktop built-ins expose it but retain their batch wrappers until dispatch migrates. Keep existing plugin entry points; run-only clients do not change. See [Client sessions](../evaluation-framework.md#client-sessions-transitional).
+- Browser and desktop hosts, and a caller-authored CLI host, have no replacement. A plugin client (`run`, `open`, or both) can drive any client application and report its trace.
+- A plugin client needs `run`, `open`, or both; `createConfig` and the client extension's `runBatch` are gone. Replace `runBatch` with `open(options, context)`, returning a session with `run`, `reset`, optional `diagnose`, and `close`. MST prefers `open` for collection and owns readiness, reporting, limits and cleanup. Run-only clients do not change. See [Client sessions](../evaluation-framework.md#client-sessions) and the [session migration](./2.0-prereleases.md#client-collection-uses-sessions-runbatch-is-removed).
 - `buildEvalDataset(raw, evalConfig)` takes no host config, and `DatasetSourceContext` has no `hostConfig`.
 - The ChatGPT client still records what it saw on each result (now `clientMetadata`; see [Result fields use the eval vocabulary](#result-fields-use-the-eval-vocabulary)), and `./experimental/clients` still exports the types for it (`ClientMetadata` and the types it uses).
 - The external-host drivers for the Claude desktop chat and Cowork surfaces (driven through Accessibility) are gone; the `cowork` client covers Cowork.

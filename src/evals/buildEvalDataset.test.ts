@@ -102,6 +102,23 @@ describe('buildEvalDataset canonical ingestion', () => {
     ).toThrow(/expected_tool/);
   });
 
+  it('rejects a blank input even when selection would exclude it', () => {
+    expect(() =>
+      buildEvalDataset(
+        {
+          name: 'blank-input',
+          cases: [
+            { id: 'valid', input: 'Find it', tags: ['keep'] },
+            { id: 'blank', input: ' \t\r\n\u00a0' },
+          ],
+        },
+        { ...evalConfig, maxCases: 1, filterTags: ['keep'] }
+      )
+    ).toThrow(
+      'case "blank" input: input must contain at least one non-whitespace character'
+    );
+  });
+
   it('reports invalid canonical cases and empty datasets', () => {
     expect(() =>
       buildEvalDataset(

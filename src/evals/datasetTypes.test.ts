@@ -50,6 +50,25 @@ describe('datasetTypes', () => {
       expect(validateEvalCase(evalCase)).toEqual(evalCase);
     });
 
+    it.each([' ', '\t\r\n', '\u00a0\u2003\u2028\ufeff'])(
+      'rejects a whitespace-only input %j',
+      (input) => {
+        const result = EvalCaseSchema.safeParse({ id: 'blank', input });
+        expect(result.success).toBe(false);
+        expect(result.error?.issues).toEqual([
+          expect.objectContaining({
+            path: ['input'],
+            message: 'input must contain at least one non-whitespace character',
+          }),
+        ]);
+      }
+    );
+
+    it('preserves valid prompt text, including whitespace and Unicode', () => {
+      const input = '\u00a0 \tFind café 📚\r\n第二行\u2028 \ufeff';
+      expect(validateEvalCase({ id: 'valid', input }).input).toBe(input);
+    });
+
     it('validates a case with all fields', () => {
       const evalCase: EvalCase = {
         id: 'test-1',
@@ -687,6 +706,16 @@ describe('the dataset editor schema', () => {
       liveKeys(EvalCaseSchema.shape)
     );
     expect(editor.definitions.EvalCase!.properties).toHaveProperty('judges');
+  });
+
+  it('requires non-whitespace input in both the runtime and editor schemas', () => {
+    const constraint = { type: 'string', minLength: 1, pattern: '\\S' };
+    expect(z.toJSONSchema(EvalCaseSchema.shape.input)).toMatchObject(
+      constraint
+    );
+    expect(editor.definitions.EvalCase!.properties.input).toMatchObject(
+      constraint
+    );
   });
 
   it('declares the same assertion keys as EvalAssertionsSchema, without passesJudge', () => {

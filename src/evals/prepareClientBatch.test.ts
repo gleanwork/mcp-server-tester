@@ -21,14 +21,21 @@ describe('prepareClientBatch redaction', () => {
     const queues = await prepareClientBatch(
       {
         schema: z.object({}),
-        runBatch: async (requests, context) => {
-          const first = traceWith(`${envSecret} token-before-renewal`);
-          await context.reportResult?.(0, first);
-          // The token renews mid-batch.
-          delivered.push('token-after-renewal');
-          return requests.map((_, index) =>
-            index === 0 ? first : traceWith(`${fileSecret} token-after-renewal`)
-          );
+        async open() {
+          let index = 0;
+          return {
+            async run() {
+              // The token renews between trials of the open session.
+              const result =
+                index++ === 0
+                  ? traceWith(`${envSecret} token-before-renewal`)
+                  : traceWith(`${fileSecret} token-after-renewal`);
+              delivered.push('token-after-renewal');
+              return { result, continuation: 'continue' };
+            },
+            async reset() {},
+            async close() {},
+          };
         },
       },
       [{ id: 'a', input: 'x', trials: 2 }],
@@ -44,7 +51,7 @@ describe('prepareClientBatch redaction', () => {
       }
     );
     const stored = [...early, ...(queues?.get('a') ?? [])];
-    expect(stored).toHaveLength(3);
+    expect(stored).toHaveLength(4);
     const text = JSON.stringify(
       stored.map(({ artifacts: _, ...rest }) => rest)
     );

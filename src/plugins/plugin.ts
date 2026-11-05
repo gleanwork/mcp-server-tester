@@ -159,7 +159,7 @@ const TOP_LEVEL_KEYS = new Set<string>([
 /** The functions an extension of each kind must provide (any one of them). */
 const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   datasetSources: ['load'],
-  clients: ['run', 'runBatch'],
+  clients: ['run', 'open'],
   judges: ['evaluate'],
   pairwiseJudges: ['compare'],
   metrics: ['compute'],
@@ -247,6 +247,12 @@ function extensionProblem(
   const schema = definition.schema as { safeParse?: unknown } | undefined;
   if (typeof schema?.safeParse !== 'function')
     return `${label} needs a Zod schema`;
+  if (kind === 'clients') {
+    if ('runBatch' in definition)
+      return `${label}: runBatch was removed; implement open(options, context) and return a session with run, reset and close instead. Run-only clients do not change`;
+    if ('open' in definition && typeof definition.open !== 'function')
+      return `${label}: open must be a function returning a client session`;
+  }
   const required = REQUIRED_FUNCTIONS[kind];
   if (!required.some((fn) => typeof definition[fn] === 'function'))
     return `${label} needs ${describeFunctions(required)}`;

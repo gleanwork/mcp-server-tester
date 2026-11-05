@@ -131,18 +131,55 @@ const schema = z.object({ type: z.string() }).passthrough();
 export default {
   meta: { name: 'shard-test-plugin', namespace: 'shard-test' },
   clients: {
+    lifecycle: {
+      schema,
+      evidence: 'structured',
+      async open(options) {
+        let closed = false;
+        return {
+          get lifecycle() {
+            return { closed };
+          },
+          async run(trial) {
+            return {
+              result: {
+                finalText: trial.input.prompt,
+                events: [],
+                artifacts: {
+                  dir: String(options.config.artifactDirectory),
+                  include: ['**'],
+                  temporary: true,
+                },
+              },
+              continuation: 'continue',
+            };
+          },
+          async reset() {},
+          async close() {
+            closed = true;
+            if (options.config.failClose) throw new Error('cleanup failed');
+          },
+        };
+      },
+    },
     probe: { schema, evidence: 'structured', run: probe },
     batch: {
       schema,
       evidence: 'structured',
-      async runBatch(requests, context) {
-        const results: ClientRunResult[] = [];
-        for (const [index, request] of requests.entries()) {
-          const result = await probe(request.input, request.config);
-          await context.reportResult?.(index, result);
-          results.push(result);
-        }
-        return results;
+      async open(options) {
+        return {
+          async run(trial) {
+            return {
+              result: await probe(
+                { ...options.input, ...trial.input },
+                options.config
+              ),
+              continuation: 'continue',
+            };
+          },
+          async reset() {},
+          async close() {},
+        };
       },
     },
   },

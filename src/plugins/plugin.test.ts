@@ -23,12 +23,11 @@ describe('assertPlugin', () => {
     expect(assertPlugin(value, './acme.js')).toBe(value);
   });
 
-  it('accepts open alongside the existing batch entry point', () => {
-    const value = plugin({
-      clients: {
-        desk: { schema, open: async () => ({}), runBatch: async () => [] },
-      },
-    });
+  it.each([
+    { open: async () => ({}) },
+    { run: async () => ({}), open: async () => ({}) },
+  ])('accepts open-only and combined clients: %s', (entryPoints) => {
+    const value = plugin({ clients: { desk: { schema, ...entryPoints } } });
     expect(assertPlugin(value, './acme.js')).toBe(value);
   });
 
@@ -89,12 +88,21 @@ describe('assertPlugin', () => {
 
   it.each([
     ['datasetSources', { schema }, 'datasetSources.x needs a load function'],
-    ['clients', { schema }, 'clients.x needs a run or runBatch function'],
-    // Session dispatch is transitional: open-only plugins cannot load yet.
+    ['clients', { schema }, 'clients.x needs a run or open function'],
     [
       'clients',
-      { schema, open: async () => ({}) },
-      'clients.x needs a run or runBatch function',
+      { schema, run: async () => ({}), open: true },
+      'clients.x: open must be a function returning a client session',
+    ],
+    [
+      'clients',
+      { schema, open: async () => ({}), runBatch: async () => [] },
+      'clients.x: runBatch was removed; implement open(options, context)',
+    ],
+    [
+      'clients',
+      { schema, runBatch: async () => [] },
+      'clients.x: runBatch was removed; implement open(options, context)',
     ],
     [
       'clients',

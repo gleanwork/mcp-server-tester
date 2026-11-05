@@ -152,28 +152,21 @@ const plugin: Plugin = {
       schema: ScriptedConfig,
       evidence: 'structured',
       headless: true,
-      async runBatch(requests) {
-        // Every case uses the same servers: connect once for the batch.
-        const pools = new Map<string, Connection[]>();
-        try {
-          const results: ClientRunResult[] = [];
-          for (const request of requests) {
-            const key = JSON.stringify(request.input.servers);
-            let pool = pools.get(key);
-            if (!pool) {
-              pool = await connect(request.input.servers);
-              pools.set(key, pool);
-            }
-            results.push(
-              await runScript(ScriptedConfig.parse(request.config), pool)
-            );
-          }
-          return results;
-        } finally {
-          await Promise.allSettled(
-            [...pools.values()].flat().map(({ client }) => client.close())
-          );
-        }
+      async open(options) {
+        const config = ScriptedConfig.parse(options.config);
+        const pool = await connect(options.input.servers);
+        return {
+          async run() {
+            return {
+              result: await runScript(config, pool),
+              continuation: 'continue',
+            };
+          },
+          async reset() {},
+          async close() {
+            await Promise.allSettled(pool.map(({ client }) => client.close()));
+          },
+        };
       },
     },
   },

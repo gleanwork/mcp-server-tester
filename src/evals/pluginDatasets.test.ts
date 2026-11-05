@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { runEval } from './runEval.js';
 import { datasetRequest } from './builtinDatasetSources.js';
 import { isDatasetReference, loadEvalConfigFromObject } from './evalConfig.js';
-import type { DatasetRequest } from './evalFrameworkTypes.js';
+import type { ClientDefinition, DatasetRequest } from './evalFrameworkTypes.js';
 import { loadEvalDatasetFromObject } from './datasetLoader.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import { assertPlugin, type Plugin } from '../plugins/plugin.js';
@@ -194,6 +194,117 @@ describe('dataset source fields', () => {
     );
   });
 });
+
+describe.each(['file', 'plugin', 'memory'] as const)(
+  '%s dataset input validation',
+  (source) => {
+    describe.each(['run-only', 'session'] as const)('%s client', (mode) => {
+      async function fixture(input: string) {
+        const calls: string[] = [];
+        const seenPrompts: string[] = [];
+        const dataset = {
+          name: 'input-validation',
+          cases: [
+            { id: 'first', input: 'First valid prompt' },
+            { id: 'second', input },
+          ],
+        };
+        const definition: ClientDefinition = {
+          schema: NoOptions,
+          ...(mode === 'run-only'
+            ? {
+                async run(trial) {
+                  calls.push('run');
+                  seenPrompts.push(trial.prompt);
+                  return { finalText: 'ok', events: [] };
+                },
+              }
+            : {
+                async open() {
+                  calls.push('open');
+                  return {
+                    async run(trial) {
+                      calls.push('submit');
+                      seenPrompts.push(trial.input.prompt);
+                      return {
+                        result: { finalText: 'ok', events: [] },
+                        continuation: 'continue',
+                      };
+                    },
+                    async reset() {},
+                    async close() {
+                      calls.push('close');
+                    },
+                  };
+                },
+              }),
+        };
+        const inputPlugin: Plugin = {
+          meta: { name: 'input-plugin', namespace: 'input' },
+          clients: { record: definition },
+          datasetSources: {
+            raw: {
+              schema: NoOptions,
+              // Return raw cases: MST must validate them even if a plugin doesn't.
+              async load() {
+                return dataset;
+              },
+            },
+          },
+        };
+        if (source === 'file')
+          await fs.writeFile(
+            path.join(dir, 'cases.json'),
+            JSON.stringify(dataset)
+          );
+        const configPath = path.join(dir, 'eval.json');
+        await fs.writeFile(
+          configPath,
+          JSON.stringify({
+            name: 'input-validation',
+            client: 'input/client/record',
+            datasets: [
+              source === 'plugin' ? 'input/dataset/raw' : './cases.json',
+            ],
+            servers: {},
+          })
+        );
+        return {
+          calls,
+          seenPrompts,
+          run: () =>
+            runEval({
+              configPath,
+              rootDir: dir,
+              plugins: [inputPlugin],
+              ...(source === 'memory' ? { loadedDatasets: [dataset] } : {}),
+            }),
+        };
+      }
+
+      it('rejects a later blank case before opening or submitting any trial', async () => {
+        const f = await fixture(' \t\r\n\u00a0\u2003\ufeff');
+        await expect(f.run()).rejects.toThrow(
+          /case "second".*input must contain at least one non-whitespace character/
+        );
+        expect(f.calls).toEqual([]);
+        expect(f.seenPrompts).toEqual([]);
+      });
+
+      it('submits valid prompts without trimming or normalizing them', async () => {
+        const input = '\u00a0 \tFind café 📚\r\n第二行 \n';
+        const f = await fixture(input);
+        await f.run();
+        expect(f.seenPrompts).toEqual(['First valid prompt', input]);
+        expect(f.calls).toEqual(
+          mode === 'run-only'
+            ? ['run', 'run']
+            : ['open', 'submit', 'submit', 'close']
+        );
+      });
+    });
+  }
+);
 
 describe('runs with a plugin dataset', () => {
   it('reads the latest snapshot by default and records it in run.json', async () => {

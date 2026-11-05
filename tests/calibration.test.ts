@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { collectClientBatch } from '../src/evals/desktopBatch.js';
 import { defaultSplit } from '../src/evals/labels.js';
 import type { ClientBatchRequest } from '../src/evals/evalFrameworkTypes.js';
 import {
@@ -161,10 +162,9 @@ describe('the calibration set', () => {
         ...c.clientOptions,
       },
     }));
-    const results = await client.runBatch!(
-      requests,
-      {} as Parameters<NonNullable<typeof client.runBatch>>[1]
-    );
+    const results = await collectClientBatch(client, requests, {
+      evalConfig: { name: 'calibration', datasets: [] },
+    });
     const trace = new Map(
       cases.map((c, index) => [c.metadata.kind, results[index]!])
     );

@@ -52,12 +52,13 @@
         },
         "input": {
           "type": "string",
-          "description": "The user's request the client acts on, sent as its prompt.",
+          "description": "The user's request the client acts on, sent as its prompt unchanged. Must contain at least one non-whitespace character for every client.",
           "examples": [
             "Find recent docs about the example MCP server",
             "Who leads the developer platform team?"
           ],
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "\\S"
         },
         "client": {
           "type": "string",

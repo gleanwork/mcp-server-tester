@@ -7,7 +7,10 @@ import { gradeRun, runEval } from './runEval.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
-import type { ClientDefinition } from './evalFrameworkTypes.js';
+import type {
+  ClientBatchRequest,
+  ClientRunResult,
+} from './evalFrameworkTypes.js';
 
 const dirs: string[] = [];
 
@@ -21,11 +24,11 @@ afterEach(async () => {
 });
 
 /**
- * A two-variant eval on a batch client; `runBatch` decides each batch. With
+ * A two-variant eval on a session client; `prepare` plans two traces at open. With
  * `datasets: 2`, each variant runs two datasets (one batch each).
  */
 async function fixture(
-  runBatch: NonNullable<ClientDefinition['runBatch']>,
+  prepare: (requests: ClientBatchRequest[]) => Promise<ClientRunResult[]>,
   {
     datasets = 1,
     judgeError,
@@ -54,7 +57,27 @@ async function fixture(
       batch: {
         schema: z.object({ type: z.string() }),
         evidence: 'structured',
-        runBatch,
+        async open(options) {
+          const requests = ['one', 'two'].map((caseId) => ({
+            ...options,
+            caseId,
+            trial: 0,
+            input: { ...options.input, prompt: caseId },
+          }));
+          const traces = await prepare(requests);
+          if (traces.length !== requests.length)
+            throw new Error(
+              'Session fixture returned an incomplete trace set; refusing to resubmit.'
+            );
+          let index = 0;
+          return {
+            async run() {
+              return { result: traces[index++]!, continuation: 'continue' };
+            },
+            async reset() {},
+            async close() {},
+          };
+        },
       },
     },
     datasetSources: {

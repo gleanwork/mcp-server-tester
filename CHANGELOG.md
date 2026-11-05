@@ -19,7 +19,8 @@
 
 ## Unreleased
 
-- Cowork, ChatGPT and Codex app expose the `open` session contract, with types in `./evals`. Their `runBatch` wrappers and existing plugin validation remain during the dispatch migration. See [the migration guide](docs/migrations/2.0-prereleases.md#desktop-clients-expose-sessions-batch-entry-points-remain).
+- Dataset loading rejects whitespace-only inputs for every client, including run-only plugins, before opening a client or submitting any trial. File, plugin and in-memory datasets use the same input rule. Valid prompts retain their exact text; the dataset editor schema matches the rule. Direct native-session blank-input guards remain. See [the migration guide](docs/migrations/2.0-prereleases.md#case-inputs-must-contain-non-whitespace-text).
+- Local and worker collection use `ClientDefinition.open` sessions for built-in and plugin clients. Removed the client extension's `runBatch`; definitions may implement `run`, `open`, or both. Run-only plugins keep their execution behavior and concurrency. Session types remain in `./evals`; stored results and run-format schemas are unchanged. See [the migration guide](docs/migrations/2.0-prereleases.md#client-collection-uses-sessions-runbatch-is-removed).
 - Built-in clients return `ClientRunResult` directly. Removed `MstClientSimulationResult`; Playwright evals use the same assertion response as `mst run`. See [the migration guide](docs/migrations/2.0-prereleases.md#built-in-clients-return-the-common-result).
 
 ## v2.0.0-beta.14 (2026-10-23)
