@@ -138,18 +138,22 @@ export default {
         let closed = false;
         return {
           get lifecycle() {
-            return { closed };
+            return options.config.withoutLifecycle ? undefined : { closed };
           },
           async run(trial) {
             return {
               result: {
                 finalText: trial.input.prompt,
                 events: [],
-                artifacts: {
-                  dir: String(options.config.artifactDirectory),
-                  include: ['**'],
-                  temporary: true,
-                },
+                ...(typeof options.config.artifactDirectory === 'string'
+                  ? {
+                      artifacts: {
+                        dir: options.config.artifactDirectory,
+                        include: ['**'],
+                        temporary: true,
+                      },
+                    }
+                  : {}),
               },
               continuation: 'continue',
             };

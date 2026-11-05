@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { collectClientBatch } from './desktopBatch.js';
+import { ClientUnavailableError } from './clientUnavailable.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import type {
   ClientBatchRequest,
@@ -172,6 +173,39 @@ describe('client session collection', () => {
     );
     await expect(failed).rejects.toThrow('setup failed [REDACTED]');
   });
+
+  it.each([
+    { phase: 'open', error: new Error('first group failed') },
+    { phase: 'run', error: new Error('first group failed') },
+    {
+      phase: 'open',
+      error: new ClientUnavailableError('first group unavailable'),
+    },
+    {
+      phase: 'run',
+      error: new ClientUnavailableError('first group unavailable'),
+    },
+  ])(
+    'keeps the thrown error when the first group fails in $phase: $error.name',
+    async ({ phase, error }) => {
+      const batch = requests();
+      batch[1]!.config.model = 'different';
+      const close = vi.fn(async () => {});
+      const run = vi.fn(async () => {
+        throw error;
+      });
+      const open = vi.fn(async () => {
+        if (phase === 'open') throw error;
+        return session({ run, close });
+      });
+      await expect(
+        collectClientBatch(definition(open), batch, context)
+      ).rejects.toBe(error);
+      expect(open).toHaveBeenCalledOnce();
+      expect(run).toHaveBeenCalledTimes(phase === 'run' ? 1 : 0);
+      expect(close).toHaveBeenCalledTimes(phase === 'run' ? 1 : 0);
+    }
+  );
 
   it('closes on cancellation between fixed-settings groups and leaves unsent indices missing', async () => {
     const batch = requests();

@@ -504,7 +504,11 @@ export async function collectShard(
               const trace = settled(index, result, false);
               // The batch's scope stays open for the requests still running.
               const stored = await save(batchIndex, index, keyOf(index), trace);
-              reported.set(index, { trace, stored });
+              // Cleanup can mutate the live result after this early save.
+              reported.set(index, {
+                trace: structuredClone(trace),
+                stored: structuredClone(stored),
+              });
             },
           },
           [...secrets],

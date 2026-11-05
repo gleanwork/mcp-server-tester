@@ -484,56 +484,93 @@ export async function collectClientBatch(
     if (cancelled?.()) break;
     const group = indices.map((index) => requests[index]!);
     const first = group[0]!;
-    const collected = await runSessionBatch(
-      async () => {
-        if (definition.open) {
-          const { prompt: _prompt, ...input } = first.input;
-          return definition.open({ config: first.config, input }, context);
-        }
-        if (!definition.run)
-          throw new Error(`Client ${first.config.type} needs run() or open().`);
-        return {
-          async run(trial) {
-            try {
-              return {
-                result: await definition.run!(
-                  { ...first.input, prompt: trial.input.prompt },
-                  first.config,
-                  context
-                ),
-                continuation: 'continue',
-              };
-            } catch (error) {
-              return {
-                result: {
-                  finalText: '',
-                  events: [],
-                  error: error instanceof Error ? error.message : String(error),
-                  ending: thrownEnding(error),
-                },
-                continuation: 'continue',
-              };
-            }
+    let opened = false;
+    try {
+      const collected = await runSessionBatch(
+        async () => {
+          if (definition.open) {
+            const { prompt: _prompt, ...input } = first.input;
+            const session = await definition.open(
+              { config: first.config, input },
+              context
+            );
+            opened = true;
+            return session;
+          }
+          if (!definition.run)
+            throw new Error(
+              `Client ${first.config.type} needs run() or open().`
+            );
+          return {
+            async run(trial) {
+              try {
+                return {
+                  result: await definition.run!(
+                    { ...first.input, prompt: trial.input.prompt },
+                    first.config,
+                    context
+                  ),
+                  continuation: 'continue',
+                };
+              } catch (error) {
+                return {
+                  result: {
+                    finalText: '',
+                    events: [],
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                    ending: thrownEnding(error),
+                  },
+                  continuation: 'continue',
+                };
+              }
+            },
+            async reset() {},
+            async close() {},
+          };
+        },
+        first.config.type,
+        group,
+        {
+          acquire: context.acquire
+            ? (index) => context.acquire!(indices[index]!)
+            : undefined,
+          reportResult: context.reportResult
+            ? (index, result) => context.reportResult!(indices[index]!, result)
+            : undefined,
+        },
+        secrets,
+        cancelled
+      );
+      for (const [index, result] of collected.entries())
+        results[indices[index]!] = result;
+    } catch (error) {
+      if (!definition.open || !results.length) throw error;
+      // Earlier groups are finalized, including close. Keep them at their
+      // original indices; only unfinished requests inherit this failure.
+      const reason = redactClientError(
+        error,
+        secrets,
+        `${first.config.type} session failed.`
+      );
+      for (const index of requests.keys()) {
+        if (results[index]) continue;
+        results[index] = notSubmitted(
+          `Not submitted because the ${first.config.type} batch stopped: ${reason}`
+        );
+      }
+      if (opened) {
+        // The first case may have been submitted before the session threw.
+        results[indices[0]!] = {
+          ...notSubmitted(`The ${first.config.type} case failed: ${reason}`),
+          diagnostics: { failureKind: 'process' },
+          telemetry: {
+            caseExecution: { status: 'failed', continuation: 'blocked' },
           },
-          async reset() {},
-          async close() {},
         };
-      },
-      first.config.type,
-      group,
-      {
-        acquire: context.acquire
-          ? (index) => context.acquire!(indices[index]!)
-          : undefined,
-        reportResult: context.reportResult
-          ? (index, result) => context.reportResult!(indices[index]!, result)
-          : undefined,
-      },
-      secrets,
-      cancelled
-    );
-    for (const [index, result] of collected.entries())
-      results[indices[index]!] = result;
+      }
+      break;
+    }
   }
   return results;
 }
