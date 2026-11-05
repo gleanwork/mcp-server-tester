@@ -1,11 +1,23 @@
 import { simulationToClientRun } from './clientTrace.js';
 import type { MstClientSimulationResult } from './mstClient/types.js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import { runEval, type RunEvalOptions } from './runEval.js';
+import {
+  READINESS_SERVER,
+  startReadinessHttpServer,
+} from '../../tests/mocks/readyServers.js';
 import {
   installPlugins,
   loadedNamespaces,
@@ -33,6 +45,16 @@ function expectedAnswer(answer: unknown): unknown {
 
 const dirs: string[] = [];
 let sequence = 0;
+
+// An HTTP server MST's readiness check reaches, at an `/eval` path.
+let evalUrl = '';
+let evalServer: { close: () => Promise<void> } | undefined;
+beforeAll(async () => {
+  const server = await startReadinessHttpServer();
+  evalUrl = `${new URL(server.url).origin}/eval`;
+  evalServer = server;
+});
+afterAll(() => evalServer?.close());
 
 interface TestPlugin extends Plugin {
   clients: Record<string, ClientDefinition>;
@@ -151,7 +173,7 @@ describe('eval review regressions', () => {
       servers: {
         'server-1': {
           transport: 'http',
-          serverUrl: 'https://example.com/eval',
+          serverUrl: evalUrl,
           auth: { accessTokenEnv: 'SUITE_DUMMY_TOKEN' },
         },
       },
@@ -239,7 +261,7 @@ describe('eval review regressions', () => {
       const server = {
         transport: 'http' as const,
         label: 'protected',
-        serverUrl: 'https://example.com/eval',
+        serverUrl: evalUrl,
         auth: { accessTokenEnv: 'SUITE_DUMMY_TOKEN' },
       };
       const { label, ...unlabelled } = server;
@@ -768,14 +790,14 @@ describe('eval review regressions', () => {
       servers: {
         one: {
           transport: 'http',
-          serverUrl: 'https://example.com/eval',
+          serverUrl: evalUrl,
           headers: { 'X-Secret': 'header-secret' },
           auth: { accessTokenEnv: 'REVIEW_TOKEN' },
         },
         two: {
           transport: 'stdio',
-          command: 'test',
-          args: ['arg-secret'],
+          command: process.execPath,
+          args: [READINESS_SERVER, 'arg-secret'],
           env: { KEY: 'env-secret' },
         },
       },

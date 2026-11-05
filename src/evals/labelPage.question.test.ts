@@ -3,7 +3,15 @@
  * built-in rubric's text, a custom rubric's, or --question. The judges run
  * on a mocked judge client.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +26,17 @@ import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { startLabelPage, type LabelPageServer } from './labelPage.js';
 import { runEval } from './runEval.js';
+import {
+  startReadinessHttpServer,
+  type ReadinessHttpServer,
+} from '../../tests/mocks/readyServers.js';
+
+// A server MST's readiness check reaches, in process: no spawn per batch.
+let docsServer: ReadinessHttpServer;
+beforeAll(async () => {
+  docsServer = await startReadinessHttpServer();
+});
+afterAll(() => docsServer.close());
 
 vi.mock('../judge/judgeClient.js', async (original) => ({
   ...(await original<typeof JudgeClientModule>()),
@@ -120,7 +139,7 @@ async function storedRun(): Promise<string> {
       datasets: ['./dataset.json'],
       client: 'lq/client/scripted',
       redactStoredResponses: false,
-      servers: { docs: { transport: 'stdio', command: 'docs-server' } },
+      servers: { docs: { transport: 'http', serverUrl: docsServer.url } },
       judges: [
         { type: 'rubric', rubric: 'correctness', ...judge },
         { type: 'task-completion', ...judge },

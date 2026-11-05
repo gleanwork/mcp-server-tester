@@ -27,7 +27,12 @@ import {
   type EvalServerConfig,
 } from '../evalConfig.js';
 import { isInfrastructure, thrownEnding } from '../trialEnding.js';
-import { proxiedBatch, type ProxiedBatch } from '../prepareClientBatch.js';
+import {
+  batchName,
+  proxiedBatch,
+  type ProxiedBatch,
+} from '../prepareClientBatch.js';
+import { readinessRetryDelaysMs, readyBatch } from '../readinessCheck.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
@@ -354,6 +359,9 @@ export async function collectShard(
       // Which run a host's own telemetry belongs to (`telemetry.host`).
       MST_RUN_ID: bundle.runId,
     };
+    // A malformed or retired readiness setting fails the shard before any
+    // batch starts.
+    readinessRetryDelaysMs(runtimeEnv);
     // Servers arrive as declared; their secrets come from this machine's
     // environment and the coordinator's `tokens`.
     const serverEnv = { ...process.env, ...runtimeEnv };
@@ -414,19 +422,31 @@ export async function collectShard(
         bundle.evalConfig,
         batch.variant
       );
-      let proxy: ToolSurfaceProxy | undefined;
-      let proxied: ProxiedBatch | undefined;
-      if (toolMetadata && usesToolSurfaceProxy(definition)) {
-        const servers = declared[0]!.input.servers;
-        proxy = await startToolSurfaceProxy(servers, toolMetadata);
-        proxied = proxiedBatch(
-          definition,
-          declared,
-          proxy,
-          servers,
-          toolMetadata.id
-        );
+      // MST's readiness check on this machine, before the batch's first
+      // trial and before the proxy starts, as in a local run. When a server
+      // isn't ready, no trial of the batch runs.
+      const servers = declared[0]!.input.servers;
+      const ready = await readyBatch(
+        definition,
+        servers,
+        toolMetadata && usesToolSurfaceProxy(definition)
+          ? () => startToolSurfaceProxy(servers, toolMetadata)
+          : undefined,
+        {
+          env: runtimeEnv,
+          batch: batchName(batch.requests[0]!.config.type, batch),
+        }
+      );
+      if (ready.notReady) {
+        for (const index of declared.keys())
+          await save(batchIndex, index, keyOf(index), ready.notReady());
+        continue;
       }
+      const proxy: ToolSurfaceProxy | undefined = ready.proxy;
+      const proxied: ProxiedBatch | undefined =
+        proxy && toolMetadata
+          ? proxiedBatch(definition, declared, proxy, servers, toolMetadata.id)
+          : undefined;
       const requests = proxied?.requests ?? declared;
       const context = proxied ? withoutToolVariant(baseContext) : baseContext;
       // A trace under the tools' original names (`final`: its request is over).

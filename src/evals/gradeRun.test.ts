@@ -21,6 +21,8 @@ import {
 } from './runFormat.js';
 import { storedRunTraces } from './telemetry/runTraces.js';
 import { withoutTrialArtifacts } from './trialArtifacts.js';
+// A stdio server: some tests here stub `fetch`, which an HTTP probe uses.
+import { readyStdioServer } from '../../tests/mocks/readyServers.js';
 
 const dirs: string[] = [];
 
@@ -196,7 +198,7 @@ async function setup(
         ...(options.trials ? { trials: options.trials } : {}),
         redactStoredResponses: options.redact ?? false,
         servers: {
-          docs: { transport: 'stdio', command: 'docs-server' },
+          docs: readyStdioServer(),
         },
         judges: [{ type: 'gr/judge/keyword', keyword, threshold: 1 }],
         pairwiseJudges: ['gr/pairwise-judge/longer'],

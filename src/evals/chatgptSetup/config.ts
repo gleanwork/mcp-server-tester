@@ -41,11 +41,6 @@ export function chatgptServers(
           args: server.args,
           cwd: server.cwd,
           env: server.env,
-          // MST's own readiness rule (as for a dry-run proxy): the direct
-          // preflight checks it; the app never sees it.
-          ...(server.minTools !== undefined
-            ? { minTools: server.minTools }
-            : {}),
         };
       if (
         server.transport !== 'http' ||

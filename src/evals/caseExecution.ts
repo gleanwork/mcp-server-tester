@@ -44,6 +44,8 @@ import {
 import { simulateMstClient } from './mstClient/simulation.js';
 import type { MstClientSimulationResult } from './mstClient/types.js';
 import { endingOf, thrownEnding } from './trialEnding.js';
+import { readinessSetup, readyBatch } from './readinessCheck.js';
+import { batchName } from './prepareClientBatch.js';
 
 /** The client payload validators and reports read: the simulation shape. */
 export type ClientResponse = MstClientSimulationResult & {
@@ -292,11 +294,46 @@ function clientExecutor(
   options: EvalCaseExecutorOptions
 ): (evalCase: EvalCase) => Promise<CaseExecution> {
   const { servers, evalConfig, variant, env, batchTraces } = options;
+  // MST's readiness check for the executor's batch (a variant's cases of
+  // one dataset), before its first trial, and before the proxy starts when
+  // proxied. It follows the client each case runs on, which a case can name
+  // itself: one check per setup (proxied, direct, or left to a client that
+  // checks after it prepares its app), shared by the cases with that setup.
+  // A batch client was checked before its batch ran.
+  const readiness = new Map<
+    string,
+    Promise<(() => ClientRunResult) | undefined>
+  >();
+  const notReady = (definition: ClientDefinition, client: string) => {
+    const startProxy =
+      options.toolVariant && usesToolSurfaceProxy(definition)
+        ? options.toolVariant.proxy
+        : undefined;
+    const setup = readinessSetup(definition, startProxy !== undefined);
+    let ready = readiness.get(setup);
+    if (!ready) {
+      ready = readyBatch(definition, servers, startProxy, {
+        ...(env ? { env } : {}),
+        batch: batchName(client, { variant }),
+      }).then((result) => result.notReady);
+      readiness.set(setup, ready);
+    }
+    return ready;
+  };
   return async (evalCase) => {
     // The eval resolves a case's own client in full (see runEval).
     const declaration =
       (clientPatchOf(evalCase) as ClientConfig | undefined) ?? options.client;
     const definition = getClient(declaration.type);
+    const notReadyResult = batchTraces
+      ? undefined
+      : await notReady(definition, declaration.type);
+    if (notReadyResult)
+      return clientRunToExecution(
+        notReadyResult(),
+        definition.evidence ?? 'none',
+        servers
+      );
     if (batchTraces) {
       const trace = batchTraces.get(evalCase.id)?.shift();
       if (!trace)

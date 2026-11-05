@@ -1,4 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -27,6 +35,17 @@ import type {
 import { labelExport, labelImport } from '../cli/commands/label/index.js';
 import { checkJudgeCommand } from '../cli/commands/judges/check.js';
 import { open } from '../cli/commands/open/index.js';
+import {
+  startReadinessHttpServer,
+  type ReadinessHttpServer,
+} from '../../tests/mocks/readyServers.js';
+
+// A server MST's readiness check reaches, in process: no spawn per batch.
+let docsServer: ReadinessHttpServer;
+beforeAll(async () => {
+  docsServer = await startReadinessHttpServer();
+});
+afterAll(() => docsServer.close());
 
 const dirs: string[] = [];
 
@@ -194,7 +213,7 @@ async function evalDirectory(
       datasets: ['./dataset.json'],
       client: 'ck/client/scripted',
       redactStoredResponses: false,
-      servers: { docs: { transport: 'stdio', command: 'docs-server' } },
+      servers: { docs: { transport: 'http', serverUrl: docsServer.url } },
       judges: [
         {
           type: 'ck/judge/keyword',

@@ -99,6 +99,7 @@ import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
+import { readinessRetryDelaysMs } from './readinessCheck.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
@@ -1569,6 +1570,9 @@ async function evaluate(
       )
     : {};
   const env = { ...ambientEnv, ...fileSecrets };
+  // A malformed or retired readiness setting fails the run now, before any
+  // trial. A regrade runs no client.
+  if (!regrade) readinessRetryDelaysMs(env);
 
   const namespaces = await loadEvalPlugins({
     configPath: options.configPath,
@@ -2268,7 +2272,8 @@ async function evaluate(
         const mcp = client
           ? createMCPFixture(client, undefined, { authType: 'api-token' })
           : undefined;
-        // Started on first use, for hosts that connect to their servers themselves.
+        // Started on first use, for hosts that connect to their servers
+        // themselves. A start that fails is tried again by the next batch.
         const toolMetadata = variantToolMetadata(evalConfig, variant);
         let proxy: Promise<ToolSurfaceProxy> | undefined;
         const toolVariant =
@@ -2279,7 +2284,10 @@ async function evaluate(
                   (proxy ??= startToolSurfaceProxy(
                     resolvedServers,
                     toolMetadata
-                  )),
+                  ).catch((error: unknown) => {
+                    proxy = undefined;
+                    throw error;
+                  })),
               }
             : undefined;
 

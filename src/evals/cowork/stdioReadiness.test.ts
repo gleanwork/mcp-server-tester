@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { verifyCoworkMcpServers } from './mcpReadiness.js';
+import { coworkReadinessServer } from './readinessServer.js';
+import { checkServersReady } from '../readinessCheck.js';
 import {
   clientStdioReadinessConfig,
   clientStdioServers,
@@ -44,20 +45,36 @@ let dataRoot: string;
 beforeEach(async () => {
   dataRoot = await realpath(await mkdtemp(join(tmpdir(), 'mst-ready-')));
   process.env.FAKE_PARENT_SECRET = 'parent-secret';
-  // Failures here are deterministic: don't wait out the preflight retries.
-  process.env.MST_COWORK_MCP_PREFLIGHT_RETRY_S = '';
 });
 afterEach(async () => {
   delete process.env.FAKE_PARENT_SECRET;
-  delete process.env.MST_COWORK_MCP_PREFLIGHT_RETRY_S;
   await rm(dataRoot, { recursive: true, force: true });
 });
+/** MST's readiness check, with each server resolved as Cowork launches it. */
+function verify(
+  servers: MCPConfig[],
+  env: Record<string, string | undefined>,
+  stdio: {
+    plugins?: MarketplacePlugin[];
+    paths?: Parameters<typeof clientStdioReadinessConfig>[1];
+  } = {}
+) {
+  return checkServersReady(servers, {
+    resolve: (config) =>
+      coworkReadinessServer(config, env, {
+        plugins: stdio.plugins ?? [],
+        paths: stdio.paths ?? {},
+      }),
+    // Failures here are deterministic: don't wait out the retries.
+    env: { MST_MCP_READINESS_RETRY_S: '' },
+  });
+}
 async function ready(token: string, url?: string) {
   const config = server(url);
   const paths = { pluginRoots: { fake: pluginRoot }, dataRoot };
   const [parsed] = clientStdioServers([config], [plugin]);
   await materializeClientStdioFiles({ server: parsed!, paths, token });
-  return verifyCoworkMcpServers(
+  return verify(
     [config],
     { FAKE_TOKEN: token },
     {
@@ -69,9 +86,10 @@ async function ready(token: string, url?: string) {
 
 describe('Cowork stdio eval server readiness', () => {
   it('connects to the resolved launch and meets minTools', async () => {
-    await expect(ready('good-token')).resolves.toMatchObject([
-      { label: 'fake-eval', status: 'connected', toolCount: 4 },
-    ]);
+    await expect(ready('good-token')).resolves.toMatchObject({
+      ready: true,
+      servers: [{ label: 'fake-eval', status: 'connected', toolCount: 4 }],
+    });
   }, 20_000);
 
   it('fails closed when a degraded adapter exposes fewer than minTools', async () => {
@@ -81,16 +99,19 @@ describe('Cowork stdio eval server readiness', () => {
       ['good-token', 'https://example.test/mcp/default'],
     ] as const) {
       await rm(join(dataRoot, 'fake-eval'), { recursive: true, force: true });
-      await expect(ready(token, url)).rejects.toMatchObject({
-        name: 'CoworkMcpReadinessError',
+      await expect(ready(token, url)).resolves.toMatchObject({
+        ready: false,
         servers: [
           {
             label: 'fake-eval',
             status: 'failed',
             toolCount: 1,
+            minTools: 4,
             error: 'too few tools (1 < 4)',
           },
         ],
+        reason:
+          'MCP server not ready, so no trial was sent: fake-eval listed 1 tool, fewer than its minTools (4). Checked 1 time.',
       });
     }
   }, 20_000);
@@ -128,9 +149,10 @@ describe('Cowork stdio eval server readiness', () => {
       cwd,
       env: { DECLARED: 'only-this' },
     };
-    await expect(verifyCoworkMcpServers([config], {})).resolves.toMatchObject([
-      { label: 'server-1', status: 'connected', toolCount: 1 },
-    ]);
+    await expect(verify([config], {})).resolves.toMatchObject({
+      ready: true,
+      servers: [{ label: 'server-1', status: 'connected', toolCount: 1 }],
+    });
   }, 20_000);
 
   it.each([1, 0])(
@@ -156,17 +178,18 @@ describe('Cowork stdio eval server readiness', () => {
         ],
         env: { DECLARED: 'only-this', TOOL_COUNT: String(toolCount) },
       };
-      const readiness = verifyCoworkMcpServers(
+      const readiness = verify(
         [config],
         toolCount === 1 ? { RUNTIME_SECRET: 'runtime-secret' } : {}
       );
       if (toolCount === 1)
-        await expect(readiness).resolves.toMatchObject([
-          { label: 'server-1', status: 'connected', toolCount: 1 },
-        ]);
+        await expect(readiness).resolves.toMatchObject({
+          ready: true,
+          servers: [{ label: 'server-1', status: 'connected', toolCount: 1 }],
+        });
       else
-        await expect(readiness).rejects.toMatchObject({
-          name: 'CoworkMcpReadinessError',
+        await expect(readiness).resolves.toMatchObject({
+          ready: false,
           servers: [
             {
               label: 'server-1',
@@ -206,7 +229,7 @@ describe('Cowork stdio eval server readiness', () => {
       paths: { dataRoot },
       token: 'good-token',
     });
-    const results = await verifyCoworkMcpServers(
+    const { servers: results } = await verify(
       configs,
       { FAKE_TOKEN: 'good-token' },
       {
@@ -222,26 +245,23 @@ describe('Cowork stdio eval server readiness', () => {
   }, 20_000);
 
   it('reports sanitized failure metadata for an invalid plain launch', async () => {
-    await expect(
-      verifyCoworkMcpServers(
-        [
-          {
-            transport: 'stdio',
-            command: join(dataRoot, 'secret-command'),
-            env: { PRIVATE_VALUE: 'metadata-secret' },
-          },
-        ],
-        {}
-      )
-    ).rejects.toSatisfy((error: unknown) => {
-      const serialized = JSON.stringify(error);
-      expect(serialized).not.toContain('secret-command');
-      expect(serialized).not.toContain('metadata-secret');
-      expect(serialized).not.toContain(dataRoot);
-      return (
-        (error as { servers: Array<{ status: string }> }).servers[0]?.status ===
-        'failed'
-      );
+    const readiness = await verify(
+      [
+        {
+          transport: 'stdio',
+          command: join(dataRoot, 'secret-command'),
+          env: { PRIVATE_VALUE: 'metadata-secret' },
+        },
+      ],
+      {}
+    );
+    const serialized = JSON.stringify(readiness);
+    expect(serialized).not.toContain('secret-command');
+    expect(serialized).not.toContain('metadata-secret');
+    expect(serialized).not.toContain(dataRoot);
+    expect(readiness).toMatchObject({
+      ready: false,
+      servers: [{ status: 'failed' }],
     });
   });
 

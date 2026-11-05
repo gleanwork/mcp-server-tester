@@ -1,6 +1,7 @@
 /**
  * The fork environment as a plugin, `fork/env/children`, for runs through
- * `runEval` and the CLI. `--env-option fail=<n>` loses shard n's machine.
+ * `runEval` and the CLI. `--env-option fail=<n>` loses shard n's machine;
+ * `workerEnv=<JSON object>` sets variables in the workers' environment only.
  */
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -13,14 +14,23 @@ export default {
   meta: { name: 'fork-env-plugin', namespace: 'fork' },
   environments: {
     children: {
-      schema: z.object({ fail: z.coerce.number().optional() }).strict(),
+      schema: z
+        .object({
+          fail: z.coerce.number().optional(),
+          workerEnv: z.string().optional(),
+        })
+        .strict(),
       maxShards: 8,
       async open(options, context) {
         const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-fork-env-'));
         const environment = forkEnvironment(
           context,
           root,
-          {},
+          typeof options.workerEnv === 'string'
+            ? z
+                .record(z.string(), z.string())
+                .parse(JSON.parse(options.workerEnv))
+            : {},
           {
             ...(typeof options.fail === 'number'
               ? { failShard: options.fail }

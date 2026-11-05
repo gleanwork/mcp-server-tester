@@ -213,14 +213,6 @@ beforeEach(() => {
     events.push('restore');
   });
   vi.mocked(getChatgptApplicationController).mockResolvedValue(controller);
-  vi.mocked(checkMcpServers).mockImplementation(async (servers) =>
-    servers.map((server) => ({
-      label: server.label ?? '',
-      status: 'connected' as const,
-      toolCount: 3,
-      elapsedMs: 1,
-    }))
-  );
   for (const [mock, event] of [
     [controller.openPrompt, 'open'],
     [beforeStart, 'login-and-mcp'],
@@ -239,7 +231,6 @@ beforeEach(() => {
         builtinToolPolicy: { disabledPlugins: [], webSearch: 'disabled' },
         inference: 'api-key',
         login: 'verified',
-        mcpPreflight: [],
       },
       beforeStart,
       dispose: disposeProfile,
@@ -369,7 +360,6 @@ describe('ChatGPT batch app lifecycle', () => {
         ({ phase, operation }) => `${phase}:${operation}`
       )
     ).toEqual([
-      'setup:verify_mcp',
       'setup:stop',
       'setup:install_config',
       'setup:start',
@@ -967,7 +957,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
   });
 });
 
-describe('ChatGPT macOS MCP preflight', () => {
+describe('ChatGPT macOS MCP readiness', () => {
   const TOKEN = 'mac-preflight-token';
   function httpConfig(environment: Record<string, string>) {
     return {
@@ -987,81 +977,14 @@ describe('ChatGPT macOS MCP preflight', () => {
     };
   }
 
-  it('connects with the bearer token the app will use, before stopping the app', async () => {
-    vi.mocked(checkMcpServers).mockImplementationOnce(async (servers) => {
-      events.push('mcp-preflight');
-      return servers.map((server) => ({
-        label: server.label ?? '',
-        status: 'connected' as const,
-        toolCount: 2,
-        elapsedMs: 1,
-      }));
-    });
+  // MST checks the servers before the batch starts, before anything
+  // touches the app (readinessCheck.ts): the session doesn't check again.
+  it('leaves the servers to MST and goes straight to the app', async () => {
     const session = new ChatgptAppSession();
     await session.prepare(httpConfig({ MST_CHATGPT_MCP_TOKEN_0: TOKEN }));
-    expect(vi.mocked(checkMcpServers).mock.calls[0]![0]).toEqual([
-      {
-        transport: 'http',
-        label: 'remote',
-        serverUrl: 'https://mcp.example.test/mcp',
-        auth: { accessToken: TOKEN },
-      },
-    ]);
-    expect(events.slice(0, 3)).toEqual(['mcp-preflight', 'state', 'stop']);
-    expect(session.telemetry.mcpPreflight).toEqual([
-      { label: 'remote', status: 'connected', toolCount: 2, elapsedMs: 1 },
-    ]);
+    expect(checkMcpServers).not.toHaveBeenCalled();
+    expect(events.slice(0, 2)).toEqual(['state', 'stop']);
     expect(JSON.stringify(session.telemetry)).not.toContain(TOKEN);
-    await session.dispose();
-  });
-
-  it.each([
-    [
-      'a server fails to connect',
-      { status: 'failed' as const, error: 'connection refused' },
-      'one=failed(connection refused)',
-    ],
-    [
-      'a server lists no tools',
-      { status: 'connected' as const, toolCount: 0 },
-      'one=connected(0 tools)',
-    ],
-  ])(
-    'fails before touching the app when %s',
-    async (_kind, readiness, detail) => {
-      vi.mocked(checkMcpServers).mockImplementationOnce(async (servers) =>
-        servers.map((server) => ({
-          label: server.label ?? '',
-          elapsedMs: 1,
-          ...readiness,
-        }))
-      );
-      const session = new ChatgptAppSession();
-      await expect(session.prepare(testConfig())).rejects.toThrow(
-        `ChatGPT MCP preflight failed; no prompt was submitted. ${detail}`
-      );
-      expect(session.telemetry.setupStatus).toBe('failed');
-      await session.dispose();
-      expect(events).toEqual([]);
-      expect(installCodexConfig).not.toHaveBeenCalled();
-      expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
-    }
-  );
-
-  it('fails closed without connecting when a bearer token is missing', async () => {
-    const session = new ChatgptAppSession();
-    await expect(session.prepare(httpConfig({}))).rejects.toThrow(
-      'remote=failed(missing bearer token)'
-    );
-    expect(checkMcpServers).not.toHaveBeenCalled();
-    await session.dispose();
-    expect(controller.stop).not.toHaveBeenCalled();
-  });
-
-  it('skips the preflight when no MCP servers are configured', async () => {
-    const session = new ChatgptAppSession();
-    await session.prepare(testConfig('gpt-test', { codexConfigName: 'empty' }));
-    expect(checkMcpServers).not.toHaveBeenCalled();
     await session.dispose();
   });
 });

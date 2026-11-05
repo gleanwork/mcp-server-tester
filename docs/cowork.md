@@ -81,7 +81,8 @@ download until recovery. Do not run two Claude bundles simultaneously.
 
 Claude's workspace disk-space check is separate from MCP authentication. Leave
 headroom for Claude's VM/workspace setup, and for the download when pinning. A
-successful connector preflight does not bypass a "Not enough disk space" error.
+server that passes MST's readiness check does not bypass a "Not enough disk
+space" error.
 MST removes its own temporary bundle, bridge credentials, and settings on normal
 teardown; it does not delete Claude's VM bundles, user workspaces, or caches to
 free space. After an interrupted process, use explicit recovery before retrying.
@@ -129,12 +130,13 @@ servers through Claude's supported local Developer MCP surface instead:
 - Cleanup tolerates Claude's JSON whitespace rewrite, but rejects semantic edits
   made concurrently. `cowork recover` also restores the developer configuration.
 
-A server that fails the preflight is checked again after 10 seconds and then
-after 30 more; only failed servers are rechecked, and the batch fails if one is
-still not ready. `MST_COWORK_MCP_PREFLIGHT_RETRY_S` sets other delays as
-comma-separated seconds (`5,20`); an empty value turns retries off.
+MST checks the servers once the app is prepared, before the first case
+([readiness](#readiness)). A server that isn't ready is checked again after 10
+seconds and then after 30 more, as for every client; when one is still not
+ready, no case is sent and each trial of the batch ends as a retryable setup
+failure.
 
-Use actual tool-call assertions: successful endpoint preflight alone is not proof
+Use actual tool-call assertions: a server that passes the readiness check is not proof
 that the Cowork session received the server. A live pinned run has passed with
 an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 
@@ -865,7 +867,7 @@ settings and private stdio files: directories use mode 0700 and JSON files use
 mode 0600. Credentials are resolved from the supplied runtime environment, not
 embedded in the eval config or public app configuration.
 
-Setup returns transaction-owned `stdioPaths`, which the shared readiness check
+Setup returns transaction-owned `stdioPaths`, which MST's readiness check
 uses after installation. Do not supply Linux-only `pluginRoots` or
 `mcpDataRoot` options on macOS. Setup status remains `applied-not-verified`:
 installing settings or starting the app does not prove Desktop adopted the MCP
@@ -965,14 +967,22 @@ callers.
 
 ### Readiness
 
-Before the first prompt, MST launches each stdio eval server itself, with the
-same resolved command, args, env, and data dir (when used), but without the parent
-environment. On macOS it uses the paths returned by the setup transaction; on
-Linux it uses the caller-owned paths checked during prepare. Every server, stdio
-or HTTP, must connect and list at least one tool (the same rule as the ChatGPT
-client). It fails closed with `too few tools (<n> < <minTools>)` when the server
-lists fewer than `minTools` tools. For example, an adapter with a bad
-token may list only its static tools. Desktop-side readiness (for example, a
+MST runs the same [readiness check](evaluation-framework.md#server-readiness)
+for Cowork as for every client, with one difference: Cowork's stdio servers
+resolve only once the app is prepared, so MST checks them after preparation and
+before the first prompt, not before the batch starts. It launches each stdio
+eval server itself, with the same resolved command, args, env, and data dir
+(when used), but without the parent environment. On macOS it uses the paths
+returned by the setup transaction; on Linux it uses the caller-owned paths
+checked during prepare. HTTP servers get the same headers Cowork uses. Every
+server, stdio or HTTP, must connect and list at least one tool, and at least its
+`minTools`. When one doesn't, no prompt is sent: each trial of the batch ends as
+a retryable setup failure whose reason names the server, for example
+`fake-eval listed 1 tool, fewer than its minTools (4)`. When a variant gives
+Cowork tool metadata, its servers go through MST's tool-variant proxy, which MST
+launches itself: MST checks them as declared before the proxy starts, as for any
+client, and Cowork doesn't check them again after preparation. An adapter with a bad
+token, for example, may list only its static tools. Desktop-side readiness (for example, a
 caller's own log check) should also compare each server's `toolCount` with
 `minTools`.
 

@@ -63,11 +63,6 @@ const setup: ResolvedCodexSetup = {
   ],
 };
 
-function preflight(status: 'connected' | 'failed', toolCount = 3) {
-  vi.mocked(checkMcpServers).mockResolvedValue([
-    { label: 'primary', status, toolCount, elapsedMs: 1 },
-  ]);
-}
 function appServer(
   initialized: boolean,
   authStatus: AppServerAuthStatus = 'bearerToken'
@@ -103,7 +98,6 @@ beforeEach(async () => {
     loginVerified: true,
     method: 'api-key',
   });
-  preflight('connected');
   appServer(true);
 });
 afterEach(async () => {
@@ -325,7 +319,7 @@ describe('fresh MST-owned Linux profile', () => {
     ).rejects.toMatchObject({ code });
   });
 
-  it('logs in without tokens, then preflights and probes MCP with tokens', async () => {
+  it('logs in without tokens, then probes the app server with tokens', async () => {
     const profile = await createProfile();
     await profile.beforeStart(setup, { MST_CHATGPT_MCP_TOKEN_0: TOKEN });
     const [codex, loginEnv, keyFile] =
@@ -339,21 +333,14 @@ describe('fresh MST-owned Linux profile', () => {
       PATH: '/usr/bin:/bin',
     });
     expect(JSON.stringify(loginEnv)).not.toContain(TOKEN);
-    expect(vi.mocked(checkMcpServers).mock.calls[0]![0]).toEqual([
-      {
-        transport: 'http',
-        label: 'primary',
-        serverUrl: 'https://example.test/mcp',
-        auth: { accessToken: TOKEN },
-      },
-    ]);
+    // MST checked the servers before the batch started.
+    expect(checkMcpServers).not.toHaveBeenCalled();
     const [, probeEnv, labels] = vi.mocked(probeAppServerStatus).mock.calls[0]!;
     expect(probeEnv.MST_CHATGPT_MCP_TOKEN_0).toBe(TOKEN);
     expect(labels).toEqual(['primary']);
     expect(profile.readiness).toMatchObject({
       executionPolicy: POLICY,
       login: 'verified',
-      mcpPreflight: [{ status: 'connected', toolCount: 3 }],
       mcpStatus: { status: 'available' },
     });
     expect(JSON.stringify(profile.readiness)).not.toContain(TOKEN);
@@ -361,8 +348,6 @@ describe('fresh MST-owned Linux profile', () => {
   });
 
   it.each([
-    ['preflight', 'mcp_preflight_failed', () => preflight('failed')],
-    ['zero tools', 'mcp_preflight_failed', () => preflight('connected', 0)],
     [
       'status unavailable',
       'mcp_status_unavailable',
@@ -387,13 +372,11 @@ describe('fresh MST-owned Linux profile', () => {
     await profile.dispose();
   });
 
-  it('fails before app start without connecting when a bearer token is missing', async () => {
+  it('gives the app server probe only the tokens it was given', async () => {
     const profile = await createProfile();
-    await expect(profile.beforeStart(setup, {})).rejects.toMatchObject({
-      code: 'mcp_preflight_failed',
-    });
-    expect(checkMcpServers).not.toHaveBeenCalled();
-    expect(profile.readiness.error).toBe('mcp_preflight_failed');
+    await profile.beforeStart(setup, {});
+    const [, probeEnv] = vi.mocked(probeAppServerStatus).mock.calls[0]!;
+    expect(probeEnv).not.toHaveProperty('MST_CHATGPT_MCP_TOKEN_0');
     await profile.dispose();
   });
 
@@ -422,7 +405,7 @@ describe('fresh MST-owned Linux profile', () => {
     });
   }
 
-  it('installs plugins after preflight and probes plugin servers under their own names', async () => {
+  it('installs plugins after login and probes plugin servers under their own names', async () => {
     withPluginServer(2);
     const receipt = {
       name: 'acme',
@@ -482,7 +465,6 @@ describe('fresh MST-owned Linux profile', () => {
       ],
     });
     vi.mocked(installCodexPlugins).mockResolvedValue([]);
-    vi.mocked(checkMcpServers).mockResolvedValue([]);
     const profile = await createProfile();
     await profile.beforeStart({ ...setup, servers: [] }, {}, [plugin]);
     expect(vi.mocked(probeAppServerStatus).mock.calls[0]![2]).toEqual([
@@ -493,7 +475,6 @@ describe('fresh MST-owned Linux profile', () => {
   });
 
   it('fails setup when a plugin does not install', async () => {
-    preflight('connected');
     vi.mocked(installCodexPlugins).mockRejectedValue(new Error('install'));
     const profile = await createProfile();
     await expect(

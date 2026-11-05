@@ -11,6 +11,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { isClientUnavailable } from './clientUnavailable.js';
+import { readyBatch } from './readinessCheck.js';
 import {
   clientSecretValues,
   redactClientError,
@@ -37,6 +38,14 @@ function batchFailure(client: string, reason: string): ClientRunResult {
       caseExecution: { status: 'not-submitted', continuation: 'blocked' },
     },
   };
+}
+
+/** A batch in messages: `The api batch for variant "baseline"`. */
+export function batchName(
+  client: string,
+  context: Pick<ClientRunContext, 'variant'>
+): string {
+  return `The ${client} batch${context.variant ? ` for variant "${context.variant.name}"` : ''}`;
 }
 
 /**
@@ -183,18 +192,6 @@ export async function prepareClientBatch(
   );
   const declared = batchRequests(cases, config, servers, context);
   if (!declared.length) return queues;
-  // Proxied clients connect to the variant's servers through the proxy.
-  const proxied =
-    toolVariant && usesToolSurfaceProxy(definition)
-      ? proxiedBatch(
-          definition,
-          declared,
-          await toolVariant.proxy(),
-          servers,
-          toolVariant.id
-        )
-      : undefined;
-  const requests = proxied?.requests ?? declared;
   const { onTrace } = options;
   // Every trace a batch client hands MST, early or at the end, has no secret
   // in it before it is settled, saved or graded.
@@ -204,6 +201,29 @@ export async function prepareClientBatch(
   ];
   const received = (trace: ClientRunResult): ClientRunResult =>
     redactedClientRun(trace, secrets());
+  // MST's readiness check, before the batch's first trial and before the
+  // proxy starts. Proxied clients connect to the variant's servers through
+  // the proxy.
+  const ready = await readyBatch(
+    definition,
+    servers,
+    toolVariant && usesToolSurfaceProxy(definition)
+      ? toolVariant.proxy
+      : undefined,
+    {
+      ...(context.env ? { env: context.env } : {}),
+      batch: batchName(config.type, context),
+    }
+  );
+  if (ready.notReady) {
+    for (const request of declared)
+      queues.get(request.caseId)!.push(received(ready.notReady()));
+    return queues;
+  }
+  const proxied = ready.proxy
+    ? proxiedBatch(definition, declared, ready.proxy, servers, toolVariant!.id)
+    : undefined;
+  const requests = proxied?.requests ?? declared;
   // A trace reported early is settled with the proxy's traffic so far; the
   // batch's returned traces are settled again when it ends.
   const reportResult = onTrace
@@ -241,7 +261,7 @@ export async function prepareClientBatch(
     // The message is stored: never with a credential in it.
     const reason = redactClientError(error, secrets(), 'client unavailable');
     console.warn(
-      `[mst] The ${config.type} batch${context.variant ? ` for variant "${context.variant.name}"` : ''} didn't run: ${reason}`
+      `[mst] ${batchName(config.type, context)} didn't run: ${reason}`
     );
     for (const request of requests)
       queues.get(request.caseId)!.push(batchFailure(config.type, reason));

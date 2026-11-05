@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { z } from 'zod';
 import {
   createEvalCaseExecutor,
@@ -16,6 +25,10 @@ import { simulateMstClient } from './mstClient/simulation.js';
 import type * as SimulationModule from './mstClient/simulation.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
+import {
+  readyStdioServer,
+  startReadinessHttpServer,
+} from '../../tests/mocks/readyServers.js';
 
 vi.mock('./mstClient/simulation.js', async (original) => ({
   ...(await original<typeof SimulationModule>()),
@@ -296,15 +309,20 @@ describe('createEvalCaseExecutor', () => {
   });
 
   describe('with a tool variant', () => {
-    const servers = [
-      { transport: 'stdio' as const, command: 'agg', label: 'agg' },
-    ];
+    const servers = [{ ...readyStdioServer(), label: 'agg' }];
+    // Where the stub proxy's endpoints are: a server the readiness check
+    // reaches.
+    let proxied: { url: string; close: () => Promise<void> };
+    beforeAll(async () => {
+      proxied = await startReadinessHttpServer();
+    });
+    afterAll(() => proxied.close());
     function stubProxy(listedTools: boolean): ToolSurfaceProxy {
       return {
         serversFor: (scope) => [
           {
             transport: 'http',
-            serverUrl: `http://127.0.0.1:1/${scope}/0/mcp`,
+            serverUrl: `${new URL(proxied.url).origin}/${scope}/0/mcp`,
             label: 'agg',
           },
         ],
@@ -350,7 +368,9 @@ describe('createEvalCaseExecutor', () => {
         unknown,
         { evalConfig: Record<string, unknown> },
       ];
-      expect(input.servers[0]?.serverUrl).toMatch(/^http:\/\/127\.0\.0\.1:1\//);
+      expect(
+        input.servers[0]?.serverUrl.startsWith(new URL(proxied.url).origin)
+      ).toBe(true);
       expect(context.evalConfig).not.toHaveProperty('tools');
       expect(
         execution.kind === 'completed' ? execution.trace?.events : undefined

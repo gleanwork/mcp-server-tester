@@ -6,7 +6,11 @@ import {
   StreamableHTTPClientTransport,
   UnsupportedProtocolVersionError,
 } from '@modelcontextprotocol/client';
-import type { OAuthClientProvider } from '@modelcontextprotocol/client';
+import type {
+  FetchLike,
+  OAuthClientProvider,
+  Transport,
+} from '@modelcontextprotocol/client';
 import {
   StdioClientTransport,
   getDefaultEnvironment,
@@ -96,17 +100,21 @@ function isRetryableError(err: unknown): boolean {
 /**
  * Retries an async operation with exponential backoff.
  * Respects Retry-After headers for 429 rate limit responses.
+ * Once `signal` aborts it retries no more, and stops waiting to.
  */
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
-  maxAttempts: number
+  maxAttempts: number,
+  signal?: AbortSignal
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+    if (signal?.aborted) throw abortError(signal);
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
+      if (signal?.aborted) throw abortError(signal);
       if (attempt < maxAttempts && isRetryableError(err)) {
         const retryAfterMs = getRetryAfterDelayMs(err);
         const delayMs =
@@ -120,7 +128,7 @@ async function retryWithBackoff<T>(
           delayMs,
           formatMCPConnectionFailure(err)
         );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await backoff(delayMs, signal);
       } else {
         throw err;
       }
@@ -292,6 +300,105 @@ export async function createMCPClientForConfig(
   config: MCPConfig,
   options?: CreateMCPClientOptions
 ): Promise<Client> {
+  return openMCPClient(config, options);
+}
+
+/** Waits `ms` before a retry, or until `signal` aborts. */
+async function backoff(ms: number, signal?: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
+/** The error an aborted open rejects with: the signal's reason, if an Error. */
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error('The MCP connection was aborted before it opened.');
+}
+
+/**
+ * Makes `transport.start()` reject once `signal` has aborted, instead of
+ * starting. The SDK can start a transport after an await inside
+ * `client.connect` (after version negotiation, for one), so checking the
+ * signal before connect is not enough.
+ */
+function refuseStartAfterAbort(
+  transport: Transport,
+  signal: AbortSignal
+): void {
+  const start = transport.start.bind(transport);
+  transport.start = async () => {
+    if (signal.aborted) throw abortError(signal);
+    return start();
+  };
+}
+
+/** The `fetch` an open's HTTP and SSE transports send through. */
+interface OpenScopedFetch {
+  fetch: FetchLike;
+  /** Fails every request the transports send from now on. */
+  abort(): void;
+  /** Unties later requests from the open, once it has connected. */
+  detach(): void;
+}
+
+/**
+ * A `fetch` tied to one open, for the requests its transports send: the
+ * open's abort aborts each request in flight, and every later request
+ * rejects at once. The SDK can send requests past `transport.start()` (an
+ * SSE transport restarts its stream itself after an OAuth refresh), so the
+ * `start()` guard alone can't stop them. Requests reject with a
+ * `DOMException` named `AbortError` because the SSE library reconnects after
+ * any other error. Each request keeps its own signal too. Once detached,
+ * requests pass through untouched, so the connected client's later requests
+ * don't depend on the open. It sends through the global `fetch` as it is at
+ * each request, as the transports do without a `fetch` of their own.
+ */
+function openScopedFetch(): OpenScopedFetch {
+  const controller = new AbortController();
+  let detached = false;
+  return {
+    fetch: async (url, init) => {
+      if (detached) return globalThis.fetch(url, init);
+      if (controller.signal.aborted)
+        throw new DOMException(
+          'The MCP connection was aborted before it opened.',
+          'AbortError'
+        );
+      const signal = init?.signal
+        ? AbortSignal.any([init.signal, controller.signal])
+        : controller.signal;
+      return globalThis.fetch(url, { ...init, signal });
+    },
+    abort: () => controller.abort(),
+    detach: () => {
+      detached = true;
+    },
+  };
+}
+
+/**
+ * Opens a client as {@link createMCPClientForConfig} does, until `signal`
+ * aborts. Aborting closes the transport the open has started (and a stdio
+ * server's process), even while connect is still waiting on it, and the open
+ * rejects with the signal's reason. After the abort the open starts no other
+ * transport (no SSE fallback, no retry), and its HTTP and SSE transports send
+ * no more requests. A client that connects anyway after the abort is closed. Internal: the readiness probe aborts at its deadline,
+ * so a server that stalls its connect can't keep the connection open.
+ */
+export async function openMCPClient(
+  config: MCPConfig,
+  options?: CreateMCPClientOptions,
+  signal?: AbortSignal
+): Promise<Client> {
+  if (signal?.aborted) throw abortError(signal);
   // Validate config
   const validatedConfig = validateMCPConfig(config);
   const protocol =
@@ -319,13 +426,57 @@ export async function createMCPClientForConfig(
     }
   );
   const connection = beginConnection(client, protocol);
+  // The transport connect is starting, so an abort can close it. After the
+  // abort no transport starts: opening one rejects, and so does its start.
+  let transport: Transport | undefined;
+  // HTTP and SSE requests the SDK sends past start() fail after the abort.
+  const scoped = signal ? openScopedFetch() : undefined;
+  const closeTransport = () => {
+    void transport?.close().catch(() => undefined);
+  };
+  const opening = (started: Transport) => {
+    if (!signal) return;
+    if (signal.aborted) throw abortError(signal);
+    transport = started;
+    refuseStartAfterAbort(started, signal);
+  };
+  let onAbort: (() => void) | undefined;
+  const aborted = signal
+    ? new Promise<never>((_, reject) => {
+        onAbort = () => {
+          scoped?.abort();
+          closeTransport();
+          reject(abortError(signal));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      })
+    : undefined;
+  const connecting = connect(
+    client,
+    connection,
+    validatedConfig,
+    options,
+    opening,
+    signal,
+    scoped?.fetch
+  );
   try {
-    await connect(client, connection, validatedConfig, options);
+    await (aborted ? Promise.race([connecting, aborted]) : connecting);
   } catch (error) {
+    // The connect may still settle after an abort: a client it connects
+    // anyway is closed, and its failure is expected.
+    if (signal?.aborted)
+      void connecting.then(
+        () => abandonMCPClient(client),
+        () => undefined
+      );
     // A failed connect never returns the client, so close what it opened.
     await releaseConnection(client);
     throw error;
+  } finally {
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
   }
+  scoped?.detach();
   debugClient('Connected successfully');
   const serverInfo = client.getServerVersion();
   if (serverInfo) {
@@ -340,7 +491,16 @@ async function connect(
   client: Client,
   connection: MCPConnection,
   validatedConfig: MCPConfig,
-  options: CreateMCPClientOptions | undefined
+  options: CreateMCPClientOptions | undefined,
+  /**
+   * Receives each transport before connect starts it, and throws instead
+   * once the open has aborted.
+   */
+  opening: (transport: Transport) => void,
+  /** Once aborted, no fallback or retry starts. */
+  signal: AbortSignal | undefined,
+  /** The `fetch` HTTP and SSE transports send through, if the open has one. */
+  openFetch: FetchLike | undefined
 ): Promise<void> {
   const protocol = connection.requestedProtocol;
   // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
@@ -380,6 +540,7 @@ async function connect(
       cwd: validatedConfig.cwd,
     });
 
+    opening(transport);
     try {
       await client.connect(
         transport,
@@ -450,17 +611,21 @@ async function connect(
         : undefined;
 
     // Try Streamable HTTP first (MCP spec 2025-03-26), fall back to SSE (2024-11-05)
-    await retryWithBackoff(async () => {
+    const attempt = async (): Promise<void> => {
       try {
         debugHttp('Attempting transport: streamableHttp');
         const streamableTransport = new StreamableHTTPClientTransport(url, {
           requestInit,
           ...(authProvider ? { authProvider } : {}),
+          ...(openFetch ? { fetch: openFetch } : {}),
         });
+        opening(streamableTransport);
         await client.connect(streamableTransport, connectOptions);
         debugClient('Connected via Streamable HTTP');
         debugHttp('Connection established via streamableHttp');
       } catch (err) {
+        // An aborted open starts no fallback.
+        if (signal?.aborted) throw abortError(signal);
         // HTTP+SSE is a legacy-only transport, so a pinned modern revision
         // (or a failed era negotiation) has nothing to fall back to.
         if (
@@ -481,7 +646,9 @@ async function connect(
           const sseTransport = new SSEClientTransport(url, {
             requestInit,
             ...(authProvider ? { authProvider } : {}),
+            ...(openFetch ? { fetch: openFetch } : {}),
           });
+          opening(sseTransport);
           await client.connect(sseTransport, connectOptions);
         } catch (sseError) {
           throw new MCPHttpConnectionError(
@@ -494,7 +661,8 @@ async function connect(
         debugClient('Connected via SSE');
         debugHttp('Connection established via sse');
       }
-    }, retryAttempts);
+    };
+    await retryWithBackoff(attempt, retryAttempts, signal);
     connection.target = {
       transport: 'http',
       url: url.toString(),
@@ -505,6 +673,25 @@ async function connect(
   }
 
   connection.wire = attachWireTap(client);
+}
+
+/**
+ * Closes a client at once, for a caller that has given up on it: rejects its
+ * pending requests and closes its transport (ends a stdio server's stdin,
+ * aborts HTTP requests), without ending the session first, since a server
+ * that stalls can stall a DELETE too. Never throws.
+ */
+export async function abandonMCPClient(client: Client): Promise<void> {
+  try {
+    await client.close();
+  } catch (error) {
+    debugClient(
+      'Error abandoning client: %s',
+      error instanceof Error ? error.message : String(error)
+    );
+  } finally {
+    await releaseConnection(client);
+  }
 }
 
 /**

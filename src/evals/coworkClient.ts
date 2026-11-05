@@ -7,7 +7,8 @@ import type {
   ClientRunResult,
 } from './evalFrameworkTypes.js';
 import { getCoworkPlatform, type CoworkPlatform } from './cowork/platform.js';
-import { verifyCoworkMcpServers } from './cowork/mcpReadiness.js';
+import { coworkReadinessServer } from './cowork/readinessServer.js';
+import { checksServersAfterPrepare } from './readinessCheck.js';
 import { clientSecretValues, redactClientError } from './clientSecrets.js';
 import {
   RESET_RETRY_DELAYS_MS,
@@ -304,8 +305,10 @@ async function runBatch(
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkClientPlugins(plugins);
   const servers = requests[0]!.input.servers;
-  // MST's readiness probe uses its own endpoint when the servers are proxied.
-  const checkServers = requests[0]!.input.checkServers ?? servers;
+  // A request carries `checkServers` only when its servers are proxied. MST
+  // then checked them as declared before the proxy started, so Cowork's
+  // check after prepare has nothing left to check.
+  const readinessServers = requests[0]!.input.checkServers ? [] : servers;
   // Validate declarations before desktop actions. macOS resolves client-resolved
   // paths inside its leased setup transaction; Linux uses prepared runtime paths.
   const stdioServers = clientStdioServers(servers, plugins);
@@ -409,22 +412,17 @@ async function runBatch(
         if (session?.stdioPaths) stdioPaths = session.stdioPaths;
         return session;
       },
-      // The readiness gate runs once setup has resolved the stdio paths.
-      async ready() {
-        if (!servers.length) return;
-        const readiness = await verifyCoworkMcpServers(checkServers, env, {
-          plugins,
-          paths: stdioPaths,
-          log: (message) => process.stderr.write(`${message}\n`),
-        });
-        process.stderr.write(
-          `[mst:cowork] MCP preflight ready: ${readiness
-            .map(
-              (server) =>
-                `${server.label}(${server.toolCount ?? 0} tools, ${server.elapsedMs}ms)`
-            )
-            .join(', ')}\n`
-        );
+      // MST's readiness check runs once setup has resolved the stdio paths.
+      readiness() {
+        return {
+          servers: readinessServers,
+          resolve: (server) =>
+            coworkReadinessServer(server, env, {
+              plugins,
+              paths: stdioPaths,
+            }),
+          env,
+        };
       },
       ...(platform.reset
         ? {
@@ -963,7 +961,9 @@ export function coworkWorkspaceUnavailable(
 export function createCoworkClient(
   platform?: CoworkPlatform
 ): ClientDefinition {
-  return {
+  // Its stdio servers resolve only once the app is prepared, so its batch
+  // checks them after `prepare`, not the dispatch before it.
+  return checksServersAfterPrepare({
     schema: CoworkSchema,
     description: 'Claude Desktop in Cowork mode',
     requirements: {
@@ -994,6 +994,6 @@ export function createCoworkClient(
           platform
         )
       )[0]!,
-  };
+  });
 }
 export const COWORK_CLIENT = createCoworkClient();

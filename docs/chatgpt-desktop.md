@@ -103,6 +103,11 @@ Your global `~/.codex/AGENTS.md` still reaches the evaluated prompt. Keep
 personal instructions out of it on a Mac you run evaluations on, or use Linux,
 whose fresh profile has none.
 
+MST checks the eval's servers before it touches the app
+([server readiness](evaluation-framework.md#server-readiness)). When one isn't
+ready, MST doesn't stop, reconfigure or restart ChatGPT, and each trial of the
+batch ends as a retryable setup failure.
+
 Before each case, MST chooses File > New Chat itself, since the app stays on
 the previous case's conversation, and the planner pastes the query rather than
 typing it. ChatGPT Work makes its own folder for a task. For `codex-app`, MST
@@ -164,14 +169,14 @@ MST then owns, in order:
    MST checks `GET <base>/models` with the token before the app starts
    (`inference_unavailable` otherwise). `nativeReadiness.inference` records
    which (`api-key` or `gateway`).
-4. Direct MCP preflight (connect and list tools for each configured server; the
-   same readiness rule as the Cowork client), then a
-   read-only `codex app-server` probe (`initialize`, `initialized`,
+4. A read-only `codex app-server` probe (`initialize`, `initialized`,
    `mcpServerStatus/list` only; server requests abort; 30 s, 256 KiB/line, 4 MiB
    total). Every configured server must be initialized with at least one tool and
-   `bearerToken` auth (or `unsupported` for servers without a bearer). The probe
-   is a native diagnostic on top of the preflight: it checks what the app itself
-   loaded, which the direct connection can't see.
+   `bearerToken` auth (or `unsupported` for servers without a bearer). MST's own
+   [readiness check](evaluation-framework.md#server-readiness) already connected
+   to each server before the batch started; this probe is a native diagnostic on
+   top of it: it checks what the app itself loaded, which a direct connection
+   can't see.
 5. Spawn the app with fixed flags (`--no-sandbox --ozone-platform=x11
 --force-renderer-accessibility --disable-gpu --disable-dev-shm-usage`) and fixed
    accessibility variables, in its own process group. The app receives only the
@@ -227,7 +232,7 @@ servers:
 ]
 ```
 
-After login and direct MCP preflight, MST runs `codex plugin marketplace add`
+After login, MST runs `codex plugin marketplace add`
 and `codex plugin add` for each entry. Git sources require a full commit SHA;
 an absolute local path (a pre-staged checkout) is also accepted, and its ref is
 only recorded. Each `mcp` key names a stdio server in the plugin's `.mcp.json`.
@@ -256,7 +261,7 @@ marketplace, version, ref, and overridden server names.
 ChatGPT Work and Codex support plain stdio `servers` entries on macOS and
 Linux: use `command`, optional `args`, `cwd`, and declared `env`. No URL or
 plugin is required. An optional `minTools` is MST's own readiness rule: the
-direct preflight checks it before the app starts, and it is never written to
+readiness check applies it before the batch starts, and it is never written to
 `config.toml`. A [dry-run proxy](cowork.md#dry-run-proxy) entry is such a
 server, so connectors behind it work with ChatGPT too. ChatGPT rejects two Cowork-only forms before the app starts:
 client-resolved stdio entries (`url`, `auth`, `files`, or
@@ -275,11 +280,11 @@ verify this. `nativeReadiness.executionPolicy` records the fixed values. macOS i
 unchanged.
 
 There is no setup-only mode. Setup failures carry fixed codes such as
-`home_not_fresh`, `login_unverified`, `mcp_preflight_failed`,
-`mcp_status_unavailable`, `mcp_server_not_ready`, `app_exited`, and
-`app_stop_failed`. Batch telemetry records `nativeReadiness` (login state,
-sanitized per-server preflight and app-server status) next to `nativeSetup`
-(AT-SPI accounting). No native output, URL, token, or key is recorded.
+`home_not_fresh`, `login_unverified`, `mcp_status_unavailable`,
+`mcp_server_not_ready`, `app_exited`, and `app_stop_failed`. Batch telemetry
+records `nativeReadiness` (login state and sanitized app-server status) next to
+`nativeSetup` (AT-SPI accounting). No native output, URL, token, or key is
+recorded.
 
 ### Draft hand-off
 

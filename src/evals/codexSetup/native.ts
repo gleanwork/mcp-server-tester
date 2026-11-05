@@ -18,7 +18,6 @@ export type CodexSetupErrorCode =
   | 'login_failed'
   | 'login_timeout'
   | 'login_unverified'
-  | 'mcp_preflight_failed'
   | 'mcp_status_unavailable'
   | 'mcp_server_not_ready'
   | 'app_start_failed'

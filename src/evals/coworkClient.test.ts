@@ -32,6 +32,19 @@ import type {
   ClientRunContext,
 } from './evalFrameworkTypes.js';
 import type * as OsModule from 'node:os';
+import type * as ReadinessCheck from './readinessCheck.js';
+import type * as ReadinessServer from './cowork/readinessServer.js';
+import { readyStdioServer } from '../../tests/mocks/readyServers.js';
+import type { ReadinessCheckOptions } from './readinessCheck.js';
+
+/** What the readiness check was given: the servers, and how each resolves. */
+function readinessCall(index = 0) {
+  const [servers, options] = mocks.readiness.mock.calls[index] as [
+    MCPConfig[],
+    ReadinessCheckOptions,
+  ];
+  return { servers, options };
+}
 
 const mocks = vi.hoisted(() => ({
   setup: vi.fn(),
@@ -44,7 +57,10 @@ const mocks = vi.hoisted(() => ({
   matches: vi.fn(),
   bind: vi.fn(),
   order: [] as string[],
+  // MST's readiness check, as desktopBatch calls it after `prepare`.
   readiness: vi.fn(),
+  // How Cowork resolves a server for it.
+  readinessServer: vi.fn(),
 }));
 // The desktop lease lives under the home directory; keep it in a temp dir.
 const lockHome = vi.hoisted(() => ({ value: '' }));
@@ -69,8 +85,12 @@ vi.mock('./coworkSetup/recoverSession.js', () => ({
 vi.mock('./coworkSetup/macSession.js', () => ({
   prepareMacCoworkSession: mocks.setup,
 }));
-vi.mock('./cowork/mcpReadiness.js', () => ({
-  verifyCoworkMcpServers: mocks.readiness,
+vi.mock('./readinessCheck.js', async (original) => ({
+  ...(await original<typeof ReadinessCheck>()),
+  checkServersReady: mocks.readiness,
+}));
+vi.mock('./cowork/readinessServer.js', () => ({
+  coworkReadinessServer: mocks.readinessServer,
 }));
 vi.mock('./cowork/anthropicComputerUse.js', async (original) => ({
   ...(await original<typeof ComputerUse>()),
@@ -134,9 +154,22 @@ beforeEach(async () => {
   vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
   vi.clearAllMocks();
   mocks.order.length = 0;
-  mocks.readiness.mockResolvedValue([
-    { label: 'primary', status: 'connected', toolCount: 22, elapsedMs: 10 },
-  ]);
+  // Ready, resolving each server as the real check does.
+  mocks.readinessServer.mockImplementation((server: MCPConfig) => server);
+  mocks.readiness.mockImplementation(
+    async (servers: MCPConfig[], options: ReadinessCheckOptions) => {
+      for (const server of servers) options.resolve?.(server);
+      return {
+        ready: true,
+        servers: servers.map((s) => ({
+          label: s.label ?? 'server',
+          status: 'connected',
+          toolCount: 22,
+          elapsedMs: 10,
+        })),
+      };
+    }
+  );
   mocks.setup.mockImplementation(async () => {
     mocks.order.push('setup');
     return { dispose: mocks.dispose };
@@ -390,7 +423,7 @@ describe('V2 Cowork client', () => {
       expect.objectContaining({ appPath: '/private/tmp/pinned/Claude.app' })
     );
   });
-  it('probes readiness on the check endpoint when its servers are proxied', async () => {
+  it("leaves a proxied batch's servers to MST's check before the proxy started", async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     const prepared = createCoworkClient({
       dataDirectory: () => '/prepared/session',
@@ -406,11 +439,9 @@ describe('V2 Cowork client', () => {
     }));
     const result = await prepared.runBatch!(batch, { ...context, env: {} });
     expect(result.every((r) => !r.error)).toBe(true);
-    expect(mocks.readiness).toHaveBeenCalledWith([check], expect.any(Object), {
-      plugins: [],
-      paths: {},
-      log: expect.any(Function),
-    });
+    // The dispatch checked the declared servers before starting the proxy.
+    expect(mocks.readiness).not.toHaveBeenCalled();
+    expect(mocks.readinessServer).not.toHaveBeenCalled();
     expect(COWORK_CLIENT.serversPerBatch).toBe(true);
     expect(COWORK_CLIENT.toolSurfaceProxy).toBeUndefined();
   });
@@ -428,11 +459,12 @@ describe('V2 Cowork client', () => {
       env: {},
     });
     expect(result.every((r) => !r.error)).toBe(true);
-    expect(mocks.readiness).toHaveBeenCalledWith([server], expect.any(Object), {
-      plugins: [],
-      paths: {},
-      log: expect.any(Function),
-    });
+    expect(readinessCall().servers).toEqual([server]);
+    expect(mocks.readinessServer).toHaveBeenCalledWith(
+      server,
+      expect.any(Object),
+      { plugins: [], paths: {} }
+    );
     expect(mocks.submit).toHaveBeenCalledTimes(2);
     expect(mocks.hitl).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -914,10 +946,11 @@ describe('V2 Cowork client', () => {
         plugins: [fake],
         stdioPaths: paths,
       });
-      expect(mocks.readiness).toHaveBeenCalledWith(
-        [evalServer],
+      expect(readinessCall().servers).toEqual([evalServer]);
+      expect(mocks.readinessServer).toHaveBeenCalledWith(
+        evalServer,
         expect.any(Object),
-        { plugins: [fake], paths, log: expect.any(Function) }
+        { plugins: [fake], paths }
       );
       expect(results[0]!.error).toBeUndefined();
       expect(results[0]!.events).toEqual([
@@ -1004,10 +1037,11 @@ describe('V2 Cowork client', () => {
             evalConfig: expect.objectContaining({ servers }),
           })
         );
-        expect(mocks.readiness).toHaveBeenCalledWith(
-          servers,
+        expect(readinessCall().servers).toEqual(servers);
+        expect(mocks.readinessServer).toHaveBeenCalledWith(
+          servers[0],
           expect.any(Object),
-          { plugins: [], paths: {}, log: expect.any(Function) }
+          { plugins: [], paths: {} }
         );
         expect(mocks.submit).toHaveBeenCalledTimes(2);
         expect(mocks.dispose).toHaveBeenCalledOnce();
@@ -1041,10 +1075,23 @@ describe('V2 Cowork client', () => {
           dispose: mocks.dispose,
         };
       });
-      mocks.readiness.mockImplementation(async () => {
-        mocks.order.push('readiness');
-        return [{ label: 'server-1', status: 'connected', toolCount: 1 }];
-      });
+      mocks.readiness.mockImplementation(
+        async (checked: MCPConfig[], options: ReadinessCheckOptions) => {
+          mocks.order.push('readiness');
+          for (const s of checked) options.resolve?.(s);
+          return {
+            ready: true,
+            servers: [
+              {
+                label: 'server-1',
+                status: 'connected',
+                toolCount: 1,
+                elapsedMs: 1,
+              },
+            ],
+          };
+        }
+      );
     });
 
     it.each([
@@ -1069,8 +1116,9 @@ describe('V2 Cowork client', () => {
         const results = await COWORK_CLIENT.runBatch!(mixedBatch, stdioContext);
         expect(results.every((result) => !result.error)).toBe(true);
         expect(mocks.setup).toHaveBeenCalledOnce();
-        expect(mocks.readiness).toHaveBeenCalledWith(
-          mixedServers,
+        expect(readinessCall().servers).toEqual(mixedServers);
+        expect(mocks.readinessServer).toHaveBeenCalledWith(
+          expect.anything(),
           expect.any(Object),
           expect.objectContaining({
             paths: { dataRoot: '/synthetic/session/stdio' },
@@ -1133,14 +1181,11 @@ describe('V2 Cowork client', () => {
       });
       expect(results.every((result) => !result.error)).toBe(true);
       expect(mocks.setup.mock.calls[0]![0]).not.toHaveProperty('stdioPaths');
-      expect(mocks.readiness).toHaveBeenCalledWith(
-        servers,
+      expect(readinessCall().servers).toEqual(servers);
+      expect(mocks.readinessServer).toHaveBeenCalledWith(
+        servers[0],
         expect.any(Object),
-        {
-          plugins: [],
-          paths: { dataRoot: '/synthetic/session/stdio' },
-          log: expect.any(Function),
-        }
+        { plugins: [], paths: { dataRoot: '/synthetic/session/stdio' } }
       );
       expect(mocks.order).toEqual([
         'prepare',
@@ -1155,11 +1200,34 @@ describe('V2 Cowork client', () => {
       ]);
     });
 
-    it('disposes the session and releases the desktop claim when readiness fails', async () => {
-      mocks.readiness.mockRejectedValueOnce(new Error('too few tools'));
-      await expect(
-        COWORK_CLIENT.runBatch!(batch(), stdioContext)
-      ).rejects.toThrow('too few tools');
+    it('sends no case, disposes the session and releases the desktop claim when a server is not ready', async () => {
+      const reason =
+        'MCP server not ready, so no trial was sent: server-1 listed 0 tools, fewer than its minTools (1). Checked 3 times.';
+      mocks.readiness.mockResolvedValueOnce({
+        ready: false,
+        servers: [
+          {
+            label: 'server-1',
+            status: 'failed',
+            toolCount: 0,
+            minTools: 1,
+            elapsedMs: 1,
+          },
+        ],
+        reason,
+      });
+      const results = await COWORK_CLIENT.runBatch!(batch(), stdioContext);
+      expect(results).toHaveLength(2);
+      for (const result of results)
+        expect(result).toMatchObject({
+          error: reason,
+          ending: {
+            kind: 'infrastructure',
+            broke: 'setup',
+            retryable: true,
+            reason,
+          },
+        });
       expect(mocks.submit).not.toHaveBeenCalled();
       expect(mocks.snapshot).not.toHaveBeenCalled();
       expect(mocks.dispose).toHaveBeenCalledOnce();
@@ -1765,6 +1833,43 @@ describe('V2 Cowork client', () => {
     await expect(
       COWORK_CLIENT.runBatch!(requests(), context)
     ).resolves.toHaveLength(2);
+  });
+  it('is checked once per batch, after prepare and before the first case, not also before the batch', async () => {
+    const actual = await vi.importActual<typeof ReadinessCheck>(
+      './readinessCheck.js'
+    );
+    const { coworkReadinessServer } = await vi.importActual<
+      typeof ReadinessServer
+    >('./cowork/readinessServer.js');
+    mocks.readinessServer.mockImplementation(coworkReadinessServer);
+    mocks.readiness.mockImplementation(
+      async (servers: MCPConfig[], options: ReadinessCheckOptions) => {
+        mocks.order.push('readiness');
+        return actual.checkServersReady(servers, options);
+      }
+    );
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-cowork-ready-'));
+    dirs.push(dir);
+    const log = path.join(dir, 'probes.log');
+    const docs = { ...readyStdioServer({ READINESS_LOG: log }), label: 'docs' };
+    const queues = await prepareClientBatch(
+      COWORK_CLIENT,
+      [
+        { id: 'first', input: 'one' },
+        { id: 'second', input: 'two' },
+      ],
+      clientConfig,
+      [docs],
+      { ...context, env: { ...context.env, MST_MCP_READINESS_RETRY_S: '' } }
+    );
+    expect(queues?.get('first')?.[0]?.error).toBeUndefined();
+    expect(mocks.order.slice(0, 3)).toEqual(['setup', 'readiness', 'submit']);
+    expect(mocks.readiness).toHaveBeenCalledOnce();
+    // One probe: the dispatch left this batch's check to Cowork's batch.
+    const probes = (await fs.readFile(log, 'utf8'))
+      .split('\n')
+      .filter((line) => line === 'initialize');
+    expect(probes).toHaveLength(1);
   });
   it('expands trials once and rejects duplicate IDs before UI', async () => {
     const cases = [
