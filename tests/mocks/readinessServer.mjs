@@ -8,6 +8,7 @@
 //   READINESS_TOOLS        how many tools it lists (default 1)
 //   READINESS_FAIL_TIMES   the first N launches exit before answering...
 //   READINESS_FAIL_AFTER   ...or every launch after the first N does...
+//   READINESS_FAIL_LAUNCH  ...or only the launch at this index (from 0)...
 //   READINESS_FAIL_FILE    ...counted in this file (one line per launch)
 //   READINESS_LOG          appends `initialize` and `tools/list` here, one
 //                          line per request, and `closed` when stdin ends
@@ -124,7 +125,11 @@ function serveStdio() {
   const failFile = process.env.READINESS_FAIL_FILE;
   const failTimes = Number(process.env.READINESS_FAIL_TIMES ?? 0);
   const failAfter = process.env.READINESS_FAIL_AFTER;
-  if (failFile && (failTimes > 0 || failAfter !== undefined)) {
+  const failLaunch = process.env.READINESS_FAIL_LAUNCH;
+  if (
+    failFile &&
+    (failTimes > 0 || failAfter !== undefined || failLaunch !== undefined)
+  ) {
     let launches = 0;
     try {
       launches = readFileSync(failFile, 'utf8')
@@ -136,6 +141,8 @@ function serveStdio() {
     appendFileSync(failFile, 'launch\n');
     if (launches < failTimes) process.exit(1);
     if (failAfter !== undefined && launches >= Number(failAfter))
+      process.exit(1);
+    if (failLaunch !== undefined && launches === Number(failLaunch))
       process.exit(1);
   }
   const settings = {

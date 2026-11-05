@@ -17,6 +17,7 @@ import {
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 import { getClient } from './builtinClients.js';
+import { checkMcpServers } from './mcpReadiness.js';
 import { createEvalCaseExecutor, executionEnding } from './caseExecution.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import type {
@@ -304,6 +305,35 @@ describe('checkServersReady', () => {
     expect(fallback).toHaveLength(1);
     // Cancelled at the deadline, not left open while a retry opens another.
     expect(fallback[0]!.signal?.aborted).toBe(true);
+  });
+
+  it('starts no SSE fallback after the deadline aborts a stalled Streamable HTTP initialize', async () => {
+    // Stalls every request until it is aborted.
+    const requests: Array<{ method: string; signal: AbortSignal | null }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: unknown, init: RequestInit = {}) => {
+        const signal = init.signal ?? null;
+        requests.push({ method: init.method ?? 'GET', signal });
+        return new Promise<Response>((_, reject) => {
+          const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+          if (signal?.aborted) abort();
+          else signal?.addEventListener('abort', abort, { once: true });
+        });
+      })
+    );
+    const readiness = await checkMcpServers(
+      [{ transport: 'http', serverUrl: 'https://example.test/mcp' }],
+      undefined,
+      100
+    );
+    expect(readiness).toMatchObject([
+      { status: 'failed', error: 'timed out after 0.1s' },
+    ]);
+    // Time for a fallback to start, if one were going to.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(requests.map((request) => request.method)).toEqual(['POST']);
+    expect(requests[0]!.signal?.aborted).toBe(true);
   });
 
   it("gives a server its longer connectTimeoutMs, plus the probe's time to list", async () => {

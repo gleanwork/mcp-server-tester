@@ -99,17 +99,21 @@ function isRetryableError(err: unknown): boolean {
 /**
  * Retries an async operation with exponential backoff.
  * Respects Retry-After headers for 429 rate limit responses.
+ * Once `signal` aborts it retries no more, and stops waiting to.
  */
 async function retryWithBackoff<T>(
   fn: () => Promise<T>,
-  maxAttempts: number
+  maxAttempts: number,
+  signal?: AbortSignal
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+    if (signal?.aborted) throw abortError(signal);
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
+      if (signal?.aborted) throw abortError(signal);
       if (attempt < maxAttempts && isRetryableError(err)) {
         const retryAfterMs = getRetryAfterDelayMs(err);
         const delayMs =
@@ -123,7 +127,7 @@ async function retryWithBackoff<T>(
           delayMs,
           formatMCPConnectionFailure(err)
         );
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await backoff(delayMs, signal);
       } else {
         throw err;
       }
@@ -298,6 +302,19 @@ export async function createMCPClientForConfig(
   return openMCPClient(config, options);
 }
 
+/** Waits `ms` before a retry, or until `signal` aborts. */
+async function backoff(ms: number, signal?: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+  });
+}
+
 /** The error an aborted open rejects with: the signal's reason, if an Error. */
 function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
@@ -306,12 +323,30 @@ function abortError(signal: AbortSignal): Error {
 }
 
 /**
+ * Makes `transport.start()` reject once `signal` has aborted, instead of
+ * starting. The SDK can start a transport after an await inside
+ * `client.connect` (after version negotiation, for one), so checking the
+ * signal before connect is not enough.
+ */
+function refuseStartAfterAbort(
+  transport: Transport,
+  signal: AbortSignal
+): void {
+  const start = transport.start.bind(transport);
+  transport.start = async () => {
+    if (signal.aborted) throw abortError(signal);
+    return start();
+  };
+}
+
+/**
  * Opens a client as {@link createMCPClientForConfig} does, until `signal`
  * aborts. Aborting closes the transport the open has started (and a stdio
  * server's process), even while connect is still waiting on it, and the open
- * rejects with the signal's reason. A client that connects anyway after the
- * abort is closed. Internal: the readiness probe aborts at its deadline, so a
- * server that stalls its connect can't keep the connection open.
+ * rejects with the signal's reason. After the abort the open starts no other
+ * transport: no SSE fallback, no retry. A client that connects anyway after
+ * the abort is closed. Internal: the readiness probe aborts at its deadline,
+ * so a server that stalls its connect can't keep the connection open.
  */
 export async function openMCPClient(
   config: MCPConfig,
@@ -346,15 +381,17 @@ export async function openMCPClient(
     }
   );
   const connection = beginConnection(client, protocol);
-  // The transport connect is starting, so an abort can close it; one
-  // started after the abort is closed at once.
+  // The transport connect is starting, so an abort can close it. After the
+  // abort no transport starts: opening one rejects, and so does its start.
   let transport: Transport | undefined;
   const closeTransport = () => {
     void transport?.close().catch(() => undefined);
   };
   const opening = (started: Transport) => {
+    if (!signal) return;
+    if (signal.aborted) throw abortError(signal);
     transport = started;
-    if (signal?.aborted) closeTransport();
+    refuseStartAfterAbort(started, signal);
   };
   let onAbort: (() => void) | undefined;
   const aborted = signal
@@ -371,7 +408,8 @@ export async function openMCPClient(
     connection,
     validatedConfig,
     options,
-    opening
+    opening,
+    signal
   );
   try {
     await (aborted ? Promise.race([connecting, aborted]) : connecting);
@@ -404,8 +442,13 @@ async function connect(
   connection: MCPConnection,
   validatedConfig: MCPConfig,
   options: CreateMCPClientOptions | undefined,
-  /** Receives each transport before connect starts it. */
-  opening: (transport: Transport) => void
+  /**
+   * Receives each transport before connect starts it, and throws instead
+   * once the open has aborted.
+   */
+  opening: (transport: Transport) => void,
+  /** Once aborted, no fallback or retry starts. */
+  signal: AbortSignal | undefined
 ): Promise<void> {
   const protocol = connection.requestedProtocol;
   // The HTTP+SSE transport only speaks 2024-11-05, so a pin to any other
@@ -516,7 +559,7 @@ async function connect(
         : undefined;
 
     // Try Streamable HTTP first (MCP spec 2025-03-26), fall back to SSE (2024-11-05)
-    await retryWithBackoff(async () => {
+    const attempt = async (): Promise<void> => {
       try {
         debugHttp('Attempting transport: streamableHttp');
         const streamableTransport = new StreamableHTTPClientTransport(url, {
@@ -528,6 +571,8 @@ async function connect(
         debugClient('Connected via Streamable HTTP');
         debugHttp('Connection established via streamableHttp');
       } catch (err) {
+        // An aborted open starts no fallback.
+        if (signal?.aborted) throw abortError(signal);
         // HTTP+SSE is a legacy-only transport, so a pinned modern revision
         // (or a failed era negotiation) has nothing to fall back to.
         if (
@@ -562,7 +607,8 @@ async function connect(
         debugClient('Connected via SSE');
         debugHttp('Connection established via sse');
       }
-    }, retryAttempts);
+    };
+    await retryWithBackoff(attempt, retryAttempts, signal);
     connection.target = {
       transport: 'http',
       url: url.toString(),

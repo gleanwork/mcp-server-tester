@@ -37,6 +37,15 @@ interface FixtureOptions {
   minTools?: number;
   /** Every launch of `docs` after the first `failAfter` exits before answering. */
   failAfter?: number;
+  /** Only the launch of `docs` at this index (from 0) exits before answering. */
+  failLaunch?: number;
+  /** Adds a second dataset, `more` (cases `charlie` and `delta`), its own batch. */
+  secondDataset?: boolean;
+  /**
+   * Gives `docs` a client-resolved field (`${dataDir}`), so MST's check
+   * leaves it to the client and never reads the retry setting.
+   */
+  clientResolved?: boolean;
 }
 
 /**
@@ -47,17 +56,21 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-run-readiness-'));
   dirs.push(dir);
   const launches = path.join(dir, 'launches');
-  await fs.writeFile(
-    path.join(dir, 'cases.json'),
-    JSON.stringify({
-      name: 'cases',
-      cases: ['alpha', 'bravo'].map((id) => ({
-        id,
-        input: id,
-        assertions: { containsText: 'then' },
-      })),
-    })
-  );
+  const writeDataset = (file: string, name: string, ids: string[]) =>
+    fs.writeFile(
+      path.join(dir, file),
+      JSON.stringify({
+        name,
+        cases: ids.map((id) => ({
+          id,
+          input: id,
+          assertions: { containsText: 'then' },
+        })),
+      })
+    );
+  await writeDataset('cases.json', 'cases', ['alpha', 'bravo']);
+  if (options.secondDataset)
+    await writeDataset('more.json', 'more', ['charlie', 'delta']);
   const configPath = path.join(dir, 'eval.json');
   await fs.writeFile(
     configPath,
@@ -65,7 +78,9 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
       name: 'readiness',
       plugins: [mock('forkEnvPlugin.ts'), mock('shardTestPlugin.ts')],
       client: options.client ?? 'shard-test/client/probe',
-      datasets: ['./cases.json'],
+      datasets: options.secondDataset
+        ? ['./cases.json', './more.json']
+        : ['./cases.json'],
       ...(options.proxied
         ? { tools: { tool_1: { description: 'The first tool.' } } }
         : {}),
@@ -83,6 +98,12 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
             READINESS_TOOLS: String(options.tools ?? 1),
             ...(options.failAfter !== undefined
               ? { READINESS_FAIL_AFTER: String(options.failAfter) }
+              : {}),
+            ...(options.failLaunch !== undefined
+              ? { READINESS_FAIL_LAUNCH: String(options.failLaunch) }
+              : {}),
+            ...(options.clientResolved
+              ? { READINESS_DATA_DIR: '${dataDir}' }
               : {}),
           },
         },
@@ -106,12 +127,12 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
         .split('\n')
         .filter(Boolean).length,
     trial,
-    run: (env?: string) =>
+    run: (env?: string, envOptions: Record<string, string> = {}) =>
       runEval({
         configPath,
         rootDir: dir,
         outputDir,
-        ...(env ? { env, envOptions: { shards: '1' } } : {}),
+        ...(env ? { env, envOptions: { shards: '1', ...envOptions } } : {}),
       }),
     resume: (run: string) =>
       resumeRun({
@@ -137,6 +158,53 @@ describe('the retry setting', () => {
     // Before any trial: not even the check ran.
     expect(await f.launches()).toBe(0);
   });
+
+  // Only the worker's environment holds the setting, so the coordinator's
+  // own check passes and the worker must catch it. Its batch's server is
+  // left to the client, so no check before a trial would read it either.
+  it.each([
+    {
+      setting: 'a malformed MST_MCP_READINESS_RETRY_S',
+      workerEnv: { MST_MCP_READINESS_RETRY_S: 'soon' },
+      message:
+        'MST_MCP_READINESS_RETRY_S must be comma-separated seconds, got "soon"',
+    },
+    {
+      setting: 'the retired MST_COWORK_MCP_PREFLIGHT_RETRY_S',
+      workerEnv: { MST_COWORK_MCP_PREFLIGHT_RETRY_S: '10,30' },
+      message:
+        "MST_COWORK_MCP_PREFLIGHT_RETRY_S was renamed: MST now checks every client's MCP servers before the first trial. Set MST_MCP_READINESS_RETRY_S instead.",
+    },
+  ])(
+    'fails the shard of a worker whose environment sets $setting, before any launch or trial',
+    async ({ workerEnv, message }) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const f = await fixture(0, { clientResolved: true });
+      // The client marks each trial it runs here.
+      const marks = path.join(path.dirname(f.configPath), 'marks.log');
+      vi.stubEnv('SHARD_TEST_LOG', marks);
+      const result = await f.run('fork/env/children', {
+        workerEnv: JSON.stringify(workerEnv),
+      });
+      expect(result.summary.metrics).toMatchObject({
+        total: 0,
+        incomplete: 2,
+      });
+      for (const caseId of ['alpha', 'bravo']) {
+        const stored = await f.trial(result.outputDir, caseId);
+        expect(stored).toMatchObject({
+          infrastructureError: true,
+          ending: { kind: 'infrastructure', broke: 'collection' },
+        });
+        expect(stored.error).toContain(message);
+      }
+      // No server launched, not even for the check, and no trial ran.
+      expect(await f.launches()).toBe(0);
+      await expect(fs.readFile(marks, 'utf8')).rejects.toThrow();
+    },
+    90_000
+  );
 });
 
 describe('a run whose server is not ready', () => {
@@ -281,6 +349,34 @@ describe('a proxied run whose server is not ready', () => {
     },
     30_000
   );
+
+  it("starts the proxy again for the variant's next batch after its start failed", async () => {
+    vi.stubEnv('MST_MCP_READINESS_RETRY_S', '');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // Launches: the first batch's check (0) passes and its proxy start (1)
+    // fails; the second batch's check (2) and proxy start (3) succeed.
+    const f = await fixture(0, {
+      proxied: true,
+      failLaunch: 1,
+      secondDataset: true,
+    });
+    const result = await f.run();
+    // The second batch's trials ran. They fail because this client never
+    // lists the tools the proxy serves it.
+    expect(result.summary.metrics).toMatchObject({
+      passed: 0,
+      failed: 2,
+      incomplete: 2,
+    });
+    await expectSetupEndings(f, result.outputDir, proxyNotReady);
+    for (const caseId of ['charlie', 'delta'])
+      expect(await f.trial(result.outputDir, caseId)).toMatchObject({
+        infrastructureError: false,
+        ending: { kind: 'trial' },
+        error: expect.stringContaining("didn't see tool variant"),
+      });
+    expect(await f.launches()).toBe(4);
+  }, 30_000);
 
   it('does the same on a worker when the proxy cannot reach a server that passed the check', async () => {
     vi.stubEnv('MST_MCP_READINESS_RETRY_S', '');

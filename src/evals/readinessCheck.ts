@@ -45,7 +45,10 @@ import { formatMCPConnectionFailure } from '../mcp/connectionDiagnostics.js';
 export const READINESS_RETRY_DELAYS_MS: readonly number[] = [10_000, 30_000];
 
 const RETRY_VARIABLE = 'MST_MCP_READINESS_RETRY_S';
-/** The name `MST_MCP_READINESS_RETRY_S` had when only Cowork retried. */
+/**
+ * The retired name, from when only Cowork retried. A run that sets it fails
+ * and is told to set `MST_MCP_READINESS_RETRY_S` instead.
+ */
 const RETIRED_RETRY_VARIABLE = 'MST_COWORK_MCP_PREFLIGHT_RETRY_S';
 
 type Env = Readonly<Record<string, string | undefined>>;

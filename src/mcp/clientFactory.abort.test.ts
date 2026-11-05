@@ -40,6 +40,30 @@ async function waitForLine(
   }
 }
 
+/**
+ * Stubs `fetch` with a server that never answers: every request stalls until
+ * its signal aborts. Returns the requests it saw.
+ */
+function stallEveryRequest(): Array<{
+  method: string;
+  signal: AbortSignal | null;
+}> {
+  const requests: Array<{ method: string; signal: AbortSignal | null }> = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: unknown, init: RequestInit = {}) => {
+      const signal = init.signal ?? null;
+      requests.push({ method: init.method ?? 'GET', signal });
+      return new Promise<Response>((_, reject) => {
+        const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+        if (signal?.aborted) abort();
+        else signal?.addEventListener('abort', abort, { once: true });
+      });
+    })
+  );
+  return requests;
+}
+
 describe('openMCPClient', () => {
   it('connects as createMCPClientForConfig does when the signal is not aborted', async () => {
     const controller = new AbortController();
@@ -102,6 +126,55 @@ describe('openMCPClient', () => {
     await expect(opening).rejects.toThrow();
     const fallback = requests.find((request) => request.method === 'GET');
     expect(fallback?.signal?.aborted).toBe(true);
+  });
+
+  it('starts no SSE fallback after an abort during a stalled Streamable HTTP initialize', async () => {
+    const requests = stallEveryRequest();
+    const controller = new AbortController();
+    const opening = openMCPClient(
+      { transport: 'http', serverUrl: 'https://example.test/mcp' },
+      undefined,
+      controller.signal
+    );
+    await vi.waitFor(() =>
+      expect(requests.map((request) => request.method)).toEqual(['POST'])
+    );
+    controller.abort(new Error('stop opening'));
+    await expect(opening).rejects.toThrow('stop opening');
+    // Time for a fallback to start, if one were going to.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(requests.map((request) => request.method)).toEqual(['POST']);
+    expect(requests[0]!.signal?.aborted).toBe(true);
+  });
+
+  it('stops waiting to retry when aborted, and retries no more', async () => {
+    // Every request fails on the network, which a retry could help.
+    const methods: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: unknown, init: RequestInit = {}) => {
+        methods.push(init.method ?? 'GET');
+        throw new TypeError('fetch failed');
+      })
+    );
+    const controller = new AbortController();
+    const opening = openMCPClient(
+      {
+        transport: 'http',
+        serverUrl: 'https://example.test/mcp',
+        retryAttempts: 3,
+      },
+      undefined,
+      controller.signal
+    );
+    // The first attempt tried both transports; the retry waits 1 s.
+    await vi.waitFor(() => expect(methods).toEqual(['POST', 'GET']));
+    const started = Date.now();
+    controller.abort(new Error('stop opening'));
+    await expect(opening).rejects.toThrow('stop opening');
+    expect(Date.now() - started).toBeLessThan(500);
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect(methods).toEqual(['POST', 'GET']);
   });
 
   it('rejects at once for a signal that is already aborted, launching nothing', async () => {
