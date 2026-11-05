@@ -281,20 +281,17 @@ export default {
     model: {
       schema: ModelConfig,
       evidence: 'structured',
-      async runBatch(requests, context) {
-        const results = [];
-        const pools = new Map();
-        try {
-          for (const request of requests) {
-            const config = ModelConfig.parse(request.config);
-            const key = JSON.stringify(request.input.servers);
-            if (!pools.has(key))
-              pools.set(key, await connect(request.input.servers));
-            const result = await runModel(request, config, pools.get(key));
+      async open(options, context) {
+        const config = ModelConfig.parse(options.config);
+        const clients = await connect(options.input.servers);
+        return {
+          async run(trial) {
+            const request = { ...options, ...trial, input: { ...options.input, ...trial.input } };
+            const result = await runModel(request, config, clients);
             record({
               variant: context.variant?.name ?? 'default',
-              caseId: request.caseId,
-              trial: request.trial,
+              caseId: trial.caseId,
+              trial: trial.trial,
               usage: result.usage,
               events: result.events.map(({ kind, source, name, server }) => ({
                 kind,
@@ -303,12 +300,11 @@ export default {
                 server,
               })),
             });
-            results.push(result);
-          }
-        } finally {
-          await Promise.allSettled([...pools.values()].map(closeAll));
-        }
-        return results;
+            return { result, continuation: 'continue' };
+          },
+          async reset() {},
+          async close() { await closeAll(clients); },
+        };
       },
     },
     assistant: {

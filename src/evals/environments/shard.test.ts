@@ -135,6 +135,178 @@ describe('a shard in a child-process environment', () => {
     auth: { accessTokenEnv: 'ACME_SESSION' },
   });
 
+  it.each([
+    { failClose: false, missingArtifacts: false },
+    { failClose: true, missingArtifacts: false },
+    { failClose: false, missingArtifacts: true },
+    { failClose: true, missingArtifacts: true },
+  ])(
+    'finalizes session cleanup without recopying temporary artifacts: %s',
+    async ({ failClose, missingArtifacts }) => {
+      const root = await tempDir();
+      const artifactDirectory = path.join(root, 'temporary-evidence');
+      if (!missingArtifacts) {
+        await fs.mkdir(artifactDirectory);
+        await fs.writeFile(
+          path.join(artifactDirectory, 'evidence.txt'),
+          'captured before close'
+        );
+      }
+      const bundleDir = path.join(root, 'bundle');
+      await writeShardBundle(bundleDir, {
+        runId: 'run-1',
+        shard: { index: 0, count: 1 },
+        mst: packageJson.version,
+        plugins: [PLUGIN],
+        evalConfig: { name: 'lifecycle', datasets: [] },
+        tokenServers: [],
+        batches: [
+          {
+            variant: { name: 'baseline' },
+            requests: [
+              {
+                caseId: 'one',
+                trial: 3,
+                config: {
+                  type: 'shard-test/client/lifecycle',
+                  artifactDirectory,
+                  failClose,
+                },
+                input: { prompt: 'one', servers: [] },
+              },
+            ],
+          },
+        ],
+      });
+      const shard: ShardSpec = {
+        runId: 'run-1',
+        index: 0,
+        count: 1,
+        work: 'collect',
+        bundleDir,
+        resultsDir: path.join(root, 'results'),
+      };
+      const { events } = recorder([() => ({ byServer: {} })]);
+      const env = forkEnvironment(context(), root, {
+        MST_TOKENS_DIR: path.join(root, 'tokens'),
+      });
+      const outcome = await env.runShard(
+        shard,
+        events,
+        new AbortController().signal
+      );
+      const infrastructure = failClose || missingArtifacts;
+      expect(outcome).toMatchObject({
+        ok: true,
+        collected: infrastructure ? 0 : 1,
+        infra: infrastructure ? 1 : 0,
+      });
+      const result = await readClientResult(
+        path.join(shard.resultsDir, '0/0.json')
+      );
+      expect(result.key).toEqual({
+        variant: 'baseline',
+        caseId: 'one',
+        trial: 3,
+      });
+      expect(result.result.telemetry).toMatchObject({
+        batchLifecycle: { closed: true },
+      });
+      if (missingArtifacts) {
+        expect(result.result).toMatchObject({
+          diagnostics: { failureKind: 'artifacts' },
+        });
+        expect(result.result.error).toContain("Couldn't copy");
+        expect(result.result.artifacts).toBeUndefined();
+      } else {
+        expect(
+          await fs.readFile(
+            path.join(shard.resultsDir, '0/0.artifacts/evidence.txt'),
+            'utf8'
+          )
+        ).toBe('captured before close');
+        await expect(fs.stat(artifactDirectory)).rejects.toThrow();
+      }
+      if (failClose) expect(result.result.error).toContain('cleanup failed');
+    }
+  );
+
+  it.each([false, true])(
+    'saves artifact-free cleanup failures and correct counters (lifecycle: %s)',
+    async (lifecycle) => {
+      const root = await tempDir();
+      const bundleDir = path.join(root, 'bundle');
+      await writeShardBundle(bundleDir, {
+        runId: 'run-1',
+        shard: { index: 0, count: 1 },
+        mst: packageJson.version,
+        plugins: [PLUGIN],
+        evalConfig: { name: 'cleanup', datasets: [] },
+        tokenServers: [],
+        batches: [
+          {
+            variant: { name: 'baseline' },
+            requests: [
+              {
+                caseId: 'one',
+                trial: 0,
+                config: {
+                  type: 'shard-test/client/lifecycle',
+                  withoutLifecycle: !lifecycle,
+                  failClose: true,
+                },
+                input: { prompt: 'ok', servers: [] },
+              },
+            ],
+          },
+        ],
+      });
+      const shard: ShardSpec = {
+        runId: 'run-1',
+        index: 0,
+        count: 1,
+        work: 'collect',
+        bundleDir,
+        resultsDir: path.join(root, 'results'),
+      };
+      // No token or secret text, and no artifacts: redaction and save both
+      // retain the live result unless the early cache takes snapshots.
+      const { events, progress } = recorder([() => ({ byServer: {} })]);
+      const env = forkEnvironment(context(), root, {
+        MST_TOKENS_DIR: path.join(root, 'tokens'),
+      });
+      const outcome = await env.runShard(
+        shard,
+        events,
+        new AbortController().signal
+      );
+      const { result } = await readClientResult(
+        path.join(shard.resultsDir, '0/0.json')
+      );
+      expect(result).toMatchObject({
+        finalText: 'ok',
+        events: [],
+        error: 'cleanup failed',
+        diagnostics: { failureKind: 'cleanup' },
+        telemetry: {
+          batchFailure: { kind: 'cleanup_failed', error: 'cleanup failed' },
+        },
+      });
+      expect(result.artifacts).toBeUndefined();
+      if (lifecycle)
+        expect(result.telemetry).toMatchObject({
+          batchLifecycle: { closed: true },
+        });
+      else expect(result.telemetry).not.toHaveProperty('batchLifecycle');
+      expect(
+        progress
+          .filter((event) => event.type === 'trial')
+          .map((event) => event.status)
+      ).toEqual(['collected', 'infra']);
+      expect(outcome).toMatchObject({ ok: true, collected: 0, infra: 1 });
+    }
+  );
+
   it('runs end to end, renewing a token mid-trial', async () => {
     const root = await tempDir();
     const tokensDir = path.join(root, 'tokens');

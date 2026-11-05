@@ -102,7 +102,11 @@ import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import { readinessRetryDelaysMs } from './readinessCheck.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import type { EvalRunnerResult } from './evalRunner.js';
-import type { EvalCase, EvalDataset } from './datasetTypes.js';
+import {
+  assertDatasetInputs,
+  type EvalCase,
+  type EvalDataset,
+} from './datasetTypes.js';
 import {
   assertNamedCases,
   narrowEvalCases,
@@ -1809,8 +1813,10 @@ async function evaluate(
         })),
     }))
   );
-  for (const { dataset } of canonicalDatasets)
+  for (const { dataset } of canonicalDatasets) {
+    assertDatasetInputs(dataset);
     assertDatasetNamespaces(dataset, namespaces);
+  }
   assertUniqueCaseIds(canonicalDatasets.map(({ dataset }) => dataset));
   assertUniqueVariantNames(variants.map((variant) => variant.name));
   assertNamedCases(
@@ -2262,9 +2268,7 @@ async function evaluate(
         const appliedPricing: Record<string, ModelPricing> = {};
         const unpricedModels = new Set<string>();
         const client =
-          replay ||
-          clientConfig.definition.run ||
-          clientConfig.definition.runBatch
+          replay || clientConfig.definition.run || clientConfig.definition.open
             ? undefined
             : resolvedServers.length === 1
               ? await createMCPClientForConfig(resolvedServers[0]!)
@@ -2307,10 +2311,10 @@ async function evaluate(
             const sourceConfig = source;
             const runClient =
               typeof clientConfig.definition.run === 'function' ||
-              typeof clientConfig.definition.runBatch === 'function';
+              typeof clientConfig.definition.open === 'function';
             if (!replay && !runClient && effectiveDataset.cases.length > 0)
               throw new Error(
-                `Client "${clientConfig.declaration.type}" has neither run() nor runBatch(), so it can't run cases.`
+                `Client "${clientConfig.declaration.type}" has neither run() nor open(), so it can't run cases.`
               );
             // The model each case runs on prices its usage and labels its result:
             // a case client's own, or the variant client's (including its default).

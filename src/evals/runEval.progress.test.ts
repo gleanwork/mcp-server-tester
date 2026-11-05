@@ -135,15 +135,16 @@ describe('a run saves each trial when it finishes', () => {
   it('for a batch client, as it reports each result', async () => {
     let seen: Awaited<ReturnType<typeof onDisk>> | undefined;
     const f: Fixture = await fixture({
-      async runBatch(requests, context) {
-        const traces: ClientRunResult[] = [];
-        for (const [index] of requests.entries()) {
-          if (index === 1 && !seen) seen = await onDisk(f);
-          const result = ok();
-          await context.reportResult?.(index, result);
-          traces.push(result);
-        }
-        return traces;
+      async open() {
+        let index = 0;
+        return {
+          async run() {
+            if (index++ === 1 && !seen) seen = await onDisk(f);
+            return { result: ok(), continuation: 'continue' };
+          },
+          async reset() {},
+          async close() {},
+        };
       },
     });
     await f.run();
@@ -157,21 +158,22 @@ describe('a run saves each trial when it finishes', () => {
   it('writes the trial record the run ends with', async () => {
     let early: Record<string, unknown> | undefined;
     const f: Fixture = await fixture({
-      async runBatch(requests, context) {
-        const traces: ClientRunResult[] = [];
-        for (const [index] of requests.entries()) {
-          const result = ok();
-          await context.reportResult?.(index, result);
-          early ??= await readJson(
-            path.join(
-              await f.runDirectory(),
-              'traces',
-              trace('baseline', 'one', 0)
-            )
-          );
-          traces.push(result);
-        }
-        return traces;
+      async open() {
+        return {
+          async run() {
+            return { result: ok(), continuation: 'continue' };
+          },
+          async reset() {},
+          async close() {
+            early ??= await readJson(
+              path.join(
+                await f.runDirectory(),
+                'traces',
+                trace('baseline', 'one', 0)
+              )
+            );
+          },
+        };
       },
     });
     await f.run();
@@ -188,22 +190,26 @@ describe('a run saves each trial when it finishes', () => {
   it('stores an early trace redacted', async () => {
     let early: string | undefined;
     const f: Fixture = await fixture({
-      async runBatch(requests, context) {
-        const traces: ClientRunResult[] = [];
-        for (const [index] of requests.entries()) {
-          const result = { finalText: 'OK private answer', events: [] };
-          await context.reportResult?.(index, result);
-          early ??= await fs.readFile(
-            path.join(
-              await f.runDirectory(),
-              'traces',
-              trace('baseline', 'one', 0)
-            ),
-            'utf8'
-          );
-          traces.push(result);
-        }
-        return traces;
+      async open() {
+        return {
+          async run() {
+            return {
+              result: { finalText: 'OK private answer', events: [] },
+              continuation: 'continue',
+            };
+          },
+          async reset() {},
+          async close() {
+            early ??= await fs.readFile(
+              path.join(
+                await f.runDirectory(),
+                'traces',
+                trace('baseline', 'one', 0)
+              ),
+              'utf8'
+            );
+          },
+        };
       },
     });
     await f.run();
@@ -211,24 +217,29 @@ describe('a run saves each trial when it finishes', () => {
     expect(early).not.toContain('private answer');
   });
 
-  it('keeps the trials that finished when a batch stops partway', async () => {
+  it('keeps earlier trials and records the failed trial when a session throws', async () => {
     const f: Fixture = await fixture({
-      async runBatch(_requests, context) {
-        await context.reportResult?.(0, ok());
-        throw new Error('the desktop went away');
+      async open() {
+        let index = 0;
+        return {
+          async run() {
+            if (index++) throw new Error('the desktop went away');
+            return { result: ok(), continuation: 'continue' };
+          },
+          async reset() {},
+          async close() {},
+        };
       },
     });
-    await expect(f.run()).rejects.toThrow('the desktop went away');
-    // No variant finished, so results.json has no cases, but the trial that
-    // finished is kept and the run says it stopped.
-    expect(await onDisk(f)).toEqual({
-      phases: { collect: 'failed', grade: 'partial' },
-      variants: [],
-      traces: [trace('baseline', 'one', 0)],
-    });
-    const { cases } = await readJson<{ cases: unknown[] }>(
-      path.join(await f.runDirectory(), 'results.json')
-    );
-    expect(cases).toEqual([]);
+    const result = await f.run();
+    expect(
+      result.summary.results.filter((c) => c.id === 'one').every((c) => c.pass)
+    ).toBe(true);
+    expect(
+      result.summary.results
+        .filter((c) => c.id === 'two')
+        .every((c) => c.error?.includes('the desktop went away'))
+    ).toBe(true);
+    expect((await onDisk(f)).traces).toHaveLength(4);
   });
 });

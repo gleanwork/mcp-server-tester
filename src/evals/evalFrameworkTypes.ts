@@ -110,16 +110,14 @@ export interface ClientRunContext extends SettingsContext {
   /** Runtime-only environment isolated per eval. */
   env?: Record<string, string | undefined>;
   /**
-   * For `runBatch`: report a request's result as soon as it finishes, with
-   * its index in `requests`, so the eval saves the trial before the batch
-   * ends. Optional, and it never throws. Report a result once, and don't
-   * change it after; `runBatch` still returns every result.
+   * MST's collection callback: save a trial as soon as it finishes, with its
+   * index in the collection batch. Session operations return their result;
+   * MST calls this callback, then finalizes lifecycle metadata after close.
    */
   reportResult?: (index: number, result: ClientRunResult) => Promise<void>;
   /**
-   * For `runBatch`: wait for room under the run's limits before request
-   * `index` starts (ADR 0004). Optional; a batch client that doesn't call
-   * it runs its requests unlimited.
+   * MST waits for room under the run's limits before trial `index` starts
+   * (ADR 0004). Session operations do not acquire or schedule trials.
    */
   acquire?: (index: number) => Promise<void>;
 }
@@ -466,7 +464,7 @@ export interface ClientDefinition {
    */
   readonly toolMetadata?: boolean;
   /**
-   * For clients with `run` or `runBatch` that don't set `toolMetadata`: the
+   * For clients with `run` or `open` that don't set `toolMetadata`: the
    * client connects to the servers in `input.servers`, so the eval can serve
    * it a variant's tool metadata through a local MCP proxy (the default). Set
    * false for a client that connects elsewhere; an eval config that gives it
@@ -491,20 +489,14 @@ export interface ClientDefinition {
    */
   readonly headless?: boolean;
   /**
-   * Opens one session with fixed options/model/servers/environment. During
-   * the dispatch migration, clients with open must also keep run or runBatch:
-   * plugin validation and dispatch still use those existing entry points.
-   * Run-only clients need no change.
+   * Opens one session with fixed options/model/servers/environment. MST
+   * prefers open for collection when both entry points exist. A definition
+   * may provide run, open, or both. Run-only clients need no change.
    */
   open?(
     options: ClientSessionOptions,
     context: ClientRunContext
   ): Promise<ClientSession>;
-  /** Transitional batch entry point. The framework owns scores. */
-  runBatch?(
-    requests: ClientBatchRequest[],
-    context: ClientRunContext
-  ): Promise<ClientRunResult[]>;
   run?(
     input: ClientRunInput,
     config: ClientConfig,

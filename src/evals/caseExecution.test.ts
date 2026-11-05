@@ -330,7 +330,9 @@ describe('createEvalCaseExecutor', () => {
     const type = installTestClient('case-execution-batch-host', {
       schema: z.object({ type: z.string() }),
       evidence: 'structured',
-      runBatch: async () => [],
+      async open() {
+        throw new Error('Must consume collected traces, never reopen.');
+      },
     });
     const execute = createEvalCaseExecutor({
       servers: [],

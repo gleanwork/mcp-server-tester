@@ -342,8 +342,15 @@ describe('golden: runEval clients', () => {
           ...(kind === 'run'
             ? { run: async () => trace }
             : {
-                runBatch: async (requests) =>
-                  requests.map(() => ({ ...trace })),
+                // Keep the historical fixture identity and golden unchanged.
+                open: async () => ({
+                  run: async () => ({
+                    result: { ...trace },
+                    continuation: 'continue' as const,
+                  }),
+                  reset: async () => {},
+                  close: async () => {},
+                }),
               }),
         },
       },

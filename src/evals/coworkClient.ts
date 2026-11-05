@@ -2,7 +2,6 @@ import { hasLLMCredential } from '../llm/endpoint.js';
 import { z } from 'zod';
 import type {
   ClientDefinition,
-  ClientBatchRequest,
   ClientRunContext,
   ClientRunResult,
   ClientSessionOptions,
@@ -13,9 +12,9 @@ import { checksServersAfterPrepare } from './readinessCheck.js';
 import { clientSecretValues, redactClientError } from './clientSecrets.js';
 import {
   RESET_RETRY_DELAYS_MS,
+  collectClientBatch,
   openDesktopSession,
   requireIdenticalClientSettings,
-  runDesktopBatch,
   type DesktopCaseOutcome,
   type DesktopClientAdapter,
   type DesktopContinuation,
@@ -286,12 +285,11 @@ const failure = (error: string): ClientRunResult => ({
 
 type CoworkSession = Awaited<ReturnType<CoworkPlatform['prepare']>> | undefined;
 
-/** Fixed desktop settings and the one native trial body, for open and runBatch. */
+/** Fixed desktop settings and the native trial body for an open session. */
 async function desktopAdapter(
   requests: ClientSessionOptions[],
   context: ClientRunContext,
-  selectedPlatform?: CoworkPlatform,
-  caseCount?: number
+  selectedPlatform?: CoworkPlatform
 ): Promise<DesktopClientAdapter<CoworkSession>> {
   requests = structuredClone(requests);
   const configs = requests.map((r) => CoworkSchema.parse(r.config));
@@ -536,7 +534,7 @@ async function desktopAdapter(
         startedAtMs,
       };
       process.stderr.write(
-        `[mst:cowork] case ${index + 1}${caseCount === undefined ? '' : `/${caseCount}`}: submitting unchanged prompt\n`
+        `[mst:cowork] case ${index + 1}: submitting unchanged prompt\n`
       );
       try {
         const submission = await platform.submit(request.input.prompt, {
@@ -716,9 +714,7 @@ async function desktopAdapter(
           throw new Error(
             'Native Claude trace deadline exceeded. No resubmission attempted.'
           );
-        process.stderr.write(
-          `[mst:cowork] collecting case ${index + 1}${caseCount === undefined ? '' : `/${caseCount}`}\n`
-        );
+        process.stderr.write(`[mst:cowork] collecting case ${index + 1}\n`);
         let inspections = 0;
         let nextInspection = 0;
         const trace = await waitForClaudeTrace({
@@ -928,23 +924,6 @@ async function desktopAdapter(
   };
 }
 
-/** Transitional dispatch wrapper; open and the batch share one lifecycle. */
-async function runBatch(
-  requests: ClientBatchRequest[],
-  context: ClientRunContext,
-  platform?: CoworkPlatform
-): Promise<ClientRunResult[]> {
-  if (!requests.length) return [];
-  if (requests.some((request) => !request.input.prompt.trim()))
-    throw new Error('Cowork cases require a non-empty input.');
-  return runDesktopBatch(
-    await desktopAdapter(requests, context, platform, requests.length),
-    requests,
-    context.reportResult,
-    context.acquire
-  );
-}
-
 /**
  * Cowork's own MCP servers (its sandbox's `workspace`, a plugin's bundled
  * server) are the client's tools, not the eval's: a call to a server the
@@ -990,7 +969,7 @@ export function createCoworkClient(
 ): ClientDefinition {
   // Its stdio servers resolve only once the app is prepared, so its batch
   // checks them after `prepare`, not the dispatch before it.
-  return checksServersAfterPrepare({
+  const definition: ClientDefinition = checksServersAfterPrepare({
     schema: CoworkSchema,
     description: 'Claude Desktop in Cowork mode',
     requirements: {
@@ -1017,15 +996,18 @@ export function createCoworkClient(
         await desktopAdapter([options], context, platform)
       );
     },
-    runBatch: (requests, context) => runBatch(requests, context, platform),
-    run: async (input, config, context) =>
-      (
-        await runBatch(
+    async run(input, config, context) {
+      if (!input.prompt.trim())
+        throw new Error('Cowork cases require a non-empty input.');
+      return (
+        await collectClientBatch(
+          definition,
           [{ caseId: 'single', trial: 0, input, config }],
-          context,
-          platform
+          context
         )
-      )[0]!,
+      )[0]!;
+    },
   });
+  return definition;
 }
 export const COWORK_CLIENT = createCoworkClient();

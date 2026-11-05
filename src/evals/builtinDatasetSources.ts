@@ -15,7 +15,7 @@ import {
   parseExtensionReference,
 } from '../plugins/plugin.js';
 import { buildEvalDataset } from './buildEvalDataset.js';
-import type { EvalDataset } from './datasetTypes.js';
+import { assertDatasetInputs, type EvalDataset } from './datasetTypes.js';
 
 const FileDatasetSchema = z
   .object({
@@ -230,6 +230,7 @@ export async function loadDataset(
     settings: settingsFor(context.evalConfig.settings, config.type),
     ...(request ? { request } : {}),
   });
+  assertDatasetInputs(dataset);
   if (request) {
     if (dataset.snapshot !== undefined && typeof dataset.snapshot !== 'string')
       throw new Error(`Dataset "${config.type}": snapshot must be a string.`);

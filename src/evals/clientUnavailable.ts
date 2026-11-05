@@ -4,9 +4,9 @@
  * records each of the batch's trials as an infrastructure failure that says
  * why, and goes on with the next variant.
  *
- * Throw it from a client's `runBatch` only for that. Any other error (a bad
- * option, a server that isn't ready) stops the run, keeping the variants that
- * finished.
+ * Throw it from a client's `open` only for that. Any other open error (a bad
+ * option, for example) stops the run, keeping the variants that finished.
+ * A server that isn't ready ends each trial as a retryable setup failure.
  */
 export class ClientUnavailableError extends Error {
   override readonly name = 'ClientUnavailableError';

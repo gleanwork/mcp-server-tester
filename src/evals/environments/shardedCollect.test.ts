@@ -12,6 +12,7 @@ import { SHARD_PROTOCOL } from './protocol.js';
 import type { ResolvedEnvironment } from './builtinEnvironments.js';
 import type { EvalConfig } from '../evalConfig.js';
 import type { Environment } from '../evalFrameworkTypes.js';
+import type { CollectInEnvironmentOptions } from './shardedCollect.js';
 
 describe('requestGroups', () => {
   const request = (caseId: string, config: Record<string, unknown>) => ({
@@ -68,7 +69,11 @@ function environment(
   };
 }
 
-async function collect(env: ResolvedEnvironment, caseIds: string[]) {
+async function collect(
+  env: ResolvedEnvironment,
+  caseIds: string[],
+  onResult?: CollectInEnvironmentOptions['onResult']
+) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
   dirs.push(workDir);
   return collectInEnvironment({
@@ -76,6 +81,7 @@ async function collect(env: ResolvedEnvironment, caseIds: string[]) {
     runId: 'run-1',
     evalConfig: { name: 'gather' } as EvalConfig,
     plugins: [],
+    onResult,
     groups: [
       {
         variant: { name: 'baseline' },
@@ -184,6 +190,59 @@ describe('collectInEnvironment', () => {
     expect(
       gathered.result({ variant: 'baseline', caseId: 'a', trial: 0 })
     ).toMatchObject({ finalText: 'from the worker' });
+  });
+
+  it('replaces an early result with cleanup facts in the final worker copy', async () => {
+    let resolveEarly!: () => void;
+    const early = new Promise<void>((resolve) => {
+      resolveEarly = resolve;
+    });
+    const errors: Array<string | undefined> = [];
+    const key = { variant: 'baseline', caseId: 'a', trial: 0 };
+    const gathered = await collect(
+      environment(async (shard, events) => {
+        const file = path.join(shard.resultsDir, '0/0.json');
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        const initial = {
+          format: SHARD_PROTOCOL,
+          kind: 'client-result',
+          key,
+          result: { finalText: 'answer', events: [] },
+        };
+        await fs.writeFile(file, JSON.stringify(initial));
+        events.progress({
+          type: 'trial',
+          key,
+          status: 'collected',
+          path: '0/0.json',
+        });
+        await early;
+        await fs.writeFile(
+          file,
+          JSON.stringify({
+            ...initial,
+            result: {
+              ...initial.result,
+              error: 'cleanup failed',
+              diagnostics: { failureKind: 'cleanup' },
+              telemetry: { batchLifecycle: { closed: true } },
+            },
+          })
+        );
+        return { ...ok, collected: 0, infra: 1 };
+      }),
+      ['a'],
+      async (_key, result) => {
+        errors.push(result.error);
+        resolveEarly();
+      }
+    );
+    expect(errors).toEqual([undefined, 'cleanup failed']);
+    expect(gathered.result(key)).toMatchObject({
+      error: 'cleanup failed',
+      diagnostics: { failureKind: 'cleanup' },
+      telemetry: { batchLifecycle: { closed: true } },
+    });
   });
 
   it("marks a failed shard's trials missing, with why", async () => {

@@ -659,7 +659,7 @@ describe('the readiness check before a batch', () => {
     'checks the %s client once, before its batch touches the desktop',
     async (type) => {
       const definition = getClient(type);
-      const runBatch = vi.spyOn(definition, 'runBatch').mockResolvedValue([]);
+      const open = vi.spyOn(definition, 'open');
       const { server, log } = await emptyServer();
       const queues = await prepareClientBatch(
         definition,
@@ -668,7 +668,7 @@ describe('the readiness check before a batch', () => {
         [server],
         { evalConfig, env }
       );
-      expect(runBatch).not.toHaveBeenCalled();
+      expect(open).not.toHaveBeenCalled();
       for (const evalCase of cases)
         expect(queues?.get(evalCase.id)).toMatchObject([
           { error: reason, ending: setupEnding },
@@ -720,17 +720,26 @@ describe('the readiness check before a batch', () => {
     expect(await count(empty.log)).toBe(1);
   });
 
-  it('checks a plugin client with runBatch() once, before its batch', async () => {
+  it('checks a plugin client with open() once, before opening its session', async () => {
     const dir = await tempDir();
     const log = path.join(dir, 'probes.log');
     const checksSeen: number[] = [];
-    const runBatch = vi.fn(async (requests: unknown[]) => {
+    const open = vi.fn(async () => {
       checksSeen.push(await count(log));
-      return requests.map(() => ({ finalText: 'ok', events: [] }));
+      return {
+        async run() {
+          return {
+            result: { finalText: 'ok', events: [] },
+            continuation: 'continue' as const,
+          };
+        },
+        async reset() {},
+        async close() {},
+      };
     });
     const definition: ClientDefinition = {
       schema: z.object({ type: z.string() }),
-      runBatch,
+      open,
     };
     const ready = await prepareClientBatch(
       definition,
@@ -742,7 +751,7 @@ describe('the readiness check before a batch', () => {
     expect(checksSeen).toEqual([1]);
     expect(ready?.get('one')).toMatchObject([{ finalText: 'ok' }]);
 
-    runBatch.mockClear();
+    open.mockClear();
     const empty = await emptyServer();
     const queues = await prepareClientBatch(
       definition,
@@ -751,7 +760,7 @@ describe('the readiness check before a batch', () => {
       [empty.server],
       { evalConfig, env }
     );
-    expect(runBatch).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
     expect(queues?.get('two')).toMatchObject([{ ending: setupEnding }]);
     expect(await count(empty.log)).toBe(1);
   });
@@ -890,9 +899,13 @@ describe('a case on its own client', () => {
   });
 
   it('leaves a cowork case in an api variant to the check Cowork runs after prepare', async () => {
-    const coworkRun = vi
-      .spyOn(getClient('cowork'), 'run')
-      .mockResolvedValue(ran);
+    const coworkRun = vi.spyOn(getClient('cowork'), 'open').mockResolvedValue({
+      async run() {
+        return { result: ran, continuation: 'continue' };
+      },
+      async reset() {},
+      async close() {},
+    });
     const apiRun = vi.spyOn(getClient('api'), 'run').mockResolvedValue(ran);
     const { server, log } = await docs(0);
     const execute = createEvalCaseExecutor({

@@ -49,7 +49,7 @@ afterEach(async () => {
 });
 
 async function fixture(
-  clientDefinition: Pick<ClientDefinition, 'run' | 'runBatch'>,
+  clientDefinition: Pick<ClientDefinition, 'run' | 'open'>,
   cases: EvalCase[],
   extra: Record<string, unknown> = {}
 ) {
@@ -106,22 +106,29 @@ describe('eval wall-clock timing', () => {
       },
     };
     const judgeName = `test/judge/${judgeKey}`;
-    const runBatch = vi.fn<NonNullable<ClientDefinition['runBatch']>>(
-      async (requests) => {
-        advance(20); // Shared setup.
-        advance(50); // Concurrent requests: elapsed time is not their sum.
-        const traces = requests.map((_, index) => ({
-          finalText: 'OK',
-          events: [],
-          // Missing request timing must not inherit or divide the batch total.
-          ...(index < 4 ? { durationMs: (index + 1) * 10 } : {}),
-        }));
-        advance(30); // Shared cleanup completes before runBatch returns.
-        return traces;
-      }
-    );
+    const open = vi.fn<NonNullable<ClientDefinition['open']>>(async () => {
+      advance(20); // Shared setup.
+      let index = 0;
+      return {
+        async run() {
+          if (!index) advance(50); // Trial clock is independent of reported timing.
+          const result = {
+            finalText: 'OK',
+            events: [],
+            // Missing timing must not inherit or divide the batch total.
+            ...(index < 4 ? { durationMs: (index + 1) * 10 } : {}),
+          };
+          index++;
+          return { result, continuation: 'continue' };
+        },
+        async reset() {},
+        async close() {
+          advance(30);
+        }, // Shared cleanup.
+      };
+    });
     const f = await fixture(
-      { runBatch },
+      { open },
       [
         { id: 'explicit', input: 'A', trials: 2 },
         { id: 'default', input: 'B' },
@@ -143,7 +150,7 @@ describe('eval wall-clock timing', () => {
 
     const result = await runEval(f);
 
-    expect(runBatch).toHaveBeenCalledTimes(4);
+    expect(open).toHaveBeenCalledTimes(4);
     for (const dataset of result.datasets) {
       expect(dataset.result?.durationMs).toBe(110); // 100 batch + 10 judging.
       expect(dataset.result?.caseResults.map((c) => c.durationMs)).toEqual([

@@ -294,19 +294,27 @@ describe('prepareClientBatch with a tool variant', () => {
   const evalConfig = { name: 'm', datasets: [] };
   const servers: MCPConfig[] = [catalog('docs', 'docs')];
 
-  it('gives each request its own proxy scope and settles each trace', async () => {
+  it('gives an open session one fixed proxy scope and settles each trace', async () => {
     const seen: string[] = [];
     const proxy = stubProxy();
     const queues = await prepareClientBatch(
       {
         schema: z.object({}),
-        runBatch: async (requests) =>
-          requests.map((request) => {
-            seen.push(
-              (request.input.servers[0] as { serverUrl: string }).serverUrl
-            );
-            return { finalText: '', events: [call('find_more')] };
-          }),
+        async open(options) {
+          return {
+            async run() {
+              seen.push(
+                (options.input.servers[0] as { serverUrl: string }).serverUrl
+              );
+              return {
+                result: { finalText: '', events: [call('find_more')] },
+                continuation: 'continue',
+              };
+            },
+            async reset() {},
+            async close() {},
+          };
+        },
       },
       [
         { id: 'a', input: 'x', trials: 2 },
@@ -317,7 +325,7 @@ describe('prepareClientBatch with a tool variant', () => {
       { evalConfig },
       { id: 'v', proxy: async () => proxy }
     );
-    expect(new Set(seen).size).toBe(3);
+    expect(new Set(seen).size).toBe(1);
     expect(seen.every((url) => url.startsWith(`${stubOrigin}/`))).toBe(true);
     expect(queues?.get('a')?.[0]?.events).toMatchObject([
       { name: 'find_skills', rawName: 'find_more' },
@@ -329,16 +337,20 @@ describe('prepareClientBatch with a tool variant', () => {
     const queues = await prepareClientBatch(
       {
         schema: z.object({}),
-        runBatch: async (requests, context) => {
-          const traces: ClientRunResult[] = [];
-          for (const [index] of requests.entries()) {
-            const trace = { finalText: '', events: [call('find_more')] };
-            await context.reportResult?.(index, trace);
-            // Reported before the next request runs.
-            expect(reported).toHaveLength(index + 1);
-            traces.push(trace);
-          }
-          return traces;
+        async open() {
+          let index = 0;
+          return {
+            async run() {
+              // MST reported the previous trace before this trial runs.
+              expect(reported).toHaveLength(index++);
+              return {
+                result: { finalText: '', events: [call('find_more')] },
+                continuation: 'continue',
+              };
+            },
+            async reset() {},
+            async close() {},
+          };
         },
       },
       [
@@ -368,10 +380,17 @@ describe('prepareClientBatch with a tool variant', () => {
     const queues = await prepareClientBatch(
       {
         schema: z.object({}),
-        runBatch: async (requests, context) => {
-          for (const [index] of requests.entries())
-            await context.reportResult?.(index, { finalText: '', events: [] });
-          return requests.map(() => ({ finalText: 'done', events: [] }));
+        async open() {
+          return {
+            async run() {
+              return {
+                result: { finalText: 'done', events: [] },
+                continuation: 'continue',
+              };
+            },
+            async reset() {},
+            async close() {},
+          };
         },
       },
       [{ id: 'a', input: 'x' }],
@@ -394,8 +413,18 @@ describe('prepareClientBatch with a tool variant', () => {
     const queues = await prepareClientBatch(
       {
         schema: z.object({}),
-        runBatch: async (requests) =>
-          requests.map(() => ({ finalText: '', events: [] })),
+        async open() {
+          return {
+            async run() {
+              return {
+                result: { finalText: '', events: [] },
+                continuation: 'continue',
+              };
+            },
+            async reset() {},
+            async close() {},
+          };
+        },
       },
       [{ id: 'a', input: 'x' }],
       { type: 'test/batch' },
@@ -451,7 +480,7 @@ describe('a batch client that connects to one server set for the batch', () => {
     }
   }
 
-  async function runBatchWith(
+  async function collectWith(
     connect: (endpoints: {
       servers: MCPConfig[];
       check: MCPConfig[];
@@ -463,16 +492,24 @@ describe('a batch client that connects to one server set for the batch', () => {
       {
         schema: z.object({}),
         serversPerBatch: true,
-        runBatch: async (requests) => {
-          for (const request of requests)
-            seen.push(
-              (request.input.servers[0] as { serverUrl: string }).serverUrl
-            );
+        async open(options) {
           await connect({
-            servers: requests[0]!.input.servers,
-            check: requests[0]!.input.checkServers!,
+            servers: options.input.servers,
+            check: options.input.checkServers!,
           });
-          return requests.map(() => ({ finalText: '', events: [] }));
+          return {
+            async run() {
+              seen.push(
+                (options.input.servers[0] as { serverUrl: string }).serverUrl
+              );
+              return {
+                result: { finalText: '', events: [] },
+                continuation: 'continue',
+              };
+            },
+            async reset() {},
+            async close() {},
+          };
         },
       },
       [
@@ -488,7 +525,7 @@ describe('a batch client that connects to one server set for the batch', () => {
   }
 
   it('serves the whole batch on one endpoint and checks once that the client listed tools', async () => {
-    const { queues, seen } = await runBatchWith(async ({ servers, check }) => {
+    const { queues, seen } = await collectWith(async ({ servers, check }) => {
       expect(check[0]).not.toEqual(servers[0]);
       expect(check[0]).toMatchObject({ label: 'docs' });
       await listFrom(check);
@@ -499,8 +536,46 @@ describe('a batch client that connects to one server set for the batch', () => {
       for (const trace of queues.get(id)!) expect(trace.error).toBeUndefined();
   });
 
+  it('does not borrow a tool listing from a session with different settings', async () => {
+    const proxy = await start([catalog('docs', 'docs')]);
+    const seen: string[] = [];
+    const queues = await prepareClientBatch(
+      {
+        schema: z.object({}),
+        async open(options) {
+          seen.push(
+            (options.input.servers[0] as { serverUrl: string }).serverUrl
+          );
+          if (options.config.model === 'listed')
+            await listFrom(options.input.servers);
+          return {
+            async run() {
+              return {
+                result: { finalText: '', events: [] },
+                continuation: 'continue',
+              };
+            },
+            async reset() {},
+            async close() {},
+          };
+        },
+      },
+      [
+        { id: 'listed', input: 'x', client: 'test/batch', model: 'listed' },
+        { id: 'unlisted', input: 'y', client: 'test/batch', model: 'unlisted' },
+      ],
+      { type: 'test/batch' },
+      [catalog('docs', 'docs')],
+      { evalConfig },
+      { id: 'v2', proxy: async () => proxy }
+    );
+    expect(new Set(seen).size).toBe(2);
+    expect(queues?.get('listed')?.[0]?.error).toBeUndefined();
+    expect(queues?.get('unlisted')?.[0]?.error).toContain('tool variant "v2"');
+  });
+
   it("doesn't take MST's own check for the client listing tools", async () => {
-    const { queues } = await runBatchWith(async ({ check }) => {
+    const { queues } = await collectWith(async ({ check }) => {
       await listFrom(check);
     });
     for (const id of ['a', 'b'])

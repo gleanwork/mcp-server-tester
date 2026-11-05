@@ -779,6 +779,45 @@ describe('runEvalDataset', () => {
     };
   }
 
+  it.each([undefined, ['keep']])(
+    'rejects a later blank in-memory input before executing any case (tags: %j)',
+    async (filterTags) => {
+      const executeCase = vi.fn(async () =>
+        clientRunToExecution({ finalText: 'ok', events: [] }, 'structured')
+      );
+      await expect(
+        runEvalDataset(
+          {
+            dataset: createDataset([
+              { id: 'valid', input: 'Find it', tags: ['keep'] },
+              { id: 'blank', input: ' \t\r\n\u00a0' },
+            ]),
+            executeCase,
+            filterTags,
+          },
+          createContext()
+        )
+      ).rejects.toThrow(
+        /case "blank".*input must contain at least one non-whitespace character/
+      );
+      expect(executeCase).not.toHaveBeenCalled();
+    }
+  );
+
+  it('passes valid in-memory prompt text unchanged to execution', async () => {
+    const input = '\u00a0 \tFind café 📚\r\n第二行 \n';
+    const executeCase = vi.fn(async () =>
+      clientRunToExecution({ finalText: 'ok', events: [] }, 'structured')
+    );
+    await runEvalDataset(
+      { dataset: createDataset([{ id: 'valid', input }]), executeCase },
+      createContext()
+    );
+    expect(executeCase).toHaveBeenCalledWith(
+      expect.objectContaining({ input })
+    );
+  });
+
   it('records a protocol passed as an option when there is no mcp', async () => {
     const protocol = {
       requested: '2026-07-28',

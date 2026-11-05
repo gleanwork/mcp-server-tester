@@ -90,14 +90,17 @@ export default {
     },
     'leaky-batch': {
       schema: z.object({ type: z.string() }).passthrough(),
-      async runBatch(requests, context) {
-        const traces: ClientRunResult[] = [];
-        for (const [index, request] of requests.entries()) {
-          const trace = await leakedTrace(request.input.servers);
-          await context.reportResult?.(index, trace);
-          traces.push(trace);
-        }
-        return traces;
+      async open(options) {
+        return {
+          async run() {
+            return {
+              result: await leakedTrace(options.input.servers),
+              continuation: 'continue',
+            };
+          },
+          async reset() {},
+          async close() {},
+        };
       },
     },
     caller: {

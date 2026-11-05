@@ -588,7 +588,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L131-L220
+```typescript snippet=src/evals/evalRunner.ts#L135-L224
 /**
  * Overall result of running an eval dataset
  */
@@ -1427,7 +1427,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L186-L240
+```typescript snippet=src/evals/datasetTypes.ts#L187-L241
 /**
  * A case's assertions
  *
@@ -1489,7 +1489,7 @@ export interface EvalAssertions {
 
 A case's `judges` entries, written like an eval config's `judges`.
 
-```typescript snippet=src/evals/datasetTypes.ts#L121-L171
+```typescript snippet=src/evals/datasetTypes.ts#L122-L172
 /**
  * One of a case's judges, written like an eval config's: a reference
  * (`acme/judge/completeness`) or `{ "type": <reference>, ...options }`.
@@ -1545,7 +1545,7 @@ export interface CaseJudgeConfig extends JudgeSettings {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L13-L119
+````typescript snippet=src/evals/datasetTypes.ts#L13-L120
 /**
  * A single eval case: an input the client under test acts on, and what to
  * assert about what it did. The case runs on the `client`, `model` and
@@ -1566,7 +1566,8 @@ export interface EvalCase extends ClientFields {
   description?: string;
 
   /**
-   * The user's request the client acts on, sent as its prompt.
+   * The user's request the client acts on, sent as its prompt unchanged.
+   * Must contain at least one non-whitespace character for every client.
    *
    * @example "Get the weather for London and tell me if I need an umbrella"
    */

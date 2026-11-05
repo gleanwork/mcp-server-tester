@@ -3,7 +3,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { variantToolMetadata } from './evalConfig.js';
 import type {
-  ClientBatchRequest,
   ClientDefinition,
   ClientRunContext,
   ClientRunResult,
@@ -23,9 +22,9 @@ import type { MCPConfig } from '../config/mcpConfig.js';
 import { endingOf } from './trialEnding.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import {
+  collectClientBatch,
   openDesktopSession,
   requireIdenticalClientSettings,
-  runDesktopBatch,
   type DesktopClientAdapter,
 } from './desktopBatch.js';
 import {
@@ -468,24 +467,6 @@ function desktopAdapter(
   };
 }
 
-/** Transitional dispatch wrapper; the session and the batch use one trial body. */
-async function runBatch(
-  requests: ClientBatchRequest[],
-  context: ClientRunContext,
-  platform: ChatgptPlatform,
-  product: DesktopProduct
-): Promise<ClientRunResult[]> {
-  if (!requests.length) return [];
-  if (requests.some((request) => !request.input.prompt.trim()))
-    throw new Error(`${product.label} requires a non-empty input.`);
-  return runDesktopBatch(
-    desktopAdapter(requests, context, platform, product),
-    requests,
-    context.reportResult,
-    context.acquire
-  );
-}
-
 /** What each product is and what a machine needs to run it (`mst clients`). */
 const PRODUCT_DEFINITIONS: Record<
   DesktopProduct['client'],
@@ -532,7 +513,7 @@ function desktopClient(
   platform?: ChatgptPlatform
 ): ClientDefinition {
   const platformNow = () => platform ?? chatgptPlatformFor(process.platform);
-  return {
+  const definition: ClientDefinition = {
     schema: SCHEMAS[product.client],
     ...PRODUCT_DEFINITIONS[product.client],
     evidence: 'structured',
@@ -545,20 +526,19 @@ function desktopClient(
         desktopAdapter([options], context, platformNow(), product)
       );
     },
-    runBatch(requests, context) {
-      return runBatch(requests, context, platformNow(), product);
-    },
     async run(input, config, context) {
+      if (!input.prompt.trim())
+        throw new Error(`${product.label} requires a non-empty input.`);
       return (
-        await runBatch(
+        await collectClientBatch(
+          definition,
           [{ caseId: 'single', trial: 0, input, config }],
-          context,
-          platformNow(),
-          product
+          context
         )
       )[0]!;
     },
   };
+  return definition;
 }
 
 /** The built-in `chatgpt` and `codex-app`: the trial's machine picks the OS. */

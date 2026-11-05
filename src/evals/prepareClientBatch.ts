@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { stableJson } from '../skills/skillEntry.js';
 import type { EvalCase } from './datasetTypes.js';
 import type { ClientConfig } from './evalConfig.js';
 import { clientPatchOf } from './clientFields.js';
@@ -12,6 +13,7 @@ import type {
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { isClientUnavailable } from './clientUnavailable.js';
 import { readyBatch } from './readinessCheck.js';
+import { collectClientBatch } from './desktopBatch.js';
 import {
   clientSecretValues,
   redactClientError,
@@ -113,11 +115,21 @@ export function proxiedBatch(
   servers: readonly MCPConfig[],
   variantId: string
 ): ProxiedBatch {
-  const shared = definition.serversPerBatch === true;
-  const scopes = requests.map(() => randomUUID());
-  if (shared) scopes.fill(scopes[0]!);
+  const shared =
+    definition.open !== undefined || definition.serversPerBatch === true;
+  const sessionScopes = new Map<string, string>();
+  const scopes = requests.map((request) => {
+    if (!shared) return randomUUID();
+    const { prompt: _prompt, ...input } = request.input;
+    const key = definition.open
+      ? stableJson({ config: request.config, input })
+      : '';
+    let scope = sessionScopes.get(key);
+    if (!scope) sessionScopes.set(key, (scope = randomUUID()));
+    return scope;
+  });
   const checkScope = randomUUID();
-  let batchListed: boolean | undefined;
+  const batchListed = new Map<string, boolean>();
   return {
     requests: requests.map((request, index) => ({
       ...request,
@@ -129,11 +141,13 @@ export function proxiedBatch(
     })),
     settle(index, trace, final) {
       const scope = scopes[index]!;
-      const listedTools = !final
-        ? proxy.activity(scope).listedTools
-        : shared
-          ? (batchListed ??= proxy.endScope(scope).listedTools)
-          : proxy.endScope(scope).listedTools;
+      let listedTools: boolean;
+      if (!final) listedTools = proxy.activity(scope).listedTools;
+      else if (shared) {
+        if (!batchListed.has(scope))
+          batchListed.set(scope, proxy.endScope(scope).listedTools);
+        listedTools = batchListed.get(scope)!;
+      } else listedTools = proxy.endScope(scope).listedTools;
       return settleProxiedTrace(trace, proxy, listedTools, servers, variantId);
     },
     endChecks() {
@@ -178,7 +192,7 @@ export async function prepareClientBatch(
   toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> },
   options: ClientBatchOptions = {}
 ): Promise<Map<string, ClientRunResult[]> | undefined> {
-  if (!definition.runBatch) return undefined;
+  if (!definition.open) return undefined;
   for (const c of cases) {
     const declaration =
       (clientPatchOf(c) as ClientConfig | undefined) ?? config;
@@ -252,9 +266,11 @@ export async function prepareClientBatch(
     : withSettings;
   let traces: ClientRunResult[];
   try {
-    traces = await definition.runBatch(
+    traces = await collectClientBatch(
+      definition,
       requests,
-      reportResult ? { ...batchContext, reportResult } : batchContext
+      reportResult ? { ...batchContext, reportResult } : batchContext,
+      secrets()
     );
   } catch (error) {
     if (!isClientUnavailable(error)) throw error;
@@ -266,8 +282,9 @@ export async function prepareClientBatch(
     for (const request of requests)
       queues.get(request.caseId)!.push(batchFailure(config.type, reason));
     return queues;
+  } finally {
+    proxied?.endChecks();
   }
-  proxied?.endChecks();
   if (traces.length !== requests.length)
     throw new Error(
       'Batch client returned an incomplete trace set; refusing to resubmit.'

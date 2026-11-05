@@ -21,6 +21,27 @@ describe('datasetLoader', () => {
       expect(dataset.cases[0]?.id).toBe('case-1');
     });
 
+    it('rejects a later blank input before returning an in-memory dataset', () => {
+      expect(() =>
+        loadEvalDatasetFromObject({
+          name: 'blank-input',
+          cases: [
+            { id: 'valid', input: 'Find it' },
+            { id: 'blank', input: ' \t\n\u00a0' },
+          ],
+        })
+      ).toThrow('input must contain at least one non-whitespace character');
+    });
+
+    it('preserves valid in-memory prompt text exactly', () => {
+      const input = '\t Find café 📚\r\n第二行 \u00a0';
+      const dataset = loadEvalDatasetFromObject({
+        name: 'preserved-input',
+        cases: [{ id: 'valid', input }],
+      });
+      expect(dataset.cases[0]?.input).toBe(input);
+    });
+
     it('should validate dataset by default', () => {
       const invalidData = {
         name: 'test',

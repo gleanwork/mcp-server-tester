@@ -23,6 +23,8 @@ import type {
   TraceEvent,
   TraceEvidence,
   ClientDefinition,
+  ClientRunInput,
+  ClientRunContext,
   ClientArtifacts,
   ClientRunResult,
   HostTelemetry,
@@ -46,6 +48,7 @@ import type { LLMToolCall } from './mstClient/types.js';
 import { endingOf, thrownEnding } from './trialEnding.js';
 import { readinessSetup, readyBatch } from './readinessCheck.js';
 import { batchName } from './prepareClientBatch.js';
+import { collectClientBatch } from './desktopBatch.js';
 
 /** The assertion/report view. Custom executors may return this view directly. */
 export interface ClientResponse {
@@ -267,8 +270,8 @@ export function batchTraceExecution(
 }
 
 /**
- * The eval's per-case executor for clients with `run()` or `runBatch()`:
- * a case consumes a batch trace or calls the client's `run()`.
+ * The eval's per-case executor for clients with `run()` or `open()`:
+ * a case consumes a collected trace or runs on its own client.
  */
 export function createEvalCaseExecutor(
   options: EvalCaseExecutorOptions
@@ -320,6 +323,7 @@ function clientExecutor(
     }
     return ready;
   };
+  const trials = new Map<string, number>();
   return async (evalCase) => {
     // The eval resolves a case's own client in full (see runEval).
     const declaration =
@@ -342,29 +346,39 @@ function clientExecutor(
         );
       return batchTraceExecution(trace, definition, servers);
     }
-    if (!definition.run)
-      throw new Error(
-        `Client ${declaration.type} must expose run() for per-case dispatch.`
-      );
+    const trial = trials.get(evalCase.id) ?? 0;
+    trials.set(evalCase.id, trial + 1);
     const context = {
       evalConfig,
       variant,
       env,
       settings: settingsFor(evalConfig.settings, declaration.type),
     };
+    const run = async (input: ClientRunInput, runContext: ClientRunContext) => {
+      if (definition.open)
+        return (
+          await collectClientBatch(
+            definition,
+            [{ caseId: evalCase.id, trial, input, config: declaration }],
+            runContext
+          )
+        )[0]!;
+      if (!definition.run)
+        throw new Error(`Client ${declaration.type} needs run() or open().`);
+      return definition.run(input, declaration, runContext);
+    };
     if (options.toolVariant && usesToolSurfaceProxy(definition)) {
       const proxy = await options.toolVariant.proxy();
       const scope = randomUUID();
       const checkScope = randomUUID();
       const trace = await timed(() =>
-        definition.run!(
+        run(
           {
             prompt: evalCase.input ?? '',
             servers: proxy.serversFor(scope),
             checkServers: proxy.serversFor(checkScope),
             env,
           },
-          declaration,
           withoutToolVariant(context)
         )
       );
@@ -382,11 +396,7 @@ function clientExecutor(
       );
     }
     const trace = await timed(() =>
-      definition.run!(
-        { prompt: evalCase.input ?? '', servers, env },
-        declaration,
-        context
-      )
+      run({ prompt: evalCase.input ?? '', servers, env }, context)
     );
     return clientRunToExecution(trace, definition.evidence ?? 'none', servers);
   };

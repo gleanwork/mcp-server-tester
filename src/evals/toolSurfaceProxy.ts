@@ -91,7 +91,7 @@ export function usesToolSurfaceProxy(definition: ClientDefinition): boolean {
     definition.toolMetadata !== true &&
     definition.toolSurfaceProxy !== false &&
     (typeof definition.run === 'function' ||
-      typeof definition.runBatch === 'function')
+      typeof definition.open === 'function')
   );
 }
 

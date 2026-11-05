@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { collectClientBatch } from './desktopBatch.js';
 import type { CoworkPlatform } from './cowork/platform.js';
 import { runEvalBatch } from './runEvalBatch.js';
 import {
@@ -340,16 +341,14 @@ describe('Cowork sessions', () => {
   });
 
   it.each(['servers', 'environment'] as const)(
-    'rejects mixed %s before setup',
+    'opens separate sessions for different %s',
     async (setting) => {
       const batch = requests();
       if (setting === 'servers') batch[1]!.input.servers = [];
       else batch[1]!.input.env = { SESSION_ENV: 'different' };
-      await expect(client().runBatch!(batch, context)).rejects.toThrow(
-        'identical client settings'
-      );
-      expect(mocks.setup).not.toHaveBeenCalled();
-      expect(mocks.submit).not.toHaveBeenCalled();
+      await collectClientBatch(client(), batch, context);
+      expect(mocks.setup).toHaveBeenCalledTimes(2);
+      expect(mocks.submit).toHaveBeenCalledTimes(2);
     }
   );
 
@@ -372,6 +371,13 @@ describe('Cowork sessions', () => {
 });
 
 describe('V2 Cowork client', () => {
+  it('keeps the single-run blank prompt check before setup', async () => {
+    await expect(
+      COWORK_CLIENT.run!({ prompt: '  ', servers: [] }, clientConfig, context)
+    ).rejects.toThrow('Cowork cases require a non-empty input.');
+    expect(mocks.setup).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
   it.each([false, undefined])(
     'uses policy %s for initial and late task-scoped approval without resubmitting',
     async (approveWriteTools) => {
@@ -389,14 +395,20 @@ describe('V2 Cowork client', () => {
           return (await original(options)) as ClaudeTrace;
         }
       );
-      const results = await COWORK_CLIENT.runBatch!([requests()[0]!], {
-        ...context,
-        evalConfig: {
-          ...context.evalConfig,
-          coworkSetup:
-            approveWriteTools === undefined ? undefined : { approveWriteTools },
-        },
-      });
+      const results = await collectClientBatch(
+        COWORK_CLIENT,
+        [requests()[0]!],
+        {
+          ...context,
+          evalConfig: {
+            ...context.evalConfig,
+            coworkSetup:
+              approveWriteTools === undefined
+                ? undefined
+                : { approveWriteTools },
+          },
+        }
+      );
       expect(mocks.submit).toHaveBeenCalledOnce();
       expect(mocks.hitl).toHaveBeenCalledTimes(2);
       for (const [options] of mocks.hitl.mock.calls) {
@@ -421,7 +433,11 @@ describe('V2 Cowork client', () => {
   );
 
   it('uses staged macOS write approval without initial or followup clicks', async () => {
-    const results = await COWORK_CLIENT.runBatch!(requests(), context);
+    const results = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      context
+    );
     expect(mocks.setup).toHaveBeenCalledWith(
       expect.objectContaining({
         evalConfig: expect.objectContaining({
@@ -465,7 +481,8 @@ describe('V2 Cowork client', () => {
       ...clientConfig,
       appVersion: '1.52386.6',
     };
-    const [result] = await COWORK_CLIENT.runBatch!(
+    const [result] = await collectClientBatch(
+      COWORK_CLIENT,
       [{ ...requests()[0]!, config: pinned }],
       readOnlyContext
     );
@@ -533,7 +550,7 @@ describe('V2 Cowork client', () => {
         ...r,
         config: { ...clientConfig, ...options },
       }));
-      await expect(client.runBatch!(batch, context)).rejects.toThrow(
+      await expect(collectClientBatch(client, batch, context)).rejects.toThrow(
         `Cowork can't run this trial: ${message}`
       );
       expect(prepare).not.toHaveBeenCalled();
@@ -547,7 +564,7 @@ describe('V2 Cowork client', () => {
       appPath: '/private/tmp/pinned/Claude.app',
       dispose: mocks.dispose,
     });
-    await COWORK_CLIENT.runBatch!([requests()[0]!], readOnlyContext);
+    await collectClientBatch(COWORK_CLIENT, [requests()[0]!], readOnlyContext);
     expect(mocks.submit).toHaveBeenCalledWith(
       'query one',
       expect.objectContaining({ appPath: '/private/tmp/pinned/Claude.app' })
@@ -570,7 +587,10 @@ describe('V2 Cowork client', () => {
       ...r,
       input: { ...r.input, checkServers: [check] },
     }));
-    const result = await prepared.runBatch!(batch, { ...context, env: {} });
+    const result = await collectClientBatch(prepared, batch, {
+      ...context,
+      env: {},
+    });
     expect(result.every((r) => !r.error)).toBe(true);
     // The dispatch checked the declared servers before starting the proxy.
     expect(mocks.readiness).not.toHaveBeenCalled();
@@ -587,7 +607,7 @@ describe('V2 Cowork client', () => {
       submit: mocks.submit,
       handleHitl: mocks.hitl,
     });
-    const result = await prepared.runBatch!(requests(), {
+    const result = await collectClientBatch(prepared, requests(), {
       ...context,
       env: {},
     });
@@ -662,7 +682,7 @@ describe('V2 Cowork client', () => {
       submit: mocks.submit,
       handleHitl: mocks.hitl,
     });
-    const [first] = await prepared.runBatch!([requests()[0]!], {
+    const [first] = await collectClientBatch(prepared, [requests()[0]!], {
       ...context,
       evalConfig: { ...context.evalConfig, telemetry: { host: {} } },
       env: { MST_RUN_ID: 'run-1' },
@@ -695,7 +715,8 @@ describe('V2 Cowork client', () => {
     expect(parsed).not.toHaveProperty('computerUseProvider');
     expect(JSON.stringify(parsed)).not.toMatch(/darwin|macos|anthropic/i);
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-    const result = await COWORK_CLIENT.runBatch!(
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
       requests().map((r) => ({ ...r, config: { ...parsed, type: 'cowork' } })),
       { ...context, env: {} }
     );
@@ -712,7 +733,8 @@ describe('V2 Cowork client', () => {
       vi.spyOn(process, 'platform', 'get').mockReturnValue(os);
       const submit = os === 'darwin' ? mocks.submit : linuxPlatform.submit;
       const run = (options: Record<string, unknown>) =>
-        COWORK_CLIENT.runBatch!(
+        collectClientBatch(
+          COWORK_CLIENT,
           [{ ...requests()[0]!, config: { ...clientConfig, ...options } }],
           readOnlyContext
         );
@@ -737,7 +759,8 @@ describe('V2 Cowork client', () => {
     'rejects Cowork options %o before any desktop action',
     async (options, message) => {
       await expect(
-        COWORK_CLIENT.runBatch!(
+        collectClientBatch(
+          COWORK_CLIENT,
           [{ ...requests()[0]!, config: { ...clientConfig, ...options } }],
           readOnlyContext
         )
@@ -748,9 +771,9 @@ describe('V2 Cowork client', () => {
   );
   it('fails on an OS Cowork does not run on, before any desktop action', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
-    await expect(COWORK_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
-      'Cowork runs on macOS or Linux, not win32.'
-    );
+    await expect(
+      collectClientBatch(COWORK_CLIENT, requests(), context)
+    ).rejects.toThrow('Cowork runs on macOS or Linux, not win32.');
     expect(mocks.setup).not.toHaveBeenCalled();
     expect(linuxPlatform.prepare).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
@@ -792,7 +815,8 @@ describe('V2 Cowork client', () => {
       now += 300;
       return { status: 'hitl_checked', telemetry: driverTelemetry };
     });
-    const result = await COWORK_CLIENT.runBatch!(
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
       requests().slice(0, 1),
       readOnlyContext
     );
@@ -822,7 +846,11 @@ describe('V2 Cowork client', () => {
       // The app cannot be reset, so nothing more is sent and the shape of the
       // failed case is the whole result.
       mocks.reset.mockRejectedValueOnce(new Error('cowork_not_ready'));
-      const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+      const result = await collectClientBatch(
+        COWORK_CLIENT,
+        requests(),
+        readOnlyContext
+      );
       expect(result[0]).toMatchObject({
         error: 'driver failed',
         telemetry: {
@@ -849,8 +877,8 @@ describe('V2 Cowork client', () => {
       .slice(0, 1)
       .map((r) => ({ ...r, input: { ...r.input, servers: [] } }));
     const results = await Promise.allSettled([
-      COWORK_CLIENT.runBatch!(batch, context),
-      COWORK_CLIENT.runBatch!(batch, context),
+      collectClientBatch(COWORK_CLIENT, batch, context),
+      collectClientBatch(COWORK_CLIENT, batch, context),
     ]);
     expect(results.map((r) => r.status).sort()).toEqual([
       'fulfilled',
@@ -883,8 +911,8 @@ describe('V2 Cowork client', () => {
         handleHitl: mocks.hitl,
       });
     const results = await Promise.allSettled([
-      desktop('/desktop/one').runBatch!(batch, context),
-      desktop('/desktop/two').runBatch!(batch, context),
+      collectClientBatch(desktop('/desktop/one'), batch, context),
+      collectClientBatch(desktop('/desktop/two'), batch, context),
     ]);
     expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
   });
@@ -897,7 +925,11 @@ describe('V2 Cowork client', () => {
         computerUseModel: 'planner-model',
       },
     }));
-    const result = await COWORK_CLIENT.runBatch!(batch, readOnlyContext);
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      batch,
+      readOnlyContext
+    );
     expect(result.every((r) => !r.error)).toBe(true);
     expect(mocks.setup).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'native-model' })
@@ -916,7 +948,7 @@ describe('V2 Cowork client', () => {
       ...r,
       config: { ...r.config, model: 'different-model' },
     }));
-    const failed = await COWORK_CLIENT.runBatch!(wrong, context);
+    const failed = await collectClientBatch(COWORK_CLIENT, wrong, context);
     expect(failed[0]!.error).toContain('Cowork model mismatch');
     expect(mocks.dispose).toHaveBeenCalledTimes(2);
   });
@@ -964,7 +996,8 @@ describe('V2 Cowork client', () => {
         modelCalls,
         toolCalls: [call],
       }));
-      const [result] = await COWORK_CLIENT.runBatch!(
+      const [result] = await collectClientBatch(
+        COWORK_CLIENT,
         requests().slice(0, 1),
         context
       );
@@ -992,7 +1025,11 @@ describe('V2 Cowork client', () => {
     }
   );
   it('serializes marker-free cases, collects native telemetry, then restores', async () => {
-    const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      readOnlyContext
+    );
     expect(mocks.order).toEqual([
       'setup',
       'submit',
@@ -1035,7 +1072,7 @@ describe('V2 Cowork client', () => {
         submit: mocks.submit,
         handleHitl: mocks.hitl,
       });
-      const result = await portable.runBatch!(requests(), context);
+      const result = await collectClientBatch(portable, requests(), context);
       expect(result).toHaveLength(2);
       expect(result[0]!.finalText).toBe('answer');
       expect(prepare).toHaveBeenCalledOnce();
@@ -1057,7 +1094,8 @@ describe('V2 Cowork client', () => {
     };
     const withPlugins = (plugins: unknown[]) =>
       requests().map((r) => ({ ...r, config: { ...clientConfig, plugins } }));
-    await createCoworkClient(platform).runBatch!(
+    await collectClientBatch(
+      createCoworkClient(platform),
       withPlugins([plugin]),
       context
     );
@@ -1069,7 +1107,11 @@ describe('V2 Cowork client', () => {
       mcp: { acme_mcp: { url: 'https://example.test/eval' } },
     };
     await expect(
-      createCoworkClient(platform).runBatch!(withPlugins([override]), context)
+      collectClientBatch(
+        createCoworkClient(platform),
+        withPlugins([override]),
+        context
+      )
     ).rejects.toMatchObject({ code: 'plugin_unsupported' });
     expect(prepare).not.toHaveBeenCalled();
     expect(mocks.submit).not.toHaveBeenCalled();
@@ -1138,7 +1180,8 @@ describe('V2 Cowork client', () => {
         telemetry: { models: [] },
       }));
       const selected = platform();
-      const results = await createCoworkClient(selected).runBatch!(
+      const results = await collectClientBatch(
+        createCoworkClient(selected),
         batch(linuxClient()),
         stdioContext
       );
@@ -1207,7 +1250,11 @@ describe('V2 Cowork client', () => {
       vi.spyOn(process, 'platform', 'get').mockReturnValue(os);
       const selected = platform();
       await expect(
-        createCoworkClient(selected).runBatch!(batch(config), stdioContext)
+        collectClientBatch(
+          createCoworkClient(selected),
+          batch(config),
+          stdioContext
+        )
       ).rejects.toMatchObject({ code });
       expect(selected.prepare).not.toHaveBeenCalled();
       expect(mocks.submit).not.toHaveBeenCalled();
@@ -1231,7 +1278,8 @@ describe('V2 Cowork client', () => {
           ...r,
           input: { ...r.input, servers },
         }));
-        const results = await createCoworkClient(selected).runBatch!(
+        const results = await collectClientBatch(
+          createCoworkClient(selected),
           plain,
           context
         );
@@ -1317,7 +1365,11 @@ describe('V2 Cowork client', () => {
           ...request,
           input: { ...request.input, servers: mixedServers },
         }));
-        const results = await COWORK_CLIENT.runBatch!(mixedBatch, stdioContext);
+        const results = await collectClientBatch(
+          COWORK_CLIENT,
+          mixedBatch,
+          stdioContext
+        );
         expect(results.every((result) => !result.error)).toBe(true);
         expect(mocks.setup).toHaveBeenCalledOnce();
         expect(readinessCall().servers).toEqual(mixedServers);
@@ -1343,7 +1395,7 @@ describe('V2 Cowork client', () => {
         },
       }));
       await expect(
-        COWORK_CLIENT.runBatch!(mixedBatch, stdioContext)
+        collectClientBatch(COWORK_CLIENT, mixedBatch, stdioContext)
       ).rejects.toMatchObject({
         code: 'mcp_server_invalid',
         plugin: 'server-2',
@@ -1370,7 +1422,7 @@ describe('V2 Cowork client', () => {
           },
         }));
         await expect(
-          COWORK_CLIENT.runBatch!(invalidBatch, stdioContext)
+          collectClientBatch(COWORK_CLIENT, invalidBatch, stdioContext)
         ).rejects.toMatchObject({ code: 'mcp_server_invalid' });
         expect(mocks.setup).not.toHaveBeenCalled();
         expect(mocks.readiness).not.toHaveBeenCalled();
@@ -1379,7 +1431,7 @@ describe('V2 Cowork client', () => {
     );
 
     it('uses session-owned paths for readiness before submitting any prompt', async () => {
-      const results = await COWORK_CLIENT.runBatch!(batch(), {
+      const results = await collectClientBatch(COWORK_CLIENT, batch(), {
         ...stdioContext,
         evalConfig: readOnlyContext.evalConfig,
       });
@@ -1420,7 +1472,11 @@ describe('V2 Cowork client', () => {
         ],
         reason,
       });
-      const results = await COWORK_CLIENT.runBatch!(batch(), stdioContext);
+      const results = await collectClientBatch(
+        COWORK_CLIENT,
+        batch(),
+        stdioContext
+      );
       expect(results).toHaveLength(2);
       for (const result of results)
         expect(result).toMatchObject({
@@ -1435,7 +1491,7 @@ describe('V2 Cowork client', () => {
       expect(mocks.submit).not.toHaveBeenCalled();
       expect(mocks.snapshot).not.toHaveBeenCalled();
       expect(mocks.dispose).toHaveBeenCalledOnce();
-      await COWORK_CLIENT.runBatch!(batch(), stdioContext);
+      await collectClientBatch(COWORK_CLIENT, batch(), stdioContext);
       expect(mocks.submit).toHaveBeenCalledTimes(2);
       expect(mocks.dispose).toHaveBeenCalledTimes(2);
     });
@@ -1444,7 +1500,11 @@ describe('V2 Cowork client', () => {
       mocks.submit.mockRejectedValueOnce(
         new Error('adapter rejected good-token')
       );
-      const results = await COWORK_CLIENT.runBatch!(batch(), stdioContext);
+      const results = await collectClientBatch(
+        COWORK_CLIENT,
+        batch(),
+        stdioContext
+      );
       expect(results[0]!.error).toBe('adapter rejected [REDACTED]');
       // Cowork didn't take the prompt: the client app failed, and the reason
       // it records is as redacted as the error (ADR 0010).
@@ -1476,7 +1536,11 @@ describe('V2 Cowork client', () => {
             { code: undefined, aborted: true }
           )
         );
-      const results = await COWORK_CLIENT.runBatch!(batch(), stdioContext);
+      const results = await collectClientBatch(
+        COWORK_CLIENT,
+        batch(),
+        stdioContext
+      );
       // A permission the desktop needs: a retry can't help.
       expect(results[0]!.ending).toMatchObject({
         kind: 'infrastructure',
@@ -1492,7 +1556,11 @@ describe('V2 Cowork client', () => {
   });
   it('skips GUI HITL for already completed native tasks without hiding actual failures', async () => {
     mocks.matches.mockResolvedValue([{ isComplete: true }]);
-    const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      readOnlyContext
+    );
     expect(mocks.hitl).not.toHaveBeenCalled();
     expect(result.every((r) => r.finalText === 'answer' && !r.error)).toBe(
       true
@@ -1504,7 +1572,7 @@ describe('V2 Cowork client', () => {
       { isComplete: true },
       { isComplete: true },
     ]);
-    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(mocks.hitl).not.toHaveBeenCalled();
     expect(result[0]!.error).toContain('Ambiguous');
   });
@@ -1512,19 +1580,27 @@ describe('V2 Cowork client', () => {
     mocks.hitl.mockRejectedValue(
       new ComputerUseHitlBudgetError('inspection budget exhausted')
     );
-    const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      readOnlyContext
+    );
     expect(result[0]).toMatchObject({
       finalText: 'answer',
       telemetry: { hitlWarning: 'inspection budget exhausted' },
     });
     expect(result[0]!.error).toBeUndefined();
     mocks.trace.mockRejectedValueOnce(new Error('native task never completed'));
-    const missing = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    const missing = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      readOnlyContext
+    );
     expect(missing[0]!.error).toBe('native task never completed');
   });
   it('on macOS, resets with Computer Use after a failed case, then runs the next', async () => {
     mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
-    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(result[0]!.error).toBe('native trace timeout');
     expect(result[1]!.error).toBeUndefined();
     expect(mocks.reset).toHaveBeenCalledOnce();
@@ -1548,7 +1624,7 @@ describe('V2 Cowork client', () => {
         'Computer Use reset failed: stopped before completion; not retrying'
       )
     );
-    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(result[1]!.error).toContain('could not be reset');
   });
@@ -1566,7 +1642,7 @@ describe('V2 Cowork client', () => {
       new Error('Computer Use reset exceeded 8 actions')
     );
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(restart).toHaveBeenCalledOnce();
     expect(mocks.submit).toHaveBeenCalledTimes(2);
     expect(result[0]!.error).toBe('native trace timeout');
@@ -1586,7 +1662,7 @@ describe('V2 Cowork client', () => {
       new Error('Computer Use reset exceeded 8 actions')
     );
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(result[1]!.error).toContain('could not be reset');
     expect(result[1]!.error).toContain('did not quit');
@@ -1594,7 +1670,11 @@ describe('V2 Cowork client', () => {
 
   it('does not hide a HITL failure when native response collection succeeds', async () => {
     mocks.hitl.mockRejectedValueOnce(new Error('HITL timed out'));
-    const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      readOnlyContext
+    );
     expect(result[0]).toMatchObject({
       error: 'HITL timed out',
       finalText: 'answer',
@@ -1610,7 +1690,11 @@ describe('V2 Cowork client', () => {
         false
       )
     );
-    const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      readOnlyContext
+    );
     expect(result[0]!.error).toBeUndefined();
     expect(result[0]).toMatchObject({
       finalText: 'answer',
@@ -1624,7 +1708,11 @@ describe('V2 Cowork client', () => {
     mocks.hitl.mockRejectedValueOnce(
       new CoworkHitlError('Linux HITL failed: no receipt', undefined, true)
     );
-    const result = await COWORK_CLIENT.runBatch!(requests(), readOnlyContext);
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      readOnlyContext
+    );
     expect(result[0]).toMatchObject({
       error: 'Linux HITL failed: no receipt',
       finalText: 'answer',
@@ -1634,7 +1722,7 @@ describe('V2 Cowork client', () => {
     mocks.bind.mockRejectedValueOnce(
       new Error('Ambiguous exact prompt sessions')
     );
-    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
       'query one',
       'query two',
@@ -1662,7 +1750,11 @@ describe('V2 Cowork client', () => {
     [new Error('Cowork model mismatch: requested a, observed b.'), undefined],
   ])('types a failed collection: %s', async (error, expected) => {
     mocks.trace.mockRejectedValueOnce(error);
-    const [result] = await COWORK_CLIENT.runBatch!(requests(), context);
+    const [result] = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      context
+    );
     expect(result!.error).toBe(error.message);
     expect(result!.ending).toEqual(
       expected ? { ...expected, reason: error.message } : undefined
@@ -1675,7 +1767,7 @@ describe('V2 Cowork client', () => {
       ...r,
       input: { ...r.input, prompt: scenario },
     }));
-    await COWORK_CLIENT.runBatch!(batch, context);
+    await collectClientBatch(COWORK_CLIENT, batch, context);
     expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
       scenario,
       scenario,
@@ -1699,7 +1791,7 @@ describe('V2 Cowork client', () => {
     const batch = [...requests(), { ...requests()[0]!, caseId: 'three' }];
     mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
     mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
-    const result = await client.runBatch!(batch, context);
+    const result = await collectClientBatch(client, batch, context);
     // Case 1 fails at submit, case 2 at trace; each is reset before the next case.
     expect(result.map((r) => r.error)).toEqual([
       'uncertain submit',
@@ -1739,7 +1831,7 @@ describe('V2 Cowork client', () => {
       handleHitl: mocks.hitl,
     });
     mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
-    const result = await client.runBatch!(requests(), context);
+    const result = await collectClientBatch(client, requests(), context);
     expect(result.map((r) => r.error)).toEqual(['uncertain submit', undefined]);
     // The failed case: the diagnosis, taken before the reset, is its artifacts.
     expect(order).toEqual(['diagnose', 'reset']);
@@ -1771,7 +1863,7 @@ describe('V2 Cowork client', () => {
       handleHitl: mocks.hitl,
     });
     mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
-    const result = await client.runBatch!(requests(), context);
+    const result = await collectClientBatch(client, requests(), context);
     expect(result[0]).toMatchObject({ error: 'uncertain submit' });
     expect(result[0]).not.toHaveProperty('artifacts');
   });
@@ -1816,7 +1908,8 @@ describe('V2 Cowork client', () => {
       return { status: 'hitl_checked', action_count: 0 };
     });
     const [request] = requests();
-    const [result] = await COWORK_CLIENT.runBatch!(
+    const [result] = await collectClientBatch(
+      COWORK_CLIENT,
       [{ ...request!, config: { ...clientConfig, timeout: 50 } }],
       readOnlyContext
     );
@@ -1875,7 +1968,7 @@ describe('V2 Cowork client', () => {
         },
       })
     );
-    const result = await client.runBatch!(requests(), context);
+    const result = await collectClientBatch(client, requests(), context);
     expect(result[0]!.error).toBe(
       "Claude kept 14336 of the prompt's 23661 characters: the model got only its beginning. No resubmission attempted."
     );
@@ -1946,7 +2039,7 @@ describe('V2 Cowork client', () => {
         } as ClaudeTrace;
       }
     );
-    const result = await client.runBatch!(requests(), context);
+    const result = await collectClientBatch(client, requests(), context);
     expect(result[0]!.error).toBe(
       "Cowork's workspace was unavailable: request req-2 (installSdk) timed out after 30s"
     );
@@ -1978,7 +2071,7 @@ describe('V2 Cowork client', () => {
       handleHitl: mocks.hitl,
     });
     mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
-    const result = await client.runBatch!(requests(), context);
+    const result = await collectClientBatch(client, requests(), context);
     expect(mocks.submit).toHaveBeenCalledTimes(1);
     expect(result[1]!.error).toContain('could not be reset');
     expect(result[1]!.error).toContain('cowork_not_ready');
@@ -1986,7 +2079,7 @@ describe('V2 Cowork client', () => {
   });
   it('never retries an ambiguous submit; resets and runs the next case', async () => {
     mocks.submit.mockRejectedValueOnce(new Error('uncertain test-secret-key'));
-    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(mocks.submit.mock.calls.map((call) => call[0] as string)).toEqual([
       'query one',
       'query two',
@@ -2005,7 +2098,7 @@ describe('V2 Cowork client', () => {
       handleHitl: mocks.hitl,
     });
     mocks.submit.mockRejectedValueOnce(new Error('uncertain test-secret-key'));
-    const result = await client.runBatch!(requests(), context);
+    const result = await collectClientBatch(client, requests(), context);
     expect(mocks.submit).toHaveBeenCalledTimes(1);
     expect(mocks.hitl).not.toHaveBeenCalled();
     expect(result[0]!.error).toContain('[REDACTED]');
@@ -2014,7 +2107,8 @@ describe('V2 Cowork client', () => {
   });
   it('disposes the session when workspace setup fails after MCP preflight', async () => {
     mocks.submit.mockRejectedValueOnce(new Error('Not enough disk space'));
-    const result = await COWORK_CLIENT.runBatch!(
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
       requests().slice(0, 1),
       context
     );
@@ -2027,14 +2121,18 @@ describe('V2 Cowork client', () => {
   });
   it('restores on native trace errors and retains per-case failure', async () => {
     mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
-    const result = await COWORK_CLIENT.runBatch!(requests(), context);
+    const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(result[0]!.error).toBe('native trace timeout');
     expect(result[1]!.finalText).toBe('answer');
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
   it('fails every case and keeps the desktop lock when restoration fails', async () => {
     mocks.dispose.mockRejectedValueOnce(new Error('restore failed'));
-    const results = await COWORK_CLIENT.runBatch!(requests(), context);
+    const results = await collectClientBatch(
+      COWORK_CLIENT,
+      requests(),
+      context
+    );
     expect(results).toHaveLength(2);
     for (const result of results) {
       expect(result.error).toContain(
@@ -2046,9 +2144,9 @@ describe('V2 Cowork client', () => {
     }
     // The desktop may be in an unknown state, so the next run is refused
     // until the lock is inspected and removed.
-    await expect(COWORK_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
-      'Cowork desktop is locked by another run'
-    );
+    await expect(
+      collectClientBatch(COWORK_CLIENT, requests(), context)
+    ).rejects.toThrow('Cowork desktop is locked by another run');
     const leases = path.join(lockHome.value, '.mcp-server-tester');
     const [lock] = (await fs.readdir(leases)).filter((name) =>
       /^cowork-desktop-[0-9a-f]{12}\.lock$/.test(name)
@@ -2056,7 +2154,7 @@ describe('V2 Cowork client', () => {
     expect(lock).toBeDefined();
     await fs.rm(path.join(leases, lock!));
     await expect(
-      COWORK_CLIENT.runBatch!(requests(), context)
+      collectClientBatch(COWORK_CLIENT, requests(), context)
     ).resolves.toHaveLength(2);
   });
   it('is checked once per batch, after prepare and before the first case, not also before the batch', async () => {

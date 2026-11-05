@@ -12,7 +12,11 @@ import type { Trace } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { SettingsSections } from '../plugins/settings.js';
-import type { EvalDataset, EvalCase } from './datasetTypes.js';
+import {
+  assertDatasetInputs,
+  type EvalDataset,
+  type EvalCase,
+} from './datasetTypes.js';
 import type { ClientOptions } from './clientFields.js';
 import {
   checkedExecution,
@@ -1153,6 +1157,7 @@ export async function runEvalDataset(
     toolOverrides,
     judgeModel,
   } = options;
+  assertDatasetInputs(dataset);
   const model = options.model;
   if (options.plugins) installPlugins(options.plugins);
 

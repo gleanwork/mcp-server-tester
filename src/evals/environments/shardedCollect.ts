@@ -233,21 +233,23 @@ export async function collectInEnvironment(
           held.get(key)?.();
           held.delete(key);
         };
-        // Results are read as they arrive, one at a time per shard, once each.
+        // Read sequentially. A final result may add lifecycle or cleanup facts
+        // to an early trace at the same path.
         let reading = Promise.resolve();
-        const seen = new Set<string>();
+        const seen = new Map<string, string>();
         // A read that fails doesn't stop the ones after it.
         const read = (relative: string) =>
           (reading = reading
             .catch(() => {})
             .then(async () => {
-              if (seen.has(relative)) return;
               // A copy can race the worker's next write; a file that isn't
               // here yet is read again after the shard's final copy.
               const file = await readClientResult(
                 path.join(resultsDir, relative)
               );
-              seen.add(relative);
+              const identity = JSON.stringify(file);
+              if (seen.get(relative) === identity) return;
+              seen.set(relative, identity);
               const result = await placeArtifacts(
                 file.result as unknown as ClientRunResult,
                 resultsDir,
@@ -299,7 +301,8 @@ export async function collectInEnvironment(
         // A shard that ended gives back whatever its trials still held.
         for (const key of [...held.keys()]) giveBack(key);
         await reading.catch(() => {});
-        // Anything copied back that no progress event announced.
+        // Closing a session can add cleanup failures and lifecycle timings.
+        // Re-read the final copy even if an early trial event saved this path.
         for (const relative of await resultFiles(resultsDir))
           await read(relative).catch(() => {});
         await reading.catch(() => {});

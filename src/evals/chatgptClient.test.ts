@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { collectClientBatch } from './desktopBatch.js';
 import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type * as OsModule from 'node:os';
@@ -241,6 +242,13 @@ describe('ChatGPT and Codex app sessions', () => {
 });
 
 describe('ChatGPT V2 batch client', () => {
+  it('keeps the single-run blank prompt check before setup', async () => {
+    await expect(
+      CHATGPT_CLIENT.run!({ prompt: '  ', servers: [] }, config, context)
+    ).rejects.toThrow('ChatGPT requires a non-empty input.');
+    expect(lifecycle.prepare).not.toHaveBeenCalled();
+    expect(runChatgptTurn).not.toHaveBeenCalled();
+  });
   it('takes its options directly, not nested under options', () => {
     expect(
       CHATGPT_CLIENT.schema.parse({
@@ -267,7 +275,7 @@ describe('ChatGPT V2 batch client', () => {
         type: 'codex-app',
         env: linuxEnvironment(home.value),
       };
-    await CODEX_APP_LINUX_CLIENT.runBatch!(batch, context);
+    await collectClientBatch(CODEX_APP_LINUX_CLIENT, batch, context);
     expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
     expect(runChatgptTurn).toHaveBeenCalledTimes(2);
@@ -286,7 +294,7 @@ describe('ChatGPT V2 batch client', () => {
   it('rejects an incomplete Linux environment before lifecycle or query execution', async () => {
     vi.stubEnv('AT_SPI_BUS_ADDRESS', '');
     await expect(
-      CHATGPT_LINUX_CLIENT.runBatch!(requests(), context)
+      collectClientBatch(CHATGPT_LINUX_CLIENT, requests(), context)
     ).rejects.toThrow('environment_invalid');
     expect(lifecycle.prepare).not.toHaveBeenCalled();
     expect(runChatgptTurn).not.toHaveBeenCalled();
@@ -306,7 +314,7 @@ describe('ChatGPT V2 batch client', () => {
         type,
         ...(platform === 'Linux' ? { env: linuxEnvironment(home.value) } : {}),
       };
-      await client.runBatch!(batch, context);
+      await collectClientBatch(client, batch, context);
       expect(runChatgptTurn).toHaveBeenCalledWith(
         'Answer one',
         expect.objectContaining({
@@ -344,19 +352,16 @@ describe('ChatGPT V2 batch client', () => {
       const client = type === 'chatgpt' ? CHATGPT_CLIENT : CODEX_APP_CLIENT;
       const batch = requests().slice(0, 1);
       batch[0]!.config = { ...config, type, surface };
-      await expect(client.runBatch!(batch, context)).rejects.toThrow(message);
+      await expect(collectClientBatch(client, batch, context)).rejects.toThrow(
+        message
+      );
       expect(lifecycle.prepare).not.toHaveBeenCalled();
       expect(runChatgptTurn).not.toHaveBeenCalled();
     }
   );
   it('names the Codex app in its errors', async () => {
-    const mixed = requests();
-    mixed[1]!.config = { ...config, model: 'other' };
-    await expect(CODEX_APP_CLIENT.runBatch!(mixed, context)).rejects.toThrow(
-      'Codex app batch requires identical client settings for all cases.'
-    );
     await expect(
-      CODEX_APP_CLIENT.runBatch!(requests(), {
+      collectClientBatch(CODEX_APP_CLIENT, requests(), {
         evalConfig: { ...context.evalConfig, concurrency: 2 },
       })
     ).rejects.toThrow('Codex app desktop requires concurrency 1.');
@@ -370,11 +375,11 @@ describe('ChatGPT V2 batch client', () => {
       await new Promise<void>((resolve) => (release = resolve));
     });
     // ChatGPT holds the app while Codex app tries to start.
-    const chatgpt = CHATGPT_CLIENT.runBatch!(requests(), context);
+    const chatgpt = collectClientBatch(CHATGPT_CLIENT, requests(), context);
     await preparing;
     await access(join(home.value, '.mcp-server-tester/chatgpt-desktop.lock'));
     await expect(
-      CODEX_APP_CLIENT.runBatch!(requests(), context)
+      collectClientBatch(CODEX_APP_CLIENT, requests(), context)
     ).rejects.toThrow(
       `Codex app desktop is locked by another run or an interrupted run (${join(home.value, '.mcp-server-tester/chatgpt-desktop.lock')})`
     );
@@ -382,14 +387,14 @@ describe('ChatGPT V2 batch client', () => {
     await chatgpt;
     expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
     // Released, the app is Codex app's to drive.
-    await CODEX_APP_CLIENT.runBatch!(requests(), context);
+    await collectClientBatch(CODEX_APP_CLIENT, requests(), context);
     expect(lifecycle.prepare).toHaveBeenCalledTimes(2);
   });
   it('defaults to exact-prompt matching and passes the eval query without any suffix', async () => {
     const batch = requests().slice(0, 1);
     batch[0]!.input.prompt =
       '  Find snake_case docs — α\nDo not change this.  ';
-    await CHATGPT_CLIENT.runBatch!(batch, context);
+    await collectClientBatch(CHATGPT_CLIENT, batch, context);
     const [prompt, actual] = vi.mocked(runChatgptTurn).mock.calls[0]!;
     expect(prompt).toBe(batch[0]!.input.prompt);
     expect(prompt).not.toContain('Evaluation MCP routing');
@@ -401,14 +406,18 @@ describe('ChatGPT V2 batch client', () => {
   it('exposes prompt markers only as an opt-in correlation mode', async () => {
     const batch = requests().slice(0, 1);
     batch[0]!.config = { ...config, correlation: 'prompt_marker' };
-    await CHATGPT_CLIENT.runBatch!(batch, context);
+    await collectClientBatch(CHATGPT_CLIENT, batch, context);
     expect(vi.mocked(runChatgptTurn).mock.calls[0]![1].correlation).toEqual({
       strategy: 'prompt_marker',
       includeInPrompt: true,
     });
   });
   it('prepares once before cases, shares only app state, and disposes once after them', async () => {
-    const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
+    const traces = await collectClientBatch(
+      CHATGPT_CLIENT,
+      requests(),
+      context
+    );
     expect(lifecycle.prepare).toHaveBeenCalledTimes(1);
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
     expect(lifecycle.prepare.mock.invocationCallOrder[0]).toBeLessThan(
@@ -429,7 +438,7 @@ describe('ChatGPT V2 batch client', () => {
     });
   });
   it.each(['servers', 'credentials', 'environment'])(
-    'rejects mixed %s before app setup',
+    'opens separate sessions for different %s',
     async (difference) => {
       const batch = requests();
       if (difference === 'servers') batch[1]!.input.servers = [];
@@ -443,10 +452,9 @@ describe('ChatGPT V2 batch client', () => {
           },
         ];
       else batch[1]!.input.env = { ANTHROPIC_API_KEY: 'different' };
-      await expect(CHATGPT_CLIENT.runBatch!(batch, context)).rejects.toThrow(
-        'identical MCP'
-      );
-      expect(lifecycle.prepare).not.toHaveBeenCalled();
+      await collectClientBatch(CHATGPT_CLIENT, batch, context);
+      expect(lifecycle.prepare).toHaveBeenCalledTimes(2);
+      expect(lifecycle.dispose).toHaveBeenCalledTimes(2);
     }
   );
   it('rejects duplicate native sessions and restarts before the next query', async () => {
@@ -457,7 +465,7 @@ describe('ChatGPT V2 batch client', () => {
       clientMetadata: metadata,
     });
     const batch = [...requests(), { ...requests()[0]!, caseId: 'three' }];
-    const traces = await CHATGPT_CLIENT.runBatch!(batch, context);
+    const traces = await collectClientBatch(CHATGPT_CLIENT, batch, context);
     expect(traces[1]!.error).toContain('duplicate attribution');
     // The reused session id stays claimed, so case three is also refused.
     // Restarts happen only before a later case, never after the last one.
@@ -468,7 +476,11 @@ describe('ChatGPT V2 batch client', () => {
   });
   it('retains evidence and a recovery lock when batch cleanup fails', async () => {
     lifecycle.dispose.mockRejectedValueOnce(new Error('restore failed'));
-    const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
+    const traces = await collectClientBatch(
+      CHATGPT_CLIENT,
+      requests(),
+      context
+    );
     expect(traces.every((r) => r.error?.includes('batch cleanup failed'))).toBe(
       true
     );
@@ -477,15 +489,15 @@ describe('ChatGPT V2 batch client', () => {
     await expect(
       access(join(home.value, '.mcp-server-tester/chatgpt-desktop.lock'))
     ).resolves.toBeUndefined();
-    await expect(CHATGPT_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
-      'locked'
-    );
+    await expect(
+      collectClientBatch(CHATGPT_CLIENT, requests(), context)
+    ).rejects.toThrow('locked');
   });
   it('cleans up partial setup before releasing the desktop lease', async () => {
     lifecycle.prepare.mockRejectedValueOnce(new Error('launch failed'));
-    await expect(CHATGPT_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
-      'launch failed'
-    );
+    await expect(
+      collectClientBatch(CHATGPT_CLIENT, requests(), context)
+    ).rejects.toThrow('launch failed');
     expect(runChatgptTurn).not.toHaveBeenCalled();
     expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
     await expect(
@@ -499,7 +511,7 @@ describe('ChatGPT V2 batch client', () => {
       computerUseModel: 'claude-sonnet-4-6',
       maxActions: 40,
     };
-    await CHATGPT_CLIENT.runBatch!(batch, {
+    await collectClientBatch(CHATGPT_CLIENT, batch, {
       ...context,
       env: { ANTHROPIC_API_KEY: 'controller-secret' },
     });
@@ -525,7 +537,7 @@ describe('ChatGPT V2 batch client', () => {
       const client = type === 'chatgpt' ? CHATGPT_CLIENT : CODEX_APP_CLIENT;
       const batch = requests().slice(0, 1);
       batch[0]!.config = { ...config, type, computerUseProvider: provider };
-      await expect(client.runBatch!(batch, context)).rejects.toThrow(
+      await expect(collectClientBatch(client, batch, context)).rejects.toThrow(
         '`clientOptions.computerUseProvider` is gone: remove it. The OS of the machine that runs the trial decides how a desktop client runs'
       );
       expect(lifecycle.prepare).not.toHaveBeenCalled();
@@ -548,7 +560,7 @@ describe('ChatGPT V2 batch client', () => {
       vi.spyOn(process, 'platform', 'get').mockReturnValue(platformName);
       const batch = requests().slice(0, 1);
       batch[0]!.config = { ...parsed, type: 'chatgpt' };
-      await CHATGPT_APP_CLIENTS.chatgpt.runBatch!(batch, context);
+      await collectClientBatch(CHATGPT_APP_CLIENTS.chatgpt, batch, context);
       expect(runChatgptTurn).toHaveBeenCalledWith(
         'Answer one',
         expect.objectContaining({ os: platformName }),
@@ -593,9 +605,9 @@ describe('ChatGPT V2 batch client', () => {
       const env = os === 'linux' ? { env: linuxEnvironment(home.value) } : {};
       const batch = requests().slice(0, 1);
       batch[0]!.config = { ...config, type, ...env };
-      await client.runBatch!(batch, context);
+      await collectClientBatch(client, batch, context);
       batch[0]!.config = { ...config, type, ...env, maxActions: 9 };
-      await client.runBatch!(batch, context);
+      await collectClientBatch(client, batch, context);
       expect(
         vi
           .mocked(runChatgptTurn)
@@ -632,7 +644,7 @@ describe('ChatGPT V2 batch client', () => {
         ...options,
         ...(platform === 'Linux' ? { env: linuxEnvironment(home.value) } : {}),
       };
-      await expect(client.runBatch!(batch, context)).rejects.toThrow(
+      await expect(collectClientBatch(client, batch, context)).rejects.toThrow(
         `Codex app can't run this trial: ${message}`
       );
       expect(lifecycle.prepare).not.toHaveBeenCalled();
@@ -646,19 +658,25 @@ describe('ChatGPT V2 batch client', () => {
       type: 'codex-app',
       reasoningEffort: 'ultra',
     };
-    await CODEX_APP_CLIENT.runBatch!(batch, context);
+    await collectClientBatch(CODEX_APP_CLIENT, batch, context);
     expect(vi.mocked(runChatgptTurn).mock.calls[0]![1].reasoningEffort).toBe(
       'ultra'
     );
     lifecycle.prepare.mockClear();
     batch[0]!.config = { ...config, reasoningEffort: 'minimal' };
-    await expect(CHATGPT_CLIENT.runBatch!(batch, context)).rejects.toThrow(
+    await expect(
+      collectClientBatch(CHATGPT_CLIENT, batch, context)
+    ).rejects.toThrow(
       "chatgpt doesn't support reasoningEffort `minimal`: it accepts low, medium, high, xhigh, max, ultra."
     );
     expect(lifecycle.prepare).not.toHaveBeenCalled();
   });
   it('runs ordered cases and preserves model, evidence, timing and unknown cost', async () => {
-    const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
+    const traces = await collectClientBatch(
+      CHATGPT_CLIENT,
+      requests(),
+      context
+    );
     expect(runChatgptTurn).toHaveBeenCalledTimes(2);
     expect(vi.mocked(runChatgptTurn).mock.calls[0]![1]).toMatchObject({
       model: 'test-chatgpt-model',
@@ -696,7 +714,7 @@ describe('ChatGPT V2 batch client', () => {
       ],
     });
     await expect(
-      CHATGPT_CLIENT.runBatch!(requests().slice(0, 1), context)
+      collectClientBatch(CHATGPT_CLIENT, requests().slice(0, 1), context)
     ).resolves.toHaveLength(1);
   });
   it('returns native events, times and telemetry directly without a result envelope', async () => {
@@ -739,7 +757,8 @@ describe('ChatGPT V2 batch client', () => {
       llmDurationMs: 150,
       mcpDurationMs: 0,
     });
-    const [result] = await CHATGPT_CLIENT.runBatch!(
+    const [result] = await collectClientBatch(
+      CHATGPT_CLIENT,
       requests().slice(0, 1),
       context
     );
@@ -799,7 +818,8 @@ describe('ChatGPT V2 batch client', () => {
       },
       conversationHistory,
     });
-    const [result] = await CHATGPT_CLIENT.runBatch!(
+    const [result] = await collectClientBatch(
+      CHATGPT_CLIENT,
       requests().slice(0, 1),
       context
     );
@@ -845,7 +865,8 @@ describe('ChatGPT V2 batch client', () => {
         durationMs: 100,
       },
     });
-    const [trace] = await CHATGPT_CLIENT.runBatch!(
+    const [trace] = await collectClientBatch(
+      CHATGPT_CLIENT,
       requests().slice(0, 1),
       context
     );
@@ -869,7 +890,8 @@ describe('ChatGPT V2 batch client', () => {
       clientMetadata: metadata,
       conversationHistory,
     });
-    const [trace] = await CHATGPT_CLIENT.runBatch!(
+    const [trace] = await collectClientBatch(
+      CHATGPT_CLIENT,
       requests().slice(0, 1),
       context
     );
@@ -890,7 +912,11 @@ describe('ChatGPT V2 batch client', () => {
         },
       ],
     });
-    const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
+    const traces = await collectClientBatch(
+      CHATGPT_CLIENT,
+      requests(),
+      context
+    );
     expect(traces[0]!.error).toContain('outside');
     expect(runChatgptTurn).toHaveBeenCalledTimes(2);
     expect(traces[1]!.error).toBeUndefined();
@@ -942,7 +968,7 @@ describe('ChatGPT V2 batch client', () => {
         config: { ...config, requireMcpCalls: true },
       })
     );
-    const traces = await CHATGPT_CLIENT.runBatch!(batch, context);
+    const traces = await collectClientBatch(CHATGPT_CLIENT, batch, context);
     expect(runChatgptTurn).toHaveBeenCalledTimes(3);
     expect(traces.map((r) => r.telemetry?.caseExecution)).toEqual(
       Array(3).fill({ status: 'completed', continuation: 'allowed' })
@@ -996,7 +1022,7 @@ describe('ChatGPT V2 batch client', () => {
     });
     const batch = requests().slice(0, 1);
     batch[0]!.config = { ...config, requireMcpCalls: true };
-    const [trace] = await CHATGPT_CLIENT.runBatch!(batch, context);
+    const [trace] = await collectClientBatch(CHATGPT_CLIENT, batch, context);
     expect(trace!.error).toBeUndefined();
     expect(trace!.telemetry?.mcpSelection).toMatchObject({
       status: 'passed',
@@ -1025,7 +1051,7 @@ describe('ChatGPT V2 batch client', () => {
         input: { ...requests()[0]!.input, input: 'Answer three' },
       },
     ];
-    const traces = await CHATGPT_CLIENT.runBatch!(batch, context);
+    const traces = await collectClientBatch(CHATGPT_CLIENT, batch, context);
     expect(traces[0]!.error).toContain('cached input exceeds');
     expect(traces[0]!.telemetry?.caseExecution).toEqual({
       status: 'failed',
@@ -1052,7 +1078,11 @@ describe('ChatGPT V2 batch client', () => {
       toolCalls: [],
       clientMetadata: { ...metadata, failureKind: 'no_matching_session' },
     });
-    const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
+    const traces = await collectClientBatch(
+      CHATGPT_CLIENT,
+      requests(),
+      context
+    );
     expect(traces[0]!.ending).toEqual({
       kind: 'infrastructure',
       broke: 'client-app',
@@ -1071,10 +1101,14 @@ describe('ChatGPT V2 batch client', () => {
       clientMetadata: metadata,
     });
     lifecycle.restart.mockRejectedValueOnce(new Error('app_exited'));
-    const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
+    const traces = await collectClientBatch(
+      CHATGPT_CLIENT,
+      requests(),
+      context
+    );
     expect(traces[0]!.error).toContain('surface_mismatch');
     for (const trace of traces.slice(1)) {
-      expect(trace.error).toContain('could not be restarted');
+      expect(trace.error).toContain('could not be reset');
       expect(trace.error).toContain('app_exited');
       expect(trace.telemetry?.caseExecution).toEqual({
         status: 'not-submitted',
@@ -1121,7 +1155,11 @@ describe('ChatGPT V2 batch client', () => {
         },
         input: { ...r.input, servers: [] },
       }));
-    const [trace] = await CHATGPT_LINUX_CLIENT.runBatch!(batch, context);
+    const [trace] = await collectClientBatch(
+      CHATGPT_LINUX_CLIENT,
+      batch,
+      context
+    );
     expect(trace!.error).toBeUndefined();
     expect(trace!.telemetry?.mcpSelection).toMatchObject({
       status: 'passed',
@@ -1159,7 +1197,7 @@ describe('ChatGPT V2 batch client', () => {
         },
       }));
     await expect(
-      CHATGPT_LINUX_CLIENT.runBatch!(batch, context)
+      collectClientBatch(CHATGPT_LINUX_CLIENT, batch, context)
     ).rejects.toMatchObject({
       code: 'plugin_credential_missing',
     });
@@ -1189,7 +1227,7 @@ describe('ChatGPT V2 batch client', () => {
     });
     const batch = requests().slice(0, 1);
     batch[0]!.config = { ...config, requireMcpCalls: true };
-    const [trace] = await CHATGPT_CLIENT.runBatch!(batch, context);
+    const [trace] = await collectClientBatch(CHATGPT_CLIENT, batch, context);
     expect(trace!.error).toContain('without calling');
   });
   it('fails before touching the app when a different process holds the desktop', async () => {
@@ -1198,30 +1236,29 @@ describe('ChatGPT V2 batch client', () => {
       join(home.value, '.mcp-server-tester/chatgpt-desktop.lock'),
       'another run'
     );
-    await expect(CHATGPT_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
-      'locked'
-    );
+    await expect(
+      collectClientBatch(CHATGPT_CLIENT, requests(), context)
+    ).rejects.toThrow('locked');
     expect(runChatgptTurn).not.toHaveBeenCalled();
   });
-  it('rejects concurrency and mixed model configurations', async () => {
+  it('rejects concurrency and opens separate sessions for different models', async () => {
     await expect(
-      CHATGPT_CLIENT.runBatch!(requests(), {
+      collectClientBatch(CHATGPT_CLIENT, requests(), {
         evalConfig: { ...context.evalConfig, concurrency: 2 },
       })
     ).rejects.toThrow('concurrency 1');
     const mixed = requests();
     mixed[1]!.config = { ...config, model: 'other' };
-    await expect(CHATGPT_CLIENT.runBatch!(mixed, context)).rejects.toThrow(
-      'identical'
-    );
-    expect(runChatgptTurn).not.toHaveBeenCalled();
+    await collectClientBatch(CHATGPT_CLIENT, mixed, context);
+    expect(lifecycle.prepare).toHaveBeenCalledTimes(2);
+    expect(lifecycle.dispose).toHaveBeenCalledTimes(2);
   });
   it.each([undefined, null, 'primitive failure'])(
     'does not silently accept a non-Error rejection: %s',
     async (reason) => {
       vi.mocked(runChatgptTurn).mockRejectedValueOnce(reason);
       await expect(
-        CHATGPT_CLIENT.runBatch!(requests(), context)
+        collectClientBatch(CHATGPT_CLIENT, requests(), context)
       ).rejects.toThrow();
       expect(lifecycle.dispose).toHaveBeenCalledTimes(1);
       await expect(
@@ -1240,12 +1277,16 @@ describe('ChatGPT V2 batch client', () => {
     lifecycle.restart.mockRejectedValueOnce(
       new Error('restart saw fixture-secret')
     );
-    const traces = await CHATGPT_CLIENT.runBatch!(requests(), context);
+    const traces = await collectClientBatch(
+      CHATGPT_CLIENT,
+      requests(),
+      context
+    );
     expect(traces[0]!.error).toBe(
       'upstream 401 for [REDACTED] using [REDACTED]'
     );
     expect(traces[1]!.error).toContain(
-      'could not be restarted after an earlier failed case: restart saw [REDACTED]'
+      'could not be reset after an earlier failed case: restart saw [REDACTED]'
     );
     expect(JSON.stringify(traces)).not.toMatch(
       /fixture-secret|env-api-key-value/
@@ -1258,9 +1299,11 @@ describe('ChatGPT V2 batch client', () => {
     lifecycle.dispose.mockRejectedValueOnce(
       new Error('dispose saw fixture-secret')
     );
-    const error = await CHATGPT_CLIENT.runBatch!(requests(), context).catch(
-      (caught: unknown) => caught
-    );
+    const error = await collectClientBatch(
+      CHATGPT_CLIENT,
+      requests(),
+      context
+    ).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(AggregateError);
     const messages = (error as AggregateError).errors.map(
       (inner: Error) => `${inner.message}\n${inner.stack ?? ''}`
@@ -1271,11 +1314,11 @@ describe('ChatGPT V2 batch client', () => {
   });
   it('releases its lease after unexpected execution errors', async () => {
     vi.mocked(runChatgptTurn).mockRejectedValueOnce(new Error('crash'));
-    await expect(CHATGPT_CLIENT.runBatch!(requests(), context)).rejects.toThrow(
-      'crash'
-    );
     await expect(
-      CHATGPT_CLIENT.runBatch!(requests(), context)
+      collectClientBatch(CHATGPT_CLIENT, requests(), context)
+    ).rejects.toThrow('crash');
+    await expect(
+      collectClientBatch(CHATGPT_CLIENT, requests(), context)
     ).resolves.toHaveLength(2);
   });
 });
@@ -1288,7 +1331,7 @@ describe('ChatGPT server translation', () => {
       label: 'second',
       command: 'node',
     });
-    const traces = await CHATGPT_CLIENT.runBatch!(batch, context);
+    const traces = await collectClientBatch(CHATGPT_CLIENT, batch, context);
     expect(
       clientRunToExecution(traces[0]!, 'structured', batch[0]!.input.servers)
         .response
