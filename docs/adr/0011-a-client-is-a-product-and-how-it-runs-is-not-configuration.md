@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # A client is a product, and how it runs is not configuration
@@ -30,7 +30,7 @@ Every client returns one trace, and the same graders score it. Nothing in gradin
 
 - **How a client runs follows from the client and the OS of the machine that runs the trial.** It is not configuration. On macOS, `cowork`, `chatgpt` and `codex-app` use Computer Use, with `computerUseModel` as its planner. On Linux they use the accessibility (AT-SPI) automation, which has no planner. `computerUseProvider` is removed. The machine that runs the trial decides, not the coordinator. A trial records the environment and OS it ran on, so its result says how it ran. MST adds no term for this: a client, a model and an environment describe a trial. In code, a client's per-OS parts are `<client>/macos.ts` and `<client>/linux.ts`.
 
-- **MST owns the rules around a trial, the same for every client.**
+- **MST owns the rules around a trial, the same for every client.** Shared timeout enforcement and reset retry timings remain follow-ups, as recorded below.
   - `timeout` means one thing: the time from the prompt to the trace, without app setup. Each client's definition states its default.
   - Dataset loading rejects empty or whitespace-only inputs for every client, including run-only plugins, before opening a client or submitting any trial. Valid prompt text is preserved exactly, without trimming. Direct native-session calls retain their blank-input guard before submission.
   - One readiness check runs before the first trial: each server connects and lists at least one tool.
@@ -64,4 +64,12 @@ File, plugin and in-memory datasets reject blank inputs before any client opens 
 
 Cowork, ChatGPT and Codex app now have concrete `macos.ts` and `linux.ts` entry points, selected from the product and worker OS when the batch opens. The platform selectors are removed. The native helpers, app transactions and turn bodies remain shared. New results omit driver identities, including `driver` on Linux receipts; readers retain old fields without rewriting stored runs.
 
-The option/default catalogue and known-environment OS checks are implemented, including case clients and optional plugin environment OS metadata. This ADR remains proposed pending final acceptance.
+The option/default catalogue and known-environment OS checks are implemented, including case clients and optional plugin environment OS metadata. The contract and removal sequence is complete, and this ADR is accepted.
+
+### Deferred work
+
+Shared timeout enforcement and reset retry timings remain deferred. Existing client deadlines, reset retries and diagnosis limits are unchanged. Preserving ChatGPT's typed planner failure cause and replacing `vercel-sdk` / `anthropic-api` in the connection-policy error also remain separate work.
+
+### Verification
+
+The sequence was checked with unit tests, CLI use cases, mocked desktop sessions and local MCP servers. Live Linux Cowork execution was not tested.

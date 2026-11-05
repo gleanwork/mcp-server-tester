@@ -39,7 +39,7 @@ The MCP client application an eval tests, named canonically: `claude-code`, `cod
 _Avoid_: host, harness, agent, runner, solver, provider
 
 **Client session**:
-One client kept open with fixed options, model, servers and environment. Each trial supplies its identity and prompt. The session returns a `ClientRunResult` and says whether MST can continue, must reset, or must stop. MST owns the readiness, reset and diagnosis policy. Built-in and plugin clients expose this through `open()`; local and worker dispatch use the same session loop. A client may supply `run`, `open`, or both. Run-only clients keep their concurrency and use one-shot sessions where needed. Different fixed settings get separate sessions.
+One client kept open with fixed options, model, servers and environment. Each trial supplies its identity and prompt. The session returns a `ClientRunResult` and says whether MST can continue, must reset, or must stop. MST owns the readiness, reset and diagnosis policy. Shared timeout enforcement and reset retry timings remain deferred in [ADR 0011](docs/adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md). Built-in and plugin clients expose this through `open()`; local and worker dispatch use the same session loop. A client may supply `run`, `open`, or both. Run-only clients keep their concurrency and use one-shot sessions where needed. Different fixed settings get separate sessions.
 _Avoid_: driver, capability pipeline
 
 **Model**:
