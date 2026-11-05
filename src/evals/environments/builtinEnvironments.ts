@@ -43,13 +43,14 @@ const environments = extensionLookup('environments', builtinEnvironments);
 
 /**
  * The OS the trials of the environment `name` run on, when MST knows it: this
- * machine's for `local`, Linux for `docker` (MST's Linux image). Unknown for a
- * plugin's environment, whose worker checks its own OS before a trial runs.
+ * machine's for `local`, otherwise the definition's declared OS. Undeclared
+ * environments stay unknown; no machine is opened and no OS is guessed.
  */
-export function environmentOS(name: string): NodeJS.Platform | undefined {
+export function environmentOS(reference: string): NodeJS.Platform | undefined {
+  const name = builtinShortName(reference, 'env');
   if (name === LOCAL_ENVIRONMENT) return process.platform;
-  if (name === 'docker') return 'linux';
-  return undefined;
+  const os = environments.get(name).os;
+  return os === 'macos' ? 'darwin' : os;
 }
 
 /** Where a run collects its trials, as run.json records it. */

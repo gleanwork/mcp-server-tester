@@ -14,6 +14,20 @@ export const ProviderSchema = z.enum([
 /** `clientOptions.skills` values. */
 export const ClientSkillsModeSchema = z.enum(['off', 'catalog', 'preload']);
 
+/** Defaults shared by runtime resolution and the client options catalogue. */
+export const API_CLIENT_DEFAULTS = {
+  model: 'claude-sonnet-4-20250514',
+  provider: 'anthropic',
+  maxToolCalls: 5,
+  temperature: 0,
+  skills: 'off',
+} as const;
+export const CLAUDE_CODE_DEFAULTS = {
+  timeout: 180_000,
+  provider: 'anthropic',
+  isolate: true,
+} as const;
+
 export const GenerationOptions = {
   model: z.string().min(1).optional(),
   maxToolCalls: z.number().int().nonnegative().optional(),
@@ -26,7 +40,9 @@ export const GenerationOptions = {
  * Instructions the client adds to its system prompt, such as an
  * organisation's instructions. Only clients that can apply it accept it.
  */
-export const SystemPromptOption = z.string().min(1).optional();
+export const SystemPromptOption = z.string().min(1).optional().meta({
+  'x-defaultDescription': 'not set (no additional instructions)',
+});
 
 export type ClientEnvironment = Record<string, string | undefined>;
 

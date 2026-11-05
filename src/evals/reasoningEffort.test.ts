@@ -2,7 +2,7 @@
  * `reasoningEffort` has one list of values (ADR 0011). Each client accepts
  * the values of it that its product supports, fails on the others naming
  * the ones it accepts, and fails on a value outside the list as unknown.
- * `mst clients show` lists what each one accepts.
+ * `mst clients show --json` lists accepted values; text output lists defaults.
  */
 import { describe, expect, it } from 'vitest';
 import { getClient } from './builtinClients.js';
@@ -59,7 +59,7 @@ describe('reasoningEffort', () => {
   });
 
   it.each(Object.entries(ACCEPTED))(
-    'mst clients show %s lists the values it accepts',
+    'mst clients show %s lists accepted values in JSON and the default in text',
     async (client, accepted) => {
       let json = '';
       await showClient(client, { json: true }, (text) => (json += text));
@@ -79,7 +79,11 @@ describe('reasoningEffort', () => {
       );
       let text = '';
       await showClient(client, {}, (line) => (text += line));
-      expect(text).toContain(`${client} accepts ${accepted.join(', ')}`);
+      expect(text).toMatch(
+        client === 'codex-cli'
+          ? /reasoningEffort\s+Codex default/
+          : /reasoningEffort\s+app default/
+      );
     }
   );
 });

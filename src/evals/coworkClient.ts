@@ -36,6 +36,7 @@ import {
 } from './cowork/trace.js';
 import { infrastructureEnding } from './trialEnding.js';
 import { computerUseEnding } from './cowork/anthropicComputerUse.js';
+import { DEFAULT_COMPUTER_USE_MODEL } from './cowork/computerUseLoop.js';
 import { NativeTraceError } from './nativeTraceError.js';
 import { toolCallEvents } from './clientTrace.js';
 import {
@@ -92,8 +93,14 @@ const CoworkSchema = z
     computerUseModel: z
       .string()
       .regex(/^[A-Za-z0-9._:-]+$/)
-      .optional(),
-    dataDir: z.string().min(1).optional(),
+      .optional()
+      .meta({
+        'x-defaultDescription': `macOS: MST_COWORK_CUA_MODEL or ${DEFAULT_COMPUTER_USE_MODEL}; Linux: no planner`,
+      }),
+    dataDir: z.string().min(1).optional().meta({
+      'x-defaultDescription':
+        'Claude Desktop session directory on the trial machine (OS-specific)',
+    }),
     /**
      * macOS: download and run exactly this Claude Desktop version (`x.y.z`).
      * Omit it to run the installed app. Either way, the version is recorded.
@@ -101,7 +108,8 @@ const CoworkSchema = z
     appVersion: z
       .string()
       .regex(/^\d+\.\d+\.\d+$/)
-      .optional(),
+      .optional()
+      .meta({ 'x-defaultDescription': 'installed app version (macOS only)' }),
     /**
      * Linux: absolute root of each staged plugin, for `${pluginRoot:<plugin>}`
      * in stdio eval servers. The caller stages it from the pinned ref.
@@ -111,22 +119,33 @@ const CoworkSchema = z
         z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
         z.string().min(2).max(4096)
       )
-      .optional(),
+      .optional()
+      .meta({
+        'x-defaultDescription': 'not set (caller stages plugin roots on Linux)',
+      }),
     /** Linux: absolute private (0700) root; a server's `${dataDir}` is `<root>/<label>`. */
-    mcpDataRoot: z.string().min(2).max(4096).optional(),
+    mcpDataRoot: z.string().min(2).max(4096).optional().meta({
+      'x-defaultDescription':
+        'not set (caller provides a private root on Linux)',
+    }),
     /** The trial's time limit in ms (default 900000). */
     timeout: z.number().int().positive().default(900_000),
     model: z
       .string()
       .regex(/^[A-Za-z0-9._:-]+$/)
-      .optional(),
+      .optional()
+      .meta({ 'x-defaultDescription': 'Cowork default' }),
     /** Gone: the client fixes its provider. */
     ...removedClientOptions({
       provider: fixedProviderGone('cowork', 'anthropic'),
     }),
-    env: z.record(z.string(), z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional().meta({
+      'x-defaultDescription': 'inherited environment; no extra variables',
+    }),
     /** Client-owned: installed through managed allowedPluginMarketplaces. */
-    plugins: MarketplacePluginsSchema.optional(),
+    plugins: MarketplacePluginsSchema.optional().meta({
+      'x-defaultDescription': 'no marketplace plugins',
+    }),
     options: z
       .never({
         message:

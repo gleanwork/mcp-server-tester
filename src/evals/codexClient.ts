@@ -61,6 +61,7 @@ import {
 
 /** How long a trial may run when the eval sets no `timeout`. */
 const DEFAULT_TIMEOUT_MS = 300_000;
+const DEFAULT_WEB_SEARCH = false;
 /** How long Codex waits for an MCP server to start and list its tools. */
 const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
 /** The environment variable Codex reads the model credential from. */
@@ -89,16 +90,18 @@ export const CodexClientSchema = z
   .object({
     type: z.literal('codex-cli').optional(),
     /** The model Codex runs. Without one, Codex's own default. */
-    model: GenerationOptions.model,
-    /** The trial's time limit in ms (default 300000). */
-    timeout: GenerationOptions.timeout,
+    model: GenerationOptions.model.meta({
+      'x-defaultDescription': 'Codex default',
+    }),
+    /** The trial's time limit in ms. */
+    timeout: GenerationOptions.timeout.meta({ default: DEFAULT_TIMEOUT_MS }),
     /** Added to Codex's own instructions (`developer_instructions`), which stay. */
     systemPrompt: SystemPromptOption,
     /** How hard the model reasons (`model_reasoning_effort`). */
     reasoningEffort: reasoningEffortOption(
       'codex-cli',
       CODEX_REASONING_EFFORTS
-    ),
+    ).meta({ 'x-defaultDescription': 'Codex default' }),
     /**
      * Codex's sandbox for its shell commands. Default: `read-only`, or
      * `danger-full-access` where MST_JUDGE_SANDBOX=container says the
@@ -107,19 +110,31 @@ export const CodexClientSchema = z
      */
     sandbox: z
       .enum(['read-only', 'workspace-write', 'danger-full-access'])
-      .optional(),
+      .optional()
+      .meta({
+        'x-defaultDescription': `${codexSandboxMode({})}; ${codexSandboxMode({ MST_JUDGE_SANDBOX: 'container' })} when MST_JUDGE_SANDBOX=container`,
+      }),
     /** Let Codex search the web (default false: answers come from the servers). */
-    webSearch: z.boolean().optional(),
+    webSearch: z.boolean().optional().meta({ default: DEFAULT_WEB_SEARCH }),
     /**
      * The directory Codex runs in, relative to the working directory of the
      * process running the eval. By default an empty temporary directory,
      * removed afterwards.
      */
-    cwd: z.string().min(1).optional(),
+    cwd: z.string().min(1).optional().meta({
+      'x-defaultDescription':
+        'empty temporary directory, removed after the trial',
+    }),
     /** Read the model credential from this variable instead of OPENAI_API_KEY or a gateway. */
-    apiKeyEnvVar: z.string().min(1).optional(),
+    apiKeyEnvVar: z
+      .string()
+      .min(1)
+      .optional()
+      .meta({ 'x-defaultDescription': 'OPENAI_API_KEY or LLM gateway' }),
     /** Extra environment variables for the Codex process (and its shell). */
-    env: z.record(z.string(), z.string().optional()).optional(),
+    env: z.record(z.string(), z.string().optional()).optional().meta({
+      'x-defaultDescription': 'allowed inherited variables; no extra variables',
+    }),
   })
   .strict();
 
@@ -457,7 +472,8 @@ async function runCodex(
       skipGitRepoCheck: true,
       approvalPolicy: 'never',
       networkAccessEnabled: false,
-      webSearchMode: options.webSearch ? 'live' : 'disabled',
+      webSearchMode:
+        (options.webSearch ?? DEFAULT_WEB_SEARCH) ? 'live' : 'disabled',
       ...(options.reasoningEffort !== undefined
         ? { modelReasoningEffort: options.reasoningEffort }
         : {}),

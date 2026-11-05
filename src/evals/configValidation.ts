@@ -449,9 +449,11 @@ export interface ValidateEvalConfigOptions {
   namespaces?: readonly string[];
   /**
    * The OS the run's trials run on, when MST knows it (`environmentOS`).
-   * When given, a desktop client's options that OS can't use fail here.
+   * When given, incompatible client requirements and options fail here.
    */
   os?: NodeJS.Platform;
+  /** The selected environment's name, for config-load errors. */
+  environment?: string;
 }
 
 /**
@@ -513,7 +515,8 @@ export function validateEvalConfig(
       tools: evalConfig.tools,
       concurrency: evalConfig.concurrency,
       context: 'The eval config',
-      ...(options.os ? { os: options.os } : {}),
+      os: options.os,
+      environment: options.environment,
     });
   }
   const variantClients: ClientConfig[] = [];
@@ -532,7 +535,8 @@ export function validateEvalConfig(
         tools: variant.tools ?? evalConfig.tools,
         concurrency: evalConfig.concurrency,
         context: `Variant "${variant.name}"`,
-        ...(options.os ? { os: options.os } : {}),
+        os: options.os,
+        environment: options.environment,
       });
     }
     const { serverLabels: _labels, ...resolved } = variant;

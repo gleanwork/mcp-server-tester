@@ -102,12 +102,15 @@ export default plugin;
 - **Contracts.** Each extension has a Zod `schema` for its options and the functions its kind needs: `load` (dataset sources), `run`, `open`, or both (clients), `evaluate` (judges), `kind` and `compute` (metrics), `create` (result stores, returning a [`RunStore`](#result-stores)), `open` (environments, with an optional positive `maxShards` and an optional `coordinator`, which creates the machine a detached run's coordinator runs on; see [Detached runs](./cli.md#runs---detached-runs)), and `create` (credential stores, returning a `CredentialStore`; they take no options, so no `schema`). MST validates the plugin when it loads, and names the plugin and extension in any error.
 - **Environments.** `environments` declares where a run's trials can be collected, used as `mst run --env acme/env/cloud-vm` ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)). An environment's `schema` checks its `--env-option`s, which arrive as strings, except `shards` and `keep`, which MST owns. In a plugin environment, MST first collects every variant's trials on `shards` machines, splitting cases by `hash(caseId) mod shards` so that a case's variants and trials share one machine. It saves each trial as it comes back, then grades them all on this machine as it grades a batch's. A trial whose shard ended without it is **missing** (`failureKind: 'missing'`): its case is incomplete, so it is left out of `total`, `passed`, `failed` and the pass rate, and counted in `incomplete`. The run is `collect: partial` and doesn't become `latest.json`. Ctrl-C stops the shards and keeps what came back; a second Ctrl-C quits. Workers get the `--secrets-file` values (not this machine's environment) and resolve their servers' secrets themselves. A connector server goes to a worker as its declaration: the worker's plugin launches it with the worker's paths, and the worker asks this machine for the server's access token when it starts and again before the token expires, so refresh grants stay here. A variant's tool metadata is served by a proxy on the worker. `mst run --resume <run-id>` (`resumeRun`) completes such a run: it collects only the missing trials in the same environment, along with any trials the client never submitted (`failureKind: 'not-submitted'`, such as a batch blocked after a failed reset), grades every trial again (the others from their stored traces, so the run must store them with `"redactStoredResponses": false`), and writes the run into its own directory, which becomes `latest.json` once nothing is missing. Connector servers and variants with tool metadata can't run in an environment yet. `run.json`'s `environment` records the environment's name, shards, and any `keep` or options, so options must not hold secrets.
 
+  An environment definition can declare `os: 'macos' | 'linux'` when every machine that collects trials has that OS. MST checks each client's `requirements.os` against it when loading the eval, including variant and case clients. `local` uses the executing machine's OS; built-in `docker` declares Linux, even when started from macOS. Omit `os` when unknown or mixed. MST does not guess the OS or open a machine during validation. This metadata does not select a desktop implementation or fill in per-OS option defaults.
+
   Most environments only create machines. `machineEnvironment` (from `./evals`) builds the rest: it copies the shard's bundle to the machine, starts the hidden `mst collect` there, answers the worker's `mst.shard/v1` messages (tokens, progress, heartbeats, cancel), copies the results back after each trial, and deletes the machine when the shard ends, or keeps it as `keep` says:
 
   ```ts
   import { machineEnvironment } from '@gleanwork/mcp-server-tester/evals';
 
   const docker: EnvironmentDefinition = {
+    os: 'linux',
     schema: z.object({ image: z.string() }).strict(),
     maxShards: 8,
     async open({ image }, context) {
@@ -760,6 +763,95 @@ What each one needs on the machine that runs its trials (`mst clients show <clie
 - **`codex-cli`.** Install: `@openai/codex-sdk` beside MST (`npm install @openai/codex-sdk`), which brings the Codex CLI. Credentials: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`).
 - **`cowork`.** Install: macOS: Claude Desktop, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's Cowork image (`--env docker`), or a prepared desktop with Claude Desktop. Credentials: macOS: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider; `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner; Linux image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`). Setup: macOS: `mst cowork setup`, then sign in to Claude Desktop once; Docker: `mst env setup docker`.
 
+Options and their defaults follow. `timeout` is in milliseconds. Required options must be supplied; “not set” preserves omission. OS- and environment-dependent defaults resolve on the trial machine, not while listing or loading the config. Removed options are not listed.
+
+#### `api` options
+
+| Option         | Default                                   |
+| -------------- | ----------------------------------------- |
+| `model`        | "claude-sonnet-4-20250514"                |
+| `maxToolCalls` | 5                                         |
+| `timeout`      | none (no time limit)                      |
+| `temperature`  | 0                                         |
+| `maxTokens`    | not set (provider default)                |
+| `provider`     | inferred from model; otherwise anthropic  |
+| `apiKeyEnvVar` | provider credential or LLM gateway        |
+| `systemPrompt` | not set (no additional instructions)      |
+| `skills`       | "off"                                     |
+| `env`          | inherited environment; no extra variables |
+
+#### `chatgpt` options
+
+| Option             | Default                                                             |
+| ------------------ | ------------------------------------------------------------------- |
+| `model`            | required                                                            |
+| `reasoningEffort`  | app default                                                         |
+| `timeout`          | 300000                                                              |
+| `env`              | inherited environment; no extra variables                           |
+| `plugins`          | no marketplace plugins (Linux only)                                 |
+| `configPath`       | app profile config.toml on the trial machine (OS-specific)          |
+| `requireMcpCalls`  | false                                                               |
+| `correlation`      | "exact_prompt"                                                      |
+| `maxActions`       | macOS: 32; Linux: 24                                                |
+| `computerUseModel` | macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner |
+
+#### `claude-code` options
+
+| Option         | Default                                            |
+| -------------- | -------------------------------------------------- |
+| `model`        | Claude Code default                                |
+| `timeout`      | 180000                                             |
+| `systemPrompt` | not set (no additional instructions)               |
+| `provider`     | "anthropic"                                        |
+| `isolate`      | true                                               |
+| `cwd`          | empty temporary directory, removed after the trial |
+| `env`          | inherited environment; no extra variables          |
+
+#### `codex-app` options
+
+| Option             | Default                                                             |
+| ------------------ | ------------------------------------------------------------------- |
+| `model`            | required                                                            |
+| `reasoningEffort`  | app default                                                         |
+| `timeout`          | 300000                                                              |
+| `env`              | inherited environment; no extra variables                           |
+| `plugins`          | no marketplace plugins (Linux only)                                 |
+| `configPath`       | app profile config.toml on the trial machine (OS-specific)          |
+| `requireMcpCalls`  | false                                                               |
+| `correlation`      | "exact_prompt"                                                      |
+| `maxActions`       | macOS: 32; Linux: 24                                                |
+| `computerUseModel` | macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner |
+
+#### `codex-cli` options
+
+| Option            | Default                                                        |
+| ----------------- | -------------------------------------------------------------- |
+| `model`           | Codex default                                                  |
+| `timeout`         | 300000                                                         |
+| `systemPrompt`    | not set (no additional instructions)                           |
+| `reasoningEffort` | Codex default                                                  |
+| `sandbox`         | read-only; danger-full-access when MST_JUDGE_SANDBOX=container |
+| `webSearch`       | false                                                          |
+| `cwd`             | empty temporary directory, removed after the trial             |
+| `apiKeyEnvVar`    | OPENAI_API_KEY or LLM gateway                                  |
+| `env`             | allowed inherited variables; no extra variables                |
+
+#### `cowork` options
+
+| Option             | Default                                                             |
+| ------------------ | ------------------------------------------------------------------- |
+| `maxActions`       | 24                                                                  |
+| `hitlMaxActions`   | 12                                                                  |
+| `computerUseModel` | macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner |
+| `dataDir`          | Claude Desktop session directory on the trial machine (OS-specific) |
+| `appVersion`       | installed app version (macOS only)                                  |
+| `pluginRoots`      | not set (caller stages plugin roots on Linux)                       |
+| `mcpDataRoot`      | not set (caller provides a private root on Linux)                   |
+| `timeout`          | 900000                                                              |
+| `model`            | Cowork default                                                      |
+| `env`              | inherited environment; no extra variables                           |
+| `plugins`          | no marketplace plugins                                              |
+
 <!-- clients:end -->
 
 Each client has its own guide: [mst-client.md](./mst-client.md) for `api` and `claude-code`, [codex.md](./codex.md), [cowork.md](./cowork.md) and [cowork-docker.md](./cowork-docker.md), and [chatgpt-desktop.md](./chatgpt-desktop.md) and [chatgpt-docker.md](./chatgpt-docker.md) for `chatgpt` and `codex-app`.
@@ -798,7 +890,8 @@ An eval config that loads the plugin selects the client with `"client": "my/clie
 - **Collection batches.** MST groups trials with fixed client settings into sessions and saves each result before sending the next trial. Cases need unique IDs within a dataset. Session operations return results; MST owns reporting and waits for room under the run's limits. Run-only clients keep their existing concurrency.
 - **Tool metadata.** A client that connects to the servers in `input.servers` gets a variant's tool metadata (`tools`) with no work of its own: the run gives it `http` server configs for a local MCP proxy that applies the variant, so the client must speak Streamable HTTP (see [Tool metadata on every client](#tool-metadata-on-every-client)). A client that shows tool metadata itself sets `toolMetadata: true`; `variantToolMetadata(context.evalConfig, context.variant)` from `./evals` gives the variant's (its own `tools`, else the config's), and `buildToolSurface(listed, metadata)` applies it with MST's rules (keys, renames, collisions), and `resolve(name, server)` maps a presented name back to the original tool. Record a renamed tool's calls under `originalName`, with the model's name in `rawName`, as MST's clients do. An open session gets one fixed proxy endpoint. MST checks that the client listed the expected tools separately for each session's settings. A run-only client that connects to one server set for the whole batch sets `serversPerBatch: true`. A proxied request also carries `input.checkServers`: the same servers on an endpoint for the client's own checks, such as a readiness probe, so that traffic isn't taken for the model seeing the variant. A client that connects elsewhere (hosted connectors, say) sets `toolSurfaceProxy: false`; an eval config that gives it `tools` then fails validation.
 - **What it honours.** `maxConcurrency` caps the eval config's `concurrency`.
-- **What it is and needs.** `description` says in one line what product the client is. `requirements` says what a machine needs to run its trials: `os` (`macos`, `linux`; without it, any), and short lines for what to `install`, the `credentials` it reads, and the `setup` commands that prepare a machine. `mst clients` and `mst clients show` print them. Both are optional, and MST checks their shape when it loads the plugin.
+- **What it is and needs.** `description` says in one line what product the client is. `requirements` says what a machine needs to run its trials: `os` (`macos`, `linux`; without it, any), and short lines for what to `install`, the `credentials` it reads, and the `setup` commands that prepare a machine. `mst clients` and `mst clients show` print them. Both are optional, and MST checks their shape when it loads the plugin. At eval load, MST rejects a client whose `requirements.os` excludes the known environment OS. The error names the client, environment and supported OS. An undeclared environment OS stays unknown.
+- **Option defaults.** Both client commands and the generated tables read the options schema. Use Zod defaults for values applied by parsing. For a fallback applied only at runtime, annotate the field with `.meta({ default: value })`, using the same value the runtime uses. For a dynamic default, use `.meta({ 'x-defaultDescription': '...' })`. Metadata describes omission without changing it; do not compute per-OS defaults on the coordinator. A required option without a default is marked `required`. An optional plugin option with no default annotation is marked `not declared`.
 - **Headless.** A client that runs as a process with no desktop session (a CLI or an SDK, as `api`, `claude-code` and `codex-cli` do) sets `headless: true`. An environment whose machines come with a desktop, such as `docker` with MST's Linux image, then runs a shard whose clients are all headless in a container without one: no desktop app, no VM and no Cowork inference. Without it, a client gets the desktop.
 
 ### Client sessions

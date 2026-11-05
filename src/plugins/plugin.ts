@@ -298,6 +298,13 @@ function extensionProblem(
     return `${label} needs a kind: ${Object.keys(METRIC_KINDS).join(', ')}`;
   if (
     kind === 'environments' &&
+    definition.os !== undefined &&
+    definition.os !== 'macos' &&
+    definition.os !== 'linux'
+  )
+    return `${label}: os must be macos or linux`;
+  if (
+    kind === 'environments' &&
     definition.maxShards !== undefined &&
     !(
       Number.isInteger(definition.maxShards) && Number(definition.maxShards) > 0

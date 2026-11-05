@@ -401,14 +401,23 @@ describe('mst CLI', () => {
     it('lists and shows built-in clients without plugins', async () => {
       const list = await runBin('clients');
       expect(list.exitCode).toBe(0);
-      expect(list.stdout).toMatch(/^cowork +macOS, Linux +Claude Desktop/m);
-      expect(list.stdout).toMatch(/^codex-cli +any OS +The Codex CLI/m);
+      expect(list.stdout).toMatch(
+        /^cowork +Claude Desktop[^\n]*\n +runs on +macOS, Linux/m
+      );
+      expect(list.stdout).toMatch(
+        /^codex-cli +The Codex CLI[^\n]*\n +runs on +any OS/m
+      );
+      expect(list.stdout).toMatch(/timeout +none \(no time limit\)/);
+      expect(list.stdout).toMatch(/timeout +180000/);
 
       const show = await runBin('clients', 'show', 'codex-cli', '--json');
       expect(show.exitCode).toBe(0);
       expect(JSON.parse(String(show.stdout))).toMatchObject({
         ref: 'codex-cli',
-        options: { type: 'object' },
+        options: {
+          type: 'object',
+          properties: { timeout: { default: 300_000 } },
+        },
       });
 
       const unknown = await runBin('clients', 'show', 'nope');

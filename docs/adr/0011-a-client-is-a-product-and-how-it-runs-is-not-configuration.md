@@ -42,7 +42,9 @@ Every client returns one trace, and the same graders score it. Nothing in gradin
 
 - **One idea has one option name, and a config that can't run fails when it loads.** The shared names are `timeout`, `maxActions`, `reasoningEffort` (one list of values) and `appVersion`. An option that a client can't use fails validation. So does a case override that a client can't honor, such as a different `model` per case in one desktop batch.
 
-- **`mst clients` lists the clients from their definitions.** For each one it shows what it is, the OS it needs, its credentials, its setup command, and its options with their defaults. `--json` prints the same list. The docs table is generated from it.
+- **`mst clients` lists the clients from their definitions.** For each one it shows what it is, the OS it needs, its credentials, its setup command, and its options with their defaults. `show` prints the same information for one client. Both JSON forms include the options schema: `default` for a literal value, `x-defaultDescription` for a dynamic default or omission semantics. Runtime fallbacks and schema annotations share their values; listing does not fill in missing options. The docs tables are generated from the same schemas.
+
+- **A known environment OS is checked at eval load.** Each variant and case client's `requirements.os` must allow the executing machine's OS for `local`, Linux for built-in `docker`, or a plugin environment's declared `os: 'macos' | 'linux'`. The environment field is optional. Unknown or mixed environments leave it out, and MST does not guess. Validation opens no machines and does not compute per-OS option defaults.
 
 ## Consequences
 
@@ -62,4 +64,4 @@ File, plugin and in-memory datasets reject blank inputs before any client opens 
 
 Cowork, ChatGPT and Codex app now have concrete `macos.ts` and `linux.ts` entry points, selected from the product and worker OS when the batch opens. The platform selectors are removed. The native helpers, app transactions and turn bodies remain shared. New results omit driver identities, including `driver` on Linux receipts; readers retain old fields without rewriting stored runs.
 
-Complete option listing with defaults and declared-OS validation remain for the final implementation step. This ADR remains proposed until the implementation sequence is complete.
+The option/default catalogue and known-environment OS checks are implemented, including case clients and optional plugin environment OS metadata. This ADR remains proposed pending final acceptance.

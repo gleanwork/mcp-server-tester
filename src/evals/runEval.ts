@@ -518,7 +518,8 @@ function assertCaseClients(
   rawConfig: EvalConfig,
   variants: EvalVariant[],
   datasets: EvalDataset[],
-  os: NodeJS.Platform | undefined
+  os: NodeJS.Platform | undefined,
+  environment: string
 ): void {
   for (const variant of variants) {
     const rawVariant = rawConfig.variants?.find(
@@ -543,7 +544,8 @@ function assertCaseClients(
           tools: variant.tools ?? evalConfig.tools,
           concurrency: evalConfig.concurrency,
           context,
-          ...(os ? { os } : {}),
+          os,
+          environment,
         });
         variantClient ??= parseClientConfig(declaration, rawConfig);
         assertCaseUsesVariantClient(variantClient, caseClient, context);
@@ -1648,7 +1650,7 @@ async function evaluate(
       ...evalConfig,
       client: evalConfig.client ?? DEFAULT_CLIENT,
     },
-    { namespaces, ...(trialOS ? { os: trialOS } : {}) }
+    { namespaces, os: trialOS, environment: resolvedEnvironment.name }
   );
   const { definition: _definition, ...environment } = resolvedEnvironment;
   const inEnvironment = environment.name !== LOCAL_ENVIRONMENT;
@@ -1755,7 +1757,14 @@ async function evaluate(
     );
     for (const dataset of loaded) assertDatasetNamespaces(dataset, namespaces);
     assertNamedCases(loaded, options.cases);
-    assertCaseClients(evalConfig, rawConfig, variants, loaded, trialOS);
+    assertCaseClients(
+      evalConfig,
+      rawConfig,
+      variants,
+      loaded,
+      trialOS,
+      environment.name
+    );
     return {
       evalConfig,
       outputDir,
@@ -1970,7 +1979,8 @@ async function evaluate(
       rawConfig,
       variants,
       canonicalDatasets.map(({ dataset }) => dataset),
-      trialOS
+      trialOS,
+      environment.name
     );
 
     // A variant's servers, client and settings, worked out once.

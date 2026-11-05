@@ -61,7 +61,7 @@ function reasoningEffortIssue(
 /**
  * `reasoningEffort` in `client`'s options schema: the values of
  * `REASONING_EFFORTS` it accepts, and what it accepts in its description,
- * which `mst clients show` prints.
+ * which `mst clients show --json` prints.
  */
 export function reasoningEffortOption<const T extends Efforts>(
   client: string,

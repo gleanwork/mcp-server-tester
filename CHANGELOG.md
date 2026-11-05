@@ -19,6 +19,8 @@
 
 ## Unreleased
 
+- `mst clients` and `mst clients show` now list every option and its default in text and JSON, from the same schemas as the generated docs. Runtime defaults and omission semantics are unchanged.
+- Eval loading checks client OS requirements for variants and cases against local, Docker or a plugin environment's declared OS. `EnvironmentDefinition.os` is optional (`macos` or `linux`); undeclared environments stay compatible. See [the migration guide](docs/migrations/2.0-prereleases.md#client-listings-include-defaults-known-environment-os-is-checked).
 - Desktop clients use concrete per-OS entry points. New Linux receipts omit the `driver` identity; old stored receipts remain readable. See [the migration guide](docs/migrations/2.0-prereleases.md#linux-desktop-receipts-omit-the-driver-identity).
 - Dataset loading rejects whitespace-only inputs for every client, including run-only plugins, before opening a client or submitting any trial. File, plugin and in-memory datasets use the same input rule. Valid prompts retain their exact text; the dataset editor schema matches the rule. Direct native-session blank-input guards remain. See [the migration guide](docs/migrations/2.0-prereleases.md#case-inputs-must-contain-non-whitespace-text).
 - Local and worker collection use `ClientDefinition.open` sessions for built-in and plugin clients. Removed the client extension's `runBatch`; definitions may implement `run`, `open`, or both. Run-only plugins keep their execution behavior and concurrency. Session types remain in `./evals`; stored results and run-format schemas are unchanged. See [the migration guide](docs/migrations/2.0-prereleases.md#client-collection-uses-sessions-runbatch-is-removed).
