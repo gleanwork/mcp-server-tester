@@ -10,8 +10,51 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { LLMToolCall } from './mstClient/types.js';
 import { z } from 'zod';
+import { validateToolCalls } from '../assertions/validators/toolCalls.js';
 
 describe('clientRunToExecution', () => {
+  it('preserves a plugin tool name that starts with its server label', () => {
+    const execution = clientRunToExecution(
+      {
+        finalText: 'answer',
+        events: [{ kind: 'tool_call', source: 'mcp', name: 'acme.search' }],
+      },
+      'structured',
+      [
+        {
+          transport: 'http',
+          serverUrl: 'https://example.test/mcp',
+          label: 'acme',
+        },
+      ]
+    );
+    expect(execution.trace?.events).toEqual([
+      { kind: 'tool_call', source: 'mcp', name: 'acme.search', server: 'acme' },
+    ]);
+    expect(
+      validateToolCalls(execution.response, {
+        calls: [{ name: 'search', required: true }],
+        exclusive: true,
+      }).pass
+    ).toBe(false);
+  });
+
+  it('does not infer a plugin server from a tool-name prefix with several servers', () => {
+    const events: ClientRunResult['events'] = [
+      { kind: 'tool_call', source: 'mcp', name: 'acme.search' },
+    ];
+    const execution = clientRunToExecution(
+      { finalText: '', events },
+      'structured',
+      ['acme', 'other'].map((label) => ({
+        transport: 'http',
+        serverUrl: 'https://example.test/mcp',
+        label,
+      }))
+    );
+    expect(execution.trace?.events).toEqual(events);
+  });
+
   it('names the replacement for a trace event with source host', () => {
     expect(() =>
       clientRunToExecution(

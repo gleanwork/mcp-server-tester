@@ -10,31 +10,43 @@ import type { LLMToolCall } from './mstClient/types.js';
 import type { SkillLoad } from '../types/index.js';
 import type { ClientExecution, ClientResponse } from './caseExecution.js';
 
-/** Attribute MCP events from fixture-qualified names or a single server. */
-export function attributeClientEvents(
-  events: TraceEvent[],
-  servers: MCPConfig[]
-): TraceEvent[] {
+/** Fill a missing server on one-server runs, without changing client names. */
+function attributed(events: TraceEvent[], servers: MCPConfig[]): TraceEvent[] {
   // 1.x and 2.0 beta clients marked built-in calls `source: 'host'`.
   if (events.some((event) => (event.source as string) === 'host'))
     throw new Error(
       "A client returned a trace event with `source: 'host'`; it is now `source: 'builtin'` (the client's built-in tools)."
     );
-  return events.map((event) => {
-    if (event.source !== 'mcp' || event.server !== undefined) return event;
-    const server = servers.find(
-      (server) => server.label && event.name.startsWith(`${server.label}.`)
-    );
-    if (server)
-      return {
-        ...event,
-        name: event.name.slice(server.label!.length + 1),
-        server: server.label,
-      };
-    return servers.length === 1
-      ? { ...event, server: mcpServerLabel(servers[0]!, 0) }
-      : event;
-  });
+  if (servers.length !== 1) return events;
+  const label = mcpServerLabel(servers[0]!, 0);
+  return events.map((event) =>
+    event.source === 'mcp' && event.server === undefined
+      ? { ...event, server: label }
+      : event
+  );
+}
+
+/** Only built-in fixtures qualify tool names with their server label. */
+export function attributeBuiltinEvents(
+  events: TraceEvent[],
+  servers: MCPConfig[]
+): TraceEvent[] {
+  return attributed(
+    events.map((event) => {
+      if (event.source !== 'mcp' || event.server !== undefined) return event;
+      const server = servers.find(
+        (server) => server.label && event.name.startsWith(`${server.label}.`)
+      );
+      return server
+        ? {
+            ...event,
+            name: event.name.slice(server.label!.length + 1),
+            server: server.label,
+          }
+        : event;
+    }),
+    servers
+  );
 }
 
 /** Adapt a client run once at the runner boundary, retaining original events for reporting. */
@@ -43,7 +55,7 @@ export function clientRunToExecution(
   evidence: TraceEvidence,
   servers: MCPConfig[] = []
 ): ClientExecution {
-  const trace = { ...run, events: attributeClientEvents(run.events, servers) };
+  const trace = { ...run, events: attributed(run.events, servers) };
   const skillLoads = checkedSkillLoads(trace.telemetry?.skillLoads);
   return {
     kind: 'completed',

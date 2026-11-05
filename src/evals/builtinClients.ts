@@ -39,7 +39,7 @@ import { variantToolMetadata } from './evalConfig.js';
 import type { ClientDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { resolveClientName } from './clientNames.js';
-import { attributeClientEvents } from './clientTrace.js';
+import { attributeBuiltinEvents } from './clientTrace.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT, coworkOptionIssues } from './coworkClient.js';
 import { CHATGPT_APP_CLIENTS, chatgptOptionIssues } from './chatgptClient.js';
@@ -323,7 +323,7 @@ async function runBuiltinClient(
       }
       return {
         ...response,
-        events: attributeClientEvents(response.events, input.servers),
+        events: attributeBuiltinEvents(response.events, input.servers),
       };
     } finally {
       await Promise.allSettled(clients.map(closeOwnedClient));
