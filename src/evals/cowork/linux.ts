@@ -172,6 +172,8 @@ function coworkLinuxOwnedSettings(
     egressAllowedHosts?: readonly string[];
     /** `coworkSetup.disabledBuiltinTools`, added to the image's own list. */
     disabledBuiltinTools?: readonly string[];
+    /** `coworkSetup.toolSearch`. Default: on. */
+    toolSearch?: boolean;
   }
 ): Record<string, unknown> {
   const managed = coworkManagedPluginSettings(options);
@@ -248,6 +250,9 @@ function coworkLinuxOwnedSettings(
       ]),
     ],
     managedMcpServers: [...http, ...managed.managedMcpServers],
+    // Tool search, as Cowork signed in to claude.ai has it: Desktop leaves
+    // it off in gateway mode unless the settings turn it on.
+    toolSearchEnabled: options.toolSearch ?? true,
     ...COWORK_MANAGED_ONLY,
     ...(managed.allowedPluginMarketplaces
       ? { allowedPluginMarketplaces: managed.allowedPluginMarketplaces }
@@ -793,6 +798,9 @@ export const linuxCoworkPlatform: CoworkPlatform = {
                 disabledBuiltinTools:
                   evalConfig.coworkSetup.disabledBuiltinTools,
               }
+            : {}),
+          ...(evalConfig.coworkSetup?.toolSearch !== undefined
+            ? { toolSearch: evalConfig.coworkSetup.toolSearch }
             : {}),
         }),
         null,
