@@ -1091,6 +1091,44 @@ describe('bounded native binding wait and failure classification', () => {
     }
   });
 
+  it('fails a completed turn whose matched transcript cannot be preserved', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'chatgpt-unpreserved-'));
+    try {
+      const state = turnState(home, true);
+      await mkdir(state.evidenceDir!, { recursive: true });
+      // The sessions root doesn't exist, so the transcript can't be copied.
+      vi.mocked(findChatgptTrace).mockResolvedValue({
+        path: join(home, '.codex', 'sessions', 'rollout.jsonl'),
+        trace: {
+          sessionId: 'session',
+          turnId: 'turn',
+          complete: true,
+          response: 'native answer',
+          toolCalls: [],
+          conversationHistory: [],
+          telemetry: {},
+          limitations: [],
+        },
+      });
+      const result = await captureChatgptTurn(state);
+      expect(result).toMatchObject({
+        success: false,
+        error:
+          'The matched native ChatGPT transcript could not be preserved as evidence.',
+        clientMetadata: {
+          failureKind: 'client_run_failed',
+          traceSource: 'none',
+          traceConfidence: 'unknown',
+        },
+      });
+      expect(result.clientMetadata.traceLimitations).toContain(
+        'The matched native transcript could not be preserved.'
+      );
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('does not copy evidence without an MST-owned evidence directory', async () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-unattested-'));
     try {
@@ -1245,6 +1283,20 @@ describe('the batch app session', () => {
 });
 
 describe('what the trial OS decides', () => {
+  it('rejects a configPath that is not config.toml before anything is sent', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-planner-key');
+    const state = unsubmitted(false);
+    state.config = {
+      ...state.config,
+      codexSetup: { servers: [], configPath: '/tmp/codex-home/settings.toml' },
+    };
+    expect(checkChatgptSettings(state)).toMatchObject({
+      success: false,
+      error: expect.stringContaining('configPath must end in config.toml'),
+    });
+    expect(submitChatgptQuery).not.toHaveBeenCalled();
+  });
+
   it('validates Linux-only settings on Linux and not on macOS', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'test-planner-key');
     vi.mocked(validateLinuxChatgptConfig).mockClear();
