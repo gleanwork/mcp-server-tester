@@ -26,14 +26,11 @@ import {
   snapshotClaudeSessions,
   waitForClaudeTrace,
   waitForClaudeSession,
-} from './externalClient/builtins/claudeSessions.js';
-import {
-  awaitingUserAnswer,
-  type ClaudeTrace,
-} from './externalClient/builtins/claudeTrace.js';
+} from './cowork/sessions.js';
+import { awaitingUserAnswer, type ClaudeTrace } from './cowork/trace.js';
 import { infrastructureEnding } from './trialEnding.js';
 import { computerUseEnding } from './cowork/anthropicComputerUse.js';
-import { NativeTraceError } from './externalClient/nativeTraceError.js';
+import { NativeTraceError } from './nativeTraceError.js';
 import { simulationToClientRun } from './clientTrace.js';
 import {
   claudeDesktopOtlpSettings,

@@ -9,7 +9,7 @@ import {
   parseChatgptTrace,
   PendingChatgptRecordError,
   snapshotChatgptSessions,
-} from './chatgptTrace.js';
+} from './trace.js';
 import { NativeTraceError } from '../nativeTraceError.js';
 
 const marker = 'MCP_SERVER_TESTER_test';

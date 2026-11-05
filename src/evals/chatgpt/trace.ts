@@ -2,15 +2,15 @@ import { open, readdir, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import type { UsageMetrics } from '../../../types/index.js';
-import type { ModelCall } from '../../evalFrameworkTypes.js';
+import type { UsageMetrics } from '../../types/index.js';
+import type { ModelCall } from '../evalFrameworkTypes.js';
 import type {
   LLMToolCall,
   MstClientSimulationResult,
-} from '../../mstClient/types.js';
-import type { ExternalClientTelemetry } from '../types.js';
+} from '../mstClient/types.js';
+import type { ExternalClientTelemetry } from '../externalClient/types.js';
 import { NativeTraceError } from '../nativeTraceError.js';
-import type { ChatgptSurface } from '../../chatgpt/driver.js';
+import type { ChatgptSurface } from './driver.js';
 
 const MAX_FILES = 10_000;
 const MAX_BYTES = 32 * 1024 * 1024;

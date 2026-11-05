@@ -12,7 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { copyChatgptEvidence } from './chatgptEvidence.js';
+import { copyChatgptEvidence } from './evidence.js';
 
 let root: string;
 let sessions: string;

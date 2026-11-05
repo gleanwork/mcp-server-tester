@@ -15,13 +15,13 @@ import {
   truncatedPrompt,
 } from './coworkClient.js';
 import { endingOf, isInfrastructure } from './trialEnding.js';
-import { NativeTraceError } from './externalClient/nativeTraceError.js';
+import { NativeTraceError } from './nativeTraceError.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import { CoworkHitlError } from './cowork/driver.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import type { ClaudeTrace } from './externalClient/builtins/claudeTrace.js';
-import type * as ClaudeNative from './externalClient/builtins/claudeSessions.js';
+import type { ClaudeTrace } from './cowork/trace.js';
+import type * as ClaudeNative from './cowork/sessions.js';
 import {
   ComputerUseDriverError,
   ComputerUseHitlBudgetError,
@@ -98,16 +98,13 @@ vi.mock('./cowork/anthropicComputerUse.js', async (original) => ({
   runAnthropicComputerUseHitl: mocks.hitl,
   runAnthropicComputerUseReset: mocks.reset,
 }));
-vi.mock(
-  './externalClient/builtins/claudeSessions.js',
-  async (importOriginal) => ({
-    ...(await importOriginal<typeof ClaudeNative>()),
-    snapshotClaudeSessions: mocks.snapshot,
-    waitForClaudeTrace: mocks.trace,
-    waitForClaudeSession: mocks.bind,
-    findMatchingClaudeSessions: mocks.matches,
-  })
-);
+vi.mock('./cowork/sessions.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof ClaudeNative>()),
+  snapshotClaudeSessions: mocks.snapshot,
+  waitForClaudeTrace: mocks.trace,
+  waitForClaudeSession: mocks.bind,
+  findMatchingClaudeSessions: mocks.matches,
+}));
 const dirs: string[] = [];
 const clientConfig = {
   type: 'cowork',

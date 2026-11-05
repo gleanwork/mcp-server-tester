@@ -14,7 +14,7 @@ import {
   auditCoworkNativeRun,
   type CoworkNativeAuditIssue,
 } from './auditCoworkNativeRun.js';
-import { parseClaudeTrace } from './externalClient/builtins/claudeTrace.js';
+import { parseClaudeTrace } from './cowork/trace.js';
 import { clientRunToExecution, simulationToClientRun } from './clientTrace.js';
 
 const sessionId = 'local_11111111-1111-4111-8111-111111111111';

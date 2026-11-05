@@ -1,4 +1,4 @@
-import type { ExternalClientFailureKind } from './types.js';
+import type { ExternalClientFailureKind } from './externalClient/types.js';
 
 /**
  * A native-trace failure whose kind is decided where it is detected, so a

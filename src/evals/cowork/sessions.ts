@@ -1,8 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import type { ExternalClientConfig, ClientRunContext } from '../types.js';
-import { POLL_INTERVAL_MS, delay } from './claudeCommon.js';
+import { POLL_INTERVAL_MS, delay, findFile } from './sessionFiles.js';
 import { NativeTraceError } from '../nativeTraceError.js';
 import {
   type ClaudeSessionBinding,
@@ -11,25 +10,22 @@ import {
   type SessionCandidate,
   metadataTimestampMs,
   parseClaudeTrace,
-} from './claudeTrace.js';
-import { findFile } from './claudeCommon.js';
-import { configStringOption, runStringOption } from './bindingOptions.js';
+} from './trace.js';
 
 const TRACE_SETTLE_AFTER_COMPLETE_MS = 1_500;
+
+/** The parts of a run's correlation that session matching reads. */
+interface ClaudeSessionCorrelation {
+  strategy: string;
+  includedInPrompt: boolean;
+}
 interface SnapshotEntry {
   mtimeMs: number;
 }
 
 export type ClaudeSessionSnapshot = Map<string, SnapshotEntry>;
 
-export function getClaudeDataDir(
-  config: ExternalClientConfig,
-  binding?: { with?: Record<string, unknown> }
-): string {
-  const configuredDataDir = binding
-    ? runStringOption(config, binding, 'dataDir')
-    : configStringOption(config, 'dataDir');
-
+export function getClaudeDataDir(configuredDataDir?: string): string {
   return (
     configuredDataDir ??
     join(
@@ -56,7 +52,7 @@ export async function snapshotClaudeSessions(
 interface ClaudeSessionMatchOptions {
   dataDir: string;
   marker?: string;
-  correlation?: ClientRunContext['correlation'];
+  correlation?: ClaudeSessionCorrelation;
   snapshot: ClaudeSessionSnapshot;
   startedAtMs: number;
   /**
@@ -401,7 +397,7 @@ function sessionMatchesCorrelation(options: {
   session: SessionCandidate;
   trace: ClaudeTrace;
   marker: string;
-  correlation?: ClientRunContext['correlation'];
+  correlation?: ClaudeSessionCorrelation;
   isNewOrUpdated: boolean;
   isRecent: boolean;
 }): boolean {

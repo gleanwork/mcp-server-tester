@@ -9,12 +9,12 @@ import {
   type ChatgptTrace,
   type ChatgptTraceBinding,
   type ChatgptTraceSelector,
-} from './chatgptTrace.js';
-import { copyChatgptEvidence } from './chatgptEvidence.js';
+} from '../../chatgpt/trace.js';
+import { copyChatgptEvidence } from '../../chatgpt/evidence.js';
 import {
   NativeTraceError,
   nativeTraceFailureKind,
-} from '../nativeTraceError.js';
+} from '../../nativeTraceError.js';
 import { resolveCodexSetup } from '../../codexSetup/config.js';
 import { ChatgptAppSession } from '../../chatgptSetup/session.js';
 import {
