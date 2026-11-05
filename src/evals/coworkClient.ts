@@ -30,7 +30,11 @@ import {
   waitForClaudeTrace,
   waitForClaudeSession,
 } from './cowork/sessions.js';
-import { awaitingUserAnswer, type ClaudeTrace } from './cowork/trace.js';
+import {
+  awaitingUserAnswer,
+  pendingUserQuestion,
+  type ClaudeTrace,
+} from './cowork/trace.js';
 import { infrastructureEnding } from './trialEnding.js';
 import { computerUseEnding } from './cowork/anthropicComputerUse.js';
 import { NativeTraceError } from './nativeTraceError.js';
@@ -627,6 +631,21 @@ async function desktopAdapter(
               });
               return current.length === 1 && awaitingUserAnswer(current[0]!);
             },
+            // Linux HITL answers a clarifying question with its first
+            // option; the macOS profile turns AskUserQuestion off.
+            ...(!mac && coworkSetup.clarifyingQuestions !== 'disabled'
+              ? {
+                  pendingQuestion: async () => {
+                    const current = await findMatchingClaudeSessions({
+                      ...match,
+                      sessionPath,
+                    });
+                    return current.length === 1
+                      ? pendingUserQuestion(current[0]!)
+                      : undefined;
+                  },
+                }
+              : {}),
             task: `Handle only the currently open Cowork task just submitted with this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks. Never create, type, or resubmit a task. If the current task cannot be identified uniquely, stop without an action.`,
           });
           hitlActions += hitl.action_count;

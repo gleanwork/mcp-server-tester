@@ -17,8 +17,8 @@ export const CoworkSetupConfigSchema = z
     /**
      * Cowork built-in tools to turn off on MST's Linux desktop (Claude
      * Desktop's `disabledBuiltinTools`), e.g. `["WebSearch"]` where the
-     * model's provider can't run it. Added to the image's own list and
-     * `AskUserQuestion`, which stay off. Not applied to a macOS desktop.
+     * model's provider can't run it. Added to the image's own list, which
+     * stays off. Not applied to a macOS desktop.
      */
     disabledBuiltinTools: z.array(z.string().min(1)).max(100).optional(),
     /**
@@ -31,6 +31,15 @@ export const CoworkSetupConfigSchema = z
      * otherwise.
      */
     toolSearch: z.boolean().optional(),
+    /**
+     * What a headless run does when Cowork asks a clarifying question
+     * (`AskUserQuestion`) on MST's Linux desktop. `first-option`, the
+     * default, keeps the tool on and answers each question with its first
+     * option, as ACE does. `disabled` turns the tool off, so the model
+     * proceeds on its best assumption. The macOS eval profile always turns
+     * the tool off.
+     */
+    clarifyingQuestions: z.enum(['first-option', 'disabled']).optional(),
   })
   .strict();
 
@@ -53,12 +62,15 @@ export function resolveCoworkSetupConfig(
     const disabledBuiltinTools =
       variant.disabledBuiltinTools ?? base.disabledBuiltinTools;
     const toolSearch = variant.toolSearch ?? base.toolSearch;
+    const clarifyingQuestions =
+      variant.clarifyingQuestions ?? base.clarifyingQuestions;
     return {
       approveWriteTools:
         variant.approveWriteTools ?? base.approveWriteTools ?? false,
       ...(egressAllowedHosts ? { egressAllowedHosts } : {}),
       ...(disabledBuiltinTools ? { disabledBuiltinTools } : {}),
       ...(toolSearch !== undefined ? { toolSearch } : {}),
+      ...(clarifyingQuestions ? { clarifyingQuestions } : {}),
     };
   } catch {
     throw new Error('Invalid Cowork setup options.');

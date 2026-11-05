@@ -66,6 +66,24 @@ describe('Cowork setup approval options', () => {
     });
   });
 
+  it("takes a variant's clarifying-question policy over the eval's, and leaves it out when neither sets it", () => {
+    expect(
+      resolveCoworkSetupConfig({ clarifyingQuestions: 'disabled' }, {})
+    ).toEqual({ approveWriteTools: false, clarifyingQuestions: 'disabled' });
+    expect(
+      resolveCoworkSetupConfig(
+        { clarifyingQuestions: 'disabled' },
+        { clarifyingQuestions: 'first-option' }
+      )
+    ).toEqual({
+      approveWriteTools: false,
+      clarifyingQuestions: 'first-option',
+    });
+    expect(resolveCoworkSetupConfig({}, {})).toEqual({
+      approveWriteTools: false,
+    });
+  });
+
   it.each([
     null,
     true,
@@ -73,6 +91,8 @@ describe('Cowork setup approval options', () => {
     'all',
     { toolSearch: 'true' },
     { toolSearch: 1 },
+    { clarifyingQuestions: 'skip' },
+    { clarifyingQuestions: true },
     { egressAllowedHosts: '*' },
     { egressAllowedHosts: [''] },
     { disabledBuiltinTools: 'WebSearch' },

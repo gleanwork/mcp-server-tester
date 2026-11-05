@@ -18,6 +18,20 @@ export interface CoworkDriverOptions {
    * (an unanswered AskUserQuestion). Headless runs fail fast instead of waiting.
    */
   awaitingUser?: () => Promise<boolean>;
+  /**
+   * The bound native session's unanswered AskUserQuestion, read from its
+   * transcript, when the driver may answer it (`coworkSetup.clarifyingQuestions`
+   * is `first-option`). The driver picks each question's first option.
+   */
+  pendingQuestion?: () => Promise<CoworkPendingQuestion | undefined>;
+}
+
+/** An unanswered AskUserQuestion, as the model asked it. */
+export interface CoworkPendingQuestion {
+  /** The tool call's ID, when the transcript has one. */
+  id?: string;
+  /** Each question's option labels, in order (Cowork shows one per page). */
+  questions: Array<{ labels: string[]; multiSelect: boolean }>;
 }
 
 export const COMPUTER_USE_TOKEN_FIELDS = [
@@ -58,6 +72,11 @@ export interface SemanticDesktopTelemetry {
    * request_cowork_directory) HITL denied: a headless run has none to give.
    */
   folder_requests_denied?: number;
+  /**
+   * Clarifying-question pages HITL answered with their first option
+   * (`coworkSetup.clarifyingQuestions: "first-option"`).
+   */
+  questions_answered?: number;
   planner: { status: 'not-applicable' };
   cost: { status: 'not-applicable' };
 }
