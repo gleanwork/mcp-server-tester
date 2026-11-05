@@ -80,8 +80,13 @@ class Desktop:
             raise DriverFailure("desktop_missing_or_ambiguous")
         return matches[0]
 
-    def controls(self, names: set[str], roles: set[str], *, require_enabled: bool = True,
-                 require_showing: bool = True):
+    def controls(self, names, roles: set[str], *, require_enabled: bool = True,
+                 require_showing: bool = True, raw: bool = False):
+        """Visible controls of `roles` whose label is in `names` (a set, or a
+        predicate on the label). With `raw`, a control also matches on its
+        whole name, a trailing number included."""
+        test = names if callable(names) else names.__contains__
+        wanted = (lambda node: test(self.label(node)) or (raw and test(node.get_name() or "")))
         pending = [self.application()]
         found = []
         seen = 0
@@ -98,7 +103,7 @@ class Desktop:
                 role = node.get_role_name()
                 if role in SKIPPED_ROLES:
                     continue
-                if (role in roles and self.label(node) in names
+                if (role in roles and wanted(node)
                         and states.contains(self.api.StateType.VISIBLE)
                         and (not require_showing or states.contains(self.api.StateType.SHOWING))
                         and (not require_enabled or (
@@ -126,6 +131,13 @@ class Desktop:
     def selected(self, node) -> bool:
         states = node.get_state_set()
         return states.contains(self.api.StateType.CHECKED) or states.contains(self.api.StateType.SELECTED)
+
+    def texts(self, pattern: re.Pattern) -> list[str]:
+        """The showing text of the app's static and label nodes that matches
+        `pattern`, whole."""
+        return [(node.get_name() or "").strip() for node in self.controls(
+            lambda name: bool(pattern.fullmatch(name.strip())), TEXT_ROLES, require_enabled=False,
+            raw=True)]
 
     def activate(self, node) -> None:
         if not node.is_action() or not node.do_action(0):
@@ -277,6 +289,45 @@ def diagnose(directory, timeout: float) -> dict:
 
 
 SHORTCUT_SUFFIX = re.compile(r" [0-9]$")
+
+# Clarifying questions (AskUserQuestion). Cowork shows one question per page,
+# marked "2 of 3" when there are several; each option is a control whose
+# name is its label, or its label then its description.
+TEXT_ROLES = {"static", "text", "label", "paragraph", "heading"}
+QUESTION_PAGE = re.compile(r"(\d+) of (\d+)", re.IGNORECASE)
+OPTION_ROLES = {"radio button", "check box", "checkbox", "toggle button", "button"}
+# Controls on or near the form that are never an option.
+NOT_OPTION = re.compile(
+    r"(?:Skip|Next|Back|Previous|Continue|Submit|Send|Cancel|Dismiss|Create|Allow|Accept|Connect|"
+    r"Approve|Stop|Show|Copy|Edit|Retry|More options|Read aloud|Restart conversation|Add |"
+    r"Press and hold|Progress|Working folder|Context|Start task|Deny)(?:\b|,)", re.IGNORECASE)
+# The control that takes a page's checked options.
+ADVANCE = re.compile(r"(?:Submit|Send|Next|Continue)(?: answers?)?", re.IGNORECASE)
+
+
+def normalized(text: str) -> str:
+    return " ".join(text.split())
+
+
+def first_option_owner(labels: list[str], name: str) -> bool:
+    """Whether a control named `name` is the first option's: its exact label,
+    or the label then a description, unless a longer label it also starts
+    with ("Table with chart" beside "Table") claims it."""
+    first = labels[0]
+    starts = lambda label: name == label or name.startswith(label + " ")
+    return starts(first) and not any(len(label) > len(first) and starts(label) for label in labels)
+
+
+def question_page(texts: list[str], count: int) -> int | None:
+    """The index of the question on screen: its "i of N" marker, which must
+    agree with the questions asked, or the only question."""
+    marks = {(int(m.group(1)), int(m.group(2))) for m in map(QUESTION_PAGE.fullmatch, texts) if m}
+    if not marks:
+        return 0 if count == 1 else None
+    if len(marks) != 1:
+        return None
+    page, total = marks.pop()
+    return page - 1 if total == count and 1 <= page <= total else None
 
 # Primary actions of Cowork's built-in tool confirmation cards (always shown with Cancel).
 CARD_ACTIONS = {"Create", "Update", "Schedule", "Run", "Delete"}
@@ -441,6 +492,44 @@ class Driver:
                 continue
             time.sleep(min(0.1, self.remaining()))
 
+    def answer(self, questions) -> dict:
+        """One step of a clarifying question's form: the first option of the
+        question on screen, or, once a checked option waits on it, the page's
+        one Submit/Next control. Acts only on an unambiguous control; on
+        anything else it acts on nothing, and the caller looks again."""
+        if (not isinstance(questions, list) or not questions or not all(
+                isinstance(q, dict) and isinstance(q.get("labels"), list) and q["labels"]
+                and all(isinstance(label, str) and label.strip() for label in q["labels"])
+                for q in questions)):
+            raise DriverFailure("invalid_questions")
+        try:
+            page = question_page(self.desktop.texts(QUESTION_PAGE), len(questions))
+            if page is None:
+                return {**self.receipt("hitl_checked"), "question": "not_found"}
+            labels = [normalized(label) for label in questions[page]["labels"]]
+            # A control named exactly the first label is its option, whatever
+            # the label says; one that only starts with it mustn't be a
+            # control of the form or the app.
+            exact = self.desktop.controls(
+                lambda name: normalized(name) == labels[0], OPTION_ROLES, raw=True)
+            options = exact or self.desktop.controls(
+                lambda name: first_option_owner(labels, normalized(name)) and not NOT_OPTION.match(name),
+                OPTION_ROLES, raw=True)
+            if len(options) != 1:
+                return {**self.receipt("hitl_checked"), "question": "not_found"}
+            target, answered = options[0], "option"
+            if self.desktop.selected(target):
+                advance = self.desktop.controls(lambda name: bool(ADVANCE.fullmatch(name.strip())), {"button"})
+                if len(advance) != 1:
+                    return {**self.receipt("hitl_checked"), "question": "not_found"}
+                target, answered = advance[0], "advance"
+        except DriverFailure as failure:
+            if str(failure) not in SCAN_INCOMPLETE:
+                raise
+            return {**self.receipt("hitl_checked"), "scan": "incomplete"}
+        self.action(lambda: self.desktop.activate(target))
+        return {**self.receipt("hitl_checked"), "answered": answered}
+
     def hitl(self, approve_writes: bool) -> dict:
         names = {"Allow once", "Allow"}
         if approve_writes:
@@ -489,7 +578,8 @@ class Driver:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["probe", "reset", "submit", "hitl", "diagnose"], required=True)
+    parser.add_argument("--mode", choices=["probe", "reset", "submit", "hitl", "answer", "diagnose"],
+                        required=True)
     parser.add_argument("--timeout-ms", type=int, required=True)
     parser.add_argument("--max-actions", type=int, default=24)
     args = parser.parse_args()
@@ -508,6 +598,8 @@ def main() -> int:
             result = driver.submit(payload.get("prompt"))
         elif args.mode == "hitl":
             result = driver.hitl(payload.get("approveWriteTools") is True)
+        elif args.mode == "answer":
+            result = driver.answer(payload.get("questions"))
         elif args.mode == "reset":
             result = driver.reset()
         else:

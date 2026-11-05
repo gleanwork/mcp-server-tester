@@ -56,8 +56,16 @@ import {
   CoworkHitlError,
   CoworkUserQuestionError,
   type CoworkDriverOptions,
+  type CoworkPendingQuestion,
   type SemanticDesktopTelemetry,
 } from './driver.js';
+
+/**
+ * How long HITL waits for Cowork's form for one clarifying question to take
+ * its first option (from when HITL first sees the question) before the case
+ * fails as unanswered.
+ */
+export const QUESTION_ANSWER_TIMEOUT_MS = 60_000;
 
 /** The most one UI submission may take, within the case deadline. */
 export const SUBMIT_TIMEOUT_MS = 10 * 60_000;
@@ -92,6 +100,8 @@ interface Receipt {
   scanIncomplete?: boolean;
   /** HITL denied the task's request for a folder of the user's computer. */
   deniedFolderRequest?: boolean;
+  /** The answer pass picked a question's first option, or advanced its page. */
+  answered?: boolean;
 }
 
 async function readSettings(file: string): Promise<Record<string, unknown>> {
@@ -174,8 +184,12 @@ function coworkLinuxOwnedSettings(
     disabledBuiltinTools?: readonly string[];
     /** `coworkSetup.toolSearch`. Default: on. */
     toolSearch?: boolean;
+    /** `coworkSetup.clarifyingQuestions`. Default: `first-option`. */
+    clarifyingQuestions?: 'first-option' | 'disabled';
   }
 ): Record<string, unknown> {
+  const answering =
+    (options.clarifyingQuestions ?? 'first-option') === 'first-option';
   const managed = coworkManagedPluginSettings(options);
   const prior = Array.isArray(base.managedMcpServers)
     ? (base.managedMcpServers as Array<Record<string, unknown> | null>)
@@ -223,9 +237,13 @@ function coworkLinuxOwnedSettings(
         ...options.telemetry,
       }
     : kept;
+  // When HITL answers clarifying questions, the image's headless default
+  // (AskUserQuestion off) gives way; an eval that lists it keeps it off.
   const disabled = Array.isArray(base.disabledBuiltinTools)
     ? base.disabledBuiltinTools.filter(
-        (tool): tool is string => typeof tool === 'string'
+        (tool): tool is string =>
+          typeof tool === 'string' &&
+          !(answering && HEADLESS_DISABLED.includes(tool))
       )
     : [];
   const imageEgress = Array.isArray(base.coworkEgressAllowedHosts)
@@ -240,12 +258,13 @@ function coworkLinuxOwnedSettings(
     coworkEgressAllowedHosts: [
       ...(options.egressAllowedHosts ?? imageEgress ?? DEFAULT_EGRESS_HOSTS),
     ],
-    // Headless: nobody can answer AskUserQuestion. The image's own
+    // HITL answers AskUserQuestion with each question's first option, or,
+    // with clarifyingQuestions disabled, the tool is off. The image's own
     // disabled tools stay disabled; the eval's are added.
     disabledBuiltinTools: [
       ...new Set([
         ...disabled,
-        ...HEADLESS_DISABLED,
+        ...(answering ? [] : HEADLESS_DISABLED),
         ...(options.disabledBuiltinTools ?? []),
       ]),
     ],
@@ -462,7 +481,11 @@ function telemetry(
   started: number,
   actions: number,
   accounting: 'complete' | 'partial',
-  hitl: { incompleteScans: number; folderRequestsDenied: number } = {
+  hitl: {
+    incompleteScans: number;
+    folderRequestsDenied: number;
+    questionsAnswered?: number;
+  } = {
     incompleteScans: 0,
     folderRequestsDenied: 0,
   }
@@ -477,6 +500,9 @@ function telemetry(
       : {}),
     ...(hitl.folderRequestsDenied > 0
       ? { folder_requests_denied: hitl.folderRequestsDenied }
+      : {}),
+    ...(hitl.questionsAnswered
+      ? { questions_answered: hitl.questionsAnswered }
       : {}),
     planner: { status: 'not-applicable' },
     cost: { status: 'not-applicable' },
@@ -510,6 +536,9 @@ function receipt(stdout: string): Receipt | undefined {
           : undefined,
       ...(r.scan === 'incomplete' ? { scanIncomplete: true } : {}),
       ...(r.denied === 'folder_request' ? { deniedFolderRequest: true } : {}),
+      ...(r.answered === 'option' || r.answered === 'advance'
+        ? { answered: true }
+        : {}),
     };
   } catch {
     return undefined;
@@ -517,7 +546,7 @@ function receipt(stdout: string): Receipt | undefined {
 }
 
 async function execute(
-  mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'diagnose',
+  mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'answer' | 'diagnose',
   payload: object,
   options: CoworkDriverOptions
 ): Promise<Receipt> {
@@ -802,6 +831,11 @@ export const linuxCoworkPlatform: CoworkPlatform = {
           ...(evalConfig.coworkSetup?.toolSearch !== undefined
             ? { toolSearch: evalConfig.coworkSetup.toolSearch }
             : {}),
+          ...(evalConfig.coworkSetup?.clarifyingQuestions
+            ? {
+                clarifyingQuestions: evalConfig.coworkSetup.clarifyingQuestions,
+              }
+            : {}),
         }),
         null,
         2
@@ -844,8 +878,13 @@ export const linuxCoworkPlatform: CoworkPlatform = {
           throw new Error('model');
         if (!coworkPluginSettingsMatch(settings, plugins))
           throw new Error('plugins');
-        // Linux Cowork is always headless: nobody can answer AskUserQuestion.
-        if (!coworkHeadlessSettingsMatch(settings)) throw new Error('headless');
+        // Linux Cowork is headless: either HITL answers AskUserQuestion with
+        // the first option, or the tool is off.
+        if (
+          evalConfig.coworkSetup?.clarifyingQuestions === 'disabled' &&
+          !coworkHeadlessSettingsMatch(settings)
+        )
+          throw new Error('headless');
         const servers = transportServers(evalConfig.servers, 'Cowork');
         if (
           !coworkMcpSettingsMatch(settings, {
@@ -918,10 +957,16 @@ export const linuxCoworkPlatform: CoworkPlatform = {
     let actions = 0;
     // Passes whose scan couldn't finish (they saw no prompt, and HITL went
     // on), and folder requests HITL denied.
-    const counts = { incompleteScans: 0, folderRequestsDenied: 0 };
+    const counts = {
+      incompleteScans: 0,
+      folderRequestsDenied: 0,
+      questionsAnswered: 0,
+    };
     // Set while the driver runs: a failure then may have acted on the app.
     let driving = false;
     const budget = options.maxActions ?? 12;
+    // Each question HITL has seen (by tool call), and since when.
+    const questionsSeen = new Map<string, number>();
     try {
       while (Date.now() < options.deadlineAt) {
         if (await options.isComplete())
@@ -930,11 +975,50 @@ export const linuxCoworkPlatform: CoworkPlatform = {
             action_count: actions,
             telemetry: telemetry(started, actions, 'complete', counts),
           };
-        if (await options.awaitingUser?.())
-          throw new CoworkUserQuestionError(
-            'Cowork is waiting for an answer to a question (AskUserQuestion); a headless run cannot answer it. No resubmission attempted.',
-            telemetry(started, actions, 'partial', counts)
+        const question = options.pendingQuestion
+          ? await options.pendingQuestion()
+          : (await options.awaitingUser?.())
+            ? ({ questions: [] } satisfies CoworkPendingQuestion)
+            : undefined;
+        if (question) {
+          if (!question.questions.length)
+            throw new CoworkUserQuestionError(
+              options.pendingQuestion
+                ? 'Cowork is waiting for an answer to a question (AskUserQuestion) that offers no usable options. No resubmission attempted.'
+                : 'Cowork is waiting for an answer to a question (AskUserQuestion); a headless run cannot answer it. No resubmission attempted.',
+              telemetry(started, actions, 'partial', counts)
+            );
+          const key = question.id ?? JSON.stringify(question.questions);
+          const since = questionsSeen.get(key) ?? Date.now();
+          questionsSeen.set(key, since);
+          if (Date.now() - since > QUESTION_ANSWER_TIMEOUT_MS)
+            throw new CoworkUserQuestionError(
+              `Cowork's question (AskUserQuestion) didn't take its first option within ${QUESTION_ANSWER_TIMEOUT_MS / 1000} s. No resubmission attempted.`,
+              telemetry(started, actions, 'partial', counts)
+            );
+          if (actions >= budget)
+            throw new CoworkHitlBudgetError(
+              'Linux HITL action budget exhausted.',
+              telemetry(started, actions, 'partial', counts)
+            );
+          // One page per pass: the first option, or the page's Submit/Next
+          // once a multi-select option is checked. A pass that finds no
+          // unambiguous control acts on nothing and the next looks again.
+          driving = true;
+          const result = await execute(
+            'answer',
+            { questions: question.questions },
+            { ...options, maxActions: Math.min(1, budget - actions) }
           );
+          driving = false;
+          actions += result.action_count;
+          if (result.answered) counts.questionsAnswered += 1;
+          if (result.scanIncomplete) counts.incompleteScans += 1;
+          await delay(
+            Math.min(1_000, Math.max(0, options.deadlineAt - Date.now()))
+          );
+          continue;
+        }
         if (actions >= budget)
           throw new CoworkHitlBudgetError(
             'Linux HITL action budget exhausted.',

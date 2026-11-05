@@ -616,5 +616,111 @@ class LinuxDiagnoseTests(unittest.TestCase):
                 module.diagnose(directory, 10)
 
 
+class PressableNode(AtspiNode):
+    """A node whose default action the test records."""
+
+    def __init__(self, name, role="radio button", pressed=None, **kwargs):
+        super().__init__(name, role, **kwargs)
+        self.pressed = pressed if pressed is not None else []
+
+    def is_action(self):
+        return True
+
+    def do_action(self, index):
+        self.pressed.append(self.name)
+        return True
+
+
+def question(*labels, multi=False):
+    return {"labels": list(labels), "multiSelect": multi}
+
+
+class ClarifyingQuestionTests(unittest.TestCase):
+    def answer(self, questions, *nodes):
+        desktop = real_desktop(FakeAtspi(*nodes))
+        return module.Driver(desktop, 2000, 1).answer(questions)
+
+    def test_picks_the_first_option_by_label_or_label_then_description(self):
+        pressed = []
+        table = PressableNode("Table Rows and columns", pressed=pressed)
+        chart = PressableNode("Table with chart Adds a chart", pressed=pressed)
+        result = self.answer([question("Table", "Table with chart")], chart, table,
+                             PressableNode("Skip", "button", pressed=pressed))
+        self.assertEqual((result["answered"], result["action_count"], pressed),
+                         ("option", 1, ["Table Rows and columns"]))
+        # "Table with chart" first: its control, not the one "Table" also starts.
+        pressed.clear()
+        self.answer([question("Table with chart", "Table")], table, chart)
+        self.assertEqual(pressed, ["Table with chart Adds a chart"])
+
+    def test_a_shortcut_number_or_a_trailing_number_in_the_label_still_matches(self):
+        pressed = []
+        self.answer([question("Brief", "Detailed")], PressableNode("Brief 1", pressed=pressed),
+                    PressableNode("Detailed 2", pressed=pressed))
+        self.assertEqual(pressed, ["Brief 1"])
+        pressed.clear()
+        self.answer([question("Q3 2025", "Q4 2025")], PressableNode("Q3 2025", pressed=pressed),
+                    PressableNode("Q4 2025", pressed=pressed))
+        self.assertEqual(pressed, ["Q3 2025"])
+
+    def test_an_exact_label_wins_even_when_it_reads_like_a_form_control(self):
+        pressed = []
+        self.answer([question("Continue with defaults", "Ask me later")],
+                    PressableNode("Continue with defaults", "button", pressed=pressed))
+        self.assertEqual(pressed, ["Continue with defaults"])
+
+    def test_answers_the_question_its_page_marker_names(self):
+        pressed = []
+        result = self.answer(
+            [question("A", "B"), question("Weekly", "Monthly"), question("X", "Y")],
+            AtspiNode("2 of 3", "static"), PressableNode("A", pressed=pressed),
+            PressableNode("Weekly", pressed=pressed), PressableNode("Monthly", pressed=pressed))
+        self.assertEqual((result["answered"], pressed), ("option", ["Weekly"]))
+
+    def test_acts_on_nothing_when_the_form_disagrees_with_the_question(self):
+        cases = [
+            # The marker counts other questions than were asked.
+            ([question("A"), question("B")], [AtspiNode("1 of 3", "static"), PressableNode("A")]),
+            # Several questions and no marker: which one is on screen is unknown.
+            ([question("A"), question("B")], [PressableNode("A"), PressableNode("B")]),
+            # Two controls for the first option.
+            ([question("A", "B")], [PressableNode("A"), PressableNode("A", "button")]),
+            # The form isn't on screen yet.
+            ([question("A", "B")], [PressableNode("Start task", "button")]),
+        ]
+        for questions, nodes in cases:
+            result = self.answer(questions, *nodes)
+            self.assertEqual((result["question"], result["action_count"]), ("not_found", 0))
+            self.assertEqual([n.pressed for n in nodes if isinstance(n, PressableNode)],
+                             [[] for n in nodes if isinstance(n, PressableNode)])
+
+    def test_a_checked_option_is_submitted_by_the_pages_one_advance_control(self):
+        pressed = []
+        checked = ("VISIBLE", "SHOWING", "ENABLED", "SENSITIVE", "CHECKED")
+        option = PressableNode("Email", "check box", pressed=pressed, states=checked)
+        result = self.answer([question("Email", "Slack", multi=True)], option,
+                             PressableNode("Slack", "check box", pressed=pressed),
+                             PressableNode("Submit answers", "button", pressed=pressed))
+        self.assertEqual((result["answered"], pressed), ("advance", ["Submit answers"]))
+        # Two advance controls: no guess.
+        pressed.clear()
+        result = self.answer([question("Email", "Slack", multi=True)], option,
+                             PressableNode("Next", "button", pressed=pressed),
+                             PressableNode("Submit", "button", pressed=pressed))
+        self.assertEqual((result["question"], pressed), ("not_found", []))
+
+    def test_refuses_questions_without_usable_labels(self):
+        for questions in (None, [], [question()], [{"labels": [" "]}], ["A"]):
+            with self.assertRaisesRegex(module.DriverFailure, "invalid_questions"):
+                self.answer(questions, PressableNode("A"))
+
+    def test_a_scan_that_cannot_finish_acts_on_nothing(self):
+        desktop = real_desktop(FakeAtspi(*[AtspiNode("x", "label") for _ in range(200)]))
+        driver = module.Driver(desktop, 2000, 1)
+        desktop.scan_deadline = time.monotonic() - 1
+        result = driver.answer([question("A")])
+        self.assertEqual((result["scan"], result["action_count"]), ("incomplete", 0))
+
+
 if __name__ == "__main__":
     unittest.main()

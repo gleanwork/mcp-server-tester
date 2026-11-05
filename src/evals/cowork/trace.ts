@@ -1061,3 +1061,56 @@ export function awaitingUserAnswer(trace: {
     last.output === undefined
   );
 }
+
+/**
+ * The bound native task's unanswered AskUserQuestion (see
+ * `awaitingUserAnswer`), with each question's option labels in order. Without
+ * a usable option list (no questions, a question with no options, a blank or
+ * repeated label) it is still a question nobody can answer: `questions` is
+ * empty, and the caller fails the case as before.
+ */
+export function pendingUserQuestion(trace: {
+  isComplete: boolean;
+  toolCalls: readonly {
+    name: string;
+    source?: string;
+    output?: unknown;
+    id?: string;
+    arguments?: Record<string, unknown>;
+  }[];
+}):
+  | {
+      id?: string;
+      questions: Array<{ labels: string[]; multiSelect: boolean }>;
+    }
+  | undefined {
+  if (!awaitingUserAnswer(trace)) return undefined;
+  const last = trace.toolCalls.at(-1)!;
+  const id = typeof last.id === 'string' && last.id ? { id: last.id } : {};
+  const asked = last.arguments?.questions;
+  if (!Array.isArray(asked) || !asked.length) return { ...id, questions: [] };
+  const questions: Array<{ labels: string[]; multiSelect: boolean }> = [];
+  for (const question of asked as unknown[]) {
+    const record =
+      question && typeof question === 'object'
+        ? (question as Record<string, unknown>)
+        : {};
+    const options = Array.isArray(record.options) ? record.options : [];
+    const labels = options.map((option: unknown) =>
+      option && typeof option === 'object'
+        ? (option as Record<string, unknown>).label
+        : undefined
+    );
+    if (
+      !labels.length ||
+      labels.some((label) => typeof label !== 'string' || !label.trim()) ||
+      new Set(labels).size !== labels.length
+    )
+      return { ...id, questions: [] };
+    questions.push({
+      labels: labels as string[],
+      multiSelect: record.multiSelect === true,
+    });
+  }
+  return { ...id, questions };
+}

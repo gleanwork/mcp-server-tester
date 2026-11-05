@@ -310,9 +310,10 @@ secrets. The helper holds none either; it's written to `MST_COWORK_HELPER_DIR`
 when the staging file's directory doesn't allow executing files (Docker mounts
 a tmpfs `noexec`), else beside the headers. Both are removed when the variant
 ends. Another HTTP
-server keeps the image's `headersHelper` for the same name and URL. It adds
-`AskUserQuestion` to the image's
-`disabledBuiltinTools`, so the image needn't. It runs the restart command, checks the
+server keeps the image's `headersHelper` for the same name and URL. It removes
+`AskUserQuestion` from the image's `disabledBuiltinTools`, so HITL can answer
+clarifying questions, or, with `coworkSetup.clarifyingQuestions: "disabled"`,
+adds it. It runs the restart command, checks the
 file as above, and probes. When the variant ends, or if the desktop isn't ready,
 the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
 stays read-only.
@@ -359,6 +360,20 @@ can choose one in a headless run, and managed settings can't remove the tool
 `Deny`, under either policy, since denying grants nothing. The model is told the
 user rejected it and answers with the tools it has; the case is graded on that
 answer. `computerUse.hitl.telemetry.folder_requests_denied` counts them.
+
+A task can ask a clarifying question (`AskUserQuestion`). By default
+(`coworkSetup.clarifyingQuestions: "first-option"`), HITL answers it the way ACE
+does: it reads the question's options from the bound task's transcript and clicks
+the first option of the question on screen (Cowork shows one per page, marked
+`2 of 3`). A control matches by its exact label, or by the label followed by its
+description, unless a longer option label claims it. Once a multi-select
+option is checked, HITL presses the page's one `Submit`/`Next` control. HITL acts
+only on one unambiguous control and never types an answer. If the form doesn't
+take the first option within 60 seconds, or the question has no usable options,
+the case fails as unanswered (`clientTelemetry.awaitingUser`).
+`computerUse.hitl.telemetry.questions_answered` counts the answered pages. Set
+`clarifyingQuestions: "disabled"` to turn the tool off instead, so the model
+proceeds on its best assumption. The macOS eval profile always turns it off.
 
 `clientTelemetry.computerUse` records `driver: "linux-desktop"`, observed semantic
 actions, and elapsed time. Planner tokens and planner cost are **not applicable**,
@@ -952,12 +967,13 @@ Claude Desktop:
   (`COWORK_MANAGED_ONLY`), so Claude Desktop runs only the managed servers: no
   servers from the user's `claude_desktop_config.json`, and no desktop
   extensions.
-- `disabledBuiltinTools` contains `AskUserQuestion`
-  (`coworkHeadlessSettings()` builds it). A headless run has nobody to answer a
-  clarifying question, so Claude proceeds on its best assumption instead. Other
-  disabled tools are allowed. If a desktop still asks, the task stops as a
-  verified failed case (`clientTelemetry.awaitingUser`) instead of waiting.
-  The macOS eval profile MST writes sets the same key.
+- With `coworkSetup.clarifyingQuestions: "disabled"`, `disabledBuiltinTools`
+  contains `AskUserQuestion` (`coworkHeadlessSettings()` builds it), so Claude
+  proceeds on its best assumption instead of asking. Other disabled tools are
+  allowed. If a desktop still asks, the task stops as a verified failed case
+  (`clientTelemetry.awaitingUser`) instead of waiting. By default
+  (`first-option`) the tool may be on or off: HITL answers a question with its
+  first option. The macOS eval profile MST writes always turns it off.
 - Each plugin root is an absolute, real (no symlink), non-world-writable
   directory. `mcpDataRoot` and each `<mcpDataRoot>/<label>` are real 0700
   directories owned by MST's user. Each `files` entry is a regular 0600 file
