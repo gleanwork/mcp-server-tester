@@ -912,6 +912,41 @@ describe('openDesktopSession', () => {
     }
   });
 
+  it('cannot submit or reset after a thrown run', async () => {
+    const runCase = vi.fn(async (): Promise<DesktopCaseOutcome> => {
+      throw new Error(`automation failed with ${SECRET}`);
+    });
+    const session = await openDesktopSession(fakeClient({ runCase }));
+    try {
+      await expect(session.run(trial())).rejects.toThrow(
+        'automation failed with [REDACTED]'
+      );
+      await expect(session.run(trial('two'))).rejects.toThrow('has stopped');
+      await expect(session.reset()).rejects.toThrow('has stopped');
+      expect(runCase).toHaveBeenCalledTimes(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it.each(['', ' \t\n'])(
+    'rejects a blank prompt %j before submission',
+    async (prompt) => {
+      const client = fakeClient();
+      const session = await openDesktopSession(client);
+      try {
+        await expect(
+          session.run({ ...trial(), input: { prompt } })
+        ).rejects.toThrow('requires a non-empty input');
+        expect(client.events).toEqual(['prepare']);
+        await session.run(trial());
+        expect(client.events).toEqual(['prepare', 'case 1']);
+      } finally {
+        await session.close();
+      }
+    }
+  );
+
   it('rejects settings on a trial instead of silently ignoring them', async () => {
     const client = fakeClient();
     const session = await openDesktopSession(client);
