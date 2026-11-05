@@ -186,7 +186,7 @@ Update snapshots: `npx playwright test --update-snapshots`
 
 ### The api and claude-code Clients
 
-`simulateMstClient()` (internal, in `src/evals/mstClient/`) runs the `api` and `claude-code` clients: the `sdk` path drives a model through the Vercel AI SDK over the test's MCP connection; the `cli` path spawns Claude Code with its own connection. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or an eval. The external-client runtime in `src/evals/externalClient/` is likewise internal to the ChatGPT app's clients (`chatgpt`, `codex-app`); `./experimental/clients` exports only the metadata types results carry.
+`simulateMstClient()` (internal, in `src/evals/mstClient/`) runs the `api` and `claude-code` clients: the `sdk` path drives a model through the Vercel AI SDK over the test's MCP connection; the `cli` path spawns Claude Code with its own connection. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or an eval. The ChatGPT app's clients (`chatgpt`, `codex-app`) are ordinary client code: `chatgptClient.ts` runs each trial through `src/evals/chatgpt/turn.ts` (check settings, use the batch's app session, snapshot native sessions, submit once, capture and attribute the native turn). `./experimental/clients` exports only the metadata types results carry (`src/evals/clientTelemetryTypes.ts`).
 
 Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
 

@@ -11,7 +11,7 @@ import {
   runLinuxChatgptDesktop,
   type ChatgptPromptOpener,
 } from '../chatgpt/linux.js';
-import type { ExternalClientConfig } from '../externalClient/types.js';
+import type { ChatgptAppConfig } from '../chatgpt/config.js';
 import {
   createLinuxChatgptProfile,
   readLinuxChatgptEnvironment,
@@ -40,14 +40,13 @@ export interface ChatgptPlatform {
   readonly name: 'macos' | 'linux';
   /** The OS it runs on, as `process.platform` names it. */
   readonly os: 'darwin' | 'linux';
-  readonly driver: string;
   /** Linux always owns an isolated profile, so CODEX_HOME is always explicit. */
   readonly isolatedConfigHome: boolean;
   readonly permissionNotice?: string;
   /** Directory that holds the cross-process desktop lock. */
-  lockHome(config: ExternalClientConfig): string;
+  lockHome(config: ChatgptAppConfig): string;
   application(
-    config: ExternalClientConfig,
+    config: ChatgptAppConfig,
     binding?: Record<string, unknown>
   ): ChatgptApplication;
   /** macOS: control the user's installed app. */
@@ -60,7 +59,7 @@ export interface ChatgptPlatform {
   ): Promise<ChatgptPlatformProfile>;
   /** Optional native post-launch surface verification. */
   verifyReady?(
-    config: ExternalClientConfig,
+    config: ChatgptAppConfig,
     openPrompt: ChatgptPromptOpener
   ): Promise<SemanticDesktopTelemetry>;
 }
@@ -68,7 +67,6 @@ export interface ChatgptPlatform {
 export const MAC_CHATGPT_PLATFORM: ChatgptPlatform = {
   name: 'macos',
   os: 'darwin',
-  driver: 'openai.chatgpt.agent.desktop-app.macos',
   isolatedConfigHome: false,
   permissionNotice:
     '[mst:chatgpt] Anthropic Computer Use requires Screen Recording and Accessibility permission. Keep ChatGPT visible and the desktop idle.\n',
@@ -100,7 +98,6 @@ export const MAC_CHATGPT_PLATFORM: ChatgptPlatform = {
 export const LINUX_CHATGPT_PLATFORM: ChatgptPlatform = {
   name: 'linux',
   os: 'linux',
-  driver: 'openai.chatgpt.agent.desktop-app.linux',
   isolatedConfigHome: true,
   lockHome(config) {
     return validateLinuxChatgptConfig(config).home;
@@ -140,6 +137,6 @@ export function chatgptPlatformFor(os: NodeJS.Platform): ChatgptPlatform {
   throw new Error(`The ChatGPT app runs on macOS or Linux, not ${os}.`);
 }
 
-export function chatgptPlatform(config: ExternalClientConfig): ChatgptPlatform {
+export function chatgptPlatform(config: ChatgptAppConfig): ChatgptPlatform {
   return isLinuxChatgpt(config) ? LINUX_CHATGPT_PLATFORM : MAC_CHATGPT_PLATFORM;
 }

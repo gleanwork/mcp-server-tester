@@ -557,31 +557,33 @@ ADR 0002's vocabulary reaches the config: an eval config compares **variants**, 
 
 Results use the 2.0 vocabulary ([ADR 0002](../adr/0002-common-eval-vocabulary.md)): they name the client a case ran on, not a host, and they record trials and the graders' scores.
 
-| 1.x                                                            | 2.0                                                          |
-| -------------------------------------------------------------- | ------------------------------------------------------------ |
-| `toolName: 'mcp_host'` on a case result                        | no `toolName`; see `request.client`                          |
-| `request.scenario`                                             | `request.input`                                              |
-| `request.iterations`                                           | `request.trials`                                             |
-| `request.accuracyThreshold`                                    | `request.passThreshold`                                      |
-| `request.expect`                                               | `request.assertions`                                         |
-| `request.toolOverrideVariantId`                                | `request.toolVariantId`                                      |
-| `mcpHostTrace`                                                 | `toolCallTrace`                                              |
-| `hostUsage`                                                    | `clientUsage`                                                |
-| `totalHostUsage` (on a run result and in `telemetry`)          | `totalClientUsage`                                           |
-| `hostTelemetry` (and its `hostApp`)                            | `clientTelemetry` (and `clientApp`)                          |
-| `hostDiagnostics`                                              | `clientDiagnostics`                                          |
-| `hostEvidence`                                                 | `traceEvidence`                                              |
-| `externalHost`                                                 | `clientMetadata`                                             |
-| `externalHost.hostName`, `.hostType`, `.hostVariant`           | `clientMetadata.clientName`, `.clientType`, `.clientVariant` |
-| `traceSource: 'host-local-transcript'`, `'host-native-export'` | `'client-local-transcript'`, `'client-native-export'`        |
-| `metadata.toolOverrideVariantId`                               | `metadata.toolVariantId`                                     |
-| `metadata.mcpHostModel`                                        | `metadata.model`                                             |
-| `expectations` (one result per assertion or judge)             | `scores`                                                     |
-| `iterationResults`                                             | `trialResults`                                               |
-| `assertionPassRate`, `assertionPassRateCI`                     | `passRate`, `passRateCI`                                     |
-| `metrics.expectationBreakdown` (reporter data)                 | `metrics.graderBreakdown`                                    |
-| pairwise `cases[].verdicts`                                    | `cases[].preferences`                                        |
-| `ExternalHostMetadata` type                                    | `ClientMetadata`                                             |
+| 1.x                                                            | 2.0                                                     |
+| -------------------------------------------------------------- | ------------------------------------------------------- |
+| `toolName: 'mcp_host'` on a case result                        | no `toolName`; see `request.client`                     |
+| `request.scenario`                                             | `request.input`                                         |
+| `request.iterations`                                           | `request.trials`                                        |
+| `request.accuracyThreshold`                                    | `request.passThreshold`                                 |
+| `request.expect`                                               | `request.assertions`                                    |
+| `request.toolOverrideVariantId`                                | `request.toolVariantId`                                 |
+| `mcpHostTrace`                                                 | `toolCallTrace`                                         |
+| `hostUsage`                                                    | `clientUsage`                                           |
+| `totalHostUsage` (on a run result and in `telemetry`)          | `totalClientUsage`                                      |
+| `hostTelemetry` (and its `hostApp`)                            | `clientTelemetry` (and `clientApp`)                     |
+| `hostDiagnostics`                                              | `clientDiagnostics`                                     |
+| `hostEvidence`                                                 | `traceEvidence`                                         |
+| `externalHost`                                                 | `clientMetadata`                                        |
+| `externalHost.hostName`, `.hostType`, `.hostVariant`           | The trial's client, and `environment` in `run.json` (1) |
+| `traceSource: 'host-local-transcript'`, `'host-native-export'` | `'client-local-transcript'`, `'client-native-export'`   |
+| `metadata.toolOverrideVariantId`                               | `metadata.toolVariantId`                                |
+| `metadata.mcpHostModel`                                        | `metadata.model`                                        |
+| `expectations` (one result per assertion or judge)             | `scores`                                                |
+| `iterationResults`                                             | `trialResults`                                          |
+| `assertionPassRate`, `assertionPassRateCI`                     | `passRate`, `passRateCI`                                |
+| `metrics.expectationBreakdown` (reporter data)                 | `metrics.graderBreakdown`                               |
+| pairwise `cases[].verdicts`                                    | `cases[].preferences`                                   |
+| `ExternalHostMetadata` type                                    | `ClientMetadata`                                        |
+
+(1) `clientMetadata` doesn't name the client or how it ran. Read the client from the trial's variant or case, and the OS from `environment` in `run.json`: its `platform`, or each worker's in `machines`.
 
 The types follow:
 

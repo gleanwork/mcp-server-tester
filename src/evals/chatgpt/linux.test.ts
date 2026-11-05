@@ -5,14 +5,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NativeChatgptDriverError, runLinuxChatgptDesktop } from './linux.js';
 import { validateLinuxChatgptConfig } from '../chatgptSetup/linuxProfile.js';
 import { linuxEnvironment } from './linuxEnvironment.fixture.js';
-import type { ExternalClientConfig } from '../externalClient/types.js';
+import type { ChatgptAppConfig } from './config.js';
 
 let root: string;
-let config: ExternalClientConfig;
+let config: ChatgptAppConfig;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'mst-chatgpt-native-'));
   config = {
-    driver: 'openai.chatgpt.agent.desktop-app.linux',
+    os: 'linux',
     codexSetup: { servers: [] },
     options: { desktopEnvironment: linuxEnvironment(root) },
   };

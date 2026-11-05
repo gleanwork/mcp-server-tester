@@ -14,7 +14,7 @@ import {
   type CodexConfigInstallation,
   type CodexSetupConfig,
 } from '../codexSetup/config.js';
-import type { ExternalClientConfig } from '../externalClient/types.js';
+import type { ChatgptAppConfig } from '../chatgpt/config.js';
 import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
 import {
   chatgptSurface,
@@ -44,7 +44,7 @@ interface ChatgptLifecycleState {
 
 /** Linux owns config even without MCP servers: keyring login needs it. */
 function effectiveSetup(
-  config: ExternalClientConfig,
+  config: ChatgptAppConfig,
   configPath: string | undefined
 ): CodexSetupConfig | undefined {
   if (!configPath) return config.codexSetup;
@@ -52,7 +52,7 @@ function effectiveSetup(
 }
 
 function sessionSettings(
-  config: ExternalClientConfig,
+  config: ChatgptAppConfig,
   binding?: Record<string, unknown>
 ) {
   const configName =
@@ -154,7 +154,7 @@ export class ChatgptAppSession {
   #ready = false;
   #disposed = false;
   #launch?: {
-    config: ExternalClientConfig;
+    config: ChatgptAppConfig;
     environment: Record<string, string>;
     platform: ReturnType<typeof chatgptPlatform>;
   };
@@ -197,7 +197,7 @@ export class ChatgptAppSession {
   }
 
   async prepare(
-    config: ExternalClientConfig,
+    config: ChatgptAppConfig,
     binding?: Record<string, unknown>
   ): Promise<void> {
     if (this.#settings || this.#disposed)
@@ -416,7 +416,7 @@ export class ChatgptAppSession {
   }
 
   assertCompatible(
-    config: ExternalClientConfig,
+    config: ChatgptAppConfig,
     binding?: Record<string, unknown>
   ): void {
     if (

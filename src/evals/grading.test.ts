@@ -10,7 +10,7 @@ import {
   type GradedExecution,
 } from './grading.js';
 import type { ClientResponse } from './caseExecution.js';
-import type { ClientMetadata } from './externalClient/types.js';
+import type { ClientMetadata } from './clientTelemetryTypes.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 

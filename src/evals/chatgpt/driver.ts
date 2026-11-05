@@ -3,8 +3,7 @@ import {
   runAnthropicComputerUseSubmission,
   type ComputerUseSubmissionResult,
 } from '../cowork/anthropicComputerUse.js';
-import type { ExternalClientConfig } from '../externalClient/types.js';
-import { normalizeClientDriver } from '../externalClient/driverIdentity.js';
+import type { ChatgptAppConfig } from './config.js';
 import { CHATGPT_MAX_ACTIONS } from './maxActions.js';
 
 export { ComputerUseDriverError } from '../cowork/anthropicComputerUse.js';
@@ -22,7 +21,7 @@ export interface ChatgptApplicationController {
 /** App-specific options only; the screenshot/action loop is shared with Cowork. */
 export function submitChatgptQuery(
   query: string,
-  config: ExternalClientConfig,
+  config: ChatgptAppConfig,
   deadlineAt: number,
   /** macOS: the trusted empty folder the task opens in. */
   workspace?: string
@@ -44,7 +43,7 @@ export function submitChatgptQuery(
   });
 }
 
-export function chatgptSurface(config: ExternalClientConfig): ChatgptSurface {
+export function chatgptSurface(config: ChatgptAppConfig): ChatgptSurface {
   const surface = config.options?.surface ?? 'chatgpt-work';
   if (surface !== 'chatgpt-work' && surface !== 'codex')
     throw new Error('ChatGPT surface must be chatgpt-work or codex.');
@@ -52,11 +51,11 @@ export function chatgptSurface(config: ExternalClientConfig): ChatgptSurface {
 }
 
 /**
- * The action budget (`maxActions`) of the driver's OS: Computer Use's on
+ * The action budget (`maxActions`) of the trial's OS: Computer Use's on
  * macOS, the accessibility automation's on Linux, each with its own range
  * and default (`CHATGPT_MAX_ACTIONS`).
  */
-export function chatgptMaxActions(config: ExternalClientConfig): number {
+export function chatgptMaxActions(config: ChatgptAppConfig): number {
   const linux = isLinuxChatgpt(config);
   const budget = CHATGPT_MAX_ACTIONS[linux ? 'linux' : 'darwin'];
   const actions = Number(config.options?.maxActions ?? budget.default);
@@ -67,12 +66,12 @@ export function chatgptMaxActions(config: ExternalClientConfig): number {
   return actions;
 }
 
-export function isLinuxChatgpt(config: ExternalClientConfig): boolean {
-  return normalizeClientDriver(config.driver).platform === 'linux';
+export function isLinuxChatgpt(config: ChatgptAppConfig): boolean {
+  return config.os === 'linux';
 }
 
 export function chatgptDesktopEnvironment(
-  config: ExternalClientConfig
+  config: ChatgptAppConfig
 ): NodeJS.ProcessEnv {
   return {
     ...process.env,
@@ -80,14 +79,14 @@ export function chatgptDesktopEnvironment(
   };
 }
 
-function plannerEnvironment(config: ExternalClientConfig): NodeJS.ProcessEnv {
+function plannerEnvironment(config: ChatgptAppConfig): NodeJS.ProcessEnv {
   return {
     ...process.env,
     ...readLaunchEnvironment(config.options?.computerUseEnvironment),
   };
 }
 
-export function validateChatgptConfig(config: ExternalClientConfig): void {
+export function validateChatgptConfig(config: ChatgptAppConfig): void {
   chatgptSurface(config);
   if (config.options?.chatgptTrace === 'accessibility')
     throw new Error(

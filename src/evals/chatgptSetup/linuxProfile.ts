@@ -35,7 +35,7 @@ import {
   CodexSetupError,
   type CodexSetupErrorCode,
 } from '../codexSetup/native.js';
-import type { ExternalClientConfig } from '../externalClient/types.js';
+import type { ChatgptAppConfig } from '../chatgpt/config.js';
 import {
   codexPluginReadinessTargets,
   installCodexPlugins,
@@ -192,7 +192,7 @@ export function readLinuxChatgptEnvironment(
 
 /** Linux options and environment checks shared by preflight, lock, and session. */
 export function validateLinuxChatgptConfig(
-  config: ExternalClientConfig
+  config: ChatgptAppConfig
 ): LinuxChatgptEnvironment {
   const desktop = chatgptDesktopEnvironment(config);
   const environment = readLinuxChatgptEnvironment(desktop);

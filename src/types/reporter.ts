@@ -21,7 +21,7 @@ import type {
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type { TraceEvidence, Trace } from '../evals/evalFrameworkTypes.js';
-import type { ClientMetadata } from '../evals/externalClient/types.js';
+import type { ClientMetadata } from '../evals/clientTelemetryTypes.js';
 
 /**
  * Configuration options for MCP Eval Reporter

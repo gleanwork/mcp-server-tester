@@ -8,15 +8,15 @@ import {
 } from './driver.js';
 import { runAnthropicComputerUseSubmission } from '../cowork/anthropicComputerUse.js';
 import type * as ComputerUseModule from '../cowork/anthropicComputerUse.js';
-import type { ExternalClientConfig } from '../externalClient/types.js';
+import type { ChatgptAppConfig } from './config.js';
 
 vi.mock('../cowork/anthropicComputerUse.js', async (original) => ({
   ...(await original<typeof ComputerUseModule>()),
   runAnthropicComputerUseSubmission: vi.fn(),
 }));
 
-const config: ExternalClientConfig = {
-  driver: 'openai.chatgpt.agent.desktop-app.macos',
+const config: ChatgptAppConfig = {
+  os: 'darwin',
   model: 'test-chatgpt-model',
   reasoningEffort: 'medium',
 };
@@ -81,10 +81,7 @@ describe('ChatGPT shared Computer Use adapter', () => {
 
   it('Linux preflight needs no Anthropic key and rejects planner configuration', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
-    const linux = {
-      ...config,
-      driver: 'openai.chatgpt.agent.desktop-app.linux',
-    };
+    const linux = { ...config, os: 'linux' as const };
     expect(() => validateChatgptConfig(linux)).not.toThrow();
     expect(() =>
       validateChatgptConfig({
@@ -97,14 +94,11 @@ describe('ChatGPT shared Computer Use adapter', () => {
     ).toThrow('surface');
   });
 
-  it("checks maxActions against the driver's OS: Computer Use on macOS, the native budget on Linux", () => {
-    const linux = {
-      ...config,
-      driver: 'openai.chatgpt.agent.desktop-app.linux',
-    };
-    const budget = (driver: ExternalClientConfig, maxActions?: number) =>
+  it("checks maxActions against the trial's OS: Computer Use on macOS, the native budget on Linux", () => {
+    const linux = { ...config, os: 'linux' as const };
+    const budget = (osConfig: ChatgptAppConfig, maxActions?: number) =>
       chatgptMaxActions({
-        ...driver,
+        ...osConfig,
         ...(maxActions !== undefined ? { options: { maxActions } } : {}),
       });
     // Each OS's default, and the value set.

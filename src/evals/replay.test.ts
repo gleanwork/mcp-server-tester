@@ -1,7 +1,17 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import type { TrialRecord } from './runFormat.js';
-import { resumeCollects } from './trialEnding.js';
+import {
+  RUN_SCHEMAS,
+  readRunTrials,
+  type RunRecord,
+  type TrialRecord,
+} from './runFormat.js';
+import { RUN_FORMAT } from './resultFormat.js';
+import { replayExecutor, runReplay } from './replay.js';
+import { endingOf, resumeCollects } from './trialEnding.js';
 
 const trial = (fields: Partial<TrialRecord> = {}) =>
   ({ infrastructureError: false, ...fields }) as unknown as TrialRecord;
@@ -70,5 +80,95 @@ describe('resumeCollects (what mst run --resume collects)', () => {
         })
       )
     ).toBe(false);
+  });
+});
+
+describe('stored ChatGPT trials from earlier versions', () => {
+  // Earlier versions recorded the driver and its capability bindings; new
+  // results don't, and old runs still read, regrade and end as recorded.
+  const oldMetadata = {
+    driver: {
+      provider: 'openai',
+      product: 'chatgpt',
+      surface: 'agent',
+      runtime: 'desktop-app',
+      platform: 'linux',
+    },
+    driverSlug: 'openai.chatgpt.agent.desktop-app.linux',
+    displayName: 'ChatGPT Native Linux Desktop',
+    clientName: 'ChatGPT Native Linux Desktop',
+    clientType: 'desktop',
+    capabilitiesUsed: ['control', 'input', 'completion', 'trace', 'normalize'],
+    traceSource: 'none',
+    traceConfidence: 'unknown',
+    artifacts: [],
+    session: {},
+    correlation: {
+      strategy: 'exact_prompt',
+      marker: 'MCP_SERVER_TESTER_external-client-old',
+      includedInPrompt: false,
+    },
+    failureKind: 'no_matching_session',
+  };
+  const error =
+    'No unique fresh native ChatGPT session matched the submitted query within the binding deadline.';
+  const record = {
+    format: RUN_FORMAT,
+    kind: 'trial',
+    runId: '20260901T000000Z-abc123',
+    variant: 'default',
+    caseId: 'case',
+    datasetName: 'cases',
+    trial: 0,
+    durationMs: 1000,
+    // Stored before endings: the failure kind says how it ended.
+    infrastructureError: true,
+    error,
+    trace: { events: [], finalText: '', error },
+    clientTelemetry: { clientMetadata: oldMetadata },
+    clientMetadata: oldMetadata,
+  };
+
+  it('reads, keeps the old fields, and ends as its failure kind says', async () => {
+    expect(RUN_SCHEMAS.trial.safeParse(record).success).toBe(true);
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-old-chatgpt-'));
+    try {
+      const file = path.join(dir, 'traces', 'default', 'case', '0.json');
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, JSON.stringify(record));
+      const [stored] = await readRunTrials(dir);
+      expect(stored).toMatchObject({
+        clientTelemetry: { clientMetadata: oldMetadata },
+        clientMetadata: oldMetadata,
+      });
+      expect(endingOf(stored!)).toEqual({
+        kind: 'infrastructure',
+        broke: 'client-app',
+        retryable: true,
+        reason: error,
+      });
+      const replay = runReplay(
+        { runId: record.runId } as RunRecord,
+        dir,
+        [stored!],
+        `${record.runId}.g2`,
+        '2026-09-01T00:00:00Z'
+      );
+      const execution = await replayExecutor(
+        replay,
+        'default',
+        [],
+        'structured'
+      )({ id: 'case', input: 'q' });
+      expect(execution).toMatchObject({
+        kind: 'completed',
+        error,
+        clientMetadata: oldMetadata,
+        telemetry: { clientMetadata: oldMetadata },
+        ending: { kind: 'infrastructure', broke: 'client-app' },
+      });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

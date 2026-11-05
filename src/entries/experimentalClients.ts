@@ -58,7 +58,7 @@ export type {
   ClientDriverId,
   ObservationConfidence,
   TraceSource,
-} from '../evals/externalClient/index.js';
+} from '../evals/clientTelemetryTypes.js';
 export type {
   ComputerUseTelemetry,
   SemanticDesktopTelemetry,

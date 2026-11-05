@@ -7,8 +7,10 @@ import type {
   ClientDefinition,
   ClientRunContext,
   ClientRunResult,
+  TraceEvent,
 } from './evalFrameworkTypes.js';
-import { runExternalClientCase } from './externalClient/runtime.js';
+import { runChatgptTurn, type ChatgptTurn } from './chatgpt/turn.js';
+import type { ChatgptAppConfig } from './chatgpt/config.js';
 import { ChatgptAppSession } from './chatgptSetup/session.js';
 import { chatgptServers } from './chatgptSetup/config.js';
 import {
@@ -16,8 +18,7 @@ import {
   clientPluginMcpServers,
   resolveClientPluginCredentials,
 } from './clientPlugins.js';
-import type { ExternalClientConfig } from './externalClient/types.js';
-import { simulationToClientRun } from './clientTrace.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import { endingOf } from './trialEnding.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import {
@@ -213,6 +214,54 @@ export function chatgptOptionIssues(
   return issues;
 }
 
+/**
+ * The trial's result from its native turn: the answer, or the turn's error,
+ * with its native calls as events. A call names its server; on a one-server
+ * trial, an MCP call that names none came from that server.
+ */
+function turnRunResult(
+  turn: ChatgptTurn,
+  servers: MCPConfig[]
+): ClientRunResult {
+  const events: TraceEvent[] = turn.toolCalls.map((call) => {
+    const server = servers.find(
+      (server) => server.label && call.name.startsWith(`${server.label}.`)
+    );
+    const source =
+      call.source ?? (server || servers.length === 1 ? 'mcp' : 'builtin');
+    return {
+      kind: call.kind ?? 'tool_call',
+      source,
+      name:
+        server && call.source !== 'builtin'
+          ? call.name.slice(server.label!.length + 1)
+          : call.name,
+      server:
+        source === 'builtin'
+          ? undefined
+          : (call.server ??
+            server?.label ??
+            (servers.length === 1 ? servers[0]?.label : undefined)),
+      arguments: call.arguments,
+      output: call.output,
+      ...(call.isError !== undefined ? { isError: call.isError } : {}),
+      ...(call.rawName !== undefined ? { rawName: call.rawName } : {}),
+      id: call.id,
+      ...(call.durationMs !== undefined ? { durationMs: call.durationMs } : {}),
+      ...(call.startedAt ? { startedAt: call.startedAt } : {}),
+      ...(call.completedAt ? { completedAt: call.completedAt } : {}),
+      ...(call.results !== undefined ? { results: call.results } : {}),
+    };
+  });
+  return {
+    finalText: (turn.success ? turn.response : undefined) ?? '',
+    error: turn.success ? undefined : turn.error,
+    usage: turn.usage,
+    ...(turn.modelCalls?.length ? { modelCalls: turn.modelCalls } : {}),
+    events,
+  };
+}
+
 async function runBatch(
   requests: ClientBatchRequest[],
   context: ClientRunContext,
@@ -259,58 +308,50 @@ async function runBatch(
       )
     ),
   ];
-  const externalConfigs: ExternalClientConfig[] = requests.map(
-    (request, index) => {
-      const config = configs[index]!;
-      const serverConfig = prepared[index]!;
-      const environment = Object.fromEntries(
-        Object.entries({
-          ...context.env,
-          ...request.input.env,
-          ...config.env,
-        }).filter((entry): entry is [string, string] => entry[1] !== undefined)
-      );
-      return {
-        driver: platform.driver,
-        model: config.model,
-        reasoningEffort: config.reasoningEffort,
-        timeoutMs: config.timeout,
-        correlation: {
-          strategy: config.correlation,
-          includeInPrompt: config.correlation === 'prompt_marker',
-        },
-        codexSetup: {
-          configPath: config.configPath,
-          servers: serverConfig.servers,
-        },
-        ...(config.plugins?.length
-          ? {
-              plugins: config.plugins,
-              pluginCredentials: pluginCredentials[index]!,
-            }
-          : {}),
-        options: {
-          environment: { ...config.env, ...serverConfig.environment },
-          computerUseModel: config.computerUseModel,
-          surface: product.surface,
-          // The budget of the OS's automation: Computer Use on macOS, the
-          // accessibility automation on Linux.
-          maxActions:
-            config.maxActions ?? CHATGPT_MAX_ACTIONS[platform.os].default,
-          // Linux launches the app in the environment it is given.
-          ...(platform.os === 'linux'
-            ? { desktopEnvironment: environment }
-            : {}),
-          computerUseEnvironment: environment,
-        },
-      };
-    }
-  );
-  if (
-    externalConfigs.some(
-      (config) => !isDeepStrictEqual(config, externalConfigs[0])
-    )
-  )
+  const appConfigs: ChatgptAppConfig[] = requests.map((request, index) => {
+    const config = configs[index]!;
+    const serverConfig = prepared[index]!;
+    const environment = Object.fromEntries(
+      Object.entries({
+        ...context.env,
+        ...request.input.env,
+        ...config.env,
+      }).filter((entry): entry is [string, string] => entry[1] !== undefined)
+    );
+    return {
+      os: platform.os,
+      model: config.model,
+      reasoningEffort: config.reasoningEffort,
+      timeoutMs: config.timeout,
+      correlation: {
+        strategy: config.correlation,
+        includeInPrompt: config.correlation === 'prompt_marker',
+      },
+      codexSetup: {
+        configPath: config.configPath,
+        servers: serverConfig.servers,
+      },
+      ...(config.plugins?.length
+        ? {
+            plugins: config.plugins,
+            pluginCredentials: pluginCredentials[index]!,
+          }
+        : {}),
+      options: {
+        environment: { ...config.env, ...serverConfig.environment },
+        computerUseModel: config.computerUseModel,
+        surface: product.surface,
+        // The budget of the OS's automation: Computer Use on macOS, the
+        // accessibility automation on Linux.
+        maxActions:
+          config.maxActions ?? CHATGPT_MAX_ACTIONS[platform.os].default,
+        // Linux launches the app in the environment it is given.
+        ...(platform.os === 'linux' ? { desktopEnvironment: environment } : {}),
+        computerUseEnvironment: environment,
+      },
+    };
+  });
+  if (appConfigs.some((config) => !isDeepStrictEqual(config, appConfigs[0])))
     throw new Error(
       `${label} batch requires identical MCP servers, credentials, and environment.`
     );
@@ -323,7 +364,7 @@ async function runBatch(
       name: label,
       lease: {
         directory: join(
-          platform.lockHome(externalConfigs[0]!),
+          platform.lockHome(appConfigs[0]!),
           '.mcp-server-tester'
         ),
         file: 'chatgpt-desktop.lock',
@@ -331,7 +372,7 @@ async function runBatch(
       secrets,
       resetVerb: 'restarted',
       async prepare() {
-        await appSession.prepare(externalConfigs[0]!);
+        await appSession.prepare(appConfigs[0]!);
         return appSession;
       },
       reset: () => appSession.restart(),
@@ -350,18 +391,13 @@ async function runBatch(
         ]);
         // Eval prompts stay unchanged. Server selection is verified from native calls,
         // not enforced by adding evaluator instructions to the model's context.
-        const result = await runExternalClientCase(
+        const result = await runChatgptTurn(
           request.input.prompt,
-          {
-            ...externalConfigs[index]!,
-            options: {
-              ...externalConfigs[index]!.options,
-              managedChatgptSession: appSession,
-            },
-          },
+          appConfigs[index]!,
+          appSession,
           { caseId: request.caseId }
         );
-        const trace = simulationToClientRun(result, request.input.servers);
+        const trace = turnRunResult(result, request.input.servers);
         if (trace.error)
           trace.error = redactClientSecrets(trace.error, secrets);
         if (result.success) {
@@ -406,7 +442,7 @@ async function runBatch(
           measurementError = `${label} completed without calling a required evaluation MCP tool on the configured server selection.`;
         if (measurementError) trace.error = measurementError;
         const session = result.clientMetadata?.session;
-        // How a failed turn ended, from the failure kind the driver typed
+        // How a failed turn ended, from the failure kind the turn typed
         // (ADR 0010): the metadata goes under telemetry, where no reader
         // looks. A completed turn that missed the servers is a trial.
         const ending =
