@@ -263,7 +263,16 @@ Linux: use `command`, optional `args`, `cwd`, and declared `env`. No URL or
 plugin is required. An optional `minTools` is MST's own readiness rule: the
 readiness check applies it before the batch starts, and it is never written to
 `config.toml`. A [dry-run proxy](cowork.md#dry-run-proxy) entry is such a
-server, so connectors behind it work with ChatGPT too. ChatGPT rejects two Cowork-only forms before the app starts:
+server, so connectors behind it work with ChatGPT too.
+
+An HTTP `servers` entry may carry a bearer token (`auth.accessToken` or
+`auth.accessTokenEnv`), which the app reads from an environment variable
+(`bearer_token_env_var`), and nothing else: ChatGPT fails the variant before
+the app starts for an HTTP server with `headers` or with OAuth. For a server
+that needs a header, such as an eval ID, use a connector, whose dry-run proxy
+adds the connector's headers, or another stdio proxy.
+
+ChatGPT rejects two Cowork-only forms before the app starts:
 client-resolved stdio entries (`url`, `auth`, `files`, or
 `${url}`/`${dataDir}`/`${pluginRoot:...}` placeholders) and
 `plugins[].blockMcpServers`. For plugin-specific endpoint and credential

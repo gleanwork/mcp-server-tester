@@ -21,6 +21,14 @@ function expectInvalid(servers: MCPConfig[]): void {
 }
 
 describe('createCoworkMcpPlan', () => {
+  it('names the fields Cowork does not take', () => {
+    const server = { ...http(), requestTimeoutMs: 300_000 } as MCPConfig;
+    expectInvalid([server]);
+    expect(() => createCoworkMcpPlan([server], DIRECTORY)).toThrow(
+      `Cowork doesn't take "requestTimeoutMs" on an HTTP server; it takes transport, label, serverUrl, headers, auth.`
+    );
+  });
+
   // Bundle/transaction tests assert exact managed settings, server sets and
   // approval policies. Keep this eval focused on canonical validation.
   it('never reads header values, tokens, or environment references while planning', () => {

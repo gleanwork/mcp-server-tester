@@ -170,9 +170,21 @@ export default {
     batch: {
       schema,
       evidence: 'structured',
-      async open(options) {
+      async open(options, context) {
         return {
           async run(trial) {
+            // The Cowork settings the client was given: its variant's over
+            // the config's.
+            if (trial.input.prompt === 'cowork-setup')
+              return {
+                result: {
+                  finalText: JSON.stringify(
+                    context.evalConfig.coworkSetup ?? null
+                  ),
+                  events: [],
+                },
+                continuation: 'continue',
+              };
             return {
               result: await probe(
                 { ...options.input, ...trial.input },

@@ -38,7 +38,6 @@ import {
 import { rejectRenamedOptions } from './renamedKeys.js';
 import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
-import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
@@ -53,6 +52,7 @@ import { createMCPFixture } from '../mcp/fixtures/mcpFixture.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { isHttpConfig } from '../config/mcpConfig.js';
 import {
+  variantEvalConfig,
   variantToolMetadata,
   loadEvalConfig,
   type DatasetConfig,
@@ -1990,16 +1990,7 @@ async function evaluate(
         variant === sourceVariant
           ? sourceClient
           : resolveClient(evalConfig, variant, resolvedServers, env);
-      const effectiveConfig: EvalConfig = {
-        ...evalConfig,
-        ...variant,
-        coworkSetup: resolveCoworkSetupConfig(
-          evalConfig.coworkSetup,
-          variant.coworkSetup
-        ),
-        name: evalConfig.name,
-        datasets: evalConfig.datasets,
-      };
+      const effectiveConfig = variantEvalConfig(evalConfig, variant);
       const rawVariant = rawConfig.variants?.find(
         (candidate) => candidate.name === variant.name
       ) ?? { name: variant.name };

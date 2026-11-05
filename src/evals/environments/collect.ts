@@ -22,6 +22,7 @@ import {
 } from '../connectorServers.js';
 import {
   isConnectorServer,
+  variantEvalConfig,
   variantToolMetadata,
   type ConnectorServerConfig,
   type EvalServerConfig,
@@ -439,7 +440,9 @@ export async function collectShard(
         trial: declared[index]!.trial,
       });
       const baseContext: ClientRunContext = {
-        evalConfig: bundle.evalConfig,
+        // The variant's settings over the config's (its `coworkSetup`), as
+        // a local run gives the client.
+        evalConfig: variantEvalConfig(bundle.evalConfig, batch.variant),
         variant: batch.variant,
         env: runtimeEnv,
         settings: settingsFor(

@@ -1050,6 +1050,48 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await expect(stat(helper)).rejects.toThrow();
   });
 
+  it("leaves MST's own server settings out of the headers helper, as on macOS", async () => {
+    const file = join(directory, 'settings.json');
+    await writeFile(file, `${JSON.stringify(image, null, 2)}\n`);
+    const prepared = await linuxCoworkPlatform.prepare({
+      evalConfig: {
+        ...evalConfig,
+        servers: [
+          ...evalConfig.servers!,
+          {
+            transport: 'http',
+            label: 'docs',
+            serverUrl: 'https://docs.example/mcp',
+            auth: { accessTokenEnv: 'DOCS_TOKEN' },
+            headers: { 'X-Eval-Id': 'run-1' },
+            connectTimeoutMs: 30_000,
+            requestTimeoutMs: 300_000,
+          },
+        ],
+      },
+      model: 'test-model',
+      env: {
+        ...session,
+        MST_COWORK_SETTINGS_FILE: file,
+        MST_DESKTOP_OWNED: '1',
+        MST_DESKTOP_RESTART: RESTART,
+        DOCS_TOKEN: 'docs-token',
+        MST_COWORK_HELPER_DIR: join(directory, 'helpers'),
+      },
+    });
+    const { spawnSync } =
+      await vi.importActual<typeof ChildProcess>('node:child_process');
+    const run = spawnSync(join(directory, 'helpers', 'docs-headers'), {
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(0);
+    expect(JSON.parse(run.stdout)).toEqual({
+      'X-Eval-Id': 'run-1',
+      Authorization: 'Bearer docs-token',
+    });
+    await prepared.dispose();
+  });
+
   it('restarts the desktop again when a restart fails, before failing the variant', async () => {
     const stderr = vi
       .spyOn(process.stderr, 'write')
