@@ -3,7 +3,7 @@ import {
   CoworkDriverError,
   type CoworkDriverOptions,
   type ComputerUseTelemetry,
-} from './driver.js';
+} from './interaction.js';
 import {
   ComputerUseLoopError,
   DEFAULT_COMPUTER_USE_MODEL,
@@ -25,7 +25,7 @@ import {
   anthropicComputerUsePlanner,
 } from './computerUsePlanner.js';
 import { macComputerUseDesktop } from './macDesktop.js';
-export type { ComputerUseTelemetry } from './driver.js';
+export type { ComputerUseTelemetry } from './interaction.js';
 
 /**
  * Computer Use for desktop clients on macOS (Cowork, and ChatGPT's macOS app):

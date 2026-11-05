@@ -56,4 +56,10 @@ Every client returns one trace, and the same graders score it. Nothing in gradin
 
 ## Implementation status
 
-Local and worker collection now use the shared session loop. Built-in and plugin clients may implement `run`, `open`, or both; collection prefers `open`, and run-only clients remain unchanged. The client extension's `runBatch` and the desktop wrappers are removed. Declared-server readiness runs before opening, and Cowork's preparation-dependent readiness runs after opening. Reset retries, diagnosis deadlines, leases and cleanup policy remain unchanged. File, plugin and in-memory datasets reject blank inputs before any client opens or trial runs, for all clients; valid prompt text is unchanged. The canonical dataset input schema owns this rule, with no client validation hook. Per-OS entry points and driver identity removal, then option defaults and OS validation, remain for later steps. This ADR remains proposed until the implementation sequence is complete.
+Local and worker collection now use the shared session loop. Built-in and plugin clients may implement `run`, `open`, or both; collection prefers `open`, and run-only clients remain unchanged. The client extension's `runBatch` and the desktop wrappers are removed. Declared-server readiness runs before opening, and Cowork's preparation-dependent readiness runs after opening. Reset retries, diagnosis deadlines, leases and cleanup policy remain unchanged.
+
+File, plugin and in-memory datasets reject blank inputs before any client opens or trial runs, for all clients; valid prompt text is unchanged. The canonical dataset input schema owns this rule, with no client validation hook.
+
+Cowork, ChatGPT and Codex app now have concrete `macos.ts` and `linux.ts` entry points, selected from the product and worker OS when the batch opens. The platform selectors are removed. The native helpers, app transactions and turn bodies remain shared. New results omit driver identities, including `driver` on Linux receipts; readers retain old fields without rewriting stored runs.
+
+Complete option listing with defaults and declared-OS validation remain for the final implementation step. This ADR remains proposed until the implementation sequence is complete.

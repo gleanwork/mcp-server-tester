@@ -375,9 +375,10 @@ the case fails as unanswered (`clientTelemetry.awaitingUser`).
 `clarifyingQuestions: "disabled"` to turn the tool off instead, so the model
 proceeds on its best assumption. The macOS eval profile always turns it off.
 
-`clientTelemetry.computerUse` records `driver: "linux-desktop"`, observed semantic
-actions, and elapsed time. Planner tokens and planner cost are **not applicable**,
-not synthetic zero-usage Anthropic calls. Native usage and cost retain their own scope.
+`clientTelemetry.computerUse` records observed semantic actions and elapsed time.
+New receipts omit the `driver` identity; readers still accept it in stored results.
+Planner tokens and planner cost are **not applicable**, not synthetic zero-usage
+Anthropic calls. Native usage and cost retain their own scope.
 
 Installation and configuration checks do not establish end-to-end correctness.
 Validate the prepared desktop with representative cases and audit their captured
@@ -469,17 +470,17 @@ the bytes present at audit time; notices contain no original digest to authentic
 ## Structure and behavior
 
 - `desktopBatch.ts`: the batch lifecycle shared with the ChatGPT client: the desktop lease, per-case reset policy, native-session de-duplication, redaction, and cleanup.
-- `coworkClient.ts`: Cowork's setup, one case (submit, bind, HITL, native collection), reset, and trace conversion.
-- `cowork/platform.ts`: small injectable platform interface and OS selection.
-- `cowork/macos.ts`: wiring to the existing setup, recovery, and desktop functions.
+- `coworkClient.ts`: selects the concrete OS entry point on the trial's machine; owns setup, one case (submit, bind, HITL, native collection), reset, and trace conversion.
+- `cowork/desktop.ts`: the native operations shared by the two OS entry points, with no selector.
+- `cowork/macos.ts`: the macOS entry point, using the existing setup, recovery, and Computer Use functions.
 - `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
   Its `macController.ts` handles only application start/stop, not UI automation.
 - `nativeHelper.ts`: builds and runs the macOS Swift controllers for Cowork and
   ChatGPT with one environment policy. The Cowork controller runs with only the
   system `PATH` and a private `TMPDIR`. The ChatGPT controller launches the app
   with the test environment; see [ChatGPT desktop](./chatgpt-desktop.md).
-- `cowork/driver.ts`: shared receipts, error classifications, and scoped telemetry.
-- `cowork/linux.ts`: readiness checks and execution against a caller-owned desktop.
+- `cowork/interaction.ts`: shared receipts, error classifications, and scoped telemetry. New Linux receipts omit `driver`; old receipts remain readable.
+- `cowork/linux.ts`: the Linux entry point, with readiness checks and execution against a caller-owned desktop.
 - `scripts/cowork_linux.py`: bounded semantic UI actions; no lifecycle or answer parsing.
 - `cowork/anthropicComputerUse.ts`: the macOS CU driver entry point, its deadline
   and its error reporting.

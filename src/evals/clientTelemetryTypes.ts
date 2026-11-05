@@ -7,7 +7,7 @@
 import type {
   ComputerUseTelemetry,
   SemanticDesktopTelemetry,
-} from './cowork/driver.js';
+} from './cowork/interaction.js';
 
 /** Recorded by earlier versions only, from the driver identity. */
 export type ExternalClientType = 'cli' | 'browser' | 'desktop' | 'custom';

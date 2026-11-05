@@ -19,6 +19,7 @@
 
 ## Unreleased
 
+- Desktop clients use concrete per-OS entry points. New Linux receipts omit the `driver` identity; old stored receipts remain readable. See [the migration guide](docs/migrations/2.0-prereleases.md#linux-desktop-receipts-omit-the-driver-identity).
 - Dataset loading rejects whitespace-only inputs for every client, including run-only plugins, before opening a client or submitting any trial. File, plugin and in-memory datasets use the same input rule. Valid prompts retain their exact text; the dataset editor schema matches the rule. Direct native-session blank-input guards remain. See [the migration guide](docs/migrations/2.0-prereleases.md#case-inputs-must-contain-non-whitespace-text).
 - Local and worker collection use `ClientDefinition.open` sessions for built-in and plugin clients. Removed the client extension's `runBatch`; definitions may implement `run`, `open`, or both. Run-only plugins keep their execution behavior and concurrency. Session types remain in `./evals`; stored results and run-format schemas are unchanged. See [the migration guide](docs/migrations/2.0-prereleases.md#client-collection-uses-sessions-runbatch-is-removed).
 - Built-in clients return `ClientRunResult` directly. Removed `MstClientSimulationResult`; Playwright evals use the same assertion response as `mst run`. See [the migration guide](docs/migrations/2.0-prereleases.md#built-in-clients-return-the-common-result).

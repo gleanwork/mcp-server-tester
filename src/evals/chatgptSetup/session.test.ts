@@ -23,6 +23,8 @@ import {
 import { runChatgptTurn, type ChatgptTurn } from '../chatgpt/turn.js';
 import { NativeTraceError } from '../nativeTraceError.js';
 import { ChatgptAppSession } from './session.js';
+import { chatgptMacos } from '../chatgpt/macos.js';
+import { chatgptLinux } from '../chatgpt/linux.js';
 import type { ChatgptAppConfig } from '../chatgpt/config.js';
 import { getChatgptApplicationController } from './macController.js';
 import {
@@ -60,9 +62,9 @@ vi.mock('../chatgpt/trace.js', async (original) => ({
 
 import { createLinuxChatgptProfile } from './linuxProfile.js';
 import type * as LinuxProfileModule from './linuxProfile.js';
-import { runLinuxChatgptDesktop } from '../chatgpt/linux.js';
-import { NativeChatgptDriverError } from '../chatgpt/linux.js';
-import type * as LinuxModule from '../chatgpt/linux.js';
+import { runLinuxChatgptDesktop } from '../chatgpt/linuxDesktop.js';
+import { NativeChatgptDriverError } from '../chatgpt/linuxDesktop.js';
+import type * as LinuxModule from '../chatgpt/linuxDesktop.js';
 import { linuxEnvironment } from '../chatgpt/linuxEnvironment.fixture.js';
 import { CodexSetupError } from '../codexSetup/native.js';
 import { checkMcpServers } from '../mcpReadiness.js';
@@ -76,7 +78,7 @@ vi.mock('./linuxProfile.js', async (original) => ({
   ...(await original<typeof LinuxProfileModule>()),
   createLinuxChatgptProfile: vi.fn(),
 }));
-vi.mock('../chatgpt/linux.js', async (original) => ({
+vi.mock('../chatgpt/linuxDesktop.js', async (original) => ({
   ...(await original<typeof LinuxModule>()),
   runLinuxChatgptDesktop: vi.fn(),
 }));
@@ -97,7 +99,6 @@ const POLICY: CodexExecutionPolicy = {
 function linuxTelemetry(action_count = 3) {
   return {
     telemetry: {
-      driver: 'linux-desktop' as const,
       accounting: 'complete' as const,
       duration_ms: 5,
       action_count,
@@ -305,7 +306,9 @@ async function batchOfOne(
   prompt: string,
   config: ChatgptAppConfig
 ): Promise<{ turn?: ChatgptTurn; error?: unknown }> {
-  const session = new ChatgptAppSession();
+  const session = new ChatgptAppSession(
+    config.os === 'linux' ? chatgptLinux : chatgptMacos
+  );
   let turn: ChatgptTurn | undefined;
   let error: unknown;
   try {
@@ -342,7 +345,7 @@ async function turnOf(
 
 describe('ChatGPT batch app lifecycle', () => {
   it('performs one app/config cycle around three isolated native submissions', async () => {
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptMacos);
     const markers = new Set<string>();
     try {
       await session.prepare(testConfig());
@@ -400,7 +403,7 @@ describe('ChatGPT batch app lifecycle', () => {
     ]);
   });
   it('retains ownership until batch disposal after an uncertain query', async () => {
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptMacos);
     try {
       await session.prepare(testConfig());
       vi.mocked(runAnthropicComputerUseSubmission).mockRejectedValueOnce(
@@ -417,7 +420,7 @@ describe('ChatGPT batch app lifecycle', () => {
     expect(controller.stop).toHaveBeenCalledTimes(2);
   });
   it('rejects a changed configuration without borrowing the batch app', async () => {
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptMacos);
     try {
       await session.prepare(testConfig());
       const result = await runChatgptTurn(
@@ -436,7 +439,7 @@ describe('ChatGPT batch app lifecycle', () => {
     }
   });
   it('cannot borrow a disposed batch session', async () => {
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptMacos);
     await session.prepare(testConfig());
     await session.dispose();
     expect(
@@ -486,7 +489,7 @@ describe('ChatGPT Linux native lifecycle', () => {
 
   it('passes client plugins to the Linux profile before start', async () => {
     const plugins = [{ name: 'acme', marketplace: { source: '/opt/plugins' } }];
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptLinux);
     try {
       await session.prepare({ ...linuxConfig(), plugins });
       expect((beforeStart.mock.calls[0] as unknown[])[2]).toEqual(plugins);
@@ -496,7 +499,8 @@ describe('ChatGPT Linux native lifecycle', () => {
   });
 
   it('saves a display screenshot when the Linux surface check fails, without changing the error', async () => {
-    const { NativeChatgptDriverError } = await import('../chatgpt/linux.js');
+    const { NativeChatgptDriverError } =
+      await import('../chatgpt/linuxDesktop.js');
     const failure = new NativeChatgptDriverError('intro screen did not change');
     vi.mocked(runLinuxChatgptDesktop).mockRejectedValueOnce(failure);
     const screenshots = await import('../chatgpt/stallScreenshot.js');
@@ -505,7 +509,7 @@ describe('ChatGPT Linux native lifecycle', () => {
       .mockResolvedValue({
         path: join(home, 'evidence/setup-prepare-x/prepare-screenshot.png'),
       });
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptLinux);
     try {
       await expect(session.prepare(linuxConfig())).rejects.toBe(failure);
       expect(save).toHaveBeenCalledWith(
@@ -524,7 +528,7 @@ describe('ChatGPT Linux native lifecycle', () => {
   });
 
   it('prepares surface once per batch and keeps native controller separate from model accounting', async () => {
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptLinux);
     const config = linuxConfig();
     try {
       await session.prepare(config);
@@ -589,7 +593,7 @@ describe('ChatGPT Linux native lifecycle', () => {
   });
 
   it('restarts the owned app with the same settings and verifies the surface without sending', async () => {
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptLinux);
     try {
       await session.prepare(linuxConfig());
       const before = events.length;
@@ -628,7 +632,7 @@ describe('ChatGPT Linux native lifecycle', () => {
     beforeStart.mockRejectedValueOnce(
       new CodexSetupError('mcp_server_not_ready')
     );
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptLinux);
     await expect(session.prepare(linuxConfig())).rejects.toThrow(
       'mcp_server_not_ready'
     );
@@ -644,8 +648,8 @@ describe('ChatGPT Linux native lifecycle', () => {
   });
 
   it('claims one in-process lease per isolated Linux HOME', async () => {
-    const first = new ChatgptAppSession();
-    const second = new ChatgptAppSession();
+    const first = new ChatgptAppSession(chatgptLinux);
+    const second = new ChatgptAppSession(chatgptLinux);
     try {
       await first.prepare(linuxConfig());
       await expect(second.prepare(linuxConfig())).rejects.toThrow(
@@ -696,7 +700,7 @@ describe('ChatGPT Linux native lifecycle', () => {
 describe('ChatGPT quit prompt after a stalled case', () => {
   async function stalled(userText: string) {
     const root = await mkdtemp(join(tmpdir(), 'mst-quit-test-'));
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptMacos);
     await session.prepare(testConfig('gpt-test', { chatgptSessionRoot: root }));
     session.noteSubmission('Say done');
     // The stalled case's chat: started, never completed.
@@ -831,7 +835,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       const result = await runChatgptTurn(
         'Say done',
         { ...testConfig(), correlation: { strategy } },
-        new ChatgptAppSession()
+        new ChatgptAppSession(chatgptMacos)
       );
       expect(result).toMatchObject({
         success: false,
@@ -1031,7 +1035,7 @@ describe('ChatGPT macOS MCP readiness', () => {
   // MST checks the servers before the batch starts, before anything
   // touches the app (readinessCheck.ts): the session doesn't check again.
   it('leaves the servers to MST and goes straight to the app', async () => {
-    const session = new ChatgptAppSession();
+    const session = new ChatgptAppSession(chatgptMacos);
     await session.prepare(httpConfig({ MST_CHATGPT_MCP_TOKEN_0: TOKEN }));
     expect(checkMcpServers).not.toHaveBeenCalled();
     expect(events.slice(0, 2)).toEqual(['state', 'stop']);

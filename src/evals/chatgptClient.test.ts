@@ -13,8 +13,10 @@ import {
   chatgptOptionIssues,
 } from './chatgptClient.js';
 import { runChatgptTurn } from './chatgpt/turn.js';
+import type * as ChatgptTurnModule from './chatgpt/turn.js';
 import { clientRunToExecution } from './clientTrace.js';
 import type { ClientBatchRequest } from './evalFrameworkTypes.js';
+import type { ChatgptDesktop } from './chatgpt/desktop.js';
 import { linuxEnvironment } from './chatgpt/linuxEnvironment.fixture.js';
 
 const home = vi.hoisted(() => ({ value: '' }));
@@ -25,6 +27,7 @@ const lifecycle = vi.hoisted(() => ({
 }));
 vi.mock('./chatgptSetup/session.js', () => ({
   ChatgptAppSession: class {
+    constructor(readonly desktop: ChatgptDesktop) {}
     prepare = lifecycle.prepare;
     restart = lifecycle.restart;
     dispose = lifecycle.dispose;
@@ -35,7 +38,8 @@ vi.mock('node:os', async (original) => ({
   ...(await original<typeof OsModule>()),
   homedir: () => home.value,
 }));
-vi.mock('./chatgpt/turn.js', () => ({
+vi.mock('./chatgpt/turn.js', async (original) => ({
+  ...(await original<typeof ChatgptTurnModule>()),
   runChatgptTurn: vi.fn(),
 }));
 const context = { evalConfig: { name: 'test', datasets: [], concurrency: 1 } };
@@ -162,7 +166,12 @@ describe('ChatGPT and Codex app sessions', () => {
             model: config.model,
             options: expect.objectContaining({ surface }),
           }),
-          expect.anything(),
+          expect.objectContaining({
+            desktop: expect.objectContaining({
+              os: linux ? 'linux' : 'darwin',
+              product: expect.objectContaining({ client: type, surface }),
+            }),
+          }),
           { caseId: 'direct' }
         );
         await session.reset();
@@ -544,27 +553,39 @@ describe('ChatGPT V2 batch client', () => {
       expect(runChatgptTurn).not.toHaveBeenCalled();
     }
   );
-  it.each(['darwin', 'linux'] as const)(
-    "runs a config parsed on another OS on the trial machine's OS, %s",
-    async (platformName) => {
+  it.each([
+    ['chatgpt', 'darwin'],
+    ['chatgpt', 'linux'],
+    ['codex-app', 'darwin'],
+    ['codex-app', 'linux'],
+  ] as const)(
+    "runs %s parsed on another OS on the trial machine's OS, %s",
+    async (product, platformName) => {
       // The coordinator parses the config on the other OS.
       vi.spyOn(process, 'platform', 'get').mockReturnValue(
         platformName === 'linux' ? 'darwin' : 'linux'
       );
-      const parsed = CHATGPT_APP_CLIENTS.chatgpt.schema.parse({
+      const client = CHATGPT_APP_CLIENTS[product];
+      const parsed = client.schema.parse({
         ...config,
+        type: product,
         ...(platformName === 'linux'
           ? { env: linuxEnvironment(home.value) }
           : {}),
       }) as Record<string, unknown>;
       vi.spyOn(process, 'platform', 'get').mockReturnValue(platformName);
       const batch = requests().slice(0, 1);
-      batch[0]!.config = { ...parsed, type: 'chatgpt' };
-      await collectClientBatch(CHATGPT_APP_CLIENTS.chatgpt, batch, context);
+      batch[0]!.config = { ...parsed, type: product };
+      await collectClientBatch(client, batch, context);
       expect(runChatgptTurn).toHaveBeenCalledWith(
         'Answer one',
         expect.objectContaining({ os: platformName }),
-        expect.anything(),
+        expect.objectContaining({
+          desktop: expect.objectContaining({
+            os: platformName,
+            product: expect.objectContaining({ client: product }),
+          }),
+        }),
         expect.anything()
       );
     }

@@ -1,4 +1,4 @@
-import type { CoworkPlatform } from './platform.js';
+import type { CoworkDesktop } from './desktop.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -11,7 +11,7 @@ import { recoverMacCoworkSession } from '../coworkSetup/recoverSession.js';
 import { clientSecretValues, redactClientError } from '../clientSecrets.js';
 
 /** Wiring only. Keep the live-tested setup and Computer Use behavior unchanged. */
-export const macCoworkPlatform: CoworkPlatform = {
+export const coworkMacos: CoworkDesktop = {
   dataDirectory: (options) =>
     options.dataDir ??
     join(

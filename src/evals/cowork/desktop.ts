@@ -4,7 +4,7 @@ import type {
   CoworkDriverOptions,
   CoworkSubmissionReceipt,
   CoworkHitlReceipt,
-} from './driver.js';
+} from './interaction.js';
 
 /** The desktop application a session runs, recorded with each case result. */
 interface CoworkClientApp {
@@ -16,7 +16,7 @@ interface CoworkClientApp {
 
 /** The shared batch lifecycle does not choose OS paths or control an application.
  * Implementations must retain the existing bounded, no-resubmission contract. */
-export interface CoworkPlatform {
+export interface CoworkDesktop {
   dataDirectory(options: { dataDir?: string }): string;
   prepare(options: {
     evalConfig: EvalConfig;
@@ -74,16 +74,4 @@ export interface CoworkPlatform {
   handleHitl(
     options: CoworkDriverOptions & { task?: string }
   ): Promise<CoworkHitlReceipt>;
-}
-
-/**
- * How Cowork runs on `os`, the OS of the machine that runs the trial (ADR
- * 0011): Computer Use on macOS, the accessibility automation on Linux.
- */
-export async function getCoworkPlatform(
-  os: NodeJS.Platform
-): Promise<CoworkPlatform> {
-  if (os === 'darwin') return (await import('./macos.js')).macCoworkPlatform;
-  if (os === 'linux') return (await import('./linux.js')).linuxCoworkPlatform;
-  throw new Error(`Cowork runs on macOS or Linux, not ${os}.`);
 }

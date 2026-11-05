@@ -2,7 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { NativeChatgptDriverError, runLinuxChatgptDesktop } from './linux.js';
+import {
+  NativeChatgptDriverError,
+  runLinuxChatgptDesktop,
+} from './linuxDesktop.js';
 import { validateLinuxChatgptConfig } from '../chatgptSetup/linuxProfile.js';
 import { linuxEnvironment } from './linuxEnvironment.fixture.js';
 import type { ChatgptAppConfig } from './config.js';
@@ -278,12 +281,12 @@ describe('Linux ChatGPT runtime adapter', () => {
     const prompt = '  α 😀\nline\n\nKeep trailing spaces.  \n';
     const result = await run('submit', prompt);
     expect(result.telemetry).toMatchObject({
-      driver: 'linux-desktop',
       accounting: 'complete',
       action_count: 2,
       planner: { status: 'not-applicable' },
       cost: { status: 'not-applicable' },
     });
+    expect(result.telemetry).not.toHaveProperty('driver');
     const call = await record<{
       payload: unknown;
       argv: string[];
@@ -360,9 +363,9 @@ describe('Linux ChatGPT runtime adapter', () => {
     'does not retry or expose raw output on %s',
     async (mode) => {
       await helper(mode);
-      await expect(run('submit', 'private-query')).rejects.toThrow(
-        'no retry attempted'
-      );
+      const error = await failure('submit', 'private-query');
+      expect(error.message).toContain('no retry attempted');
+      expect(error.telemetry).not.toHaveProperty('driver');
       expect(await calls()).toHaveLength(1);
     }
   );

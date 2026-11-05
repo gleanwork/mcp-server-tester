@@ -17,7 +17,7 @@ import {
   coworkHeadlessSettingsMatch,
   coworkManagedPluginSettings,
   coworkPluginSettingsMatch,
-  linuxCoworkPlatform,
+  coworkLinux as linuxCoworkPlatform,
   COWORK_MANAGED_ONLY,
   desktopRestartTimeoutMs,
   installedDebVersion,
@@ -28,7 +28,7 @@ import {
   CoworkHitlBudgetError,
   CoworkHitlError,
   CoworkUserQuestionError,
-} from './driver.js';
+} from './interaction.js';
 import type * as ChildProcess from 'node:child_process';
 import type { EvalConfig } from '../evalConfig.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
@@ -427,11 +427,11 @@ describe('caller-owned Linux Cowork desktop', () => {
     expect(result).toMatchObject({
       status: 'submitted',
       telemetry: {
-        driver: 'linux-desktop',
         planner: { status: 'not-applicable' },
         cost: { status: 'not-applicable' },
       },
     });
+    expect(result.telemetry).not.toHaveProperty('driver');
     expect(result.telemetry).not.toHaveProperty('usage');
     expect(result).not.toHaveProperty('model');
   });
@@ -567,6 +567,7 @@ describe('caller-owned Linux Cowork desktop', () => {
       action_count: 3,
       telemetry: { accounting: 'complete', questions_answered: 2 },
     });
+    expect(result.telemetry).not.toHaveProperty('driver');
     // Two answer passes with the questions as asked, then the usual HITL check.
     const modes = child.exec.mock.calls.map((call) => {
       const args = call[1] as string[];
@@ -703,6 +704,9 @@ describe('caller-owned Linux Cowork desktop', () => {
     await expect(pending).rejects.toMatchObject({
       message: expect.stringContaining('(approval_control_ambiguous)'),
       touchedUi: false,
+    });
+    await pending.catch((error: unknown) => {
+      expect(error).not.toHaveProperty('telemetry.driver');
     });
   });
   it('treats a driver call that failed without a receipt as one that may have acted', async () => {

@@ -1,4 +1,4 @@
-/** Desktop driver contracts. Runtime provisioning belongs to the caller/platform. */
+/** Native desktop interaction options, receipts and typed failures. */
 
 export interface CoworkDriverOptions {
   deadlineAt: number;
@@ -58,7 +58,8 @@ export interface ComputerUseTelemetry {
 }
 
 export interface SemanticDesktopTelemetry {
-  driver: 'linux-desktop';
+  /** Recorded by earlier versions only; new receipts omit this identity. */
+  driver?: 'linux-desktop';
   accounting: 'complete' | 'partial';
   duration_ms: number;
   action_count: number;

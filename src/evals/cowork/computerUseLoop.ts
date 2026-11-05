@@ -1,7 +1,7 @@
 import {
   COMPUTER_USE_TOKEN_FIELDS as TOKEN_FIELDS,
   type ComputerUseTelemetry,
-} from './driver.js';
+} from './interaction.js';
 
 /**
  * The Computer Use loop for desktop clients on macOS: one bounded

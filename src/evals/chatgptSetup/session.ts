@@ -15,7 +15,7 @@ import {
   type CodexSetupConfig,
 } from '../codexSetup/config.js';
 import type { ChatgptAppConfig } from '../chatgpt/config.js';
-import type { SemanticDesktopTelemetry } from '../cowork/driver.js';
+import type { SemanticDesktopTelemetry } from '../cowork/interaction.js';
 import {
   chatgptSurface,
   readLaunchEnvironment,
@@ -23,9 +23,9 @@ import {
   validateChatgptConfig,
   type ChatgptApplicationController,
 } from '../chatgpt/driver.js';
-import { NativeChatgptDriverError } from '../chatgpt/linux.js';
+import { NativeChatgptDriverError } from '../chatgpt/linuxDesktop.js';
 import { saveStallScreenshot } from '../chatgpt/stallScreenshot.js';
-import { chatgptPlatform } from './platform.js';
+import type { ChatgptDesktop } from '../chatgpt/desktop.js';
 import type {
   ChatgptPlatformProfile,
   LinuxChatgptReadiness,
@@ -53,12 +53,12 @@ function effectiveSetup(
 
 function sessionSettings(
   config: ChatgptAppConfig,
+  platform: ChatgptDesktop,
   binding?: Record<string, unknown>
 ) {
   const configName =
     stringOption(binding, 'configName') ??
     stringOption(config.options, 'codexConfigName');
-  const platform = chatgptPlatform(config);
   const application = platform.application(config, binding);
   const codexSetup = effectiveSetup(config, application.configPath);
   const setup = codexSetup
@@ -82,6 +82,7 @@ function sessionSettings(
     throw new Error('ChatGPT client plugins require the Linux fresh profile.');
   return {
     platform: platform.name,
+    os: config.os,
     application,
     codexSetup,
     setup,
@@ -156,7 +157,7 @@ export class ChatgptAppSession {
   #launch?: {
     config: ChatgptAppConfig;
     environment: Record<string, string>;
-    platform: ReturnType<typeof chatgptPlatform>;
+    platform: ChatgptDesktop;
   };
   sessionsRoot?: string;
   /** Linux: where native evidence is copied before profile teardown. */
@@ -192,7 +193,10 @@ export class ChatgptAppSession {
     }>,
   };
 
-  constructor(scope: 'batch' | 'case' = 'batch') {
+  constructor(
+    readonly desktop: ChatgptDesktop,
+    scope: 'batch' | 'case' = 'batch'
+  ) {
     this.telemetry.scope = scope;
   }
 
@@ -205,8 +209,8 @@ export class ChatgptAppSession {
     const started = Date.now();
     try {
       validateChatgptConfig(config);
-      const platform = chatgptPlatform(config);
-      const settings = sessionSettings(config, binding);
+      const platform = this.desktop;
+      const settings = sessionSettings(config, platform, binding);
       this.#settings = settings;
       const lease = `${platform.name}:${settings.application.leaseKey}`;
       if (activeApplications.has(lease))
@@ -422,7 +426,10 @@ export class ChatgptAppSession {
     if (
       !this.#ready ||
       this.#disposed ||
-      !isDeepStrictEqual(this.#settings, sessionSettings(config, binding))
+      !isDeepStrictEqual(
+        this.#settings,
+        sessionSettings(config, this.desktop, binding)
+      )
     )
       throw new Error(
         'ChatGPT batch app session is unavailable or has different settings.'

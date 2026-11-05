@@ -20,7 +20,7 @@ import {
   type PlannerResponse,
 } from './computerUseLoop.js';
 import { PlannerTimeoutError } from './computerUsePlanner.js';
-import type { ComputerUseTelemetry } from './driver.js';
+import type { ComputerUseTelemetry } from './interaction.js';
 
 /** Offline: never opens an app or touches the display. */
 

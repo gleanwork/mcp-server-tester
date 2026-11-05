@@ -62,4 +62,4 @@ export type {
 export type {
   ComputerUseTelemetry,
   SemanticDesktopTelemetry,
-} from '../evals/cowork/driver.js';
+} from '../evals/cowork/interaction.js';
