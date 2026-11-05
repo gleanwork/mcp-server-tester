@@ -77,7 +77,28 @@ describe('startToolSurfaceProxy', () => {
       (error: unknown) => error
     );
     expect(failure).toBeInstanceOf(ProxyUpstreamError);
-    expect(failure).toMatchObject({ server: 'server-2' });
+    expect(failure).toMatchObject({ server: 'server-2', phase: 'connect' });
+  });
+
+  it('names the server that connects but cannot list its tools', async () => {
+    const stalls = await startReadinessHttpServer({ stallList: true });
+    try {
+      const failure = await start([
+        {
+          transport: 'http',
+          serverUrl: stalls.url,
+          label: 'docs',
+          requestTimeoutMs: 500,
+        },
+      ]).catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(ProxyUpstreamError);
+      expect(failure).toMatchObject({ server: 'docs', phase: 'list' });
+      expect((failure as Error).message).toMatch(
+        /^The tool-variant proxy couldn't list the tools of docs: /
+      );
+    } finally {
+      await stalls.close();
+    }
   });
 
   it.each(['legacy', '2026-07-28'] as const)(

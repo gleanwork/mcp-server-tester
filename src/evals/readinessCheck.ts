@@ -286,20 +286,21 @@ export async function readyBatch<P>(
     return { proxy: await startProxy() };
   } catch (error) {
     if (!(error instanceof ProxyUpstreamError)) throw error;
-    const reason = `MCP server not ready, so no trial was sent: ${error.server} did not connect (${formatMCPConnectionFailure(error.cause)}) when the tool-variant proxy started.`;
+    // Recorded as the check records its own failures: one that connected
+    // and then failed to list its tools says so.
+    const server: McpServerReadiness = {
+      label: error.server,
+      status: error.phase === 'list' ? 'connected' : 'failed',
+      elapsedMs: 0,
+      error: formatMCPConnectionFailure(error.cause),
+    };
+    const reason = `MCP server not ready, so no trial was sent: ${describeNotReady(server)} when the tool-variant proxy started.`;
     logLine(options)(
       `[mst] ${options.batch ?? 'The batch'} didn't run: ${reason}`
     );
     const readiness: Extract<ServersReadiness, { ready: false }> = {
       ready: false,
-      servers: [
-        {
-          label: error.server,
-          status: 'failed',
-          elapsedMs: 0,
-          error: formatMCPConnectionFailure(error.cause),
-        },
-      ],
+      servers: [server],
       reason,
     };
     return { notReady: () => notReadyResult(readiness) };

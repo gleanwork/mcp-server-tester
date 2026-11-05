@@ -11,6 +11,10 @@ import { mcpServerLabel } from '../config/mcpConfig.js';
 /** Sanitized direct-connection readiness. Never raw errors, bodies, or headers. */
 export interface McpServerReadiness {
   label: string;
+  /**
+   * `connected` with an `error` is a server that connected and then failed
+   * to list its tools.
+   */
   status: 'connected' | 'failed';
   toolCount?: number;
   /** The server's declared `minTools`, when it listed fewer. */
@@ -112,9 +116,10 @@ async function probe(
       elapsedMs: Date.now() - started,
     };
   } catch (error) {
+    // A client that opened connected: what failed was listing its tools.
     return {
       label,
-      status: 'failed',
+      status: client ? 'connected' : 'failed',
       elapsedMs: Date.now() - started,
       error: formatMCPConnectionFailure(error),
     };
@@ -177,11 +182,15 @@ export function isMcpServerReady(server: McpServerReadiness): boolean {
 
 /**
  * What is wrong with a server that isn't ready, in words a person reads:
- * `search did not connect (network_error)`, `search listed no tools`, or
- * `search listed 2 tools, fewer than its minTools (4)`.
+ * `search did not connect (network_error)`, `search did not list its tools
+ * (timeout)`, `search listed no tools`, or `search listed 2 tools, fewer
+ * than its minTools (4)`.
  */
 export function describeNotReady(server: McpServerReadiness): string {
-  if (server.status === 'connected') return `${server.label} listed no tools`;
+  if (server.status === 'connected')
+    return server.error
+      ? `${server.label} did not list its tools (${server.error})`
+      : `${server.label} listed no tools`;
   if (server.minTools !== undefined)
     return `${server.label} listed ${server.toolCount ?? 0} tool${server.toolCount === 1 ? '' : 's'}, fewer than its minTools (${server.minTools})`;
   return `${server.label} did not connect${server.error ? ` (${server.error})` : ''}`;

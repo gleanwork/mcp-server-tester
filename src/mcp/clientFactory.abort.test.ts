@@ -7,8 +7,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { OAuthClientProvider } from '@modelcontextprotocol/client';
 import { closeMCPClient, openMCPClient } from './clientFactory.js';
-import { readyStdioServer } from '../../tests/mocks/readyServers.js';
+import {
+  readyStdioServer,
+  startReadinessHttpServer,
+} from '../../tests/mocks/readyServers.js';
 
 const dirs: string[] = [];
 
@@ -64,6 +68,61 @@ function stallEveryRequest(): Array<{
   return requests;
 }
 
+/**
+ * An OAuth provider whose stored token the server refuses, so the transport
+ * refreshes it. The refresh is held until `releaseRefresh` runs.
+ */
+function refreshingProvider(): OAuthClientProvider {
+  let tokens = {
+    access_token: 'old',
+    token_type: 'Bearer',
+    refresh_token: 'refresh',
+    issuer: 'https://auth.test',
+  };
+  const provider = {
+    redirectUrl: 'https://client.test/callback',
+    clientMetadata: {
+      redirect_uris: ['https://client.test/callback'],
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code', 'refresh_token'],
+    },
+    async tokens() {
+      return tokens;
+    },
+    async clientInformation() {
+      return { client_id: 'test-client', issuer: 'https://auth.test' };
+    },
+    async saveTokens(next: typeof tokens) {
+      tokens = next;
+    },
+    async discoveryState() {
+      return {
+        authorizationServerUrl: 'https://auth.test',
+        resourceMetadata: {
+          resource: 'https://example.test/mcp',
+          authorization_servers: ['https://auth.test'],
+        },
+        authorizationServerMetadata: {
+          issuer: 'https://auth.test',
+          authorization_endpoint: 'https://auth.test/authorize',
+          token_endpoint: 'https://auth.test/token',
+          response_types_supported: ['code'],
+          token_endpoint_auth_methods_supported: ['none'],
+          code_challenge_methods_supported: ['S256'],
+        },
+      };
+    },
+    async redirectToAuthorization() {
+      throw new Error('unexpected redirect');
+    },
+    async saveCodeVerifier() {},
+    async codeVerifier() {
+      return 'test-verifier';
+    },
+  };
+  return provider as unknown as OAuthClientProvider;
+}
+
 describe('openMCPClient', () => {
   it('connects as createMCPClientForConfig does when the signal is not aborted', async () => {
     const controller = new AbortController();
@@ -78,6 +137,29 @@ describe('openMCPClient', () => {
       });
     } finally {
       await closeMCPClient(client);
+    }
+  });
+
+  it('leaves an HTTP client it opened working after the signal aborts', async () => {
+    const server = await startReadinessHttpServer();
+    const controller = new AbortController();
+    try {
+      const client = await openMCPClient(
+        { transport: 'http', serverUrl: server.url },
+        undefined,
+        controller.signal
+      );
+      try {
+        // The open is over, so its signal no longer reaches the requests.
+        controller.abort();
+        await expect(client.listTools()).resolves.toMatchObject({
+          tools: [{ name: 'tool_1' }],
+        });
+      } finally {
+        await closeMCPClient(client);
+      }
+    } finally {
+      await server.close();
     }
   });
 
@@ -145,6 +227,78 @@ describe('openMCPClient', () => {
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(requests.map((request) => request.method)).toEqual(['POST']);
     expect(requests[0]!.signal?.aborted).toBe(true);
+  });
+
+  it('leaves no request open when an SSE OAuth refresh finishes after the abort', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    let releaseRefresh!: () => void;
+    const refreshHeld = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let refreshStarted!: () => void;
+    const refreshing = new Promise<void>((resolve) => {
+      refreshStarted = resolve;
+    });
+    // Each request to the MCP server, and the signal it was sent with.
+    const requests: Array<{ method: string; signal: AbortSignal | null }> = [];
+    let gets = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown, init: RequestInit = {}) => {
+        const url = String(input);
+        if (url === 'https://auth.test/token') {
+          refreshStarted();
+          await refreshHeld;
+          return Response.json({
+            access_token: 'new',
+            token_type: 'Bearer',
+            refresh_token: 'refresh',
+          });
+        }
+        const method = init.method ?? 'GET';
+        const signal = init.signal ?? null;
+        requests.push({ method, signal });
+        // No Streamable HTTP, so the open falls back to SSE.
+        if (method === 'POST') return new Response('', { status: 405 });
+        // The first SSE GET is refused, which starts the refresh.
+        if (++gets === 1) return new Response('', { status: 401 });
+        // Any later GET stalls until its signal aborts.
+        return new Promise<Response>((_, reject) => {
+          const abort = () => reject(new DOMException('Aborted', 'AbortError'));
+          if (signal?.aborted) abort();
+          else signal?.addEventListener('abort', abort, { once: true });
+        });
+      })
+    );
+    try {
+      const controller = new AbortController();
+      const opening = openMCPClient(
+        { transport: 'http', serverUrl: 'https://example.test/mcp' },
+        { authProvider: refreshingProvider() },
+        controller.signal
+      );
+      await refreshing;
+      controller.abort(new Error('stop opening'));
+      await expect(opening).rejects.toThrow('stop opening');
+      // The refresh finishes after the abort, so the SDK restarts the SSE
+      // stream itself, past the transport's start().
+      releaseRefresh();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const open = requests.filter(
+        (request) =>
+          request.method === 'GET' && request.signal?.aborted !== true
+      );
+      expect(open.map((request) => request.method)).toEqual([]);
+      expect(requests.map((request) => request.method)).toEqual([
+        'POST',
+        'GET',
+      ]);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 
   it('stops waiting to retry when aborted, and retries no more', async () => {

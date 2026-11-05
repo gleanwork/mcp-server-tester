@@ -24,6 +24,7 @@ import {
 } from '@modelcontextprotocol/server';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
 import {
+  abandonMCPClient,
   closeMCPClient,
   createMCPClientForConfig,
 } from '../mcp/clientFactory.js';
@@ -31,6 +32,7 @@ import type { ToolOverrideVariant } from './evalRunner.js';
 import { buildToolSurface, type ToolSurface } from './toolSurface.js';
 import {
   ProxyUpstreamError,
+  type ProxyUpstreamPhase,
   type ToolSurfaceProxy,
   type ToolSurfaceProxyActivity,
 } from './toolSurfaceProxy.js';
@@ -59,8 +61,8 @@ interface Upstream {
 /**
  * Connects to the variant's servers, applies the variant, and listens on
  * 127.0.0.1. Throws, after closing what it opened, if a server can't be
- * reached or list its tools (`ProxyUpstreamError`) or the variant doesn't
- * fit the servers' tools.
+ * reached or list its tools (`ProxyUpstreamError`, with the phase that
+ * failed) or the variant doesn't fit the servers' tools.
  */
 export async function startToolSurfaceProxy(
   servers: readonly MCPConfig[],
@@ -70,18 +72,23 @@ export async function startToolSurfaceProxy(
   let http: HttpServer | undefined;
   try {
     // An upstream that fails names its server, as the readiness check does.
-    const reaching = async <T>(index: number, work: () => Promise<T>) => {
+    const reaching = async <T>(
+      index: number,
+      phase: ProxyUpstreamPhase,
+      work: () => Promise<T>
+    ) => {
       try {
         return await work();
       } catch (error) {
         throw new ProxyUpstreamError(
           mcpServerLabel(servers[index]!, index),
+          phase,
           error
         );
       }
     };
     for (const [index, config] of servers.entries()) {
-      const client = await reaching(index, () =>
+      const client = await reaching(index, 'connect', () =>
         createMCPClientForConfig(config)
       );
       upstreams.push({
@@ -101,7 +108,7 @@ export async function startToolSurfaceProxy(
         tools:
           'tools' in upstream.capabilities
             ? (
-                await reaching(index, () =>
+                await reaching(index, 'list', () =>
                   upstream.client.listTools(undefined, {
                     timeout: upstream.timeout,
                   })
@@ -201,8 +208,10 @@ export async function startToolSurfaceProxy(
         opened.closeAllConnections();
       });
     }
+    // Abandoned, not closed: a server that stalled its tools/list can stall
+    // a session DELETE too, and the start would never end.
     await Promise.allSettled(
-      upstreams.map(({ client }) => closeMCPClient(client))
+      upstreams.map(({ client }) => abandonMCPClient(client))
     );
     throw error;
   }

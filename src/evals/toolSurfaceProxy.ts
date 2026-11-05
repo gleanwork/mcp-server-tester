@@ -53,20 +53,28 @@ export interface ToolSurfaceProxy {
   close(): Promise<void>;
 }
 
+/** What the proxy was doing with an upstream server when it failed. */
+export type ProxyUpstreamPhase = 'connect' | 'list';
+
 /**
- * The proxy couldn't connect to an upstream server or list its tools. The
- * dispatch ends the batch as not ready (`readyBatch`), as for a server that
- * failed MST's readiness check; any other error starting the proxy (a
- * variant that doesn't fit the tools) is thrown.
+ * The proxy couldn't connect to an upstream server (`connect`) or, once
+ * connected, list its tools (`list`). The dispatch ends the batch as not
+ * ready (`readyBatch`), as for a server that failed MST's readiness check;
+ * any other error starting the proxy (a variant that doesn't fit the tools)
+ * is thrown.
  */
 export class ProxyUpstreamError extends Error {
   constructor(
     /** The server's label, as the readiness check names it. */
     readonly server: string,
+    readonly phase: ProxyUpstreamPhase,
     cause: unknown
   ) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
     super(
-      `The tool-variant proxy couldn't reach ${server}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      phase === 'connect'
+        ? `The tool-variant proxy couldn't reach ${server}: ${detail}`
+        : `The tool-variant proxy couldn't list the tools of ${server}: ${detail}`,
       { cause }
     );
     this.name = 'ProxyUpstreamError';

@@ -103,7 +103,8 @@ describe('Cowork servers in the readiness check', () => {
     await expect(verify([acme()], { TOKEN: 'secret' })).resolves.toMatchObject({
       ready: false,
       servers: [
-        { label: 'acme', status: 'failed', error: 'connection_failed' },
+        // It connected; listing its tools is what failed.
+        { label: 'acme', status: 'connected', error: 'connection_failed' },
       ],
     });
     expect(closeMCPClient).toHaveBeenCalledWith(client);

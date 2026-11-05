@@ -16,6 +16,7 @@ import {
   ProxyUpstreamError,
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
+import { startToolSurfaceProxy } from './toolSurfaceProxyServer.js';
 import { getClient } from './builtinClients.js';
 import { checkMcpServers } from './mcpReadiness.js';
 import { createEvalCaseExecutor, executionEnding } from './caseExecution.js';
@@ -253,6 +254,25 @@ describe('checkServersReady', () => {
     expect(await count(log, 'tools/list')).toBe(1);
     // Its stdin is closed at once, not when the SDK's request times out.
     expect(await waitForLine(log, 'closed', 1_000)).toBe(true);
+  });
+
+  it('says a server that connected did not list its tools when listing fails', async () => {
+    const readiness = await checkServersReady(
+      [
+        {
+          ...readyStdioServer({ READINESS_LIST_ERROR: '1' }),
+          label: 'broken',
+        },
+      ],
+      { env: { MST_MCP_READINESS_RETRY_S: '' }, timeoutMs: 3_000 }
+    );
+    expect(readiness).toMatchObject({
+      ready: false,
+      servers: [{ label: 'broken', status: 'connected' }],
+    });
+    expect(readiness.ready || readiness.reason).toMatch(
+      /broken did not list its tools \(/
+    );
   });
 
   it('drops a stalled HTTP tools/list at the deadline, without waiting on a session DELETE', async () => {
@@ -503,7 +523,11 @@ describe('readyBatch', () => {
       plain,
       servers,
       async () => {
-        throw new ProxyUpstreamError('docs', new Error('connect ECONNREFUSED'));
+        throw new ProxyUpstreamError(
+          'docs',
+          'connect',
+          new Error('connect ECONNREFUSED')
+        );
       },
       { env, log: () => {} }
     );
@@ -525,6 +549,40 @@ describe('readyBatch', () => {
         { env }
       )
     ).rejects.toThrow('names a tool no server has');
+  });
+
+  it('says a server connected but did not list its tools when the proxy could not list them', async () => {
+    // The check's own probe lists the tools; the proxy's connection then
+    // connects, and its tools/list stalls past the request timeout.
+    const servers = [{ ...readyStdioServer(), label: 'docs' }];
+    const listStalls = {
+      ...readyStdioServer({ READINESS_STALL_LIST: '1' }),
+      label: 'docs',
+      requestTimeoutMs: 500,
+    };
+    const lines: string[] = [];
+    const ready = await readyBatch(
+      plain,
+      servers,
+      () => startToolSurfaceProxy([listStalls], { id: 'v2', tools: {} }),
+      { env, log: (line) => lines.push(line) }
+    );
+    const result = ready.notReady?.();
+    const reason =
+      /^MCP server not ready, so no trial was sent: docs did not list its tools \(.+\) when the tool-variant proxy started\.$/;
+    expect(result?.error).toMatch(reason);
+    expect(result).toMatchObject({
+      ending: { kind: 'infrastructure', broke: 'setup', retryable: true },
+      telemetry: {
+        mcpReadiness: [
+          { label: 'docs', status: 'connected', error: expect.any(String) },
+        ],
+      },
+    });
+    expect(lines).toEqual([
+      expect.stringMatching(/did not list its tools \(.+\) when the tool/),
+    ]);
+    expect(lines.join('\n')).not.toContain('did not connect');
   });
 });
 
@@ -731,7 +789,11 @@ describe('a case on its own client', () => {
   /** A proxy whose upstream can't be reached once the check passed. */
   function unreachableProxy() {
     return vi.fn(async (): Promise<ToolSurfaceProxy> => {
-      throw new ProxyUpstreamError('docs', new Error('connect ECONNREFUSED'));
+      throw new ProxyUpstreamError(
+        'docs',
+        'connect',
+        new Error('connect ECONNREFUSED')
+      );
     });
   }
 

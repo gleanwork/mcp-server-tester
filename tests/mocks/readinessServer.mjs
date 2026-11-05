@@ -14,6 +14,7 @@
 //                          line per request, and `closed` when stdin ends
 //   READINESS_STALL_LIST   when `1`, never answers `tools/list`
 //   READINESS_STALL_INITIALIZE  when `1`, never answers `initialize`
+//   READINESS_LIST_ERROR   when `1`, answers `tools/list` with an error
 //
 // Over HTTP, `startReadinessHttpServer` takes the same settings as options.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -33,7 +34,10 @@ function toolList(count) {
  * The JSON-RPC response for a message, or null for a notification (and for
  * `tools/list` when `stallList` is set).
  */
-function respond(message, { tools, log, stallList, stallInitialize }) {
+function respond(
+  message,
+  { tools, log, stallList, stallInitialize, listError }
+) {
   if (
     log &&
     (message.method === 'initialize' || message.method === 'tools/list')
@@ -42,6 +46,12 @@ function respond(message, { tools, log, stallList, stallInitialize }) {
   if (message.id === undefined) return null;
   if (stallList && message.method === 'tools/list') return null;
   if (stallInitialize && message.method === 'initialize') return null;
+  if (listError && message.method === 'tools/list')
+    return {
+      jsonrpc: '2.0',
+      id: message.id,
+      error: { code: -32603, message: 'tools are unavailable' },
+    };
   const result = (value) => ({ jsonrpc: '2.0', id: message.id, result: value });
   switch (message.method) {
     case 'initialize':
@@ -150,6 +160,7 @@ function serveStdio() {
     log: process.env.READINESS_LOG,
     stallList: process.env.READINESS_STALL_LIST === '1',
     stallInitialize: process.env.READINESS_STALL_INITIALIZE === '1',
+    listError: process.env.READINESS_LIST_ERROR === '1',
   };
   process.stdin.on('end', () => {
     if (settings.log) appendFileSync(settings.log, 'closed\n');

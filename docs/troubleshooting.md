@@ -67,6 +67,8 @@ Common issues and how to fix them.
 **Cause:** MST checks every client's servers before a batch's first trial ([Server readiness](./evaluation-framework.md#server-readiness)). The reason names each server and what failed:
 
 - `<server> did not connect (...)`: the server didn't start, refused the connection, rejected its credential, or took more than 30 seconds to connect, list its tools and close (a server with a longer `connectTimeoutMs` gets that to connect, plus 30 seconds).
+- `<server> did not list its tools (...)`: the server connected, then answered `tools/list` with an error.
+- `<server> did not list its tools (...) when the tool-variant proxy started`: the server passed the check, then connected to MST's tool-variant proxy but failed or timed out listing its tools.
 - `<server> listed no tools`: it connected but served no tools, which no client can be evaluated against.
 - `<server> listed <n> tools, fewer than its minTools (<m>)`: a stdio server, or a connector's proxy, served fewer tools than it declares. A degraded server, such as one whose upstream credential failed, often serves only its static tools.
 
