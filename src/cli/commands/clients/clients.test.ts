@@ -129,6 +129,14 @@ describe('mst clients', () => {
     });
   });
 
+  it('shows an empty plugin options schema as none declared', async () => {
+    const out = capture();
+    await showClient('acme/client/bare', { plugins: [pluginPath] }, out.print);
+    expect(out.text()).toContain('acme/client/bare');
+    expect(out.text()).toContain('options (defaults; timeout in ms)');
+    expect(out.text()).toContain('(none declared)');
+  });
+
   it("lists and shows an eval config's plugins' clients", async () => {
     const config = path.join(dir, 'eval.json');
     await fs.writeFile(
@@ -427,6 +435,28 @@ describe('mst clients', () => {
     expect(out.text()).toContain('"instruction"');
     expect(out.text()).not.toContain('(none declared)');
   });
+
+  it.each(['chatgpt', 'codex-app'] as const)(
+    'lists %s requireMcpCalls as off without materializing the omitted option',
+    async (client) => {
+      const json = capture();
+      await showClient(client, { json: true }, json.print);
+      expect(JSON.parse(json.text())).toMatchObject({
+        options: { properties: { requireMcpCalls: { default: false } } },
+      });
+      const text = capture();
+      await showClient(client, {}, text.print);
+      expect(text.text()).toMatch(/requireMcpCalls\s+false/);
+      const schema = getClient(client).schema;
+      const config = { type: client, model: 'test-model' };
+      expect(schema.parse(config)).not.toHaveProperty('requireMcpCalls');
+      for (const requireMcpCalls of [false, true]) {
+        expect(schema.parse({ ...config, requireMcpCalls })).toMatchObject({
+          requireMcpCalls,
+        });
+      }
+    }
+  );
 
   it.each([
     ['cowork', 900_000],

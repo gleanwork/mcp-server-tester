@@ -790,7 +790,7 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 | `env`              | inherited environment; no extra variables                           |
 | `plugins`          | no marketplace plugins (Linux only)                                 |
 | `configPath`       | app profile config.toml on the trial machine (OS-specific)          |
-| `requireMcpCalls`  | not set (currently unused)                                          |
+| `requireMcpCalls`  | false                                                               |
 | `correlation`      | "exact_prompt"                                                      |
 | `maxActions`       | macOS: 32; Linux: 24                                                |
 | `computerUseModel` | macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner |
@@ -817,7 +817,7 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 | `env`              | inherited environment; no extra variables                           |
 | `plugins`          | no marketplace plugins (Linux only)                                 |
 | `configPath`       | app profile config.toml on the trial machine (OS-specific)          |
-| `requireMcpCalls`  | not set (currently unused)                                          |
+| `requireMcpCalls`  | false                                                               |
 | `correlation`      | "exact_prompt"                                                      |
 | `maxActions`       | macOS: 32; Linux: 24                                                |
 | `computerUseModel` | macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner |

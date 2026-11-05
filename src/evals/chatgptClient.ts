@@ -107,10 +107,7 @@ const schemaOf = (product: DesktopProduct) =>
         'x-defaultDescription':
           'app profile config.toml on the trial machine (OS-specific)',
       }),
-      requireMcpCalls: z
-        .boolean()
-        .optional()
-        .meta({ 'x-defaultDescription': 'not set (currently unused)' }),
+      requireMcpCalls: z.boolean().optional().meta({ default: false }),
       /** Gone: the surface is the client (`chatgpt` or `codex-app`). */
       surface: z
         .never({ error: (issue) => surfaceGone(product, issue.input) })
