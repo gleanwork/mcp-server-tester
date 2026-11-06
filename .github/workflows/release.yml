@@ -61,13 +61,8 @@ jobs:
           # release-it requires one.
           ref: ${{ github.head_ref || github.ref_name }}
 
-      # The same npm the release job publishes with; see its note.
       - name: Setup mise
         uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
-        with:
-          mise_toml: |
-            [tools]
-            npm = "11"
 
       - name: Install dependencies
         run: npm ci
@@ -122,16 +117,11 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
-      # Trusted publishing needs npm 11.5.1 or later. npm 12 fails to publish
-      # with OIDC: it rejects the token that its OIDC step sets as an unknown
-      # CLI flag (EUNKNOWNCONFIG), so release with npm 11. This mise.toml takes
-      # precedence over the repo's .mise.toml, which tracks the latest npm.
+      # Node and npm from .mise.toml. Trusted publishing needs npm 11.5.1 or
+      # later, and npm 12 fails to publish with OIDC (EUNKNOWNCONFIG), so
+      # .mise.toml pins npm 11.
       - name: Setup mise
         uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
-        with:
-          mise_toml: |
-            [tools]
-            npm = "11"
 
       - name: Install dependencies
         run: npm ci
