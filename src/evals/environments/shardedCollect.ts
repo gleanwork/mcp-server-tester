@@ -57,10 +57,11 @@ async function placeArtifacts(
 }
 
 /**
- * A shard's outcome from an environment, even one that throws. `runShard`
- * promises its failures as its outcome; an environment (a plugin's) that
- * rejects anyway fails only its own shard, so the run's other shards finish
- * and keep what they collected, rather than being closed mid-shard.
+ * A shard's outcome from `run` (its bundle, then its environment), even when
+ * that throws. `runShard` promises its failures as its outcome; a bundle
+ * that can't be written, or an environment (a plugin's) that rejects anyway,
+ * fails only its own shard, so the run's other shards finish and keep what
+ * they collected, rather than being closed mid-shard.
  */
 export async function settledShardOutcome(
   shard: { index: number },
@@ -72,7 +73,7 @@ export async function settledShardOutcome(
   } catch (error) {
     return {
       ok: false,
-      reason: `The environment failed shard ${shard.index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+      reason: `Shard ${shard.index + 1} failed: ${error instanceof Error ? error.message : String(error)}`,
       collected: 0,
       infra: 0,
       cancelled: signal.aborted,
@@ -239,20 +240,11 @@ export async function collectInEnvironment(
         const root = path.join(options.workDir, `shard-${index}`);
         const bundleDir = path.join(root, 'bundle');
         const resultsDir = path.join(root, 'results');
-        await writeShardBundle(bundleDir, {
-          runId: options.runId,
-          shard: { index, count },
-          mst: packageJson.version,
-          plugins: options.plugins,
-          ...(options.pluginPackages?.length
-            ? { pluginPackages: options.pluginPackages }
-            : {}),
-          evalConfig: options.evalConfig,
-          tokenServers: options.connectorTokens?.labels ?? [],
-          batches,
-        });
         // Room this shard's trials hold under the limits, until they're done.
+        // A shard that ended holds nothing: room it was still waiting for
+        // goes straight back, or a sibling waiting on it would never run.
         const held = new Map<string, () => void>();
+        let ended = false;
         const giveBack = (key: string) => {
           held.get(key)?.();
           held.delete(key);
@@ -287,8 +279,20 @@ export async function collectInEnvironment(
         const outcome = await settledShardOutcome(
           { index },
           options.signal,
-          () =>
-            opened.runShard(
+          async () => {
+            await writeShardBundle(bundleDir, {
+              runId: options.runId,
+              shard: { index, count },
+              mst: packageJson.version,
+              plugins: options.plugins,
+              ...(options.pluginPackages?.length
+                ? { pluginPackages: options.pluginPackages }
+                : {}),
+              evalConfig: options.evalConfig,
+              tokenServers: options.connectorTokens?.labels ?? [],
+              batches,
+            });
+            return opened.runShard(
               {
                 runId: options.runId,
                 index,
@@ -321,13 +325,19 @@ export async function collectInEnvironment(
                 },
                 async acquire(key) {
                   const id = keyString(key);
-                  held.set(id, await limiter.acquire(resources.get(id) ?? []));
+                  const release = await limiter.acquire(
+                    resources.get(id) ?? []
+                  );
+                  if (ended) release();
+                  else held.set(id, release);
                 },
               },
               options.signal
-            )
+            );
+          }
         );
         // A shard that ended gives back whatever its trials still held.
+        ended = true;
         for (const key of [...held.keys()]) giveBack(key);
         await reading.catch(() => {});
         // Closing a session can add cleanup failures and lifecycle timings.

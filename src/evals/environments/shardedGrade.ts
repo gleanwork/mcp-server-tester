@@ -182,24 +182,6 @@ export async function gradeInEnvironment(
         const root = path.join(options.workDir, `shard-${index}`);
         const bundleDir = bundleDirOf(index);
         const resultsDir = path.join(root, 'results');
-        await writeGradeShardBundle(bundleDir, {
-          runId,
-          shard: { index, count },
-          mst: packageJson.version,
-          plugins: prepared.plugins,
-          ...(prepared.pluginPackages.length
-            ? { pluginPackages: prepared.pluginPackages }
-            : {}),
-          evalConfig: workerConfig(prepared.configFile),
-          datasets: prepared.datasets.map(
-            (dataset): EvalDataset => ({
-              ...dataset,
-              cases: dataset.cases.filter((c) => cases.has(c.id)),
-            })
-          ),
-          ...(prepared.resume ? { resume: true } : {}),
-        });
-        await stageRun(prepared, cases, bundledRunDir(bundleDir, runId));
         // Results are read as they arrive, one at a time, once each.
         let reading = Promise.resolve();
         const seen = new Set<string>();
@@ -219,8 +201,26 @@ export async function gradeInEnvironment(
         const outcome = await settledShardOutcome(
           { index },
           options.signal,
-          () =>
-            opened.runShard(
+          async () => {
+            await writeGradeShardBundle(bundleDir, {
+              runId,
+              shard: { index, count },
+              mst: packageJson.version,
+              plugins: prepared.plugins,
+              ...(prepared.pluginPackages.length
+                ? { pluginPackages: prepared.pluginPackages }
+                : {}),
+              evalConfig: workerConfig(prepared.configFile),
+              datasets: prepared.datasets.map(
+                (dataset): EvalDataset => ({
+                  ...dataset,
+                  cases: dataset.cases.filter((c) => cases.has(c.id)),
+                })
+              ),
+              ...(prepared.resume ? { resume: true } : {}),
+            });
+            await stageRun(prepared, cases, bundledRunDir(bundleDir, runId));
+            return opened.runShard(
               {
                 runId: prepared.replay.runId,
                 index,
@@ -254,7 +254,8 @@ export async function gradeInEnvironment(
                 },
               },
               options.signal
-            )
+            );
+          }
         );
         await reading.catch(() => {});
         for (const relative of await resultFiles(resultsDir))

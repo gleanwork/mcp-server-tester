@@ -363,9 +363,13 @@ async function runOnMachine(
     const troubled = !outcome.ok
       ? !outcome.cancelled
       : outcome.infra > 0 || (outcome.failed ?? 0) > 0;
+    // A diagnosis that fails, or throws before it returns a promise, says
+    // nothing; it never replaces the outcome.
     const cause =
       troubled && machine.diagnose
-        ? await machine.diagnose().catch(() => undefined)
+        ? await Promise.resolve()
+            .then(() => machine.diagnose!())
+            .catch(() => undefined)
         : undefined;
     if (cause && outcome.ok) outcome.note = cause;
     else if (cause)

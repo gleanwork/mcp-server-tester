@@ -210,7 +210,7 @@ describe('collectInEnvironment', () => {
     expect(order).toEqual(['shard-1 threw', 'shard-2 finished', 'closed']);
     expect(gathered.outcomes[0]).toEqual({
       ok: false,
-      reason: 'The environment failed shard 1: the machine API returned 503',
+      reason: 'Shard 1 failed: the machine API returned 503',
       collected: 0,
       infra: 0,
       cancelled: false,
@@ -225,6 +225,89 @@ describe('collectInEnvironment', () => {
     expect(
       gathered.result({ variant: 'baseline', caseId: 'a', trial: 0 }).error
     ).toContain('the machine API returned 503');
+  });
+
+  it('gives back room a shard was still waiting for when it ended, so a sibling can take it', async () => {
+    // One slot for the shared server. Shard 1 ('a') queues for it behind
+    // shard 2 ('c' #1), then throws; shard 2's second trial needs the slot.
+    const order: string[] = [];
+    let healthyAcquired!: () => void;
+    const healthyHasRoom = new Promise<void>((resolve) => {
+      healthyAcquired = resolve;
+    });
+    let failedEnded!: () => void;
+    const failedShardEnded = new Promise<void>((resolve) => {
+      failedEnded = resolve;
+    });
+    const key = (caseId: string, trial = 0) => ({
+      variant: 'baseline',
+      caseId,
+      trial,
+    });
+    const env = environment(async (shard, events) => {
+      if (shard.index === 0) {
+        await healthyHasRoom;
+        void events.acquire!(key('a')).then(() => order.push('a got room'));
+        order.push('shard 1 waits for room, then throws');
+        throw new Error('channel gone while waiting for room');
+      }
+      await events.acquire!(key('c'));
+      order.push('c #1 has room');
+      healthyAcquired();
+      await failedShardEnded;
+      events.progress({
+        type: 'trial',
+        key: key('c'),
+        status: 'collected',
+        path: '0/0.json',
+      });
+      await events.acquire!(key('c', 1));
+      order.push('c #2 has room');
+      return { ...ok, collected: 2 };
+    }, 2);
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
+    dirs.push(workDir);
+    const server = {
+      transport: 'http' as const,
+      label: 'shared',
+      serverUrl: 'https://example.invalid/mcp',
+    };
+    const gathered = await Promise.race([
+      collectInEnvironment({
+        environment: env,
+        runId: 'run-1',
+        evalConfig: { name: 'gather' } as EvalConfig,
+        plugins: [],
+        limits: { servers: { shared: 1 } },
+        groups: [
+          {
+            variant: { name: 'baseline' },
+            requests: [key('a'), key('c'), key('c', 1)].map(
+              ({ caseId, trial }) => ({
+                caseId,
+                trial,
+                config: { type: 'api' },
+                input: { prompt: caseId, servers: [server] },
+              })
+            ),
+          },
+        ],
+        secrets: {},
+        workDir,
+        signal: new AbortController().signal,
+        log(line) {
+          if (line.startsWith('shard 1/2: stopped:')) failedEnded();
+        },
+      }),
+      new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 2000)),
+    ]);
+    expect(gathered).not.toBe('hung');
+    expect(order).toEqual([
+      'c #1 has room',
+      'shard 1 waits for room, then throws',
+      'a got room',
+      'c #2 has room',
+    ]);
   });
 
   it('finds a result announced before its file was copied back', async () => {

@@ -228,6 +228,31 @@ describe('mst grade --env (ADR 0005)', () => {
     expect(pairwise?.summary[0]).toMatchObject({ errors: lost.size });
   }, 60_000);
 
+  it('an environment that throws for one grade shard fails that shard only; the other shard grades', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture();
+    const lost = new Set(CASES.filter((id) => shardOf(id, 2) === 0));
+    expect(lost.size).toBeGreaterThan(0);
+    expect(lost.size).toBeLessThan(CASES.length);
+    const sharded = await gradeRun({
+      ...f.base,
+      run: f.runId,
+      secretsFile: f.secretsFile,
+      env: 'fork/env/children',
+      envOptions: { shards: '2', throw: '0' },
+    });
+    for (const result of sharded.summary.results)
+      if (lost.has(result.id))
+        expect(result.gradingError).toMatch(
+          /^error: Missing: grade shard 1 ended before this trial's grading came back \(Shard 1 failed: the environment threw for shard 1\)/
+        );
+      else expect(result.gradingError).toBeUndefined();
+    const run = await f.readJson<Record<string, unknown>>(
+      path.join(sharded.outputDir, 'run.json')
+    );
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'partial' });
+  }, 60_000);
+
   it("a judge key that isn't in the secrets file stops the shard at the judge's preflight", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture();
