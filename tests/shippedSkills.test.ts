@@ -143,34 +143,40 @@ function parseJson(
   }
 }
 
-/** Validates one block, or throws. A block it can't place fails. */
+/**
+ * Validates one block, or throws. A block is placed by any key it shares
+ * with an eval config or with assertions, so the strict schemas reject a
+ * misspelt key next to it instead of the block being skipped. A fragment it
+ * can't place fails.
+ */
 function validateBlock({ value, fragment }: JsonBlock): void {
   if (!isRecord(value)) {
     if (fragment) throw new Error('not JSON, or a fragment of a JSON object');
     return;
   }
   const keys = Object.keys(value);
-  const within = (known: string[]) =>
-    keys.length > 0 && keys.every((key) => known.includes(key));
+  const shares = (known: string[]) => keys.some((key) => known.includes(key));
+  // Output examples, such as a tool call, can have a `name` too.
+  const configKeys = fragment
+    ? CONFIG_KEYS
+    : CONFIG_KEYS.filter((key) => key !== 'name');
   if (Array.isArray(value.cases)) {
     validateEvalDataset(value);
   } else if (typeof value.id === 'string' && 'input' in value) {
     validateEvalDataset({ name: 'skill-example', cases: [value] });
-  } else if (within(ASSERTION_KEYS)) {
-    validateEvalDataset({
-      name: 'skill-example',
-      cases: [{ id: 'skill-example', input: 'x', assertions: value }],
-    });
-  } else if (within(CONFIG_KEYS)) {
+  } else if (shares(configKeys)) {
     // A whole config validates as it is; a fragment, inside a minimal one.
     validateEvalConfig(
       loadEvalConfigFromObject(
         fragment ? { ...BASE_CONFIG, ...value } : value,
-        {
-          skipDatasetValidation: true,
-        }
+        { skipDatasetValidation: true }
       )
     );
+  } else if (shares(ASSERTION_KEYS)) {
+    validateEvalDataset({
+      name: 'skill-example',
+      cases: [{ id: 'skill-example', input: 'x', assertions: value }],
+    });
   } else if (fragment) {
     // Not part of an eval config or of assertions, so nothing would check it.
     throw new Error(
@@ -382,7 +388,10 @@ describe('shipped skills', () => {
         try {
           validateBlock(block);
         } catch (error) {
-          const message = (error as Error).message.split('\n')[0];
+          // Zod reports its issues as indented JSON; keep them on one line.
+          const message = (error as Error).message
+            .replace(/\s+/g, ' ')
+            .slice(0, 300);
           problems.push(`${path.basename(file)}:${block.line}: ${message}`);
         }
       }
