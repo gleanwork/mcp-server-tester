@@ -113,7 +113,7 @@ jobs:
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.GLEANWORK_CI_CLIENT_ID }}
-          private-key: ${{ secrets.GLEANWORK_CI_PRIVATE_KEY }}
+          private-key: ${{ secrets.GLEANWORK_CI_KEY }}
           owner: gleanwork
           repositories: mcp-server-tester
 
