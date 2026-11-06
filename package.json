@@ -129,7 +129,6 @@
   "devDependencies": {
     "@ai-sdk/provider-utils": "^4.0.15",
     "@anthropic-ai/claude-agent-sdk": "^0.2.71",
-    "@inkjs/ui": "^2.0.0",
     "@openai/codex-sdk": "^0.160.1",
     "@playwright/test": "^1.49.0",
     "@release-it-plugins/lerna-changelog": "^8.0.1",
@@ -145,9 +144,6 @@
     "bintastic": "^4.0.1",
     "esbuild": "^0.28.0",
     "eslint": "^8.57.1",
-    "ink": "^5.2.1",
-    "ink-spinner": "^5.0.0",
-    "ink-testing-library": "^4.0.0",
     "knip": "^6.39.0",
     "lucide-react": "^0.460.0",
     "markdown-code": "^0.6.1",

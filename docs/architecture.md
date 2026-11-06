@@ -63,7 +63,7 @@ Custom Playwright reporter. `channel.ts` is the contract between the code that r
 
 ### `src/cli/`
 
-The CLI, installed as `mst` and as `mcp-server-tester` (the same binary). `index.ts` is the entry point; the `commands/` directory contains one subdirectory per command (`init`, `generate`, `login`, `token`, `auth`, `datasets`, `judges`, `run`, `grade`, `batch`, `cowork`, `open`, and the hidden `collect` a worker runs). `components/` holds Ink-based React components for the interactive prompts. `templates/` stores scaffold files emitted by `init`.
+The CLI, installed as `mst` and as `mcp-server-tester` (the same binary). `index.ts` is the entry point; the `commands/` directory contains one subdirectory per command (`init`, `generate`, `login`, `token`, `auth`, `datasets`, `judges`, `run`, `grade`, `batch`, `cowork`, `open`, and the hidden `collect` a worker runs). `utils/prompt.ts` holds the line prompts `init` and `generate` ask in a terminal; without one, they take every answer from flags. `templates/` stores scaffold files emitted by `init`.
 
 ### `src/types/`
 

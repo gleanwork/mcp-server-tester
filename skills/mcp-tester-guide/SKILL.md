@@ -271,9 +271,9 @@ Options: `outputDir` (default `.mcp-test-results`), `name` (the eval's name, def
 
 | Command                                                     | Does                                                                                                                           |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `npx @gleanwork/mcp-server-tester@beta init`                | Scaffold a project: Playwright config, a tool test, a dataset. Interactive                                                     |
-| `mst generate [-o tests/generated.spec.ts] [--snapshot]`    | Call tools interactively and write the calls as a Playwright spec. Interactive                                                 |
-| `mst login <server-url> [--scopes a,b] [--force]`           | OAuth login in a browser; the `mcp` fixture uses the stored tokens. Interactive                                                |
+| `npx @gleanwork/mcp-server-tester@beta init`                | Scaffold a project: Playwright config, a tool test, a dataset. `--command` or `--url`, `--name`, `--no-install`, `--force`     |
+| `mst generate --tool <name> --args <json>`                  | Call a tool and write the call as a Playwright test. `--command`, `--url` or `--config`; `-o`, `--snapshot`, `--name`          |
+| `mst login <server-url> [--scopes a,b] [--force]`           | OAuth login in a browser; the `mcp` fixture uses the stored tokens                                                             |
 | `mst token <server-url> [--format env\|json\|gh]`           | Print stored tokens for CI                                                                                                     |
 | `mst run --config <path>`                                   | Run an eval config. `--variant`, `--case <ids...>`, `--trials <n>`, `--plugins`, `--output-dir`, `--secrets-file`, `--dry-run` |
 | `mst batch --config-dir <dir>`                              | Run several eval configs. `--configs`, `--workers`, `--skip-existing`, `--dry-run`                                             |
@@ -282,7 +282,7 @@ Options: `outputDir` (default `.mcp-test-results`), `name` (the eval's name, def
 | `mst open [run or eval dir]`                                | Open a run's report: the newest run, or the one named. `--print` prints its path                                               |
 | `mst cowork setup`                                          | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                               |
 
-`init`, `generate` and `login` need a terminal. An agent's shell has none, so there they fail with `Raw mode is not supported on the current process.stdin` and write nothing. As an agent, write the Playwright config and specs yourself (the `write-mcp-test` skill), and ask the user to run `mst login` in their own terminal. Every other command runs without a terminal.
+No command needs a terminal. In one, `init` and `generate` ask for what the flags leave out; in an agent's shell they take every answer from flags and name the flag they need. `generate` without `--tool` asks which tools to call, so an agent passes `--tool`. Without a terminal, `mst login` prints the sign-in URL instead of opening a browser and waits: run it in the background and give the user the URL. An older 2.0 beta fails in an agent's shell with `Raw mode is not supported on the current process.stdin`; upgrade it.
 
 Inside a project, `npx mst` and `npx mcp-server-tester` run the same binary. Before installing, use `npx @gleanwork/mcp-server-tester@beta`: `npx mst` alone downloads an unrelated package.
 

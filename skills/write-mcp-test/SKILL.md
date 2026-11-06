@@ -18,7 +18,7 @@ A test has no client and no model, so it can't tell you whether a model would pi
 2. Find the tools to test and their input schemas: the server source, or `await mcp.listTools()` in a test.
 3. Check `playwright.config.ts` for an `mcpConfig` (Step 1).
 
-For a person at a terminal, `npx mst generate` connects to a server, lets them call tools interactively, and writes the calls as a spec (default `tests/generated.spec.ts`) to edit. `npx @gleanwork/mcp-server-tester@beta init` scaffolds a new project. Both are interactive: in an agent's shell, which has no terminal, they fail with `Raw mode is not supported on the current process.stdin` and write nothing. As an agent, write `playwright.config.ts` (Step 1) and the specs (Step 2) yourself.
+`npx mst generate --command "node server.js" --tool get_weather --args '{"city":"London"}'` calls a tool and writes the call as a test (default `tests/generated.spec.ts`), with assertions suggested from the real response. Run it once per call, then edit the spec: it is a fast way to record what the server returns. `npx @gleanwork/mcp-server-tester@beta init --command "node server.js"` scaffolds a new project. Both run in an agent's shell when the flags give every answer (an older 2.0 beta fails there with `Raw mode is not supported`). For anything they don't cover, write `playwright.config.ts` (Step 1) and the specs (Step 2) yourself.
 
 ## Step 1: Configure the server
 
@@ -63,7 +63,7 @@ HTTP servers take `serverUrl` (not `url`) and optional `headers`. For auth:
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A token you already have             | `{ accessToken: process.env.MCP_ACCESS_TOKEN }`                                                                                                           |
 | CI, service account, no browser      | `{ clientCredentials: { tokenEndpoint: 'https://auth.example.com/oauth/token' } }` (reads `MCP_CLIENT_ID` and `MCP_CLIENT_SECRET`)                        |
-| A user logs in once                  | The user runs `npx mst login <server-url>` in their own terminal; the `mcp` fixture uses the stored login and refreshes it                                |
+| A user logs in once                  | `npx mst login <server-url>`: without a terminal it prints the sign-in URL for the user to open; the `mcp` fixture uses the stored login and refreshes it |
 | A browser OAuth flow in global setup | `{ oauth: { serverUrl, scopes, authStatePath } }` (see [Authentication](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/authentication.md)) |
 
 The `mcp` fixture handles auth from `mcpConfig`, so tests don't change. `mst token <server-url> --format gh` prints a stored login as CI secrets.
