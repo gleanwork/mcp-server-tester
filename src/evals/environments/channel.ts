@@ -90,22 +90,38 @@ export async function runShardOverChannel(
   // Tokens and secrets sent to the worker, kept out of the reason.
   const secrets: string[] = [];
 
-  await channel.put(shard.bundleDir, remoteBundle);
+  // Staging and launch fail as the shard's outcome, like everything after
+  // them: a channel that rejects must not take the run's other shards down.
+  try {
+    await channel.put(shard.bundleDir, remoteBundle);
+  } catch (error) {
+    outcome.reason = `Couldn't copy the shard's bundle to its machine: ${error instanceof Error ? error.message : String(error)}`;
+    outcome.cancelled = signal.aborted;
+    return outcome;
+  }
   const stdin = inputQueue();
   const send = (message: CoordinatorMessage) =>
     stdin.push(encodeMessage(message));
   const kill = new AbortController();
-  const run = channel.exec(
-    [
-      ...(options.command ?? ['mst']),
-      WORKER_COMMANDS[shard.work],
-      '--bundle',
-      remoteBundle,
-      '--results',
-      remoteResults,
-    ],
-    { stdin, signal: kill.signal }
-  );
+  let run: ReturnType<WorkerChannel['exec']>;
+  try {
+    run = channel.exec(
+      [
+        ...(options.command ?? ['mst']),
+        WORKER_COMMANDS[shard.work],
+        '--bundle',
+        remoteBundle,
+        '--results',
+        remoteResults,
+      ],
+      { stdin, signal: kill.signal }
+    );
+  } catch (error) {
+    stdin.close();
+    outcome.reason = `Couldn't start the worker on the shard's machine: ${error instanceof Error ? error.message : String(error)}`;
+    outcome.cancelled = signal.aborted;
+    return outcome;
+  }
 
   let stderr = '';
   const readingStderr = (async () => {
@@ -270,54 +286,29 @@ export function machineEnvironment(
         };
       }
       live.add(machine);
-      let outcome: ShardOutcome | undefined;
+      // Never throws: a failure on the machine is the outcome.
+      const outcome = await runOnMachine(
+        machine,
+        shard,
+        events,
+        signal,
+        options
+      );
+      live.delete(machine);
+      const keep =
+        context.keep === 'always' || (context.keep === 'failed' && !outcome.ok);
       try {
-        // The machine's image, for a worker that doesn't say (MST_IMAGE).
-        const image = machine.image
-          ? machine.image.digest
-            ? `${machine.image.ref}@${machine.image.digest}`
-            : machine.image.ref
-          : undefined;
-        outcome = await runShardOverChannel(
-          machine.channel,
-          shard,
-          image
-            ? {
-                ...events,
-                progress: (event) =>
-                  events.progress(
-                    event.type === 'hello' && !event.image
-                      ? { ...event, image }
-                      : event
-                  ),
-              }
-            : events,
-          signal,
-          {
-            ...options,
-            ...(machine.workDir ? { workDir: machine.workDir } : {}),
-          }
-        );
-        const troubled = !outcome.ok
-          ? !outcome.cancelled
-          : outcome.infra > 0 || (outcome.failed ?? 0) > 0;
-        const cause =
-          troubled && machine.diagnose
-            ? await machine.diagnose().catch(() => undefined)
-            : undefined;
-        if (cause && outcome.ok) outcome.note = cause;
-        else if (cause)
-          outcome.reason = outcome.reason
-            ? `${cause} ${outcome.reason}`
-            : cause;
-        return outcome;
-      } finally {
-        live.delete(machine);
-        const keep =
-          context.keep === 'always' ||
-          (context.keep === 'failed' && !outcome?.ok);
         await machine.dispose({ keep });
+      } catch (error) {
+        // The shard's work is done and copied: a machine that stayed behind
+        // is a note on a good shard, and more of a bad shard's reason.
+        const left = `Couldn't ${keep ? 'release' : 'delete'} the shard's machine: ${error instanceof Error ? error.message : String(error)}`;
+        if (outcome.ok)
+          outcome.note = outcome.note ? `${outcome.note} ${left}` : left;
+        else
+          outcome.reason = outcome.reason ? `${outcome.reason} ${left}` : left;
       }
+      return outcome;
     },
     async close() {
       const remaining = [...live];
@@ -327,4 +318,66 @@ export function machineEnvironment(
       );
     },
   };
+}
+
+/**
+ * One shard on its machine: the worker over the machine's channel, then,
+ * for a shard in trouble, what the machine knows about why. A throw from
+ * either is the shard's outcome, as `Environment.runShard` promises.
+ */
+async function runOnMachine(
+  machine: Machine,
+  shard: ShardSpec,
+  events: ShardEvents,
+  signal: AbortSignal,
+  options: Omit<ShardChannelOptions, 'workDir'>
+): Promise<ShardOutcome> {
+  let outcome: ShardOutcome;
+  try {
+    // The machine's image, for a worker that doesn't say (MST_IMAGE).
+    const image = machine.image
+      ? machine.image.digest
+        ? `${machine.image.ref}@${machine.image.digest}`
+        : machine.image.ref
+      : undefined;
+    outcome = await runShardOverChannel(
+      machine.channel,
+      shard,
+      image
+        ? {
+            ...events,
+            progress: (event) =>
+              events.progress(
+                event.type === 'hello' && !event.image
+                  ? { ...event, image }
+                  : event
+              ),
+          }
+        : events,
+      signal,
+      {
+        ...options,
+        ...(machine.workDir ? { workDir: machine.workDir } : {}),
+      }
+    );
+    const troubled = !outcome.ok
+      ? !outcome.cancelled
+      : outcome.infra > 0 || (outcome.failed ?? 0) > 0;
+    const cause =
+      troubled && machine.diagnose
+        ? await machine.diagnose().catch(() => undefined)
+        : undefined;
+    if (cause && outcome.ok) outcome.note = cause;
+    else if (cause)
+      outcome.reason = outcome.reason ? `${cause} ${outcome.reason}` : cause;
+    return outcome;
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `Shard ${shard.index + 1} failed on its machine: ${error instanceof Error ? error.message : String(error)}`,
+      collected: 0,
+      infra: 0,
+      cancelled: signal.aborted,
+    };
+  }
 }

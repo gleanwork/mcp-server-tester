@@ -26,7 +26,7 @@ import {
   writeGradeShardBundle,
   type GradeShardBundle,
 } from './protocol.js';
-import { shardOf } from './shardedCollect.js';
+import { settledShardOutcome, shardOf } from './shardedCollect.js';
 import { readJsonFile, writeJsonFile } from '../../utils/jsonFile.js';
 
 export interface GradeInEnvironmentOptions {
@@ -216,40 +216,45 @@ export async function gradeInEnvironment(
               seen.add(relative);
               records.set(gradeKeyString(record.key), record);
             }));
-        const outcome = await opened.runShard(
-          {
-            runId: prepared.replay.runId,
-            index,
-            count,
-            work: 'grade',
-            bundleDir,
-            resultsDir,
-          },
-          {
-            progress(event) {
-              if (event.type === 'hello') {
-                hellos.set(index, {
-                  mst: event.mst,
-                  ...(event.image ? { image: event.image } : {}),
-                });
-                log(
-                  `grade shard ${index + 1}/${count}: ${cases.size} cases on MST ${event.mst}${event.image ? ` (${event.image})` : ''}`
-                );
-              } else if (event.type === 'graded') {
-                const { key } = event;
-                log(
-                  `grade shard ${index + 1}/${count}: ${key.kind === 'trial' ? `${key.variant} ${key.caseId} #${key.trial + 1}` : `${key.candidate} vs baseline ${key.caseId}`} ${event.status}`
-                );
-                read(event.path).catch(() => {});
-              }
-            },
-            // Grading starts no client: no connector tokens, only the run's
-            // secrets, for its judges.
-            async requestTokens() {
-              return { byServer: {}, env: prepared.secrets };
-            },
-          },
-          options.signal
+        const outcome = await settledShardOutcome(
+          { index },
+          options.signal,
+          () =>
+            opened.runShard(
+              {
+                runId: prepared.replay.runId,
+                index,
+                count,
+                work: 'grade',
+                bundleDir,
+                resultsDir,
+              },
+              {
+                progress(event) {
+                  if (event.type === 'hello') {
+                    hellos.set(index, {
+                      mst: event.mst,
+                      ...(event.image ? { image: event.image } : {}),
+                    });
+                    log(
+                      `grade shard ${index + 1}/${count}: ${cases.size} cases on MST ${event.mst}${event.image ? ` (${event.image})` : ''}`
+                    );
+                  } else if (event.type === 'graded') {
+                    const { key } = event;
+                    log(
+                      `grade shard ${index + 1}/${count}: ${key.kind === 'trial' ? `${key.variant} ${key.caseId} #${key.trial + 1}` : `${key.candidate} vs baseline ${key.caseId}`} ${event.status}`
+                    );
+                    read(event.path).catch(() => {});
+                  }
+                },
+                // Grading starts no client: no connector tokens, only the
+                // run's secrets, for its judges.
+                async requestTokens() {
+                  return { byServer: {}, env: prepared.secrets };
+                },
+              },
+              options.signal
+            )
         );
         await reading.catch(() => {});
         for (const relative of await resultFiles(resultsDir))

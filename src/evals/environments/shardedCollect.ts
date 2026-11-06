@@ -56,6 +56,30 @@ async function placeArtifacts(
   }
 }
 
+/**
+ * A shard's outcome from an environment, even one that throws. `runShard`
+ * promises its failures as its outcome; an environment (a plugin's) that
+ * rejects anyway fails only its own shard, so the run's other shards finish
+ * and keep what they collected, rather than being closed mid-shard.
+ */
+export async function settledShardOutcome(
+  shard: { index: number },
+  signal: AbortSignal,
+  run: () => Promise<ShardOutcome>
+): Promise<ShardOutcome> {
+  try {
+    return await run();
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `The environment failed shard ${shard.index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+      collected: 0,
+      infra: 0,
+      cancelled: signal.aborted,
+    };
+  }
+}
+
 /** The shard a case runs on: every variant and trial of a case share one. */
 export function shardOf(caseId: string, count: number): number {
   return createHash('sha256').update(caseId).digest().readUInt32BE(0) % count;
@@ -260,43 +284,48 @@ export async function collectInEnvironment(
               results.set(keyString(file.key), result);
               await options.onResult?.(file.key, result);
             }));
-        const outcome = await opened.runShard(
-          {
-            runId: options.runId,
-            index,
-            count,
-            work: 'collect',
-            bundleDir,
-            resultsDir,
-          },
-          {
-            progress(event) {
-              if (event.type === 'hello') {
-                hellos.set(index, event);
-                log(
-                  `shard ${index + 1}/${count}: ${event.client} on MST ${event.mst}${event.platform ? `, ${event.platform}` : ''}${event.image ? ` (${event.image})` : ''}`
-                );
-              } else if (event.type === 'trial') {
-                giveBack(keyString(event.key));
-                log(
-                  `shard ${index + 1}/${count}: ${event.key.variant} ${event.key.caseId} #${event.key.trial + 1} ${event.status}`
-                );
-                read(event.path).catch(() => {});
-              }
-            },
-            async requestTokens({ servers }) {
-              return {
-                byServer:
-                  (await options.connectorTokens?.tokens(servers)) ?? {},
-                env: options.secrets,
-              };
-            },
-            async acquire(key) {
-              const id = keyString(key);
-              held.set(id, await limiter.acquire(resources.get(id) ?? []));
-            },
-          },
-          options.signal
+        const outcome = await settledShardOutcome(
+          { index },
+          options.signal,
+          () =>
+            opened.runShard(
+              {
+                runId: options.runId,
+                index,
+                count,
+                work: 'collect',
+                bundleDir,
+                resultsDir,
+              },
+              {
+                progress(event) {
+                  if (event.type === 'hello') {
+                    hellos.set(index, event);
+                    log(
+                      `shard ${index + 1}/${count}: ${event.client} on MST ${event.mst}${event.platform ? `, ${event.platform}` : ''}${event.image ? ` (${event.image})` : ''}`
+                    );
+                  } else if (event.type === 'trial') {
+                    giveBack(keyString(event.key));
+                    log(
+                      `shard ${index + 1}/${count}: ${event.key.variant} ${event.key.caseId} #${event.key.trial + 1} ${event.status}`
+                    );
+                    read(event.path).catch(() => {});
+                  }
+                },
+                async requestTokens({ servers }) {
+                  return {
+                    byServer:
+                      (await options.connectorTokens?.tokens(servers)) ?? {},
+                    env: options.secrets,
+                  };
+                },
+                async acquire(key) {
+                  const id = keyString(key);
+                  held.set(id, await limiter.acquire(resources.get(id) ?? []));
+                },
+              },
+              options.signal
+            )
         );
         // A shard that ended gives back whatever its trials still held.
         for (const key of [...held.keys()]) giveBack(key);

@@ -703,7 +703,96 @@ describe('collectShard', () => {
   });
 });
 
+describe('runShardOverChannel failures before the worker speaks', () => {
+  it("reports a bundle it couldn't stage as the shard's outcome", async () => {
+    const { channel } = scriptedChannel([]);
+    let launched = false;
+    channel.put = async () => {
+      throw new Error('scp: connection reset');
+    };
+    const exec = channel.exec.bind(channel);
+    channel.exec = (argv, io) => {
+      launched = true;
+      return exec(argv, io);
+    };
+    expect(
+      await runShardOverChannel(
+        channel,
+        spec,
+        quiet,
+        new AbortController().signal
+      )
+    ).toEqual({
+      ok: false,
+      reason:
+        "Couldn't copy the shard's bundle to its machine: scp: connection reset",
+      collected: 0,
+      infra: 0,
+      cancelled: false,
+    });
+    expect(launched).toBe(false);
+  });
+
+  it("reports a worker it couldn't start as the shard's outcome", async () => {
+    const { channel } = scriptedChannel([]);
+    channel.exec = () => {
+      throw new Error('docker exec: container is not running');
+    };
+    expect(
+      await runShardOverChannel(
+        channel,
+        spec,
+        quiet,
+        new AbortController().signal
+      )
+    ).toEqual({
+      ok: false,
+      reason:
+        "Couldn't start the worker on the shard's machine: docker exec: container is not running",
+      collected: 0,
+      infra: 0,
+      cancelled: false,
+    });
+  });
+});
+
 describe('machineEnvironment', () => {
+  it("folds a machine it couldn't delete into the shard's outcome, keeping a good shard good", async () => {
+    const finish = (stdout: string[], keep: 'never' | 'failed') =>
+      machineEnvironment(
+        { ...context(), keep },
+        async () => ({
+          id: 'machine-1',
+          channel: scriptedChannel(stdout).channel,
+          async dispose() {
+            throw new Error('docker rm: device or resource busy');
+          },
+        }),
+        { silenceMs: 50, cancelGraceMs: 10 }
+      ).runShard(spec, quiet, new AbortController().signal);
+    const done = JSON.stringify({
+      type: 'done',
+      collected: 2,
+      infra: 0,
+      cancelled: false,
+      cleanup: 'ok',
+    });
+    expect(await finish([done], 'never')).toEqual({
+      ok: true,
+      collected: 2,
+      infra: 0,
+      cancelled: false,
+      note: "Couldn't delete the shard's machine: docker rm: device or resource busy",
+    });
+    // A failed shard's machine is kept for inspection: releasing it failed.
+    expect(await finish([], 'failed')).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(
+        /^The worker sent nothing for 0 s.* Couldn't release the shard's machine: docker rm: device or resource busy$/
+      ),
+    });
+  });
+
   it("reports a machine it couldn't create as the shard's outcome", async () => {
     const environment = machineEnvironment(context(), async () => {
       throw new Error('no capacity in us-west1-b');

@@ -162,6 +162,71 @@ describe('collectInEnvironment', () => {
     ]);
   });
 
+  it('contains an environment that throws to its shard: the other shards finish, keep their results, and close once', async () => {
+    // 'a' hashes to shard 1, 'c' to shard 2 (shardOf).
+    const order: string[] = [];
+    let releaseHealthy!: () => void;
+    const healthyMayFinish = new Promise<void>((resolve) => {
+      releaseHealthy = resolve;
+    });
+    const env = environment(async (shard, events) => {
+      if (shard.index === 0) {
+        order.push('shard-1 threw');
+        // Let the healthy sibling finish only after the throw has propagated.
+        setTimeout(releaseHealthy, 20);
+        throw new Error('the machine API returned 503');
+      }
+      await healthyMayFinish;
+      await fs.mkdir(path.join(shard.resultsDir, '0'), { recursive: true });
+      await fs.writeFile(
+        path.join(shard.resultsDir, '0/0.json'),
+        JSON.stringify({
+          format: SHARD_PROTOCOL,
+          kind: 'client-result',
+          key: { variant: 'baseline', caseId: 'c', trial: 0 },
+          result: { finalText: 'from the healthy shard', events: [] },
+        })
+      );
+      events.progress({
+        type: 'trial',
+        key: { variant: 'baseline', caseId: 'c', trial: 0 },
+        status: 'collected',
+        path: '0/0.json',
+      });
+      order.push('shard-2 finished');
+      return ok;
+    }, 2);
+    const open = env.definition.open;
+    env.definition.open = async (options, context) => {
+      const opened = await open(options, context);
+      return {
+        ...opened,
+        async close() {
+          order.push('closed');
+        },
+      };
+    };
+    const gathered = await collect(env, ['a', 'c']);
+    expect(order).toEqual(['shard-1 threw', 'shard-2 finished', 'closed']);
+    expect(gathered.outcomes[0]).toEqual({
+      ok: false,
+      reason: 'The environment failed shard 1: the machine API returned 503',
+      collected: 0,
+      infra: 0,
+      cancelled: false,
+    });
+    expect(gathered.outcomes[1]).toEqual(ok);
+    expect(
+      gathered.result({ variant: 'baseline', caseId: 'c', trial: 0 })
+    ).toMatchObject({ finalText: 'from the healthy shard' });
+    expect(gathered.missing).toEqual([
+      { variant: 'baseline', caseId: 'a', trial: 0 },
+    ]);
+    expect(
+      gathered.result({ variant: 'baseline', caseId: 'a', trial: 0 }).error
+    ).toContain('the machine API returned 503');
+  });
+
   it('finds a result announced before its file was copied back', async () => {
     const gathered = await collect(
       environment(async (shard, events) => {
