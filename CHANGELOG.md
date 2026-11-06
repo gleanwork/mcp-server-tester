@@ -17,6 +17,25 @@
 
 
 
+
+## v2.0.0-rc.0 (2026-11-06)
+
+#### :boom: Breaking Change
+* [#532](https://github.com/gleanwork/mcp-server-tester/pull/532) feat!: the Codex CLI client is codex-cli ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#494](https://github.com/gleanwork/mcp-server-tester/pull/494) feat(clients): Codex and ChatGPT in the docker environment and on VMs, headless docker shards ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#487](https://github.com/gleanwork/mcp-server-tester/pull/487) feat(cowork): Cowork on MST's Linux desktop can reach public hosts (coworkSetup.egressAllowedHosts, default *) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :rocket: Enhancement
+* [#532](https://github.com/gleanwork/mcp-server-tester/pull/532) feat!: the Codex CLI client is codex-cli ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#494](https://github.com/gleanwork/mcp-server-tester/pull/494) feat(clients): Codex and ChatGPT in the docker environment and on VMs, headless docker shards ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#489](https://github.com/gleanwork/mcp-server-tester/pull/489) feat(connectors): a connector's launch gets the run's ID (runId) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#488](https://github.com/gleanwork/mcp-server-tester/pull/488) feat(cowork): an eval can turn off Cowork built-in tools on MST's Linux desktop (coworkSetup.disabledBuiltinTools) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#486](https://github.com/gleanwork/mcp-server-tester/pull/486) feat(cowork): trials record TTFT, tool approvals, final context and web searches; resume keeps model calls and host telemetry ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### Committers: 2
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
 ## Unreleased
 
 - The `codex-cli` client gives its model calls the request IDs the host's telemetry names them by, through the same helper Cowork and Claude Code use, so every built-in client's trace joins host events to model requests by one rule. A host event can now name a call by its response ID (`response_id`, `gen_ai.response.id`) as well as by one of its message entries (`message_uuid`); Codex's record has response IDs and no entries. Codex 0.160's own `codex.api_request` events carry neither a request nor a response ID, so for Codex today this changes the code path, not the trace.
