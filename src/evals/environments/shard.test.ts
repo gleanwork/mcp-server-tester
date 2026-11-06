@@ -225,19 +225,23 @@ describe('a shard in a child-process environment', () => {
         batchLifecycle: { closed: true },
       });
       if (infrastructure) {
-        // The worker copies artifacts after the batch, so a cleanup failure
-        // is the first of MST's failures: it stands, in ending and kind.
+        // The first of MST's failures stands, in ending and kind: the
+        // worker's early save copies artifacts during the batch, before the
+        // desktop's cleanup.
         expect(result.result.ending).toEqual({
           kind: 'infrastructure',
-          broke: failClose ? 'client-app' : 'collection',
+          broke: missingArtifacts ? 'collection' : 'client-app',
           retryable: true,
           reason: expect.stringContaining(
-            failClose ? 'cleanup failed' : "Couldn't copy"
+            missingArtifacts ? "Couldn't copy" : 'cleanup failed'
           ),
         });
         expect(result.result).toMatchObject({
-          diagnostics: { failureKind: failClose ? 'cleanup' : 'artifacts' },
+          diagnostics: {
+            failureKind: missingArtifacts ? 'artifacts' : 'cleanup',
+          },
         });
+        if (failClose) expect(result.result.error).toContain('cleanup failed');
       } else {
         expect(result.result.ending).toEqual(
           explicitEnding ? { kind: 'trial' } : undefined

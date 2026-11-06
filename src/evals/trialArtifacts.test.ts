@@ -313,5 +313,9 @@ describe('withCopiedArtifacts', () => {
     // What broke first stands.
     const timedOut = await execute({ id: 'deadline' } as EvalCase);
     expect(timedOut.ending).toEqual(deadline);
+    // Both failures' messages are kept.
+    expect(timedOut.error).toMatch(
+      /^timed out Couldn't copy the trial's client artifacts/
+    );
   });
 });

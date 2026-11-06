@@ -89,24 +89,24 @@ function parseInclude(include: readonly string[]): Array<RegExp[] | 'all'> {
 }
 
 /**
- * What a client's result becomes when MST couldn't copy its artifacts
- * (`error` is the copy's message, or the messages so far): no artifacts, and
- * the collection failure's ending and failure kind unless the attempt
- * already was an infrastructure failure (`failedAfterClient`). The worker,
- * the coordinator and the local run all end a failed copy this way.
+ * What an attempt becomes when MST couldn't copy its artifacts: the copy's
+ * `message` after any error it already had, and the collection failure's
+ * ending and failure kind unless the attempt already was an infrastructure
+ * failure (`failedAfterClient`). The worker, the coordinator and the local
+ * run all end a failed copy this way.
  */
 export function afterCopyFailed(
-  result: ClientRunResult,
-  error: string
+  attempt: Pick<ClientRunResult, 'diagnostics' | 'error' | 'ending'>,
+  message: string
 ): Pick<ClientRunResult, 'diagnostics' | 'error' | 'ending'> {
-  const { ending, failureKind } = failedAfterClient(result, {
+  const { ending, failureKind } = failedAfterClient(attempt, {
     broke: 'collection',
     kind: 'artifacts',
-    reason: error,
+    reason: message,
   });
   return {
-    diagnostics: { ...result.diagnostics, failureKind },
-    error,
+    diagnostics: { ...attempt.diagnostics, failureKind },
+    error: [...new Set([attempt.error, message].filter(Boolean))].join(' '),
     ending,
   };
 }
@@ -234,17 +234,23 @@ export function withCopiedArtifacts(
       const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
       // MST couldn't collect the trial, whatever the client said; a failure
       // the attempt already had stands.
-      const previous = execution.diagnostics ?? response.diagnostics;
-      const { ending, failureKind } = failedAfterClient(
-        { ending: executionEnding(execution), diagnostics: previous },
-        { broke: 'collection', kind: 'artifacts', reason: message }
+      const {
+        diagnostics,
+        error: failure,
+        ending,
+      } = afterCopyFailed(
+        {
+          ending: executionEnding(execution),
+          error: execution.error,
+          diagnostics: execution.diagnostics ?? response.diagnostics,
+        },
+        message
       );
-      const diagnostics = { ...previous, failureKind };
       return {
         ...execution,
         response: { ...response, diagnostics },
         diagnostics,
-        error: message,
+        error: failure,
         ending,
       };
     }

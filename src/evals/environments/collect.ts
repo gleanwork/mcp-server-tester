@@ -313,15 +313,24 @@ export async function collectShard(
       // An early save may have consumed temporary diagnosis files. Reuse its
       // copy, or retain its copy failure, rather than recopying missing files.
       const { artifacts: _source, ...rest } = redacted;
-      // The early save had artifacts to copy and stored none: its copy failed.
+      // The early save had artifacts to copy and stored none: its copy
+      // failed, before anything that failed the result since (the desktop's
+      // cleanup), so its failure is the one that stands.
       const copyFailed = !previous.stored.artifacts;
-      const error = [
-        ...new Set([previous.stored.error, rest.error].filter(Boolean)),
-      ].join(' ');
       stored = {
         ...rest,
         ...(copyFailed
-          ? afterCopyFailed(rest, error)
+          ? {
+              ending: previous.stored.ending,
+              diagnostics: {
+                ...rest.diagnostics,
+                failureKind:
+                  previous.stored.diagnostics?.failureKind ?? 'artifacts',
+              },
+              error: [
+                ...new Set([previous.stored.error, rest.error].filter(Boolean)),
+              ].join(' '),
+            }
           : { artifacts: previous.stored.artifacts }),
       };
     } else if (redacted.artifacts) {
