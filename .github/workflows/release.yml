@@ -1,0 +1,163 @@
+name: Release
+
+# Releases run here rather than on a laptop. npm trusted publishing (OIDC)
+# lets this workflow publish without an npm token or a one-time password: the
+# package's trusted publisher on npmjs.com names this file and the `npm`
+# environment, and the environment only deploys from main. The release commit
+# and tag are pushed as the org's `gleanwork-ci` GitHub App, which main's
+# protection lets bypass pull requests. See RELEASE.md.
+#
+#   gh workflow run release.yml -f increment=prerelease -f pre_release=beta
+#   gh workflow run release.yml -f increment=major -f dry_run=true
+#
+# A pull request that changes the release setup gets a dry run.
+on:
+  workflow_dispatch:
+    inputs:
+      increment:
+        description: Version increment
+        required: true
+        type: choice
+        options:
+          - prerelease
+          - patch
+          - minor
+          - major
+      pre_release:
+        description: Prerelease identifier (beta, rc). Empty for a final release.
+        type: string
+        default: ''
+      dry_run:
+        description: Print what the release would do, and change nothing
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .release-it.js
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Dry run
+    # Pull requests from forks can't check out their branch from this repo.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.dry_run) ||
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read # lerna-changelog reads the merged pull requests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The changelog is built from the history since the last tag.
+          fetch-depth: 0
+          # A branch with an upstream, not the pull request's merge commit:
+          # release-it requires one.
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Setup mise
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `npm publish --dry-run` runs prepublishOnly, so this also builds and
+      # tests the package the release would publish.
+      - name: Dry run
+        run: |
+          args=("$INCREMENT" --ci --dry-run)
+          if [ -n "$PRE_RELEASE" ]; then args+=("--preRelease=$PRE_RELEASE"); fi
+          npx release-it "${args[@]}"
+        env:
+          # A pull request's dry run rehearses the next beta.
+          INCREMENT: ${{ github.event_name == 'pull_request' && 'prerelease' || inputs.increment }}
+          PRE_RELEASE: ${{ github.event_name == 'pull_request' && 'beta' || inputs.pre_release }}
+          GITHUB_AUTH: ${{ github.token }}
+
+  release:
+    name: Release
+    if: github.event_name == 'workflow_dispatch' && !inputs.dry_run
+    runs-on: ubuntu-24.04
+    # npm's trusted publisher accepts only this environment, and the
+    # environment only deploys from main.
+    environment: npm
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing (OIDC)
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Releases run from main, not $GITHUB_REF."
+          exit 1
+
+      # The release commit goes straight to main, which requires pull requests.
+      # GITHUB_TOKEN can't bypass that; the gleanwork-ci app can. Its
+      # credentials are the org secrets other gleanwork workflows use.
+      - name: Mint the app's token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: gleanwork
+          repositories: mcp-server-tester
+
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup mise
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+      # Trusted publishing needs npm 11.5.1 or later. npm 12.2.1 fails to
+      # publish with OIDC: it rejects the token that its OIDC step sets as an
+      # unknown CLI flag (EUNKNOWNCONFIG), so stay on npm 11.
+      - name: Use npm 11
+        run: |
+          npm install --global npm@11
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Commit as the app
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+
+      # Bumps the version, publishes to npm (prepublishOnly builds and tests
+      # first; a prerelease publishes under its identifier as the dist-tag),
+      # then commits, tags, pushes, and creates the GitHub release.
+      - name: Release
+        run: |
+          args=("$INCREMENT" --ci)
+          if [ -n "$PRE_RELEASE" ]; then args+=("--preRelease=$PRE_RELEASE"); fi
+          npx release-it "${args[@]}"
+        env:
+          INCREMENT: ${{ inputs.increment }}
+          PRE_RELEASE: ${{ inputs.pre_release }}
+          GITHUB_AUTH: ${{ steps.app-token.outputs.token }}
+
+      - name: Summary
+        run: |
+          version="$(jq -r .version package.json)"
+          {
+            echo "Released [v$version](https://github.com/$GITHUB_REPOSITORY/releases/tag/v$version)."
+            echo "npm: https://www.npmjs.com/package/@gleanwork/mcp-server-tester/v/$version"
+          } >> "$GITHUB_STEP_SUMMARY"
