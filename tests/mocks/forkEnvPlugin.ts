@@ -1,7 +1,9 @@
 /**
  * The fork environment as a plugin, `fork/env/children`, for runs through
  * `runEval` and the CLI. `--env-option fail=<n>` loses shard n's machine;
- * `workerEnv=<JSON object>` sets variables in the workers' environment only.
+ * `throw=<n>` makes `runShard` reject for shard n, as an environment that
+ * breaks its contract does; `workerEnv=<JSON object>` sets variables in the
+ * workers' environment only.
  */
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -17,6 +19,7 @@ export default {
       schema: z
         .object({
           fail: z.coerce.number().optional(),
+          throw: z.coerce.number().optional(),
           workerEnv: z.string().optional(),
         })
         .strict(),
@@ -40,7 +43,13 @@ export default {
         return {
           // Whatever work its machines' channel runs: collect and grade.
           work: environment.work,
-          runShard: environment.runShard.bind(environment),
+          async runShard(shard, events, signal) {
+            if (shard.index === options.throw)
+              throw new Error(
+                `the environment threw for shard ${shard.index + 1}`
+              );
+            return environment.runShard(shard, events, signal);
+          },
           async close() {
             await environment.close();
             await fs.rm(root, { recursive: true, force: true });

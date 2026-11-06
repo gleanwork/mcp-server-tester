@@ -162,6 +162,204 @@ describe('collectInEnvironment', () => {
     ]);
   });
 
+  it('contains an environment that throws to its shard: the other shards finish, keep their results, and close once', async () => {
+    // 'a' hashes to shard 1, 'c' to shard 2 (shardOf).
+    const order: string[] = [];
+    let releaseHealthy!: () => void;
+    const healthyMayFinish = new Promise<void>((resolve) => {
+      releaseHealthy = resolve;
+    });
+    const env = environment(async (shard, events) => {
+      if (shard.index === 0) {
+        order.push('shard-1 threw');
+        // Let the healthy sibling finish only after the throw has propagated.
+        setTimeout(releaseHealthy, 20);
+        throw new Error('the machine API returned 503');
+      }
+      await healthyMayFinish;
+      await fs.mkdir(path.join(shard.resultsDir, '0'), { recursive: true });
+      await fs.writeFile(
+        path.join(shard.resultsDir, '0/0.json'),
+        JSON.stringify({
+          format: SHARD_PROTOCOL,
+          kind: 'client-result',
+          key: { variant: 'baseline', caseId: 'c', trial: 0 },
+          result: { finalText: 'from the healthy shard', events: [] },
+        })
+      );
+      events.progress({
+        type: 'trial',
+        key: { variant: 'baseline', caseId: 'c', trial: 0 },
+        status: 'collected',
+        path: '0/0.json',
+      });
+      order.push('shard-2 finished');
+      return ok;
+    }, 2);
+    const open = env.definition.open;
+    env.definition.open = async (options, context) => {
+      const opened = await open(options, context);
+      return {
+        ...opened,
+        async close() {
+          order.push('closed');
+        },
+      };
+    };
+    const gathered = await collect(env, ['a', 'c']);
+    expect(order).toEqual(['shard-1 threw', 'shard-2 finished', 'closed']);
+    expect(gathered.outcomes[0]).toEqual({
+      ok: false,
+      reason: 'Shard 1 failed: the machine API returned 503',
+      collected: 0,
+      infra: 0,
+      cancelled: false,
+    });
+    expect(gathered.outcomes[1]).toEqual(ok);
+    expect(
+      gathered.result({ variant: 'baseline', caseId: 'c', trial: 0 })
+    ).toMatchObject({ finalText: 'from the healthy shard' });
+    expect(gathered.missing).toEqual([
+      { variant: 'baseline', caseId: 'a', trial: 0 },
+    ]);
+    expect(
+      gathered.result({ variant: 'baseline', caseId: 'a', trial: 0 }).error
+    ).toContain('the machine API returned 503');
+  });
+
+  it("fails only the shard whose bundle can't be written; the other shard runs", async () => {
+    // 'a' hashes to shard 1, 'c' to shard 2. Shard 1's directory is a file.
+    const ran: number[] = [];
+    const env = environment(async (shard) => {
+      ran.push(shard.index);
+      return ok;
+    }, 2);
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
+    dirs.push(workDir);
+    await fs.writeFile(path.join(workDir, 'shard-0'), 'not a directory');
+    const gathered = await collectInEnvironment({
+      environment: env,
+      runId: 'run-1',
+      evalConfig: { name: 'gather' } as EvalConfig,
+      plugins: [],
+      groups: [
+        {
+          variant: { name: 'baseline' },
+          requests: ['a', 'c'].map((caseId) => ({
+            caseId,
+            trial: 0,
+            config: { type: 'api' },
+            input: { prompt: caseId, servers: [] },
+          })),
+        },
+      ],
+      secrets: {},
+      workDir,
+      signal: new AbortController().signal,
+    });
+    expect(ran).toEqual([1]);
+    expect(gathered.outcomes[0]).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/^Shard 1 failed: /),
+    });
+    expect(gathered.outcomes[1]).toEqual(ok);
+    // The fake writes no results, so both are missing; only 'a' for the
+    // bundle.
+    expect(
+      gathered.result({ variant: 'baseline', caseId: 'a', trial: 0 }).error
+    ).toMatch(/shard 1 ended before this trial came back \(Shard 1 failed: /);
+    expect(
+      gathered.result({ variant: 'baseline', caseId: 'c', trial: 0 }).error
+    ).toMatch(/shard 2 ended before this trial came back \(no result\)/);
+  });
+
+  it('gives back room a shard was still waiting for when it ended, so a sibling can take it', async () => {
+    // One slot for the shared server. Shard 1 ('a') queues for it behind
+    // shard 2 ('c' #1), then throws; shard 2's second trial needs the slot.
+    const order: string[] = [];
+    let healthyAcquired!: () => void;
+    const healthyHasRoom = new Promise<void>((resolve) => {
+      healthyAcquired = resolve;
+    });
+    let failedEnded!: () => void;
+    const failedShardEnded = new Promise<void>((resolve) => {
+      failedEnded = resolve;
+    });
+    const key = (caseId: string, trial = 0) => ({
+      variant: 'baseline',
+      caseId,
+      trial,
+    });
+    const env = environment(async (shard, events) => {
+      if (shard.index === 0) {
+        await healthyHasRoom;
+        void events.acquire!(key('a')).then(() => order.push('a got room'));
+        order.push('shard 1 waits for room, then throws');
+        throw new Error('channel gone while waiting for room');
+      }
+      await events.acquire!(key('c'));
+      order.push('c #1 has room');
+      healthyAcquired();
+      await failedShardEnded;
+      events.progress({
+        type: 'trial',
+        key: key('c'),
+        status: 'collected',
+        path: '0/0.json',
+      });
+      await events.acquire!(key('c', 1));
+      order.push('c #2 has room');
+      return { ...ok, collected: 2 };
+    }, 2);
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
+    dirs.push(workDir);
+    const server = {
+      transport: 'http' as const,
+      label: 'shared',
+      serverUrl: 'https://example.invalid/mcp',
+    };
+    let hangGuard: NodeJS.Timeout | undefined;
+    const gathered = await Promise.race([
+      collectInEnvironment({
+        environment: env,
+        runId: 'run-1',
+        evalConfig: { name: 'gather' } as EvalConfig,
+        plugins: [],
+        limits: { servers: { shared: 1 } },
+        groups: [
+          {
+            variant: { name: 'baseline' },
+            requests: [key('a'), key('c'), key('c', 1)].map(
+              ({ caseId, trial }) => ({
+                caseId,
+                trial,
+                config: { type: 'api' },
+                input: { prompt: caseId, servers: [server] },
+              })
+            ),
+          },
+        ],
+        secrets: {},
+        workDir,
+        signal: new AbortController().signal,
+        log(line) {
+          if (line.startsWith('shard 1/2: stopped:')) failedEnded();
+        },
+      }),
+      new Promise<'hung'>((resolve) => {
+        hangGuard = setTimeout(() => resolve('hung'), 2000);
+      }),
+    ]);
+    clearTimeout(hangGuard);
+    expect(gathered).not.toBe('hung');
+    expect(order).toEqual([
+      'c #1 has room',
+      'shard 1 waits for room, then throws',
+      'a got room',
+      'c #2 has room',
+    ]);
+  });
+
   it('finds a result announced before its file was copied back', async () => {
     const gathered = await collect(
       environment(async (shard, events) => {
