@@ -22,7 +22,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkDesktop } from './desktop.js';
 import { transportServers } from '../evalConfig.js';
 import { credentialHelperScript } from '../coworkSetup/credentialHelper.js';
-import { resolveCoworkMcpHeaders } from '../coworkSetup/config.js';
+import {
+  resolveCoworkMcpHeaders,
+  toCoworkServers,
+} from '../coworkSetup/config.js';
 import {
   clientStdioFileContents,
   clientStdioServers,
@@ -376,8 +379,13 @@ async function writeServerHeaders(
   for (const [index, server] of servers.entries()) {
     if (server.transport !== 'http') continue;
     const name = mcpServerLabel(server, index);
+    // Only what Cowork reads, as on macOS: MST's own settings, such as
+    // `requestTimeoutMs` for its readiness check, aren't Claude Desktop's.
     const headers = Object.values(
-      resolveCoworkMcpHeaders([{ ...server, label: name }], env)
+      resolveCoworkMcpHeaders(
+        toCoworkServers([{ ...server, label: name }]),
+        env
+      )
     )[0]!;
     if (Object.keys(headers).length === 0) continue;
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name))

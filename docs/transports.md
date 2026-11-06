@@ -38,6 +38,11 @@ proxies and mixed HTTP/stdio sets. Its client-resolved fields (`url`, `auth`,
 `files`, `minTools`, and placeholders) are not portable to ChatGPT or direct
 MCP clients. ChatGPT plugin-specific overrides use `plugins[].mcp` instead.
 
+Over HTTP, `chatgpt` and `codex-app` take a bearer token only: an HTTP server
+with `headers` or OAuth fails before the app starts
+([ChatGPT guide](./chatgpt-desktop.md)). Cowork takes `headers` and a bearer
+token.
+
 Cowork rejects `inheritEnv: true`; declare the server environment explicitly.
 It implements `cwd` with a fixed argv wrapper, not shell-interpolated values.
 Mac setup owns the private files and runtime paths; Linux setup checks

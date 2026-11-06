@@ -136,10 +136,16 @@ function describeServers(servers: MCPConfig[]): CoworkMcpServer[] {
   const labels = new Set<string>();
   const urls = new Set<string>();
   return Array.from(servers, (server) => {
+    const unsupported = isRecord(server)
+      ? Object.keys(server).filter((key) => !SERVER_KEYS.has(key))
+      : [];
+    if (unsupported.length)
+      throw new Error(
+        `Invalid or unsupported Cowork MCP configuration. Cowork doesn't take ${unsupported.map((key) => JSON.stringify(key)).join(', ')} on an HTTP server; it takes ${[...SERVER_KEYS].join(', ')}.`
+      );
     if (
       !isRecord(server) ||
       server.transport !== 'http' ||
-      Object.keys(server).some((key) => !SERVER_KEYS.has(key)) ||
       typeof server.label !== 'string' ||
       !LABEL_PATTERN.test(server.label) ||
       containsControls(server.label) ||

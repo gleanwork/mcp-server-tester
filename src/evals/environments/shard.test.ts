@@ -14,7 +14,7 @@ import {
   writeShardBundle,
   type ShardTokens,
 } from './protocol.js';
-import type { EvalConfig } from '../evalConfig.js';
+import type { EvalConfig, EvalVariant } from '../evalConfig.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import type {
   EnvironmentContext,
@@ -52,7 +52,12 @@ async function shardIn(
   root: string,
   probe: RequestSpec[],
   batch: RequestSpec[] = [],
-  servers: MCPConfig[] = []
+  servers: MCPConfig[] = [],
+  // The config's and the `candidate` variant's settings beyond their names.
+  settings: {
+    evalConfig?: Partial<EvalConfig>;
+    candidate?: Partial<EvalVariant>;
+  } = {}
 ): Promise<ShardSpec> {
   const bundleDir = path.join(root, 'bundle');
   const request = (type: string) => (spec: RequestSpec) => ({
@@ -66,7 +71,7 @@ async function shardIn(
     shard: { index: 0, count: 1 },
     mst: packageJson.version,
     plugins: [PLUGIN],
-    evalConfig: { name: 'shard-test' } as EvalConfig,
+    evalConfig: { ...settings.evalConfig, name: 'shard-test' } as EvalConfig,
     tokenServers: ['acme'],
     batches: [
       {
@@ -76,7 +81,7 @@ async function shardIn(
       ...(batch.length
         ? [
             {
-              variant: { name: 'candidate' },
+              variant: { ...settings.candidate, name: 'candidate' },
               requests: batch.map(request('shard-test/client/batch')),
             },
           ]
@@ -306,6 +311,38 @@ describe('a shard in a child-process environment', () => {
       expect(outcome).toMatchObject({ ok: true, collected: 0, infra: 1 });
     }
   );
+
+  it("gives a client its variant's Cowork settings over the config's", async () => {
+    const root = await tempDir();
+    const shard = await shardIn(
+      root,
+      [],
+      [{ caseId: 'a', prompt: 'cowork-setup' }],
+      [],
+      {
+        evalConfig: {
+          coworkSetup: {
+            toolSearch: true,
+            disabledBuiltinTools: ['WebSearch'],
+          },
+        },
+        candidate: { coworkSetup: { toolSearch: false } },
+      }
+    );
+    const { events } = recorder([() => ({ byServer: {}, env: {} })]);
+    const outcome = await forkEnvironment(context(), root, {}).runShard(
+      shard,
+      events,
+      new AbortController().signal
+    );
+
+    expect(outcome).toMatchObject({ ok: true, collected: 1 });
+    const a = await readClientResult(path.join(shard.resultsDir, '1/0.json'));
+    expect(JSON.parse(a.result.finalText)).toMatchObject({
+      toolSearch: false,
+      disabledBuiltinTools: ['WebSearch'],
+    });
+  });
 
   it('runs end to end, renewing a token mid-trial', async () => {
     const root = await tempDir();

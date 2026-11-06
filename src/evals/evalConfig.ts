@@ -16,6 +16,7 @@ import type {
 } from '../types/index.js';
 import {
   CoworkSetupConfigSchema,
+  resolveCoworkSetupConfig,
   type CoworkSetupConfig,
 } from './coworkSetup/options.js';
 import {
@@ -238,6 +239,28 @@ export function variantToolMetadata(
       ? { description: variant.description }
       : {}),
     tools,
+  };
+}
+
+/**
+ * The eval config a variant's client runs with: the variant's settings over
+ * the config's, with `coworkSetup` merged field by field. A local run and a
+ * shard's `mst collect` both give a client this, so a variant's settings
+ * apply wherever its trials run.
+ */
+export function variantEvalConfig(
+  evalConfig: EvalConfig,
+  variant: EvalVariant
+): EvalConfig {
+  return {
+    ...evalConfig,
+    ...variant,
+    coworkSetup: resolveCoworkSetupConfig(
+      evalConfig.coworkSetup,
+      variant.coworkSetup
+    ),
+    name: evalConfig.name,
+    datasets: evalConfig.datasets,
   };
 }
 
