@@ -267,4 +267,51 @@ describe('withCopiedArtifacts', () => {
       `${trialArtifactsPath('v', 'c1', 0)}/outputs/report.md`,
     ]);
   });
+
+  it('makes a trial whose artifacts it could not copy an infrastructure failure, and keeps one the client already had', async () => {
+    const root = await tree({});
+    const missing = path.join(root, 'gone');
+    const deadline = {
+      kind: 'infrastructure' as const,
+      broke: 'deadline' as const,
+      retryable: true,
+      reason: 'Timed out.',
+    };
+    const executions: Record<string, CaseExecution> = {
+      // As `clientRunToExecution` places a client's ending.
+      trial: {
+        kind: 'completed',
+        ending: { kind: 'trial' },
+        response: {
+          response: 'a correct answer',
+          artifacts: { dir: missing, include: ['**'] },
+        },
+      } as unknown as CaseExecution,
+      deadline: {
+        kind: 'completed',
+        ending: deadline,
+        error: 'timed out',
+        response: {
+          response: '',
+          artifacts: { dir: missing, include: ['**'] },
+        },
+      } as unknown as CaseExecution,
+    };
+    const execute = withCopiedArtifacts(
+      async (evalCase) => executions[evalCase.id]!,
+      root,
+      'v'
+    );
+    const trial = await execute({ id: 'trial' } as EvalCase);
+    expect(trial.error).toContain("Couldn't copy the trial's client artifacts");
+    expect(trial.ending).toEqual({
+      kind: 'infrastructure',
+      broke: 'collection',
+      retryable: true,
+      reason: trial.error,
+    });
+    // What broke first stands.
+    const timedOut = await execute({ id: 'deadline' } as EvalCase);
+    expect(timedOut.ending).toEqual(deadline);
+  });
 });

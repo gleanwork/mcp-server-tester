@@ -5,7 +5,9 @@ import {
   caseIncompleteness,
   contextOverflowEnding,
   endingOf,
+  failedAfterClientEnding,
   isCounted,
+  resumeCollects,
   thrownEnding,
   TRIAL_ENDING,
 } from './trialEnding.js';
@@ -154,6 +156,46 @@ describe('endingOf', () => {
     ],
   ])('maps a stored record from before endings: %s', (_, record, expected) => {
     expect(endingOf(record)).toMatchObject(expected);
+  });
+});
+
+describe('failedAfterClientEnding', () => {
+  it('makes a trial, or an untyped attempt, a retryable failure of what broke after the client', () => {
+    for (const existing of [TRIAL_ENDING, undefined]) {
+      const ending = failedAfterClientEnding(
+        existing,
+        'collection',
+        "Couldn't copy."
+      );
+      expect(ending).toEqual({
+        kind: 'infrastructure',
+        broke: 'collection',
+        retryable: true,
+        reason: "Couldn't copy.",
+      });
+      // Not counted, and a resume collects it again.
+      expect(isCounted({ ending })).toBe(false);
+      expect(resumeCollects({ ending })).toBe(true);
+    }
+    expect(
+      failedAfterClientEnding(TRIAL_ENDING, 'client-app', 'Cleanup failed.')
+    ).toMatchObject({ broke: 'client-app', retryable: true });
+  });
+
+  it("keeps the attempt's own infrastructure failure: what broke first", () => {
+    const deadline = {
+      kind: 'infrastructure' as const,
+      broke: 'deadline' as const,
+      retryable: true,
+      reason: 'Timed out.',
+    };
+    expect(
+      failedAfterClientEnding(deadline, 'collection', "Couldn't copy.")
+    ).toBe(deadline);
+    const setup = { ...deadline, broke: 'setup' as const, retryable: false };
+    expect(failedAfterClientEnding(setup, 'client-app', 'Cleanup.')).toBe(
+      setup
+    );
   });
 });
 

@@ -27,7 +27,11 @@ import {
   type ConnectorServerConfig,
   type EvalServerConfig,
 } from '../evalConfig.js';
-import { isInfrastructure } from '../trialEnding.js';
+import {
+  endingOf,
+  failedAfterClientEnding,
+  isInfrastructure,
+} from '../trialEnding.js';
 import { collectClientBatch } from '../desktopBatch.js';
 import {
   batchName,
@@ -313,20 +317,28 @@ export async function collectShard(
       // An early save may have consumed temporary diagnosis files. Reuse its
       // copy, or retain its copy failure, rather than recopying missing files.
       const { artifacts: _source, ...rest } = redacted;
+      const copyFailed =
+        previous.stored.diagnostics?.failureKind === 'artifacts';
+      const error = [
+        ...new Set([previous.stored.error, rest.error].filter(Boolean)),
+      ].join(' ');
       stored = {
         ...rest,
         ...(previous.stored.artifacts
           ? { artifacts: previous.stored.artifacts }
           : {}),
-        ...(previous.stored.diagnostics?.failureKind === 'artifacts'
+        ...(copyFailed
           ? {
               diagnostics: {
                 ...rest.diagnostics,
                 failureKind: 'artifacts' as const,
               },
-              error: [
-                ...new Set([previous.stored.error, rest.error].filter(Boolean)),
-              ].join(' '),
+              error,
+              ending: failedAfterClientEnding(
+                endingOf(rest),
+                'collection',
+                error
+              ),
             }
           : {}),
       };
@@ -337,10 +349,17 @@ export async function collectShard(
         await copyArtifacts(artifacts, path.join(options.resultsDir, dir));
         stored = { ...rest, artifacts: { dir, include: ALL_ARTIFACTS } };
       } catch (error) {
+        const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
         stored = {
           ...rest,
           diagnostics: { ...rest.diagnostics, failureKind: 'artifacts' },
-          error: `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`,
+          error: message,
+          // Whatever the client said, MST couldn't collect the trial.
+          ending: failedAfterClientEnding(
+            endingOf(rest),
+            'collection',
+            message
+          ),
         };
       }
     }

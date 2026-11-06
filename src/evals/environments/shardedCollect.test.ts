@@ -5,9 +5,11 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   collectInEnvironment,
+  placeArtifacts,
   requestGroups,
   shardOf,
 } from './shardedCollect.js';
+import type { ClientRunResult } from '../evalFrameworkTypes.js';
 import { SHARD_PROTOCOL } from './protocol.js';
 import type { ResolvedEnvironment } from './builtinEnvironments.js';
 import type { EvalConfig } from '../evalConfig.js';
@@ -110,6 +112,51 @@ describe('shardOf', () => {
         expect(shard).toBeGreaterThanOrEqual(0);
         expect(shard).toBeLessThan(count);
       }
+  });
+});
+
+describe('placeArtifacts', () => {
+  it("makes a trial whose worker copy it can't move an infrastructure failure, and keeps one the client already had", async () => {
+    const resultsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-place-'));
+    dirs.push(resultsDir);
+    const target = async () => path.join(resultsDir, 'run', 'artifacts');
+    const missing = { dir: '0/0.artifacts', include: ['**'] };
+    const trial = await placeArtifacts(
+      {
+        finalText: 'a correct answer',
+        events: [],
+        ending: { kind: 'trial' },
+        artifacts: missing,
+      } as ClientRunResult,
+      resultsDir,
+      target
+    );
+    expect(trial.error).toContain("Couldn't copy the trial's client artifacts");
+    expect(trial.ending).toEqual({
+      kind: 'infrastructure',
+      broke: 'collection',
+      retryable: true,
+      reason: trial.error,
+    });
+    expect(trial.artifacts).toBeUndefined();
+    const deadline = {
+      kind: 'infrastructure' as const,
+      broke: 'deadline' as const,
+      retryable: true,
+      reason: 'Timed out.',
+    };
+    const timedOut = await placeArtifacts(
+      {
+        finalText: '',
+        events: [],
+        error: 'timed out',
+        ending: deadline,
+        artifacts: missing,
+      } as ClientRunResult,
+      resultsDir,
+      target
+    );
+    expect(timedOut.ending).toBe(deadline);
   });
 });
 
