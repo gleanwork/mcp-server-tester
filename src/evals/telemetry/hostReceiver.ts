@@ -675,8 +675,9 @@ export async function startHostTelemetryReceiver(
  * The model calls with the request IDs the host's telemetry gives them: an
  * event naming a request and one of a call's records (Claude's
  * `assistant_response`, by `message_uuid`) or the call's own response ID
- * (Codex's, by `response_id`) says which request it was. Every client that
- * collects host telemetry applies this, so traces join the same way.
+ * (`response_id`, the ID Codex's record knows a call by) says which request
+ * it was. Every built-in client that collects host telemetry applies this,
+ * so their traces join the same way.
  */
 export function withHostRequestIds(
   calls: readonly ModelCall[] | undefined,

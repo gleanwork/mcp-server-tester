@@ -16,6 +16,7 @@ import { assertClientSupports, getClient } from './builtinClients.js';
 import type { ClientRunContext } from './evalFrameworkTypes.js';
 import type { EvalConfig } from './evalConfig.js';
 import { endingOf } from './trialEnding.js';
+import { hostTelemetryReceiver } from './telemetry/hostReceiver.js';
 
 /** What the fake SDK saw, and how it behaves. */
 const sdk = vi.hoisted(() => ({
@@ -464,7 +465,9 @@ describe('codex-cli client run', () => {
     expect(existsSync(String(sdk.thread!.workingDirectory))).toBe(false);
   });
 
-  it("gives its model calls the request IDs Codex's telemetry names them by, as Cowork and Claude Code do", async () => {
+  it("gives its model calls the request IDs the host's events name them by, as Cowork and Claude Code do", async () => {
+    // Codex 0.160's own `codex.api_request` carries no request or response
+    // ID; these are the attributes an event would need for the join.
     sdk.hostEvents = [
       {
         name: 'codex.api_request',
@@ -472,22 +475,27 @@ describe('codex-cli client run', () => {
       },
       { name: 'codex.api_request', attributes: { request_id: 'req_other' } },
     ];
-    const result = await CODEX_CLIENT.run!(
-      { prompt: 'Find x', servers: [servers[0]!] },
-      { type: 'codex-cli', model: 'gpt-5.5' },
-      {
-        evalConfig: { ...evalConfig, telemetry: { host: {} } },
-        env: GATEWAY,
-      }
-    );
-    expect(result.error).toBeUndefined();
-    expect(result.hostTelemetry?.events.map((event) => event.name)).toEqual([
-      'codex.api_request',
-      'codex.api_request',
-    ]);
-    expect(result.modelCalls).toMatchObject([
-      { id: 'resp_1', requestId: 'req_9' },
-    ]);
+    try {
+      const result = await CODEX_CLIENT.run!(
+        { prompt: 'Find x', servers: [servers[0]!] },
+        { type: 'codex-cli', model: 'gpt-5.5' },
+        {
+          evalConfig: { ...evalConfig, telemetry: { host: {} } },
+          env: GATEWAY,
+        }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.hostTelemetry?.events.map((event) => event.name)).toEqual([
+        'codex.api_request',
+        'codex.api_request',
+      ]);
+      expect(result.modelCalls).toMatchObject([
+        { id: 'resp_1', requestId: 'req_9' },
+      ]);
+    } finally {
+      // The process-wide receiver the trial started.
+      await (await hostTelemetryReceiver({}, { env: GATEWAY })).close();
+    }
   });
 
   it.each([
