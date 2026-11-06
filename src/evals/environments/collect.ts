@@ -38,7 +38,7 @@ import { readinessRetryDelaysMs, readyBatch } from '../readinessCheck.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
-import { copyArtifacts } from '../trialArtifacts.js';
+import { afterCopyFailed, copyArtifacts } from '../trialArtifacts.js';
 import {
   usesToolSurfaceProxy,
   withoutToolVariant,
@@ -313,22 +313,25 @@ export async function collectShard(
       // An early save may have consumed temporary diagnosis files. Reuse its
       // copy, or retain its copy failure, rather than recopying missing files.
       const { artifacts: _source, ...rest } = redacted;
+      // The early save had artifacts to copy and stored none: its copy
+      // failed, before anything that failed the result since (the desktop's
+      // cleanup), so its failure is the one that stands.
+      const copyFailed = !previous.stored.artifacts;
       stored = {
         ...rest,
-        ...(previous.stored.artifacts
-          ? { artifacts: previous.stored.artifacts }
-          : {}),
-        ...(previous.stored.diagnostics?.failureKind === 'artifacts'
+        ...(copyFailed
           ? {
+              ending: previous.stored.ending,
               diagnostics: {
                 ...rest.diagnostics,
-                failureKind: 'artifacts' as const,
+                failureKind:
+                  previous.stored.diagnostics?.failureKind ?? 'artifacts',
               },
               error: [
                 ...new Set([previous.stored.error, rest.error].filter(Boolean)),
               ].join(' '),
             }
-          : {}),
+          : { artifacts: previous.stored.artifacts }),
       };
     } else if (redacted.artifacts) {
       const dir = `${batch}/${index}.artifacts`;
@@ -337,11 +340,8 @@ export async function collectShard(
         await copyArtifacts(artifacts, path.join(options.resultsDir, dir));
         stored = { ...rest, artifacts: { dir, include: ALL_ARTIFACTS } };
       } catch (error) {
-        stored = {
-          ...rest,
-          diagnostics: { ...rest.diagnostics, failureKind: 'artifacts' },
-          error: `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`,
-        };
+        const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
+        stored = { ...rest, ...afterCopyFailed(rest, message) };
       }
     }
     await writeFileAtomically(

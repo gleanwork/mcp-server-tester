@@ -8,11 +8,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { EvalCase } from './datasetTypes.js';
-import type { CaseExecution } from './caseExecution.js';
-import type { ClientArtifacts } from './evalFrameworkTypes.js';
+import { executionEnding, type CaseExecution } from './caseExecution.js';
+import type { ClientArtifacts, ClientRunResult } from './evalFrameworkTypes.js';
 import { trialArtifactsPath } from './runFormat.js';
 import { ALL_ARTIFACTS, DIAGNOSIS_DIR } from './allArtifacts.js';
-import { infrastructureEnding } from './trialEnding.js';
+import { failedAfterClient } from './trialEnding.js';
 import { jsonCopy } from '../utils/jsonFile.js';
 
 /** The most a trial's copy may hold. A copy over a limit fails. */
@@ -86,6 +86,29 @@ function parseInclude(include: readonly string[]): Array<RegExp[] | 'all'> {
       );
     return segments.map(segmentPattern);
   });
+}
+
+/**
+ * What an attempt becomes when MST couldn't copy its artifacts: the copy's
+ * `message` after any error it already had, and the collection failure's
+ * ending and failure kind unless the attempt already was an infrastructure
+ * failure (`failedAfterClient`). The worker, the coordinator and the local
+ * run all end a failed copy this way.
+ */
+export function afterCopyFailed(
+  attempt: Pick<ClientRunResult, 'diagnostics' | 'error' | 'ending'>,
+  message: string
+): Pick<ClientRunResult, 'diagnostics' | 'error' | 'ending'> {
+  const { ending, failureKind } = failedAfterClient(attempt, {
+    broke: 'collection',
+    kind: 'artifacts',
+    reason: message,
+  });
+  return {
+    diagnostics: { ...attempt.diagnostics, failureKind },
+    error: [...new Set([attempt.error, message].filter(Boolean))].join(' '),
+    ending,
+  };
 }
 
 /**
@@ -208,18 +231,27 @@ export function withCopiedArtifacts(
     try {
       await copyArtifacts(artifacts, target);
     } catch (error) {
-      const diagnostics = {
-        ...(execution.diagnostics ?? response.diagnostics),
-        failureKind: 'artifacts' as const,
-      };
       const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
+      // MST couldn't collect the trial, whatever the client said; a failure
+      // the attempt already had stands.
+      const {
+        diagnostics,
+        error: failure,
+        ending,
+      } = afterCopyFailed(
+        {
+          ending: executionEnding(execution),
+          error: execution.error,
+          diagnostics: execution.diagnostics ?? response.diagnostics,
+        },
+        message
+      );
       return {
         ...execution,
         response: { ...response, diagnostics },
         diagnostics,
-        error: message,
-        // Whatever the client said: MST couldn't collect the trial.
-        ending: infrastructureEnding('collection', message),
+        error: failure,
+        ending,
       };
     }
     return {

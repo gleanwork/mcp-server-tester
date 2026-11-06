@@ -142,13 +142,19 @@ describe('a shard in a child-process environment', () => {
   });
 
   it.each([
-    { failClose: false, missingArtifacts: false },
-    { failClose: true, missingArtifacts: false },
-    { failClose: false, missingArtifacts: true },
-    { failClose: true, missingArtifacts: true },
+    { failClose: false, missingArtifacts: false, explicitEnding: false },
+    { failClose: true, missingArtifacts: false, explicitEnding: false },
+    { failClose: false, missingArtifacts: true, explicitEnding: false },
+    { failClose: true, missingArtifacts: true, explicitEnding: false },
+    // A client that typed its attempt a trial: MST's failure after it
+    // still makes the attempt an infrastructure failure, not a failed trial.
+    { failClose: false, missingArtifacts: false, explicitEnding: true },
+    { failClose: true, missingArtifacts: false, explicitEnding: true },
+    { failClose: false, missingArtifacts: true, explicitEnding: true },
+    { failClose: true, missingArtifacts: true, explicitEnding: true },
   ])(
     'finalizes session cleanup without recopying temporary artifacts: %s',
-    async ({ failClose, missingArtifacts }) => {
+    async ({ failClose, missingArtifacts, explicitEnding }) => {
       const root = await tempDir();
       const artifactDirectory = path.join(root, 'temporary-evidence');
       if (!missingArtifacts) {
@@ -177,6 +183,7 @@ describe('a shard in a child-process environment', () => {
                   type: 'shard-test/client/lifecycle',
                   artifactDirectory,
                   failClose,
+                  explicitEnding,
                 },
                 input: { prompt: 'one', servers: [] },
               },
@@ -218,10 +225,30 @@ describe('a shard in a child-process environment', () => {
       expect(result.result.telemetry).toMatchObject({
         batchLifecycle: { closed: true },
       });
-      if (missingArtifacts) {
-        expect(result.result).toMatchObject({
-          diagnostics: { failureKind: 'artifacts' },
+      if (infrastructure) {
+        // The first of MST's failures stands, in ending and kind: the
+        // worker's early save copies artifacts during the batch, before the
+        // desktop's cleanup.
+        expect(result.result.ending).toEqual({
+          kind: 'infrastructure',
+          broke: missingArtifacts ? 'collection' : 'client-app',
+          retryable: true,
+          reason: expect.stringContaining(
+            missingArtifacts ? "Couldn't copy" : 'cleanup failed'
+          ),
         });
+        expect(result.result).toMatchObject({
+          diagnostics: {
+            failureKind: missingArtifacts ? 'artifacts' : 'cleanup',
+          },
+        });
+        if (failClose) expect(result.result.error).toContain('cleanup failed');
+      } else {
+        expect(result.result.ending).toEqual(
+          explicitEnding ? { kind: 'trial' } : undefined
+        );
+      }
+      if (missingArtifacts) {
         expect(result.result.error).toContain("Couldn't copy");
         expect(result.result.artifacts).toBeUndefined();
       } else {

@@ -33,6 +33,41 @@ export function infrastructureEnding(
   return { kind: 'infrastructure', broke, retryable, reason };
 }
 
+/** A failure of MST's after the client: what broke, and the diagnostic kind. */
+export interface AfterClientFailure {
+  broke: Extract<InfrastructureBreak, 'collection' | 'client-app'>;
+  kind: Extract<DiagnosticFailureKind, 'artifacts' | 'cleanup'>;
+  reason: string;
+}
+
+/**
+ * How an attempt ends when MST failed after the client: it couldn't keep
+ * what the client did (copy its artifacts), or the desktop failed to clean
+ * up, so no case can count the attempt. An infrastructure failure the
+ * attempt already has stands, in its ending and its failure kind: what
+ * broke first is what a reader should see, and a retry collects it either
+ * way. A trial, or an attempt its producer gave no ending, becomes this
+ * failure, retryable: the client may well have done its part. Every
+ * producer that fails after the client applies this rule: the local run, a
+ * collect worker, the coordinator gathering a shard, and desktop cleanup.
+ */
+export function failedAfterClient(
+  attempt: EndingEvidence & { diagnostics?: ClientDiagnostics },
+  failure: AfterClientFailure
+): { ending: TrialEnding; failureKind: DiagnosticFailureKind } {
+  const existing = endingOf(attempt);
+  if (existing.kind === 'infrastructure') {
+    return {
+      ending: existing,
+      failureKind: attempt.diagnostics?.failureKind ?? failure.kind,
+    };
+  }
+  return {
+    ending: infrastructureEnding(failure.broke, failure.reason),
+    failureKind: failure.kind,
+  };
+}
+
 /**
  * A client that ran out of context (ADR 0010). After the client acted, its
  * own turns and tool results filled the context: a trial, which counts

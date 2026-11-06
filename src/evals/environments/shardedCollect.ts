@@ -23,15 +23,17 @@ import {
   type TrialKey,
 } from './protocol.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
-import { copyArtifacts } from '../trialArtifacts.js';
+import { afterCopyFailed, copyArtifacts } from '../trialArtifacts.js';
 import { stableJson } from '../../skills/skillEntry.js';
 
 /**
  * A trial's artifacts, where grading reads them: a worker names its copy
  * relative to the shard's results; that copy moves to `target` (when given),
- * or is read where it is.
+ * or is read where it is. A move that fails makes the trial an
+ * infrastructure failure, as the worker's copy failing does, unless the
+ * attempt already was one.
  */
-async function placeArtifacts(
+export async function placeArtifacts(
   result: ClientRunResult,
   resultsDir: string,
   target: (() => Promise<string>) | undefined
@@ -48,11 +50,8 @@ async function placeArtifacts(
     await copyArtifacts({ dir: copy.dir, include: ALL_ARTIFACTS }, dir);
     return { ...rest, artifacts: { dir, include: ALL_ARTIFACTS } };
   } catch (error) {
-    return {
-      ...rest,
-      diagnostics: { ...rest.diagnostics, failureKind: 'artifacts' },
-      error: `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`,
-    };
+    const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
+    return { ...rest, ...afterCopyFailed(rest, message) };
   }
 }
 

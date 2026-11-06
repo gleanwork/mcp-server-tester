@@ -784,6 +784,57 @@ describe('runDesktopBatch', () => {
     expect(await exists(leasePath())).toBe(true);
   });
 
+  it('makes a trial the client typed an infrastructure failure when cleanup fails, and keeps one the client already had', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const deadline = {
+      kind: 'infrastructure' as const,
+      broke: 'deadline' as const,
+      retryable: true,
+      reason: 'The desktop never answered.',
+    };
+    const results: ClientRunResult[] = await runDesktopBatch(
+      fakeClient({
+        async runCase(_session, request) {
+          return request.caseId === 'case-1'
+            ? {
+                result: {
+                  finalText: 'a correct answer',
+                  events: [],
+                  ending: { kind: 'trial' },
+                },
+                continuation: 'continue',
+              }
+            : {
+                result: {
+                  finalText: '',
+                  events: [],
+                  error: 'timed out',
+                  ending: deadline,
+                },
+                continuation: 'continue',
+              };
+        },
+        async dispose() {
+          throw new Error('restore failed');
+        },
+      }),
+      requests(2)
+    );
+    // The answer is kept, but the desktop's state is unknown: no case
+    // counts it, and a resume collects it again.
+    expect(results[0]).toMatchObject({
+      finalText: 'a correct answer',
+      diagnostics: { failureKind: 'cleanup' },
+      ending: {
+        kind: 'infrastructure',
+        broke: 'client-app',
+        retryable: true,
+        reason: expect.stringContaining('restore failed'),
+      },
+    });
+    expect(results[1]?.ending).toEqual(deadline);
+  });
+
   it('reports both an execution failure and a cleanup failure', async () => {
     const failure = await runDesktopBatch(
       fakeClient({

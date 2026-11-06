@@ -145,6 +145,10 @@ export default {
               result: {
                 finalText: trial.input.prompt,
                 events: [],
+                // As a client that types its endings (ADR 0010) answers.
+                ...(options.config.explicitEnding
+                  ? { ending: { kind: 'trial' as const } }
+                  : {}),
                 ...(typeof options.config.artifactDirectory === 'string'
                   ? {
                       artifacts: {
