@@ -7,9 +7,9 @@ version, writes the changelog with
 pushes, and creates the GitHub Release. The tag push then runs
 [`publish.yml`](.github/workflows/publish.yml), which publishes the package to
 npm from CI with [trusted publishing](https://docs.npmjs.com/trusted-publishers):
-npm trusts that workflow through GitHub's OIDC token, so no npm token exists
-anywhere, and every tarball carries a provenance attestation that ties it to its
-commit and workflow run.
+npm trusts that workflow, in this repository's `npm` environment, through
+GitHub's OIDC token. No npm token exists anywhere, and every tarball carries a
+provenance attestation that ties it to its commit and workflow run.
 
 ## Preparation
 
@@ -32,7 +32,8 @@ Labels:
 
 2. Export a [GitHub personal access token][generate-token] with the `repo`
    scope as `GITHUB_AUTH`. release-it uses it for the changelog and the GitHub
-   Release; nothing else needs a credential.
+   Release. Your own git credentials push the release commit and tag to `main`;
+   nothing needs an npm credential.
 
    ```bash
    export GITHUB_AUTH=abc123def456
@@ -49,28 +50,47 @@ Labels:
    to npm (`npm.publish` is off in `package.json`); don't run `npm publish` by
    hand either.
 
-4. Watch the [Publish workflow](https://github.com/gleanwork/mcp-server-tester/actions/workflows/publish.yml)
-   run for the tag. It waits for the release commit's CI run to pass, checks that
-   the tag matches `package.json`, builds, and publishes. A prerelease such as
-   `2.0.0-beta.15` publishes under the `beta` dist-tag; a release publishes as
-   `latest`.
+4. Open the [Publish workflow](https://github.com/gleanwork/mcp-server-tester/actions/workflows/publish.yml)
+   run for the tag. Its `build` job waits for the release commit's CI run to
+   pass, checks that the tag matches `package.json`, and packs the tarball. Its
+   `publish` job then waits for a maintainer to approve the `npm` environment;
+   approve it, and it publishes. A prerelease such as `2.0.0-beta.15` publishes
+   under its identifier as the dist-tag (`beta`); a release passes no dist-tag,
+   so npm sets `latest` and refuses to move it to an older version.
 
 If the publish fails, fix the cause and re-run the workflow run from the Actions
 tab; the tag is unchanged. If the package itself needs a change, make it on main
-and cut the next version.
+and cut the next version. A release from a maintenance branch fails the CI gate,
+which looks for push CI on the release commit; cut those from `main`.
 
 [generate-token]: https://github.com/settings/tokens/new?scopes=repo&description=GITHUB_AUTH+env+variable
 
-## One-time setup: trusted publishing on npm
+## One-time setup
 
-A maintainer of `@gleanwork/mcp-server-tester` on npmjs.com does this once:
+Trusted publishing ties npm's trust to this repository, the `publish.yml`
+workflow and the `npm` environment. Anyone with write access can push a `v*`
+tag, so the environment's required approval is what keeps a tag alone from
+publishing. Set up both sides.
 
-1. Package page -> Settings -> Trusted Publisher -> GitHub Actions.
-2. Organization or user: `gleanwork`. Repository: `mcp-server-tester`.
-   Workflow filename: `publish.yml`. Environment name: leave empty.
-3. Under Publishing access, choose "Require two-factor authentication and
-   disallow tokens". With trusted publishing in place, this makes the workflow
-   the only way to publish.
+On GitHub (repository admin), Settings -> Environments -> New environment,
+named `npm`:
 
-Trusted publishing needs npm 11.5.1 or later in the workflow; `mise.toml` pins
-`npm = "latest"`, so the runner has it.
+1. Required reviewers: the package maintainers. Leave "Allow administrators to
+   bypass" off and "Prevent self-review" on.
+2. Deployment branches and tags: "Selected branches and tags", add the tag rule
+   `v*`.
+
+On npmjs.com (package maintainer), `@gleanwork/mcp-server-tester` -> Settings:
+
+1. Trusted Publisher -> GitHub Actions. Organization or user: `gleanwork`.
+   Repository: `mcp-server-tester`. Workflow filename: `publish.yml`.
+   Environment name: `npm`.
+2. Allowed actions: enable direct publishing with `npm publish`. New
+   configurations default to `npm stage publish` only, and the workflow runs
+   `npm publish`.
+3. Publishing access: "Require two-factor authentication and disallow tokens".
+   With trusted publishing in place, this makes the workflow the only way to
+   publish.
+
+Trusted publishing needs npm 11.5.1 or later; the `publish` job installs Node
+24 and the latest npm, and installs nothing else.
