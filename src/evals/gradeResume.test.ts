@@ -33,7 +33,10 @@ const PAIRWISE = [
  * judges and each case two pairwise judges; the `flaky` ones time out while
  * `flag` exists. Every judge call is logged to `calls`.
  */
-async function fixture() {
+async function fixture(cases?: {
+  judges?: string[];
+  assertions?: Record<string, unknown>;
+}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-resume-'));
   dirs.push(dir);
   const writeCases = (judges: string[]) =>
@@ -41,10 +44,15 @@ async function fixture() {
       path.join(dir, 'cases.json'),
       JSON.stringify({
         name: 'cases',
-        cases: CASES.map((id) => ({ id, input: id, judges })),
+        cases: CASES.map((id) => ({
+          id,
+          input: id,
+          judges,
+          ...(cases?.assertions ? { assertions: cases.assertions } : {}),
+        })),
       })
     );
-  await writeCases(JUDGES);
+  await writeCases(cases?.judges ?? JUDGES);
   const configPath = path.join(dir, 'eval.json');
   const writeConfig = (pairwiseJudges: string[]) =>
     fs.writeFile(
@@ -228,6 +236,81 @@ describe('mst grade --resume', () => {
       gradedTrials: 0,
       reusedComparisons: 4,
       gradedComparisons: 0,
+    });
+  }, 60_000);
+
+  it('records a grading as partial when only a pairwise judge has no verdict, and resumes just that judge', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture({ judges: [JUDGES[0]!] });
+    vi.stubEnv('GRADE_TEST_KEY', KEY);
+    await f.flaky(true);
+    const first = await gradeRun({ ...f.base, run: f.collectedId });
+    await f.takeCalls();
+    // Every trial has its verdict; the flaky pairwise judge has none.
+    expect(first.summary.results.every((r) => r.pass)).toBe(true);
+    expect(
+      first.summary.results.every((r) => r.gradingError === undefined)
+    ).toBe(true);
+    const pairwise = first.summary.variants.find((v) => v.pairwise)!.pairwise!;
+    expect(pairwise.summary.map((s) => [s.judge, s.errors])).toEqual([
+      ['grade-test/pairwise-judge/longer', 0],
+      ['grade-test/pairwise-judge/flaky', 4],
+    ]);
+    expect((await f.readRun(first.outputDir)).phases).toEqual({
+      collect: 'complete',
+      grade: 'partial',
+    });
+
+    await f.flaky(false);
+    const resumed = await gradeRun({
+      ...f.base,
+      run: path.basename(first.outputDir),
+      resume: true,
+    });
+    expect(await f.takeCalls()).toEqual({ 'flaky-pairwise': 8 });
+    const run = await f.readRun(resumed.outputDir);
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
+    expect(run.resumedGrading).toEqual({
+      from: path.basename(first.outputDir),
+      reusedTrials: 8,
+      gradedTrials: 0,
+      reusedComparisons: 0,
+      gradedComparisons: 4,
+    });
+  }, 60_000);
+
+  it('records a grading as partial when a failed assertion settles a case whose judge has no verdict', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // The probe makes no tool calls, so every trial fails its assertion;
+    // one fail settles the case, whatever the flaky judge would have said.
+    const f = await fixture({
+      assertions: { toolCallCount: { min: 1 } },
+    });
+    vi.stubEnv('GRADE_TEST_KEY', KEY);
+    await f.flaky(true);
+    const first = await gradeRun({ ...f.base, run: f.collectedId });
+    await f.takeCalls();
+    expect(first.summary.results.every((r) => !r.pass)).toBe(true);
+    expect(
+      first.summary.results.every((r) => r.gradingError === undefined)
+    ).toBe(true);
+    expect((await f.readRun(first.outputDir)).phases).toEqual({
+      collect: 'complete',
+      grade: 'partial',
+    });
+
+    await f.flaky(false);
+    const resumed = await gradeRun({
+      ...f.base,
+      run: path.basename(first.outputDir),
+      resume: true,
+    });
+    // The judges without a verdict run again; the verdicts stay fails.
+    expect(await f.takeCalls()).toEqual({ flaky: 8, 'flaky-pairwise': 8 });
+    expect(resumed.summary.results.every((r) => !r.pass)).toBe(true);
+    expect((await f.readRun(resumed.outputDir)).phases).toEqual({
+      collect: 'complete',
+      grade: 'complete',
     });
   }, 60_000);
 

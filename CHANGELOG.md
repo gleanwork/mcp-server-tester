@@ -19,6 +19,7 @@
 
 ## Unreleased
 
+- `run.json`'s `phases.grade` is `partial` whenever `mst grade --resume` would have something to grade: a pairwise judge that failed or whose comparison was lost, or a judge without a verdict on a case another assertion already failed. Before, the writer looked only at `gradingError`, so those runs were recorded as `grade: complete` while a resume would still retry them.
 - A failure after the client (its artifacts couldn't be copied, or a desktop session's cleanup failed) now ends the attempt as a retryable infrastructure failure whatever ending the client gave, and keeps an infrastructure ending the client already had. Before, a trial the client had typed `{ kind: 'trial' }` kept counting as a failed trial that a resume wouldn't collect again, and a local artifact-copy failure replaced the client's own ending. The local run, collect workers and the coordinator now apply the one rule.
 - Stored-response redaction now drops every judge's `metadata`: a combined score's `judgeResults` and pairwise preferences too, in `results.json`, `summary.json`, the per-judge score files and the stored report. Before, only a case's top-level scores lost their metadata, so a judge that quoted the answer in its notes kept it in the stored run.
 - `mst clients` and `mst clients show` now list every option and its default in text and JSON, from the same schemas as the generated docs. Runtime defaults and omission semantics are unchanged.
