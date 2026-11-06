@@ -16,6 +16,7 @@ import { assertClientSupports, getClient } from './builtinClients.js';
 import type { ClientRunContext } from './evalFrameworkTypes.js';
 import type { EvalConfig } from './evalConfig.js';
 import { endingOf } from './trialEnding.js';
+import { hostTelemetryReceiver } from './telemetry/hostReceiver.js';
 
 /** What the fake SDK saw, and how it behaves. */
 const sdk = vi.hoisted(() => ({
@@ -34,6 +35,13 @@ const sdk = vi.hoisted(() => ({
   turnFailed: undefined as string | undefined,
   /** Answer once before the turn fails. */
   actedFirst: undefined as boolean | undefined,
+  /**
+   * Export these events to the receiver the trial's config.toml names, as
+   * Codex's `[otel]` exporter does, each with the thread's conversation ID.
+   */
+  hostEvents: undefined as
+    | Array<{ name: string; attributes: Record<string, string> }>
+    | undefined,
 }));
 
 vi.mock('@openai/codex-sdk', () => ({
@@ -99,6 +107,50 @@ vi.mock('@openai/codex-sdk', () => ({
                 )
               );
             yield { type: 'turn.started' };
+            if (sdk.hostEvents) {
+              const otel = parse(sdk.config!).otel as {
+                exporter: { 'otlp-http': { endpoint: string } };
+              };
+              const str = (v: string) => ({ stringValue: v });
+              const response = await fetch(
+                otel.exporter['otlp-http'].endpoint,
+                {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    resourceLogs: [
+                      {
+                        resource: {
+                          attributes: [
+                            { key: 'service.name', value: str('codex') },
+                          ],
+                        },
+                        scopeLogs: [
+                          {
+                            logRecords: sdk.hostEvents.map((event) => ({
+                              timeUnixNano: `${Date.now()}000000`,
+                              body: str('codex_otel::otel_event_manager'),
+                              attributes: [
+                                { key: 'event.name', value: str(event.name) },
+                                {
+                                  key: 'conversation.id',
+                                  value: str('thread-9'),
+                                },
+                                ...Object.entries(event.attributes).map(
+                                  ([key, v]) => ({ key, value: str(v) })
+                                ),
+                              ],
+                            })),
+                          },
+                        ],
+                      },
+                    ],
+                  }),
+                }
+              );
+              if (!response.ok)
+                throw new Error(`receiver answered ${response.status}`);
+            }
             if (sdk.fail) throw new Error(sdk.fail);
             if (sdk.turnFailed !== undefined) {
               if (sdk.actedFirst)
@@ -411,6 +463,39 @@ describe('codex-cli client run', () => {
     // The trial's home and working directory are gone.
     expect(existsSync(env.CODEX_HOME!)).toBe(false);
     expect(existsSync(String(sdk.thread!.workingDirectory))).toBe(false);
+  });
+
+  it("gives its model calls the request IDs the host's events name them by, as Cowork and Claude Code do", async () => {
+    // Codex 0.160's own `codex.api_request` carries no request or response
+    // ID; these are the attributes an event would need for the join.
+    sdk.hostEvents = [
+      {
+        name: 'codex.api_request',
+        attributes: { request_id: 'req_9', response_id: 'resp_1' },
+      },
+      { name: 'codex.api_request', attributes: { request_id: 'req_other' } },
+    ];
+    try {
+      const result = await CODEX_CLIENT.run!(
+        { prompt: 'Find x', servers: [servers[0]!] },
+        { type: 'codex-cli', model: 'gpt-5.5' },
+        {
+          evalConfig: { ...evalConfig, telemetry: { host: {} } },
+          env: GATEWAY,
+        }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.hostTelemetry?.events.map((event) => event.name)).toEqual([
+        'codex.api_request',
+        'codex.api_request',
+      ]);
+      expect(result.modelCalls).toMatchObject([
+        { id: 'resp_1', requestId: 'req_9' },
+      ]);
+    } finally {
+      // The process-wide receiver the trial started.
+      await (await hostTelemetryReceiver({}, { env: GATEWAY })).close();
+    }
   });
 
   it.each([

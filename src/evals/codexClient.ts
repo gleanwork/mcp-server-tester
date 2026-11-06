@@ -52,6 +52,7 @@ import {
 } from './mstClient/clientOptions.js';
 import {
   hostTelemetryReceiver,
+  withHostRequestIds,
   type HostTelemetryReceiver,
 } from './telemetry/hostReceiver.js';
 import {
@@ -510,6 +511,9 @@ async function runCodex(
     });
     const host =
       receiver && threadId ? await receiver.collect([threadId]) : undefined;
+    // As Cowork and Claude Code do: the host's events name each call's
+    // request, so the trace joins them the same way for every client.
+    const modelCalls = withHostRequestIds(trace.modelCalls, host);
     const error = failure?.message ?? (trace.error && redact(trace.error));
     // Codex started its turn and ran out of the case's time: its own time, a
     // trial that failed (ADR 0010). Before the turn started, the failure kind
@@ -530,7 +534,7 @@ async function runCodex(
     return {
       finalText: trace.finalText,
       events: trace.events,
-      ...(trace.modelCalls ? { modelCalls: trace.modelCalls } : {}),
+      ...(modelCalls ? { modelCalls } : {}),
       ...(trace.usage ? { usage: trace.usage } : {}),
       startedAt,
       completedAt: endedAt,
