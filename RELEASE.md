@@ -53,8 +53,8 @@ Labels:
 4. Open the [Publish workflow](https://github.com/gleanwork/mcp-server-tester/actions/workflows/publish.yml)
    run for the tag. Its `build` job waits for the release commit's CI run to
    pass, checks that the tag matches `package.json`, and packs the tarball. Its
-   `publish` job then waits for a maintainer to approve the `npm` environment;
-   approve it, and it publishes. A prerelease such as `2.0.0-beta.15` publishes
+   `publish` job then waits for the `npm` environment's approval. The environment
+   prevents self-review, so another maintainer approves it, and it publishes. A prerelease such as `2.0.0-beta.15` publishes
    under its identifier as the dist-tag (`beta`); a release passes no dist-tag,
    so npm sets `latest` and refuses to move it to an older version.
 
@@ -75,8 +75,9 @@ publishing. Set up both sides.
 On GitHub (repository admin), Settings -> Environments -> New environment,
 named `npm`:
 
-1. Required reviewers: the package maintainers. Leave "Allow administrators to
-   bypass" off and "Prevent self-review" on.
+1. Required reviewers: the package maintainers, at least two, since the one who
+   pushed the tag cannot approve. Leave "Allow administrators to bypass" off
+   and "Prevent self-review" on.
 2. Deployment branches and tags: "Selected branches and tags", add the tag rule
    `v*`.
 
@@ -89,8 +90,8 @@ On npmjs.com (package maintainer), `@gleanwork/mcp-server-tester` -> Settings:
    configurations default to `npm stage publish` only, and the workflow runs
    `npm publish`.
 3. Publishing access: "Require two-factor authentication and disallow tokens".
-   With trusted publishing in place, this makes the workflow the only way to
-   publish.
+   With trusted publishing in place, the workflow and a maintainer's own 2FA
+   session are the only ways to publish.
 
-Trusted publishing needs npm 11.5.1 or later; the `publish` job installs Node
-24 and the latest npm, and installs nothing else.
+Trusted publishing needs npm 11.5.1 or later; the `publish` job uses the npm
+that ships with Node 24 and installs nothing else.
