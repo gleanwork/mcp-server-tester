@@ -76,9 +76,9 @@ A pull request that changes `release.yml` or `.release-it.js` gets a dry run.
 - The repository has an `npm` environment that deploys only from `main`.
 - `main` requires pull requests, so the release commit is pushed as the org's
   `gleanwork-ci` GitHub App, which is a bypass actor on `main`'s protection.
-  Its credentials are the `APP_ID` and `APP_PRIVATE_KEY` organization secrets,
-  shared with this repository; the token is scoped to this repository when it
-  is minted.
+  Its credentials are the `GLEANWORK_CI_CLIENT_ID` and
+  `GLEANWORK_CI_PRIVATE_KEY` organization secrets, shared with this
+  repository; the token is scoped to this repository when it is minted.
 
 ### If a release fails after publishing
 

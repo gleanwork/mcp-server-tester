@@ -101,14 +101,13 @@ jobs:
           exit 1
 
       # The release commit goes straight to main, which requires pull requests.
-      # GITHUB_TOKEN can't bypass that; the gleanwork-ci app can. Its
-      # credentials are the org secrets other gleanwork workflows use.
+      # GITHUB_TOKEN can't bypass that; the gleanwork-ci app can.
       - name: Mint the app's token
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          client-id: ${{ secrets.GLEANWORK_CI_CLIENT_ID }}
+          private-key: ${{ secrets.GLEANWORK_CI_PRIVATE_KEY }}
           owner: gleanwork
           repositories: mcp-server-tester
 
