@@ -252,6 +252,14 @@
   "overrides": {
     "release-it": {
       "undici": "6.29.1"
-    }
+    },
+    "tar": "^7.5.22",
+    "tmp": "^0.2.7",
+    "basic-ftp": "^6.2.6"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "fsevents": true,
+    "@parcel/watcher": true
   }
 }
