@@ -6,6 +6,8 @@
  * show exists, and they link only to files an agent can open from a
  * consumer's project.
  *
+ * It also checks that the package and the Claude Code marketplace ship them.
+ *
  * The CLI check reads the built CLI's help, so build first (as
  * `src/cli/commands/cli.test.ts` needs).
  */
@@ -14,16 +16,60 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+import { z } from 'zod';
+import packageJson from '../package.json' with { type: 'json' };
 import { resolveClientName } from '../src/evals/clientNames.js';
 import { validateEvalConfig } from '../src/evals/configValidation.js';
-import { validateEvalDataset } from '../src/evals/datasetTypes.js';
-import { loadEvalConfigFromObject } from '../src/evals/evalConfig.js';
+import {
+  EvalAssertionsSchema,
+  validateEvalDataset,
+} from '../src/evals/datasetTypes.js';
+import {
+  EvalConfigSchema,
+  loadEvalConfigFromObject,
+} from '../src/evals/evalConfig.js';
+import {
+  installPlugins,
+  resetPluginsForTests,
+} from '../src/plugins/extensions.js';
+import type { Plugin } from '../src/plugins/plugin.js';
 
-const SKILLS = fileURLToPath(new URL('../skills/', import.meta.url));
-const CLI = fileURLToPath(new URL('../dist/cli/index.js', import.meta.url));
+const REPO = fileURLToPath(new URL('../', import.meta.url));
+const SKILLS = path.join(REPO, 'skills');
+const CLI = path.join(REPO, 'dist/cli/index.js');
 const execFileAsync = promisify(execFile);
+
+/**
+ * The example plugin the skills name, with only the extensions they use, so
+ * an example that references `acme` validates and a misspelt one doesn't.
+ */
+const ACME: Plugin = {
+  meta: { name: '@acme/mst-plugin', namespace: 'acme' },
+  datasetSources: {
+    'info-seeking': {
+      schema: z.object({ type: z.string() }),
+      load: async () => ({ name: 'info-seeking', cases: [] }),
+    },
+  },
+  judges: {
+    completeness: {
+      schema: z.object({}).passthrough(),
+      evaluate: async () => ({ score: 1 }),
+    },
+  },
+};
+
+const ASSERTION_KEYS = Object.keys(EvalAssertionsSchema.shape);
+const CONFIG_KEYS = Object.keys(EvalConfigSchema.shape);
+
+/** What a skill's fragment of an eval config is merged into to validate. */
+const BASE_CONFIG = {
+  name: 'skill-example',
+  datasets: ['./cases.json'],
+  servers: { local: { transport: 'stdio', command: 'node' } },
+};
 
 interface SkillFile {
   /** The path from `skills/`, for test names. */
@@ -57,18 +103,81 @@ function skillFiles(): SkillFile[] {
     }));
 }
 
-/** The ```json blocks that parse as JSON, with the line each starts on. */
-function jsonBlocks(text: string): Array<{ line: number; value: unknown }> {
-  const blocks: Array<{ line: number; value: unknown }> = [];
+interface JsonBlock {
+  line: number;
+  /** The parsed block; a fragment (`"variants": [...]`) is wrapped in `{}`. */
+  value: unknown;
+  fragment: boolean;
+}
+
+/**
+ * Every ```json block, with the line it starts on. A block that is neither
+ * JSON nor a fragment of an object has `value` undefined.
+ */
+function jsonBlocks(text: string): JsonBlock[] {
+  const blocks: JsonBlock[] = [];
   for (const match of text.matchAll(/```json\n([\s\S]*?)```/g)) {
     const line = text.slice(0, match.index).split('\n').length;
-    try {
-      blocks.push({ line, value: JSON.parse(match[1]!) });
-    } catch {
-      // A fragment, such as one key of an assertions block.
-    }
+    const body = match[1]!;
+    blocks.push(
+      parseJson(body, line, false) ??
+        parseJson(`{${body}}`, line, true) ?? {
+          line,
+          value: undefined,
+          fragment: true,
+        }
+    );
   }
   return blocks;
+}
+
+function parseJson(
+  text: string,
+  line: number,
+  fragment: boolean
+): JsonBlock | null {
+  try {
+    return { line, value: JSON.parse(text), fragment };
+  } catch {
+    return null;
+  }
+}
+
+/** Validates one block, or throws. A block it can't place fails. */
+function validateBlock({ value, fragment }: JsonBlock): void {
+  if (!isRecord(value)) {
+    if (fragment) throw new Error('not JSON, or a fragment of a JSON object');
+    return;
+  }
+  const keys = Object.keys(value);
+  const within = (known: string[]) =>
+    keys.length > 0 && keys.every((key) => known.includes(key));
+  if (Array.isArray(value.cases)) {
+    validateEvalDataset(value);
+  } else if (typeof value.id === 'string' && 'input' in value) {
+    validateEvalDataset({ name: 'skill-example', cases: [value] });
+  } else if (within(ASSERTION_KEYS)) {
+    validateEvalDataset({
+      name: 'skill-example',
+      cases: [{ id: 'skill-example', input: 'x', assertions: value }],
+    });
+  } else if (within(CONFIG_KEYS)) {
+    // A whole config validates as it is; a fragment, inside a minimal one.
+    validateEvalConfig(
+      loadEvalConfigFromObject(
+        fragment ? { ...BASE_CONFIG, ...value } : value,
+        {
+          skipDatasetValidation: true,
+        }
+      )
+    );
+  } else if (fragment) {
+    // Not part of an eval config or of assertions, so nothing would check it.
+    throw new Error(
+      `keys ${keys.join(', ')} are not eval config or assertion keys`
+    );
+  }
+  // Any other whole document is an example of output, such as a tool call.
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -112,6 +221,19 @@ function subcommandsIn(help: string): string[] {
   return [...section.matchAll(/^ {2}([a-z][\w-]*)/gm)]
     .map((match) => match[1]!)
     .filter((name) => name !== 'help');
+}
+
+/**
+ * The long flags a help screen's `Options:` section defines, by exact name.
+ * A description that mentions another flag doesn't count.
+ */
+function flagsIn(help: string): Set<string> {
+  const section = (help.split(/^Options:$/m)[1] ?? '').split(/^\S/m)[0]!;
+  return new Set(
+    [...section.matchAll(/^ {2}(?:-\w, )?(--[a-z][\w-]*)/gm)].map(
+      (match) => match[1]!
+    )
+  );
 }
 
 /**
@@ -195,19 +317,47 @@ async function invocationProblems(words: string[]): Promise<string[]> {
     command.push(word);
     rest = after;
   }
-  const help = await helpFor(command);
+  const flags = flagsIn(await helpFor(command));
   const problems: string[] = [];
   for (const word of rest) {
     const flag = /^--[a-z][\w-]*/.exec(word)?.[0];
     if (!flag || flag === '--help') continue;
-    const listed =
-      help.includes(flag) || help.includes(flag.replace(/^--no-/, '--'));
-    if (!listed) problems.push(`"mst ${command.join(' ')}" has no ${flag}`);
+    if (!flags.has(flag)) {
+      problems.push(`"mst ${command.join(' ')}" has no ${flag}`);
+    }
   }
   return problems;
 }
 
 describe('shipped skills', () => {
+  beforeAll(() => {
+    installPlugins([ACME]);
+  });
+  afterAll(() => {
+    resetPluginsForTests();
+  });
+
+  it('ship in the npm package', () => {
+    // `npx skills experimental_sync` reads `skills/` in an installed package.
+    expect(packageJson.files).toContain('skills');
+  });
+
+  it('ship as a Claude Code plugin whose root holds every skill', () => {
+    const marketplace = JSON.parse(
+      readFileSync(path.join(REPO, '.claude-plugin/marketplace.json'), 'utf8')
+    ) as { name: string; plugins: Array<{ name: string; source: string }> };
+    expect(marketplace.name).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    expect(marketplace.plugins).toHaveLength(1);
+    const [plugin] = marketplace.plugins;
+    expect(plugin!.name).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    const root = path.resolve(REPO, plugin!.source);
+    for (const dir of skillDirs()) {
+      expect(existsSync(path.join(root, 'skills', dir, 'SKILL.md')), dir).toBe(
+        true
+      );
+    }
+  });
+
   it.each(skillDirs())('%s has valid frontmatter', (dir) => {
     const file = path.join(SKILLS, dir, 'SKILL.md');
     expect(existsSync(file)).toBe(true);
@@ -226,28 +376,17 @@ describe('shipped skills', () => {
   });
 
   describe.each(skillFiles())('$name', ({ path: file, text }) => {
-    it('shows only eval datasets, cases and eval configs that validate', () => {
-      for (const { line, value } of jsonBlocks(text)) {
-        if (!isRecord(value)) continue;
-        const where = `${path.basename(file)}:${line}`;
-        if (Array.isArray(value.cases)) {
-          expect(() => validateEvalDataset(value), where).not.toThrow();
-        } else if (Array.isArray(value.datasets)) {
-          expect(
-            () =>
-              validateEvalConfig(
-                loadEvalConfigFromObject(value, { skipDatasetValidation: true })
-              ),
-            where
-          ).not.toThrow();
-        } else if (typeof value.id === 'string' && 'input' in value) {
-          expect(
-            () =>
-              validateEvalDataset({ name: 'skill-example', cases: [value] }),
-            where
-          ).not.toThrow();
+    it('shows only eval datasets, cases, assertions and eval configs that validate', () => {
+      const problems: string[] = [];
+      for (const block of jsonBlocks(text)) {
+        try {
+          validateBlock(block);
+        } catch (error) {
+          const message = (error as Error).message.split('\n')[0];
+          problems.push(`${path.basename(file)}:${block.line}: ${message}`);
         }
       }
+      expect(problems).toEqual([]);
     });
 
     it('names no renamed client', () => {
