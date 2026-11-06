@@ -8,15 +8,17 @@ import { assertPlugin } from '../../../plugins/plugin.js';
 
 let dir: string;
 let pluginPath: string;
+let barePluginPath: string;
 
 // A plugin module with a judge and a pairwise judge, loaded as --plugins loads one.
 const PLUGIN = `
 import { z } from 'zod';
 export default {
-  meta: { name: 'acme-plugin', namespace: 'acme' },
+  meta: { name: 'acme-plugin', namespace: 'acme', version: '1.4.0' },
   judges: {
     completeness: {
       description: 'Did the answer cover every point of the expected answer?',
+      version: 'completeness-2',
       requires: ['case.expected.answer'],
       schema: z.object({ strict: z.boolean().default(false) }).strict(),
       async evaluate() { return { score: 1 }; },
@@ -37,6 +39,21 @@ export default {
 };
 `;
 
+// A plugin with no version whose judge declares none: MST can't version it.
+const BARE_PLUGIN = `
+export default {
+  meta: { name: 'bare-plugin', namespace: 'bare' },
+  judges: {
+    loose: {
+      schema: { safeParse: (value) => ({ success: true, data: value }) },
+      async evaluate() { return { score: 1 }; },
+    },
+  },
+};
+`;
+
+const HASH = /^[0-9a-f]{64}$/;
+
 function capture(): { text: () => string; print: (text: string) => void } {
   let out = '';
   return { text: () => out, print: (text) => (out += text) };
@@ -46,6 +63,8 @@ beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-judges-'));
   pluginPath = path.join(dir, 'plugin.mjs');
   await fs.writeFile(pluginPath, PLUGIN);
+  barePluginPath = path.join(dir, 'bare.mjs');
+  await fs.writeFile(barePluginPath, BARE_PLUGIN);
   // The plugin imports zod: resolve it from this package.
   await fs.symlink(
     path.resolve('node_modules'),
@@ -70,36 +89,42 @@ describe('mst judges', () => {
         kind: 'judge',
         description: expect.stringContaining("the case's own criteria"),
         requires: [],
+        version: expect.stringMatching(HASH),
       },
       {
         ref: 'grounded-in-tools',
         kind: 'judge',
         description: expect.stringContaining('supported by a tool result'),
         requires: [],
+        version: expect.stringMatching(HASH),
       },
       {
         ref: 'rubric',
         kind: 'judge',
         description: expect.stringContaining('rubric'),
         requires: [],
+        version: expect.stringMatching(HASH),
       },
       {
         ref: 'task-completion',
         kind: 'judge',
         description: expect.stringContaining('did what the user asked'),
         requires: [],
+        version: expect.stringMatching(HASH),
       },
       {
         ref: 'tool-use',
         kind: 'judge',
         description: expect.stringContaining('chose the right tools'),
         requires: [],
+        version: expect.stringMatching(HASH),
       },
       {
         ref: 'preference',
         kind: 'pairwise',
         description: expect.stringContaining('better did what the user asked'),
         requires: [],
+        version: expect.stringMatching(HASH),
       },
     ]);
   });
@@ -125,6 +150,74 @@ describe('mst judges', () => {
     );
   });
 
+  it("lists each judge's version, or marks it unversioned", async () => {
+    const out = capture();
+    await listJudgeCommand(
+      { plugins: [pluginPath, barePluginPath], rootDir: dir, json: true },
+      out.print
+    );
+    const listed = JSON.parse(out.text()) as Array<{
+      ref: string;
+      version?: string;
+      unversioned?: true;
+    }>;
+    const byRef = Object.fromEntries(listed.map((entry) => [entry.ref, entry]));
+    // A built-in's version covers its prompts and defaults.
+    expect(byRef.rubric).toMatchObject({
+      version: expect.stringMatching(HASH),
+    });
+    expect(byRef.preference).toMatchObject({
+      version: expect.stringMatching(HASH),
+    });
+    expect(byRef.rubric).not.toHaveProperty('unversioned');
+    // A plugin judge's own version, else its plugin's.
+    expect(byRef['acme/judge/completeness']).toMatchObject({
+      version: 'completeness-2',
+    });
+    expect(byRef['acme/pairwise-judge/preference']).toMatchObject({
+      version: '1.4.0',
+    });
+    expect(byRef['acme/pairwise-judge/preference']).not.toHaveProperty(
+      'unversioned'
+    );
+    // Neither: unversioned, with no version.
+    expect(byRef['bare/judge/loose']).toMatchObject({ unversioned: true });
+    expect(byRef['bare/judge/loose']).not.toHaveProperty('version');
+
+    resetPluginsForTests();
+    const table = capture();
+    await listJudgeCommand(
+      { plugins: [pluginPath, barePluginPath], rootDir: dir },
+      table.print
+    );
+    expect(table.text()).toMatch(
+      /^acme\/judge\/completeness +judge +completeness-2 +requires/m
+    );
+    expect(table.text()).toMatch(
+      /^acme\/pairwise-judge\/preference +pairwise +1\.4\.0 +Which answer/m
+    );
+    expect(table.text()).toMatch(/^bare\/judge\/loose +judge +unversioned$/m);
+    expect(table.text()).toMatch(
+      /^rubric +judge +[0-9a-f]{12} +An LLM grades/m
+    );
+
+    resetPluginsForTests();
+    const shown = capture();
+    await showJudge(
+      'bare/judge/loose',
+      { plugins: [barePluginPath], rootDir: dir, json: true },
+      shown.print
+    );
+    expect(JSON.parse(shown.text())).toMatchObject({
+      ref: 'bare/judge/loose',
+      unversioned: true,
+    });
+    resetPluginsForTests();
+    const shownText = capture();
+    await showJudge('acme/judge/completeness', plugins(), shownText.print);
+    expect(shownText.text()).toContain('  version   completeness-2');
+  });
+
   it("shows a judge's requirements and options as JSON Schema", async () => {
     const out = capture();
     await showJudge(
@@ -135,6 +228,7 @@ describe('mst judges', () => {
     expect(JSON.parse(out.text())).toMatchObject({
       ref: 'acme/judge/completeness',
       kind: 'judge',
+      version: 'completeness-2',
       requires: ['case.expected.answer'],
       options: {
         type: 'object',
