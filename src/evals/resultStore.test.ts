@@ -458,6 +458,66 @@ describe('redactStoredResponses', () => {
         reasoning: 'cites the report',
       });
   });
+
+  it("drops the metadata of a combined score's judgeResults, and of pairwise preferences", () => {
+    const judge = (name: string) => ({
+      pass: true,
+      reasoning: `${name} graded it`,
+      metadata: { quote: `${name} evidence` },
+    });
+    const combined = {
+      pass: true,
+      details: '2/2 judges passed',
+      judgeResults: [judge('a'), judge('b')],
+    };
+    const preference = {
+      judge: 'p',
+      preference: 'candidate',
+      strength: 1,
+      reasoning: 'better',
+      metadata: { quote: 'candidate evidence' },
+    };
+    const redacted = redactStoredResponses({
+      results: [
+        {
+          id: 'c1',
+          pass: true,
+          scores: { judge: combined },
+          trialResults: [{ pass: true, scores: { judge: combined } }],
+        },
+      ],
+      variants: [
+        {
+          name: 'candidate',
+          pairwise: {
+            baseline: 'baseline',
+            cases: [{ id: 'c1', preferences: [preference] }],
+          },
+        },
+      ],
+      comparison: { cases: [{ id: 'c1', preferences: [preference] }] },
+    });
+    const [result] = redacted.results;
+    for (const scores of [result!.scores, result!.trialResults[0]!.scores])
+      expect(scores.judge).toEqual({
+        pass: true,
+        details: '2/2 judges passed',
+        judgeResults: [
+          { pass: true, reasoning: 'a graded it' },
+          { pass: true, reasoning: 'b graded it' },
+        ],
+      });
+    const kept = {
+      judge: 'p',
+      preference: 'candidate',
+      strength: 1,
+      reasoning: 'better',
+    };
+    expect(redacted.variants[0]!.pairwise.cases[0]!.preferences).toEqual([
+      kept,
+    ]);
+    expect(redacted.comparison.cases[0]!.preferences).toEqual([kept]);
+  });
 });
 
 describe('partial runs and latest.json', () => {

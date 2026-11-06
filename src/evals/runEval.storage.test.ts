@@ -10,10 +10,11 @@ import {
   runEval,
   type EvalConfig,
   type ClientDefinition,
+  type PairwiseJudgeDefinition,
   type ResultStoreDefinition,
   type RunStore,
 } from '../entries/evals.js';
-import type { Plugin } from '../index.js';
+import type { JudgeDefinition, Plugin } from '../index.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import { fileRunStore } from './runStore.js';
 
@@ -22,12 +23,39 @@ let sequence = 0;
 
 interface TestPlugin extends Plugin {
   clients: Record<string, ClientDefinition>;
+  judges: Record<string, JudgeDefinition>;
+  pairwiseJudges: Record<string, PairwiseJudgeDefinition>;
   resultStores: Record<string, ResultStoreDefinition>;
+}
+/** A judge whose own notes quote the answer, as an agentic judge's audit does. */
+function quotingJudge(name: string): JudgeDefinition {
+  return {
+    schema: z.object({}),
+    evaluate: async ({ trial }) => ({
+      score: 1,
+      reasoning: `${name} graded it`,
+      metadata: { quoted: `PRIVATE_JUDGE_${name}_MARKER ${trial.text}` },
+    }),
+  };
 }
 function newTestPlugin(): TestPlugin {
   return {
     meta: { name: 'storage-test-plugin', namespace: 'test' },
     clients: {},
+    judges: { quoteA: quotingJudge('A'), quoteB: quotingJudge('B') },
+    pairwiseJudges: {
+      prefer: {
+        schema: z.object({}),
+        compare: async (input) => ({
+          preference: 'candidate',
+          strength: 1,
+          reasoning: 'the candidate searched twice',
+          metadata: {
+            quoted: `PRIVATE_PAIRWISE_MARKER ${input.candidate.text}`,
+          },
+        }),
+      },
+    },
     resultStores: {},
   };
 }
@@ -226,6 +254,13 @@ describe('eval storage through public APIs', () => {
       const f = await fixture();
       f.evalConfig.variants = [{ name: 'baseline' }, { name: 'candidate' }];
       f.evalConfig.trials = 2;
+      // Two judges, so each trial's score combines them in `judgeResults`,
+      // and a pairwise judge: every judge's metadata quotes the answer.
+      f.evalConfig.judges = [
+        { type: 'test/judge/quoteA' },
+        { type: 'test/judge/quoteB' },
+      ];
+      f.evalConfig.pairwiseJudges = [{ type: 'test/pairwise-judge/prefer' }];
       f.evalConfig.redactStoredResponses = configRedact;
       await fs.writeFile(f.configPath, JSON.stringify(f.evalConfig));
       const runs = [];
@@ -262,20 +297,45 @@ describe('eval storage through public APIs', () => {
           expect(await fs.readFile(path.join(stored, file))).toEqual(
             await fs.readFile(path.join(result.outputDir, file))
           );
+        const jsonFiles = files.filter((file) => file.endsWith('.json'));
         const storedText = await Promise.all(
-          files
-            .filter((file) => file.endsWith('.json'))
-            .map((file) => fs.readFile(path.join(stored, file), 'utf8'))
+          jsonFiles.map((file) => fs.readFile(path.join(stored, file), 'utf8'))
         );
         for (const marker of [
           'PRIVATE_RESPONSE_MARKER',
           'PRIVATE_TOOL_OUTPUT_MARKER',
+          'PRIVATE_JUDGE_A_MARKER',
+          'PRIVATE_JUDGE_B_MARKER',
+          'PRIVATE_PAIRWISE_MARKER',
         ]) {
           expect(JSON.stringify(result.summary)).toContain(marker);
-          expect(storedText.some((text) => text.includes(marker))).toBe(
-            !redact
+          const leaked = jsonFiles.filter((_file, index) =>
+            storedText[index]!.includes(marker)
           );
+          if (redact) expect(leaked, `${marker} in stored files`).toEqual([]);
+          else expect(leaked, `${marker} in stored files`).not.toEqual([]);
         }
+        // The judges' verdicts and reasoning stay; only their notes go.
+        const results = JSON.parse(
+          await fs.readFile(path.join(stored, 'results.json'), 'utf8')
+        ) as {
+          cases: Array<{
+            scores: Record<string, unknown>;
+            trialResults: Array<{ scores: Record<string, unknown> }>;
+          }>;
+        };
+        const [stored0] = results.cases;
+        for (const scores of [
+          stored0!.scores,
+          ...stored0!.trialResults.map((trial) => trial.scores),
+        ])
+          expect(scores.judge).toMatchObject({
+            pass: true,
+            judgeResults: [
+              { pass: true, reasoning: 'A graded it' },
+              { pass: true, reasoning: 'B graded it' },
+            ],
+          });
       }
       // The second run is the store's latest, and was compared with the first.
       const [first, second] = runs;

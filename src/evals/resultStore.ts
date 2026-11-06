@@ -180,12 +180,42 @@ function stripTrace(trace: unknown): void {
 /**
  * A judge's `metadata` is the judge's own: an agentic judge's audit, a
  * plugin's working notes. It can quote the evidence, so it goes too; the
- * score, pass and reasoning stay.
+ * score, pass and reasoning stay. A score that combines several judges
+ * keeps each one's verdict in `judgeResults`, with its own metadata.
  */
 function stripScoreMetadata(scores: unknown): void {
   if (!isJsonObject(scores)) return;
-  for (const score of Object.values(scores))
-    if (isJsonObject(score)) delete score.metadata;
+  for (const score of Object.values(scores)) stripScore(score);
+}
+
+function stripScore(score: unknown): void {
+  if (!isJsonObject(score)) return;
+  delete score.metadata;
+  if (Array.isArray(score.judgeResults))
+    for (const result of score.judgeResults) stripScore(result);
+}
+
+/**
+ * A pairwise judge's preference is a score too: its `metadata` goes, its
+ * preference, strength, dimensions and reasoning stay. Preferences sit in a
+ * comparison's `cases[].preferences[]`: a variant's `pairwise`, a stored
+ * comparison, or a run's pairwise summary.
+ */
+function isPairwiseCases(value: JsonObject): boolean {
+  return (
+    Array.isArray(value.cases) &&
+    value.cases.length > 0 &&
+    value.cases.every(
+      (item) => isJsonObject(item) && Array.isArray(item.preferences)
+    )
+  );
+}
+
+function stripPreferenceMetadata(comparison: JsonObject): void {
+  for (const item of comparison.cases as unknown[])
+    if (isJsonObject(item))
+      for (const preference of item.preferences as unknown[])
+        if (isJsonObject(preference)) delete preference.metadata;
 }
 
 /**
@@ -218,6 +248,7 @@ function stripResponses(value: unknown): void {
           stripClientTelemetry(trial.clientTelemetry);
         }
   }
+  if (isPairwiseCases(value)) stripPreferenceMetadata(value);
   for (const nested of Object.values(value)) stripResponses(nested);
 }
 
@@ -227,7 +258,8 @@ function stripResponses(value: unknown): void {
  * comparisons), has no raw `response`, no echoed exact-match
  * `expect.response`, no `finalText`, event `output` or model call `text` in
  * its traces, no `content` in its client telemetry, and no judge score
- * `metadata` (in it or its trials).
+ * `metadata` (in it, its trials, or a combined score's `judgeResults`), and
+ * every pairwise preference has no `metadata`.
  * These may hold data from the server under test. Everything else is kept,
  * including each trace's events, servers, arguments and usage.
  */
