@@ -1,3 +1,5 @@
 [tools]
 node = "22"
-npm = "latest"
+# npm 12 can't publish with trusted publishing yet (EUNKNOWNCONFIG on the
+# token its OIDC step sets), and the Release workflow publishes with this npm.
+npm = "11"
