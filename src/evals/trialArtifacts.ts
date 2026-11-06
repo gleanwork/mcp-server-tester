@@ -9,10 +9,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { EvalCase } from './datasetTypes.js';
 import { executionEnding, type CaseExecution } from './caseExecution.js';
-import type { ClientArtifacts } from './evalFrameworkTypes.js';
+import type { ClientArtifacts, ClientRunResult } from './evalFrameworkTypes.js';
 import { trialArtifactsPath } from './runFormat.js';
 import { ALL_ARTIFACTS, DIAGNOSIS_DIR } from './allArtifacts.js';
-import { failedAfterClientEnding } from './trialEnding.js';
+import { failedAfterClient } from './trialEnding.js';
 import { jsonCopy } from '../utils/jsonFile.js';
 
 /** The most a trial's copy may hold. A copy over a limit fails. */
@@ -86,6 +86,29 @@ function parseInclude(include: readonly string[]): Array<RegExp[] | 'all'> {
       );
     return segments.map(segmentPattern);
   });
+}
+
+/**
+ * What a client's result becomes when MST couldn't copy its artifacts
+ * (`error` is the copy's message, or the messages so far): no artifacts, and
+ * the collection failure's ending and failure kind unless the attempt
+ * already was an infrastructure failure (`failedAfterClient`). The worker,
+ * the coordinator and the local run all end a failed copy this way.
+ */
+export function afterCopyFailed(
+  result: ClientRunResult,
+  error: string
+): Pick<ClientRunResult, 'diagnostics' | 'error' | 'ending'> {
+  const { ending, failureKind } = failedAfterClient(result, {
+    broke: 'collection',
+    kind: 'artifacts',
+    reason: error,
+  });
+  return {
+    diagnostics: { ...result.diagnostics, failureKind },
+    error,
+    ending,
+  };
 }
 
 /**
@@ -208,23 +231,21 @@ export function withCopiedArtifacts(
     try {
       await copyArtifacts(artifacts, target);
     } catch (error) {
-      const diagnostics = {
-        ...(execution.diagnostics ?? response.diagnostics),
-        failureKind: 'artifacts' as const,
-      };
       const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
+      // MST couldn't collect the trial, whatever the client said; a failure
+      // the attempt already had stands.
+      const previous = execution.diagnostics ?? response.diagnostics;
+      const { ending, failureKind } = failedAfterClient(
+        { ending: executionEnding(execution), diagnostics: previous },
+        { broke: 'collection', kind: 'artifacts', reason: message }
+      );
+      const diagnostics = { ...previous, failureKind };
       return {
         ...execution,
         response: { ...response, diagnostics },
         diagnostics,
         error: message,
-        // MST couldn't collect the trial, whatever the client said; what
-        // broke before that, if anything, stands.
-        ending: failedAfterClientEnding(
-          executionEnding(execution),
-          'collection',
-          message
-        ),
+        ending,
       };
     }
     return {

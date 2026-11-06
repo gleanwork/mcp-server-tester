@@ -23,8 +23,7 @@ import {
   type TrialKey,
 } from './protocol.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
-import { endingOf, failedAfterClientEnding } from '../trialEnding.js';
-import { copyArtifacts } from '../trialArtifacts.js';
+import { afterCopyFailed, copyArtifacts } from '../trialArtifacts.js';
 import { stableJson } from '../../skills/skillEntry.js';
 
 /**
@@ -52,13 +51,7 @@ export async function placeArtifacts(
     return { ...rest, artifacts: { dir, include: ALL_ARTIFACTS } };
   } catch (error) {
     const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
-    return {
-      ...rest,
-      diagnostics: { ...rest.diagnostics, failureKind: 'artifacts' },
-      error: message,
-      // Whatever the client said, MST couldn't collect the trial.
-      ending: failedAfterClientEnding(endingOf(rest), 'collection', message),
-    };
+    return { ...rest, ...afterCopyFailed(rest, message) };
   }
 }
 

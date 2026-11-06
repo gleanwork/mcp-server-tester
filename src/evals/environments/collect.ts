@@ -27,11 +27,7 @@ import {
   type ConnectorServerConfig,
   type EvalServerConfig,
 } from '../evalConfig.js';
-import {
-  endingOf,
-  failedAfterClientEnding,
-  isInfrastructure,
-} from '../trialEnding.js';
+import { isInfrastructure } from '../trialEnding.js';
 import { collectClientBatch } from '../desktopBatch.js';
 import {
   batchName,
@@ -42,7 +38,7 @@ import { readinessRetryDelaysMs, readyBatch } from '../readinessCheck.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
-import { copyArtifacts } from '../trialArtifacts.js';
+import { afterCopyFailed, copyArtifacts } from '../trialArtifacts.js';
 import {
   usesToolSurfaceProxy,
   withoutToolVariant,
@@ -317,30 +313,16 @@ export async function collectShard(
       // An early save may have consumed temporary diagnosis files. Reuse its
       // copy, or retain its copy failure, rather than recopying missing files.
       const { artifacts: _source, ...rest } = redacted;
-      const copyFailed =
-        previous.stored.diagnostics?.failureKind === 'artifacts';
+      // The early save had artifacts to copy and stored none: its copy failed.
+      const copyFailed = !previous.stored.artifacts;
       const error = [
         ...new Set([previous.stored.error, rest.error].filter(Boolean)),
       ].join(' ');
       stored = {
         ...rest,
-        ...(previous.stored.artifacts
-          ? { artifacts: previous.stored.artifacts }
-          : {}),
         ...(copyFailed
-          ? {
-              diagnostics: {
-                ...rest.diagnostics,
-                failureKind: 'artifacts' as const,
-              },
-              error,
-              ending: failedAfterClientEnding(
-                endingOf(rest),
-                'collection',
-                error
-              ),
-            }
-          : {}),
+          ? afterCopyFailed(rest, error)
+          : { artifacts: previous.stored.artifacts }),
       };
     } else if (redacted.artifacts) {
       const dir = `${batch}/${index}.artifacts`;
@@ -350,17 +332,7 @@ export async function collectShard(
         stored = { ...rest, artifacts: { dir, include: ALL_ARTIFACTS } };
       } catch (error) {
         const message = `Couldn't copy the trial's client artifacts: ${error instanceof Error ? error.message : String(error)}`;
-        stored = {
-          ...rest,
-          diagnostics: { ...rest.diagnostics, failureKind: 'artifacts' },
-          error: message,
-          // Whatever the client said, MST couldn't collect the trial.
-          ending: failedAfterClientEnding(
-            endingOf(rest),
-            'collection',
-            message
-          ),
-        };
+        stored = { ...rest, ...afterCopyFailed(rest, message) };
       }
     }
     await writeFileAtomically(

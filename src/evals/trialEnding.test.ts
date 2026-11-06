@@ -5,7 +5,7 @@ import {
   caseIncompleteness,
   contextOverflowEnding,
   endingOf,
-  failedAfterClientEnding,
+  failedAfterClient,
   isCounted,
   resumeCollects,
   thrownEnding,
@@ -159,43 +159,78 @@ describe('endingOf', () => {
   });
 });
 
-describe('failedAfterClientEnding', () => {
+describe('failedAfterClient', () => {
+  const copyFailed = {
+    broke: 'collection' as const,
+    kind: 'artifacts' as const,
+    reason: "Couldn't copy.",
+  };
+
   it('makes a trial, or an untyped attempt, a retryable failure of what broke after the client', () => {
-    for (const existing of [TRIAL_ENDING, undefined]) {
-      const ending = failedAfterClientEnding(
-        existing,
-        'collection',
-        "Couldn't copy."
-      );
+    for (const attempt of [
+      { ending: TRIAL_ENDING },
+      { finalText: 'a correct answer' },
+    ]) {
+      const { ending, failureKind } = failedAfterClient(attempt, copyFailed);
       expect(ending).toEqual({
         kind: 'infrastructure',
         broke: 'collection',
         retryable: true,
         reason: "Couldn't copy.",
       });
+      expect(failureKind).toBe('artifacts');
       // Not counted, and a resume collects it again.
       expect(isCounted({ ending })).toBe(false);
       expect(resumeCollects({ ending })).toBe(true);
     }
     expect(
-      failedAfterClientEnding(TRIAL_ENDING, 'client-app', 'Cleanup failed.')
-    ).toMatchObject({ broke: 'client-app', retryable: true });
+      failedAfterClient(
+        { ending: TRIAL_ENDING },
+        { broke: 'client-app', kind: 'cleanup', reason: 'Cleanup failed.' }
+      )
+    ).toEqual({
+      ending: expect.objectContaining({ broke: 'client-app', retryable: true }),
+      failureKind: 'cleanup',
+    });
   });
 
-  it("keeps the attempt's own infrastructure failure: what broke first", () => {
+  it("keeps the attempt's own infrastructure failure, ending and kind: what broke first", () => {
     const deadline = {
       kind: 'infrastructure' as const,
       broke: 'deadline' as const,
       retryable: true,
       reason: 'Timed out.',
     };
+    // Typed by the client.
     expect(
-      failedAfterClientEnding(deadline, 'collection', "Couldn't copy.")
-    ).toBe(deadline);
+      failedAfterClient(
+        { ending: deadline, diagnostics: { failureKind: 'timeout' } },
+        copyFailed
+      )
+    ).toEqual({ ending: deadline, failureKind: 'timeout' });
+    // Said only by a failure kind, as a desktop's cleanup failure before a
+    // worker's copy failure is.
+    expect(
+      failedAfterClient(
+        { error: 'Cleanup failed.', diagnostics: { failureKind: 'cleanup' } },
+        copyFailed
+      )
+    ).toEqual({
+      ending: { ...infra('client-app'), reason: 'Cleanup failed.' },
+      failureKind: 'cleanup',
+    });
+    // An infrastructure ending without a kind takes the new kind.
+    expect(failedAfterClient({ ending: deadline }, copyFailed)).toEqual({
+      ending: deadline,
+      failureKind: 'artifacts',
+    });
     const setup = { ...deadline, broke: 'setup' as const, retryable: false };
-    expect(failedAfterClientEnding(setup, 'client-app', 'Cleanup.')).toBe(
-      setup
-    );
+    expect(
+      failedAfterClient(
+        { ending: setup },
+        { broke: 'client-app', kind: 'cleanup', reason: 'Cleanup.' }
+      ).ending
+    ).toBe(setup);
   });
 });
 

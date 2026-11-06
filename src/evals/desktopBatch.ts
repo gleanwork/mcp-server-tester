@@ -48,11 +48,7 @@ import {
 import { ClientUnavailableError } from './clientUnavailable.js';
 import { stableJson } from '../skills/skillEntry.js';
 import { checkServersReady, notReadyResult } from './readinessCheck.js';
-import {
-  endingOf,
-  failedAfterClientEnding,
-  thrownEnding,
-} from './trialEnding.js';
+import { failedAfterClient, thrownEnding } from './trialEnding.js';
 
 /**
  * Failed cases in a row after which a batch stops submitting. A reset that
@@ -696,16 +692,14 @@ async function runSessionBatch(
         // The desktop's state is unknown, so no case counts; but this is the
         // desktop failing, not the client: an infrastructure failure, a
         // retry collects. One the client already had stands.
+        const { ending, failureKind } = failedAfterClient(result, {
+          broke: 'client-app',
+          kind: 'cleanup',
+          reason: message,
+        });
         result.error = [result.error, message].filter(Boolean).join(' ');
-        result.diagnostics = {
-          ...result.diagnostics,
-          failureKind: result.diagnostics?.failureKind ?? 'cleanup',
-        };
-        result.ending = failedAfterClientEnding(
-          endingOf(result),
-          'client-app',
-          message
-        );
+        result.diagnostics = { ...result.diagnostics, failureKind };
+        result.ending = ending;
         result.telemetry = {
           ...result.telemetry,
           batchFailure: { kind: 'cleanup_failed', error: message },

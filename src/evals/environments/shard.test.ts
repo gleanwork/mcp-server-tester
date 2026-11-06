@@ -147,6 +147,7 @@ describe('a shard in a child-process environment', () => {
     { failClose: true, missingArtifacts: true, explicitEnding: false },
     // A client that typed its attempt a trial: MST's failure after it
     // still makes the attempt an infrastructure failure, not a failed trial.
+    { failClose: false, missingArtifacts: false, explicitEnding: true },
     { failClose: true, missingArtifacts: false, explicitEnding: true },
     { failClose: false, missingArtifacts: true, explicitEnding: true },
     { failClose: true, missingArtifacts: true, explicitEnding: true },
@@ -224,7 +225,8 @@ describe('a shard in a child-process environment', () => {
         batchLifecycle: { closed: true },
       });
       if (infrastructure) {
-        // The desktop's cleanup failure, when there was one, broke first.
+        // The worker copies artifacts after the batch, so a cleanup failure
+        // is the first of MST's failures: it stands, in ending and kind.
         expect(result.result.ending).toEqual({
           kind: 'infrastructure',
           broke: failClose ? 'client-app' : 'collection',
@@ -233,15 +235,15 @@ describe('a shard in a child-process environment', () => {
             failClose ? 'cleanup failed' : "Couldn't copy"
           ),
         });
+        expect(result.result).toMatchObject({
+          diagnostics: { failureKind: failClose ? 'cleanup' : 'artifacts' },
+        });
       } else {
         expect(result.result.ending).toEqual(
           explicitEnding ? { kind: 'trial' } : undefined
         );
       }
       if (missingArtifacts) {
-        expect(result.result).toMatchObject({
-          diagnostics: { failureKind: 'artifacts' },
-        });
         expect(result.result.error).toContain("Couldn't copy");
         expect(result.result.artifacts).toBeUndefined();
       } else {
