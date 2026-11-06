@@ -1,0 +1,20 @@
+{
+  "name": "mcp-server-tester",
+  "owner": {
+    "name": "Glean",
+    "url": "https://github.com/gleanwork"
+  },
+  "metadata": {
+    "description": "Agent skills for @gleanwork/mcp-server-tester, the Playwright-based testing and evaluation framework for MCP servers."
+  },
+  "plugins": [
+    {
+      "name": "mcp-server-tester",
+      "source": "./",
+      "description": "Skills for testing and evaluating MCP servers with @gleanwork/mcp-server-tester: the reference, writing tests, writing evals, and optimizing tool metadata.",
+      "homepage": "https://github.com/gleanwork/mcp-server-tester",
+      "license": "MIT",
+      "strict": false
+    }
+  ]
+}

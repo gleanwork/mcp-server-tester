@@ -119,6 +119,10 @@ The public API is tiered. Each name is exported from exactly one of these entry 
 
 The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (the extension table, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only `Symbol.for` state (the extension table and the plugin-load cache) is shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. `src/publicApi.test.ts` pins each entry point's runtime exports: after a deliberate change, update it with `npx vitest run src/publicApi.test.ts -u` and note any removal in the migration guides. Tests count as users, so an export only a test imports is not flagged.
 
+### Agent Skills for Consumers (`skills/`)
+
+`skills/` holds the agent skills MST's users install: with `npx skills add gleanwork/mcp-server-tester`, from the npm package (`files` includes `skills`) with `npx skills experimental_sync`, or as a Claude Code plugin from `.claude-plugin/marketplace.json`. They are not covered by `docs:check`; `tests/shippedSkills.test.ts` validates every dataset, case and eval config they show, and fails on a renamed client name or a link to a repo file a consumer doesn't have. When you rename a key, client or command, update the skills too. Link to docs with `https://github.com/gleanwork/mcp-server-tester/blob/main/docs/...`, not `docs/...`.
+
 ### Trials and Pass Rate
 
 Eval cases can run several trials to compute a pass rate:

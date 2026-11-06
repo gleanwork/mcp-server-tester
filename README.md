@@ -223,13 +223,7 @@ for client-specific fields, environment rules, and setup ownership.
 
 ## AI Skills
 
-Install AI skills to help your coding assistant write tests and evals, and improve tool metadata:
-
-```bash
-npx skills add -g gleanwork/mcp-server-tester
-```
-
-This installs skills globally so they're available across all your projects. Four skills are included:
+MST ships agent skills that teach your coding assistant MST and help it write tests and evals, and improve tool metadata. Four skills are included:
 
 | Skill                        | Description                                                                         |
 | ---------------------------- | ----------------------------------------------------------------------------------- |
@@ -238,7 +232,24 @@ This installs skills globally so they're available across all your projects. Fou
 | `write-mcp-eval`             | Write eval datasets and eval configs: cases a client and model act on, and variants |
 | `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `mst optimize`                |
 
-Compatible with Claude Code, Cursor, Windsurf, Copilot, and [40+ other AI agents](https://github.com/nicepkg/nice-skills).
+Install them with the [`skills` CLI](https://github.com/vercel-labs/skills), which supports Claude Code, Codex, Cursor, Copilot and many other agents:
+
+```bash
+npx skills add -g gleanwork/mcp-server-tester
+```
+
+This installs the skills from the repository's `main` branch, for all your projects. The npm package ships the same skills, so a project can use the ones that match its version of MST instead. Run this in the project after you install MST (the command is experimental in the `skills` CLI):
+
+```bash
+npx skills experimental_sync
+```
+
+In Claude Code, you can also install the skills as a plugin:
+
+```text
+/plugin marketplace add gleanwork/mcp-server-tester
+/plugin install mcp-server-tester@mcp-server-tester
+```
 
 ## Examples
 

@@ -76,7 +76,8 @@
     "scripts/chatgpt_linux.py",
     "scripts/chatgpt_linux_contract.json",
     "schema",
-    "docker"
+    "docker",
+    "skills"
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",
