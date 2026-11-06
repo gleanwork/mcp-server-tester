@@ -227,6 +227,52 @@ describe('collectInEnvironment', () => {
     ).toContain('the machine API returned 503');
   });
 
+  it("fails only the shard whose bundle can't be written; the other shard runs", async () => {
+    // 'a' hashes to shard 1, 'c' to shard 2. Shard 1's directory is a file.
+    const ran: number[] = [];
+    const env = environment(async (shard) => {
+      ran.push(shard.index);
+      return ok;
+    }, 2);
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
+    dirs.push(workDir);
+    await fs.writeFile(path.join(workDir, 'shard-0'), 'not a directory');
+    const gathered = await collectInEnvironment({
+      environment: env,
+      runId: 'run-1',
+      evalConfig: { name: 'gather' } as EvalConfig,
+      plugins: [],
+      groups: [
+        {
+          variant: { name: 'baseline' },
+          requests: ['a', 'c'].map((caseId) => ({
+            caseId,
+            trial: 0,
+            config: { type: 'api' },
+            input: { prompt: caseId, servers: [] },
+          })),
+        },
+      ],
+      secrets: {},
+      workDir,
+      signal: new AbortController().signal,
+    });
+    expect(ran).toEqual([1]);
+    expect(gathered.outcomes[0]).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/^Shard 1 failed: /),
+    });
+    expect(gathered.outcomes[1]).toEqual(ok);
+    // The fake writes no results, so both are missing; only 'a' for the
+    // bundle.
+    expect(
+      gathered.result({ variant: 'baseline', caseId: 'a', trial: 0 }).error
+    ).toMatch(/shard 1 ended before this trial came back \(Shard 1 failed: /);
+    expect(
+      gathered.result({ variant: 'baseline', caseId: 'c', trial: 0 }).error
+    ).toMatch(/shard 2 ended before this trial came back \(no result\)/);
+  });
+
   it('gives back room a shard was still waiting for when it ended, so a sibling can take it', async () => {
     // One slot for the shared server. Shard 1 ('a') queues for it behind
     // shard 2 ('c' #1), then throws; shard 2's second trial needs the slot.
@@ -272,6 +318,7 @@ describe('collectInEnvironment', () => {
       label: 'shared',
       serverUrl: 'https://example.invalid/mcp',
     };
+    let hangGuard: NodeJS.Timeout | undefined;
     const gathered = await Promise.race([
       collectInEnvironment({
         environment: env,
@@ -299,8 +346,11 @@ describe('collectInEnvironment', () => {
           if (line.startsWith('shard 1/2: stopped:')) failedEnded();
         },
       }),
-      new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 2000)),
+      new Promise<'hung'>((resolve) => {
+        hangGuard = setTimeout(() => resolve('hung'), 2000);
+      }),
     ]);
+    clearTimeout(hangGuard);
     expect(gathered).not.toBe('hung');
     expect(order).toEqual([
       'c #1 has room',

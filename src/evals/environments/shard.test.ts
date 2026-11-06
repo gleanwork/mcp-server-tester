@@ -18,6 +18,7 @@ import type { EvalConfig, EvalVariant } from '../evalConfig.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import type {
   EnvironmentContext,
+  Machine,
   ShardEvents,
   ShardProgress,
   ShardSpec,
@@ -873,5 +874,34 @@ describe('machineEnvironment', () => {
     // A clean shard isn't asked.
     expect(await finish(0)).not.toHaveProperty('note');
     expect(asked).toBe(1);
+  });
+
+  it("keeps the shard's outcome when a diagnosis throws before it returns a promise", async () => {
+    const run = (stdout: string[]) =>
+      machineEnvironment(
+        context(),
+        async () => ({
+          id: 'machine-1',
+          channel: scriptedChannel(stdout).channel,
+          // A plugin's non-async diagnose that throws synchronously.
+          diagnose: (() => {
+            throw new Error('sync');
+          }) as unknown as Machine['diagnose'],
+          async dispose() {},
+        }),
+        { silenceMs: 50, cancelGraceMs: 10 }
+      ).runShard(spec, quiet, new AbortController().signal);
+    expect(
+      await run([
+        JSON.stringify({
+          type: 'done',
+          collected: 2,
+          infra: 1,
+          cancelled: false,
+          cleanup: 'ok',
+        }),
+      ])
+    ).toEqual({ ok: true, collected: 2, infra: 1, cancelled: false });
+    expect((await run([])).reason).toMatch(/^The worker sent nothing/);
   });
 });
