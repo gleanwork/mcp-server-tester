@@ -3,12 +3,19 @@ import {
   LOCAL_GRADING,
   gatheredGrading,
   gradeKeyString,
+  gradingComplete,
   recordingGrading,
   resumedGrading,
   type GradeRecord,
   type PreviousGrades,
 } from './gradingSource.js';
 import type { GradingOutcome } from './grading.js';
+import type {
+  EvaluationSummary,
+  EvaluationVariantResult,
+} from './evalFrameworkTypes.js';
+import type { PairwiseCasePreference } from './pairwiseComparison.js';
+import type { EvalCaseResult } from '../types/reporter.js';
 
 const trialKey = {
   kind: 'trial',
@@ -171,5 +178,116 @@ describe('resumed grading (mst grade --resume)', () => {
       await source.pairwise({ ...pairKey, caseId: 'other' }, [], judge)
     ).toEqual([]);
     expect(judge).not.toHaveBeenCalled();
+  });
+});
+
+describe('gradingComplete', () => {
+  const pairwise = { baseline: 'baseline', judges: ['p'] };
+  const trial = (
+    id: string,
+    variant: string,
+    scores: GradingOutcome['scores'],
+    extra: Partial<EvalCaseResult> = {}
+  ): EvalCaseResult =>
+    ({
+      id,
+      variant,
+      pass: true,
+      scores,
+      trialResults: [{ pass: true, scores }],
+      ...extra,
+    }) as EvalCaseResult;
+  const compared = (
+    cases: Array<{ id: string; preferences: PairwiseCasePreference[] }>
+  ): EvaluationVariantResult[] => [
+    { name: 'baseline', servers: [] },
+    {
+      name: 'candidate',
+      servers: [],
+      pairwise: {
+        baseline: 'baseline',
+        candidate: 'candidate',
+        unmatched: { baselineOnly: [], candidateOnly: [] },
+        cases,
+        summary: [],
+      } as unknown as EvaluationVariantResult['pairwise'],
+    },
+  ];
+  const summary = (
+    results: EvalCaseResult[],
+    variants: EvaluationVariantResult[]
+  ): EvaluationSummary =>
+    ({ runId: 'r1', results, variants }) as unknown as EvaluationSummary;
+  const ok = { judge: { pass: true, score: 1 } };
+  const preferred: PairwiseCasePreference = { judge: 'p', preference: 'tie' };
+
+  it('is complete when every judge and pairwise judge gave a verdict', () => {
+    const results = [trial('c', 'baseline', ok), trial('c', 'candidate', ok)];
+    expect(
+      gradingComplete(
+        summary(results, compared([{ id: 'c', preferences: [preferred] }])),
+        pairwise
+      )
+    ).toBe(true);
+    // No pairwise judges: the trials' verdicts are all it takes.
+    expect(gradingComplete(summary(results, compared([])))).toBe(true);
+  });
+
+  it('is partial when a judge nested in a combined score has no verdict, though another grader settled the case', () => {
+    const scores = {
+      toolCallCount: { pass: false, score: 0 },
+      judge: {
+        pass: false,
+        judgeResults: [
+          { pass: true, score: 1 },
+          { pass: false, error: 'Request timed out.' },
+        ],
+      },
+    };
+    const results = [
+      trial('c', 'baseline', scores, { pass: false }),
+      trial('c', 'candidate', ok),
+    ];
+    expect(
+      gradingComplete(
+        summary(results, compared([{ id: 'c', preferences: [preferred] }])),
+        pairwise
+      )
+    ).toBe(false);
+  });
+
+  it('is partial when a pairwise judge failed, or its comparison was lost', () => {
+    const results = [trial('c', 'baseline', ok), trial('c', 'candidate', ok)];
+    expect(
+      gradingComplete(
+        summary(
+          results,
+          compared([
+            { id: 'c', preferences: [{ ...preferred, error: 'timed out' }] },
+          ])
+        ),
+        pairwise
+      )
+    ).toBe(false);
+    expect(gradingComplete(summary(results, compared([])), pairwise)).toBe(
+      false
+    );
+    // The same run with its pairwise judges skipped is complete.
+    expect(gradingComplete(summary(results, compared([])))).toBe(true);
+  });
+
+  it("doesn't wait on a trial whose client failed: nothing grades it", () => {
+    const failed = {
+      id: 'c',
+      variant: 'baseline',
+      pass: false,
+      error: 'client crashed',
+    } as EvalCaseResult;
+    expect(
+      gradingComplete(
+        summary([failed, trial('c', 'candidate', ok)], compared([])),
+        pairwise
+      )
+    ).toBe(true);
   });
 });

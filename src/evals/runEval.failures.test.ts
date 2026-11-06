@@ -363,8 +363,10 @@ describe('a run that meets failures', () => {
     await f.run();
     const runDirectory = await f.runDirectory();
     const { run, cases } = await storedRun(runDirectory);
-    // The assertion's fail settles it: a graded fail, not "not graded".
-    expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
+    // The assertion's fail settles the case: a graded fail, not "not
+    // graded". The judge still has no verdict, so the grading is partial:
+    // `mst grade --resume` would run that judge.
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'partial' });
     expect(cases[0]?.pass).toBe(false);
     expect(cases[0]?.error).toBeUndefined();
     const trial = await readJson<{ infrastructureError: boolean }>(

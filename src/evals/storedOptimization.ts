@@ -398,12 +398,14 @@ async function completeRunOf(
     .reverse();
   for (const id of candidates) {
     const run = (await readRun(evalDirectory, id).catch(() => undefined))?.run;
+    // Every trial collected, as the step's own result would be: a judge
+    // without a verdict leaves the run's grading partial, not its measurement
+    // unusable, and the step that succeeds keeps such a run too.
     if (
       run?.optimization?.id === marker.id &&
       run.optimization.role === marker.role &&
       run.optimization.round === marker.round &&
-      run.phases.collect === 'complete' &&
-      run.phases.grade === 'complete'
+      run.phases.collect === 'complete'
     )
       return readRun(evalDirectory, id);
   }
