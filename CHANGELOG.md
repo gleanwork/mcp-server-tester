@@ -19,6 +19,7 @@
 
 ## Unreleased
 
+- Stored-response redaction now drops every judge's `metadata`: a combined score's `judgeResults` and pairwise preferences too, in `results.json`, `summary.json`, the per-judge score files and the stored report. Before, only a case's top-level scores lost their metadata, so a judge that quoted the answer in its notes kept it in the stored run.
 - `mst clients` and `mst clients show` now list every option and its default in text and JSON, from the same schemas as the generated docs. Runtime defaults and omission semantics are unchanged.
 - Eval loading checks client OS requirements for variants and cases against local, Docker or a plugin environment's declared OS. `EnvironmentDefinition.os` is optional (`macos` or `linux`); undeclared environments stay compatible. See [the migration guide](docs/migrations/2.0-prereleases.md#client-listings-include-defaults-known-environment-os-is-checked).
 - Desktop clients use concrete per-OS entry points. New Linux receipts omit the `driver` identity; old stored receipts remain readable. See [the migration guide](docs/migrations/2.0-prereleases.md#linux-desktop-receipts-omit-the-driver-identity).
