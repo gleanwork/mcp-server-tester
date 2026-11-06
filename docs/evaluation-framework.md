@@ -186,7 +186,11 @@ out of the trial pass rate and judge metrics, its case is incomplete (neither
 passed nor failed), and the run's `run.json` says `grade: partial`. It isn't an
 infrastructure failure: the client's attempt ended fine, and
 `mst grade --resume` grades it. Its other graders' scores, and the
-judge's error, are still stored under `scores/`.
+judge's error, are still stored under `scores/`. When another grader did
+fail the trial, the case is a fail, but the judge still has no verdict: the
+run is `grade: partial` all the same, and `--resume` runs that judge. The
+same goes for a pairwise judge that gave no preference. `grade: complete`
+means exactly that a resume would have nothing to grade.
 
 `case.expected` holds the case's ground truth:
 

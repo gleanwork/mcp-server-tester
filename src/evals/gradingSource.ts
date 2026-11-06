@@ -249,6 +249,43 @@ export function gradingToResume(
   return todo;
 }
 
+/**
+ * Whether a run's grading finished: every grader and judge of every trial a
+ * client ran gave a verdict, and every pairwise judge gave a preference for
+ * every case it compares. This is the rule `mst grade --resume` grades
+ * again by, so a run that resume would grade again is never recorded as
+ * `grade: complete`. A case's verdict can be settled (one assertion failed)
+ * while a judge of it has no verdict: the case is a fail, the grading is
+ * still partial. `pairwise` names the baseline and the pairwise judges that
+ * were to run; omit it when none were.
+ */
+export function gradingComplete(
+  summary: EvaluationSummary,
+  pairwise?: { baseline: string; judges: readonly string[] }
+): boolean {
+  const trials = new Map<string, Map<string, { clientFailed: boolean }[]>>();
+  for (const result of summary.results) {
+    const variant = result.variant ?? 'default';
+    const byCase =
+      trials.get(variant) ?? new Map<string, { clientFailed: boolean }[]>();
+    trials.set(variant, byCase);
+    const list = result.trialResults?.length ? result.trialResults : [result];
+    byCase.set(
+      result.id,
+      list.map((trial) => ({
+        clientFailed:
+          trial.error !== undefined && trial.gradingError === undefined,
+      }))
+    );
+  }
+  const todo = gradingToResume(
+    previousGrades(summary.runId ?? '', summary),
+    trials,
+    pairwise
+  );
+  return todo.trials === 0 && todo.comparisons === 0;
+}
+
 /** Whether a score, or one of its judges, has no verdict: its grader failed to run. */
 function failedToRun(score: GraderScore): boolean {
   return (

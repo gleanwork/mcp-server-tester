@@ -150,6 +150,7 @@ import {
 } from './builtinResultStores.js';
 import {
   LOCAL_GRADING,
+  gradingComplete,
   gradingToResume,
   previousGrades,
   resumedGrading,
@@ -2869,14 +2870,18 @@ async function evaluate(
         : missingTrials > 0
           ? 'partial'
           : 'complete',
-      // Trials a grader couldn't score are what a regrade would finish.
-      grade: allResults.some(
-        (result) =>
-          result.gradingError !== undefined ||
-          result.trialResults?.some((trial) => trial.gradingError !== undefined)
-      )
-        ? 'partial'
-        : 'complete',
+      // Trials and comparisons with a judge without a verdict are what
+      // `mst grade --resume` would finish: the same rule decides both.
+      grade: gradingComplete(storedSummary, {
+        baseline: evalConfig.variants?.[0]?.name ?? 'default',
+        judges: options.skipPairwise
+          ? []
+          : (evalConfig.pairwiseJudges ?? []).map(
+              (entry) => pairwiseJudgeSpec(entry).type
+            ),
+      })
+        ? 'complete'
+        : 'partial',
     }),
     storedSummary
   );
