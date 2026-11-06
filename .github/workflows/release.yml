@@ -51,8 +51,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: read # lerna-changelog reads the merged pull requests
-    env:
-      MISE_NPM_VERSION: '11'
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -63,12 +61,13 @@ jobs:
           # release-it requires one.
           ref: ${{ github.head_ref || github.ref_name }}
 
+      # The same npm the release job publishes with; see its note.
       - name: Setup mise
         uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
-
-      # The same npm the release job publishes with; see its note.
-      - name: Require npm 11
-        run: npm --version | grep -E '^11\.' || { echo "::error::npm 11 is required, got $(npm --version)"; exit 1; }
+        with:
+          mise_toml: |
+            [tools]
+            npm = "11"
 
       - name: Install dependencies
         run: npm ci
@@ -99,8 +98,6 @@ jobs:
     permissions:
       contents: read
       id-token: write # npm trusted publishing (OIDC)
-    env:
-      MISE_NPM_VERSION: '11'
     steps:
       - name: Require main
         if: github.ref != 'refs/heads/main'
@@ -125,16 +122,16 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
+      # Trusted publishing needs npm 11.5.1 or later. npm 12 fails to publish
+      # with OIDC: it rejects the token that its OIDC step sets as an unknown
+      # CLI flag (EUNKNOWNCONFIG), so release with npm 11. This mise.toml takes
+      # precedence over the repo's .mise.toml, which tracks the latest npm.
       - name: Setup mise
         uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
-
-      # Trusted publishing needs npm 11.5.1 or later. npm 12.2.1 fails to
-      # publish with OIDC: it rejects the token that its OIDC step sets as an
-      # unknown CLI flag (EUNKNOWNCONFIG), so stay on npm 11. MISE_NPM_VERSION
-      # (set on both jobs) overrides .mise.toml's `npm = "latest"`; a global
-      # `npm install -g npm@11` doesn't, because mise's shim stays first on PATH.
-      - name: Require npm 11
-        run: npm --version | grep -E '^11\.' || { echo "::error::npm 11 is required, got $(npm --version)"; exit 1; }
+        with:
+          mise_toml: |
+            [tools]
+            npm = "11"
 
       - name: Install dependencies
         run: npm ci
