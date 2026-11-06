@@ -64,6 +64,12 @@ jobs:
       - name: Setup mise
         uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
 
+      # The same npm the release job publishes with; see its note.
+      - name: Use npm 11
+        run: |
+          npm install --global npm@11
+          npm --version
+
       - name: Install dependencies
         run: npm ci
 
