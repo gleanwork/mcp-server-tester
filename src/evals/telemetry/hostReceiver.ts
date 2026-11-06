@@ -20,6 +20,12 @@ import type { AddressInfo } from 'node:net';
 import { gunzipSync } from 'node:zlib';
 import type { HostTelemetryConfig } from '../evalConfig.js';
 import { isHostContentAttribute } from './hostContent.js';
+import {
+  HOST_MESSAGE_KEYS,
+  HOST_REQUEST_ID_KEYS,
+  HOST_RESPONSE_ID_KEYS,
+  hostKey,
+} from './hostKeys.js';
 import type {
   HostAttributeValue,
   HostTelemetry,
@@ -667,8 +673,10 @@ export async function startHostTelemetryReceiver(
 
 /**
  * The model calls with the request IDs the host's telemetry gives them: an
- * event naming both a request and one of a call's records (Claude's
- * `assistant_response`, by `message_uuid`) says which request it was.
+ * event naming a request and one of a call's records (Claude's
+ * `assistant_response`, by `message_uuid`) or the call's own response ID
+ * (Codex's, by `response_id`) says which request it was. Every client that
+ * collects host telemetry applies this, so traces join the same way.
  */
 export function withHostRequestIds(
   calls: readonly ModelCall[] | undefined,
@@ -676,17 +684,22 @@ export function withHostRequestIds(
 ): ModelCall[] | undefined {
   if (!calls || !telemetry) return calls ? [...calls] : undefined;
   const byEntry = new Map<string, string>();
+  const byResponse = new Map<string, string>();
   for (const event of telemetry.events) {
-    const entry = event.attributes.message_uuid;
-    const request = event.attributes.request_id;
-    if (typeof entry === 'string' && typeof request === 'string')
-      byEntry.set(entry, request);
+    const request = hostKey(event, HOST_REQUEST_ID_KEYS);
+    if (!request) continue;
+    const entry = hostKey(event, HOST_MESSAGE_KEYS);
+    if (entry) byEntry.set(entry, request);
+    const response = hostKey(event, HOST_RESPONSE_ID_KEYS);
+    if (response) byResponse.set(response, request);
   }
   return calls.map((call) => {
     if (call.requestId) return call;
-    const requestId = (call.entryIds ?? [])
-      .map((entry) => byEntry.get(entry))
-      .find((id) => id !== undefined);
+    const requestId =
+      (call.entryIds ?? [])
+        .map((entry) => byEntry.get(entry))
+        .find((id) => id !== undefined) ??
+      (call.id ? byResponse.get(call.id) : undefined);
     return requestId ? { ...call, requestId } : call;
   });
 }

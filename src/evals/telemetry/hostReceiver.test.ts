@@ -471,4 +471,26 @@ describe('host settings', () => {
       { id: 'msg_2', requestId: 'req_own' },
     ]);
   });
+
+  it("gives a model call the request ID of the event naming its response (Codex's record has no entries)", () => {
+    expect(
+      withHostRequestIds([{ id: 'resp_1' }, { id: 'resp_2' }], {
+        events: [
+          {
+            name: 'codex.api_request',
+            time: '2026-10-22T12:00:00.000Z',
+            attributes: {
+              'request.id': 'req_1',
+              'gen_ai.response.id': 'resp_1',
+            },
+          },
+          {
+            name: 'codex.api_request',
+            time: '2026-10-22T12:00:01.000Z',
+            attributes: { response_id: 'resp_2' },
+          },
+        ],
+      })
+    ).toEqual([{ id: 'resp_1', requestId: 'req_1' }, { id: 'resp_2' }]);
+  });
 });
