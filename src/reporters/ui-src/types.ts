@@ -28,11 +28,20 @@ export type {
   RunReportVariant,
 } from '../../types/reporter.js';
 
+export type {
+  HistoryIndex,
+  HistoryRun,
+  HistoryVariant,
+} from '../../types/history.js';
+
 import type { MCPRunReportData } from '../../types/reporter.js';
+import type { HistoryIndex } from '../../types/history.js';
 
 declare global {
   interface Window {
     /** Set by a run's report/data.js (`mst open`). */
     MST_RUN_REPORT?: MCPRunReportData;
+    /** Set by an eval's history/data.js (`mst open --history`). */
+    MST_HISTORY?: HistoryIndex;
   }
 }

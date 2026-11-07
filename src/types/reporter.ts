@@ -1073,6 +1073,11 @@ export interface MCPRunReportData {
     gradingEnvironment?: RunReportEnvironment;
     /** The client apps the trials ran, as each recorded it: `Claude 2.31226.1`. */
     clientApps?: string[];
+    /**
+     * The eval's history page, relative to the report
+     * (`../../../history/index.html`), when the eval has one.
+     */
+    historyPath?: string;
   };
   comparison: MCPComparisonData;
   variants: RunReportVariant[];

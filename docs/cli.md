@@ -1143,7 +1143,7 @@ glean
 
 - **Where the runs are.** With an eval's directory, its runs. With `--config`, the result store's runs (`--results`, else the eval config's `results.store`), or with no store, the local runs under `--output-dir` (default `.mcp-test-results/<name>`).
 - **Since previous** is the paired test `mst run` reports against its previous run, on the headline cases, against the previous run of the variant's era that was complete for it. An era starts when the datasets, the eval config's judges or the variant's setup change; a run in a new era says `new era`. See [The eval's history](./evaluation-framework.md#the-evals-history).
-- **The runs are the truth.** `mst history` reads `history.json` and builds the rows of runs it doesn't have yet, so a run another machine just finished shows. It writes nothing; `--rebuild` builds every row again and writes `history.json`.
+- **The runs are the truth.** `mst history` reads `history.json` and builds the rows of runs it doesn't have yet, so a run another machine just finished shows. It writes nothing; `--rebuild` builds every row again and writes `history.json` and the history page. `mst open --history` opens the page.
 - **Options:** `--variant <names...>`, `--since <date>` (runs collected on or after it), `--limit <n>` (most runs per variant, default 20), `--json`, `--rebuild`, `--output-dir`, `--root-dir`.
 
 ## `batch` - Run Several Eval Configs
@@ -1182,6 +1182,14 @@ npx mst open .mcp-test-results/<eval name>/runs/<run-id>
 Opens a run's report (`<run>/report/index.html`), which `mst run` writes with every run. With no path it opens the newest complete run under `-d, --dir` (default `.mcp-test-results`), read from each eval's `latest.json`. A path names a run directory, or an eval's directory for its latest run. A run without a report, such as one copied without `report/`, gets one written from its files first. `--print` prints the report's path instead of opening it.
 
 The MCP Playwright reporter writes its runs the same way, so `mst open` opens those too.
+
+`--history` opens the eval's [history page](./ui-reporter.md#the-history-page) instead (`<eval>/history/index.html`): the eval the path names (an eval's directory, or a run's), the eval config `-c, --config` names (with `--output-dir` if `mst run` was given one), or with neither, the newest eval under `--dir`. It brings the eval's `history.json` and page up to date with its local runs first.
+
+```bash
+npx mst open --history
+npx mst open --history .mcp-test-results/<eval name>
+npx mst open --history --config ./eval.json --print
+```
 
 The report has the same sections for every eval: **Result** (each variant clearly better, clearly worse, or unclear against the baseline), **Variants compared** (pass rate, judge score, pairwise preference, cost, time, tools used; _Show statistics_ adds 95% ranges, p-values and pass^k), **What differs** (each variant's setup next to the baseline's), **Case by case** (every trial with its trace, each grader's score and the pairwise preference) and **Why trials failed**. Every pass rate has its likely range, and a run too thin to pin them down says so and what to run next. A run with one variant has the same sections, with one column, and opens on the cases that need attention, if any do. A run that stored responses redacted (the default, `redactStoredResponses`) shows no answers or tool outputs; set `redactStoredResponses: false` in the eval config to keep them.
 
