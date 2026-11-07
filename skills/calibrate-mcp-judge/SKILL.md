@@ -9,6 +9,8 @@ A judge's accuracy depends on the answers it grades. A judge that agrees with pe
 
 A judge that passes the check is **usable**. The run report then shows its pass rate corrected for the judge's errors, beside the raw rate. A judge that is not usable still runs, but treat its pass rate as a guess.
 
+`mst label` and `mst judges check` need MST 2.0.0-rc.0 or later (`npm install --save-dev @gleanwork/mcp-server-tester@rc`). On an older 2.0 beta they are unknown commands.
+
 To run evals, use `run-mcp-eval`. To add judges to a dataset or eval config, use `write-mcp-eval`.
 
 ## Step 1: Choose a judge you can check

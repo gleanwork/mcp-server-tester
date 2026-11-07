@@ -25,9 +25,11 @@ Then check the credentials the run needs:
 
 Keep keys out of the config. Put them in a file and pass `--secrets-file run.env` (JSON or dotenv). Results replace values named as credentials (`*_TOKEN`, `*_KEY`, ...). A local run also reads the environment. A worker in Docker or another environment doesn't inherit this machine's environment, so put what its client and servers need in the secrets file.
 
+Decide now whether you may resume, regrade or label this run later. Each needs the run's full traces, which MST redacts by default, so set `"redactStoredResponses": false` in the eval config before you run (Step 5).
+
 ## Step 2: Run a little first
 
-A full run costs money and time. Start with one case and one trial:
+A full run costs money and time, and with many trials or a desktop client it can run for a long time. Start with one case and one trial:
 
 ```bash
 npx mst run --config eval.json --case search-recent-docs --trials 1
@@ -61,7 +63,7 @@ A bare `mst open` opens the newest full, graded run. A partial run, a `--no-grad
 
 The report's sections are **Result** (each variant clearly better, clearly worse or unclear against the baseline), **Variants compared**, **What differs** (each variant's setup next to the baseline's), **Case by case** (every trial's trace and scores) and **Why trials failed**. Read the failing trials' traces before you change anything: the client may have called the right tool with the wrong arguments, or not called a tool at all.
 
-The run's files are in `.mcp-test-results/<eval name>/runs/<run-id>/`. `results.json` has every case result and `summary.json` the per-variant totals. A run ID's last six characters (`7f3c2a`) are its short form, which every command below accepts.
+`mst open` opens the report in the user's browser. An agent reads the run's files instead, in `.mcp-test-results/<eval name>/runs/<run-id>/`: `summary.json` has the per-variant totals, `results.json` every case result, `traces/<variant>/<case-id>/<trial>.json` what the client did in each trial, and `scores/<grader>/<variant>/<case-id>/<trial>.json` each grader's score and reasoning. Without `"redactStoredResponses": false`, traces have no answers or tool outputs. A run ID's last six characters (`7f3c2a`) are its short form, which every command below accepts.
 
 ## Step 4: Tell a failed case from a broken run
 
@@ -103,7 +105,7 @@ npx mst grade 7f3c2a.g2 --config eval.json --resume           # run only the jud
 ## Step 6: Run somewhere else
 
 - **Docker.** `--env docker` runs trials in containers from MST's Linux images: the ChatGPT image for `chatgpt` and `codex-app`, else the Cowork image. Build the image once with `mst env setup docker --config eval.json`. `--env-option shards=4` splits cases over four containers. Each Docker context runs one Cowork container at a time, so four `cowork` shards run side by side only with four contexts (`--env-option contexts=a,b,c,d`).
-- **Detached.** `--detach` runs the coordinator on a machine a plugin environment creates, so your machine can go offline. It needs `--env`, a result store other machines reach (`--results gs://bucket/prefix`), and secrets in `--secrets-file`. Follow it with `mst runs list`, `mst runs watch <id>` and `mst runs logs <id>`, each with the same `--config` and `--results`. `mst runs cancel <id>` stops it and keeps what it collected.
+- **Detached.** `--detach` runs the coordinator on a machine a plugin environment creates, so your machine can go offline. It needs `--env`, a result store other machines reach (`--results gs://bucket/prefix`), secrets in `--secrets-file`, and for connector servers a shared credential store (`--store`). Follow it with `mst runs list`, `mst runs watch <id>` and `mst runs logs <id>`, each with the same `--config` and `--results`. `mst runs cancel <id>` stops it and keeps what it collected.
 - **Several configs.** `mst batch --config-dir ./evals --workers 2` runs every eval config in a directory, and exits 1 when any failed. `--skip-existing` skips configs whose result store already has a completed run.
 
 ## Step 7: Run in CI

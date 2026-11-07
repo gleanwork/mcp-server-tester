@@ -326,7 +326,7 @@ test.describe('get_weather', () => {
 });
 ```
 
-Run with `npx playwright test`. Tests and conformance checks are in Playwright's own output: the `list` reporter prints them, and with `['html', { open: 'never' }]` added to `reporter`, `npx playwright show-report` opens them. MST's reporter and `npx mst open` show evals only.
+Run with `npx playwright test`. MST's reporter takes `{ outputDir, name, autoOpen, quiet, resultStore, runMetadata, redactStoredResponses }`, and writes a test run's eval results (`runEvalDataset`) as a run in `<outputDir>/<name>/runs/<run-id>/`: by default `.mcp-test-results/playwright/runs/`, one variant per project. Tests and conformance checks are in Playwright's own output: the `list` reporter prints them, and with `['html', { open: 'never' }]` added to `reporter`, `npx playwright show-report` opens them. MST's reporter and `npx mst open` show evals only.
 
 ## Checklist
 
