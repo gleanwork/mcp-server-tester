@@ -72,10 +72,12 @@ npx mst label page 7f3c2a --judge task-completion
 
 The page opens in a browser on this machine. It shows one trial at a time: the input, the reference answer, the tool calls and the answer. It hides the judge's verdict and the variant, so neither sways you. Press `P` or `F`, add a note if you like, and press Ctrl+C in the terminal when you're done. Labels are saved as you give them.
 
+Labeling is the person's job, not the agent's. The command serves the page until it is interrupted, so an agent runs it in the background with `--no-open`, gives the user the printed `127.0.0.1` address, and stops the command with SIGINT when the user is done.
+
 - **Answer the question the page shows**, not your overall opinion of the trial. A wrong answer that a tool result supports is grounded: it passes `grounded-in-tools` and fails `task-completion`.
 - **`--judge`** is the judge's name in results: a `rubric` judge's rubric (`correctness`), else its reference (`task-completion`, `acme/judge/completeness`). One criterion is `criteria#<id>`, such as `criteria#deployed-port`. `tool-use` shows its four questions together.
 - **A plugin judge's question** is unknown to MST. Pass it with `--question "Did the answer ...?"`, so your labels answer what the judge answers.
-- **Two people labeling** give their names with `--labeler`.
+- **`--labeler`** records who gave the labels. A trial holds one label per question, so a second person's label for the same trial replaces the first. When two people label, split the trials between them.
 
 To label in a spreadsheet instead, export a row per verdict, fill in the `label` column with `pass` or `fail`, and import it back:
 
@@ -138,7 +140,7 @@ A pairwise judge, such as the built-in `preference`, compares a variant's trial 
 ## Common mistakes
 
 - **Trusting MST's published numbers for your data.** [Built-in judges on the calibration set](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/judges.md) is MST's own set, with constructed labels. It is not a calibration of your server.
-- **Labeling a redacted run.** `mst label` refuses it. Set `"redactStoredResponses": false` and run again.
+- **Labeling a redacted run.** `mst label page` refuses it, and `export` writes a sheet with no answers. Set `"redactStoredResponses": false` and run again. Labels made in another tool can still be imported.
 - **Labeling only passing trials.** The check needs failures as much as passes.
 - **Tuning on the `test` split.** Use `--split dev` while changing the judge.
 - **Labeling your opinion of the answer instead of the judge's question.** Read the question on the page first.
