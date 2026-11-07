@@ -24,7 +24,7 @@ import {
   createMCPClientForConfig,
 } from '../../../mcp/clientFactory.js';
 import { suggestAssertions } from '../../utils/assertionSuggester.js';
-import { splitCommandLine } from '../../utils/commandLine.js';
+import { askServerCommand, splitCommandLine } from '../../utils/commandLine.js';
 import { jsonPreview, status } from '../../utils/format.js';
 import {
   createPrompter,
@@ -201,7 +201,7 @@ async function resolveConfig(
     { label: 'http (remote server)', value: 'http' as const },
   ]);
   return transport === 'stdio'
-    ? stdioConfig(await prompter.text('Server command', 'node server.js'))
+    ? stdioConfig(await askServerCommand(prompter, print))
     : httpConfig(
         await prompter.text('Server URL', 'http://localhost:3000/mcp')
       );

@@ -16,7 +16,7 @@ import {
   getTestFileTemplate,
   getTsconfigTemplate,
 } from '../../templates/index.js';
-import { splitCommandLine } from '../../utils/commandLine.js';
+import { askServerCommand, splitCommandLine } from '../../utils/commandLine.js';
 import { status } from '../../utils/format.js';
 import {
   createPrompter,
@@ -115,7 +115,7 @@ async function collectAnswers(
       { label: 'http (remote server)', value: 'http' as const },
     ]);
     if (transport === 'stdio') {
-      serverCommand = await askCommand(prompter);
+      serverCommand = await askServerCommand(prompter, print);
     } else {
       serverUrl = await askNonEmpty(
         prompter,
@@ -169,23 +169,6 @@ async function askNonEmpty(
   for (;;) {
     const answer = await prompter.text(question, defaultValue);
     if (answer !== '') return answer;
-  }
-}
-
-/** A server command that splits into a command and arguments. */
-async function askCommand(prompter: Prompter): Promise<string> {
-  for (;;) {
-    const answer = await askNonEmpty(
-      prompter,
-      'Server command',
-      'node server.js'
-    );
-    try {
-      splitCommandLine(answer);
-      return answer;
-    } catch (error) {
-      print(error instanceof Error ? error.message : String(error));
-    }
   }
 }
 

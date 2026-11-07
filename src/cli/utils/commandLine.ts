@@ -1,3 +1,5 @@
+import type { Prompter } from './prompt.js';
+
 /**
  * Splits a `--command` value, such as `node "/Users/a/My Server/index.js"`,
  * into the command and its arguments.
@@ -34,4 +36,23 @@ export function splitCommandLine(commandLine: string): string[] {
   if (inWord) words.push(word);
   if (words.length === 0) throw new Error('The command is empty.');
   return words;
+}
+
+/**
+ * Asks for the command that starts a stdio server until the answer splits,
+ * reporting why an answer doesn't (an unclosed quote) and asking again.
+ */
+export async function askServerCommand(
+  prompter: Prompter,
+  report: (message: string) => void
+): Promise<string> {
+  for (;;) {
+    const answer = await prompter.text('Server command', 'node server.js');
+    try {
+      splitCommandLine(answer);
+      return answer;
+    } catch (error) {
+      report(error instanceof Error ? error.message : String(error));
+    }
+  }
 }

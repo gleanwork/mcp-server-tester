@@ -1,5 +1,26 @@
+import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { splitCommandLine } from './commandLine.js';
+import { askServerCommand, splitCommandLine } from './commandLine.js';
+import { createPrompter } from './prompt.js';
+
+describe('askServerCommand', () => {
+  it('asks again after an answer that does not split', async () => {
+    const input = new PassThrough();
+    input.end('node "/tmp/My Server\nnode "/tmp/My Server/index.js"\n');
+    const prompter = createPrompter({ input, output: new PassThrough() });
+    const reported: string[] = [];
+
+    const command = await askServerCommand(prompter, (message) =>
+      reported.push(message)
+    );
+
+    expect(command).toBe('node "/tmp/My Server/index.js"');
+    expect(reported).toEqual([
+      'The command has an unclosed ": node "/tmp/My Server',
+    ]);
+    prompter.close();
+  });
+});
 
 describe('splitCommandLine', () => {
   it('splits on runs of whitespace', () => {
