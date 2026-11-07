@@ -165,6 +165,11 @@ import {
   type RunStore,
 } from './runStore.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
+import {
+  localHistoryLocation,
+  recordInHistory,
+  storeHistoryLocation,
+} from './runHistory.js';
 import { costSource, estimateCosts } from './pricing.js';
 import {
   pairwiseJudgeSpec,
@@ -2885,6 +2890,10 @@ async function evaluate(
     }),
     storedSummary
   );
+  // The eval's history (history.json) has a row for this run. A tool
+  // optimization's runs aren't in it (ADR 0008).
+  if (!optimization)
+    await recordInHistory(localHistoryLocation(evalDirectory), evalConfig.name);
   // The report is rebuilt from the run's files, so it shows what was stored.
   // It must never cost the run its results.
   try {
@@ -2922,6 +2931,13 @@ async function evaluate(
         { cause: error }
       );
     }
+  // The store's history, from the store's runs: a CI machine's local runs
+  // are only its own.
+  if (resultStore && !optimization)
+    await recordInHistory(
+      storeHistoryLocation(resultStore, evalConfig.name),
+      evalConfig.name
+    );
   return {
     evalConfig,
     outputDir,

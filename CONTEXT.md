@@ -210,6 +210,14 @@ _Avoid_: subset run, filtered run
 How a variant differs from the baseline, or a run from an earlier run: metric changes with confidence intervals, an assessment of each change (better, worse or unclear, from a paired test), and the cases that improved or regressed.
 _Avoid_: diff, A/B result, verdict
 
+**History**:
+An eval's runs over time: a row per run with what it ran with and what each variant measured, in the eval's `history.json` (`mst.history/v1`), beside `latest.json` locally and in a result store. Derived from the runs and rebuildable from them; `mst history` prints it ([ADR 0012](docs/adr/0012-an-evals-history-is-derived-from-its-runs.md)).
+_Avoid_: trend, timeline, dashboard, log
+
+**Era**:
+Consecutive full runs in an eval's history that measured the same way: the same datasets, the same eval config judges, and for one variant the same setup. A change starts a new era, with the reasons; runs on either side of an era's start are never compared. A new client app build doesn't start one.
+_Avoid_: epoch, segment, baseline period
+
 **Result store**:
 Where an eval's runs are kept besides the local run directories: a `file` directory, a `gcs` bucket, or a plugin's store, chosen with `mst run --results` or the eval config's `results.store`. It gets a copy of each whole run directory, in the same layout, with a manifest written last, and is where the previous run comes from; `mst grade` and `--resume` fetch a run from it that isn't local. A plugin's store only moves bytes (a `RunStore`); MST owns the layout. Opening a stored run (`mst open --results`) is planned.
 _Avoid_: results backend, sink
