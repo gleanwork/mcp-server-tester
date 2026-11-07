@@ -135,7 +135,7 @@ export function readLine(line: string): {
 export interface CoordinatorChild {
   lines: AsyncIterable<string>;
   exit: Promise<number>;
-  /** Asks it to stop as Ctrl-C does: it ends its shards and keeps its traces. */
+  /** Asks it to stop as Ctrl-C does: it ends its shards and keeps its transcripts. */
   interrupt(): void;
 }
 

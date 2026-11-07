@@ -272,7 +272,7 @@ describe('runEvalDataset toolOverrides renames', () => {
     expect(observed).toEqual(['find_documents']);
     expect(mcp.callTool).toHaveBeenCalledWith('search', { query: 'expense' });
     expect(result.failed).toBe(0);
-    expect(result.caseResults[0]?.trace?.events).toMatchObject([
+    expect(result.caseResults[0]?.transcript?.events).toMatchObject([
       { kind: 'tool_call', name: 'search', rawName: 'find_documents' },
     ]);
   });

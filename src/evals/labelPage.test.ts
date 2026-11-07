@@ -217,12 +217,12 @@ describe('the label page', () => {
     expect(cause).toMatchObject({
       input: 'Why did checkout fail',
       reference: 'An expired certificate',
-      trace: {
-        traced: true,
+      transcript: {
+        hasTranscript: true,
         events: [{ kind: 'tool_call', name: 'search', server: 'docs' }],
       },
     });
-    expect(cause.trace!.answer).toMatch(/^Why did checkout fail: /);
+    expect(cause.transcript!.answer).toMatch(/^Why did checkout fail: /);
     // Nothing that gives the verdict or the variant away.
     expect(text).not.toContain('SECRET-REASONING');
     expect(text).not.toMatch(/"(pass|score|scores|verdict|variant)"/);

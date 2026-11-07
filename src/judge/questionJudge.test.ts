@@ -134,7 +134,7 @@ describe('parseQuestionAnswer', () => {
       '{"reasoning":"a "b" c","verdict":"no","confidence":"high"}',
       '{"verdict":"no","reasoning":"a "b" c","confidence":"high"}',
       // Quoted JSON in the reasoning, with a verdict of its own.
-      '{"reasoning":"The trace says {"reasoning":"x","verdict":"yes"}',
+      '{"reasoning":"The transcript says {"reasoning":"x","verdict":"yes"}',
       // Two objects, the first without a verdict.
       '{"reasoning":"first"}\n{"reasoning":"second "quote" words","verdict":"yes"}',
     ])
@@ -244,7 +244,7 @@ describe('defineQuestionJudge', () => {
     ],
   };
 
-  it('asks each question in its own model call, about the rendered trace', async () => {
+  it('asks each question in its own model call, about the rendered transcript', async () => {
     const requests = model({
       'Is the first thing right?': '{"reasoning": "event 1", "verdict": "yes"}',
       'Is the second thing right?': '{"reasoning": "no", "verdict": "no"}',
@@ -259,7 +259,7 @@ describe('defineQuestionJudge', () => {
     for (const request of requests) {
       expect(request.system).toBe(QUESTION_SYSTEM_PROMPT);
       expect(request.prompt).toContain('<request>\nWhy did checkout fail?');
-      // The trace is cut to maxToolOutputSize, which the model never sees.
+      // The transcript is cut to maxToolOutputSize, which the model never sees.
       expect(request.prompt).toContain('cut="first 10 of 50 bytes"');
       // The reference is left out unless the judge asks for it.
       expect(request.prompt).not.toContain('reference_answer');
@@ -392,7 +392,7 @@ describe('defineQuestionJudge', () => {
     ).toMatchObject({ unknown: true });
     expect(requests).toHaveLength(0);
     // A client trial whose client declares no evidence (the api client in a
-    // Playwright test) has its trace, and is asked about it.
+    // Playwright test) has its transcript, and is asked about it.
     const clientResponse = {
       response: 'An expired certificate.',
       toolCalls: [{ name: 'search', arguments: {}, output: 'expired' }],
@@ -411,9 +411,9 @@ describe('defineQuestionJudge', () => {
       '<event n="1" kind="tool_call" name="search">'
     );
     requests.length = 0;
-    // A judge whose questions don't need the trace still asks them.
+    // A judge whose questions don't need the transcript still asks them.
     expect(
-      await defineQuestionJudge({ ...spec, needsTrace: false }).evaluate(
+      await defineQuestionJudge({ ...spec, needsTranscript: false }).evaluate(
         unrecorded,
         {}
       )
@@ -477,10 +477,19 @@ describe('defineQuestionJudge', () => {
     ).toMatch(/^[0-9a-f]+$/);
   });
 
-  it('has a version that changes with the questions it asks, whether each is required, and whether it needs the trace', () => {
+  it('rejects the old needsTrace option, naming needsTranscript', () => {
+    expect(() =>
+      defineQuestionJudge({
+        ...spec,
+        needsTrace: false,
+      } as unknown as Parameters<typeof defineQuestionJudge>[0])
+    ).toThrow('needsTrace is now needsTranscript');
+  });
+
+  it('has a version that changes with the questions it asks, whether each is required, and whether it needs the transcript', () => {
     const version = defineQuestionJudge(spec).version;
     expect(
-      defineQuestionJudge({ ...spec, needsTrace: false }).version
+      defineQuestionJudge({ ...spec, needsTranscript: false }).version
     ).not.toBe(version);
     expect(
       defineQuestionJudge({

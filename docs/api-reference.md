@@ -902,7 +902,7 @@ const result = validateResponse(response, { status: 'ok', count: 42 });
 
 ### `validateToolCalls(response, assertion)`
 
-Validates the tool calls in a client case's trace. Only applicable to client cases.
+Validates the tool calls in a client case's transcript. Only applicable to client cases.
 
 **Parameters:**
 
@@ -924,7 +924,7 @@ const result = validateToolCalls(caseResult.response, assertion);
 
 ### `validateToolCallCount(response, options)`
 
-Validates the number of tool calls in a client case's trace. Only applicable to client cases.
+Validates the number of tool calls in a client case's transcript. Only applicable to client cases.
 
 **Parameters:**
 
@@ -937,7 +937,7 @@ const result = validateToolCallCount(caseResult.response, { min: 1, max: 3 });
 
 ### `validateJudge(response, config, run?)` (async)
 
-Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin judge. Returns a `Promise<ValidationResult>`. A judge that can't score the response (an unknown judge, invalid options, an API error, a score outside 0 to 1) fails with `details.error` set. A judge that skips passes with `details.skipped` set. A judge that answers unknown (the trace can't tell) doesn't pass: `details.unknown` is set, and `details.score` is not.
+Evaluates a response with a judge: the built-in `rubric` LLM judge or a plugin judge. Returns a `Promise<ValidationResult>`. A judge that can't score the response (an unknown judge, invalid options, an API error, a score outside 0 to 1) fails with `details.error` set. A judge that skips passes with `details.skipped` set. A judge that answers unknown (the transcript can't tell) doesn't pass: `details.unknown` is set, and `details.score` is not.
 
 **Parameters:**
 
@@ -1453,8 +1453,8 @@ export interface EvalAssertions {
     calls: Array<{
       /** Tool or explicitly selected client event name. */
       name: string;
-      kind?: TraceEvent['kind'];
-      source?: TraceEvent['source'];
+      kind?: TranscriptEvent['kind'];
+      source?: TranscriptEvent['source'];
       server?: string;
       /** Expected arguments (partial match — extra keys are allowed) */
       arguments?: Record<string, unknown>;

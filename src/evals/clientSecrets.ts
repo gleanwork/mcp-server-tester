@@ -23,7 +23,7 @@ const CREDENTIAL_WORDS = new Set([
 const MIN_SECRET_LENGTH = 4;
 /**
  * A value is a secret by its name alone only when it is at least this long:
- * a short one (`true`, `main`, a port) would garble the traces graders read.
+ * a short one (`true`, `main`, a port) would garble the transcripts graders read.
  */
 const MIN_NAMED_SECRET_LENGTH = 8;
 const REDACTED = '[REDACTED]';
@@ -32,7 +32,7 @@ const REDACTED = '[REDACTED]';
  * Values with a credential's name ({@link isCredentialName}), at least
  * {@link MIN_NAMED_SECRET_LENGTH} long: environment variables, a secrets
  * file's entries, a server's headers. Settings beside them, such as a base
- * URL or an instance name, are kept, so traces that quote them grade as
+ * URL or an instance name, are kept, so transcripts that quote them grade as
  * they should.
  */
 export function namedSecretValues(

@@ -1,5 +1,5 @@
 import type { Tool } from '@modelcontextprotocol/client';
-import type { TraceEvent } from './evalFrameworkTypes.js';
+import type { TranscriptEvent } from './evalFrameworkTypes.js';
 import type { ToolOverrideVariant } from './evalRunner.js';
 
 /** One server's tools as it listed them. `server` is its label, if it has one. */
@@ -162,7 +162,7 @@ export function registerPresentedTools(
  * original names, so assertions and comparisons read the same names in
  * every variant. `rawName` keeps the name the model used.
  */
-export function withOriginalToolNames<T extends { events: TraceEvent[] }>(
+export function withOriginalToolNames<T extends { events: TranscriptEvent[] }>(
   result: T,
   mcp: object
 ): T {

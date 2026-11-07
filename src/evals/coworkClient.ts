@@ -26,19 +26,19 @@ import { validateMacLocalServers } from './coworkSetup/macLocalMcp.js';
 import {
   findMatchingClaudeSessions,
   snapshotClaudeSessions,
-  waitForClaudeTrace,
+  waitForClaudeTranscript,
   waitForClaudeSession,
 } from './cowork/sessions.js';
 import {
   awaitingUserAnswer,
   pendingUserQuestion,
-  type ClaudeTrace,
-} from './cowork/trace.js';
+  type ClaudeTranscript,
+} from './cowork/transcript.js';
 import { infrastructureEnding } from './trialEnding.js';
 import { computerUseEnding } from './cowork/anthropicComputerUse.js';
 import { DEFAULT_COMPUTER_USE_MODEL } from './cowork/computerUseLoop.js';
-import { NativeTraceError } from './nativeTraceError.js';
-import { toolCallEvents } from './clientTrace.js';
+import { NativeTranscriptError } from './nativeTranscriptError.js';
+import { toolCallEvents } from './clientTranscript.js';
 import {
   claudeDesktopOtlpSettings,
   hostTelemetryReceiver,
@@ -206,19 +206,22 @@ const COWORK_SESSION_EVIDENCE = [
 export const COWORK_STDIO_PLATFORMS = ['darwin', 'linux'] as const;
 
 /**
- * How the trace was bound to its case, for its telemetry: an exact initial
+ * How the transcript was bound to its case, for its telemetry: an exact initial
  * prompt, or the only new session, with how its stored prompt differs.
  */
 /** The IDs a task's own telemetry names it by: Cowork's and Claude Code's. */
-function sessionIdsOf(trace: ClaudeTrace | undefined): string[] {
-  if (!trace) return [];
-  return [trace.candidate.id, trace.candidate.metadata?.cliSessionId].filter(
-    (id): id is string => typeof id === 'string' && id.length > 0
-  );
+function sessionIdsOf(transcript: ClaudeTranscript | undefined): string[] {
+  if (!transcript) return [];
+  return [
+    transcript.candidate.id,
+    transcript.candidate.metadata?.cliSessionId,
+  ].filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
 
-function correlationTelemetry(trace: ClaudeTrace): Record<string, unknown> {
-  const binding = trace.binding ?? { kind: 'exact-initial-prompt' };
+function correlationTelemetry(
+  transcript: ClaudeTranscript
+): Record<string, unknown> {
+  const binding = transcript.binding ?? { kind: 'exact-initial-prompt' };
   return binding.kind === 'only-new-session'
     ? { correlation: binding.kind, promptDifference: binding.promptDifference }
     : { correlation: binding.kind };
@@ -241,21 +244,26 @@ export interface DeadlineWait {
 
 /** When a native task started and ended, from its session's events. */
 function taskTimes(
-  trace: Pick<ClaudeTrace, 'startedAt' | 'completedAt' | 'lastEventAt'>
+  transcript: Pick<
+    ClaudeTranscript,
+    'startedAt' | 'completedAt' | 'lastEventAt'
+  >
 ): { startedAt?: string; completedAt?: string } {
-  const completedAt = trace.completedAt ?? trace.lastEventAt;
+  const completedAt = transcript.completedAt ?? transcript.lastEventAt;
   return {
-    ...(trace.startedAt ? { startedAt: trace.startedAt } : {}),
+    ...(transcript.startedAt ? { startedAt: transcript.startedAt } : {}),
     ...(completedAt ? { completedAt } : {}),
   };
 }
 
 export function deadlineWait(
-  trace: Pick<ClaudeTrace, 'toolCalls' | 'lastEventAt'>,
+  transcript: Pick<ClaudeTranscript, 'toolCalls' | 'lastEventAt'>,
   now = Date.now()
 ): DeadlineWait {
-  const last = trace.toolCalls.at(-1);
-  const lastEvent = trace.lastEventAt ? Date.parse(trace.lastEventAt) : NaN;
+  const last = transcript.toolCalls.at(-1);
+  const lastEvent = transcript.lastEventAt
+    ? Date.parse(transcript.lastEventAt)
+    : NaN;
   return {
     ...(last && last.output === undefined
       ? { on: 'tool' as const, tool: last.rawName ?? last.name }
@@ -285,9 +293,9 @@ export function describeDeadlineWait(wait: DeadlineWait): string {
  * this catches any other path that cuts one.
  */
 export function truncatedPrompt(
-  trace: Pick<ClaudeTrace, 'binding'>
+  transcript: Pick<ClaudeTranscript, 'binding'>
 ): { storedChars: number; promptChars: number } | undefined {
-  const binding = trace.binding;
+  const binding = transcript.binding;
   if (binding?.kind !== 'only-new-session') return undefined;
   const { storedChars, promptChars, firstDifferenceAt } =
     binding.promptDifference;
@@ -739,12 +747,12 @@ async function desktopAdapter(
         const remaining = deadlineAt - Date.now();
         if (remaining <= 0)
           throw new Error(
-            'Native Claude trace deadline exceeded. No resubmission attempted.'
+            'Native Claude transcript deadline exceeded. No resubmission attempted.'
           );
         process.stderr.write(`[mst:cowork] collecting case ${index + 1}\n`);
         let inspections = 0;
         let nextInspection = 0;
-        const trace = await waitForClaudeTrace({
+        const transcript = await waitForClaudeTranscript({
           ...match,
           sessionPath,
           timeoutMs: remaining,
@@ -752,7 +760,7 @@ async function desktopAdapter(
             ? {
                 onPending: async (pending) => {
                   // A tool request can arrive after the initial visual check. Revisit
-                  // only a bound trace with an outstanding native tool call, within
+                  // only a bound transcript with an outstanding native tool call, within
                   // the same per-case action budget. Never resubmit the prompt.
                   if (
                     hitlError ||
@@ -798,41 +806,46 @@ async function desktopAdapter(
               }
             : {}),
         });
-        if (trace.candidate.metadataPath !== sessionPath)
+        if (transcript.candidate.metadataPath !== sessionPath)
           throw new Error(
             'Native session identity changed; refusing attribution.'
           );
-        hostSessions = sessionIdsOf(trace);
+        hostSessions = sessionIdsOf(transcript);
         process.stderr.write(
-          `[mst:cowork] case ${index + 1}: native completion found (${trace.toolCalls.length} tool calls)\n`
+          `[mst:cowork] case ${index + 1}: native completion found (${transcript.toolCalls.length} tool calls)\n`
         );
-        if (config.model && !trace.telemetry.models.includes(config.model)) {
+        if (
+          config.model &&
+          !transcript.telemetry.models.includes(config.model)
+        ) {
           throw new Error(
-            `Cowork model mismatch: requested ${config.model}, observed ${trace.telemetry.models.join(', ') || 'unavailable'}.`
+            `Cowork model mismatch: requested ${config.model}, observed ${transcript.telemetry.models.join(', ') || 'unavailable'}.`
           );
         }
         const nativeResult: ClientRunResult = {
-          finalText: trace.finalAnswer ?? '',
+          finalText: transcript.finalAnswer ?? '',
           events: toolCallEvents(
-            coworkOwnToolCalls(trace.toolCalls, servers),
+            coworkOwnToolCalls(transcript.toolCalls, servers),
             servers
           ),
-          ...(trace.modelCalls?.length ? { modelCalls: trace.modelCalls } : {}),
-          usage: trace.usage,
-          error: trace.isError
+          ...(transcript.modelCalls?.length
+            ? { modelCalls: transcript.modelCalls }
+            : {}),
+          usage: transcript.usage,
+          error: transcript.isError
             ? 'Native Claude task failed.'
-            : trace.finalAnswer === undefined
-              ? 'Native trace has no final answer.'
+            : transcript.finalAnswer === undefined
+              ? 'Native transcript has no final answer.'
               : undefined,
         };
         result = {
           ...nativeResult,
-          ...taskTimes(trace),
+          ...taskTimes(transcript),
           // The session folder: audit log, spilled tool output, written files.
-          ...(trace.candidate.sessionDir
+          ...(transcript.candidate.sessionDir
             ? {
                 artifacts: {
-                  dir: trace.candidate.sessionDir,
+                  dir: transcript.candidate.sessionDir,
                   include: COWORK_SESSION_EVIDENCE,
                 },
               }
@@ -845,18 +858,18 @@ async function desktopAdapter(
           telemetry: {
             source: 'claude-native',
             costScope: 'native-inference-only',
-            ...trace.telemetry,
-            nativeSessionId: trace.candidate.id,
-            ...correlationTelemetry(trace),
+            ...transcript.telemetry,
+            nativeSessionId: transcript.candidate.id,
+            ...correlationTelemetry(transcript),
             ...(hitlWarning
               ? { hitlWarning }
               : hitlUntouched && hitlError && !nativeResult.error
                 ? { hitlWarning: hitlError }
                 : {}),
           },
-          llmDurationMs: trace.llmDurationMs,
+          llmDurationMs: transcript.llmDurationMs,
         };
-        const unavailable = coworkWorkspaceUnavailable(trace.toolCalls);
+        const unavailable = coworkWorkspaceUnavailable(transcript.toolCalls);
         if (unavailable !== undefined) {
           // Cowork's VM didn't start, so the task ran without its shell:
           // an infrastructure failure, kept with its evidence. Cowork
@@ -870,7 +883,7 @@ async function desktopAdapter(
           };
           if (platform.reset) continuation = 'reset';
         }
-        const truncated = truncatedPrompt(trace);
+        const truncated = truncatedPrompt(transcript);
         if (truncated !== undefined) {
           // The model answered the beginning of the prompt, not the case:
           // never graded, kept with its evidence. A retry gets the same
@@ -884,12 +897,12 @@ async function desktopAdapter(
           };
         }
       } catch (error) {
-        // Trace collection or attribution failed: the app state is unknown.
+        // Transcript collection or attribution failed: the app state is unknown.
         const message = safeError(error);
         // The bound session never finished or went away: the client app
         // failed, not the model. Any other error here is the trial's.
         const lostSession =
-          error instanceof NativeTraceError &&
+          error instanceof NativeTranscriptError &&
           (error.failureKind === 'timeout' ||
             error.failureKind === 'no_matching_session');
         const ending = lostSession

@@ -99,7 +99,7 @@ const run = (options: { cases?: string[] } = {}) =>
   });
 
 describe('the mst.run/v1 layout', () => {
-  it('writes run.json, a trace and a score per grader per trial, results and summary', async () => {
+  it('writes run.json, a transcript and a score per grader per trial, results and summary', async () => {
     const result = await run();
     const evalDir = path.join(dir, '.mcp-test-results', 'run-format');
     const runId = path.basename(result.outputDir);
@@ -111,7 +111,7 @@ describe('the mst.run/v1 layout', () => {
     expect(all).toContain(path.join('report', 'index.html'));
     const tree = all.filter((file) => !file.startsWith(`report${path.sep}`));
     const trial = (variant: string, id: string, n: number) =>
-      `traces/${variant}/${encodeURIComponent(id)}/${n}.json`;
+      `transcripts/${variant}/${encodeURIComponent(id)}/${n}.json`;
     const score = (variant: string, id: string, n: number) =>
       `scores/textContains/${variant}/${encodeURIComponent(id)}/${n}.json`;
     const expected = ['base', 'other'].flatMap((variant) =>

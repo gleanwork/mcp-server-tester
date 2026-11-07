@@ -1,5 +1,5 @@
 /**
- * Grading a stored run (`mst grade`): each trial's stored trace stands in for
+ * Grading a stored run (`mst grade`): each trial's stored transcript stands in for
  * the client run, so a run is graded with the same pipeline that collected
  * it, without starting a client.
  */
@@ -8,8 +8,8 @@ import type { MCPConfig } from '../config/mcpConfig.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type {
   ClientRunResult,
-  Trace,
-  TraceEvidence,
+  Transcript,
+  TranscriptEvidence,
 } from './evalFrameworkTypes.js';
 import type { EvalConfig, EvalVariant } from './evalConfig.js';
 import {
@@ -17,7 +17,7 @@ import {
   type CaseExecution,
   type ClientExecution,
 } from './caseExecution.js';
-import { clientRunToExecution } from './clientTrace.js';
+import { clientRunToExecution } from './clientTranscript.js';
 import {
   trialArtifactsPath,
   type RunRecord,
@@ -35,7 +35,7 @@ export interface RunReplay {
   directory: string;
   /** The new run's ID: the stored run's with the next `.g<n>`. */
   runId: string;
-  /** The run that collected the traces: a regrade's own source, or the run. */
+  /** The run that collected the transcripts: a regrade's own source, or the run. */
   gradedFrom: string;
   /** When that run collected them: its summary's `timestamp`. */
   collectedAt: string;
@@ -50,7 +50,7 @@ export interface RunReplay {
 
 /**
  * The replay of a stored run: its trials grouped by variant and case. Fails
- * when the traces can't be graded: none were stored, or they were stored
+ * when the transcripts can't be graded: none were stored, or they were stored
  * without the answers and tool outputs judges read.
  */
 export function runReplay(
@@ -64,7 +64,7 @@ export function runReplay(
     throw new Error(`Run ${run.runId} stored no trials to grade.`);
   if (run.redactStoredResponses)
     throw new Error(
-      `Run ${run.runId} stored redacted traces, without the answers and tool outputs graders read, so it can't be graded again. Collect with "redactStoredResponses": false in the eval config (mst run --no-grade requires it).`
+      `Run ${run.runId} stored redacted transcripts, without the answers and tool outputs graders read, so it can't be graded again. Collect with "redactStoredResponses": false in the eval config (mst run --no-grade requires it).`
     );
   const byVariant = new Map<string, Map<string, TrialRecord[]>>();
   for (const trial of trials) {
@@ -207,34 +207,39 @@ async function storedExecution(
   trial: TrialRecord,
   directory: string,
   servers: MCPConfig[],
-  evidence: TraceEvidence
+  evidence: TranscriptEvidence
 ): Promise<CaseExecution> {
-  const trace = trial.trace as Trace | undefined;
+  const transcript = trial.transcript as Transcript | undefined;
   // A trial a grader couldn't score stores "Not graded: …" as its error. The
   // client ran; finishing its grading is what a regrade is for.
   const runnerError =
     trial.gradingError === undefined ? trial.error : undefined;
   // As it was recorded: a regrade never changes how an attempt ended.
   const ending = endingOf(trial);
-  if (!trace) {
+  if (!transcript) {
     const execution = failedExecution(
-      runnerError ?? 'The stored trial has no trace.'
+      runnerError ?? 'The stored trial has no transcript.'
     );
     return { ...execution, preExecutionDurationMs: trial.durationMs, ending };
   }
   const run: ClientRunResult = {
-    events: trace.events ?? [],
-    finalText: trace.finalText ?? '',
-    ...(trace.error !== undefined ? { error: trace.error } : {}),
+    events: transcript.events ?? [],
+    finalText: transcript.finalText ?? '',
+    ...(transcript.error !== undefined ? { error: transcript.error } : {}),
     // What the trial recorded beyond its events: a resume rewrites every
-    // stored trace from this run, so a field left out here is lost.
-    ...(trace.modelCalls?.length ? { modelCalls: trace.modelCalls } : {}),
-    ...(trace.hostTelemetry ? { hostTelemetry: trace.hostTelemetry } : {}),
-    ...(trace.startedAt ? { startedAt: trace.startedAt } : {}),
-    ...(trace.completedAt ? { completedAt: trace.completedAt } : {}),
-    ...((trial.clientUsage ?? trace.usage)
+    // stored transcript from this run, so a field left out here is lost.
+    ...(transcript.modelCalls?.length
+      ? { modelCalls: transcript.modelCalls }
+      : {}),
+    ...(transcript.hostTelemetry
+      ? { hostTelemetry: transcript.hostTelemetry }
+      : {}),
+    ...(transcript.startedAt ? { startedAt: transcript.startedAt } : {}),
+    ...(transcript.completedAt ? { completedAt: transcript.completedAt } : {}),
+    ...((trial.clientUsage ?? transcript.usage)
       ? {
-          usage: (trial.clientUsage ?? trace.usage) as ClientRunResult['usage'],
+          usage: (trial.clientUsage ??
+            transcript.usage) as ClientRunResult['usage'],
         }
       : {}),
     ...(trial.clientTelemetry
@@ -258,8 +263,8 @@ async function storedExecution(
   };
   const execution = clientRunToExecution(
     run,
-    (trial.traceEvidence as TraceEvidence | undefined) ??
-      trace.evidence ??
+    (trial.transcriptEvidence as TranscriptEvidence | undefined) ??
+      transcript.evidence ??
       evidence,
     servers
   );
@@ -298,7 +303,7 @@ export function replayExecutor(
   replay: RunReplay,
   variant: string,
   servers: MCPConfig[],
-  evidence: TraceEvidence,
+  evidence: TranscriptEvidence,
   /** For a resume: a missing trial as it was collected again. */
   collected?: (caseId: string, trial: number) => CaseExecution | undefined
 ): (evalCase: EvalCase) => Promise<CaseExecution> {

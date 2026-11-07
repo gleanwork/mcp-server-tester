@@ -5,7 +5,7 @@ import { parse as parseToml } from 'smol-toml';
 import { activeChatOwnership, confirmChatgptQuitPrompt } from './quitPrompt.js';
 import { isDeepStrictEqual } from 'node:util';
 import { basename, dirname, join } from 'node:path';
-import { isChatgptBuiltinServer } from '../chatgpt/trace.js';
+import { isChatgptBuiltinServer } from '../chatgpt/transcript.js';
 import { defaultChatgptConfigHome } from './macController.js';
 import {
   installCodexConfig,

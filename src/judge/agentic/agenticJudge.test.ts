@@ -140,7 +140,7 @@ describe('agenticJudge', () => {
             {
               tool: 'Read',
               isError: false,
-              input: '{"file_path":"trace/events.json"}',
+              input: '{"file_path":"transcript/events.json"}',
               output: 'xxxxxxxxxxxx',
             } as AgentJudgeStep,
           ],
@@ -250,7 +250,7 @@ describe('agenticJudge', () => {
     });
     expect(seen.task?.commands?.[0]?.name).toBe('helper');
     // Nothing is truncated.
-    const events = JSON.parse(seen.files!['trace/events.json']!);
+    const events = JSON.parse(seen.files!['transcript/events.json']!);
     expect(events[0].output).toHaveLength(50_000);
     expect(seen.files!['response.md']).toBe('It launches March 3.');
     expect(JSON.parse(seen.files!['case.json']!).expected.answer).toBe(

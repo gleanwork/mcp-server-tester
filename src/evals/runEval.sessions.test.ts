@@ -113,7 +113,7 @@ describe('retained settings-group results through evaluation and resume', () => 
         expect(trial).toMatchObject({
           ending: { kind: 'trial' },
           infrastructureError: false,
-          trace: {
+          transcript: {
             finalText: `COMPLETED:${trial.caseId}:${trial.trial}`,
             events: [
               {
@@ -136,7 +136,7 @@ describe('retained settings-group results through evaluation and resume', () => 
       for (const trial of unfinished) {
         expect(trial).toMatchObject({
           infrastructureError: true,
-          trace: { finalText: '', events: [] },
+          transcript: { finalText: '', events: [] },
           clientDiagnostics: {
             failureKind:
               failure === 'run-error' &&
@@ -186,7 +186,7 @@ describe('retained settings-group results through evaluation and resume', () => 
           (candidate) =>
             candidate.caseId === trial.caseId && candidate.trial === trial.trial
         );
-        expect(retained?.trace).toEqual(trial.trace);
+        expect(retained?.transcript).toEqual(trial.transcript);
         expect(retained?.clientTelemetry).toEqual(trial.clientTelemetry);
       }
       expect(resumed.summary.metrics).toMatchObject({ passed: 5, failed: 0 });

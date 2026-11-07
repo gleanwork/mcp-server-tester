@@ -15,7 +15,7 @@ import type { EvalCaseResult } from '../types/reporter.js';
  *
  * ```text
  * <eval name>/latest.json
- * <eval name>/runs/<run-id>/…   (run.json, traces/, scores/, results.json, summary.json, report/)
+ * <eval name>/runs/<run-id>/…   (run.json, transcripts/, scores/, results.json, summary.json, report/)
  * ```
  *
  * A plugin's result store (`resultStores` in a plugin) returns one of these

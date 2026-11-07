@@ -20,14 +20,14 @@ import {
   redactedClientRun,
 } from './clientSecrets.js';
 import {
-  settleProxiedTrace,
+  settleProxiedTranscript,
   usesToolSurfaceProxy,
   withoutToolVariant,
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 
 /**
- * The trace for a request whose client was unavailable: an infrastructure
+ * The transcript for a request whose client was unavailable: an infrastructure
  * failure that says why, so the run keeps its other results.
  */
 function batchFailure(client: string, reason: string): ClientRunResult {
@@ -85,18 +85,18 @@ export function batchRequests(
   return requests;
 }
 
-/** A batch's requests pointed at a tool-variant proxy, and how to settle their traces. */
+/** A batch's requests pointed at a tool-variant proxy, and how to settle their transcripts. */
 export interface ProxiedBatch {
   /** The requests, each connecting to the proxy. */
   requests: ClientBatchRequest[];
   /**
-   * A request's trace, with tool calls under their original names. Before
+   * A request's transcript, with tool calls under their original names. Before
    * the request is over (`final: false`) it is settled with the traffic so
    * far; `final` ends the request's scope.
    */
   settle(
     index: number,
-    trace: ClientRunResult,
+    transcript: ClientRunResult,
     final: boolean
   ): ClientRunResult;
   /** Ends the scope of the client's own checks, once the batch has run. */
@@ -106,7 +106,7 @@ export interface ProxiedBatch {
 /**
  * Points `requests` at `proxy`: one scope per request, or one for the batch
  * when the client connects to one server set per batch (`serversPerBatch`).
- * A local run and a shard's worker both settle traces this way.
+ * A local run and a shard's worker both settle transcripts this way.
  */
 export function proxiedBatch(
   definition: ClientDefinition,
@@ -139,7 +139,7 @@ export function proxiedBatch(
         checkServers: proxy.serversFor(checkScope),
       },
     })),
-    settle(index, trace, final) {
+    settle(index, transcript, final) {
       const scope = scopes[index]!;
       let listedTools: boolean;
       if (!final) listedTools = proxy.activity(scope).listedTools;
@@ -148,7 +148,13 @@ export function proxiedBatch(
           batchListed.set(scope, proxy.endScope(scope).listedTools);
         listedTools = batchListed.get(scope)!;
       } else listedTools = proxy.endScope(scope).listedTools;
-      return settleProxiedTrace(trace, proxy, listedTools, servers, variantId);
+      return settleProxiedTranscript(
+        transcript,
+        proxy,
+        listedTools,
+        servers,
+        variantId
+      );
     },
     endChecks() {
       proxy.endScope(checkScope);
@@ -159,18 +165,18 @@ export function proxiedBatch(
 /** What else a batch does while it runs. */
 export interface ClientBatchOptions {
   /**
-   * Secrets to replace in every trace besides the environment's and the
+   * Secrets to replace in every transcript besides the environment's and the
    * servers' (a secrets file's values, connector tokens). Read when each
-   * trace arrives, so a token renewed mid-batch is included.
+   * transcript arrives, so a token renewed mid-batch is included.
    */
   secrets?: () => readonly string[];
   /**
-   * Receives each trace the client reports before its batch ends, settled
-   * like the traces the batch returns. A failure is printed, not thrown.
+   * Receives each transcript the client reports before its batch ends, settled
+   * like the transcripts the batch returns. A failure is printed, not thrown.
    */
-  onTrace?: (
+  onTranscript?: (
     request: ClientBatchRequest,
-    trace: ClientRunResult
+    transcript: ClientRunResult
   ) => Promise<void>;
 }
 
@@ -181,7 +187,7 @@ export interface ClientBatchOptions {
  * desktop still leased by an earlier batch, say) gives every request an
  * infrastructure failure instead of throwing, so an eval goes on with its
  * other variants. Any other error stops the run. A batch client returns the
- * traces of cases it ran even when it stops early.
+ * transcripts of cases it ran even when it stops early.
  */
 export async function prepareClientBatch(
   definition: ClientDefinition,
@@ -206,15 +212,15 @@ export async function prepareClientBatch(
   );
   const declared = batchRequests(cases, config, servers, context);
   if (!declared.length) return queues;
-  const { onTrace } = options;
-  // Every trace a batch client hands MST, early or at the end, has no secret
+  const { onTranscript } = options;
+  // Every transcript a batch client hands MST, early or at the end, has no secret
   // in it before it is settled, saved or graded.
   const secrets = (): string[] => [
     ...clientSecretValues(context.env ?? {}, servers),
     ...(options.secrets?.() ?? []),
   ];
-  const received = (trace: ClientRunResult): ClientRunResult =>
-    redactedClientRun(trace, secrets());
+  const received = (transcript: ClientRunResult): ClientRunResult =>
+    redactedClientRun(transcript, secrets());
   // MST's readiness check, before the batch's first trial and before the
   // proxy starts. Proxied clients connect to the variant's servers through
   // the proxy.
@@ -238,21 +244,21 @@ export async function prepareClientBatch(
     ? proxiedBatch(definition, declared, ready.proxy, servers, toolVariant!.id)
     : undefined;
   const requests = proxied?.requests ?? declared;
-  // A trace reported early is settled with the proxy's traffic so far; the
-  // batch's returned traces are settled again when it ends.
-  const reportResult = onTrace
+  // A transcript reported early is settled with the proxy's traffic so far;
+  // the batch's returned transcripts are settled again when it ends.
+  const reportResult = onTranscript
     ? async (index: number, reported: ClientRunResult): Promise<void> => {
         const request = requests[index];
         if (!request) return;
-        const trace = received(reported);
+        const transcript = received(reported);
         try {
-          await onTrace(
+          await onTranscript(
             request,
-            proxied ? proxied.settle(index, trace, false) : trace
+            proxied ? proxied.settle(index, transcript, false) : transcript
           );
         } catch (error) {
           console.warn(
-            `[mst] Couldn't save the trace of ${request.caseId} (trial ${request.trial}) before the batch ended: ${error instanceof Error ? error.message : String(error)}`
+            `[mst] Couldn't save the transcript of ${request.caseId} (trial ${request.trial}) before the batch ended: ${error instanceof Error ? error.message : String(error)}`
           );
         }
       }
@@ -264,9 +270,9 @@ export async function prepareClientBatch(
   const batchContext = proxied
     ? withoutToolVariant(withSettings)
     : withSettings;
-  let traces: ClientRunResult[];
+  let transcripts: ClientRunResult[];
   try {
-    traces = await collectClientBatch(
+    transcripts = await collectClientBatch(
       definition,
       requests,
       reportResult ? { ...batchContext, reportResult } : batchContext,
@@ -285,15 +291,15 @@ export async function prepareClientBatch(
   } finally {
     proxied?.endChecks();
   }
-  if (traces.length !== requests.length)
+  if (transcripts.length !== requests.length)
     throw new Error(
-      'Batch client returned an incomplete trace set; refusing to resubmit.'
+      'Batch client returned an incomplete transcript set; refusing to resubmit.'
     );
   requests.forEach((request, index) => {
-    const trace = received(traces[index]!);
+    const transcript = received(transcripts[index]!);
     queues
       .get(request.caseId)!
-      .push(proxied ? proxied.settle(index, trace, true) : trace);
+      .push(proxied ? proxied.settle(index, transcript, true) : transcript);
   });
   return queues;
 }

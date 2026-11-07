@@ -175,7 +175,7 @@ export interface CheckJudgeOptions {
  * the runs' verdicts have, newest runs' identity first.
  *
  * Each label counts once per identity: a run given twice is read once, and
- * when a run and its regrades (which share its traces and labels) gave the
+ * when a run and its regrades (which share its transcripts and labels) gave the
  * same identity's verdict for a label, only the newest run's counts.
  */
 export function checkJudge(
@@ -191,7 +191,7 @@ export function checkJudge(
       unversioned: boolean;
       models: Set<string>;
       runs: Set<string>;
-      /** By the trace's run and the label's key. */
+      /** By the transcript's run and the label's key. */
       pairs: Map<string, Pair>;
     }
   >();
@@ -203,7 +203,7 @@ export function checkJudge(
   );
   for (const run of ordered) {
     const runId = run.stored.run.runId;
-    const traces = run.stored.run.gradedFrom ?? runId;
+    const transcripts = run.stored.run.gradedFrom ?? runId;
     const items = new Map(
       run.items
         .filter((item) => labelQuestion(item) === options.judge)
@@ -234,7 +234,7 @@ export function checkJudge(
       }
       if (item.judgeUnversioned === true) group.unversioned = true;
       if (item.judgeModel) group.models.add(item.judgeModel);
-      group.pairs.set(JSON.stringify([traces, labelKey(label)]), {
+      group.pairs.set(JSON.stringify([transcripts, labelKey(label)]), {
         item,
         label,
         runId,

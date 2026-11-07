@@ -5,12 +5,12 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   expectedChatgptOriginator,
-  findChatgptTrace,
-  parseChatgptTrace,
+  findChatgptTranscript,
+  parseChatgptTranscript,
   PendingChatgptRecordError,
   snapshotChatgptSessions,
-} from './trace.js';
-import { NativeTraceError } from '../nativeTraceError.js';
+} from './transcript.js';
+import { NativeTranscriptError } from '../nativeTranscriptError.js';
 
 const marker = 'MCP_SERVER_TESTER_test';
 function event(type: string, payload: Record<string, unknown>, ms = 1000) {
@@ -194,7 +194,7 @@ it.each([
       [turn(), marker],
     ] as const) {
       const parse = (from: string) =>
-        parseChatgptTrace(
+        parseChatgptTranscript(
           serialize(records, 'session', from),
           selector,
           1000,
@@ -220,15 +220,17 @@ it('keeps the observed Codex abort terminal but unsuccessful', async () => {
     new URL('./fixtures/codexDesktopAborted.jsonl', import.meta.url),
     'utf8'
   );
-  expect(parseChatgptTrace(content, exact('Find documents.'))).toBeUndefined();
-  const trace = parseChatgptTrace(
+  expect(
+    parseChatgptTranscript(content, exact('Find documents.'))
+  ).toBeUndefined();
+  const transcript = parseChatgptTranscript(
     content,
     exact('Find documents.'),
     Date.parse('2026-09-23T15:34:00Z'),
     Date.parse('2026-09-23T15:36:01Z'),
     { surface: 'codex' }
   );
-  expect(trace).toMatchObject({
+  expect(transcript).toMatchObject({
     promptMatch: 'native_terminal_lf',
     model: 'gpt-5.6-terra',
     reasoningEffort: 'medium',
@@ -236,8 +238,8 @@ it('keeps the observed Codex abort terminal but unsuccessful', async () => {
     error: 'ChatGPT turn was aborted.',
     telemetry: { resultCount: 0 },
   });
-  expect(trace?.response).toBeUndefined();
-  expect(trace?.usage).toBeUndefined();
+  expect(transcript?.response).toBeUndefined();
+  expect(transcript?.usage).toBeUndefined();
 });
 
 describe('marker-free native correlation', () => {
@@ -246,7 +248,7 @@ describe('marker-free native correlation', () => {
     const prompt = 'run text(ALL_TOOLS.filter(t => /acme/i.test(t.name)))';
     const stored = 'run text(ALL\\_TOOLS.filter(t => /acme/i.test(t.name)))\n';
     const linux = (native: string, expected = prompt) =>
-      parseChatgptTrace(
+      parseChatgptTranscript(
         serialize(exactTurn(native)),
         exact(expected),
         0,
@@ -259,7 +261,7 @@ describe('marker-free native correlation', () => {
     });
     // macOS (default policy) stays strict.
     expect(
-      parseChatgptTrace(serialize(exactTurn(stored)), exact(prompt))
+      parseChatgptTranscript(serialize(exactTurn(stored)), exact(prompt))
     ).toBeUndefined();
     for (const other of [
       'run text(ALL\\_TOOLS.filter(t => /acme/i.test(t.names)))',
@@ -274,31 +276,34 @@ describe('marker-free native correlation', () => {
   });
 
   it('records the native single-terminal-LF form without general whitespace folding', () => {
-    const trace = parseChatgptTrace(
+    const transcript = parseChatgptTranscript(
       serialize(exactTurn('Find docs\n')),
       exact('Find docs')
     )!;
-    expect(trace.promptMatch).toBe('native_terminal_lf');
-    expect(trace.nativePromptSha256).toBe(
+    expect(transcript.promptMatch).toBe('native_terminal_lf');
+    expect(transcript.nativePromptSha256).toBe(
       createHash('sha256').update('Find docs\n').digest('hex')
     );
     expect(
-      parseChatgptTrace(
+      parseChatgptTranscript(
         serialize(exactTurn('Find docs\n\n')),
         exact('Find docs')
       )
     ).toBeUndefined();
     expect(
-      parseChatgptTrace(
+      parseChatgptTranscript(
         serialize(exactTurn('Find docs \n')),
         exact('Find docs')
       )
     ).toBeUndefined();
     expect(
-      parseChatgptTrace(serialize(exactTurn('Find docs')), exact('Find docs\n'))
+      parseChatgptTranscript(
+        serialize(exactTurn('Find docs')),
+        exact('Find docs\n')
+      )
     ).toBeUndefined();
     expect(
-      parseChatgptTrace(
+      parseChatgptTranscript(
         serialize(exactTurn('Find docs\n')),
         exact('Find docs\n')
       )?.promptMatch
@@ -306,19 +311,19 @@ describe('marker-free native correlation', () => {
   });
   it('matches the unchanged native user prompt with no marker', () => {
     const prompt = '  Find snake_case docs — α\nSecond line.  ';
-    const trace = parseChatgptTrace(
+    const transcript = parseChatgptTranscript(
       serialize(exactTurn(prompt)),
       exact(prompt),
       1000,
       2000
     );
-    expect(trace).toMatchObject({
+    expect(transcript).toMatchObject({
       sessionId: 'session',
       turnId: 'turn',
       complete: true,
       response: 'done',
     });
-    expect(trace!.usage?.inputTokens).toBe(30);
+    expect(transcript!.usage?.inputTokens).toBe(30);
   });
   it.each([
     'find docs',
@@ -328,18 +333,18 @@ describe('marker-free native correlation', () => {
     'prefix Find docs',
   ])('does not fuzzy-match %j', (other) => {
     expect(
-      parseChatgptTrace(serialize(exactTurn(other)), exact('Find docs'))
+      parseChatgptTranscript(serialize(exactTurn(other)), exact('Find docs'))
     ).toBeUndefined();
   });
   it('does not remove Markdown escapes or normalize Unicode to manufacture equality', () => {
     expect(
-      parseChatgptTrace(
+      parseChatgptTranscript(
         serialize(exactTurn('snake\\_case')),
         exact('snake_case')
       )
     ).toBeUndefined();
     expect(
-      parseChatgptTrace(serialize(exactTurn('cafe\u0301')), exact('café'))
+      parseChatgptTranscript(serialize(exactTurn('cafe\u0301')), exact('café'))
     ).toBeUndefined();
   });
   it('requires the authoritative native UserMessage, not an assistant/tool/context echo', () => {
@@ -350,26 +355,26 @@ describe('marker-free native correlation', () => {
       content: [{ text: 'Find docs' }],
     });
     expect(
-      parseChatgptTrace(serialize(records), exact('Find docs'))
+      parseChatgptTranscript(serialize(records), exact('Find docs'))
     ).toBeUndefined();
     records[2] = event('event_msg', {
       type: 'item_completed',
       item: { type: 'AgentMessage', content: [{ text: 'Find docs' }] },
     });
     expect(
-      parseChatgptTrace(serialize(records), exact('Find docs'))
+      parseChatgptTranscript(serialize(records), exact('Find docs'))
     ).toBeUndefined();
   });
   it('rejects stale/future messages, multiple matching turns, and follow-up prompts', () => {
     const records = serialize(exactTurn('Find docs'));
     expect(
-      parseChatgptTrace(records, exact('Find docs'), 1001)
+      parseChatgptTranscript(records, exact('Find docs'), 1001)
     ).toBeUndefined();
     expect(
-      parseChatgptTrace(records, exact('Find docs'), 0, 999)
+      parseChatgptTranscript(records, exact('Find docs'), 0, 999)
     ).toBeUndefined();
     expect(() =>
-      parseChatgptTrace(
+      parseChatgptTranscript(
         serialize([
           ...exactTurn('Find docs', 'one'),
           ...exactTurn('Find docs', 'two'),
@@ -378,7 +383,7 @@ describe('marker-free native correlation', () => {
       )
     ).toThrow('Ambiguous');
     expect(() =>
-      parseChatgptTrace(
+      parseChatgptTranscript(
         serialize([
           ...exactTurn('Prior question', 'one'),
           ...exactTurn('Find docs', 'two'),
@@ -386,7 +391,9 @@ describe('marker-free native correlation', () => {
         exact('Find docs')
       )
     ).toThrow('initial user message');
-    expect(() => parseChatgptTrace(records, exact('   '))).toThrow('non-empty');
+    expect(() => parseChatgptTranscript(records, exact('   '))).toThrow(
+      'non-empty'
+    );
   });
   it('only reads fresh files, and attributes repeated queries to separate sessions across baselines', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mst-chatgpt-exact-'));
@@ -398,8 +405,8 @@ describe('marker-free native correlation', () => {
       const first = join(root, 'rollout-first.jsonl');
       await writeFile(first, serialize(exactTurn('Same query'), 'first'));
       expect(
-        (await findChatgptTrace(root, before, exact('Same query'), 0))?.trace
-          .sessionId
+        (await findChatgptTranscript(root, before, exact('Same query'), 0))
+          ?.transcript.sessionId
       ).toBe('first');
       const between = await snapshotChatgptSessions(root);
       await writeFile(
@@ -407,11 +414,11 @@ describe('marker-free native correlation', () => {
         serialize(exactTurn('Same query', 'two'), 'second')
       );
       expect(
-        (await findChatgptTrace(root, between, exact('Same query'), 0))?.trace
-          .sessionId
+        (await findChatgptTranscript(root, between, exact('Same query'), 0))
+          ?.transcript.sessionId
       ).toBe('second');
       await expect(
-        findChatgptTrace(root, before, exact('Same query'), 0)
+        findChatgptTranscript(root, before, exact('Same query'), 0)
       ).rejects.toMatchObject({
         failureKind: 'ambiguous_matching_sessions',
         message: expect.stringContaining('Ambiguous'),
@@ -426,25 +433,25 @@ describe('marker-free native correlation', () => {
       const path = join(root, 'rollout-first.jsonl');
       const baseline = await snapshotChatgptSessions(root);
       await writeFile(path, serialize(exactTurn('Same query').slice(0, -1)));
-      const first = (await findChatgptTrace(
+      const first = (await findChatgptTranscript(
         root,
         baseline,
         exact('Same query'),
         0
       ))!;
-      expect(first.trace.complete).toBe(false);
+      expect(first.transcript.complete).toBe(false);
       const bound = {
         path,
-        sessionId: first.trace.sessionId,
-        turnId: first.trace.turnId,
+        sessionId: first.transcript.sessionId,
+        turnId: first.transcript.turnId,
       };
       await writeFile(path, serialize(exactTurn('Same query')));
       expect(
         (
-          await findChatgptTrace(root, baseline, exact('Same query'), 0, {
+          await findChatgptTranscript(root, baseline, exact('Same query'), 0, {
             bound,
           })
-        )?.trace.complete
+        )?.transcript.complete
       ).toBe(true);
       const duplicate = join(root, 'rollout-duplicate.jsonl');
       await writeFile(
@@ -452,7 +459,7 @@ describe('marker-free native correlation', () => {
         serialize(exactTurn('Same query\n', 'other'), 'other')
       );
       await expect(
-        findChatgptTrace(root, baseline, exact('Same query'), 0, { bound })
+        findChatgptTranscript(root, baseline, exact('Same query'), 0, { bound })
       ).rejects.toMatchObject({
         failureKind: 'ambiguous_matching_sessions',
         message: expect.stringContaining('Ambiguous'),
@@ -463,14 +470,14 @@ describe('marker-free native correlation', () => {
         serialize(exactTurn('Same query', 'switched'), 'switched')
       );
       await expect(
-        findChatgptTrace(root, baseline, exact('Same query'), 0, { bound })
+        findChatgptTranscript(root, baseline, exact('Same query'), 0, { bound })
       ).rejects.toMatchObject({
         failureKind: 'client_run_failed',
         message: expect.stringContaining('Bound ChatGPT'),
       });
       await rm(path);
       await expect(
-        findChatgptTrace(root, baseline, exact('Same query'), 0, { bound })
+        findChatgptTranscript(root, baseline, exact('Same query'), 0, { bound })
       ).rejects.toMatchObject({
         failureKind: 'client_run_failed',
         message: expect.stringContaining('Bound ChatGPT'),
@@ -489,14 +496,14 @@ describe('ChatGPT native telemetry', () => {
       const item = records[3]!.payload.item as Record<string, unknown>;
       item.server = 'codex';
       item.tool = tool;
-      const trace = parseChatgptTrace(
+      const transcript = parseChatgptTranscript(
         serialize(records, 'session', 'Codex Desktop'),
         marker,
         0,
         Infinity,
         { surface: 'codex' }
       )!;
-      expect(trace.toolCalls).toMatchObject([
+      expect(transcript.toolCalls).toMatchObject([
         {
           source: 'builtin',
           server: 'codex',
@@ -505,7 +512,7 @@ describe('ChatGPT native telemetry', () => {
         },
         { source: 'mcp', server: 'beta', name: 'lookup' },
       ]);
-      expect(trace.telemetry).toMatchObject({
+      expect(transcript.telemetry).toMatchObject({
         mcpToolCallCount: 1,
         builtinToolCallCount: 1,
         mcpWallDurationMs: 200,
@@ -513,7 +520,7 @@ describe('ChatGPT native telemetry', () => {
       });
       item.server = 'alpha';
       expect(
-        parseChatgptTrace(serialize(records), marker)!.toolCalls[0]
+        parseChatgptTranscript(serialize(records), marker)!.toolCalls[0]
       ).toMatchObject({
         source: 'mcp',
         server: 'alpha',
@@ -522,7 +529,7 @@ describe('ChatGPT native telemetry', () => {
       item.server = 'codex';
       item.tool = 'unknown_future_tool';
       expect(
-        parseChatgptTrace(serialize(records), marker)!.toolCalls[0]
+        parseChatgptTranscript(serialize(records), marker)!.toolCalls[0]
       ).toMatchObject({
         source: 'mcp',
         server: 'codex',
@@ -536,21 +543,24 @@ describe('ChatGPT native telemetry', () => {
     item.server = 'cua_repl';
     item.tool = 'js';
     item.status = 'failed';
-    const trace = parseChatgptTrace(serialize(records), marker)!;
-    expect(trace.toolCalls[0]).toMatchObject({
+    const transcript = parseChatgptTranscript(serialize(records), marker)!;
+    expect(transcript.toolCalls[0]).toMatchObject({
       source: 'builtin',
       server: 'cua_repl',
       name: 'js',
       rawName: 'cua_repl.js',
       isError: true,
     });
-    expect(trace.toolCalls[1]).toMatchObject({
+    expect(transcript.toolCalls[1]).toMatchObject({
       source: 'mcp',
       server: 'beta',
       name: 'lookup',
     });
-    expect(trace).toMatchObject({ mcpDurationMs: 200, llmDurationMs: 1700 });
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript).toMatchObject({
+      mcpDurationMs: 200,
+      llmDurationMs: 1700,
+    });
+    expect(transcript.telemetry).toMatchObject({
       toolCallCount: 2,
       toolErrorCount: 1,
       mcpToolCallCount: 1,
@@ -576,7 +586,7 @@ describe('ChatGPT native telemetry', () => {
       ],
     });
     expect(
-      parseChatgptTrace(
+      parseChatgptTranscript(
         serialize(records).replace('codex_work_desktop', 'codex_cli'),
         marker
       )
@@ -623,8 +633,8 @@ describe('ChatGPT native telemetry', () => {
       },
       2300
     );
-    const trace = parseChatgptTrace(serialize(records), marker)!;
-    expect(trace.toolCalls).toMatchObject([
+    const transcript = parseChatgptTranscript(serialize(records), marker)!;
+    expect(transcript.toolCalls).toMatchObject([
       {
         source: 'builtin',
         name: 'CommandExecution',
@@ -642,11 +652,11 @@ describe('ChatGPT native telemetry', () => {
         arguments: { query: 'documentation', action: { type: 'search' } },
       },
     ]);
-    expect(trace.toolCalls[0]!.server).toBeUndefined();
-    expect(trace.toolCalls[0]!.output).toContain('access denied');
-    expect(trace.toolCalls[1]!.output).toContain('https://example.test');
-    expect(trace).toMatchObject({ mcpDurationMs: 0, llmDurationMs: 1700 });
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript.toolCalls[0]!.server).toBeUndefined();
+    expect(transcript.toolCalls[0]!.output).toContain('access denied');
+    expect(transcript.toolCalls[1]!.output).toContain('https://example.test');
+    expect(transcript).toMatchObject({ mcpDurationMs: 0, llmDurationMs: 1700 });
+    expect(transcript.telemetry).toMatchObject({
       mcpToolCallCount: 0,
       builtinToolCallCount: 2,
       builtinToolErrorCount: 1,
@@ -668,7 +678,7 @@ describe('ChatGPT native telemetry', () => {
     });
     records.splice(5, 0, records[3]);
     expect(
-      parseChatgptTrace(serialize(records), marker)!.toolCalls
+      parseChatgptTranscript(serialize(records), marker)!.toolCalls
     ).toHaveLength(2);
   });
   it('does not fabricate records for malformed native client actions', () => {
@@ -677,14 +687,14 @@ describe('ChatGPT native telemetry', () => {
       type: 'item_completed',
       item: { type: 'CommandExecution', id: 'bad-command' },
     });
-    expect(() => parseChatgptTrace(serialize(records), marker)).toThrow(
+    expect(() => parseChatgptTranscript(serialize(records), marker)).toThrow(
       'Malformed native client command'
     );
     records[3] = event('event_msg', {
       type: 'item_completed',
       item: { type: 'Extension', kind: 'web.search', id: 'bad-web' },
     });
-    expect(() => parseChatgptTrace(serialize(records), marker)).toThrow(
+    expect(() => parseChatgptTranscript(serialize(records), marker)).toThrow(
       'Malformed native client web'
     );
   });
@@ -695,9 +705,9 @@ describe('ChatGPT native telemetry', () => {
       item.server = 'cua_repl';
       item.tool = 'js';
     }
-    const trace = parseChatgptTrace(serialize(records), marker)!;
-    expect(trace).toMatchObject({ mcpDurationMs: 0, llmDurationMs: 1700 });
-    expect(trace.telemetry).toMatchObject({
+    const transcript = parseChatgptTranscript(serialize(records), marker)!;
+    expect(transcript).toMatchObject({ mcpDurationMs: 0, llmDurationMs: 1700 });
+    expect(transcript.telemetry).toMatchObject({
       mcpToolCallCount: 0,
       builtinToolCallCount: 2,
       mcpWallDurationMs: 0,
@@ -714,15 +724,15 @@ describe('ChatGPT native telemetry', () => {
       content: [],
     };
     expect(
-      parseChatgptTrace(serialize(records), marker)!.toolCalls[0]
+      parseChatgptTranscript(serialize(records), marker)!.toolCalls[0]
     ).toMatchObject({ source: 'mcp', server: 'alpha' });
     item.server = 'cua_repl';
     item.tool = 'unknown_future_tool';
     expect(
-      parseChatgptTrace(serialize(records), marker)!.toolCalls[0]
+      parseChatgptTranscript(serialize(records), marker)!.toolCalls[0]
     ).toMatchObject({ source: 'mcp', server: 'cua_repl' });
     delete item.server;
-    expect(() => parseChatgptTrace(serialize(records), marker)).toThrow(
+    expect(() => parseChatgptTranscript(serialize(records), marker)).toThrow(
       'Malformed native MCP'
     );
   });
@@ -738,7 +748,7 @@ describe('ChatGPT native telemetry', () => {
       output_tokens: 3,
       reasoning_output_tokens: 1,
     };
-    const trace = parseChatgptTrace(
+    const transcript = parseChatgptTranscript(
       serialize([
         started!,
         context!,
@@ -750,7 +760,7 @@ describe('ChatGPT native telemetry', () => {
       ]),
       marker
     )!;
-    expect(trace.modelCalls).toEqual([
+    expect(transcript.modelCalls).toEqual([
       {
         id: 'r1',
         model: 'gpt-test',
@@ -776,8 +786,8 @@ describe('ChatGPT native telemetry', () => {
     ]);
   });
   it('extracts exact-turn tools, messages and usage without double counting parallel time', () => {
-    const trace = parseChatgptTrace(serialize(), marker)!;
-    expect(trace).toMatchObject({
+    const transcript = parseChatgptTranscript(serialize(), marker)!;
+    expect(transcript).toMatchObject({
       sessionId: 'session',
       turnId: 'turn',
       model: 'gpt-test',
@@ -787,38 +797,35 @@ describe('ChatGPT native telemetry', () => {
       mcpDurationMs: 400,
       llmDurationMs: 1700,
     });
-    expect(trace.usage).toMatchObject({
+    expect(transcript.usage).toMatchObject({
       inputTokens: 30,
       outputTokens: 5,
       cacheReadInputTokens: 8,
       reasoningOutputTokens: 1,
       durationMs: 2000,
     });
-    expect(trace.usage?.totalCostUsd).toBeUndefined();
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript.usage?.totalCostUsd).toBeUndefined();
+    expect(transcript.telemetry).toMatchObject({
       apiCallCount: 2,
       toolCallCount: 2,
       mcpWallDurationMs: 300,
       timeToFirstTokenMs: 100,
     });
-    expect(trace.toolCalls[0]).toMatchObject({
+    expect(transcript.toolCalls[0]).toMatchObject({
       name: 'lookup',
       server: 'alpha',
       arguments: { query: 'test' },
       durationMs: 200,
       isError: false,
     });
-    expect(trace.toolCalls[0]?.output).toContain('result-a');
-    expect(trace.conversationHistory.map((message) => message.role)).toEqual([
-      'user',
-      'tool',
-      'tool',
-      'assistant',
-    ]);
+    expect(transcript.toolCalls[0]?.output).toContain('result-a');
+    expect(
+      transcript.conversationHistory.map((message) => message.role)
+    ).toEqual(['user', 'tool', 'tool', 'assistant']);
   });
 
   it('does not mix prior or subsequent turns into the marked turn', () => {
-    const trace = parseChatgptTrace(
+    const transcript = parseChatgptTranscript(
       serialize([
         ...turn('old', 'old-marker'),
         ...turn(),
@@ -826,17 +833,20 @@ describe('ChatGPT native telemetry', () => {
       ]),
       marker
     )!;
-    expect(trace.toolCalls).toHaveLength(2);
-    expect(trace.usage?.inputTokens).toBe(30);
-    expect(trace.turnId).toBe('turn');
+    expect(transcript.toolCalls).toHaveLength(2);
+    expect(transcript.usage?.inputTokens).toBe(30);
+    expect(transcript.turnId).toBe('turn');
   });
 
   it('rejects ambiguous turns and old matching prompts', () => {
     expect(() =>
-      parseChatgptTrace(serialize([...turn(), ...turn('duplicate')]), marker)
+      parseChatgptTranscript(
+        serialize([...turn(), ...turn('duplicate')]),
+        marker
+      )
     ).toThrow('Ambiguous');
-    expect(parseChatgptTrace(serialize(), marker, 5000)).toBeUndefined();
-    expect(parseChatgptTrace(serialize(), 'other')).toBeUndefined();
+    expect(parseChatgptTranscript(serialize(), marker, 5000)).toBeUndefined();
+    expect(parseChatgptTranscript(serialize(), 'other')).toBeUndefined();
   });
 
   it('does not correlate from tool output or assistant text', () => {
@@ -850,16 +860,16 @@ describe('ChatGPT native telemetry', () => {
         content: [{ type: 'Text', text: `[eval-run-marker:${marker}]` }],
       },
     });
-    expect(parseChatgptTrace(serialize(events), marker)).toBeUndefined();
+    expect(parseChatgptTranscript(serialize(events), marker)).toBeUndefined();
   });
 
   it('ignores partial last records but rejects malformed completed records', () => {
     expect(
-      parseChatgptTrace(serialize() + '{"partial":', marker)?.complete
+      parseChatgptTranscript(serialize() + '{"partial":', marker)?.complete
     ).toBe(true);
-    expect(() => parseChatgptTrace(serialize() + '{bad}\n', marker)).toThrow(
-      'Malformed'
-    );
+    expect(() =>
+      parseChatgptTranscript(serialize() + '{bad}\n', marker)
+    ).toThrow('Malformed');
   });
 
   describe('native rewrite of a truncated record under the same ordinal', () => {
@@ -878,9 +888,12 @@ describe('ChatGPT native telemetry', () => {
     it('uses the rewritten record and records a limitation', () => {
       const lines = numbered();
       lines.splice(4, 0, truncate(lines[4]!));
-      const trace = parseChatgptTrace(lines.join('\n') + '\n', marker);
-      expect(trace?.complete).toBe(true);
-      expect(trace?.limitations).toContain(
+      const transcript = parseChatgptTranscript(
+        lines.join('\n') + '\n',
+        marker
+      );
+      expect(transcript?.complete).toBe(true);
+      expect(transcript?.limitations).toContain(
         '1 truncated native record(s) were rewritten by the client under the same ordinal; the rewritten record was used.'
       );
     });
@@ -894,23 +907,23 @@ describe('ChatGPT native telemetry', () => {
       const truncated = records[4]!.slice(0, -30);
       const replacement = records[4]!.slice(0, -5);
       const growing = [...prefix, truncated, replacement].join('\n');
-      expect(() => parseChatgptTrace(growing, marker)).toThrow(
+      expect(() => parseChatgptTranscript(growing, marker)).toThrow(
         PendingChatgptRecordError
       );
       const finished =
         [...prefix, truncated, ...records.slice(4)].join('\n') + '\n';
-      const trace = parseChatgptTrace(finished, marker)!;
-      expect(trace.complete).toBe(true);
-      expect(trace.toolCalls).toHaveLength(2);
-      expect(trace.limitations).toContain(
+      const transcript = parseChatgptTranscript(finished, marker)!;
+      expect(transcript.complete).toBe(true);
+      expect(transcript.toolCalls).toHaveLength(2);
+      expect(transcript.limitations).toContain(
         '1 truncated native record(s) were rewritten by the client under the same ordinal; the rewritten record was used.'
       );
       // A complete malformed replacement or a different ordinal remains a failure.
-      expect(() => parseChatgptTrace(growing + '\n', marker)).toThrow(
+      expect(() => parseChatgptTranscript(growing + '\n', marker)).toThrow(
         'Malformed complete'
       );
       expect(() =>
-        parseChatgptTrace(
+        parseChatgptTranscript(
           [
             ...prefix,
             truncated,
@@ -935,15 +948,15 @@ describe('ChatGPT native telemetry', () => {
     ])('fails closed when the malformed line is followed by %s', (_, edit) => {
       const lines = numbered();
       edit(lines);
-      expect(() => parseChatgptTrace(lines.join('\n') + '\n', marker)).toThrow(
-        'Malformed complete JSONL record'
-      );
+      expect(() =>
+        parseChatgptTranscript(lines.join('\n') + '\n', marker)
+      ).toThrow('Malformed complete JSONL record');
     });
   });
 
   it('does not call a final answer complete until task_complete', () => {
     expect(
-      parseChatgptTrace(serialize(turn().slice(0, -1)), marker)?.complete
+      parseChatgptTranscript(serialize(turn().slice(0, -1)), marker)?.complete
     ).toBe(false);
   });
 
@@ -962,12 +975,12 @@ describe('ChatGPT native telemetry', () => {
         error: { message: 'fixture failed' },
       },
     });
-    const trace = parseChatgptTrace(serialize(records), marker)!;
+    const transcript = parseChatgptTranscript(serialize(records), marker)!;
     expect(
-      trace.toolCalls.find((call) => call.server === 'alpha')
+      transcript.toolCalls.find((call) => call.server === 'alpha')
     ).toMatchObject({ isError: true, output: '{"message":"fixture failed"}' });
-    expect(trace.telemetry.toolErrorCount).toBe(1);
-    expect(trace.mcpDurationMs).toBeUndefined();
+    expect(transcript.telemetry.toolErrorCount).toBe(1);
+    expect(transcript.mcpDurationMs).toBeUndefined();
   });
 
   it('preserves the final answer as native Markdown', () => {
@@ -978,7 +991,7 @@ describe('ChatGPT native telemetry', () => {
       duration_ms: 2000,
       last_agent_message: String.raw`a\_b`,
     });
-    expect(parseChatgptTrace(serialize(records), marker)?.response).toBe(
+    expect(parseChatgptTranscript(serialize(records), marker)?.response).toBe(
       String.raw`a\_b`
     );
   });
@@ -987,36 +1000,36 @@ describe('ChatGPT native telemetry', () => {
     const records = turn();
     records.splice(-1, 0, records[5]!);
     expect(
-      parseChatgptTrace(serialize(records), marker)?.usage?.inputTokens
+      parseChatgptTranscript(serialize(records), marker)?.usage?.inputTokens
     ).toBe(30);
   });
 
   it('reports aborted turns', () => {
     const events = turn().slice(0, -1);
     events.push(event('event_msg', { type: 'turn_aborted', turn_id: 'turn' }));
-    const trace = parseChatgptTrace(serialize(events), marker)!;
-    expect(trace.complete).toBe(true);
-    expect(trace.error).toContain('aborted');
+    const transcript = parseChatgptTranscript(serialize(events), marker)!;
+    expect(transcript.complete).toBe(true);
+    expect(transcript.error).toContain('aborted');
   });
 
   it('does not invent usage or cost when native token records are missing', () => {
-    const trace = parseChatgptTrace(
+    const transcript = parseChatgptTranscript(
       serialize(
         turn().filter((record) => record.type !== 'token_usage_record')
       ),
       marker
     )!;
-    expect(trace.usage).toBeUndefined();
-    expect(trace.telemetry.totalCostUsd).toBeUndefined();
+    expect(transcript.usage).toBeUndefined();
+    expect(transcript.telemetry.totalCostUsd).toBeUndefined();
   });
 
   it('deduplicates repeated native items and response IDs', () => {
     const events = turn();
     events.splice(5, 0, events[3]!);
     events.splice(-1, 0, events[7]!);
-    const trace = parseChatgptTrace(serialize(events), marker)!;
-    expect(trace.toolCalls).toHaveLength(2);
-    expect(trace.telemetry.apiCallCount).toBe(2);
+    const transcript = parseChatgptTranscript(serialize(events), marker)!;
+    expect(transcript.toolCalls).toHaveLength(2);
+    expect(transcript.telemetry.apiCallCount).toBe(2);
   });
 
   it('never exposes reasoning or client instruction records as conversation text', () => {
@@ -1035,7 +1048,7 @@ describe('ChatGPT native telemetry', () => {
       })
     );
     expect(
-      JSON.stringify(parseChatgptTrace(serialize(events), marker))
+      JSON.stringify(parseChatgptTranscript(serialize(events), marker))
     ).not.toMatch(/secret|host instruction/);
   });
 });
@@ -1048,22 +1061,23 @@ it('rejects a matching marker submitted into a pre-existing chat when freshness 
     const baseline = await snapshotChatgptSessions(root);
     await writeFile(file, serialize([...turn('old', 'old-marker'), ...turn()]));
     expect(
-      (await findChatgptTrace(root, baseline, marker, 0))?.trace.turnId
+      (await findChatgptTranscript(root, baseline, marker, 0))?.transcript
+        .turnId
     ).toBe('turn');
-    const existing = await findChatgptTrace(root, baseline, marker, 0, {
+    const existing = await findChatgptTranscript(root, baseline, marker, 0, {
       requireFreshSession: true,
     }).catch((error: unknown) => error);
     expect(existing).toBeInstanceOf(Error);
     expect((existing as Error).message).toContain('instead of a fresh chat');
     // Unclassified, so reported as a parse failure (see openaiChatgpt tests).
-    expect(existing).not.toBeInstanceOf(NativeTraceError);
+    expect(existing).not.toBeInstanceOf(NativeTranscriptError);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
 it('discovers only changed/new rollout files and rejects duplicate sessions', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'mst-chatgpt-trace-'));
+  const root = await mkdtemp(join(tmpdir(), 'mst-chatgpt-transcript-'));
   try {
     const day = join(root, '2026', '09', '18');
     await mkdir(day, { recursive: true });
@@ -1071,12 +1085,13 @@ it('discovers only changed/new rollout files and rejects duplicate sessions', as
     const before = await snapshotChatgptSessions(root);
     await writeFile(join(day, 'rollout-new.jsonl'), serialize());
     expect(
-      (await findChatgptTrace(root, before, marker, 0))?.trace.response
+      (await findChatgptTranscript(root, before, marker, 0))?.transcript
+        .response
     ).toBe('done');
     await writeFile(join(day, 'rollout-second.jsonl'), serialize());
-    await expect(findChatgptTrace(root, before, marker, 0)).rejects.toThrow(
-      'Ambiguous'
-    );
+    await expect(
+      findChatgptTranscript(root, before, marker, 0)
+    ).rejects.toThrow('Ambiguous');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1148,7 +1163,7 @@ describe('ChatGPT native response_item tool calls', () => {
       mcpServers = ['acme-eval'],
     } = {}
   ) =>
-    parseChatgptTrace(
+    parseChatgptTranscript(
       serialize(
         [
           event('event_msg', { type: 'task_started', turn_id: T }, at(0)),
@@ -1181,8 +1196,8 @@ describe('ChatGPT native response_item tool calls', () => {
 
   it('pairs a custom_tool_call exec with its output as a client call without raw input', () => {
     const input = 'const r = await tools.web__run({ q: "redacted" }); r';
-    const trace = parse(exec('call_web', input, 1, 2));
-    expect(trace.toolCalls).toEqual([
+    const transcript = parse(exec('call_web', input, 1, 2));
+    expect(transcript.toolCalls).toEqual([
       expect.objectContaining({
         source: 'builtin',
         id: 'call_web',
@@ -1197,11 +1212,14 @@ describe('ChatGPT native response_item tool calls', () => {
         },
       }),
     ]);
-    expect(JSON.stringify(trace.toolCalls)).not.toContain('await tools');
-    expect(trace.telemetry).toMatchObject({ mcpToolCallCount: 0 });
-    expect(trace.telemetry.partial).toBeUndefined();
-    expect(trace.limitations.join(' ')).not.toContain('code-mode');
-    expect(trace.usage).toMatchObject({ inputTokens: 100, durationMs: 5000 });
+    expect(JSON.stringify(transcript.toolCalls)).not.toContain('await tools');
+    expect(transcript.telemetry).toMatchObject({ mcpToolCallCount: 0 });
+    expect(transcript.telemetry.partial).toBeUndefined();
+    expect(transcript.limitations.join(' ')).not.toContain('code-mode');
+    expect(transcript.usage).toMatchObject({
+      inputTokens: 100,
+      durationMs: 5000,
+    });
   });
 
   it.each(['list_mcp_resources', 'list_mcp_resource_templates'])(
@@ -1238,7 +1256,7 @@ describe('ChatGPT native response_item tool calls', () => {
   );
 
   it('attributes nested code-mode MCP references inside exec to the configured label', () => {
-    const trace = parse(
+    const transcript = parse(
       exec(
         'call_mcp',
         'await tools.mcp__acme_eval__search({ query: "x" }); await tools.web__run({})',
@@ -1246,7 +1264,7 @@ describe('ChatGPT native response_item tool calls', () => {
         2
       )
     );
-    expect(trace.toolCalls).toMatchObject([
+    expect(transcript.toolCalls).toMatchObject([
       { source: 'builtin', arguments: { nestedTools: ['web__run'] } },
       {
         source: 'mcp',
@@ -1256,9 +1274,9 @@ describe('ChatGPT native response_item tool calls', () => {
         arguments: {},
       },
     ]);
-    expect(trace.toolCalls[1]!.durationMs).toBeUndefined();
-    expect(trace.mcpDurationMs).toBeUndefined();
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript.toolCalls[1]!.durationMs).toBeUndefined();
+    expect(transcript.mcpDurationMs).toBeUndefined();
+    expect(transcript.telemetry).toMatchObject({
       mcpToolCallCount: 1,
       builtinToolCallCount: 1,
       toolProvenance: [
@@ -1266,7 +1284,7 @@ describe('ChatGPT native response_item tool calls', () => {
         { id: 'call_mcp#1', source: 'mcp', viaCodeMode: true },
       ],
     });
-    expect(trace.limitations.join(' ')).toContain('code-mode exec runner');
+    expect(transcript.limitations.join(' ')).toContain('code-mode exec runner');
     // executed_tool_calls supplies nested arguments and counts.
     const confirmed = call('call_mcp', { name: 'exec', input: 'code' }, 1, {
       at: 2,
@@ -1317,11 +1335,11 @@ describe('ChatGPT native response_item tool calls', () => {
         ),
         item(native, 1.2, 1.3),
       ];
-      const trace = parse(
+      const transcript = parse(
         [...body, item({ ...mcp, id: 'real-mcp', arguments: {} }, 3, 4)],
         { surface: 'codex' }
       );
-      expect(trace.toolCalls).toMatchObject([
+      expect(transcript.toolCalls).toMatchObject([
         { source: 'builtin', name: 'exec' },
         {
           source: 'builtin',
@@ -1334,7 +1352,7 @@ describe('ChatGPT native response_item tool calls', () => {
         },
         { source: 'mcp', server: 'acme-eval', name: 'search' },
       ]);
-      expect(trace.telemetry).toMatchObject({
+      expect(transcript.telemetry).toMatchObject({
         mcpToolCallCount: 1,
         mcpToolErrorCount: 0,
         builtinToolCallCount: 2,
@@ -1376,7 +1394,7 @@ describe('ChatGPT native response_item tool calls', () => {
     'await tools.list_mcp_resources ( { server : "acme_eval" } ) ;',
     'const r = await tools\n  .list_mcp_resources({server:"acme_eval"});\ntext(r);',
   ])('allows whitespace between the tokens of a helper: %s', (input) => {
-    const trace = parse([
+    const transcript = parse([
       ...exec('resource', input, 1, 2),
       item(
         {
@@ -1390,10 +1408,10 @@ describe('ChatGPT native response_item tool calls', () => {
         1.3
       ),
     ]);
-    expect(trace.toolCalls.find((c) => c.id === 'native')).toMatchObject({
+    expect(transcript.toolCalls.find((c) => c.id === 'native')).toMatchObject({
       source: 'builtin',
     });
-    expect(trace.telemetry.mcpToolCallCount).toBe(0);
+    expect(transcript.telemetry.mcpToolCallCount).toBe(0);
   });
 
   it('counts a replayed helper record once, so the helper stays built-in', () => {
@@ -1419,11 +1437,13 @@ describe('ChatGPT native response_item tool calls', () => {
       [...call, native, native],
       [...call, ...call, native],
     ]) {
-      const trace = parse(body);
-      expect(trace.toolCalls.find((c) => c.id === 'native')).toMatchObject({
-        source: 'builtin',
-      });
-      expect(trace.telemetry.mcpToolCallCount).toBe(0);
+      const transcript = parse(body);
+      expect(transcript.toolCalls.find((c) => c.id === 'native')).toMatchObject(
+        {
+          source: 'builtin',
+        }
+      );
+      expect(transcript.telemetry.mcpToolCallCount).toBe(0);
     }
   });
 
@@ -1444,7 +1464,7 @@ describe('ChatGPT native response_item tool calls', () => {
   ])(
     'does not use ambiguous or unrelated exec code as helper provenance: %s',
     (input) => {
-      const trace = parse([
+      const transcript = parse([
         ...exec('resource', input, 1, 2),
         item(
           {
@@ -1458,9 +1478,11 @@ describe('ChatGPT native response_item tool calls', () => {
           1.3
         ),
       ]);
-      expect(trace.toolCalls.find((c) => c.id === 'native')).toMatchObject({
-        source: 'mcp',
-      });
+      expect(transcript.toolCalls.find((c) => c.id === 'native')).toMatchObject(
+        {
+          source: 'mcp',
+        }
+      );
     }
   );
 
@@ -1546,8 +1568,8 @@ describe('ChatGPT native response_item tool calls', () => {
       });
     const codex = { surface: 'codex' as const };
     const confirmed = [{ name: 'mcp__acme_eval__search' }];
-    const trace = parse(direct('mcp__acme_eval', confirmed), codex);
-    expect(trace.toolCalls).toEqual([
+    const transcript = parse(direct('mcp__acme_eval', confirmed), codex);
+    expect(transcript.toolCalls).toEqual([
       expect.objectContaining({
         source: 'mcp',
         id: 'call_fc',
@@ -1558,8 +1580,11 @@ describe('ChatGPT native response_item tool calls', () => {
         durationMs: 500,
       }),
     ]);
-    expect(trace).toMatchObject({ mcpDurationMs: 500, llmDurationMs: 4500 });
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript).toMatchObject({
+      mcpDurationMs: 500,
+      llmDurationMs: 4500,
+    });
+    expect(transcript.telemetry).toMatchObject({
       mcpToolCallCount: 1,
       mcpWallDurationMs: 500,
       toolProvenance: [
@@ -1590,16 +1615,16 @@ describe('ChatGPT native response_item tool calls', () => {
   });
 
   it('returns partial calls and usage for a turn that timed out mid-call', () => {
-    const trace = parse(
+    const transcript = parse(
       [
         ...exec('call_1', 'await tools.exec_command({})', 1, 2),
         ...exec('call_2', 'await tools.mcp__acme_eval__search({})', 3),
       ],
       { done: false }
     );
-    expect(trace.complete).toBe(false);
-    expect(trace.response).toBeUndefined();
-    expect(trace.toolCalls).toMatchObject([
+    expect(transcript.complete).toBe(false);
+    expect(transcript.response).toBeUndefined();
+    expect(transcript.toolCalls).toMatchObject([
       {
         id: 'call_1',
         source: 'builtin',
@@ -1608,7 +1633,7 @@ describe('ChatGPT native response_item tool calls', () => {
       { id: 'call_2', source: 'builtin', output: undefined },
       { id: 'call_2#1', source: 'mcp' },
     ]);
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript.telemetry).toMatchObject({
       partial: true,
       resultCount: 0,
       mcpToolCallCount: 1,
@@ -1616,8 +1641,11 @@ describe('ChatGPT native response_item tool calls', () => {
       toolProvenance: [{ id: 'call_1' }, { id: 'call_2', pending: true }, {}],
     });
     // Elapsed native time so far (task_started to last record), not a turn total.
-    expect(trace.usage).toMatchObject({ inputTokens: 100, durationMs: 4000 });
-    expect(trace.limitations).toEqual(
+    expect(transcript.usage).toMatchObject({
+      inputTokens: 100,
+      durationMs: 4000,
+    });
+    expect(transcript.limitations).toEqual(
       expect.arrayContaining([
         'Turn did not complete; tool calls and usage are partial.',
         'Some native tool calls have no recorded output and are pending.',
@@ -1635,16 +1663,19 @@ function thrown(run: () => unknown): unknown {
   throw new Error('expected the parser to throw');
 }
 
-describe('ChatGPT trace failures carry their kind', () => {
+describe('ChatGPT transcript failures carry their kind', () => {
   it('marks ambiguous turns and a non-initial exact prompt where they are detected', () => {
     expect(
       thrown(() =>
-        parseChatgptTrace(serialize([...turn(), ...turn('duplicate')]), marker)
+        parseChatgptTranscript(
+          serialize([...turn(), ...turn('duplicate')]),
+          marker
+        )
       )
     ).toMatchObject({ failureKind: 'ambiguous_matching_sessions' });
     expect(
       thrown(() =>
-        parseChatgptTrace(
+        parseChatgptTranscript(
           serialize([
             ...exactTurn('Find docs', 'one'),
             ...exactTurn('Find docs', 'two'),
@@ -1655,7 +1686,7 @@ describe('ChatGPT trace failures carry their kind', () => {
     ).toMatchObject({ failureKind: 'ambiguous_matching_sessions' });
     expect(
       thrown(() =>
-        parseChatgptTrace(
+        parseChatgptTranscript(
           serialize([
             ...exactTurn('Prior question', 'one'),
             ...exactTurn('Find docs', 'two'),
@@ -1666,7 +1697,7 @@ describe('ChatGPT trace failures carry their kind', () => {
     ).toMatchObject({ failureKind: 'client_run_failed' });
     // A malformed transcript is left unclassified: the caller reports a parse failure.
     expect(
-      thrown(() => parseChatgptTrace(serialize() + '{bad}\n', marker))
-    ).not.toBeInstanceOf(NativeTraceError);
+      thrown(() => parseChatgptTranscript(serialize() + '{bad}\n', marker))
+    ).not.toBeInstanceOf(NativeTranscriptError);
   });
 });

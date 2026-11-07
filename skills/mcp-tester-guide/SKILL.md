@@ -41,9 +41,9 @@ MST uses these terms in its API, config keys, CLI and reports. Use them, and not
 | baseline       | The variant the others are compared with (the first, unless `baseline` names one)                          | control            |
 | tool metadata  | Tool names, descriptions and input schemas a variant shows the client (`tools`)                            | tool overrides     |
 | trial          | One attempt at a case by one variant                                                                       | iteration          |
-| trace          | What a client did in a trial: tool calls, skill loads, usage, final answer                                 | transcript         |
+| transcript     | What a client did in a trial: tool calls, skill loads, usage, final answer                                 | trace              |
 | grader         | An assertion (code) or a judge (model)                                                                     | scorer             |
-| assertion      | A deterministic check of a trial's trace or answer (`toolsTriggered`, `containsText`, ...)                 | expectation        |
+| assertion      | A deterministic check of a trial's transcript or answer (`toolsTriggered`, `containsText`, ...)            | expectation        |
 | judge          | An LLM that scores a trial against expected, a question or a rubric                                        | evaluator          |
 | score          | A grader's result for one trial: 0 to 1, pass, and why                                                     | verdict            |
 | label          | A person's pass or fail for a judge's question on one trial, which a judge is measured against             | annotation         |
@@ -96,7 +96,7 @@ The `api` client needs `ai`, its provider's package (such as `@ai-sdk/anthropic`
 
 ## Judges
 
-- **Yes-or-no judges** read the whole trace and answer yes, no or `unknown`: `task-completion`, `grounded-in-tools`, `tool-use`, and `criteria` (the case's own criteria, one question each).
+- **Yes-or-no judges** read the whole transcript and answer yes, no or `unknown`: `task-completion`, `grounded-in-tools`, `tool-use`, and `criteria` (the case's own criteria, one question each).
 - **`rubric`** scores the answer from 0 to 1 against a built-in rubric (`correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`) or your own text.
 - **`preference`** is a pairwise judge: which variant did better on a case, against the baseline.
 - **Plugin judges** are named `<namespace>/judge/<name>`, such as `"acme/judge/completeness"`.
@@ -119,7 +119,7 @@ An extension's name is `<namespace>/<kind>/<name>`, where the kind comes from th
 | `mst login <server-url>`                        | OAuth login in a browser; the `mcp` fixture uses the stored tokens. `--scopes a,b`, `--force`                              |
 | `mst token <server-url> --format env\|json\|gh` | Print stored tokens for CI                                                                                                 |
 | `mst run --config <path>`                       | Run an eval config (`run-mcp-eval`)                                                                                        |
-| `mst grade <run> --config <path>`               | Grade a stored run's traces again, as a new run                                                                            |
+| `mst grade <run> --config <path>`               | Grade a stored run's transcripts again, as a new run                                                                       |
 | `mst open`                                      | Open a run's report: the newest run, or the run or eval directory named                                                    |
 | `mst batch --config-dir <dir>`                  | Run several eval configs                                                                                                   |
 | `mst label page <run> --judge <name>`           | Label a judge's trials on a local page (`calibrate-mcp-judge`); `export` and `import` for spreadsheets                     |
@@ -162,7 +162,7 @@ Full list: [the 2.0 migration guide](https://github.com/gleanwork/mcp-server-tes
 - **`expect` from `@playwright/test`.** It has no MST matchers. Import `test` and `expect` from `@gleanwork/mcp-server-tester/fixtures/mcp`.
 - **Missing `await`.** `toMatchToolSnapshot`, `toSatisfyToolPredicate` and `toPassToolJudge` are async; without `await`, a failure may not fail the test.
 - **A tool call in a dataset.** `toolName`/`args` cases fail to load. Write a Playwright test.
-- **Tool-call assertions on a tool response.** `toHaveToolCalls` and `toolsTriggered` read a client's trace. A `callTool` result has none.
+- **Tool-call assertions on a tool response.** `toHaveToolCalls` and `toolsTriggered` read a client's transcript. A `callTool` result has none.
 - **One trial.** A single trial can't tell a good description from a lucky one. Use 10 or more for decisions.
 - **`url` for an HTTP server.** The key is `serverUrl`.
 - **No `client` in an eval config.** It runs on `claude-code`. Name the client.

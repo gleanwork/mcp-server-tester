@@ -131,7 +131,7 @@ describe.each(stores)('the %s run store', (_name, makeStore) => {
   it('holds an uploaded run, and its history lists it', async () => {
     const store = await makeStore();
     const runDirectory = await tempDir();
-    await fs.mkdir(path.join(runDirectory, 'traces', 'v', 'case'), {
+    await fs.mkdir(path.join(runDirectory, 'transcripts', 'v', 'case'), {
       recursive: true,
     });
     await fs.writeFile(
@@ -143,7 +143,7 @@ describe.each(stores)('the %s run store', (_name, makeStore) => {
       '{"cases":[{"id":"case"}]}'
     );
     await fs.writeFile(
-      path.join(runDirectory, 'traces', 'v', 'case', '0.json'),
+      path.join(runDirectory, 'transcripts', 'v', 'case', '0.json'),
       '{}'
     );
     const runId = '20261013T000000Z-abc123';
@@ -157,7 +157,7 @@ describe.each(stores)('the %s run store', (_name, makeStore) => {
       `my-eval/runs/${runId}/manifest.json`,
       `my-eval/runs/${runId}/results.json`,
       `my-eval/runs/${runId}/summary.json`,
-      `my-eval/runs/${runId}/traces/v/case/0.json`,
+      `my-eval/runs/${runId}/transcripts/v/case/0.json`,
     ]);
     expect(
       JSON.parse(
@@ -198,12 +198,12 @@ describe('fetching a stored run', () => {
   async function uploaded() {
     const store = fileRunStore(await tempDir());
     const runDirectory = await tempDir();
-    await fs.mkdir(path.join(runDirectory, 'traces', 'v', 'case'), {
+    await fs.mkdir(path.join(runDirectory, 'transcripts', 'v', 'case'), {
       recursive: true,
     });
     await fs.writeFile(path.join(runDirectory, 'run.json'), '{"runId":"r"}');
     await fs.writeFile(
-      path.join(runDirectory, 'traces', 'v', 'case', '0.json'),
+      path.join(runDirectory, 'transcripts', 'v', 'case', '0.json'),
       '{}'
     );
     // An atomic write's temporary: never uploaded.
@@ -221,7 +221,7 @@ describe('fetching a stored run', () => {
     const u = await uploaded();
     expect(u.manifest.files.map((file) => file.path)).toEqual([
       'run.json',
-      'traces/v/case/0.json',
+      'transcripts/v/case/0.json',
     ]);
     expect(await hasStoredRun(u.store, 'my-eval', runId)).toBe(true);
     expect(
@@ -230,10 +230,10 @@ describe('fetching a stored run', () => {
     expect((await fs.readdir(u.into, { recursive: true })).sort()).toEqual([
       'manifest.json',
       'run.json',
-      'traces',
-      'traces/v',
-      'traces/v/case',
-      'traces/v/case/0.json',
+      'transcripts',
+      'transcripts/v',
+      'transcripts/v/case',
+      'transcripts/v/case/0.json',
     ]);
     expect(await fs.readdir(path.dirname(u.into))).toEqual([runId]);
   });

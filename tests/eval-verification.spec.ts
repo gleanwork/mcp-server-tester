@@ -13,7 +13,7 @@ import {
   type EvalCase,
   type MCPFixtureApi,
 } from '../src/index.js';
-import { clientRunToExecution } from '../src/evals/clientTrace.js';
+import { clientRunToExecution } from '../src/evals/clientTranscript.js';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 

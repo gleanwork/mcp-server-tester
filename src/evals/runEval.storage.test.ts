@@ -292,7 +292,9 @@ describe('eval storage through public APIs', () => {
             'report/index.html',
           ])
         );
-        expect(files.some((file) => file.startsWith('traces/'))).toBe(true);
+        expect(files.some((file) => file.startsWith('transcripts/'))).toBe(
+          true
+        );
         for (const file of files)
           expect(await fs.readFile(path.join(stored, file))).toEqual(
             await fs.readFile(path.join(result.outputDir, file))

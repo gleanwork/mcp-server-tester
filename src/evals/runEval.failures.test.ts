@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 
 /**
- * A two-variant eval on a session client; `prepare` plans two traces at open. With
+ * A two-variant eval on a session client; `prepare` plans two transcripts at open. With
  * `datasets: 2`, each variant runs two datasets (one batch each).
  */
 async function fixture(
@@ -36,7 +36,7 @@ async function fixture(
   }: {
     datasets?: number;
     judgeError?: string;
-    /** Store unredacted traces, so the run can be regraded. */
+    /** Store unredacted transcripts, so the run can be regraded. */
     storeResponses?: boolean;
   } = {}
 ) {
@@ -64,15 +64,18 @@ async function fixture(
             trial: 0,
             input: { ...options.input, prompt: caseId },
           }));
-          const traces = await prepare(requests);
-          if (traces.length !== requests.length)
+          const transcripts = await prepare(requests);
+          if (transcripts.length !== requests.length)
             throw new Error(
-              'Session fixture returned an incomplete trace set; refusing to resubmit.'
+              'Session fixture returned an incomplete transcript set; refusing to resubmit.'
             );
           let index = 0;
           return {
             async run() {
-              return { result: traces[index++]!, continuation: 'continue' };
+              return {
+                result: transcripts[index++]!,
+                continuation: 'continue',
+              };
             },
             async reset() {},
             async close() {},
@@ -187,12 +190,12 @@ describe('a run that meets failures', () => {
     // Infrastructure failures, not failed grades.
     for (const id of ['one', 'two']) {
       const trial = await readJson<{ infrastructureError: boolean }>(
-        path.join(runDirectory, 'traces', 'candidate', id, '0.json')
+        path.join(runDirectory, 'transcripts', 'candidate', id, '0.json')
       );
       expect(trial.infrastructureError).toBe(true);
     }
     const baselineTrial = await readJson<{ infrastructureError: boolean }>(
-      path.join(runDirectory, 'traces', 'baseline', 'one', '0.json')
+      path.join(runDirectory, 'transcripts', 'baseline', 'one', '0.json')
     );
     expect(baselineTrial.infrastructureError).toBe(false);
     expect(result.summary.variants.map((v) => v.name)).toEqual([
@@ -276,12 +279,12 @@ describe('a run that meets failures', () => {
     const f = await fixture(
       async (requests) => {
         batches += 1;
-        // The candidate's second dataset breaks the contract: fewer traces.
+        // The candidate's second dataset breaks the contract: fewer transcripts.
         return batches === 4 ? [] : requests.map(ok);
       },
       { datasets: 2 }
     );
-    await expect(f.run()).rejects.toThrow('incomplete trace set');
+    await expect(f.run()).rejects.toThrow('incomplete transcript set');
     const { run, cases } = await storedRun(await f.runDirectory());
     expect(run.phases).toEqual({ collect: 'failed', grade: 'partial' });
     expect(run.variants.map((v) => v.name)).toEqual(['baseline']);
@@ -313,7 +316,7 @@ describe('a run that meets failures', () => {
       infrastructureError: boolean;
       ending: unknown;
       gradingError?: string;
-    }>(path.join(runDirectory, 'traces', 'baseline', 'one', '0.json'));
+    }>(path.join(runDirectory, 'transcripts', 'baseline', 'one', '0.json'));
     // The client's attempt ended fine: a trial, just not graded (ADR 0010).
     expect(trial.infrastructureError).toBe(false);
     expect(trial.ending).toEqual({ kind: 'trial' });
@@ -370,7 +373,7 @@ describe('a run that meets failures', () => {
     expect(cases[0]?.pass).toBe(false);
     expect(cases[0]?.error).toBeUndefined();
     const trial = await readJson<{ infrastructureError: boolean }>(
-      path.join(runDirectory, 'traces', 'baseline', 'one', '0.json')
+      path.join(runDirectory, 'transcripts', 'baseline', 'one', '0.json')
     );
     expect(trial.infrastructureError).toBe(false);
   });

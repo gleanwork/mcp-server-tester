@@ -33,7 +33,7 @@ export const NEEDED_CALLS_QUESTION = `Did the assistant avoid calls it didn't ne
 
 Answer "yes" when every call helped answer the request. A call that failed, and a call made to find the way after an error (such as listing a folder after a wrong path), count as needed.
 
-Answer "no" when the assistant made a call that didn't help: the same call again with the same arguments when the first worked, a call to a tool or for information the request doesn't need, or a check of a result the trace already shows.
+Answer "no" when the assistant made a call that didn't help: the same call again with the same arguments when the first worked, a call to a tool or for information the request doesn't need, or a check of a result the transcript already shows.
 
 Leave the choice of tool and arguments to other questions: when the assistant made one call to answer the request, that call is "yes" here even if it went to the wrong tool or asked for the wrong thing.`;
 

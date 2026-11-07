@@ -194,7 +194,7 @@ describe('typeClaudeCodeCall', () => {
 });
 
 describe('Claude CLI stream-json', () => {
-  it('produces typed skill and tool_search events in the trace', () => {
+  it('produces typed skill and tool_search events in the transcript', () => {
     const lines = [
       {
         type: 'assistant',

@@ -18,7 +18,7 @@ import {
 import {
   Preferences,
   TrialView,
-  traceSummary,
+  transcriptSummary,
   useTrialLookup,
 } from '../RunReport/TrialDetail';
 
@@ -36,7 +36,7 @@ function sameNote(trials: RunReportTrial[]): string | null {
     (t) => t.pass === first.pass && signature(t) === signature(first)
   );
   if (!same) return null;
-  const calls = traceSummary(first);
+  const calls = transcriptSummary(first);
   return calls === 'called no tools'
     ? `All ${trials.length} trials ${first.pass ? 'passed' : 'failed'} and called no tools.`
     : `All ${trials.length} trials ${first.pass ? 'passed' : 'failed'}, with the same tool calls.`;

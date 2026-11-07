@@ -15,7 +15,7 @@ import {
 } from '../../src/mcp/clientFactory.js';
 import type {
   ClientRunResult,
-  TraceEvent,
+  TranscriptEvent,
 } from '../../src/evals/evalFrameworkTypes.js';
 import type { Plugin } from '../../src/plugins/plugin.js';
 
@@ -42,7 +42,7 @@ async function launchedToken(servers: readonly MCPConfig[]): Promise<string> {
   return '';
 }
 
-async function leakedTrace(
+async function leakedTranscript(
   servers: readonly MCPConfig[]
 ): Promise<ClientRunResult> {
   const token = await launchedToken(servers);
@@ -85,7 +85,7 @@ export default {
     leaky: {
       schema: z.object({ type: z.string() }).passthrough(),
       async run(input) {
-        return leakedTrace(input.servers);
+        return leakedTranscript(input.servers);
       },
     },
     'leaky-batch': {
@@ -94,7 +94,7 @@ export default {
         return {
           async run() {
             return {
-              result: await leakedTrace(options.input.servers),
+              result: await leakedTranscript(options.input.servers),
               continuation: 'continue',
             };
           },
@@ -107,7 +107,7 @@ export default {
       schema: z.object({ type: z.string() }).passthrough(),
       evidence: 'structured',
       async run(input): Promise<ClientRunResult> {
-        const events: TraceEvent[] = [];
+        const events: TranscriptEvent[] = [];
         for (const config of input.servers) {
           const client = await createMCPClientForConfig(config);
           try {

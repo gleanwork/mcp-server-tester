@@ -30,7 +30,7 @@ export async function runApiClient(
   return runVercelClient(mcp, input, config, signal);
 }
 
-/** Runs Claude Code with its own MCP connections and parses its trace. */
+/** Runs Claude Code with its own MCP connections and parses its transcript. */
 export async function runClaudeCodeClient(
   input: string,
   config: MstClientConfig,

@@ -235,7 +235,7 @@ beforeEach(() => {
 });
 
 describe('codex-cli client options', () => {
-  it('is a built-in, headless client with a structured trace', () => {
+  it('is a built-in, headless client with a structured transcript', () => {
     expect(getClient('codex-cli')).toBe(CODEX_CLIENT);
     expect(CODEX_CLIENT).toMatchObject({
       evidence: 'structured',
@@ -410,7 +410,7 @@ describe('codex-cli client run', () => {
     await rm(cwd, { recursive: true, force: true });
   });
 
-  it('runs one turn in a private CODEX_HOME and returns its trace', async () => {
+  it('runs one turn in a private CODEX_HOME and returns its transcript', async () => {
     const result = await CODEX_CLIENT.run!(
       { prompt: 'Find x', servers: [servers[0]!], env: { EXTRA: '1' } },
       {

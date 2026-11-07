@@ -51,7 +51,7 @@ Spans follow OpenTelemetry's [generative AI conventions](https://opentelemetry.i
 | `execute_tool <name>`   | One tool call: MCP or the client's own.                                           | `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type`, `mcp.method.name`, `mst.tool.server`, `mst.tool.source`, `mst.tool.kind`; an error status when the call failed                                                                                      |
 | `evaluate <judge>`      | One verdict.                                                                      | `gen_ai.evaluation.name`, `gen_ai.evaluation.score.value`, `gen_ai.evaluation.score.label`, `mst.grading_run_id`                                                                                                                                                   |
 
-A verdict's `gen_ai.evaluation.score.label` is `pass` or `fail`, or `unknown` when the judge couldn't tell from the trace. An unknown verdict has no score value and no error status.
+A verdict's `gen_ai.evaluation.score.label` is `pass` or `fail`, or `unknown` when the judge couldn't tell from the transcript. An unknown verdict has no score value and no error status.
 
 `gen_ai.usage.input_tokens` counts all input, cached or not, as OpenTelemetry does; `gen_ai.usage.cache_read.input_tokens` and `gen_ai.usage.cache_creation.input_tokens` say how much was cached, and `mst.usage.uncached_input_tokens` is MST's own input count. `mst.usage.reasoning_output_tokens` is how many of the output tokens were reasoning, when the client reports it: OpenAI's reasoning tokens, or Claude's thinking tokens (Claude Code's and Cowork's result, for the trial as a whole).
 
@@ -85,7 +85,7 @@ A client's record of a trial is its conversation: messages, tool calls and resul
 }
 ```
 
-MST runs an OTLP/HTTP receiver beside the client (one per process, on a random port and secret path) and points the host's exporter at it, asking for OTLP/JSON. Each trial takes the records of its own session: Claude Code runs with a session ID MST chooses, and a Cowork task is matched by its session. The trial's record keeps them in `trace.hostTelemetry`: the host's events, spans and metrics (each metric's latest value), with its resource attributes. `telemetry.otlp` isn't needed: without it, they're only in the run.
+MST runs an OTLP/HTTP receiver beside the client (one per process, on a random port and secret path) and points the host's exporter at it, asking for OTLP/JSON. Each trial takes the records of its own session: Claude Code runs with a session ID MST chooses, and a Cowork task is matched by its session. The trial's record keeps them in `transcript.hostTelemetry`: the host's events, spans and metrics (each metric's latest value), with its resource attributes. `telemetry.otlp` isn't needed: without it, they're only in the run.
 
 | Field     | Meaning                                                                                                                                                                                                                                                                                                       |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

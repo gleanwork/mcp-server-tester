@@ -9,7 +9,7 @@ import { createMCPFixture } from '../../../mcp/fixtures/mcpFixture.js';
 import type { MCPFixtureApi } from '../../../mcp/fixtures/mcpFixture.js';
 import { validateToolCalls } from '../../../assertions/validators/toolCalls.js';
 import { runApiClient, runClaudeCodeClient } from '../run.js';
-import { clientRunToExecution } from '../../clientTrace.js';
+import { clientRunToExecution } from '../../clientTranscript.js';
 import { runEvalDataset } from '../../evalRunner.js';
 import { computeMetrics } from '../../metrics.js';
 import type { EvalDataset } from '../../datasetTypes.js';
@@ -202,7 +202,7 @@ describe('SDK client with skills', () => {
     30_000
   );
 
-  it('off (default): no skills, no system prompt, unchanged tool trace', async () => {
+  it('off (default): no skills, no system prompt, unchanged tool calls', async () => {
     await withFixture(async (mcp) => {
       const result = await runApiClient(mcp, 'Weather in London?', {
         provider: 'openai',

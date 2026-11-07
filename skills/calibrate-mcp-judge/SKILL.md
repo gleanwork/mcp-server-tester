@@ -20,12 +20,12 @@ Prefer a judge that asks one yes-or-no question. People agree on "did the answer
 | Judge               | Asks                                                                                         |
 | ------------------- | -------------------------------------------------------------------------------------------- |
 | `criteria`          | Does the trial meet each criterion the case lists? One question per criterion.               |
-| `task-completion`   | Did the assistant do what the user asked, as the trace shows?                                |
+| `task-completion`   | Did the assistant do what the user asked, as the transcript shows?                           |
 | `grounded-in-tools` | Is every claim in the answer supported by a tool result?                                     |
 | `tool-use`          | Right tools, fitting arguments, no needless calls, errors recovered? Four questions.         |
 | `rubric`            | A 0-to-1 score against a rubric (`correctness`, ...). Harder to label: you decide pass/fail. |
 
-The yes-or-no judges read the whole trace and may answer `unknown` when the trace can't settle the question. `unknown` is not a pass.
+The yes-or-no judges read the whole transcript and may answer `unknown` when the transcript can't settle the question. `unknown` is not a pass.
 
 `criteria` is the easiest to calibrate, because each criterion is one thing a person can check in the trial:
 

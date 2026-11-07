@@ -26,7 +26,7 @@ import { storedClientName, storedClientSetup } from './clientNames.js';
  * <eval dir>/latest.json
  * <eval dir>/calibrations/<judge>/<judge identity>.json
  * <eval dir>/runs/<run-id>/run.json
- * <eval dir>/runs/<run-id>/traces/<variant>/<case-id>/<trial>.json
+ * <eval dir>/runs/<run-id>/transcripts/<variant>/<case-id>/<trial>.json
  * <eval dir>/runs/<run-id>/scores/<grader>/<variant>/<case-id>/<trial>.json
  * <eval dir>/runs/<run-id>/labels/<question>/<variant>/<case-id>/<trial>.json
  * <eval dir>/runs/<run-id>/results.json
@@ -37,10 +37,13 @@ import { storedClientName, storedClientSetup } from './clientNames.js';
  * don't know, so adding an optional field keeps the version; removing or
  * renaming one moves the format to `mst.run/v2`.
  *
- * A trial's trace is written when the trial finishes (`writeTrial`), so a
+ * A trial's transcript is written when the trial finishes (`writeTrial`), so a
  * run that is killed keeps every trial that finished. The other files are
- * written when the run is saved (`writeRun`), which rewrites the traces.
+ * written when the run is saved (`writeRun`), which rewrites the transcripts.
  */
+
+/** A run's directory of trial transcripts (`transcripts/<variant>/<case-id>/<trial>.json`). */
+const TRANSCRIPTS_DIR = 'transcripts';
 
 /** A run's ID: its UTC start time, then 6 hex characters (`20261007T182504Z-7f3c2a`). */
 export const RUN_ID_PATTERN = /^\d{8}T\d{6}Z-[0-9a-f]{6}(\.g\d+)?$/;
@@ -166,7 +169,7 @@ const RunRecordSchema = z.looseObject({
    * (`simulateWrites`). Absent: with a planned-write result.
    */
   simulateWrites: z.literal(true).optional(),
-  /** A regrade's run: the run whose traces it graded (`mst grade`). */
+  /** A regrade's run: the run whose transcripts it graded (`mst grade`). */
   gradedFrom: z.string().regex(RUN_ID_PATTERN).optional(),
   /**
    * `mst grade --resume`: the regrade whose verdicts this one kept, and how
@@ -265,12 +268,12 @@ export interface GradeShardRecord {
 }
 
 /**
- * A case's directories in a run, relative to it: its traces and its trials'
- * client artifacts, for one variant.
+ * A case's directories in a run, relative to it: its transcripts and its
+ * trials' client artifacts, for one variant.
  */
 export function caseRunPaths(variant: string, caseId: string): string[] {
   return [
-    path.join('traces', segment(variant), segment(caseId)),
+    path.join(TRANSCRIPTS_DIR, segment(variant), segment(caseId)),
     path.join('artifacts', segment(variant), segment(caseId)),
   ];
 }
@@ -302,7 +305,7 @@ const TrialEndingSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 
-/** `traces/<variant>/<case-id>/<trial>.json`: what the client did in one trial. */
+/** `transcripts/<variant>/<case-id>/<trial>.json`: what the client did in one trial. */
 const TrialRecordSchema = z.looseObject({
   ...Envelope('trial'),
   runId: z.string(),
@@ -321,7 +324,8 @@ const TrialRecordSchema = z.looseObject({
   error: z.string().optional(),
   /** A grader couldn't score the trial (`<grader>: <error>`); the client ran. */
   gradingError: z.string().optional(),
-  trace: z.looseObject({}).optional(),
+  /** The trial's transcript: what the client did. */
+  transcript: z.looseObject({}).optional(),
   /** The trial's client artifacts, copied into the run: a path relative to it. */
   artifacts: z.string().optional(),
 });
@@ -528,7 +532,7 @@ export function parseCalibrationRecord(
   return parsed.data;
 }
 
-/** `results.json`: every case result, traces and scores joined. */
+/** `results.json`: every case result, transcripts and scores joined. */
 const ResultsRecordSchema = z.looseObject({
   ...Envelope('results'),
   runId: z.string(),
@@ -575,7 +579,7 @@ export function datasetContentHash(dataset: EvalDataset): string {
     .digest('hex');
 }
 
-/** Case IDs name trace and score paths, so a run can't have one twice. */
+/** Case IDs name transcript and score paths, so a run can't have one twice. */
 export function assertUniqueCaseIds(datasets: readonly EvalDataset[]): void {
   // Case-folded: macOS and Windows paths ignore case.
   const seen = new Map<string, string>();
@@ -593,7 +597,7 @@ export function assertUniqueCaseIds(datasets: readonly EvalDataset[]): void {
   }
 }
 
-/** Variant names name trace and score paths too, so they can't differ only in case. */
+/** Variant names name transcript and score paths too, so they can't differ only in case. */
 export function assertUniqueVariantNames(names: readonly string[]): void {
   const seen = new Map<string, string>();
   for (const name of names) {
@@ -662,7 +666,7 @@ export interface RunFacts {
    * remain is `partial`; one that stopped on an error is `collect: failed`.
    */
   phases?: RunPhases;
-  /** The run a regrade graded the traces of. */
+  /** The run a regrade graded the transcripts of. */
   gradedFrom?: string;
   /** `mst grade --resume`: the grading it kept the verdicts of, and how many. */
   resumedGrading?: ResumedGradingRecord;
@@ -683,7 +687,7 @@ export type RunOptimization = NonNullable<
   z.infer<typeof RunRecordSchema>['optimization']
 >;
 
-/** `run.json`'s `phases`: how far collecting traces and grading them got. */
+/** `run.json`'s `phases`: how far collecting transcripts and grading them got. */
 type RunPhases = Pick<
   z.infer<typeof RunRecordSchema>['phases'],
   'collect' | 'grade'
@@ -753,20 +757,22 @@ function trialRecord(
     ...(t.error !== undefined ? { error: t.error } : {}),
     // The client ran; a grader couldn't score it. A regrade can finish it.
     ...(t.gradingError !== undefined ? { gradingError: t.gradingError } : {}),
-    ...(t.trace
-      ? { trace: t.trace as unknown as Record<string, unknown> }
+    ...(t.transcript
+      ? { transcript: t.transcript as unknown as Record<string, unknown> }
       : {}),
     ...(t.clientUsage ? { clientUsage: t.clientUsage } : {}),
     ...(t.clientTelemetry ? { clientTelemetry: t.clientTelemetry } : {}),
     ...(t.clientMetadata ? { clientMetadata: t.clientMetadata } : {}),
     ...(t.clientDiagnostics ? { clientDiagnostics: t.clientDiagnostics } : {}),
-    ...(t.traceEvidence ? { traceEvidence: t.traceEvidence } : {}),
+    ...(t.transcriptEvidence
+      ? { transcriptEvidence: t.transcriptEvidence }
+      : {}),
     ...(t.skillLoads ? { skillLoads: t.skillLoads } : {}),
     ...(artifacts ? { artifacts } : {}),
   };
 }
 
-/** `traces/<variant>/<case-id>/<trial>.json`, for one trial of a case result. */
+/** `transcripts/<variant>/<case-id>/<trial>.json`, for one trial of a case result. */
 async function writeTrialRecord(
   runDirectory: string,
   runId: string,
@@ -787,7 +793,7 @@ async function writeTrialRecord(
   await replaceJson(
     path.join(
       runDirectory,
-      'traces',
+      TRANSCRIPTS_DIR,
       segment(result.variant ?? 'default'),
       segment(result.id),
       `${index}.json`
@@ -797,7 +803,7 @@ async function writeTrialRecord(
 }
 
 /**
- * Write one trial's trace as soon as the trial finishes. `result` is the
+ * Write one trial's transcript as soon as the trial finishes. `result` is the
  * trial's own result, as it is stored (redacted when the run redacts), with
  * its `variant`; `trial` is its number from 0. `writeRun` writes the same
  * record again when the run is saved.
@@ -812,7 +818,7 @@ export async function writeTrial(
 }
 
 /**
- * Write a run directory: `run.json`, one trace and one score per grader per
+ * Write a run directory: `run.json`, one transcript and one score per grader per
  * trial, `results.json` and `summary.json`. `summary` is the stored (redacted)
  * summary. Returns the files' paths, relative to `runDirectory`.
  */
@@ -824,7 +830,7 @@ export async function writeRun(
 ): Promise<void> {
   const { results, ...rest } = summary;
   // The run's files that readers need come first, so a failure writing a
-  // trace or score file can't leave a run without them.
+  // transcript or score file can't leave a run without them.
   await writeJson(path.join(runDirectory, 'results.json'), {
     format: RUN_FORMAT,
     kind: 'results',
@@ -1044,16 +1050,29 @@ export interface StoredRun {
 
 /**
  * Refuse a run a 2.0 release candidate stored, before ADR 0013 renamed its
- * fields, rather than fail on a missing field.
+ * fields and its `traces/` directory, rather than fail on a missing field.
  */
-function assertCurrentRunLayout(record: unknown, directory: string): void {
+async function assertCurrentRunLayout(
+  record: unknown,
+  directory: string
+): Promise<void> {
   const fields =
     record && typeof record === 'object'
       ? (record as Record<string, unknown>)
       : {};
+  const renamed: string[] = [];
   if ('environment' in fields && !('runner' in fields))
+    renamed.push('environment to runner');
+  const isDirectory = async (name: string): Promise<boolean> =>
+    fs
+      .stat(path.join(directory, name))
+      .then((stat) => stat.isDirectory())
+      .catch(() => false);
+  if ((await isDirectory('traces')) && !(await isDirectory(TRANSCRIPTS_DIR)))
+    renamed.push('traces to transcripts');
+  if (renamed.length > 0)
     throw new Error(
-      `${directory} was stored by an MST 2.0 release candidate, before ADR 0013 renamed environment to runner. This MST can't read it: run the eval again.`
+      `${directory} was stored by an MST 2.0 release candidate, before ADR 0013 renamed ${renamed.join(' and ')}. This MST can't read it: run the eval again.`
     );
 }
 
@@ -1077,7 +1096,7 @@ export async function readRunDirectory(directory: string): Promise<StoredRun> {
     return value;
   };
   const record = await read('run.json');
-  assertCurrentRunLayout(record, directory);
+  await assertCurrentRunLayout(record, directory);
   const run = RunRecordSchema.parse(record);
   const summary = (await read('summary.json')) as EvaluationSummary;
   const results = (await read('results.json')) as { cases?: EvalCaseResult[] };
@@ -1209,18 +1228,20 @@ function casesWithCurrentClients(
   });
 }
 
-/** A trial's stored record: `traces/<variant>/<case-id>/<trial>.json`. */
+/** A trial's stored record: `transcripts/<variant>/<case-id>/<trial>.json`. */
 export type TrialRecord = z.infer<typeof TrialRecordSchema>;
 
 /**
- * Every trial a run stored, read from its `traces/` directory, in trial order
- * within each variant and case.
+ * Every trial a run stored, read from its `transcripts/` directory, in trial
+ * order within each variant and case.
  */
 export async function readRunTrials(directory: string): Promise<TrialRecord[]> {
-  const root = path.join(directory, 'traces');
+  const root = path.join(directory, TRANSCRIPTS_DIR);
   const files = (
     await fs.readdir(root, { recursive: true }).catch(() => {
-      throw new Error(`${root} is missing: ${directory} stored no traces.`);
+      throw new Error(
+        `${root} is missing: ${directory} stored no transcripts.`
+      );
     })
   )
     .filter((file) => file.endsWith('.json'))

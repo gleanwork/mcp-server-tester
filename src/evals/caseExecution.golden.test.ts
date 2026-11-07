@@ -2,7 +2,7 @@
  * Characterization tests: the EvalCaseResult each execution path produces.
  *
  * These pin the runner's observable output (scores, `response`, evidence,
- * `toolCallTrace`, usage, errors, trial accounting) across the
+ * `toolCallTranscript`, usage, errors, trial accounting) across the
  * case-execution refactor. A snapshot change here is a behaviour change and
  * must be deliberate.
  */
@@ -25,7 +25,7 @@ import type * as ClientRunModule from './mstClient/run.js';
 import type * as JudgeClientModule from '../judge/judgeClient.js';
 import { createJudge } from '../judge/judgeClient.js';
 import type { JudgeConfig, JudgeResult } from '../judge/judgeTypes.js';
-import { clientRunToExecution } from './clientTrace.js';
+import { clientRunToExecution } from './clientTranscript.js';
 import type { ClientRunResult, JudgeDefinition } from './evalFrameworkTypes.js';
 import { runEval } from './runEval.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
@@ -119,7 +119,7 @@ const clientCase: EvalCase = {
   },
 };
 
-const trace: ClientRunResult = {
+const transcript: ClientRunResult = {
   finalText: 'It is sunny in London.',
   events: [
     {
@@ -225,10 +225,10 @@ describe('golden: the api client (dataset API)', () => {
   });
 });
 
-describe('golden: client traces through executeCase', () => {
-  const traceCase: EvalCase = {
+describe('golden: client transcripts through executeCase', () => {
+  const transcriptCase: EvalCase = {
     ...clientCase,
-    id: 'trace',
+    id: 'transcript',
     assertions: {
       containsText: 'sunny',
       toolsTriggered: {
@@ -244,24 +244,24 @@ describe('golden: client traces through executeCase', () => {
   it.each(['structured', 'observed', 'none'] as const)(
     '%s evidence',
     async (evidence) => {
-      const result = await runEvalCase(traceCase, context(), {
+      const result = await runEvalCase(transcriptCase, context(), {
         executeCase: async () => ({
-          ...clientRunToExecution(trace, evidence, [
+          ...clientRunToExecution(transcript, evidence, [
             { transport: 'stdio', command: 'a', label: 'weather' },
             { transport: 'stdio', command: 'b', label: 'other' },
           ]),
-          preExecutionDurationMs: trace.durationMs,
+          preExecutionDurationMs: transcript.durationMs,
         }),
       });
       expect(stable(result)).toMatchSnapshot();
     }
   );
 
-  it('client trace error', async () => {
-    const result = await runEvalCase(traceCase, context(), {
+  it('client transcript error', async () => {
+    const result = await runEvalCase(transcriptCase, context(), {
       executeCase: async () =>
         clientRunToExecution(
-          { ...trace, error: 'native session missing' },
+          { ...transcript, error: 'native session missing' },
           'structured'
         ),
     });
@@ -269,7 +269,7 @@ describe('golden: client traces through executeCase', () => {
   });
 
   it('executeCase that throws', async () => {
-    const result = await runEvalCase(traceCase, context(), {
+    const result = await runEvalCase(transcriptCase, context(), {
       executeCase: async () => {
         throw new Error('client crashed');
       },
@@ -340,12 +340,12 @@ describe('golden: runEval clients', () => {
           schema: z.object({ type: z.string() }).passthrough(),
           evidence: 'structured',
           ...(kind === 'run'
-            ? { run: async () => trace }
+            ? { run: async () => transcript }
             : {
                 // Keep the historical fixture identity and golden unchanged.
                 open: async () => ({
                   run: async () => ({
-                    result: { ...trace },
+                    result: { ...transcript },
                     continuation: 'continue' as const,
                   }),
                   reset: async () => {},

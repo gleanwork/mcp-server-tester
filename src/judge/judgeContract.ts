@@ -5,7 +5,7 @@
  *
  * - `case` is what the dataset author wrote: the input and what is expected.
  *   It is the same for every run of the case.
- * - `trial` is one observed run: the response, its text and trace, and usage.
+ * - `trial` is one observed run: the response, its text and transcript, and usage.
  * - `options` is how this judge grades, parsed by the judge's schema.
  *
  * The pass threshold belongs to the framework, not the judge. A judge returns
@@ -13,7 +13,10 @@
  */
 
 import type { UsageMetrics } from './judgeTypes.js';
-import type { TraceEvent, TraceEvidence } from '../evals/evalFrameworkTypes.js';
+import type {
+  TranscriptEvent,
+  TranscriptEvidence,
+} from '../evals/evalFrameworkTypes.js';
 import type { LLMToolCall } from '../evals/mstClient/types.js';
 import { extractText } from '../mcp/response.js';
 
@@ -58,15 +61,15 @@ export interface JudgeTrial {
   /** The response text. */
   text: string;
   /** Tool calls and other client events, in order. Empty for a tool result. */
-  events: TraceEvent[];
+  events: TranscriptEvent[];
   /** Conversation turns, when the client reports them. */
   messages?: JudgeMessage[];
   /**
-   * How the trace was observed. Absent for a tool result. A client trial
+   * How the transcript was observed. Absent for a tool result. A client trial
    * whose client declares none is `structured`, as tool-call assertions
    * treat it.
    */
-  evidence?: TraceEvidence;
+  evidence?: TranscriptEvidence;
   /**
    * A local directory with the client's own record of the trial (for
    * Cowork, its session folder: audit log, spilled tool output, written
@@ -123,7 +126,7 @@ export interface JudgeScore {
    */
   skipped?: boolean;
   /**
-   * The trial's trace can't support a verdict: the judge read it and can't
+   * The trial's transcript can't support a verdict: the judge read it and can't
    * tell. Unlike a skip, it doesn't pass the trial. It is recorded, left
    * out of the judge's pass rate and score metrics, and counted by
    * `mst judges check`. Its `score` and `pass` are ignored.
@@ -168,7 +171,7 @@ export interface JudgeCaseSource {
 interface ClientResponseLike {
   response?: string;
   toolCalls?: LLMToolCall[];
-  events?: TraceEvent[];
+  events?: TranscriptEvent[];
   conversationHistory?: JudgeMessage[];
   usage?: Partial<UsageMetrics>;
   artifactsDir?: string;
@@ -201,7 +204,7 @@ export function buildJudgeCase(
   };
 }
 
-function toolCallEvents(calls: LLMToolCall[]): TraceEvent[] {
+function toolCallEvents(calls: LLMToolCall[]): TranscriptEvent[] {
   return calls.map((call) => ({
     kind: 'tool_call',
     source: call.source ?? 'mcp',
@@ -217,7 +220,7 @@ function toolCallEvents(calls: LLMToolCall[]): TraceEvent[] {
 /** One run, built from the graded response and the client response, if any. */
 export function buildJudgeTrial(
   response: unknown,
-  client?: { clientResponse?: unknown; evidence?: TraceEvidence }
+  client?: { clientResponse?: unknown; evidence?: TranscriptEvidence }
 ): JudgeTrial {
   const clientResponse = (
     isRecord(client?.clientResponse)

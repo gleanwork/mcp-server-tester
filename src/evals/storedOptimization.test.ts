@@ -448,14 +448,14 @@ describe('stored tool optimization', () => {
       context!.history.map((r) => r.candidates.map((c) => c.variant.id))
     ).toEqual([['verbose']]);
     const baselineCases = context!.baseline.caseResults;
-    // Without the held-out case, and as stored: traces without answers or
-    // tool outputs.
+    // Without the held-out case, and as stored: transcripts without answers
+    // or tool outputs.
     expect(baselineCases.map((c) => c.id)).not.toContain('case-6');
-    const trace = baselineCases[0]!.trace;
-    expect(trace).toBeDefined();
-    expect(trace!.finalText).toBeUndefined();
+    const transcript = baselineCases[0]!.transcript;
+    expect(transcript).toBeDefined();
+    expect(transcript!.finalText).toBeUndefined();
     const candidate = context!.history[0]!.candidates[0]!.result.caseResults;
-    const events = candidate.flatMap((c) => c.trace?.events ?? []);
+    const events = candidate.flatMap((c) => c.transcript?.events ?? []);
     expect(events.some((event) => event.kind === 'tool_call')).toBe(true);
     expect(events.every((event) => !('output' in event))).toBe(true);
   }, 120_000);

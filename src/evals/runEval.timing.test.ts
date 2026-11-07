@@ -171,7 +171,7 @@ describe('eval wall-clock timing', () => {
     expect(result.summary.durationMs).toBe(454); // 14 source preparation + 440 execution.
   });
 
-  it('does not add live client trace timing to time already measured by the runner', async () => {
+  it('does not add live client transcript timing to time already measured by the runner', async () => {
     const f = await fixture(
       {
         async run() {

@@ -20,7 +20,7 @@
  * baseline in A and lets MST swap.
  *
  * Workspace layout: `a/` and `b/` hold the trials in slots A and B, as for
- * `agenticPairwiseJudge` (`response.md`, `trace/`, `artifacts/`), `case.json`
+ * `agenticPairwiseJudge` (`response.md`, `transcript/`, `artifacts/`), `case.json`
  * the case, and the bundle's files at their paths. `prepare` programs run in
  * it, unsandboxed, as the plugin's own code would; agents then get it (or
  * its `workdir`) read-only. Placeholders' `{{workspace}}` is always the root.

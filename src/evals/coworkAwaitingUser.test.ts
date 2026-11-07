@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { awaitingUserAnswer, pendingUserQuestion } from './cowork/trace.js';
+import {
+  awaitingUserAnswer,
+  pendingUserQuestion,
+} from './cowork/transcript.js';
 
 const ask = { name: 'AskUserQuestion', source: 'builtin' };
 

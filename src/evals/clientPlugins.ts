@@ -19,7 +19,7 @@ import { mcpServerLabel } from '../config/mcpConfig.js';
  */
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-/** MCP server names become client config keys and trace labels. */
+/** MCP server names become client config keys and transcript labels. */
 const SERVER = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** One path segment. No separators, no `.`/`..`, no hidden or odd names. */

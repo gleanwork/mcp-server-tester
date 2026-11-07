@@ -149,9 +149,9 @@ export interface HistoryChange {
 /** One run directory. */
 export interface HistoryRun {
   runId: string;
-  /** The run that collected the traces: `runId` without `.g<n>`. */
+  /** The run that collected the transcripts: `runId` without `.g<n>`. */
   collectedRunId: string;
-  /** When its traces were collected: what history is ordered by. */
+  /** When its transcripts were collected: what history is ordered by. */
   collectedAt: string;
   createdAt: string;
   finishedAt: string;
@@ -169,9 +169,9 @@ export interface HistoryRun {
   mstVersion: string;
   /** The regrade's source run, for a regrade. */
   gradedFrom?: string;
-  /** The newer grading of the same traces that replaces this one. */
+  /** The newer grading of the same transcripts that replaces this one. */
   supersededBy?: string;
-  /** Other gradings of the same traces, on the row that shows them. */
+  /** Other gradings of the same transcripts, on the row that shows them. */
   gradings?: string[];
   /** Where the trials were collected (`--runner`). */
   runner?: string;

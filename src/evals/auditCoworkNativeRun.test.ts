@@ -14,8 +14,8 @@ import {
   auditCoworkNativeRun,
   type CoworkNativeAuditIssue,
 } from './auditCoworkNativeRun.js';
-import { parseClaudeTrace } from './cowork/trace.js';
-import { clientRunToExecution, toolCallEvents } from './clientTrace.js';
+import { parseClaudeTranscript } from './cowork/transcript.js';
+import { clientRunToExecution, toolCallEvents } from './clientTranscript.js';
 
 const sessionId = 'local_11111111-1111-4111-8111-111111111111';
 const cliSessionId = '22222222-2222-4222-8222-222222222222';
@@ -118,7 +118,7 @@ async function fixture(
     await mkdir(dirname(attachmentPath), { recursive: true });
     await writeFile(attachmentPath, secret);
   }
-  const trace = await parseClaudeTrace({
+  const transcript = await parseClaudeTranscript({
     id: sessionId,
     sessionDir,
     metadataPath,
@@ -128,18 +128,18 @@ async function fixture(
   const telemetry: RecordValue = {
     source: 'claude-native',
     costScope: 'native-inference-only',
-    ...trace.telemetry,
+    ...transcript.telemetry,
     nativeSessionId: sessionId,
     correlation: 'exact-initial-prompt',
     computerUse: { durationMs: 999 },
   };
   const replay = clientRunToExecution(
     {
-      finalText: trace.finalAnswer ?? '',
-      usage: trace.usage,
-      events: toolCallEvents(trace.toolCalls),
+      finalText: transcript.finalAnswer ?? '',
+      usage: transcript.usage,
+      events: toolCallEvents(transcript.toolCalls),
       telemetry,
-      llmDurationMs: trace.llmDurationMs,
+      llmDurationMs: transcript.llmDurationMs,
     },
     'structured'
   );
@@ -148,9 +148,9 @@ async function fixture(
     pass: true as boolean | null,
     request: { input: metadata.initialMessage },
     response: JSON.parse(JSON.stringify(replay.response)) as RecordValue,
-    clientUsage: JSON.parse(JSON.stringify(trace.usage)) as RecordValue,
+    clientUsage: JSON.parse(JSON.stringify(transcript.usage)) as RecordValue,
     clientTelemetry: JSON.parse(JSON.stringify(telemetry)) as RecordValue,
-    traceEvidence: 'structured',
+    transcriptEvidence: 'structured',
     scores: { judge: { pass: true } },
   };
   const raw: {
@@ -543,7 +543,7 @@ describe('auditCoworkNativeRun', () => {
   });
 
   it('excludes desktop batch-runner telemetry from replay equality', async () => {
-    // runDesktopBatch adds batchCase/batchLifecycle after the native trace is read.
+    // runDesktopBatch adds batchCase/batchLifecycle after the native transcript is read.
     const f = await fixture();
     for (const stored of [
       f.saved.clientTelemetry,
@@ -602,7 +602,7 @@ describe('auditCoworkNativeRun', () => {
     expect(report.cases[0]?.issues).toContain('PARSE_WARNINGS');
   });
 
-  it('rejects native client errors and incomplete traces', async () => {
+  it('rejects native client errors and incomplete transcripts', async () => {
     const f = await fixture({
       modifyResult: (result) => {
         result.is_error = true;

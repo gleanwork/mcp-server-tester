@@ -42,7 +42,7 @@ import type { ClientDefinition } from './evalFrameworkTypes.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { resolveClientName } from './clientNames.js';
 import { osName } from './desktopOS.js';
-import { attributeBuiltinEvents } from './clientTrace.js';
+import { attributeBuiltinEvents } from './clientTranscript.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT, coworkOptionIssues } from './coworkClient.js';
 import { CHATGPT_APP_CLIENTS, chatgptOptionIssues } from './chatgptClient.js';
@@ -340,7 +340,7 @@ async function runBuiltinClient(
       config.cli?.claudeMcpServers !== undefined
     ) {
       // The Claude process runner settles on this controller's abort. Do not
-      // race away its partial trace/diagnostics at the same deadline.
+      // race away its partial transcript/diagnostics at the same deadline.
       void expired.catch(() => {});
       return await execute();
     }

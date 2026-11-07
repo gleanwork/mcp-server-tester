@@ -48,7 +48,7 @@ function Mistakes({
           {variant.failures.error > 0 &&
           variant.failures.error === variant.failedTrials
             ? 'Its failed trials ended in errors: open them in the case grid.'
-            : 'No tool-call traces were recorded for its failed trials.'}
+            : 'No tool calls were recorded for its failed trials.'}
         </p>
       ) : (
         <ul className="grid gap-2 text-sm">

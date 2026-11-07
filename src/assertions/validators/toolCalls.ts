@@ -1,31 +1,31 @@
 /**
- * Tool call validators for a client case's trace.
+ * Tool call validators for a client case's transcript.
  *
- * These validators extract the tool call trace from a client's assertion view
+ * These validators extract the tool calls from a client's assertion view
  * and apply assertions against expected call lists and counts.
  */
 import type { ValidationResult } from './types.js';
 import type {
-  TraceEvent,
-  TraceEvidence,
+  TranscriptEvent,
+  TranscriptEvidence,
 } from '../../evals/evalFrameworkTypes.js';
 
 /** Legacy simulations omit identity metadata; explicit assertions never infer it. */
-type TraceCall = Pick<TraceEvent, 'name' | 'arguments'> &
-  Partial<Pick<TraceEvent, 'kind' | 'source' | 'server'>>;
+type TranscriptCall = Pick<TranscriptEvent, 'name' | 'arguments'> &
+  Partial<Pick<TranscriptEvent, 'kind' | 'source' | 'server'>>;
 
-interface TraceResponse {
+interface TranscriptResponse {
   success: unknown;
-  toolCalls: TraceCall[];
-  events?: TraceEvent[];
-  evidence?: TraceEvidence;
+  toolCalls: TranscriptCall[];
+  events?: TranscriptEvent[];
+  evidence?: TranscriptEvidence;
 }
 
 export interface ToolCallAssertion {
   calls: Array<{
     name: string;
-    kind?: TraceEvent['kind'];
-    source?: TraceEvent['source'];
+    kind?: TranscriptEvent['kind'];
+    source?: TranscriptEvent['source'];
     server?: string;
     arguments?: Record<string, unknown>;
     required?: boolean;
@@ -40,13 +40,13 @@ export interface ToolCallCountOptions {
   exact?: number;
 }
 
-function isSimulationResult(value: unknown): value is TraceResponse {
+function isSimulationResult(value: unknown): value is TranscriptResponse {
   return (
     typeof value === 'object' &&
     value !== null &&
     'success' in value &&
     'toolCalls' in value &&
-    Array.isArray((value as TraceResponse).toolCalls)
+    Array.isArray((value as TranscriptResponse).toolCalls)
   );
 }
 
@@ -96,9 +96,9 @@ function partialMatch(
   });
 }
 
-/** Shared identity matching for assertions and reported tool traces. */
+/** Shared identity matching for assertions and reported tool calls. */
 export function matchesIdentity(
-  call: TraceCall,
+  call: TranscriptCall,
   expected: ToolCallAssertion['calls'][number]
 ): boolean {
   return (
@@ -117,7 +117,7 @@ export function matchesIdentity(
  * can. Clients that don't report evidence are treated as structured.
  */
 export function clientEvidenceProblem(
-  evidence: TraceEvidence | undefined
+  evidence: TranscriptEvidence | undefined
 ): string | undefined {
   return evidence === undefined || evidence === 'structured'
     ? undefined
@@ -125,7 +125,7 @@ export function clientEvidenceProblem(
 }
 
 function unverifiedEvidence(
-  response: TraceResponse
+  response: TranscriptResponse
 ): ValidationResult | undefined {
   const problem = clientEvidenceProblem(response.evidence);
   if (problem === undefined) return undefined;
@@ -137,7 +137,7 @@ function unverifiedEvidence(
 }
 
 function findMatchingCall(
-  actual: TraceCall[],
+  actual: TranscriptCall[],
   expected: ToolCallAssertion['calls'][number],
   startIndex = 0
 ): number {
@@ -156,15 +156,15 @@ function findMatchingCall(
 }
 
 /**
- * How an observed trace lines up with a tool-call assertion. This is the
- * one matcher behind precision, recall and the reported trace.
+ * How an observed transcript lines up with a tool-call assertion. This is the
+ * one matcher behind precision, recall and the reported tool calls.
  */
 export interface ToolCallMatch {
   /**
    * Every observed event, in order, and whether the assertion names it
    * (identity only). The fraction marked expected is the precision.
    */
-  observed: Array<{ call: TraceCall; expected: boolean }>;
+  observed: Array<{ call: TranscriptCall; expected: boolean }>;
   /**
    * Required calls with no observed call matching their identity and
    * arguments. Their share of the required calls is what recall misses.
@@ -172,9 +172,9 @@ export interface ToolCallMatch {
   missed: ToolCallAssertion['calls'];
 }
 
-/** Matches an observed trace (all event kinds, in order) against an assertion. */
+/** Matches an observed transcript (all event kinds, in order) against an assertion. */
 export function matchToolCalls(
-  actual: TraceCall[],
+  actual: TranscriptCall[],
   assertion: ToolCallAssertion
 ): ToolCallMatch {
   return {
@@ -212,7 +212,7 @@ export function validateToolCalls(
   const unverified = unverifiedEvidence(response);
   if (unverified) return unverified;
 
-  // Selectors constrain matching, not the observed trace. Retain every event so
+  // Selectors constrain matching, not the observed transcript. Retain every event so
   // exclusive assertions and precision also account for unexpected kinds.
   const actual = response.events ?? response.toolCalls;
   const match = matchToolCalls(actual, assertion);

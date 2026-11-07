@@ -165,7 +165,7 @@ export function describeExpectation(
 
 /** One failed trial, in one line. */
 function describeTrial(trial: TrialResult | EvalCaseResult): string {
-  const calls = trial.toolCallTrace?.calls ?? [];
+  const calls = trial.toolCallTranscript?.calls ?? [];
   const parts: string[] = [];
   parts.push(
     calls.length
@@ -184,7 +184,7 @@ function describeTrial(trial: TrialResult | EvalCaseResult): string {
           .join(' -> ')
       : '(no tool calls)'
   );
-  const missed = trial.toolCallTrace?.missed ?? [];
+  const missed = trial.toolCallTranscript?.missed ?? [];
   if (missed.length)
     parts.push(`missed ${missed.map((call) => call.name).join(', ')}`);
   const failedGraders = Object.entries(trial.scores ?? {}).filter(

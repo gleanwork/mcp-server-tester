@@ -1,6 +1,6 @@
 /**
  * Workspace commands: plugin helpers an agentic judge can run, such as a
- * trace parser. A command is a trusted program the plugin ships; the agent
+ * transcript parser. A command is a trusted program the plugin ships; the agent
  * only chooses its arguments.
  *
  * Codex runs commands itself, through its sandboxed shell. The Claude

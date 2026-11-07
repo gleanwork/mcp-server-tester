@@ -98,8 +98,8 @@ let outside: string;
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), 'mst-ws-test-'));
   outside = await mkdtemp(join(tmpdir(), 'mst-outside-'));
-  await mkdir(join(root, 'trace'));
-  await writeFile(join(root, 'trace/events.json'), '[]');
+  await mkdir(join(root, 'transcript'));
+  await writeFile(join(root, 'transcript/events.json'), '[]');
   await writeFile(join(outside, 'secret.txt'), 'secret');
   await symlink(join(outside, 'secret.txt'), join(root, 'link.txt'));
 });
@@ -124,20 +124,23 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('Claude workspace permission', () => {
   it('allows read tools inside the workspace only', async () => {
-    const allow = workspacePermission(root, new Set(['mcp__judge__trace']));
+    const allow = workspacePermission(
+      root,
+      new Set(['mcp__judge__transcript'])
+    );
     expect(
-      (await allow('Read', { file_path: join(root, 'trace/events.json') }))
+      (await allow('Read', { file_path: join(root, 'transcript/events.json') }))
         .behavior
     ).toBe('allow');
     expect(
-      (await allow('Read', { file_path: 'trace/events.json' })).behavior
+      (await allow('Read', { file_path: 'transcript/events.json' })).behavior
     ).toBe('allow');
     expect((await allow('Grep', { pattern: 'x' })).behavior).toBe('allow');
     expect(
       (await allow('Glob', { pattern: '**/*', path: root })).behavior
     ).toBe('allow');
     expect(
-      (await allow('mcp__judge__trace', { args: ['overview'] })).behavior
+      (await allow('mcp__judge__transcript', { args: ['overview'] })).behavior
     ).toBe('allow');
   });
 
@@ -393,7 +396,11 @@ describe('claudeRuntime', () => {
       timeoutMs: 10_000,
       outputSchema: { type: 'object' },
       commands: [
-        { name: 'trace', description: 'd', argv: ['python3', 'scripts/t.py'] },
+        {
+          name: 'transcript',
+          description: 'd',
+          argv: ['python3', 'scripts/t.py'],
+        },
       ],
     });
     const o = claudeCalls.options!;
@@ -402,7 +409,7 @@ describe('claudeRuntime', () => {
     expect(o.strictMcpConfig).toBe(true);
     expect(o.persistSession).toBe(false);
     expect(o.permissionMode).toBe('default');
-    expect(o.allowedTools).toEqual(['mcp__judge__trace']);
+    expect(o.allowedTools).toEqual(['mcp__judge__transcript']);
     expect(o.disallowedTools).toEqual(
       expect.arrayContaining(['Bash', 'Write', 'Edit', 'WebFetch', 'WebSearch'])
     );

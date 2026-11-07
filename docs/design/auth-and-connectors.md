@@ -177,7 +177,7 @@ MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester
 
 - Refresh grants exist only in the store and in MST's process memory.
 - Access tokens exist only in `tokenFile` (0600, in a 0700 directory the run deletes), in a run-private environment variable, and in process memory.
-- Neither may appear in eval configs, `run.json`, traces, results, reports, logs, stdout or the client's MCP settings. Every staged token goes on the run's redaction list.
+- Neither may appear in eval configs, `run.json`, transcripts, results, reports, logs, stdout or the client's MCP settings. Every staged token goes on the run's redaction list.
 - Client secrets come from the plugin at call time. MST never writes them anywhere.
 
 ## How we test it

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { gradeRun, resumeRun, runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import { localCredentialStore } from '../auth/grants/localStore.js';
-import type { TraceEvent } from './evalFrameworkTypes.js';
+import type { TranscriptEvent } from './evalFrameworkTypes.js';
 
 const mock = (name: string) =>
   fileURLToPath(new URL(`../../tests/mocks/${name}`, import.meta.url));
@@ -21,8 +21,8 @@ afterEach(async () => {
   );
 });
 
-interface StoredTrace {
-  trace: { events: TraceEvent[] };
+interface StoredTranscript {
+  transcript: { events: TranscriptEvent[] };
 }
 
 /** Every file under `dir`, as text. */
@@ -42,7 +42,7 @@ async function allText(dir: string): Promise<string> {
 
 describe('connector tokens in a local run', () => {
   it.each(['sc/client/leaky', 'sc/client/leaky-batch'])(
-    'replaces a connector token %s quotes, early batch traces included',
+    'replaces a connector token %s quotes, early batch transcripts included',
     async (client) => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-conn-redact-'));
@@ -77,7 +77,7 @@ describe('connector tokens in a local run', () => {
           client,
           datasets: ['./cases.json'],
           servers: { notes: { connector: 'sc/connector/notes' } },
-          // Full traces: the answer and telemetry content are stored.
+          // Full transcripts: the answer and telemetry content are stored.
           redactStoredResponses: false,
         })
       );
@@ -176,15 +176,21 @@ describe('connector servers and tool metadata in a runner', () => {
       '[mst] shard 1/1: renamed alpha #1 collected',
       '[mst] shard 1/1: renamed bravo #1 collected',
     ]);
-    const trace = async (variant: string, caseId: string) =>
+    const transcript = async (variant: string, caseId: string) =>
       (
         JSON.parse(
           await fs.readFile(
-            path.join(result.outputDir, 'traces', variant, caseId, '0.json'),
+            path.join(
+              result.outputDir,
+              'transcripts',
+              variant,
+              caseId,
+              '0.json'
+            ),
             'utf8'
           )
-        ) as StoredTrace
-      ).trace.events.map(({ name, rawName, output, simulatedWrite }) => ({
+        ) as StoredTranscript
+      ).transcript.events.map(({ name, rawName, output, simulatedWrite }) => ({
         name,
         rawName,
         output,
@@ -192,7 +198,7 @@ describe('connector servers and tool metadata in a runner', () => {
       }));
     // The worker's notes server read the token the coordinator sent, and
     // its simulated write is marked.
-    expect(await trace('current', 'alpha')).toEqual([
+    expect(await transcript('current', 'alpha')).toEqual([
       {
         name: 'lookup',
         rawName: undefined,
@@ -208,7 +214,7 @@ describe('connector servers and tool metadata in a runner', () => {
     ]);
     // The variant's tool metadata was served by a proxy on the worker; the
     // call is recorded under the tool's original name.
-    expect(await trace('renamed', 'bravo')).toEqual([
+    expect(await transcript('renamed', 'bravo')).toEqual([
       {
         name: 'lookup',
         rawName: 'find_note',
@@ -311,7 +317,7 @@ describe('connector servers and tool metadata in a runner', () => {
       configPath,
       JSON.stringify({ ...config, simulateWrites: false })
     );
-    // A regrade keeps the mode its traces were collected with.
+    // A regrade keeps the mode its transcripts were collected with.
     const regrade = await gradeRun({ ...options, run: runId });
     expect((await runJson(regrade.outputDir)).simulateWrites).toBe(true);
     // So does a resume, for the trials it collects as well as the record.
@@ -324,12 +330,18 @@ describe('connector servers and tool metadata in a runner', () => {
     for (const caseId of caseIds) {
       const stored = JSON.parse(
         await fs.readFile(
-          path.join(resumed.outputDir, 'traces', 'default', caseId, '0.json'),
+          path.join(
+            resumed.outputDir,
+            'transcripts',
+            'default',
+            caseId,
+            '0.json'
+          ),
           'utf8'
         )
-      ) as StoredTrace;
+      ) as StoredTranscript;
       expect(
-        stored.trace.events.find((event) => event.name === 'create_note')
+        stored.transcript.events.find((event) => event.name === 'create_note')
           ?.simulatedWrite
       ).toBe(true);
     }

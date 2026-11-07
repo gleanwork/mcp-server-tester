@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runClaudeCodeClient } from '../../run.js';
-import { clientRunToExecution } from '../../../clientTrace.js';
+import { clientRunToExecution } from '../../../clientTranscript.js';
 import { runEvalDataset } from '../../../evalRunner.js';
 import { executionEnding } from '../../../caseExecution.js';
 

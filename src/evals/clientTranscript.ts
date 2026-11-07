@@ -1,8 +1,8 @@
 import type {
-  TraceEvent,
-  TraceEvidence,
+  TranscriptEvent,
+  TranscriptEvidence,
   ClientRunResult,
-  Trace,
+  Transcript,
 } from './evalFrameworkTypes.js';
 import { withSkillEvents } from './mstClient/skills.js';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
@@ -11,11 +11,14 @@ import type { SkillLoad } from '../types/index.js';
 import type { ClientExecution, ClientResponse } from './caseExecution.js';
 
 /** Fill a missing server on one-server runs, without changing client names. */
-function attributed(events: TraceEvent[], servers: MCPConfig[]): TraceEvent[] {
+function attributed(
+  events: TranscriptEvent[],
+  servers: MCPConfig[]
+): TranscriptEvent[] {
   // 1.x and 2.0 beta clients marked built-in calls `source: 'host'`.
   if (events.some((event) => (event.source as string) === 'host'))
     throw new Error(
-      "A client returned a trace event with `source: 'host'`; it is now `source: 'builtin'` (the client's built-in tools)."
+      "A client returned a transcript event with `source: 'host'`; it is now `source: 'builtin'` (the client's built-in tools)."
     );
   if (servers.length !== 1) return events;
   const label = mcpServerLabel(servers[0]!, 0);
@@ -28,9 +31,9 @@ function attributed(events: TraceEvent[], servers: MCPConfig[]): TraceEvent[] {
 
 /** Only built-in fixtures qualify tool names with their server label. */
 export function attributeBuiltinEvents(
-  events: TraceEvent[],
+  events: TranscriptEvent[],
   servers: MCPConfig[]
-): TraceEvent[] {
+): TranscriptEvent[] {
   return attributed(
     events.map((event) => {
       if (event.source !== 'mcp' || event.server !== undefined) return event;
@@ -52,27 +55,29 @@ export function attributeBuiltinEvents(
 /** Adapt a client run once at the runner boundary, retaining original events for reporting. */
 export function clientRunToExecution(
   run: ClientRunResult,
-  evidence: TraceEvidence,
+  evidence: TranscriptEvidence,
   servers: MCPConfig[] = []
 ): ClientExecution {
-  const trace = { ...run, events: attributed(run.events, servers) };
-  const skillLoads = checkedSkillLoads(trace.telemetry?.skillLoads);
+  const attributedRun = { ...run, events: attributed(run.events, servers) };
+  const skillLoads = checkedSkillLoads(attributedRun.telemetry?.skillLoads);
   return {
     kind: 'completed',
-    trace: {
-      events: trace.events,
-      ...timing(trace),
-      finalText: trace.finalText,
+    transcript: {
+      events: attributedRun.events,
+      ...timing(attributedRun),
+      finalText: attributedRun.finalText,
       evidence,
-      ...(trace.usage ? { usage: trace.usage } : {}),
-      ...(trace.error !== undefined ? { error: trace.error } : {}),
+      ...(attributedRun.usage ? { usage: attributedRun.usage } : {}),
+      ...(attributedRun.error !== undefined
+        ? { error: attributedRun.error }
+        : {}),
     },
     response: {
-      success: !trace.error,
-      response: trace.finalText,
-      events: trace.events,
+      success: !attributedRun.error,
+      response: attributedRun.finalText,
+      events: attributedRun.events,
       evidence,
-      toolCalls: trace.events
+      toolCalls: attributedRun.events
         .filter((event) => event.kind === 'tool_call')
         .map((event) => ({
           name:
@@ -93,20 +98,28 @@ export function clientRunToExecution(
           ...(event.startedAt ? { startedAt: event.startedAt } : {}),
           ...(event.completedAt ? { completedAt: event.completedAt } : {}),
         })),
-      usage: trace.usage,
+      usage: attributedRun.usage,
       ...(skillLoads !== undefined ? { skillLoads } : {}),
-      ...(trace.telemetry ? { telemetry: trace.telemetry } : {}),
-      ...(trace.llmDurationMs !== undefined
-        ? { llmDurationMs: trace.llmDurationMs }
+      ...(attributedRun.telemetry
+        ? { telemetry: attributedRun.telemetry }
         : {}),
-      ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
-      ...(trace.artifacts ? { artifacts: trace.artifacts } : {}),
+      ...(attributedRun.llmDurationMs !== undefined
+        ? { llmDurationMs: attributedRun.llmDurationMs }
+        : {}),
+      ...(attributedRun.diagnostics
+        ? { diagnostics: attributedRun.diagnostics }
+        : {}),
+      ...(attributedRun.artifacts
+        ? { artifacts: attributedRun.artifacts }
+        : {}),
     },
-    error: trace.error,
-    ...(trace.ending ? { ending: trace.ending } : {}),
-    usage: trace.usage,
-    telemetry: trace.telemetry,
-    ...(trace.diagnostics ? { diagnostics: trace.diagnostics } : {}),
+    error: attributedRun.error,
+    ...(attributedRun.ending ? { ending: attributedRun.ending } : {}),
+    usage: attributedRun.usage,
+    telemetry: attributedRun.telemetry,
+    ...(attributedRun.diagnostics
+      ? { diagnostics: attributedRun.diagnostics }
+      : {}),
     evidence,
   };
 }
@@ -138,10 +151,13 @@ function checkedSkillLoads(value: unknown): SkillLoad[] | undefined {
     : undefined;
 }
 
-/** A client run's model requests, task times and host telemetry, for its trace. */
+/** A client run's model requests, task times and host telemetry, for its transcript. */
 function timing(
   run: ClientRunResult
-): Pick<Trace, 'modelCalls' | 'hostTelemetry' | 'startedAt' | 'completedAt'> {
+): Pick<
+  Transcript,
+  'modelCalls' | 'hostTelemetry' | 'startedAt' | 'completedAt'
+> {
   return {
     ...(run.modelCalls?.length ? { modelCalls: run.modelCalls } : {}),
     ...(run.hostTelemetry ? { hostTelemetry: run.hostTelemetry } : {}),
@@ -154,7 +170,7 @@ function timing(
 export function toolCallEvents(
   calls: readonly LLMToolCall[],
   servers: MCPConfig[] = []
-): TraceEvent[] {
+): TranscriptEvent[] {
   return calls.map((call) => {
     const server = servers.find(
       (server) => server.label && call.name.startsWith(`${server.label}.`)
@@ -188,9 +204,9 @@ export function toolCallEvents(
   });
 }
 
-/** Only legacy custom executors need a trace derived from their assertion view. */
-export function responseTrace(result: ClientResponse): Trace {
-  const events: TraceEvent[] = (result.toolCalls ?? []).map((call) => ({
+/** Only legacy custom executors need a transcript derived from their assertion view. */
+export function responseTranscript(result: ClientResponse): Transcript {
+  const events: TranscriptEvent[] = (result.toolCalls ?? []).map((call) => ({
     ...call,
     kind: call.kind ?? 'tool_call',
     source: call.source ?? 'mcp',

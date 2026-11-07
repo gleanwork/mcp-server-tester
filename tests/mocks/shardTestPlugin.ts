@@ -101,7 +101,7 @@ async function probe(
   return {
     finalText: `${input.prompt}: ${reversed(first)} then ${reversed(second)}; key ${reversed(input.env?.API_KEY)}`,
     events: [],
-    // What a native-trace client records beyond its events, which a
+    // What a native-transcript client records beyond its events, which a
     // resume must keep for the trials it doesn't run again.
     startedAt: '2026-01-01T00:00:00.000Z',
     completedAt: '2026-01-01T00:00:02.000Z',

@@ -297,20 +297,20 @@ export function pairedChange(
   };
 }
 
-/** Classifies a failed trial from its trace and error. */
+/** Classifies a failed trial from its tool calls and error. */
 function failureOf(
   trial: Pick<TrialResult, 'error'> &
     EndingEvidence & {
-      toolCallTrace?: TrialResult['toolCallTrace'];
+      toolCallTranscript?: TrialResult['toolCallTranscript'];
     }
 ): TrialFailureKind {
   if (isInfrastructure(trial) || trial.error) return 'error';
-  const trace = trial.toolCallTrace;
-  if (!trace) return 'check-failed';
-  if (trace.calls.length === 0) return 'no-tool-call';
+  const calls = trial.toolCallTranscript;
+  if (!calls) return 'check-failed';
+  if (calls.calls.length === 0) return 'no-tool-call';
   if (
-    trace.missed.length > 0 ||
-    trace.calls.some((call) => call.status === 'unexpected')
+    calls.missed.length > 0 ||
+    calls.calls.some((call) => call.status === 'unexpected')
   ) {
     return 'wrong-tool';
   }
@@ -328,18 +328,20 @@ interface RecordedAttempt extends VariantTrial {
 function toAttempt(
   pass: boolean,
   source: Pick<TrialResult, 'error' | 'clientUsage'> &
-    EndingEvidence & { toolCallTrace?: TrialResult['toolCallTrace'] },
+    EndingEvidence & {
+      toolCallTranscript?: TrialResult['toolCallTranscript'];
+    },
   incomplete: boolean
 ): RecordedAttempt {
-  const trace = source.toolCallTrace;
+  const toolCalls = source.toolCallTranscript;
   const usage = source.clientUsage;
   return {
     pass,
     ...(pass ? {} : { failure: failureOf(source) }),
-    ...(trace
+    ...(toolCalls
       ? {
-          calls: trace.calls.map((call) => call.name),
-          missed: trace.missed.map((tool) => tool.name),
+          calls: toolCalls.calls.map((call) => call.name),
+          missed: toolCalls.missed.map((tool) => tool.name),
         }
       : {}),
     ...(usage ? { tokens: totalTokens(usage) } : {}),
@@ -860,7 +862,7 @@ export function compareVariants(
     const tokens = all
       .map((a) => a.tokens)
       .filter((t): t is number => t !== undefined);
-    const traced = all.filter((a) => a.calls !== undefined);
+    const recorded = all.filter((a) => a.calls !== undefined);
     const passesOf = (row: VariantComparisonCase, variant: string) =>
       (row.trials[variant] ?? []).filter((a) => a.pass).length;
     const comparable = rows.filter(
@@ -908,10 +910,10 @@ export function compareVariants(
       failures,
       mistakes: mistakesOf(rows, id),
       ...(tokens.length > 0 ? { meanTokensPerTrial: mean(tokens) } : {}),
-      ...(traced.length > 0
+      ...(recorded.length > 0
         ? {
             meanToolCallsPerTrial: mean(
-              traced.map((a) => (a.calls ?? []).length)
+              recorded.map((a) => (a.calls ?? []).length)
             ),
           }
         : {}),

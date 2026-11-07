@@ -21,7 +21,7 @@ import {
 import { formatError } from './sessionFiles.js';
 import { findFile } from './sessionFiles.js';
 
-// The session-store types live with the parser: parseClaudeTrace reads a
+// The session-store types live with the parser: parseClaudeTranscript reads a
 // SessionCandidate's files, and sessions.ts depends on this module.
 export interface ClaudeSessionMetadata {
   sessionId?: string;
@@ -99,7 +99,7 @@ interface ClaudeNativeTelemetry {
 }
 
 /**
- * How a fresh-session trace was bound to its case: its initial message equals
+ * How a fresh-session transcript was bound to its case: its initial message equals
  * the prompt, or it is the only session the submission created, whose stored
  * prompt Claude changed. `promptDifference` says how, never with the text.
  */
@@ -114,7 +114,7 @@ export type ClaudeSessionBinding =
       };
     };
 
-export interface ClaudeTrace {
+export interface ClaudeTranscript {
   candidate: SessionCandidate;
   /** Set for fresh-session (exact prompt) correlation. */
   binding?: ClaudeSessionBinding;
@@ -202,7 +202,7 @@ interface ClaudeAuditEvent {
   _audit_timestamp?: string;
 }
 
-export async function parseClaudeTrace(
+export async function parseClaudeTranscript(
   candidate: SessionCandidate,
   marker?: string,
   options: {
@@ -212,7 +212,7 @@ export async function parseClaudeTrace(
      */
     resolvePersistedOutputs?: boolean;
   } = {}
-): Promise<ClaudeTrace> {
+): Promise<ClaudeTranscript> {
   const parseWarnings: string[] = [];
   const auditPath = join(candidate.sessionDir, 'audit.jsonl');
   const transcriptPath = candidate.metadata.cliSessionId
@@ -1047,14 +1047,14 @@ export function metadataTimestampMs(
 /**
  * The bound native task's latest built-in tool call is an unanswered
  * AskUserQuestion: Claude is waiting for a person. A headless run cannot
- * answer, so the case fails now instead of waiting for the trace deadline.
+ * answer, so the case fails now instead of waiting for the transcript deadline.
  */
-export function awaitingUserAnswer(trace: {
+export function awaitingUserAnswer(transcript: {
   isComplete: boolean;
   toolCalls: readonly { name: string; source?: string; output?: unknown }[];
 }): boolean {
-  if (trace.isComplete) return false;
-  const last = trace.toolCalls.at(-1);
+  if (transcript.isComplete) return false;
+  const last = transcript.toolCalls.at(-1);
   return (
     last?.source === 'builtin' &&
     last.name === 'AskUserQuestion' &&
@@ -1069,7 +1069,7 @@ export function awaitingUserAnswer(trace: {
  * repeated label) it is still a question nobody can answer: `questions` is
  * empty, and the caller fails the case as before.
  */
-export function pendingUserQuestion(trace: {
+export function pendingUserQuestion(transcript: {
   isComplete: boolean;
   toolCalls: readonly {
     name: string;
@@ -1084,8 +1084,8 @@ export function pendingUserQuestion(trace: {
       questions: Array<{ labels: string[]; multiSelect: boolean }>;
     }
   | undefined {
-  if (!awaitingUserAnswer(trace)) return undefined;
-  const last = trace.toolCalls.at(-1)!;
+  if (!awaitingUserAnswer(transcript)) return undefined;
+  const last = transcript.toolCalls.at(-1)!;
   const id = typeof last.id === 'string' && last.id ? { id: last.id } : {};
   const asked = last.arguments?.questions;
   if (!Array.isArray(asked) || !asked.length) return { ...id, questions: [] };

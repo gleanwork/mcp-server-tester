@@ -52,7 +52,7 @@ To turn off Cowork built-in tools, set `coworkSetup.disabledBuiltinTools` (in th
 
 Cowork can ask a clarifying question (`AskUserQuestion`). MST answers each one with its first option, as ACE does; set `coworkSetup.clarifyingQuestions: "disabled"` to turn the tool off instead, so the model proceeds on its best assumption. See [Cowork in MST](./cowork.md).
 
-Tool search is on, here and in the macOS eval profile: Cowork lists each MCP server's tools by name and loads a tool's definition when the model searches for it, rather than sending every connector's tools in every request. That's Claude Desktop's `toolSearchEnabled` (Claude Desktop 1.21459.0 or later), which Desktop leaves off in gateway mode unless the settings turn it on; Cowork signed in to claude.ai has it on. Set `coworkSetup.toolSearch: false` (in the eval or a variant; a variant's value wins) to send every tool in every request, as before. The gateway must accept what tool search adds to each request, such as the `tool-search-tool-2025-10-19` beta, or every request fails with HTTP 400. A trace with tool search on shows `ToolSearch` calls, and `tool_search_hit_rate` counts them.
+Tool search is on, here and in the macOS eval profile: Cowork lists each MCP server's tools by name and loads a tool's definition when the model searches for it, rather than sending every connector's tools in every request. That's Claude Desktop's `toolSearchEnabled` (Claude Desktop 1.21459.0 or later), which Desktop leaves off in gateway mode unless the settings turn it on; Cowork signed in to claude.ai has it on. Set `coworkSetup.toolSearch: false` (in the eval or a variant; a variant's value wins) to send every tool in every request, as before. The gateway must accept what tool search adds to each request, such as the `tool-search-tool-2025-10-19` beta, or every request fails with HTTP 400. A transcript with tool search on shows `ToolSearch` calls, and `tool_search_hit_rate` counts them.
 
 Options (`--runner-option key=value`):
 
@@ -120,7 +120,7 @@ On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest t
 
 ## When something fails
 
-A case that fails and leaves the desktop in an unknown state (a task that didn't submit, a session MST can't read) keeps a failure diagnosis: what the desktop showed at that moment, before MST resets it for the next case. A run that keeps full traces (`"redactStoredResponses": false` in the eval config) stores it as the trial's artifacts, `.mcp-test-results/<eval>/runs/<run>/artifacts/<variant>/<case>/<trial>/`; a run with redacted traces (the default) doesn't keep it, since it holds what the screen and logs showed:
+A case that fails and leaves the desktop in an unknown state (a task that didn't submit, a session MST can't read) keeps a failure diagnosis: what the desktop showed at that moment, before MST resets it for the next case. A run that keeps full transcripts (`"redactStoredResponses": false` in the eval config) stores it as the trial's artifacts, `.mcp-test-results/<eval>/runs/<run>/artifacts/<variant>/<case>/<trial>/`; a run with redacted transcripts (the default) doesn't keep it, since it holds what the screen and logs showed:
 
 - `screen.png`: the screen
 - `accessibility.txt`: every control the app showed, with its role, name and whether it was enabled

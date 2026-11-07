@@ -46,7 +46,11 @@
     "infrastructureError": { "type": "boolean" },
     "error": { "type": "string" },
     "gradingError": { "type": "string" },
-    "trace": { "type": "object", "properties": {}, "additionalProperties": {} },
+    "transcript": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "artifacts": { "type": "string" }
   },
   "required": [

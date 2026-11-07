@@ -16,12 +16,12 @@ import {
   truncatedPrompt,
 } from './coworkClient.js';
 import { endingOf, isInfrastructure } from './trialEnding.js';
-import { NativeTraceError } from './nativeTraceError.js';
+import { NativeTranscriptError } from './nativeTranscriptError.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import { CoworkHitlError } from './cowork/interaction.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import type { ClaudeTrace } from './cowork/trace.js';
+import type { ClaudeTranscript } from './cowork/transcript.js';
 import type * as ClaudeNative from './cowork/sessions.js';
 import {
   ComputerUseDriverError,
@@ -54,7 +54,7 @@ const mocks = vi.hoisted(() => ({
   hitl: vi.fn(),
   reset: vi.fn(),
   snapshot: vi.fn(),
-  trace: vi.fn(),
+  transcript: vi.fn(),
   matches: vi.fn(),
   bind: vi.fn(),
   order: [] as string[],
@@ -102,7 +102,7 @@ vi.mock('./cowork/anthropicComputerUse.js', async (original) => ({
 vi.mock('./cowork/sessions.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ClaudeNative>()),
   snapshotClaudeSessions: mocks.snapshot,
-  waitForClaudeTrace: mocks.trace,
+  waitForClaudeTranscript: mocks.transcript,
   waitForClaudeSession: mocks.bind,
   findMatchingClaudeSessions: mocks.matches,
 }));
@@ -199,8 +199,8 @@ beforeEach(async () => {
   mocks.bind.mockReset().mockImplementation(async () => ({
     candidate: { metadataPath: `/fixture/session-${index++}` },
   }));
-  mocks.trace.mockImplementation(async ({ sessionPath }) => {
-    mocks.order.push('trace');
+  mocks.transcript.mockImplementation(async ({ sessionPath }) => {
+    mocks.order.push('transcript');
     return {
       candidate: { metadataPath: sessionPath },
       finalAnswer: 'answer',
@@ -226,7 +226,7 @@ beforeEach(async () => {
         models: ['native-model'],
         totalCostUsd: 0.01,
       },
-    } as unknown as ClaudeTrace;
+    } as unknown as ClaudeTranscript;
   });
 });
 afterEach(async () => {
@@ -334,7 +334,7 @@ describe('Cowork sessions', () => {
         'duplicate attribution'
       );
       expect(mocks.submit).toHaveBeenCalledTimes(3);
-      expect(mocks.trace).toHaveBeenCalledOnce();
+      expect(mocks.transcript).toHaveBeenCalledOnce();
     } finally {
       await session.close();
     }
@@ -381,18 +381,18 @@ describe('V2 Cowork client', () => {
   it.each([false, undefined])(
     'uses policy %s for initial and late task-scoped approval without resubmitting',
     async (approveWriteTools) => {
-      const original = mocks.trace.getMockImplementation()!;
-      mocks.trace.mockImplementationOnce(
+      const original = mocks.transcript.getMockImplementation()!;
+      mocks.transcript.mockImplementationOnce(
         async (options: {
           sessionPath: string;
-          onPending?: (trace: ClaudeTrace) => Promise<void>;
+          onPending?: (transcript: ClaudeTranscript) => Promise<void>;
         }) => {
           await options.onPending?.({
             candidate: { metadataPath: options.sessionPath },
             toolCalls: [{ name: 'search', arguments: {} }],
             isComplete: false,
-          } as ClaudeTrace);
-          return (await original(options)) as ClaudeTrace;
+          } as ClaudeTranscript);
+          return (await original(options)) as ClaudeTranscript;
         }
       );
       const results = await collectClientBatch(
@@ -447,8 +447,8 @@ describe('V2 Cowork client', () => {
     );
     expect(mocks.submit).toHaveBeenCalledTimes(2);
     expect(mocks.hitl).not.toHaveBeenCalled();
-    expect(mocks.trace).toHaveBeenCalledTimes(2);
-    for (const [options] of mocks.trace.mock.calls) {
+    expect(mocks.transcript).toHaveBeenCalledTimes(2);
+    for (const [options] of mocks.transcript.mock.calls) {
       expect(options).not.toHaveProperty('onPending');
     }
     for (const result of results) {
@@ -634,7 +634,7 @@ describe('V2 Cowork client', () => {
       endpoint = options.otlpSettings?.otlpEndpoint as string | undefined;
       return (await mocks.setup(options)) as Awaited<ReturnType<Prepare>>;
     });
-    mocks.trace.mockImplementationOnce(async ({ sessionPath }) => {
+    mocks.transcript.mockImplementationOnce(async ({ sessionPath }) => {
       // What Desktop's Claude Code sent for this task's session.
       await fetch(`${endpoint}/v1/logs`, {
         method: 'POST',
@@ -673,7 +673,7 @@ describe('V2 Cowork client', () => {
         toolCalls: [],
         usage: { inputTokens: 1, outputTokens: 1 },
         isComplete: true,
-      } as unknown as ClaudeTrace;
+      } as unknown as ClaudeTranscript;
     });
     const prepared = createCoworkClient({
       dataDirectory: () => '/prepared/session',
@@ -958,7 +958,7 @@ describe('V2 Cowork client', () => {
     {
       finalAnswer: undefined,
       isError: false,
-      error: 'Native trace has no final answer.',
+      error: 'Native transcript has no final answer.',
     },
     {
       finalAnswer: 'partial answer',
@@ -986,9 +986,9 @@ describe('V2 Cowork client', () => {
         startedAt,
         completedAt,
       };
-      const original = mocks.trace.getMockImplementation()!;
-      mocks.trace.mockImplementationOnce(async (options) => ({
-        ...((await original(options)) as ClaudeTrace),
+      const original = mocks.transcript.getMockImplementation()!;
+      mocks.transcript.mockImplementationOnce(async (options) => ({
+        ...((await original(options)) as ClaudeTranscript),
         finalAnswer,
         isError,
         startedAt,
@@ -1034,10 +1034,10 @@ describe('V2 Cowork client', () => {
       'setup',
       'submit',
       'hitl',
-      'trace',
+      'transcript',
       'submit',
       'hitl',
-      'trace',
+      'transcript',
       'dispose',
     ]);
     expect(result[0]).toMatchObject({
@@ -1053,7 +1053,7 @@ describe('V2 Cowork client', () => {
     expect(mocks.hitl.mock.calls[0]![0].task).not.toContain(
       'MCP_SERVER_TESTER_'
     );
-    expect(mocks.trace.mock.calls[0]![0]).toMatchObject({
+    expect(mocks.transcript.mock.calls[0]![0]).toMatchObject({
       exactPrompt: 'query one',
       sessionPath: '/fixture/session-0',
     });
@@ -1161,7 +1161,7 @@ describe('V2 Cowork client', () => {
 
     it('passes plugins and paths to prepare/readiness and attributes mcp__<label>__* calls', async () => {
       vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
-      mocks.trace.mockImplementation(async ({ sessionPath }) => ({
+      mocks.transcript.mockImplementation(async ({ sessionPath }) => ({
         candidate: { metadataPath: sessionPath },
         finalAnswer: 'answer',
         // Parsed from native `mcp__fake-eval__search`.
@@ -1448,10 +1448,10 @@ describe('V2 Cowork client', () => {
         'readiness',
         'submit',
         'hitl',
-        'trace',
+        'transcript',
         'submit',
         'hitl',
-        'trace',
+        'transcript',
         'dispose',
       ]);
     });
@@ -1565,7 +1565,7 @@ describe('V2 Cowork client', () => {
     expect(result.every((r) => r.finalText === 'answer' && !r.error)).toBe(
       true
     );
-    expect(mocks.trace).toHaveBeenCalledTimes(2);
+    expect(mocks.transcript).toHaveBeenCalledTimes(2);
   });
   it('refuses HITL when native correlation is ambiguous', async () => {
     mocks.matches.mockResolvedValue([
@@ -1590,7 +1590,9 @@ describe('V2 Cowork client', () => {
       telemetry: { hitlWarning: 'inspection budget exhausted' },
     });
     expect(result[0]!.error).toBeUndefined();
-    mocks.trace.mockRejectedValueOnce(new Error('native task never completed'));
+    mocks.transcript.mockRejectedValueOnce(
+      new Error('native task never completed')
+    );
     const missing = await collectClientBatch(
       COWORK_CLIENT,
       requests(),
@@ -1599,16 +1601,18 @@ describe('V2 Cowork client', () => {
     expect(missing[0]!.error).toBe('native task never completed');
   });
   it('on macOS, resets with Computer Use after a failed case, then runs the next', async () => {
-    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    mocks.transcript.mockRejectedValueOnce(
+      new Error('native transcript timeout')
+    );
     const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
-    expect(result[0]!.error).toBe('native trace timeout');
+    expect(result[0]!.error).toBe('native transcript timeout');
     expect(result[1]!.error).toBeUndefined();
     expect(mocks.reset).toHaveBeenCalledOnce();
     expect(mocks.reset.mock.calls[0]![0]).toMatchObject({
       deadlineAt: expect.any(Number),
     });
     // The reset runs between the failed case and the next submission.
-    expect(mocks.order.filter((step) => step !== 'trace')).toEqual([
+    expect(mocks.order.filter((step) => step !== 'transcript')).toEqual([
       'setup',
       'submit',
       'reset',
@@ -1618,7 +1622,9 @@ describe('V2 Cowork client', () => {
   });
 
   it('on macOS, sends nothing more when the reset fails', async () => {
-    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    mocks.transcript.mockRejectedValueOnce(
+      new Error('native transcript timeout')
+    );
     mocks.reset.mockRejectedValueOnce(
       new Error(
         'Computer Use reset failed: stopped before completion; not retrying'
@@ -1637,7 +1643,9 @@ describe('V2 Cowork client', () => {
       mocks.order.push('setup');
       return { dispose: mocks.dispose, restart };
     });
-    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    mocks.transcript.mockRejectedValueOnce(
+      new Error('native transcript timeout')
+    );
     mocks.reset.mockRejectedValueOnce(
       new Error('Computer Use reset exceeded 8 actions')
     );
@@ -1645,7 +1653,7 @@ describe('V2 Cowork client', () => {
     const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
     expect(restart).toHaveBeenCalledOnce();
     expect(mocks.submit).toHaveBeenCalledTimes(2);
-    expect(result[0]!.error).toBe('native trace timeout');
+    expect(result[0]!.error).toBe('native transcript timeout');
     expect(result[1]!.error).toBeUndefined();
   });
 
@@ -1657,7 +1665,9 @@ describe('V2 Cowork client', () => {
       dispose: mocks.dispose,
       restart,
     }));
-    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    mocks.transcript.mockRejectedValueOnce(
+      new Error('native transcript timeout')
+    );
     mocks.reset.mockRejectedValueOnce(
       new Error('Computer Use reset exceeded 8 actions')
     );
@@ -1729,27 +1739,30 @@ describe('V2 Cowork client', () => {
     ]);
     expect(mocks.reset).toHaveBeenCalledOnce();
     expect(mocks.hitl).not.toHaveBeenCalled();
-    // Only the next case is traced; the unbound one is never inspected.
-    expect(mocks.trace).toHaveBeenCalledOnce();
+    // Only the next case's transcript is read; the unbound one is never inspected.
+    expect(mocks.transcript).toHaveBeenCalledOnce();
     expect(result[0]!.error).toContain('Ambiguous');
     expect(result[1]!.error).toBeUndefined();
   });
-  // How a case ended when its trace couldn't be collected (ADR 0010).
+  // How a case ended when its transcript couldn't be collected (ADR 0010).
   it.each([
     [
-      new NativeTraceError(
+      new NativeTranscriptError(
         'timeout',
         'Timed out waiting for Claude session local_1 to complete'
       ),
       { kind: 'infrastructure', broke: 'client-app', retryable: true },
     ],
     [
-      new NativeTraceError('no_matching_session', 'No matching Claude session'),
+      new NativeTranscriptError(
+        'no_matching_session',
+        'No matching Claude session'
+      ),
       { kind: 'infrastructure', broke: 'client-app', retryable: true },
     ],
     [new Error('Cowork model mismatch: requested a, observed b.'), undefined],
   ])('types a failed collection: %s', async (error, expected) => {
-    mocks.trace.mockRejectedValueOnce(error);
+    mocks.transcript.mockRejectedValueOnce(error);
     const [result] = await collectClientBatch(
       COWORK_CLIENT,
       requests(),
@@ -1773,7 +1786,7 @@ describe('V2 Cowork client', () => {
       scenario,
     ]);
     expect(
-      mocks.trace.mock.calls.map(
+      mocks.transcript.mock.calls.map(
         (call) => (call[0] as { sessionPath: string }).sessionPath
       )
     ).toEqual(['/fixture/session-0', '/fixture/session-1']);
@@ -1790,12 +1803,14 @@ describe('V2 Cowork client', () => {
     });
     const batch = [...requests(), { ...requests()[0]!, caseId: 'three' }];
     mocks.submit.mockRejectedValueOnce(new Error('uncertain submit'));
-    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+    mocks.transcript.mockRejectedValueOnce(
+      new Error('native transcript timeout')
+    );
     const result = await collectClientBatch(client, batch, context);
-    // Case 1 fails at submit, case 2 at trace; each is reset before the next case.
+    // Case 1 fails at submit, case 2 at its transcript; each is reset before the next case.
     expect(result.map((r) => r.error)).toEqual([
       'uncertain submit',
-      'native trace timeout',
+      'native transcript timeout',
       undefined,
     ]);
     expect(mocks.submit).toHaveBeenCalledTimes(3);
@@ -1894,7 +1909,7 @@ describe('V2 Cowork client', () => {
           toolCallCount: 1,
           models: ['native-model'],
         },
-      }) as unknown as ClaudeTrace;
+      }) as unknown as ClaudeTranscript;
     mocks.matches.mockImplementation(
       async (options: { sessionPath?: string }) => [
         partial(options.sessionPath ?? ''),
@@ -1913,9 +1928,9 @@ describe('V2 Cowork client', () => {
       [{ ...request!, config: { ...clientConfig, timeout: 50 } }],
       readOnlyContext
     );
-    expect(mocks.trace).not.toHaveBeenCalled();
+    expect(mocks.transcript).not.toHaveBeenCalled();
     expect(result!.error).toMatch(
-      /^Native Claude trace deadline exceeded\. No resubmission attempted\. It had been waiting on the model's response for 1m 3\ds\.$/
+      /^Native Claude transcript deadline exceeded\. No resubmission attempted\. It had been waiting on the model's response for 1m 3\ds\.$/
     );
     // The client ran out of its own time: a trial (ADR 0010).
     expect(isInfrastructure(result!)).toBe(false);
@@ -1953,10 +1968,10 @@ describe('V2 Cowork client', () => {
       submit: mocks.submit,
       handleHitl: mocks.hitl,
     });
-    const original = mocks.trace.getMockImplementation()!;
-    mocks.trace.mockImplementationOnce(
+    const original = mocks.transcript.getMockImplementation()!;
+    mocks.transcript.mockImplementationOnce(
       async (options: { sessionPath: string }) => ({
-        ...((await original(options)) as ClaudeTrace),
+        ...((await original(options)) as ClaudeTranscript),
         // A deep link's 14,336 characters of a 23,661-character prompt.
         binding: {
           kind: 'only-new-session',
@@ -2016,14 +2031,14 @@ describe('V2 Cowork client', () => {
       submit: mocks.submit,
       handleHitl: mocks.hitl,
     });
-    const original = mocks.trace.getMockImplementation()!;
-    mocks.trace.mockImplementationOnce(
+    const original = mocks.transcript.getMockImplementation()!;
+    mocks.transcript.mockImplementationOnce(
       async (options: { sessionPath: string }) => {
-        const trace = (await original(options)) as ClaudeTrace;
+        const transcript = (await original(options)) as ClaudeTranscript;
         return {
-          ...trace,
+          ...transcript,
           toolCalls: [
-            ...trace.toolCalls,
+            ...transcript.toolCalls,
             // Cowork's own sandbox shell, while its VM's startup had failed.
             {
               name: 'bash',
@@ -2036,7 +2051,7 @@ describe('V2 Cowork client', () => {
               isError: true,
             },
           ],
-        } as ClaudeTrace;
+        } as ClaudeTranscript;
       }
     );
     const result = await collectClientBatch(client, requests(), context);
@@ -2116,13 +2131,15 @@ describe('V2 Cowork client', () => {
     expect(result[0]!.error).toBe('Not enough disk space');
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(mocks.hitl).not.toHaveBeenCalled();
-    expect(mocks.trace).not.toHaveBeenCalled();
+    expect(mocks.transcript).not.toHaveBeenCalled();
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });
-  it('restores on native trace errors and retains per-case failure', async () => {
-    mocks.trace.mockRejectedValueOnce(new Error('native trace timeout'));
+  it('restores on native transcript errors and retains per-case failure', async () => {
+    mocks.transcript.mockRejectedValueOnce(
+      new Error('native transcript timeout')
+    );
     const result = await collectClientBatch(COWORK_CLIENT, requests(), context);
-    expect(result[0]!.error).toBe('native trace timeout');
+    expect(result[0]!.error).toBe('native transcript timeout');
     expect(result[1]!.finalText).toBe('answer');
     expect(mocks.dispose).toHaveBeenCalledOnce();
   });

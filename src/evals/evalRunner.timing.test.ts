@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clientRunToExecution } from './clientTrace.js';
+import { clientRunToExecution } from './clientTranscript.js';
 import { runEvalCase, runEvalDataset } from './evalRunner.js';
 import type { CaseExecution } from './caseExecution.js';
 

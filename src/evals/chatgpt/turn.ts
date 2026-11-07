@@ -10,19 +10,19 @@ import { basename } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
-  findChatgptTrace,
+  findChatgptTranscript,
   PendingChatgptRecordError,
   snapshotChatgptSessions,
   type ChatgptSessionSnapshot,
-  type ChatgptTrace,
-  type ChatgptTraceBinding,
-  type ChatgptTraceSelector,
-} from './trace.js';
+  type ChatgptTranscript,
+  type ChatgptTranscriptBinding,
+  type ChatgptTranscriptSelector,
+} from './transcript.js';
 import { copyChatgptEvidence } from './evidence.js';
 import {
-  NativeTraceError,
-  nativeTraceFailureKind,
-} from '../nativeTraceError.js';
+  NativeTranscriptError,
+  nativeTranscriptFailureKind,
+} from '../nativeTranscriptError.js';
 import { resolveCodexSetup } from '../codexSetup/config.js';
 import type { ChatgptAppSession } from '../chatgptSetup/session.js';
 import {
@@ -53,7 +53,7 @@ import type { ModelCall } from '../evalFrameworkTypes.js';
 const POLL_INTERVAL_MS = 750;
 const DEFAULT_TIMEOUT_MS = 120_000;
 const PROMPT_MARKER_TEMPLATE =
-  'Trace marker for MCP Server Tester; do not mention this marker in your response: [eval-run-marker:{{marker}}]';
+  'Transcript marker for MCP Server Tester; do not mention this marker in your response: [eval-run-marker:{{marker}}]';
 
 /** One trial's prompt, correlation and deadline. */
 export interface ChatgptTrial {
@@ -95,7 +95,7 @@ interface ChatgptTurnSuccess {
   response?: string;
   toolCalls: LLMToolCall[];
   modelCalls?: ModelCall[];
-  conversationHistory?: ChatgptTrace['conversationHistory'];
+  conversationHistory?: ChatgptTranscript['conversationHistory'];
   usage?: UsageMetrics;
   llmDurationMs?: number;
   mcpDurationMs?: number;
@@ -108,7 +108,7 @@ interface ChatgptTurnFailure {
   toolCalls: LLMToolCall[];
   modelCalls?: ModelCall[];
   /** Partial native evidence from a bound turn that did not complete. */
-  conversationHistory?: ChatgptTrace['conversationHistory'];
+  conversationHistory?: ChatgptTranscript['conversationHistory'];
   usage?: UsageMetrics;
   clientMetadata: ClientMetadata;
 }
@@ -395,8 +395,8 @@ export async function submitWithComputerUse(
 /** Fail a silent Linux turn early and attach a display screenshot. */
 async function stalledResult(
   state: ChatgptTurnState,
-  found: { path: string; trace: ChatgptTrace },
-  bound: ChatgptTraceBinding | undefined,
+  found: { path: string; transcript: ChatgptTranscript },
+  bound: ChatgptTranscriptBinding | undefined,
   silentMs: number
 ): Promise<ChatgptTurn> {
   const silentSeconds = Math.round(silentMs / 1000);
@@ -449,8 +449,8 @@ function attachScreenshot(
       },
     ];
   else
-    external.traceLimitations = [
-      ...(external.traceLimitations ?? []),
+    external.transcriptLimitations = [
+      ...(external.transcriptLimitations ?? []),
       `${name} screenshot unavailable: ${screenshot.error}`,
     ];
 }
@@ -465,8 +465,8 @@ export async function captureChatgptTurn(
 ): Promise<ChatgptTurn> {
   const { config, trial } = state;
   let matched = false;
-  let bound: ChatgptTraceBinding | undefined;
-  let latest: { path: string; trace: ChatgptTrace } | undefined;
+  let bound: ChatgptTranscriptBinding | undefined;
+  let latest: { path: string; transcript: ChatgptTranscript } | undefined;
   const steps = state.desktop;
   const runDeadline = trial.startedAtMs + trial.timeoutMs;
   // Transcript growth is the only progress signal; a silent turn is stalled.
@@ -479,7 +479,7 @@ export async function captureChatgptTurn(
   let boundAtMs: number | undefined;
   let progressKey: string | undefined;
   let progressAtMs = Date.now();
-  const selector: ChatgptTraceSelector =
+  const selector: ChatgptTranscriptSelector =
     trial.correlation.strategy === 'exact_prompt'
       ? { strategy: 'exact_prompt', prompt: trial.submittedInput }
       : trial.marker;
@@ -536,9 +536,9 @@ export async function captureChatgptTurn(
       Date.now() < runDeadline &&
       (matched || Date.now() < bindingDeadline)
     ) {
-      let found: Awaited<ReturnType<typeof findChatgptTrace>>;
+      let found: Awaited<ReturnType<typeof findChatgptTranscript>>;
       try {
-        found = await findChatgptTrace(
+        found = await findChatgptTranscript(
           state.sessionsRoot as string,
           baseline,
           selector,
@@ -574,9 +574,13 @@ export async function captureChatgptTurn(
       }
       if (found) {
         matched = true;
-        const { trace, path } = found;
+        const { transcript, path } = found;
         boundAtMs ??= Date.now();
-        bound ??= { path, sessionId: trace.sessionId, turnId: trace.turnId };
+        bound ??= {
+          path,
+          sessionId: transcript.sessionId,
+          turnId: transcript.turnId,
+        };
         latest = found;
         const size = await stat(path).then(
           (info) => `${info.size}:${info.mtimeMs}`,
@@ -586,7 +590,10 @@ export async function captureChatgptTurn(
           progressKey = size;
           progressAtMs = Date.now();
         }
-        if (!trace.complete && Date.now() - progressAtMs >= CHATGPT_STALL_MS)
+        if (
+          !transcript.complete &&
+          Date.now() - progressAtMs >= CHATGPT_STALL_MS
+        )
           return await stalledResult(
             state,
             found,
@@ -594,7 +601,8 @@ export async function captureChatgptTurn(
             Date.now() - progressAtMs
           );
         // Awaited here, so a mismatch it throws is classified below.
-        if (trace.complete) return await completedTurn(state, found, bound);
+        if (transcript.complete)
+          return await completedTurn(state, found, bound);
       }
       await delay(
         Math.min(
@@ -652,7 +660,7 @@ export async function captureChatgptTurn(
       failureResult(state, {
         // Anything not classified where it was detected is a transcript we
         // could not read as expected.
-        failureKind: nativeTraceFailureKind(error, 'parse_failure'),
+        failureKind: nativeTranscriptFailureKind(error, 'parse_failure'),
         error: formatError(error),
         limitations: [],
       }),
@@ -668,80 +676,80 @@ export async function captureChatgptTurn(
  */
 async function completedTurn(
   state: ChatgptTurnState,
-  found: { path: string; trace: ChatgptTrace },
-  bound: ChatgptTraceBinding | undefined
+  found: { path: string; transcript: ChatgptTranscript },
+  bound: ChatgptTranscriptBinding | undefined
 ): Promise<ChatgptTurn> {
   const { config, trial } = state;
-  const { trace, path } = found;
-  if (trace.error)
+  const { transcript, path } = found;
+  if (transcript.error)
     return withEvidence(
-      partialFailure(state, found, 'client_run_failed', trace.error),
+      partialFailure(state, found, 'client_run_failed', transcript.error),
       state,
       boundEvidence(bound)
     );
-  if (config.model && trace.model !== config.model)
-    throw new NativeTraceError(
+  if (config.model && transcript.model !== config.model)
+    throw new NativeTranscriptError(
       'client_run_failed',
-      `ChatGPT model mismatch: requested ${config.model}, recorded ${trace.model ?? 'unknown'}.`
+      `ChatGPT model mismatch: requested ${config.model}, recorded ${transcript.model ?? 'unknown'}.`
     );
   if (
     config.reasoningEffort &&
-    trace.reasoningEffort !== config.reasoningEffort
+    transcript.reasoningEffort !== config.reasoningEffort
   )
-    throw new NativeTraceError(
+    throw new NativeTranscriptError(
       'client_run_failed',
-      `ChatGPT reasoning effort mismatch: requested ${config.reasoningEffort}, recorded ${trace.reasoningEffort ?? 'unknown'}.`
+      `ChatGPT reasoning effort mismatch: requested ${config.reasoningEffort}, recorded ${transcript.reasoningEffort ?? 'unknown'}.`
     );
-  if (!trace.response)
+  if (!transcript.response)
     throw new Error('Completed ChatGPT turn has no native final answer.');
   const metadata = buildMetadata(state);
   return withEvidence(
     {
       success: true,
-      response: trace.response,
-      toolCalls: trace.toolCalls,
-      ...(trace.modelCalls ? { modelCalls: trace.modelCalls } : {}),
-      conversationHistory: trace.conversationHistory,
-      usage: trace.usage,
-      llmDurationMs: trace.llmDurationMs,
-      mcpDurationMs: trace.mcpDurationMs,
+      response: transcript.response,
+      toolCalls: transcript.toolCalls,
+      ...(transcript.modelCalls ? { modelCalls: transcript.modelCalls } : {}),
+      conversationHistory: transcript.conversationHistory,
+      usage: transcript.usage,
+      llmDurationMs: transcript.llmDurationMs,
+      mcpDurationMs: transcript.mcpDurationMs,
       clientMetadata: {
         ...metadata,
         correlation: {
           ...metadata.correlation,
-          ...(trace.promptMatch
+          ...(transcript.promptMatch
             ? {
-                nativePromptMatch: trace.promptMatch,
-                nativePromptSha256: trace.nativePromptSha256,
+                nativePromptMatch: transcript.promptMatch,
+                nativePromptSha256: transcript.nativePromptSha256,
               }
             : {}),
         },
-        traceSource: 'client-local-transcript',
-        traceConfidence: 'high',
-        traceLimitations: trace.limitations,
+        transcriptSource: 'client-local-transcript',
+        transcriptConfidence: 'high',
+        transcriptLimitations: transcript.limitations,
         artifacts: [
           {
             kind: 'transcript',
             name: 'ChatGPT native session',
             path,
             contentType: 'application/x-ndjson',
-            summary: `Matched turn ${trace.turnId}`,
+            summary: `Matched turn ${transcript.turnId}`,
           },
         ],
         session: {
-          id: trace.sessionId,
-          turnId: trace.turnId,
+          id: transcript.sessionId,
+          turnId: transcript.turnId,
           ...(trial.correlation.includedInPrompt
             ? { runMarker: trial.marker }
             : {}),
-          startedAt: trace.startedAt,
-          completedAt: trace.completedAt,
+          startedAt: transcript.startedAt,
+          completedAt: transcript.completedAt,
         },
-        telemetry: trace.telemetry,
+        telemetry: transcript.telemetry,
         sources: {
           finalAnswer: 'client-local-transcript',
           toolCalls: 'client-local-transcript',
-          usage: trace.usage ? 'client-local-transcript' : 'none',
+          usage: transcript.usage ? 'client-local-transcript' : 'none',
           cost: 'none',
         },
         evidence: {
@@ -754,15 +762,15 @@ async function completedTurn(
             confidence: 'high',
           },
           usage: {
-            source: trace.usage ? 'client-local-transcript' : 'none',
-            confidence: trace.usage ? 'high' : 'unknown',
+            source: transcript.usage ? 'client-local-transcript' : 'none',
+            confidence: transcript.usage ? 'high' : 'unknown',
           },
           cost: { source: 'none', confidence: 'unknown' },
         },
       },
     },
     state,
-    { path, summary: `Matched turn ${trace.turnId}` }
+    { path, summary: `Matched turn ${transcript.turnId}` }
   );
 }
 
@@ -772,42 +780,42 @@ async function completedTurn(
  */
 function partialFailure(
   state: ChatgptTurnState,
-  { path, trace }: { path: string; trace: ChatgptTrace },
+  { path, transcript }: { path: string; transcript: ChatgptTranscript },
   failureKind: ExternalClientFailureKind,
   error: string
 ): ChatgptTurn {
   const metadata = buildMetadata(state);
-  const usageSource = trace.usage ? 'client-local-transcript' : 'none';
+  const usageSource = transcript.usage ? 'client-local-transcript' : 'none';
   return {
     success: false,
     error,
-    toolCalls: trace.toolCalls,
-    ...(trace.modelCalls ? { modelCalls: trace.modelCalls } : {}),
-    conversationHistory: trace.conversationHistory,
-    usage: trace.usage,
+    toolCalls: transcript.toolCalls,
+    ...(transcript.modelCalls ? { modelCalls: transcript.modelCalls } : {}),
+    conversationHistory: transcript.conversationHistory,
+    usage: transcript.usage,
     clientMetadata: {
       ...metadata,
       failureKind,
-      traceSource: 'client-local-transcript',
-      traceConfidence: 'low',
-      traceLimitations: trace.limitations,
+      transcriptSource: 'client-local-transcript',
+      transcriptConfidence: 'low',
+      transcriptLimitations: transcript.limitations,
       artifacts: [
         {
           kind: 'transcript',
           name: 'ChatGPT native session',
           path,
           contentType: 'application/x-ndjson',
-          summary: `Bound turn ${trace.turnId}; did not complete successfully`,
+          summary: `Bound turn ${transcript.turnId}; did not complete successfully`,
         },
       ],
       session: {
         ...metadata.session,
-        id: trace.sessionId,
-        turnId: trace.turnId,
-        startedAt: trace.startedAt,
-        completedAt: trace.completedAt,
+        id: transcript.sessionId,
+        turnId: transcript.turnId,
+        startedAt: transcript.startedAt,
+        completedAt: transcript.completedAt,
       },
-      telemetry: trace.telemetry,
+      telemetry: transcript.telemetry,
       sources: {
         finalAnswer: 'none',
         toolCalls: 'client-local-transcript',
@@ -819,7 +827,7 @@ function partialFailure(
         toolCalls: { source: 'client-local-transcript', confidence: 'low' },
         usage: {
           source: usageSource,
-          confidence: trace.usage ? 'low' : 'unknown',
+          confidence: transcript.usage ? 'low' : 'unknown',
         },
         cost: { source: 'none', confidence: 'unknown' },
       },
@@ -828,7 +836,7 @@ function partialFailure(
 }
 
 function boundEvidence(
-  bound: ChatgptTraceBinding | undefined
+  bound: ChatgptTranscriptBinding | undefined
 ): { path: string; summary: string } | undefined {
   return bound
     ? {
@@ -865,8 +873,8 @@ async function withEvidence(
     ),
     ...copy.artifacts,
   ];
-  external.traceLimitations = [
-    ...(external.traceLimitations ?? []),
+  external.transcriptLimitations = [
+    ...(external.transcriptLimitations ?? []),
     ...copy.limitations,
   ];
   if (result.success && copy.matchedCopied === false)
@@ -878,8 +886,8 @@ async function withEvidence(
       clientMetadata: {
         ...external,
         failureKind: 'client_run_failed',
-        traceSource: 'none',
-        traceConfidence: 'unknown',
+        transcriptSource: 'none',
+        transcriptConfidence: 'unknown',
       },
     };
   return result;
@@ -892,8 +900,8 @@ function buildMetadata(
 ): ClientMetadata {
   const { trial } = state;
   return {
-    traceSource: 'none',
-    traceConfidence: 'unknown',
+    transcriptSource: 'none',
+    transcriptConfidence: 'unknown',
     artifacts: [],
     session: trial.correlation.includedInPrompt
       ? { runMarker: trial.marker }
@@ -925,7 +933,7 @@ function failureResult(
     clientMetadata: {
       ...buildMetadata(state, options),
       failureKind: options.failureKind,
-      traceLimitations: options.limitations,
+      transcriptLimitations: options.limitations,
     },
   };
 }

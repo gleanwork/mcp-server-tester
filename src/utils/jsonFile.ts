@@ -4,7 +4,7 @@ import { chmod, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseChunked, stringifyChunked } from '@discoveryjs/json-ext';
 
-/** JSON chunks avoid V8's single-string limit for runs with large tool traces. */
+/** JSON chunks avoid V8's single-string limit for runs with large transcripts. */
 export function* jsonChunks(value: unknown): Generator<string> {
   yield* stringifyChunked(value, { space: 2 });
   yield '\n';

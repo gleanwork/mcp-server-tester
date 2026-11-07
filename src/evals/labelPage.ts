@@ -28,7 +28,7 @@ import {
   type ImportedLabel,
   type LabelSplit,
 } from './labels.js';
-import { trialTrace } from './runReport.js';
+import { trialTranscript } from './runReport.js';
 import {
   labelQuestion,
   readRunDirectory,
@@ -40,7 +40,7 @@ import {
 interface LabelPageTrial {
   answer?: string;
   /** Whether the client recorded what it called. */
-  traced: boolean;
+  hasTranscript: boolean;
   events: RunReportEvent[];
 }
 
@@ -77,7 +77,7 @@ interface LabelPageItem {
   label?: string;
   note?: string;
   /** Pointwise: the trial. */
-  trace?: LabelPageTrial;
+  transcript?: LabelPageTrial;
   /** Pairwise: the two sides, in an order fixed for the case. */
   sides?: [LabelPageSide, LabelPageSide];
 }
@@ -404,7 +404,7 @@ function pageData(
     return trials;
   };
   // A pairwise judge compares each side's case result, which is the last
-  // trial that ran (evalRunner keeps it); a trial that threw has no trace.
+  // trial that ran (evalRunner keeps it); a trial that threw has no transcript.
   const sideOf = (
     label: LabelPageSide['label'],
     variant: string,
@@ -412,12 +412,15 @@ function pageData(
   ): LabelPageSide => {
     const trials = trialsOf(variant, caseId);
     let index = trials.length - 1;
-    while (index > 0 && !('trace' in trials[index]! && trials[index]!.trace))
+    while (
+      index > 0 &&
+      !('transcript' in trials[index]! && trials[index]!.transcript)
+    )
       index--;
     const trial = trials[index];
     return {
       label,
-      trial: trial ? pageTrial(trial) : { traced: false, events: [] },
+      trial: trial ? pageTrial(trial) : { hasTranscript: false, events: [] },
       trialIndex: Math.max(index, 0),
       trialCount: trials.length,
     };
@@ -456,7 +459,9 @@ function pageData(
         return {
           ...base,
           trial: item.trial ?? 0,
-          trace: trial ? pageTrial(trial) : { traced: false, events: [] },
+          transcript: trial
+            ? pageTrial(trial)
+            : { hasTranscript: false, events: [] },
         };
       }
       const baseline = sideOf('baseline', item.baseline, item.caseId);
@@ -483,12 +488,13 @@ function pageData(
 }
 
 function pageTrial(trial: TrialResult | EvalCaseResult): LabelPageTrial {
-  const { traced, events } = trialTrace(trial);
+  const { hasTranscript, events } = trialTranscript(trial);
   // The whole answer, as the judge read it; the report shortens it.
-  const answer = (trial as { trace?: { finalText?: string } }).trace?.finalText;
+  const answer = (trial as { transcript?: { finalText?: string } }).transcript
+    ?.finalText;
   return {
     ...(answer ? { answer } : {}),
-    traced: traced ?? false,
+    hasTranscript: hasTranscript ?? false,
     events,
   };
 }

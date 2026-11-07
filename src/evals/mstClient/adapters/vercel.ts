@@ -15,9 +15,9 @@ import { extractText } from '../../../mcp/response.js';
 import type {
   ClientRunResult,
   ModelCall,
-  TraceEvent,
+  TranscriptEvent,
 } from '../../evalFrameworkTypes.js';
-import { toolCallEvents } from '../../clientTrace.js';
+import { toolCallEvents } from '../../clientTranscript.js';
 import {
   createClientSkillsSession,
   HOST_SKILL_TOOL_NAMES,
@@ -559,7 +559,7 @@ function toError(value: unknown): Error {
 function apiEvents(
   toolCalls: LLMToolCall[],
   skills: ClientSkillsSession | null
-): TraceEvent[] {
+): TranscriptEvent[] {
   const events = toolCallEvents(toolCalls);
   return skills ? withSkillEvents(events, skills.loads) : events;
 }

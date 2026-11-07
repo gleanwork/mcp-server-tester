@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { clientRunToExecution, toolCallEvents } from './clientTrace.js';
+import { clientRunToExecution, toolCallEvents } from './clientTranscript.js';
 import { runEvalDataset } from './evalRunner.js';
 import { executionEnding } from './caseExecution.js';
 import { infrastructureEnding } from './trialEnding.js';
 import type {
   ClientDefinition,
   ClientRunResult,
-  TraceEvidence,
+  TranscriptEvidence,
 } from './evalFrameworkTypes.js';
 import type { LLMToolCall } from './mstClient/types.js';
 import { z } from 'zod';
@@ -28,7 +28,7 @@ describe('clientRunToExecution', () => {
         },
       ]
     );
-    expect(execution.trace?.events).toEqual([
+    expect(execution.transcript?.events).toEqual([
       { kind: 'tool_call', source: 'mcp', name: 'acme.search', server: 'acme' },
     ]);
     expect(
@@ -52,10 +52,10 @@ describe('clientRunToExecution', () => {
         label,
       }))
     );
-    expect(execution.trace?.events).toEqual(events);
+    expect(execution.transcript?.events).toEqual(events);
   });
 
-  it('names the replacement for a trace event with source host', () => {
+  it('names the replacement for a transcript event with source host', () => {
     expect(() =>
       clientRunToExecution(
         {
@@ -84,7 +84,7 @@ describe('clientRunToExecution', () => {
   });
 });
 
-describe('per-scenario client traces', () => {
+describe('per-scenario client transcripts', () => {
   it('retains tool-result evidence and error status through the runner boundary', () => {
     const toolCalls = [
       {
@@ -99,13 +99,13 @@ describe('per-scenario client traces', () => {
       },
       { name: 'Read', arguments: {}, source: 'builtin' as const, id: 'call-2' },
     ];
-    const trace: ClientRunResult = {
+    const transcript: ClientRunResult = {
       finalText: '',
       events: toolCallEvents(toolCalls),
     };
-    expect(trace.events[0]).toMatchObject(toolCalls[0]!);
-    expect(trace.events[1]).not.toHaveProperty('isError');
-    const execution = clientRunToExecution(trace, 'structured');
+    expect(transcript.events[0]).toMatchObject(toolCalls[0]!);
+    expect(transcript.events[1]).not.toHaveProperty('isError');
+    const execution = clientRunToExecution(transcript, 'structured');
     expect(execution.response).toMatchObject({ toolCalls });
     expect(execution.preExecutionDurationMs).toBeUndefined();
   });
@@ -193,14 +193,14 @@ describe('per-scenario client traces', () => {
           label: 'agg',
         },
       ];
-      const trace: ClientRunResult = {
+      const transcript: ClientRunResult = {
         finalText: 'OK',
         events: toolCallEvents(
           [{ name: 'native_search', arguments: { query: 'docs' } }],
           servers
         ),
       };
-      trace.events.unshift({
+      transcript.events.unshift({
         kind: 'skill',
         source: 'builtin',
         name: 'research',
@@ -234,7 +234,7 @@ describe('per-scenario client traces', () => {
           },
           toolMap: { search: [alias] },
           executeCase: async () =>
-            clientRunToExecution(trace, 'structured', servers),
+            clientRunToExecution(transcript, 'structured', servers),
         },
         {}
       );
@@ -248,8 +248,8 @@ describe('per-scenario client traces', () => {
           { name: 'native_search', server: 'agg' },
         ],
       });
-      expect(trace.events[1]?.name).toBe('native_search');
-      expect(result.caseResults[0]?.toolCallTrace).toMatchObject({
+      expect(transcript.events[1]?.name).toBe('native_search');
+      expect(result.caseResults[0]?.toolCallTranscript).toMatchObject({
         calls: [{ name: 'native_search', status: 'expected' }],
         missed: [],
       });
@@ -286,16 +286,16 @@ describe('per-scenario client traces', () => {
     expect(result.caseResults[0]?.response).toMatchObject({
       evidence: 'observed',
     });
-    expect(result.caseResults[0]?.toolCallTrace).toBeUndefined();
-    // An executor that returns only a response still gets a trace.
-    expect(result.caseResults[0]?.trace).toEqual({
+    expect(result.caseResults[0]?.toolCallTranscript).toBeUndefined();
+    // An executor that returns only a response still gets a transcript.
+    expect(result.caseResults[0]?.transcript).toEqual({
       events: [
         { kind: 'tool_call', source: 'mcp', name: 'search', arguments: {} },
       ],
       evidence: 'observed',
     });
   });
-  it.each<TraceEvidence>(['structured', 'observed', 'none'])(
+  it.each<TranscriptEvidence>(['structured', 'observed', 'none'])(
     'gates tool assertions for %s evidence',
     async (evidence) => {
       const client: ClientDefinition = {
@@ -318,7 +318,7 @@ describe('per-scenario client traces', () => {
       const result = await runEvalDataset(
         {
           dataset: {
-            name: 'traces',
+            name: 'transcripts',
             cases: [
               {
                 id: 'one',
@@ -355,7 +355,7 @@ describe('per-scenario client traces', () => {
       expect(result.caseResults[0]?.response).toMatchObject({ evidence });
       if (evidence !== 'structured') {
         for (const trial of result.caseResults[0]?.trialResults ?? []) {
-          expect(trial.toolCallTrace).toBeUndefined();
+          expect(trial.toolCallTranscript).toBeUndefined();
         }
       }
       expect(result.caseResults[0]?.scores?.textContains?.pass).toBe(true);
@@ -369,17 +369,21 @@ describe('per-scenario client traces', () => {
         label: 'acme',
       },
     ];
-    const trace: ClientRunResult = {
+    const transcript: ClientRunResult = {
       finalText: 'OK',
       events: toolCallEvents([{ name: 'search', arguments: {} }], servers),
     };
-    expect(trace.events[0]).toMatchObject({
+    expect(transcript.events[0]).toMatchObject({
       source: 'mcp',
       server: 'acme',
       name: 'search',
     });
-    trace.events.push({ kind: 'skill', source: 'builtin', name: 'research' });
-    const result = clientRunToExecution(trace, 'structured', servers);
+    transcript.events.push({
+      kind: 'skill',
+      source: 'builtin',
+      name: 'research',
+    });
+    const result = clientRunToExecution(transcript, 'structured', servers);
     expect(result.response).toMatchObject({
       toolCalls: [
         { name: 'search', server: 'acme', source: 'mcp', kind: 'tool_call' },
@@ -490,7 +494,7 @@ describe('client-native skill events', () => {
       telemetry: { source: 'native-client' },
     };
     const execution = clientRunToExecution(run, 'structured');
-    expect(execution.trace?.events).toEqual(run.events);
+    expect(execution.transcript?.events).toEqual(run.events);
     expect(execution.response).toMatchObject({
       success: true,
       response: 'done',
@@ -518,7 +522,7 @@ describe('server attribution at the runner boundary', () => {
       'structured',
       [stdio('docs')]
     );
-    expect(labeled.trace?.events).toEqual([
+    expect(labeled.transcript?.events).toEqual([
       { ...events[0], server: 'docs' },
       events[1],
     ]);
@@ -528,7 +532,7 @@ describe('server attribution at the runner boundary', () => {
       'structured',
       [stdio()]
     );
-    expect(unlabeled.trace?.events[0]?.server).toBe('server-1');
+    expect(unlabeled.transcript?.events[0]?.server).toBe('server-1');
   });
 
   it('does not guess the server when a variant has several', () => {
@@ -537,6 +541,6 @@ describe('server attribution at the runner boundary', () => {
       'structured',
       [stdio('docs'), stdio('tickets')]
     );
-    expect(execution.trace?.events).toEqual(events);
+    expect(execution.transcript?.events).toEqual(events);
   });
 });

@@ -174,7 +174,7 @@ Claude Code also reads the files in its working directory, and the client runs i
 
 Without a `model`, Claude Code runs on its own default model, the one its users get. Each trial records the model it ran in its diagnostics (`claudeStartup.model`).
 
-Claude Code saves a large tool result to a file in its config directory and leaves a `<persisted-output>` placeholder in the transcript. With the empty config directory MST makes (`mst-claude-*`), MST reads the file back so the trace has the full result, up to 1 MB. With `isolate: false` or your own `CLAUDE_CONFIG_DIR`, it doesn't: the trace keeps the placeholder and its 2 KB preview.
+Claude Code saves a large tool result to a file in its config directory and leaves a `<persisted-output>` placeholder in the transcript. With the empty config directory MST makes (`mst-claude-*`), MST reads the file back so the transcript has the full result, up to 1 MB. With `isolate: false` or your own `CLAUDE_CONFIG_DIR`, it doesn't: the transcript keeps the placeholder and its 2 KB preview.
 
 ## Claude Code startup and failure evidence
 
@@ -196,9 +196,9 @@ startup, timeout, process, and output failures. Each `trialResults` entry
 retains its own diagnostics, and infrastructure failures keep the framework's
 existing separate pass-rate accounting. Credentials, MCP config bodies, and raw
 stderr are not included in diagnostics. Existing result redaction still applies
-to retained conversation/tool traces.
+to retained conversation/tool transcripts.
 
-On timeout or nonzero exit, Claude's partial trace is retained instead of being
+On timeout or nonzero exit, Claude's partial transcript is retained instead of being
 replaced by an empty tool-call list. Missing usage remains unknown. On POSIX,
 Claude runs in an invocation-owned process group so cancellation also stops its
 MCP servers and subprocesses without affecting other runs. Windows retains
@@ -211,7 +211,7 @@ names from its generated MCP config.
 
 `api` and `claude-code` return `ClientRunResult`, the same contract as other clients. Import its type from `@gleanwork/mcp-server-tester/evals`. The result contains `finalText`, ordered `events`, and optional `error`, `ending`, `usage`, `modelCalls`, `diagnostics` and `telemetry`.
 
-MST derives the assertion view once from that result. A successful `runEvalCase` in Playwright and an eval client both expose `response.success`, `response.response`, `response.toolCalls`, `response.events` and `response.evidence` to validators and judges. The case's `trace` retains non-tool events, such as skills and commands.
+MST derives the assertion view once from that result. A successful `runEvalCase` in Playwright and an eval client both expose `response.success`, `response.response`, `response.toolCalls`, `response.events` and `response.evidence` to validators and judges. The case's `transcript` retains non-tool events, such as skills and commands.
 
 For `api`, `llmDurationMs` measures model time excluding tool execution. MCP time is `telemetry.mcpDurationMs`. Input and conversation history are in `telemetry.content`; stored results omit that content unless `redactStoredResponses: false`. Skill-load measurements remain available in the assertion view's `skillLoads` and in per-trial records.
 
@@ -282,7 +282,7 @@ console.log(`Improved cases: ${comparison.improvedCases.length}`);
 
 `toolOverrides.tools` (in an eval config, a variant's `tools`) is keyed by a tool's name on its server; with several servers, `server.tool` picks one (a qualified key wins over a bare one). An override can replace a tool's `name`, `description` and `inputSchema`. A key that matches no tool or several is an error, and so is a rename that isn't a valid tool name or takes a name another tool on the same server has.
 
-A renamed tool's calls reach the original tool and are recorded under its original name, so a dataset's assertions read the same in every variant; the trace's `rawName` keeps the name the model used:
+A renamed tool's calls reach the original tool and are recorded under its original name, so a dataset's assertions read the same in every variant; the transcript's `rawName` keeps the name the model used:
 
 ```json
 {

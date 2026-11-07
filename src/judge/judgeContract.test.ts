@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { clientRunToExecution } from '../evals/clientTrace.js';
+import { clientRunToExecution } from '../evals/clientTranscript.js';
 import { z } from 'zod';
 import { runEvalDataset } from '../evals/evalRunner.js';
 import { validateEvalDataset } from '../evals/datasetTypes.js';
@@ -143,7 +143,7 @@ describe('buildJudgeTrial', () => {
       content: [{ type: 'text', text: 'tool text' }],
     });
     expect(trial).toMatchObject({ text: 'tool text', events: [] });
-    // A tool result has no trace, so it has no evidence level.
+    // A tool result has no transcript, so it has no evidence level.
     expect(trial.evidence).toBeUndefined();
   });
 

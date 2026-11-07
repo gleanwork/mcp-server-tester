@@ -4,7 +4,7 @@
  * Every path (the api client on a Playwright test's connection, or an eval's
  * client) produces a `CaseExecution`. The
  * runner reads its explicit fields and never inspects `response` to guess how
- * a case ran. Clients and adapters produce traces; the runner owns every score.
+ * a case ran. Clients and adapters produce transcripts; the runner owns every score.
  */
 import { randomUUID } from 'node:crypto';
 import type { MCPConfig } from '../config/mcpConfig.js';
@@ -20,8 +20,8 @@ import { settingsFor } from '../plugins/settings.js';
 import type { EvalVariant, EvalConfig, ClientConfig } from './evalConfig.js';
 import { clientPatchOf, type ClientFields } from './clientFields.js';
 import type {
-  TraceEvent,
-  TraceEvidence,
+  TranscriptEvent,
+  TranscriptEvidence,
   ClientDefinition,
   ClientRunInput,
   ClientRunContext,
@@ -29,16 +29,16 @@ import type {
   ClientRunResult,
   HostTelemetry,
   ModelCall,
-  Trace,
+  Transcript,
 } from './evalFrameworkTypes.js';
 import type { ClientMetadata } from './clientTelemetryTypes.js';
 import { getBuiltinClientConfig, getClient } from './builtinClients.js';
 import { bareClientName, resolveClientName } from './clientNames.js';
-import { clientRunToExecution } from './clientTrace.js';
+import { clientRunToExecution } from './clientTranscript.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
 import { withOriginalToolNames } from './toolSurface.js';
 import {
-  settleProxiedTrace,
+  settleProxiedTranscript,
   usesToolSurfaceProxy,
   withoutToolVariant,
   type ToolSurfaceProxy,
@@ -55,8 +55,8 @@ export interface ClientResponse {
   success: boolean;
   response?: string;
   toolCalls: LLMToolCall[];
-  events?: TraceEvent[];
-  evidence?: TraceEvidence;
+  events?: TranscriptEvent[];
+  evidence?: TranscriptEvidence;
   error?: string;
   ending?: TrialEnding;
   usage?: UsageMetrics;
@@ -82,7 +82,7 @@ export interface ClientResponse {
 interface ExecutionBase {
   /** Set when execution failed; assertions are not evaluated. */
   error?: string;
-  /** Client time spent before the runner's timer started (batch traces). */
+  /** Client time spent before the runner's timer started (batch transcripts). */
   preExecutionDurationMs?: number;
   /**
    * How the attempt ended (ADR 0010), when its producer said. Otherwise
@@ -96,12 +96,12 @@ export interface ClientExecution extends ExecutionBase {
   kind: 'completed';
   response: ClientResponse;
   /**
-   * What the client did, as it reported it. A custom executor may omit it;
-   * the runner then derives it from `response`.
+   * What the client did, as it reported it: its transcript. A custom executor
+   * may omit it; the runner then derives it from `response`.
    */
-  trace?: Trace;
-  /** Declared trace evidence. Custom executors may omit it. */
-  evidence?: TraceEvidence;
+  transcript?: Transcript;
+  /** Declared transcript evidence. Custom executors may omit it. */
+  evidence?: TranscriptEvidence;
   usage?: UsageMetrics;
   telemetry?: Record<string, unknown>;
   diagnostics?: ClientDiagnostics;
@@ -223,7 +223,7 @@ export async function executeEvalCase(
     );
     if (!run.error) return clientRunToExecution(run, 'structured');
     // Keep the Playwright API's failed-execution contract and the producer's
-    // ending. Eval clients retain failed runs and their partial traces.
+    // ending. Eval clients retain failed runs and their partial transcripts.
     return {
       kind: 'failed',
       response: undefined,
@@ -245,8 +245,8 @@ export interface EvalCaseExecutorOptions {
   evalConfig: EvalConfig;
   variant?: EvalVariant;
   env?: Record<string, string | undefined>;
-  /** Traces from a batch client, consumed once per case trial. */
-  batchTraces?: Map<string, ClientRunResult[]>;
+  /** Transcripts from a batch client, consumed once per case trial. */
+  batchTranscripts?: Map<string, ClientRunResult[]>;
   /** The variant's tool metadata, which `proxy` serves to clients that connect to their servers. */
   toolVariant?: { id: string; proxy: () => Promise<ToolSurfaceProxy> };
   /**
@@ -257,21 +257,21 @@ export interface EvalCaseExecutorOptions {
   secrets?: () => readonly string[];
 }
 
-/** How a trace a batch client returned ran: the execution the case grades. */
-export function batchTraceExecution(
-  trace: ClientRunResult,
+/** How a run a batch client returned went: the execution the case grades. */
+export function batchTranscriptExecution(
+  transcript: ClientRunResult,
   definition: ClientDefinition,
   servers: MCPConfig[]
 ): CaseExecution {
   return {
-    ...clientRunToExecution(trace, definition.evidence ?? 'none', servers),
-    preExecutionDurationMs: trace.durationMs,
+    ...clientRunToExecution(transcript, definition.evidence ?? 'none', servers),
+    preExecutionDurationMs: transcript.durationMs,
   };
 }
 
 /**
  * The eval's per-case executor for clients with `run()` or `open()`:
- * a case consumes a collected trace or runs on its own client.
+ * a case consumes a collected transcript or runs on its own client.
  */
 export function createEvalCaseExecutor(
   options: EvalCaseExecutorOptions
@@ -296,7 +296,7 @@ export function createEvalCaseExecutor(
 function clientExecutor(
   options: EvalCaseExecutorOptions
 ): (evalCase: EvalCase) => Promise<CaseExecution> {
-  const { servers, evalConfig, variant, env, batchTraces } = options;
+  const { servers, evalConfig, variant, env, batchTranscripts } = options;
   // MST's readiness check for the executor's batch (a variant's cases of
   // one dataset), before its first trial, and before the proxy starts when
   // proxied. It follows the client each case runs on, which a case can name
@@ -329,7 +329,7 @@ function clientExecutor(
     const declaration =
       (clientPatchOf(evalCase) as ClientConfig | undefined) ?? options.client;
     const definition = getClient(declaration.type);
-    const notReadyResult = batchTraces
+    const notReadyResult = batchTranscripts
       ? undefined
       : await notReady(definition, declaration.type);
     if (notReadyResult)
@@ -338,13 +338,13 @@ function clientExecutor(
         definition.evidence ?? 'none',
         servers
       );
-    if (batchTraces) {
-      const trace = batchTraces.get(evalCase.id)?.shift();
-      if (!trace)
+    if (batchTranscripts) {
+      const transcript = batchTranscripts.get(evalCase.id)?.shift();
+      if (!transcript)
         throw new Error(
-          'Batch trace already consumed or missing; refusing to resubmit.'
+          'Batch transcript already consumed or missing; refusing to resubmit.'
         );
-      return batchTraceExecution(trace, definition, servers);
+      return batchTranscriptExecution(transcript, definition, servers);
     }
     const trial = trials.get(evalCase.id) ?? 0;
     trials.set(evalCase.id, trial + 1);
@@ -371,7 +371,7 @@ function clientExecutor(
       const proxy = await options.toolVariant.proxy();
       const scope = randomUUID();
       const checkScope = randomUUID();
-      const trace = await timed(() =>
+      const transcript = await timed(() =>
         run(
           {
             prompt: evalCase.input ?? '',
@@ -384,8 +384,8 @@ function clientExecutor(
       );
       proxy.endScope(checkScope);
       return clientRunToExecution(
-        settleProxiedTrace(
-          trace,
+        settleProxiedTranscript(
+          transcript,
           proxy,
           proxy.endScope(scope).listedTools,
           servers,
@@ -395,10 +395,14 @@ function clientExecutor(
         servers
       );
     }
-    const trace = await timed(() =>
+    const transcript = await timed(() =>
       run({ prompt: evalCase.input ?? '', servers, env }, context)
     );
-    return clientRunToExecution(trace, definition.evidence ?? 'none', servers);
+    return clientRunToExecution(
+      transcript,
+      definition.evidence ?? 'none',
+      servers
+    );
   };
 }
 
@@ -407,10 +411,10 @@ async function timed(
   run: () => Promise<ClientRunResult>
 ): Promise<ClientRunResult> {
   const startedAt = new Date().toISOString();
-  const trace = await run();
+  const transcript = await run();
   return {
-    ...trace,
-    startedAt: trace.startedAt ?? startedAt,
-    completedAt: trace.completedAt ?? new Date().toISOString(),
+    ...transcript,
+    startedAt: transcript.startedAt ?? startedAt,
+    completedAt: transcript.completedAt ?? new Date().toISOString(),
   };
 }

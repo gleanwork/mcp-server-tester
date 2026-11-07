@@ -6,7 +6,7 @@ import {
   type BuiltInRubric,
   type ProviderKind,
 } from '../judge/judgeTypes.js';
-import type { TraceEvent } from './evalFrameworkTypes.js';
+import type { TranscriptEvent } from './evalFrameworkTypes.js';
 import { RubricSpecSchema } from '../judge/rubricJudge.js';
 import { removedKeys, renamedKeys } from './renamedKeys.js';
 
@@ -209,8 +209,8 @@ export interface EvalAssertions {
     calls: Array<{
       /** Tool or explicitly selected client event name. */
       name: string;
-      kind?: TraceEvent['kind'];
-      source?: TraceEvent['source'];
+      kind?: TranscriptEvent['kind'];
+      source?: TranscriptEvent['source'];
       server?: string;
       /** Expected arguments (partial match — extra keys are allowed) */
       arguments?: Record<string, unknown>;

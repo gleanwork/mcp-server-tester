@@ -46,7 +46,7 @@ function textBlock(title, value) {
   return el('section', null, el('h2', { text: title }), el('div', { class: 'text', text: value }));
 }
 function events(trial) {
-  if (!trial.traced) return el('p', { class: 'muted', text: 'The client recorded no calls.' });
+  if (!trial.hasTranscript) return el('p', { class: 'muted', text: 'The client recorded no calls.' });
   if (trial.events.length === 0) return el('p', { class: 'muted', text: 'No calls.' });
   const list = el('div');
   for (const event of trial.events) {
@@ -96,7 +96,7 @@ function render() {
     textBlock('Input', item.input),
     textBlock('Reference answer', item.reference),
   ]) if (block) main.append(block);
-  if (item.trace) main.append(trialView(item.trace));
+  if (item.transcript) main.append(trialView(item.transcript));
   if (item.sides) {
     const grid = el('div', { class: 'sides' });
     item.sides.forEach((side, i) => {

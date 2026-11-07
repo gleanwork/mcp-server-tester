@@ -92,7 +92,7 @@ export const JudgeLLMSchema = z.object({
   /**
    * For the `rubric` judge, the largest answer it grades (bytes): a larger
    * one fails without a model call. For a yes-or-no judge, the size each
-   * tool result in the trace is cut to.
+   * tool result in the transcript is cut to.
    */
   maxToolOutputSize: z.number().int().positive().optional(),
 });

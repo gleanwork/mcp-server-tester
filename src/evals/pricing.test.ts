@@ -80,9 +80,9 @@ describe('estimateCosts', () => {
 
 describe('call counts', () => {
   it('counts MCP calls and client-native events separately, per trial', () => {
-    const traced: EvalCaseResult = {
+    const recorded: EvalCaseResult = {
       ...result('t', undefined),
-      trace: {
+      transcript: {
         evidence: 'structured',
         events: [
           { kind: 'tool_call', source: 'mcp', name: 'search', server: 'docs' },
@@ -93,7 +93,7 @@ describe('call counts', () => {
       },
     };
     expect(
-      computeMetrics(['mcp_call_count', 'builtin_event_count'], [traced])
+      computeMetrics(['mcp_call_count', 'builtin_event_count'], [recorded])
         .aggregated
     ).toEqual({ mcp_call_count_mean: 2, builtin_event_count_mean: 2 });
   });

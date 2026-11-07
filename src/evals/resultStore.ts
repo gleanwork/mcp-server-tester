@@ -144,21 +144,21 @@ function isCaseResult(value: JsonObject): boolean {
   );
 }
 
-/** A trace keeps its structure; its answer and tool outputs go. */
-function stripTrace(trace: unknown): void {
-  if (!isJsonObject(trace)) return;
-  delete trace.finalText;
-  if (Array.isArray(trace.events))
-    for (const event of trace.events)
+/** A transcript keeps its structure; its answer and tool outputs go. */
+function stripTranscript(transcript: unknown): void {
+  if (!isJsonObject(transcript)) return;
+  delete transcript.finalText;
+  if (Array.isArray(transcript.events))
+    for (const event of transcript.events)
       if (isJsonObject(event)) delete event.output;
-  if (Array.isArray(trace.modelCalls))
-    for (const call of trace.modelCalls)
+  if (Array.isArray(transcript.modelCalls))
+    for (const call of transcript.modelCalls)
       if (isJsonObject(call)) {
         delete call.text;
         delete call.reasoningText;
       }
   // The host's content attributes, kept with `telemetry.host.content`.
-  const host = trace.hostTelemetry;
+  const host = transcript.hostTelemetry;
   if (isJsonObject(host)) {
     const strip = (attributes: unknown) => {
       if (isJsonObject(attributes))
@@ -237,13 +237,13 @@ function stripResponses(value: unknown): void {
     const request = value.request;
     if (isJsonObject(request) && isJsonObject(request.assertions))
       delete request.assertions.response;
-    stripTrace(value.trace);
+    stripTranscript(value.transcript);
     stripScoreMetadata(value.scores);
     stripClientTelemetry(value.clientTelemetry);
     if (Array.isArray(value.trialResults))
       for (const trial of value.trialResults)
         if (isJsonObject(trial)) {
-          stripTrace(trial.trace);
+          stripTranscript(trial.transcript);
           stripScoreMetadata(trial.scores);
           stripClientTelemetry(trial.clientTelemetry);
         }
@@ -257,11 +257,11 @@ function stripResponses(value: unknown): void {
  * every eval case result, wherever it is nested (runs, eval variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
  * `expect.response`, no `finalText`, event `output` or model call `text` in
- * its traces, no `content` in its client telemetry, and no judge score
+ * its transcripts, no `content` in its client telemetry, and no judge score
  * `metadata` (in it, its trials, or a combined score's `judgeResults`), and
  * every pairwise preference has no `metadata`.
  * These may hold data from the server under test. Everything else is kept,
- * including each trace's events, servers, arguments and usage.
+ * including each transcript's events, servers, arguments and usage.
  */
 export function redactStoredResponses<T>(value: T): T {
   // JSON's semantics, as stored results are JSON: a judge's metadata only has

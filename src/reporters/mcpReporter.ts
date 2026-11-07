@@ -476,7 +476,7 @@ function qualifyShared(
 
 /**
  * A project's case results with IDs that differ, since IDs name the run's
- * trace and score paths and pair a case across variants. A case two tests
+ * transcript and score paths and pair a case across variants. A case two tests
  * ran (one dataset run two ways) is `<id> (<test>)`; one ID in two datasets
  * of a test is `<dataset>/<id>`. Each project gets the same names, so cases
  * still pair across variants.
@@ -501,7 +501,7 @@ function distinguishCases(tests: TestCaseResults[]): EvalCaseResult[] {
 }
 
 /**
- * A project's case IDs name its trace and score paths, so they must differ,
+ * A project's case IDs name its transcript and score paths, so they must differ,
  * and in more than case: two tests running the same dataset, or one ID in
  * two datasets, would overwrite each other's results.
  */

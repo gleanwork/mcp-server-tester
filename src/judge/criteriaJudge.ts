@@ -52,7 +52,7 @@ export const CRITERIA_JUDGE: JudgeDefinition = defineQuestionJudge({
   reference: true,
   // A criterion can be about the answer alone, so the judge asks even when
   // the client didn't report its calls.
-  needsTrace: false,
+  needsTranscript: false,
   criteria: true,
   questions: (_input, options) =>
     options.criteria.map((criterion) => ({

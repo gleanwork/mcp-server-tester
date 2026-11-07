@@ -20,7 +20,8 @@ export type ClientCapability =
   | 'trace'
   | 'normalize';
 
-export type TraceSource =
+/** Where a client's transcript, or one part of it, came from. */
+export type TranscriptSource =
   | 'mcp-proxy'
   | 'mcp-server-logs'
   | 'client-local-transcript'
@@ -170,18 +171,18 @@ export interface ClientMetadata {
   clientVariant?: string;
   /** Recorded by earlier versions only; new results don't write it. */
   capabilitiesUsed?: ClientCapability[];
-  traceSource: TraceSource;
-  traceConfidence: ObservationConfidence;
-  traceLimitations?: string[];
+  transcriptSource: TranscriptSource;
+  transcriptConfidence: ObservationConfidence;
+  transcriptLimitations?: string[];
   artifacts: ClientArtifact[];
   session: ExternalClientSession;
   correlation: ExternalClientCorrelationMetadata;
   failureKind?: ExternalClientFailureKind;
   sources?: {
-    finalAnswer?: TraceSource;
-    toolCalls?: TraceSource;
-    usage?: TraceSource;
-    cost?: TraceSource;
+    finalAnswer?: TranscriptSource;
+    toolCalls?: TranscriptSource;
+    usage?: TranscriptSource;
+    cost?: TranscriptSource;
   };
   telemetry?: ExternalClientTelemetry;
   /** Controller API accounting is separate from the evaluated application's usage. */
@@ -212,6 +213,6 @@ export interface ClientMetadata {
 }
 
 export interface EvidenceSource {
-  source: TraceSource;
+  source: TranscriptSource;
   confidence: ObservationConfidence;
 }

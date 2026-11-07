@@ -70,7 +70,7 @@ async function leakyEval(caseIds: string[]) {
       plugins: [mock('leakyRunnerPlugin.ts'), mock('shardTestPlugin.ts')],
       client: 'shard-test/client/probe',
       datasets: ['./cases.json'],
-      // Full traces: the answer is stored too, and a run can be resumed.
+      // Full transcripts: the answer is stored too, and a run can be resumed.
       redactStoredResponses: false,
     })
   );
@@ -168,7 +168,7 @@ describe('a trial a worker sends back', () => {
     for (const caseId of ['alpha', 'beta'])
       expect(
         await fs.readFile(
-          path.join(resumed.outputDir, 'traces/default', caseId, '0.json'),
+          path.join(resumed.outputDir, 'transcripts/default', caseId, '0.json'),
           'utf8'
         )
       ).toContain('a token is [REDACTED]');

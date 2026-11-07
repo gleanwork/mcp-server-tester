@@ -1,4 +1,4 @@
-import type { ModelCall, TraceEvent } from './evalFrameworkTypes.js';
+import type { ModelCall, TranscriptEvent } from './evalFrameworkTypes.js';
 import type { LLMToolCall } from './mstClient/types.js';
 
 /**
@@ -147,7 +147,7 @@ export function timeClaudeToolCalls(
 }
 
 /** A tool a client's tool search surfaced. */
-export type SurfacedTool = NonNullable<TraceEvent['results']>[number];
+export type SurfacedTool = NonNullable<TranscriptEvent['results']>[number];
 
 // An MCP tool name in text, as Claude Code writes them.
 const MCP_TOOL_IN_TEXT = /mcp__[A-Za-z0-9_-]+?__[A-Za-z0-9_.-]+/g;

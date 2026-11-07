@@ -8,13 +8,13 @@ import {
 } from './simulatedWriteMarks.js';
 import { recordSimulatedWrite } from '../proxy/simulatedWrites.js';
 import type { CaseExecution } from './caseExecution.js';
-import type { TraceEvent } from './evalFrameworkTypes.js';
+import type { TranscriptEvent } from './evalFrameworkTypes.js';
 
 const call = (
   name: string,
   args: Record<string, unknown>,
   server = 'slack'
-): TraceEvent => ({
+): TranscriptEvent => ({
   kind: 'tool_call',
   source: 'mcp',
   server,
@@ -23,10 +23,10 @@ const call = (
   output: 'ok',
 });
 
-const completed = (events: TraceEvent[]): CaseExecution => ({
+const completed = (events: TranscriptEvent[]): CaseExecution => ({
   kind: 'completed',
   response: { success: true, response: '', toolCalls: [], events } as never,
-  trace: { events, finalText: '' } as never,
+  transcript: { events, finalText: '' } as never,
 });
 
 describe('withSimulatedWriteMarks', () => {
@@ -64,9 +64,9 @@ describe('withSimulatedWriteMarks', () => {
       const marks = async () =>
         (
           (await execute({ id: 'c' } as never)) as {
-            trace: { events: TraceEvent[] };
+            transcript: { events: TranscriptEvent[] };
           }
-        ).trace.events.map((event) => event.simulatedWrite === true);
+        ).transcript.events.map((event) => event.simulatedWrite === true);
       expect(await marks()).toEqual([false, true]);
       expect(await marks()).toEqual([true, false, false]);
     } finally {
@@ -99,17 +99,17 @@ describe('withSimulatedWriteMarks', () => {
             toolCalls,
             events: events.map((event) => ({ ...event })),
           } as never,
-          trace: { events, finalText: '' } as never,
+          transcript: { events, finalText: '' } as never,
         }),
         [file]
       );
       const execution = (await execute({ id: 'c' } as never)) as {
-        trace: { events: TraceEvent[] };
-        response: { events: TraceEvent[]; toolCalls: TraceEvent[] };
+        transcript: { events: TranscriptEvent[] };
+        response: { events: TranscriptEvent[]; toolCalls: TranscriptEvent[] };
       };
-      const marked = (list: TraceEvent[]) =>
+      const marked = (list: TranscriptEvent[]) =>
         list.map((event) => event.simulatedWrite === true);
-      expect(marked(execution.trace.events)).toEqual([true]);
+      expect(marked(execution.transcript.events)).toEqual([true]);
       expect(marked(execution.response.events)).toEqual([true]);
       expect(marked(execution.response.toolCalls)).toEqual([false, true]);
     } finally {
@@ -117,7 +117,7 @@ describe('withSimulatedWriteMarks', () => {
     }
   });
 
-  it('marks a write whose arguments the trace has redacted', async () => {
+  it('marks a write whose arguments the transcript has redacted', async () => {
     const dir = await fs.mkdtemp(join(os.tmpdir(), 'mst-marks-'));
     try {
       const file = join(dir, 'acme.jsonl');
@@ -130,7 +130,7 @@ describe('withSimulatedWriteMarks', () => {
         arguments: { url: 'https://hooks.example.test', secret },
         reply: '',
       });
-      // The executor's trace has the secret replaced.
+      // The executor's transcript has the secret replaced.
       const execute = withSimulatedWriteMarks(
         async () =>
           completed([
@@ -144,9 +144,9 @@ describe('withSimulatedWriteMarks', () => {
         () => [secret]
       );
       const execution = (await execute({ id: 'c' } as never)) as {
-        trace: { events: TraceEvent[] };
+        transcript: { events: TranscriptEvent[] };
       };
-      expect(execution.trace.events[0]?.simulatedWrite).toBe(true);
+      expect(execution.transcript.events[0]?.simulatedWrite).toBe(true);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }

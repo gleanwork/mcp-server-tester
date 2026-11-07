@@ -47,12 +47,12 @@ For `--runner` and `--detach` runs, put these in the `--secrets-file`: workers g
 - **A fresh, private `CODEX_HOME`** (also its `HOME`), holding only the `config.toml` MST writes (mode 0600): the model provider, the servers and their credentials, and settings that keep extras out of the result. Codex's plugins, apps, memories, bundled skills, history, update check, analytics and OpenAI-bound metrics are off. Nothing secret is on Codex's command line. The directory is removed after the trial.
 - **Its environment** is only what Codex needs (`PATH`, locale, proxy and CA settings), the model key, and the client's `env`. Codex's shell gets only core variables (`shell_environment_policy.inherit = "core"`).
 - **Servers.** Each server is required: one that doesn't start fails the trial with Codex's reason, instead of Codex answering without it. Tool calls are approved (`approval_policy = "never"`, tools `approve`): the servers, or a connector's dry-run proxy, decide what a write does. A server's `connectTimeoutMs` is Codex's startup timeout (default 60 s). Codex can't forward OAuth, client credentials, mTLS, a proxy, `retryAttempts` or client capabilities; an eval that sets them for a `codex-cli` server fails validation.
-- **Server labels** become Codex `mcp_servers` keys (characters other than letters, digits, `_` and `-` become `_`); the trace keeps the eval's labels.
+- **Server labels** become Codex `mcp_servers` keys (characters other than letters, digits, `_` and `-` become `_`); the transcript keeps the eval's labels.
 - **Tool metadata** (`tools`) reaches Codex through MST's local MCP proxy, as for other clients that connect to their servers.
 
-## The trace
+## The transcript
 
-The trace (`evidence: structured`) is Codex's own record:
+The transcript (`evidence: structured`) is Codex's own record:
 
 - **Events**, from Codex's event stream, timed as they arrived: each MCP call (`source: mcp`, with its server label, arguments, result text and error status), shell command (`shell`), web search (`web_search`) and file change (`apply_patch`), and each `tool_search` Codex ran to load deferred MCP tools, with the tools it returned in `results`.
 - **Model calls**, from the session's rollout file: one per model response, with its response ID, model, usage (uncached input, cached input, output, reasoning tokens), times, text and the calls it asked for (`toolCallIds`, Codex's native call IDs, which the events carry too).

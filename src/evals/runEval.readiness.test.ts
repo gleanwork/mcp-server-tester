@@ -116,7 +116,7 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
   const trial = async (runDir: string, caseId: string) =>
     JSON.parse(
       await fs.readFile(
-        path.join(runDir, 'traces', 'baseline', caseId, '0.json'),
+        path.join(runDir, 'transcripts', 'baseline', caseId, '0.json'),
         'utf8'
       )
     ) as { ending?: unknown; error?: string; infrastructureError?: boolean };

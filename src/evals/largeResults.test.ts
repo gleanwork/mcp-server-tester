@@ -31,7 +31,7 @@ function caseResult(index: number) {
     pass: true,
     scores: {},
     response: OUTPUT,
-    trace: { finalText: OUTPUT, events: [] },
+    transcript: { finalText: OUTPUT, events: [] },
   };
 }
 const CASES = Array.from({ length: 40 }, (_, index) => caseResult(index));

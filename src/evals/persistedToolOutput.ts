@@ -10,7 +10,7 @@
  *   ...
  *   </persisted-output>
  *
- * The model reads the file, so a trace that keeps only the placeholder hides
+ * The model reads the file, so a transcript that keeps only the placeholder hides
  * what the model saw from judges. While the client's files still exist (during
  * collection), this reads the full result back.
  *
@@ -141,7 +141,7 @@ export function resolvePersistedOutput(
 
 /**
  * Whether `full` is the result a placeholder stands for, as far as its
- * preview shows: for checking a trace collected with the file against a
+ * preview shows: for checking a transcript collected with the file against a
  * transcript read later without it.
  */
 export function matchesPersistedPreview(

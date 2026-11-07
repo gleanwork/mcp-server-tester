@@ -31,7 +31,7 @@ function Badge({ pass, unknown }: { pass: boolean; unknown?: boolean }) {
     return (
       <span
         className={`rounded px-1.5 text-xs font-bold ${TONE.warn}`}
-        title="The judge couldn't tell from the trace. The trial doesn't pass, and the judge's pass rate leaves it out."
+        title="The judge couldn't tell from the transcript. The trial doesn't pass, and the judge's pass rate leaves it out."
       >
         UNKNOWN
       </span>
@@ -103,12 +103,12 @@ function callText(event: RunReportEvent, max = 90): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-/** How a trial's trace reads in one line: its tool calls, or that it called none. */
-export function traceSummary(trial: RunReportTrial): string {
+/** How a trial's transcript reads in one line: its tool calls, or that it called none. */
+export function transcriptSummary(trial: RunReportTrial): string {
   const calls = trial.events.filter((e) => e.kind === 'tool_call');
   if (calls.length) return calls.map((e) => callText(e)).join(' → ');
-  if (trial.events.length || trial.traced) return 'called no tools';
-  return 'no trace recorded';
+  if (trial.events.length || trial.hasTranscript) return 'called no tools';
+  return 'no transcript recorded';
 }
 
 const EXCERPT = 280;
@@ -126,7 +126,7 @@ function Answer({ text }: { text: string }) {
   );
 }
 
-/** One trial in full: its scores, its trace, its answer. */
+/** One trial in full: its scores, its transcript, its answer. */
 export function TrialView({
   trial,
   index,
@@ -212,7 +212,7 @@ export function TrialView({
       {trial.events.length > 0 ? (
         <details>
           <summary className="cursor-pointer wrap-break-word font-mono text-xs text-muted-foreground">
-            {traceSummary(trial)}
+            {transcriptSummary(trial)}
           </summary>
           <ol className="mt-2 grid gap-2">
             {trial.events.map((event, i) => (
@@ -222,7 +222,7 @@ export function TrialView({
         </details>
       ) : (
         <p className="font-mono text-xs text-muted-foreground">
-          {traceSummary(trial)}
+          {transcriptSummary(trial)}
         </p>
       )}
       {trial.finalText && <Answer text={trial.finalText} />}

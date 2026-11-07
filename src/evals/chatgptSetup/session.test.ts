@@ -13,15 +13,15 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ControllerModule from './macController.js';
 import type * as ConfigModule from '../codexSetup/config.js';
-import type * as TraceModule from '../chatgpt/trace.js';
+import type * as TranscriptModule from '../chatgpt/transcript.js';
 import type * as ComputerUseModule from '../cowork/anthropicComputerUse.js';
 import {
-  findChatgptTrace,
-  parseChatgptTrace,
+  findChatgptTranscript,
+  parseChatgptTranscript,
   snapshotChatgptSessions,
-} from '../chatgpt/trace.js';
+} from '../chatgpt/transcript.js';
 import { runChatgptTurn, type ChatgptTurn } from '../chatgpt/turn.js';
-import { NativeTraceError } from '../nativeTraceError.js';
+import { NativeTranscriptError } from '../nativeTranscriptError.js';
 import { ChatgptAppSession } from './session.js';
 import { chatgptMacos } from '../chatgpt/macos.js';
 import { chatgptLinux } from '../chatgpt/linux.js';
@@ -54,9 +54,9 @@ vi.mock('../mcpReadiness.js', async (original) => ({
   ...(await original<typeof ReadinessModule>()),
   checkMcpServers: vi.fn(),
 }));
-vi.mock('../chatgpt/trace.js', async (original) => ({
-  ...(await original<typeof TraceModule>()),
-  findChatgptTrace: vi.fn(),
+vi.mock('../chatgpt/transcript.js', async (original) => ({
+  ...(await original<typeof TranscriptModule>()),
+  findChatgptTranscript: vi.fn(),
   snapshotChatgptSessions: vi.fn(),
 }));
 
@@ -135,7 +135,7 @@ beforeEach(() => {
     events.push('snapshot');
     return new Map();
   });
-  vi.mocked(findChatgptTrace).mockImplementation(
+  vi.mocked(findChatgptTranscript).mockImplementation(
     async (_root, _baseline, selector) => {
       const records = [
         {
@@ -189,7 +189,7 @@ beforeEach(() => {
       ];
       return {
         path: '/tmp/native-session.jsonl',
-        trace: parseChatgptTrace(
+        transcript: parseChatgptTranscript(
           records
             .map((record) =>
               JSON.stringify({ timestamp: new Date().toISOString(), ...record })
@@ -368,12 +368,12 @@ describe('ChatGPT batch app lifecycle', () => {
       ]);
       expect(restore).not.toHaveBeenCalled();
       expect(markers.size).toBe(3);
-      expect(vi.mocked(findChatgptTrace).mock.calls[0]![1]).not.toBe(
-        vi.mocked(findChatgptTrace).mock.calls[1]![1]
+      expect(vi.mocked(findChatgptTranscript).mock.calls[0]![1]).not.toBe(
+        vi.mocked(findChatgptTranscript).mock.calls[1]![1]
       );
       expect(
         vi
-          .mocked(findChatgptTrace)
+          .mocked(findChatgptTranscript)
           .mock.calls.every((args) => args[4]?.requireFreshSession)
       ).toBe(true);
     } finally {
@@ -472,8 +472,10 @@ describe('ChatGPT Linux native lifecycle', () => {
     await mkdir(join(home, 'evidence'), { mode: 0o700 });
     const transcript = join(sessions, 'rollout-native.jsonl');
     await writeFile(transcript, '{"type":"session_meta"}\n');
-    const implementation = vi.mocked(findChatgptTrace).getMockImplementation()!;
-    vi.mocked(findChatgptTrace).mockImplementation(async (...args) => {
+    const implementation = vi
+      .mocked(findChatgptTranscript)
+      .getMockImplementation()!;
+    vi.mocked(findChatgptTranscript).mockImplementation(async (...args) => {
       const found = await implementation(...args);
       return found ? { ...found, path: transcript } : found;
     });
@@ -543,7 +545,7 @@ describe('ChatGPT Linux native lifecycle', () => {
             surface: 'codex',
             submission: { status: 'completed' },
           },
-          traceSource: 'client-local-transcript',
+          transcriptSource: 'client-local-transcript',
           artifacts: [
             {
               kind: 'transcript',
@@ -553,7 +555,7 @@ describe('ChatGPT Linux native lifecycle', () => {
           ],
         });
       }
-      // Extra snapshots after each trace are the bounded evidence-candidate scan.
+      // Extra snapshots after each transcript are the bounded evidence-candidate scan.
       const submit = ['open', 'snapshot', 'native-submit'];
       expect(
         events.filter(
@@ -692,7 +694,7 @@ describe('ChatGPT Linux native lifecycle', () => {
       draftState,
     });
     expect(result.clientMetadata.computerUse).toBeUndefined();
-    expect(findChatgptTrace).not.toHaveBeenCalled();
+    expect(findChatgptTranscript).not.toHaveBeenCalled();
     expect(runLinuxChatgptDesktop).toHaveBeenCalledTimes(2);
   });
 });
@@ -846,15 +848,17 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     }
   );
   it('binds the session and turn on the first observation before waiting for completion', async () => {
-    const implementation = vi.mocked(findChatgptTrace).getMockImplementation()!;
-    vi.mocked(findChatgptTrace).mockImplementationOnce(async (...args) => {
+    const implementation = vi
+      .mocked(findChatgptTranscript)
+      .getMockImplementation()!;
+    vi.mocked(findChatgptTranscript).mockImplementationOnce(async (...args) => {
       const match = await implementation(...args);
-      match!.trace.complete = false;
+      match!.transcript.complete = false;
       return match;
     });
     const result = await turnOf(run());
     expect(result.success).toBe(true);
-    expect(vi.mocked(findChatgptTrace).mock.calls[1]![4]?.bound).toEqual({
+    expect(vi.mocked(findChatgptTranscript).mock.calls[1]![4]?.bound).toEqual({
       path: '/tmp/native-session.jsonl',
       sessionId: 'native-session',
       turnId: 'native-turn',
@@ -950,8 +954,8 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
     }
   );
   it('fails ambiguous native evidence and restores config', async () => {
-    vi.mocked(findChatgptTrace).mockRejectedValueOnce(
-      new NativeTraceError(
+    vi.mocked(findChatgptTranscript).mockRejectedValueOnce(
+      new NativeTranscriptError(
         'ambiguous_matching_sessions',
         'Ambiguous matching ChatGPT sessions for this query.'
       )
@@ -974,7 +978,7 @@ describe('ChatGPT AI-driven macOS lifecycle', () => {
       result.clientMetadata.computerUse?.submission.telemetry?.accounting
     ).toBe('partial');
     expect(runAnthropicComputerUseSubmission).toHaveBeenCalledTimes(1);
-    expect(findChatgptTrace).not.toHaveBeenCalled();
+    expect(findChatgptTranscript).not.toHaveBeenCalled();
     expect(restore).toHaveBeenCalledTimes(1);
   });
   it('preserves initially stopped app state', async () => {

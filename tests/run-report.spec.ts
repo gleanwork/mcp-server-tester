@@ -168,7 +168,7 @@ test.describe('run report', () => {
     // A trial's calls show their arguments; one that called nothing says so.
     await expect(dialog).toContainText('search(query: "Who handles refunds?")');
     await expect(dialog).toContainText('called no tools');
-    await expect(dialog).not.toContainText('No trace recorded');
+    await expect(dialog).not.toContainText('no transcript recorded');
     // The answer shows without opening anything.
     await expect(
       dialog.getByText('answer to Who handles refunds?').first()

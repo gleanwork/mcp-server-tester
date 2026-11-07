@@ -176,7 +176,7 @@ export {
   loadEvalDatasetFromObject,
 } from './evals/datasetLoader.js';
 // Types root APIs take or return: plugins and their judges, and the client
-// trace in tool-call assertions and case results.
+// transcript in tool-call assertions and case results.
 export type {
   Plugin,
   PluginMeta,
@@ -188,10 +188,10 @@ export type { PluginConfig } from './evals/evalConfig.js';
 // For code that calls validators or matchers outside a runner or the fixture.
 export { installPlugins } from './plugins/extensions.js';
 export type {
-  TraceEvent,
+  TranscriptEvent,
   ModelCall,
-  TraceEvidence,
-  Trace,
+  TranscriptEvidence,
+  Transcript,
   JudgeDefinition,
   JudgeScore,
 } from './evals/evalFrameworkTypes.js';

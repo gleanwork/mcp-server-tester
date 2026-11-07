@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExternalClientFailureKind } from '../clientTelemetryTypes.js';
 import {
-  findChatgptTrace,
+  findChatgptTranscript,
   PendingChatgptRecordError,
   snapshotChatgptSessions,
-} from './trace.js';
-import type * as TraceModule from './trace.js';
+} from './transcript.js';
+import type * as TranscriptModule from './transcript.js';
 import {
   captureChatgptTurn,
   chatgptBindingDeadline,
@@ -28,7 +28,7 @@ import type * as LinuxModule from './linuxDesktop.js';
 import { chatgptMacos } from './macos.js';
 import { chatgptLinux } from './linux.js';
 import { ChatgptAppSession } from '../chatgptSetup/session.js';
-import { NativeTraceError } from '../nativeTraceError.js';
+import { NativeTranscriptError } from '../nativeTranscriptError.js';
 import { NativeChatgptDriverError } from './linuxDesktop.js';
 import { validateLinuxChatgptConfig } from '../chatgptSetup/linuxProfile.js';
 import type * as LinuxProfileModule from '../chatgptSetup/linuxProfile.js';
@@ -51,9 +51,9 @@ vi.mock('./stallScreenshot.js', async (original) => ({
   ...(await original<object>()),
   saveStallScreenshot: screenshots.saveStallScreenshot,
 }));
-vi.mock('./trace.js', async (original) => ({
-  ...(await original<typeof TraceModule>()),
-  findChatgptTrace: vi.fn(),
+vi.mock('./transcript.js', async (original) => ({
+  ...(await original<typeof TranscriptModule>()),
+  findChatgptTranscript: vi.fn(),
   snapshotChatgptSessions: vi.fn(),
 }));
 vi.mock('./driver.js', async (original) => ({
@@ -172,7 +172,7 @@ const semanticTelemetry: SemanticDesktopTelemetry = {
 beforeEach(() => {
   clock.now = 1000;
   vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
-  vi.mocked(findChatgptTrace).mockReset().mockResolvedValue(undefined);
+  vi.mocked(findChatgptTranscript).mockReset().mockResolvedValue(undefined);
   vi.mocked(snapshotChatgptSessions).mockReset().mockResolvedValue(new Map());
   vi.mocked(submitChatgptQuery).mockReset();
   vi.mocked(runLinuxChatgptDesktop).mockReset();
@@ -233,7 +233,7 @@ describe('the trial prompt and its correlation', () => {
 describe('one trial, in order', () => {
   const answered = {
     path: '/sessions/rollout.jsonl',
-    trace: {
+    transcript: {
       sessionId: 'session',
       turnId: 'turn',
       model: 'gpt-test',
@@ -259,7 +259,7 @@ describe('one trial, in order', () => {
       submission_action: {},
       telemetry: computerUseTelemetry,
     });
-    vi.mocked(findChatgptTrace).mockResolvedValue(answered);
+    vi.mocked(findChatgptTranscript).mockResolvedValue(answered);
     const config: ChatgptAppConfig = { os: 'darwin', model: 'gpt-test' };
     const turn = await runChatgptTurn('private prompt', config, session, {
       caseId: 'one',
@@ -268,7 +268,7 @@ describe('one trial, in order', () => {
       success: true,
       response: 'native answer',
       clientMetadata: {
-        traceSource: 'client-local-transcript',
+        transcriptSource: 'client-local-transcript',
         session: { id: 'session', turnId: 'turn' },
         computerUse: { submission: { status: 'completed' } },
       },
@@ -277,7 +277,7 @@ describe('one trial, in order', () => {
       vi.mocked(session.assertCompatible).mock.invocationCallOrder[0]!,
       vi.mocked(snapshotChatgptSessions).mock.invocationCallOrder[0]!,
       vi.mocked(submitChatgptQuery).mock.invocationCallOrder[0]!,
-      vi.mocked(findChatgptTrace).mock.invocationCallOrder[0]!,
+      vi.mocked(findChatgptTranscript).mock.invocationCallOrder[0]!,
     ];
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(submitChatgptQuery).toHaveBeenCalledTimes(1);
@@ -295,7 +295,7 @@ describe('one trial, in order', () => {
       submission_action: {},
       telemetry: computerUseTelemetry,
     });
-    vi.mocked(findChatgptTrace).mockResolvedValue(answered);
+    vi.mocked(findChatgptTranscript).mockResolvedValue(answered);
     const completed = await runChatgptTurn(
       'private prompt',
       { os: 'darwin' },
@@ -332,7 +332,7 @@ describe('one trial, in order', () => {
         'ChatGPT requires exact_prompt or an included prompt_marker; uncorrelated telemetry is not supported.',
       clientMetadata: {
         failureKind: 'submission_failed',
-        traceLimitations: [
+        transcriptLimitations: [
           'Preflight failed before application or configuration changes.',
         ],
       },
@@ -448,8 +448,8 @@ describe('bounded native binding wait and failure classification', () => {
           toolCalls: [],
           clientMetadata: {
             failureKind: 'no_matching_session',
-            traceSource: 'none',
-            traceConfidence: 'unknown',
+            transcriptSource: 'none',
+            transcriptConfidence: 'unknown',
             session: {},
           },
         });
@@ -459,7 +459,7 @@ describe('bounded native binding wait and failure classification', () => {
         expect(JSON.stringify(result.clientMetadata)).not.toContain(
           'private-session'
         );
-        expect(findChatgptTrace).toHaveBeenCalledWith(
+        expect(findChatgptTranscript).toHaveBeenCalledWith(
           root,
           state.baseline,
           { strategy: 'exact_prompt', prompt: 'private prompt' },
@@ -487,8 +487,8 @@ describe('bounded native binding wait and failure classification', () => {
         success: false,
         clientMetadata: {
           failureKind: 'no_matching_session',
-          traceSource: 'none',
-          traceConfidence: 'unknown',
+          transcriptSource: 'none',
+          transcriptConfidence: 'unknown',
           artifacts: [expect.objectContaining({ kind: 'screenshot' })],
         },
       });
@@ -510,8 +510,11 @@ describe('bounded native binding wait and failure classification', () => {
     async (linux, surface, originator) => {
       const home = await mkdtemp(join(tmpdir(), 'chatgpt-origin-'));
       try {
-        const actual = await vi.importActual<typeof TraceModule>('./trace.js');
-        vi.mocked(findChatgptTrace).mockImplementation(actual.findChatgptTrace);
+        const actual =
+          await vi.importActual<typeof TranscriptModule>('./transcript.js');
+        vi.mocked(findChatgptTranscript).mockImplementation(
+          actual.findChatgptTranscript
+        );
         const state = turnState(home, linux);
         state.config.options!.surface = surface;
         const root = state.sessionsRoot as string;
@@ -560,11 +563,11 @@ describe('bounded native binding wait and failure classification', () => {
           success: true,
           response: 'done',
           clientMetadata: {
-            traceSource: 'client-local-transcript',
+            transcriptSource: 'client-local-transcript',
             correlation: { nativePromptMatch: 'native_terminal_lf' },
           },
         });
-        expect(findChatgptTrace).toHaveBeenCalledWith(
+        expect(findChatgptTranscript).toHaveBeenCalledWith(
           root,
           state.baseline,
           { strategy: 'exact_prompt', prompt: 'private prompt' },
@@ -590,9 +593,9 @@ describe('bounded native binding wait and failure classification', () => {
   ])(
     'fails a completed turn recorded with another %s as client_run_failed',
     async (_what, requested, message) => {
-      vi.mocked(findChatgptTrace).mockResolvedValue({
+      vi.mocked(findChatgptTranscript).mockResolvedValue({
         path: '/home/synthetic/.codex/sessions/rollout.jsonl',
-        trace: {
+        transcript: {
           sessionId: 'session',
           turnId: 'turn',
           model: 'gpt-test',
@@ -613,7 +616,7 @@ describe('bounded native binding wait and failure classification', () => {
         error: expect.stringContaining(message),
         clientMetadata: {
           failureKind: 'client_run_failed',
-          traceSource: 'none',
+          transcriptSource: 'none',
         },
       });
       expect(result).not.toHaveProperty('response');
@@ -623,8 +626,11 @@ describe('bounded native binding wait and failure classification', () => {
   it('binds the preserved Codex abort shape as client_run_failed, never completed success', async () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-codex-abort-'));
     try {
-      const actual = await vi.importActual<typeof TraceModule>('./trace.js');
-      vi.mocked(findChatgptTrace).mockImplementation(actual.findChatgptTrace);
+      const actual =
+        await vi.importActual<typeof TranscriptModule>('./transcript.js');
+      vi.mocked(findChatgptTranscript).mockImplementation(
+        actual.findChatgptTranscript
+      );
       clock.now = Date.parse('2026-09-23T15:34:00Z');
       const state = turnState(home, true);
       state.config.options!.surface = 'codex';
@@ -650,8 +656,8 @@ describe('bounded native binding wait and failure classification', () => {
         ],
         clientMetadata: {
           failureKind: 'client_run_failed',
-          traceSource: 'client-local-transcript',
-          traceConfidence: 'low',
+          transcriptSource: 'client-local-transcript',
+          transcriptConfidence: 'low',
           telemetry: {
             builtinToolCallCount: 1,
             toolProvenance: [expect.objectContaining({ pending: true })],
@@ -663,7 +669,7 @@ describe('bounded native binding wait and failure classification', () => {
         },
       });
       expect(result).not.toHaveProperty('response');
-      expect(findChatgptTrace).toHaveBeenCalledTimes(1);
+      expect(findChatgptTranscript).toHaveBeenCalledTimes(1);
       // The bound (aborted) transcript is preserved as evidence, not accepted.
       expect(result.clientMetadata.artifacts).toEqual([
         expect.objectContaining({
@@ -685,9 +691,9 @@ describe('bounded native binding wait and failure classification', () => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-bound-'));
     try {
       const state = turnState(home, true, 1500);
-      vi.mocked(findChatgptTrace).mockResolvedValue({
+      vi.mocked(findChatgptTranscript).mockResolvedValue({
         path: join(home, '.codex', 'sessions', 'rollout-bound.jsonl'),
-        trace: {
+        transcript: {
           sessionId: 'session',
           turnId: 'turn',
           complete: false,
@@ -712,11 +718,11 @@ describe('bounded native binding wait and failure classification', () => {
         success: false,
         clientMetadata: {
           failureKind: 'timeout',
-          traceConfidence: 'low',
-          traceSource: 'client-local-transcript',
+          transcriptConfidence: 'low',
+          transcriptSource: 'client-local-transcript',
           session: { id: 'session', turnId: 'turn' },
           telemetry: { partial: true, mcpToolCallCount: 1 },
-          traceLimitations: expect.arrayContaining([
+          transcriptLimitations: expect.arrayContaining([
             'Turn did not complete; tool calls and usage are partial.',
           ]),
           evidence: { usage: { confidence: 'low' } },
@@ -743,9 +749,9 @@ describe('bounded native binding wait and failure classification', () => {
       screenshots.saveStallScreenshot.mockResolvedValue({
         path: join(home, 'evidence', 'case-stall-x', 'stall-screenshot.png'),
       });
-      vi.mocked(findChatgptTrace).mockResolvedValue({
+      vi.mocked(findChatgptTranscript).mockResolvedValue({
         path,
-        trace: {
+        transcript: {
           sessionId: 'session',
           turnId: 'turn',
           complete: false,
@@ -787,13 +793,13 @@ describe('bounded native binding wait and failure classification', () => {
       const path = join(sessions, 'rollout-progress.jsonl');
       await writeFile(path, 'x');
       let polls = 0;
-      vi.mocked(findChatgptTrace).mockImplementation(async () => {
+      vi.mocked(findChatgptTranscript).mockImplementation(async () => {
         polls += 1;
         // Grow the file every ~60s of simulated time: never silent for 120s.
         if (polls % 80 === 0) await writeFile(path, 'x'.repeat(polls));
         return {
           path,
-          trace: {
+          transcript: {
             sessionId: 'session',
             turnId: 'turn',
             complete: false,
@@ -822,7 +828,7 @@ describe('bounded native binding wait and failure classification', () => {
       screenshots.saveStallScreenshot.mockResolvedValue({
         path: join(home, 'timeout.png'),
       });
-      vi.mocked(findChatgptTrace).mockRejectedValue(
+      vi.mocked(findChatgptTranscript).mockRejectedValue(
         new PendingChatgptRecordError()
       );
       const result = await captureChatgptTurn(state);
@@ -835,7 +841,7 @@ describe('bounded native binding wait and failure classification', () => {
         error: expect.stringContaining('binding deadline'),
         clientMetadata: {
           failureKind: 'parse_failure',
-          traceConfidence: 'unknown',
+          transcriptConfidence: 'unknown',
         },
       });
       expect(clock.now).toBe(4000);
@@ -857,12 +863,12 @@ describe('bounded native binding wait and failure classification', () => {
       const start = state.trial.startedAtMs;
       // Binds at +29s; a rewrite is then pending from +31s to the end: most
       // of the bound wait, though under half of the whole run.
-      vi.mocked(findChatgptTrace).mockImplementation(async () => {
+      vi.mocked(findChatgptTranscript).mockImplementation(async () => {
         if (clock.now < start + 29_000) return undefined;
         if (clock.now >= start + 31_000) throw new PendingChatgptRecordError();
         return {
           path,
-          trace: {
+          transcript: {
             sessionId: 'session',
             turnId: 'turn',
             complete: false,
@@ -878,7 +884,7 @@ describe('bounded native binding wait and failure classification', () => {
         success: false,
         clientMetadata: {
           failureKind: 'parse_failure',
-          traceConfidence: 'low',
+          transcriptConfidence: 'low',
         },
       });
     } finally {
@@ -892,7 +898,7 @@ describe('bounded native binding wait and failure classification', () => {
       const state = turnState(home, true, 4000);
       // Setup and submission took most of the run's time.
       clock.now += 2500;
-      vi.mocked(findChatgptTrace).mockRejectedValue(
+      vi.mocked(findChatgptTranscript).mockRejectedValue(
         new PendingChatgptRecordError()
       );
       const result = await captureChatgptTurn(state);
@@ -926,12 +932,12 @@ describe('bounded native binding wait and failure classification', () => {
           path: join(home, 'timeout.png'),
         });
         const end = state.trial.startedAtMs + state.trial.timeoutMs;
-        vi.mocked(findChatgptTrace).mockImplementation(async () => {
+        vi.mocked(findChatgptTranscript).mockImplementation(async () => {
           if (clock.now >= end - 800) throw new PendingChatgptRecordError();
           return bindState === 'bound'
             ? {
                 path,
-                trace: {
+                transcript: {
                   sessionId: 'session',
                   turnId: 'turn',
                   complete: false,
@@ -971,10 +977,10 @@ describe('bounded native binding wait and failure classification', () => {
         source: 'mcp' as const,
         arguments: { query: 'q' },
       };
-      vi.mocked(findChatgptTrace)
+      vi.mocked(findChatgptTranscript)
         .mockResolvedValueOnce({
           path,
-          trace: {
+          transcript: {
             sessionId: 'session',
             turnId: 'turn',
             complete: false,
@@ -992,7 +998,7 @@ describe('bounded native binding wait and failure classification', () => {
         toolCalls: [call],
         clientMetadata: {
           failureKind: 'parse_failure',
-          traceConfidence: 'low',
+          transcriptConfidence: 'low',
         },
       });
       // Stops at the 120s stall limit, not the 900s case timeout.
@@ -1013,11 +1019,11 @@ describe('bounded native binding wait and failure classification', () => {
       await mkdir(join(home, 'evidence'));
       const path = join(root, 'rollout.jsonl');
       await writeFile(path, 'fixture native transcript');
-      vi.mocked(findChatgptTrace)
+      vi.mocked(findChatgptTranscript)
         .mockRejectedValueOnce(new PendingChatgptRecordError())
         .mockResolvedValue({
           path,
-          trace: {
+          transcript: {
             sessionId: 'session',
             turnId: 'turn',
             complete: true,
@@ -1030,7 +1036,7 @@ describe('bounded native binding wait and failure classification', () => {
         });
       const result = await captureChatgptTurn(state);
       expect(result).toMatchObject({ success: true });
-      expect(findChatgptTrace).toHaveBeenCalledTimes(2);
+      expect(findChatgptTranscript).toHaveBeenCalledTimes(2);
       expect(runLinuxChatgptDesktop).not.toHaveBeenCalled();
       expect(submitChatgptQuery).not.toHaveBeenCalled();
     } finally {
@@ -1038,13 +1044,13 @@ describe('bounded native binding wait and failure classification', () => {
     }
   });
 
-  // Each rejection is what the trace reader throws for that condition; the
+  // Each rejection is what the transcript reader throws for that condition; the
   // kind is carried by the error, never read from its wording.
   it.each(
     (
       [
         [
-          new NativeTraceError(
+          new NativeTranscriptError(
             'ambiguous_matching_sessions',
             'Ambiguous matching ChatGPT sessions for this query.'
           ),
@@ -1057,7 +1063,7 @@ describe('bounded native binding wait and failure classification', () => {
           'parse_failure',
         ],
         [
-          new NativeTraceError(
+          new NativeTranscriptError(
             'client_run_failed',
             'Bound ChatGPT session/turn changed or no longer matches the query.'
           ),
@@ -1077,15 +1083,15 @@ describe('bounded native binding wait and failure classification', () => {
   )('preserves failure classifier: %s', async (message, error, failureKind) => {
     const home = await mkdtemp(join(tmpdir(), 'chatgpt-classifier-'));
     try {
-      vi.mocked(findChatgptTrace).mockRejectedValue(error);
+      vi.mocked(findChatgptTranscript).mockRejectedValue(error);
       const result = await captureChatgptTurn(turnState(home, true));
       expect(result).toMatchObject({
         success: false,
         error: message,
         clientMetadata: {
           failureKind,
-          traceConfidence: 'unknown',
-          traceSource: 'none',
+          transcriptConfidence: 'unknown',
+          transcriptSource: 'none',
         },
       });
       expect(clock.now).toBe(1000);
@@ -1100,9 +1106,9 @@ describe('bounded native binding wait and failure classification', () => {
       const state = turnState(home, true);
       await mkdir(state.evidenceDir!, { recursive: true });
       // The sessions root doesn't exist, so the transcript can't be copied.
-      vi.mocked(findChatgptTrace).mockResolvedValue({
+      vi.mocked(findChatgptTranscript).mockResolvedValue({
         path: join(home, '.codex', 'sessions', 'rollout.jsonl'),
-        trace: {
+        transcript: {
           sessionId: 'session',
           turnId: 'turn',
           complete: true,
@@ -1120,11 +1126,11 @@ describe('bounded native binding wait and failure classification', () => {
           'The matched native ChatGPT transcript could not be preserved as evidence.',
         clientMetadata: {
           failureKind: 'client_run_failed',
-          traceSource: 'none',
-          traceConfidence: 'unknown',
+          transcriptSource: 'none',
+          transcriptConfidence: 'unknown',
         },
       });
-      expect(result.clientMetadata.traceLimitations).toContain(
+      expect(result.clientMetadata.transcriptLimitations).toContain(
         'The matched native transcript could not be preserved.'
       );
     } finally {
@@ -1259,7 +1265,7 @@ describe('submission follows the trial OS', () => {
       clientMetadata: { failureKind: 'submission_failed' },
     });
     expect(submitChatgptQuery).toHaveBeenCalledTimes(1);
-    expect(findChatgptTrace).not.toHaveBeenCalled();
+    expect(findChatgptTranscript).not.toHaveBeenCalled();
   });
 });
 
@@ -1319,7 +1325,7 @@ describe('what the trial OS decides', () => {
       const state = turnState('/home/synthetic', linux, 2_000);
       state.evidenceDir = undefined;
       await captureChatgptTurn(state);
-      expect(vi.mocked(findChatgptTrace).mock.calls[0]![4]).toMatchObject({
+      expect(vi.mocked(findChatgptTranscript).mock.calls[0]![4]).toMatchObject({
         nativeMarkdownEscapes: escapes,
       });
     }
@@ -1362,10 +1368,10 @@ describe('what the trial OS decides', () => {
     expect(screenshots.saveStallScreenshot).toHaveBeenCalledWith(
       expect.objectContaining({ label: 'submit' })
     );
-    expect(result!.clientMetadata.traceLimitations).toContain(
+    expect(result!.clientMetadata.transcriptLimitations).toContain(
       'ChatGPT display at submission failure screenshot unavailable: no display in unit tests'
     );
-    expect(result!.clientMetadata.traceLimitations).toContain(
+    expect(result!.clientMetadata.transcriptLimitations).toContain(
       'Native evidence directory is unavailable.'
     );
   });

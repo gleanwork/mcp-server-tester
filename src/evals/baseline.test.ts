@@ -38,6 +38,30 @@ describe('baselines from an earlier MST', () => {
       `Baseline ${file} was written by an earlier MST. 2.0 renamed result fields`
     );
   });
+
+  it.each([
+    ['trace', { trace: { events: [] } }],
+    ['toolCallTrace', { toolCallTrace: {} }],
+    ['a trial traceEvidence', { trialResults: [{ traceEvidence: 'none' }] }],
+  ])(
+    'fails on a 2.0 release candidate field, %s, naming its new name',
+    async (_label, fields) => {
+      const { writeFile } = await import('fs/promises');
+      const file = join(dir, 'baseline.json');
+      await writeFile(
+        file,
+        JSON.stringify({
+          total: 1,
+          passed: 1,
+          failed: 0,
+          caseResults: [{ id: 'a', pass: true, source: 'eval', ...fields }],
+        })
+      );
+      await expect(loadBaseline(file)).rejects.toThrow(
+        /2\.0 release candidate, before ADR 0013 renamed its result fields \(trace → transcript, toolCallTrace → toolCallTranscript, traceEvidence → transcriptEvidence/
+      );
+    }
+  );
 });
 
 const makeResult = (

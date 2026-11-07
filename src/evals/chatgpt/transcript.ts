@@ -6,7 +6,7 @@ import type { UsageMetrics } from '../../types/index.js';
 import type { ModelCall } from '../evalFrameworkTypes.js';
 import type { LLMToolCall } from '../mstClient/types.js';
 import type { ExternalClientTelemetry } from '../clientTelemetryTypes.js';
-import { NativeTraceError } from '../nativeTraceError.js';
+import { NativeTranscriptError } from '../nativeTranscriptError.js';
 import type { ChatgptSurface } from './driver.js';
 
 const MAX_FILES = 10_000;
@@ -42,7 +42,7 @@ export function expectedChatgptOriginator(
   }
 }
 
-export interface ChatgptTracePolicy {
+export interface ChatgptTranscriptPolicy {
   /** Defaults to Work for existing macOS and marker-based callers. */
   surface?: ChatgptSurface;
   /** Configured MCP labels; native `mcp__<label>` namespaces map back to them. */
@@ -220,7 +220,7 @@ function targetedResourceHelpers(
   return helpers;
 }
 
-export interface ChatgptTrace {
+export interface ChatgptTranscript {
   promptMatch?: ChatgptPromptMatch;
   nativePromptSha256?: string;
   sessionId: string;
@@ -284,29 +284,29 @@ export async function snapshotChatgptSessions(
   return files;
 }
 
-export type ChatgptTraceSelector =
+export type ChatgptTranscriptSelector =
   | string
   | { strategy: 'exact_prompt'; prompt: string };
-export interface ChatgptTraceBinding {
+export interface ChatgptTranscriptBinding {
   path: string;
   sessionId: string;
   turnId: string;
 }
 
 /** Exact-prompt discovery never reads a session that existed at the baseline. */
-export async function findChatgptTrace(
+export async function findChatgptTranscript(
   root: string,
   baseline: ChatgptSessionSnapshot,
-  selector: ChatgptTraceSelector,
+  selector: ChatgptTranscriptSelector,
   startedAfterMs: number,
-  options: ChatgptTracePolicy & {
+  options: ChatgptTranscriptPolicy & {
     requireFreshSession?: boolean;
     observedBeforeMs?: number;
-    bound?: ChatgptTraceBinding;
+    bound?: ChatgptTranscriptBinding;
   } = {}
-): Promise<{ path: string; trace: ChatgptTrace } | undefined> {
+): Promise<{ path: string; transcript: ChatgptTranscript } | undefined> {
   const current = await snapshotChatgptSessions(root);
-  const matches: Array<{ path: string; trace: ChatgptTrace }> = [];
+  const matches: Array<{ path: string; transcript: ChatgptTranscript }> = [];
   for (const [path, info] of current) {
     const old = baseline.get(path);
     if (old && typeof selector !== 'string') continue;
@@ -325,21 +325,21 @@ export async function findChatgptTrace(
     } finally {
       await file.close();
     }
-    const trace = parseChatgptTrace(
+    const transcript = parseChatgptTranscript(
       content,
       selector,
       startedAfterMs,
       options.observedBeforeMs,
       options
     );
-    if (trace && old && options.requireFreshSession)
+    if (transcript && old && options.requireFreshSession)
       throw new Error(
         'ChatGPT submitted into an existing native session instead of a fresh chat.'
       );
-    if (trace) matches.push({ path, trace });
+    if (transcript) matches.push({ path, transcript });
   }
   if (matches.length > 1)
-    throw new NativeTraceError(
+    throw new NativeTranscriptError(
       'ambiguous_matching_sessions',
       'Ambiguous matching ChatGPT sessions for this query.'
     );
@@ -348,23 +348,23 @@ export async function findChatgptTrace(
     options.bound &&
     (!match ||
       match.path !== options.bound.path ||
-      match.trace.sessionId !== options.bound.sessionId ||
-      match.trace.turnId !== options.bound.turnId)
+      match.transcript.sessionId !== options.bound.sessionId ||
+      match.transcript.turnId !== options.bound.turnId)
   )
-    throw new NativeTraceError(
+    throw new NativeTranscriptError(
       'client_run_failed',
       'Bound ChatGPT session/turn changed or no longer matches the query.'
     );
   return match;
 }
 
-export function parseChatgptTrace(
+export function parseChatgptTranscript(
   content: string,
-  selector: ChatgptTraceSelector,
+  selector: ChatgptTranscriptSelector,
   startedAfterMs = 0,
   observedBeforeMs = Infinity,
-  options: ChatgptTracePolicy = {}
-): ChatgptTrace | undefined {
+  options: ChatgptTranscriptPolicy = {}
+): ChatgptTranscript | undefined {
   const expectedOriginator = expectedChatgptOriginator(options.surface);
   if (typeof selector !== 'string' && !selector.prompt.trim())
     throw new Error('Exact-prompt correlation requires a non-empty prompt.');
@@ -478,7 +478,7 @@ export function parseChatgptTrace(
   if (!sessionId || originator !== expectedOriginator || matches.size === 0)
     return undefined;
   if (matches.size > 1)
-    throw new NativeTraceError(
+    throw new NativeTranscriptError(
       'ambiguous_matching_sessions',
       'Ambiguous matching ChatGPT turns for this query.'
     );
@@ -487,7 +487,7 @@ export function parseChatgptTrace(
     typeof selector !== 'string' &&
     (userTurns[0] !== turnId || userTexts.get(turnId)?.size !== 1)
   )
-    throw new NativeTraceError(
+    throw new NativeTranscriptError(
       'client_run_failed',
       'Exact-prompt match is not the unique initial user message of a fresh ChatGPT session.'
     );
@@ -516,7 +516,7 @@ export function parseChatgptTrace(
     source: 'mcp' | 'builtin';
     span: [number, number];
   }> = [];
-  const history: ChatgptTrace['conversationHistory'] = [];
+  const history: ChatgptTranscript['conversationHistory'] = [];
   const seenItems = new Set<string>();
   const nativeMessageIds = new Set(
     turn
@@ -1166,7 +1166,7 @@ export type ChatgptPromptMatch =
 function promptMatchKind(
   stored: string,
   prompt: string,
-  options: ChatgptTracePolicy
+  options: ChatgptTranscriptPolicy
 ): ChatgptPromptMatch | undefined {
   if (stored === prompt) return 'exact';
   const body = stored.endsWith('\n') ? stored.slice(0, -1) : stored;

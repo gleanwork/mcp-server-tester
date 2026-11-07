@@ -236,7 +236,7 @@ describe('validateText', () => {
       const response = {
         response: 'final answer text',
         clientMetadata: {
-          traceLimitations: ['metadata-only text'],
+          transcriptLimitations: ['metadata-only text'],
         },
       };
 

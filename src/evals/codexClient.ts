@@ -10,7 +10,7 @@
  * history or update checks). Nothing secret is passed as an argument. The
  * trial runs in an empty working directory (or `cwd`), both removed after.
  *
- * The trace is Codex's own record (see codexTrace.ts): its streamed events,
+ * The transcript is Codex's own record (see codexTranscript.ts): its streamed events,
  * and the session's rollout file for each model response's usage and the
  * tool searches it ran. Its model endpoint and credential come from
  * `resolveLLMEndpoint('openai')`: OPENAI_API_KEY, or OPENAI_BASE_URL with a
@@ -38,7 +38,10 @@ import {
 } from './trialEnding.js';
 import type { ClientDiagnostics } from '../types/index.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
-import { buildCodexTrace, type TimedCodexEvent } from './codexTrace.js';
+import {
+  buildCodexTranscript,
+  type TimedCodexEvent,
+} from './codexTranscript.js';
 import type {
   ClientDefinition,
   ClientRunContext,
@@ -503,18 +506,23 @@ async function runCodex(
     const endedAt = new Date().toISOString();
     const threadId = stream.find((e) => e.event.type === 'thread.started')
       ?.event.thread_id as string | undefined;
-    const trace = buildCodexTrace(stream, await findRollout(home, threadId), {
-      servers: labels,
-      ...(options.model ? { model: options.model } : {}),
-      startedAt,
-      endedAt,
-    });
+    const transcript = buildCodexTranscript(
+      stream,
+      await findRollout(home, threadId),
+      {
+        servers: labels,
+        ...(options.model ? { model: options.model } : {}),
+        startedAt,
+        endedAt,
+      }
+    );
     const host =
       receiver && threadId ? await receiver.collect([threadId]) : undefined;
     // As Cowork and Claude Code do: the host's events name each call's
-    // request, so the trace joins them the same way for every client.
-    const modelCalls = withHostRequestIds(trace.modelCalls, host);
-    const error = failure?.message ?? (trace.error && redact(trace.error));
+    // request, so the transcript joins them the same way for every client.
+    const modelCalls = withHostRequestIds(transcript.modelCalls, host);
+    const error =
+      failure?.message ?? (transcript.error && redact(transcript.error));
     // Codex started its turn and ran out of the case's time: its own time, a
     // trial that failed (ADR 0010). Before the turn started, the failure kind
     // says how it ended.
@@ -523,26 +531,26 @@ async function runCodex(
         ? stream.some((e) => e.event.type === 'turn.started')
           ? TRIAL_ENDING
           : undefined
-        : trace.error === undefined
+        : transcript.error === undefined
           ? undefined
           : codexTurnEnding(
-              redact(trace.error),
-              trace.events.length > 0 || trace.finalText.length > 0
+              redact(transcript.error),
+              transcript.events.length > 0 || transcript.finalText.length > 0
             );
     const durationMs = Date.parse(endedAt) - Date.parse(startedAt);
-    const toolMs = trace.telemetry.toolWallDurationMs;
+    const toolMs = transcript.telemetry.toolWallDurationMs;
     return {
-      finalText: trace.finalText,
-      events: trace.events,
+      finalText: transcript.finalText,
+      events: transcript.events,
       ...(modelCalls ? { modelCalls } : {}),
-      ...(trace.usage ? { usage: trace.usage } : {}),
+      ...(transcript.usage ? { usage: transcript.usage } : {}),
       startedAt,
       completedAt: endedAt,
       durationMs,
       ...(typeof toolMs === 'number'
         ? { llmDurationMs: Math.max(0, durationMs - toolMs) }
         : {}),
-      telemetry: trace.telemetry,
+      telemetry: transcript.telemetry,
       ...(host ? { hostTelemetry: host } : {}),
       ...(error ? { error } : {}),
       ...(ending ? { ending } : {}),

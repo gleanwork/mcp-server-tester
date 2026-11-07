@@ -22,7 +22,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { ToolSurfaceProxy } from './toolSurfaceProxy.js';
 import type { SkillLoad } from '../types/index.js';
-import { clientRunToExecution } from './clientTrace.js';
+import { clientRunToExecution } from './clientTranscript.js';
 import { runApiClient } from './mstClient/run.js';
 import type * as ClientRunModule from './mstClient/run.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
@@ -155,7 +155,7 @@ describe('executeEvalCase', () => {
 });
 
 describe('custom executeCase results', () => {
-  it('derives a trace from the existing response view without changing provenance', async () => {
+  it('derives a transcript from the existing response view without changing provenance', async () => {
     const result = await runEvalCase(
       { id: 'custom', input: 'query' },
       {},
@@ -174,14 +174,14 @@ describe('custom executeCase results', () => {
       }
     );
     expect(result.pass).toBe(true);
-    expect(result.trace).toMatchObject({
+    expect(result.transcript).toMatchObject({
       finalText: 'answer',
       events: [
         { kind: 'tool_call', source: 'mcp', name: 'search', output: 'found' },
         { kind: 'tool_call', source: 'builtin', name: 'Bash', id: 'native' },
       ],
     });
-    expect(result.traceEvidence).toBeUndefined();
+    expect(result.transcriptEvidence).toBeUndefined();
   });
 
   it('keeps explicit native events instead of rebuilding them from toolCalls', async () => {
@@ -209,8 +209,8 @@ describe('custom executeCase results', () => {
         }),
       }
     );
-    expect(result.trace?.events).toEqual(events);
-    expect(result.traceEvidence).toBe('structured');
+    expect(result.transcript?.events).toEqual(events);
+    expect(result.transcriptEvidence).toBe('structured');
   });
 
   it('fails a pre-2.0 untyped result loudly', async () => {
@@ -311,7 +311,11 @@ describe('client skill loads at the result boundary', () => {
 });
 
 describe('createEvalCaseExecutor', () => {
-  const trace: ClientRunResult = { finalText: 'ok', events: [], durationMs: 7 };
+  const transcript: ClientRunResult = {
+    finalText: 'ok',
+    events: [],
+    durationMs: 7,
+  };
 
   /** Install `host` as `test/client/<name>` and return that reference. */
   function installTestClient(name: string, client: ClientDefinition): string {
@@ -326,19 +330,19 @@ describe('createEvalCaseExecutor', () => {
 
   afterEach(() => resetPluginsForTests());
 
-  it('consumes each batch trace once and never resubmits', async () => {
+  it('consumes each batch transcript once and never resubmits', async () => {
     const type = installTestClient('case-execution-batch-host', {
       schema: z.object({ type: z.string() }),
       evidence: 'structured',
       async open() {
-        throw new Error('Must consume collected traces, never reopen.');
+        throw new Error('Must consume collected transcripts, never reopen.');
       },
     });
     const execute = createEvalCaseExecutor({
       servers: [],
       client: { type },
       evalConfig,
-      batchTraces: new Map([['client', [trace]]]),
+      batchTranscripts: new Map([['client', [transcript]]]),
     });
     await expect(execute(clientCase)).resolves.toMatchObject({
       kind: 'completed',
@@ -347,12 +351,13 @@ describe('createEvalCaseExecutor', () => {
     });
     await expect(execute(clientCase)).resolves.toMatchObject({
       kind: 'failed',
-      error: 'Batch trace already consumed or missing; refusing to resubmit.',
+      error:
+        'Batch transcript already consumed or missing; refusing to resubmit.',
     });
   });
 
   it('dispatches per case to run() with the declared evidence', async () => {
-    const run = vi.fn(async () => trace);
+    const run = vi.fn(async () => transcript);
     const type = installTestClient('case-execution-run-host', {
       schema: z.object({ type: z.string() }),
       evidence: 'observed',
@@ -492,7 +497,9 @@ describe('createEvalCaseExecutor', () => {
       ).toBe(true);
       expect(context.evalConfig).not.toHaveProperty('tools');
       expect(
-        execution.kind === 'completed' ? execution.trace?.events : undefined
+        execution.kind === 'completed'
+          ? execution.transcript?.events
+          : undefined
       ).toMatchObject([
         { name: 'find_skills', rawName: 'find_more', server: 'agg' },
       ]);
@@ -518,7 +525,7 @@ describe('createEvalCaseExecutor', () => {
     });
 
     it('leaves a client that applies variants itself on the real servers', async () => {
-      const run = vi.fn(async () => trace);
+      const run = vi.fn(async () => transcript);
       const type = installTestClient('native-variant-host', {
         schema: z.object({ type: z.string() }),
         evidence: 'structured',
