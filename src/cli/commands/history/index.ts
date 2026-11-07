@@ -301,7 +301,7 @@ export function formatHistory(
     );
   out.push(
     '',
-    'Cases and Trials are pass rates; Since previous is the paired test on the headline cases against the previous complete run of the same era. Cost and tokens are per trial.'
+    'Cases and Trials are pass rates; Since previous is the paired test on the headline cases against the previous run of the same era that was complete for the variant. Cost and tokens are per trial.'
   );
   return out.join('\n');
 }
