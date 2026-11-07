@@ -21,6 +21,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [grade - Grade a Stored Run Again](#grade---grade-a-stored-run-again)
 - [optimize - Improve Tool Metadata](#optimize---improve-tool-metadata)
 - [runs - Detached Runs](#runs---detached-runs)
+- [history - An Eval's Runs Over Time](#history---an-evals-runs-over-time)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open a Run's Report](#open---open-a-runs-report)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
@@ -1116,6 +1117,34 @@ npx mst runs cancel e33763 --config ./eval.json --results gs://my-bucket/evals
 - **Connector servers need a shared credential store** (`--store <namespace>/credential-store/<name>`, one whose definition is `shared`), since the coordinator machine refreshes the grants. Sign in to it with `mst auth --store`, and use it for local runs too, or a provider that rotates refresh tokens invalidates the local copy.
 - **The run's status is in the result store**, at `<eval>/detached/<id>/`: `status.json` (rewritten every 30 seconds), `log.txt` and, after `cancel`, `cancel`. Each `mst runs` command takes the eval config and the `--results` the run was given, and an id or its last six characters.
 - **`runs cancel`** asks the coordinator to stop: within a minute it interrupts the command under way as Ctrl-C does, deleting its machines and keeping what was collected. A coordinator that stops reporting for five minutes shows as `lost`; finish its run with `mst run --resume <run> --detach`.
+
+## `history` - An Eval's Runs Over Time
+
+```bash
+npx mst history .mcp-test-results/<eval name>          # an eval's local runs
+npx mst history --config ./eval.json                    # its result store's runs, or its local runs without one
+npx mst history --config ./eval.json --results gs://my-bucket/evals --variant glean --since 2026-10-01
+npx mst history .mcp-test-results/<eval name> --json    # the history as mst.history/v1
+npx mst history .mcp-test-results/<eval name> --rebuild # build history.json again from the runs
+```
+
+Prints a table per variant, newest run first: the case and trial pass rates, the change since the previous comparable run, each judge's pass rate, each pairwise judge's win rate against the baseline with its 95% range, cost and tokens per trial, the median and 95th-percentile trial time, and the share of attempts lost to infrastructure failures. A line marks where an era starts, with what changed. The last column marks partial, incomplete and ungraded runs, regrades, and runs whose change is clearly worse (`REGRESSED`).
+
+```text
+glean
+  Run     Collected (UTC)   Cases  Trials  Since previous      quality  prefer vs official  Cost/trial  Tokens/trial  p50     p95     Infra
+  f5a7ea  2026-11-09 09:34  50%    72%       −11 pts unclear   72%      71% (43–89)         $0.058      19.8k         18.9 s  27.6 s  0%
+  01c9e5  2026-11-02 09:11  42%    78%     (partial)           78%      —                   $0.056      19.2k         19.0 s  27.5 s  0%     partial
+  d6dcda  2026-10-26 09:38  42%    75%     new era             75%      38% (16–65)         $0.061      20.8k         23.6 s  32.5 s  0%
+    ── era 2 starts above: judge changed: acme/judge/quality
+  de6e78  2026-10-19 09:39  17%    56%       +3.7 pts unclear  56%      58% (32–81)         $0.057      19.5k         23.2 s  33.1 s  0%
+  cf0679  2026-10-12 09:38  45%    73%     ▲ +25 pts better    73%      46% (22–71)         $0.057      19.2k         17.1 s  32.7 s  8%     1 case incomplete
+```
+
+- **Where the runs are.** With an eval's directory, its runs. With `--config`, the result store's runs (`--results`, else the eval config's `results.store`), or with no store, the local runs under `--output-dir` (default `.mcp-test-results/<name>`).
+- **Since previous** is the paired test `mst run` reports against its previous run, on the headline cases, against the previous run of the variant's era that was complete for it. An era starts when the datasets, the eval config's judges or the variant's setup change; a run in a new era says `new era`. See [The eval's history](./evaluation-framework.md#the-evals-history).
+- **The runs are the truth.** `mst history` reads `history.json` and builds the rows of runs it doesn't have yet, so a run another machine just finished shows. It writes nothing; `--rebuild` builds every row again and writes `history.json`.
+- **Options:** `--variant <names...>`, `--since <date>` (runs collected on or after it), `--limit <n>` (most runs per variant, default 20), `--json`, `--rebuild`, `--output-dir`, `--root-dir`.
 
 ## `batch` - Run Several Eval Configs
 

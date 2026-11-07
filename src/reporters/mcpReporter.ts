@@ -43,6 +43,7 @@ import { buildVariantDeltas } from '../evals/variantDeltas.js';
 import { writeRunReport } from '../evals/runReport.js';
 import { CORE_METRICS, computeMetrics } from '../evals/metrics.js';
 import { compareWithPrevious, findPreviousRun } from '../evals/runBaseline.js';
+import { localHistoryLocation, recordInHistory } from '../evals/runHistory.js';
 import packageJson from '../../package.json' with { type: 'json' };
 
 /** Options the reporter no longer takes, and what to do instead. */
@@ -384,6 +385,10 @@ export default class MCPReporter implements Reporter {
         redactStoredResponses: redact,
       },
       stored
+    );
+    // The eval's history has a row for this run, as `mst run`'s do.
+    await recordInHistory(localHistoryLocation(evalDirectory), this.name, (m) =>
+      this.logError(m)
     );
     const report = await writeRunReport(runDirectory);
     if (!summary.partial) await writeLatest(evalDirectory, runId, timestamp);

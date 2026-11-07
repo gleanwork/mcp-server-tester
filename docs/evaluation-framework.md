@@ -997,6 +997,7 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 ```text
 .mcp-test-results/<eval name>/
 ├── latest.json                     # the newest complete, full run
+├── history.json                    # a row per run, rebuildable from runs/ (mst.history/v1; mst history)
 ├── calibrations/<judge>/<identity>.json  # how one judge identity agreed with people (mst judges check)
 └── runs/<run-id>/
     ├── run.json                    # what ran: variants, datasets (with content hashes), judges, environment, phases
@@ -1265,6 +1266,18 @@ Every run has a `runId`. Its summary's `previousRun` compares it with the previo
 ```
 
 `sameConfig` is false when the eval config changed between the runs, so a difference may come from the configuration rather than the server: the report and `mst run` then show no change. Datasets aren't part of that hash.
+
+### The eval's history
+
+Every run updates the eval's `history.json` (format `mst.history/v1`): a row per run, newest first, with what the run ran with and what each variant measured. `mst history` prints it. A result store has its own, beside its `latest.json`, built from the store's runs, so a CI machine's history isn't only its own runs.
+
+- **What a row has.** The run's ID, when its traces were collected, its status (`complete`, `incomplete`, `ungraded`, `failed`), whether it was partial and how it was narrowed, the eval config's `configId` and `contentHash`, MST's version, the datasets (with their content hashes and snapshots), every case ID and a hash of them, the eval config's judges (with their identities), and per variant: its client, model, servers, the client apps its trials recorded, and a hash of its setup. Per variant it measures the case and trial pass rates, the headline pass rate with its likely range, each judge's pass rate and mean score, each pairwise judge's wins, ties and losses against the baseline with the win rate's 95% Wilson range (a tie counts as half a win), cost per trial with its `costSource` and `unpricedModels`, tokens per trial (input, output, cache reads and writes), the median and 95th percentile of trial time, tool and MCP calls per trial, infrastructure failures and client errors, and each complete case's passed and counted trials.
+- **Eras.** Consecutive full runs that measured the same way are one era. The datasets changing (cases added or removed, a case edited, another snapshot) or the eval config's judges changing (one added, removed, or with another judge identity) starts a new era for every variant; a variant's own setup changing (its client, model, options, servers, tool metadata, input template or judges) starts one for it. Each row lists what changed since the previous full run, and whether it ends the era. A client app's version, MST's version, the trials per case and the eval config's hash are noted but don't: a weekly run of the same eval on a new client build is what the history is for. A client option `run.json` records only as a keyed hash counts by its name, since its value can't be matched across runs.
+- **Since previous.** Each variant's change since the previous run of its era that was complete for it (collected and graded, none of its cases incomplete) is the paired test `mst run` reports against its previous run, on the headline cases, with the cases that regressed and improved. `regressed` is true when that test says worse. A run in a new era has none: old runs are never hidden, and never compared across an era's start.
+- **Partial runs** (`--variant`, `--case`, …) have rows, marked `partial` with their selection, but no era and no change: they're never compared with full runs. Ungraded and failed runs have rows without pass rates. A run with incomplete cases is on the line, but no later run is compared with it for the variants whose cases were incomplete. Tool optimization runs aren't in the history.
+- **Regrades.** A regrade (`<run-id>.g2`) is a row of its own, ordered by when its traces were collected. A collection's newest grading that finished grading is the one shown; the gradings it replaces have `supersededBy`. A regrade with a new judge belongs to the new judge's era.
+- **A cache of the runs.** Each row is built from the run's `run.json`, `summary.json` and `results.json`, and kept until the run's `run.json` changes (a resumed run) or a newer MST builds rows differently. `mst history --rebuild` builds every row again. The file is replaced in one step. Two runs can finish at once, and a store can't lock, so after writing it MST lists the runs again and writes once more if one appeared; a history that still misses a run gets it at the next write or `mst history`.
+- **Old runs.** A run in an older format is listed in `skipped` with why. Fields a run's MST didn't record (judge identities, client apps) are left out of its row.
 
 ## CLI
 

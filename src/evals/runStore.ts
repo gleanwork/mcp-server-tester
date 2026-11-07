@@ -76,7 +76,16 @@ export function fileRunStore(dir: string): RunStore {
     async put(key, body) {
       const file = at(key);
       await fs.mkdir(path.dirname(file), { recursive: true });
-      await fs.writeFile(file, body);
+      // In one step, as a GCS object is: a reader sees the old file or the
+      // new one, never half of one (latest.json, history.json).
+      const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
+      try {
+        await fs.writeFile(temporary, body);
+        await fs.rename(temporary, file);
+      } catch (error) {
+        await fs.rm(temporary, { force: true });
+        throw error;
+      }
     },
     async get(key) {
       try {
