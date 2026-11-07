@@ -146,7 +146,10 @@ Escape backslashes in JSON (`\\d`).
 
 ### Judges
 
-A judge is an LLM that scores the trial from 0 to 1. A case lists its judges in `judges`, beside `assertions`. Use the built-in `rubric` judge with a built-in rubric (`correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`) or your own text:
+A judge is an LLM that grades the trial. A case lists its judges in `judges`, beside `assertions`. The built-in judges:
+
+- **Yes-or-no judges** read the trace (the request, each tool call and result, the answer) and answer yes (1), no (0) or `unknown` when the trace can't settle it. `task-completion`: did the assistant do what was asked? `grounded-in-tools`: does a tool result support every claim? `tool-use`: right tools, fitting arguments, no needless calls, errors recovered? `criteria`: does the trial meet each of the case's own criteria, `{ "id", "text", "required"? }`? Prefer these: one narrow question is easier for a judge to get right and for a person to check.
+- **`rubric`** scores the answer from 0 to 1 against a built-in rubric (`correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`) or your own text.
 
 ```json
 {
@@ -154,6 +157,16 @@ A judge is an LLM that scores the trial from 0 to 1. A case lists its judges in 
   "input": "How many days of PTO do new employees get?",
   "expected": { "answer": "New employees get 20 days of PTO a year." },
   "judges": [
+    "task-completion",
+    {
+      "type": "criteria",
+      "criteria": [
+        {
+          "id": "pto-days",
+          "text": "The answer says new employees get 20 days."
+        }
+      ]
+    },
     { "type": "rubric", "rubric": "correctness", "threshold": 0.75 },
     {
       "type": "rubric",
@@ -165,13 +178,15 @@ A judge is an LLM that scores the trial from 0 to 1. A case lists its judges in 
 }
 ```
 
-- A judge passes when its mean score reaches its `threshold` (default 0.7), and every listed judge must pass.
+- A `rubric` judge passes when its mean score reaches its `threshold` (default 0.7). Every listed judge must pass, and `unknown` is not a pass.
 - `expected.answer` is what the judge compares the answer with, unless the judge sets `reference`.
 - An eval config's `judges` apply to every case, on top of the case's own.
-- The rubric judge's LLM settings sit next to it: `provider` (`anthropic` by default, `vertex-anthropic`, `anthropic-agent-sdk`, `openai`, `google`), `model`, `temperature`, `maxTokens`. The default `anthropic` judge needs `@anthropic-ai/sdk` and `ANTHROPIC_API_KEY`.
+- A judge's LLM settings sit next to it: `provider` (`anthropic` by default, `vertex-anthropic`, `anthropic-agent-sdk`, `openai`, `google`), `model`, `temperature`, `maxTokens`. The default `anthropic` judge needs `@anthropic-ai/sdk` and `ANTHROPIC_API_KEY`.
 - A plugin's judge is named `<namespace>/judge/<name>`: `"acme/judge/completeness"`, or `{ "type": "acme/judge/completeness", "threshold": 0.8 }` with options. Load the plugin where the cases run (Step 5).
 
-Judges cost a model call per trial (times `reps`). Prefer `toolsTriggered` when the question is which tool was called.
+Judges cost a model call per trial (times `reps`; `tool-use` makes four, `criteria` one per criterion). Prefer `toolsTriggered` when the question is which tool was called.
+
+A judge's pass rate is only as good as the judge. Before a decision rests on one, measure it against your own labels: `calibrate-mcp-judge`.
 
 ## Step 4: Set trials and a pass threshold
 
@@ -296,7 +311,7 @@ npx mst run --config evals/eval.json
 
 `mst run` prints a row per variant (cases passed, trial pass rate, MCP calls, tokens, cost, time) and the change since the previous run of the same eval config. It writes the run to `.mcp-test-results/<name>/runs/<run-id>/` (`results.json`, `summary.json`, traces, scores and `report/`) and exits 1 if any case failed. `npx mst open` opens the newest run's report: the result, the variants compared, what differs, every case and trial, and why trials failed. Set `redactStoredResponses: false` in the eval config to see answers and tool outputs in it.
 
-Every key, the clients, and what variants inherit: [references/eval-configs.md](references/eval-configs.md).
+Every key, the clients, and what variants inherit: [references/eval-configs.md](references/eval-configs.md). Reading the results, incomplete cases, resuming and regrading a run: `run-mcp-eval`.
 
 ## Step 6: Compare variants
 

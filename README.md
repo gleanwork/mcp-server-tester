@@ -223,14 +223,16 @@ for client-specific fields, environment rules, and setup ownership.
 
 ## AI Skills
 
-MST ships agent skills that teach your coding assistant MST and help it write tests and evals, and improve tool metadata. Four skills are included:
+MST ships agent skills that teach your coding assistant MST and help it write, run and read tests and evals, check judges, and improve tool metadata. Six skills are included:
 
-| Skill                        | Description                                                                         |
-| ---------------------------- | ----------------------------------------------------------------------------------- |
-| `mcp-tester-guide`           | Reference: vocabulary, config, fixtures, matchers, eval configs, CLI, 1.x renames   |
-| `write-mcp-test`             | Write Playwright tests that call tools directly and check them with matchers        |
-| `write-mcp-eval`             | Write eval datasets and eval configs: cases a client and model act on, and variants |
-| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `mst optimize`                |
+| Skill                        | Description                                                                            |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `mcp-tester-guide`           | Reference: which skill to use, vocabulary, config, clients, judges, CLI, 1.x renames   |
+| `write-mcp-test`             | Write Playwright tests that call tools directly and check them with matchers           |
+| `write-mcp-eval`             | Write eval datasets and eval configs: cases a client and model act on, and variants    |
+| `run-mcp-eval`               | Run an eval and read its results: incomplete cases, resuming, regrading, Docker and CI |
+| `calibrate-mcp-judge`        | Measure a judge against your own labels with `mst label` and `mst judges check`        |
+| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `mst optimize`                   |
 
 Install them with the [`skills` CLI](https://github.com/vercel-labs/skills), which supports Claude Code, Codex, Cursor, Copilot and many other agents:
 
