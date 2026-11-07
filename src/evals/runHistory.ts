@@ -61,6 +61,7 @@ import {
   measureAgainstBaseline,
 } from './variantComparison.js';
 import { wilson } from './judgeCheck.js';
+import { reporterUiDirectory } from './runReport.js';
 
 /** The history format. Readers ignore fields they don't know. */
 export const HISTORY_FORMAT = 'mst.history/v1' as const;
@@ -1020,6 +1021,7 @@ async function writeHistoryIndex(
  * swap, so after writing it lists the runs again and writes once more when
  * one appeared meanwhile. A history that still misses a run is rebuilt by
  * the next write or read: the runs are the truth, the index a cache.
+ * The history page (`history/index.html`) is written from the index last.
  */
 export async function updateHistory(
   location: HistoryLocation,
@@ -1037,10 +1039,38 @@ export async function updateHistory(
       again.runs.length === index.runs.length &&
       again.runs.every((row) => known.has(row.runId))
     )
-      return index;
+      break;
     index = again;
   }
+  await writeHistoryPage(location, index);
   return index;
+}
+
+/**
+ * Writes the history page into `<eval>/history/`: the reporter UI and the
+ * history as `data.js`, so it opens from `file://` with nothing else. Its
+ * links to runs' reports are relative (`../runs/<id>/report/index.html`).
+ * The data holds no answers, tool outputs or reasoning: only IDs and
+ * numbers, so a redacted run's history is as redacted as the run.
+ */
+async function writeHistoryPage(
+  location: HistoryLocation,
+  index: HistoryIndex
+): Promise<void> {
+  const ui = reporterUiDirectory();
+  const prefix = `${location.evalKey}/history/`;
+  const files = (await fs.readdir(ui, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(entry.parentPath, entry.name));
+  for (const file of files)
+    await location.store.put(
+      prefix + path.relative(ui, file).split(path.sep).join('/'),
+      await fs.readFile(file)
+    );
+  await location.store.put(
+    `${prefix}data.js`,
+    `window.MST_HISTORY = ${JSON.stringify(index)};\n`
+  );
 }
 
 /**

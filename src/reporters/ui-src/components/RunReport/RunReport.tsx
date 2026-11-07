@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ChartLine } from 'lucide-react';
 import type {
   MCPRunReportData,
   PairedChange,
@@ -698,11 +699,23 @@ function Header({ data }: { data: MCPRunReportData }) {
         <h1 className="text-2xl font-semibold tracking-tight">
           {run.evalName}
         </h1>
-        {clients.length === 1 && (
-          <span className="font-mono text-sm text-muted-foreground">
-            {clients[0]}
-          </span>
-        )}
+        <span className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          {clients.length === 1 && (
+            <span className="font-mono text-sm text-muted-foreground">
+              {clients[0]}
+            </span>
+          )}
+          {run.historyPath && (
+            <a
+              href={run.historyPath}
+              className="inline-flex items-center gap-1 text-sm text-primary underline-offset-2 hover:underline"
+              title="This eval's runs over time: pass rates, judges, cost and time for each variant"
+            >
+              <ChartLine className="h-4 w-4" aria-hidden="true" />
+              History
+            </a>
+          )}
+        </span>
       </div>
       <p className="text-[15px] text-muted-foreground">
         {new Date(run.createdAt).toLocaleString()} · {run.cases}{' '}

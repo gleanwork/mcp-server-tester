@@ -473,6 +473,36 @@ describe('mst CLI', () => {
     });
   });
 
+  describe('history', () => {
+    it('writes and opens an eval directory history page with open --history', async () => {
+      await project.write({
+        '.mcp-test-results': { 'my-eval': { runs: { notes: 'not a run' } } },
+      });
+      const result = await runBin(
+        'open',
+        '--history',
+        '--print',
+        `${project.baseDir}/.mcp-test-results/my-eval`
+      );
+      expect(result.exitCode).toBe(0);
+      expect(String(result.stdout).trim()).toMatch(
+        /my-eval\/history\/index\.html$/
+      );
+      const history = await runBin(
+        'history',
+        `${project.baseDir}/.mcp-test-results/my-eval`
+      );
+      expect(history.exitCode).toBe(0);
+      expect(history.stdout).toContain('No runs of my-eval');
+    });
+
+    it('says what to give when the directory has no runs', async () => {
+      const result = await runBin('history', project.baseDir);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain("isn't an eval's directory");
+    });
+  });
+
   describe('open command', () => {
     it('exits with code 1 when there is no run in the default directory', async () => {
       const result = await runBin('open');

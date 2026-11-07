@@ -722,6 +722,16 @@ program
     '.mcp-test-results'
   )
   .option('--print', "Print the report's path instead of opening it")
+  .option(
+    '--history',
+    "Open the eval's history page instead: the eval the path or --config names, or the newest"
+  )
+  .option('-c, --config <path>', 'With --history: the eval config')
+  .option(
+    '--output-dir <dir>',
+    "With --config: the eval's directory, if mst run was given one"
+  )
+  .option('--root-dir <dir>', 'Fallback directory for relative paths', '.')
   .action(open);
 
 // Env command: prepare an environment once (ADR 0004)

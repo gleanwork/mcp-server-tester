@@ -25,5 +25,6 @@ An eval that runs every week, a variant on the server under development next to 
 ## Consequences
 
 - `mst history` prints an eval's history, from a directory or from a result store, and `--rebuild` writes it again.
+- The history page (`<eval>/history/index.html`) is written from `history.json` with it, as a static page like a run's report, and each run's report links to it. It holds only IDs and numbers, so it needs no redaction of its own.
 - Each run directory is read once more after it is written. A first write over an eval with many runs reads them all once.
 - Every row records only what MST already records. Trial time percentiles come from trials' wall time; MST records no per-call latency, no asked-user count and no time to first tool call yet.

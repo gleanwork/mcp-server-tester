@@ -294,6 +294,23 @@ describe('the history of an eval', () => {
       await fs.readFile(path.join(dir, 'history.json'), 'utf8')
     ) as HistoryIndex;
     expect(written.runs).toHaveLength(6);
+    // With its page: the reporter UI and the history as data.js.
+    for (const file of ['index.html', 'app.js', 'styles.css'])
+      await expect(
+        fs.stat(path.join(dir, 'history', file))
+      ).resolves.toBeTruthy();
+    const script = await fs.readFile(
+      path.join(dir, 'history', 'data.js'),
+      'utf8'
+    );
+    expect(script.startsWith('window.MST_HISTORY = ')).toBe(true);
+    expect(
+      (
+        JSON.parse(
+          script.replace(/^window\.MST_HISTORY = /, '').replace(/;\s*$/, '')
+        ) as HistoryIndex
+      ).runs
+    ).toEqual(written.runs);
   });
 
   it("measures each variant against the previous run of its era, with the run's paired test", async () => {
@@ -576,6 +593,11 @@ describe('the history in a result store', () => {
     expect(written.runs.map((run) => run.runId)).toEqual(
       index.runs.map((run) => run.runId)
     );
+    // The page is in the store too, beside the runs it links to.
+    expect(store.files.has('weekly/history/index.html')).toBe(true);
+    expect(
+      Buffer.from(store.files.get('weekly/history/data.js')!).toString('utf8')
+    ).toMatch(/^window\.MST_HISTORY = \{"format":"mst\.history\/v1"/);
   });
 
   it('writes again when a run finished while it was writing', async () => {
