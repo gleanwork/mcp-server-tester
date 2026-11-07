@@ -42,7 +42,7 @@ npx @gleanwork/mcp-server-tester init [options]
 
 - `-n, --name <name>` - Project name (default: `my-mcp-tests`)
 - `-d, --dir <directory>` - Target directory (default: ".")
-- `--command <command>` - The command that starts a stdio MCP server, such as `"node server.js"`
+- `--command <command>` - The command that starts a stdio MCP server, such as `"node server.js"`. Quote an argument that holds spaces: `'node "/Users/a/My Server/index.js"'`. Nothing else is expanded: no variables, globs or backslash escapes
 - `--url <url>` - The URL of an HTTP MCP server. Pass `--command` or `--url`, not both
 - `--install` / `--no-install` - Run `npm install` in the new project (default: yes)
 - `--force` - Write into a project directory that already exists
@@ -166,7 +166,7 @@ npx mst generate [options]
 
 - `-c, --config <path>` - Path to MCP config JSON file
 - `--url <url>` - The URL of an HTTP MCP server, instead of `--config`
-- `--command <command>` - The command that starts a stdio MCP server, instead of `--config`
+- `--command <command>` - The command that starts a stdio MCP server, instead of `--config`. Quote an argument that holds spaces, as for `init`
 - `-o, --output <path>` - Spec file to write or add to (default: "tests/generated.spec.ts")
 - `-s, --snapshot` - Compare every response with a saved snapshot
 - `--tool <name>` - Record one call to this tool, without asking

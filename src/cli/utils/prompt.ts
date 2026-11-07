@@ -1,8 +1,15 @@
 /**
  * Line prompts for the CLI's interactive commands (`init`, `generate`).
  *
- * Each prompt writes a question and reads one line. Lines come from an async
- * iterator, which buffers them, so answers piped in all at once aren't lost.
+ * Each prompt sets the question as readline's prompt and reads one line, so
+ * readline redraws the question when the user edits the line. Lines come from
+ * an async iterator, which buffers them, so answers piped in all at once
+ * aren't lost.
+ *
+ * In a terminal, readline turns Ctrl+C into an event instead of a signal
+ * while the prompter is open, even between prompts. So Ctrl+C rejects
+ * `cancelled`, and a command races its work in flight (connecting, a tool
+ * call) against it.
  * A command asks only when `isInteractive()`; without a terminal it takes its
  * answers from flags and names the flag it is missing.
  */
@@ -28,6 +35,8 @@ export interface Prompter {
   confirm(question: string, defaultValue: boolean): Promise<boolean>;
   /** Lists numbered choices and asks for one, by number. */
   choose<T extends string>(question: string, choices: Choice<T>[]): Promise<T>;
+  /** Rejects with `PromptCancelledError` on Ctrl+C. Never resolves. */
+  cancelled: Promise<never>;
   close(): void;
 }
 
@@ -51,23 +60,33 @@ export function createPrompter(
     terminal: (output as { isTTY?: boolean }).isTTY === true,
   });
   const lines = rl[Symbol.asyncIterator]();
-  let cancelled = false;
+  let isCancelled = false;
+  let cancel: (error: PromptCancelledError) => void = () => {};
+  const cancelled = new Promise<never>((_, reject) => {
+    cancel = reject;
+  });
+  // A command that never races against it mustn't see an unhandled rejection.
+  cancelled.catch(() => {});
   // Without a listener, readline only pauses on Ctrl+C.
   rl.on('SIGINT', () => {
-    cancelled = true;
+    isCancelled = true;
     output.write('\n');
     rl.close();
+    cancel(new PromptCancelledError());
   });
 
   async function readLine(question: string): Promise<string> {
-    if (cancelled) throw new PromptCancelledError();
-    output.write(question);
+    if (isCancelled) throw new PromptCancelledError();
+    rl.setPrompt(question);
+    rl.prompt();
     const next = await lines.next();
-    if (cancelled || next.done === true) throw new PromptCancelledError();
+    if (isCancelled || next.done === true) throw new PromptCancelledError();
     return String(next.value).trim();
   }
 
   return {
+    cancelled,
+
     async text(question, defaultValue) {
       const hint = defaultValue ? ` (${defaultValue})` : '';
       const answer = await readLine(`${question}${hint}: `);

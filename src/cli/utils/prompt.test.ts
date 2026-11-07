@@ -17,7 +17,46 @@ function prompterFor(answers: string[], { end = true } = {}) {
   return { prompter, written: () => written };
 }
 
+/** A prompter on a fake terminal, where readline handles keys itself. */
+function terminalPrompter() {
+  const input = new PassThrough();
+  const output = Object.assign(new PassThrough(), {
+    isTTY: true,
+    columns: 80,
+  });
+  let written = '';
+  output.on('data', (chunk: Buffer) => {
+    written += chunk.toString();
+  });
+  const prompter = createPrompter({ input, output });
+  return { prompter, input, written: () => written };
+}
+
 describe('createPrompter', () => {
+  it('redraws the question, not a stray prompt, when the user edits a line', async () => {
+    const { prompter, input, written } = terminalPrompter();
+    const answer = prompter.text('Project name', 'my-mcp-tests');
+    // "abcd", Backspace, Enter.
+    input.write('abcd\x7f\r');
+    expect(await answer).toBe('abc');
+    const redrawn = written().split('\x1b[0J').at(-1) ?? '';
+    expect(redrawn).toContain('Project name (my-mcp-tests): abc');
+    expect(written()).not.toContain('> ');
+    prompter.close();
+  });
+
+  it('rejects `cancelled` on Ctrl+C, even when no prompt is waiting', async () => {
+    const { prompter, input } = terminalPrompter();
+    input.write('\x03');
+    await expect(prompter.cancelled).rejects.toBeInstanceOf(
+      PromptCancelledError
+    );
+    await expect(prompter.text('Name')).rejects.toBeInstanceOf(
+      PromptCancelledError
+    );
+    prompter.close();
+  });
+
   it('reads answers piped in before the questions are asked', async () => {
     const { prompter } = prompterFor(['first', 'second']);
     expect(await prompter.text('One')).toBe('first');

@@ -9,7 +9,7 @@
  */
 
 import { createBintastic, type BintasticProject } from 'bintastic';
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import packageJson from '../../../package.json' with { type: 'json' };
@@ -642,6 +642,50 @@ describe('mst CLI', () => {
       expect(source).toContain('toMatchToolSnapshot("tool_1-2")');
     });
 
+    it('writes --name, --description, --suite and --exact into a new spec', async () => {
+      const result = await runBin(
+        'generate',
+        '--command',
+        SERVER_COMMAND,
+        '--tool',
+        'tool_1',
+        '--name',
+        'answers ok',
+        '--description',
+        'First line\nglobalThis.ran = true;',
+        '--suite',
+        'Readiness tools',
+        '--exact'
+      );
+      expect(result.exitCode).toBe(0);
+
+      const source = readFileSync(
+        path.join(project.baseDir, 'tests/generated.spec.ts'),
+        'utf8'
+      );
+      expect(source).toContain('test.describe("Readiness tools"');
+      expect(source).toContain('test("answers ok"');
+      expect(source).toContain('// First line\n  // globalThis.ran = true;');
+      expect(source).toContain('toMatchToolResponse(');
+    });
+
+    it('runs a --command whose quoted path has a space', async () => {
+      const dir = path.join(project.baseDir, 'My Server');
+      mkdirSync(dir);
+      copyFileSync(READINESS_SERVER, path.join(dir, 'server.mjs'));
+      const result = await runBin(
+        'generate',
+        '--command',
+        `"${process.execPath}" "${path.join(dir, 'server.mjs')}"`,
+        '--tool',
+        'tool_1'
+      );
+
+      expect(result.stderr).toBe('');
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('Tests added: 1');
+    });
+
     it('names the tools a server has when --tool is not one of them', async () => {
       const result = await runBin(
         'generate',
@@ -655,6 +699,32 @@ describe('mst CLI', () => {
       expect(result.stderr).toContain(
         'The server has no tool "nope". Its tools: tool_1.'
       );
+    });
+  });
+
+  describe('login command', () => {
+    it('rejects an invalid URL without a terminal', async () => {
+      const result = await runBin('login', 'not-a-url');
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Invalid URL: not-a-url');
+      expect(result.stderr).not.toContain('Raw mode');
+    });
+
+    it('reports a server it cannot reach without a terminal', async () => {
+      const result = await runBin(
+        'login',
+        'http://127.0.0.1:9/mcp',
+        '--state-dir',
+        path.join(project.baseDir, 'state')
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toContain(
+        'Authenticating with http://127.0.0.1:9/mcp'
+      );
+      expect(result.stderr).toContain('Authentication failed');
+      expect(result.stderr).not.toContain('Raw mode');
     });
   });
 

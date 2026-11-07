@@ -24,6 +24,7 @@ import {
   createMCPClientForConfig,
 } from '../../../mcp/clientFactory.js';
 import { suggestAssertions } from '../../utils/assertionSuggester.js';
+import { splitCommandLine } from '../../utils/commandLine.js';
 import { jsonPreview, status } from '../../utils/format.js';
 import {
   createPrompter,
@@ -75,6 +76,7 @@ export async function generate(options: GenerateOptions): Promise<void> {
   const oneShot = options.tool !== undefined;
   const prompter = !oneShot && isInteractive() ? createPrompter() : null;
   let client: Client | null = null;
+  let cancelled = false;
   try {
     if (!oneShot && !prompter) {
       throw missingFlagError('--tool <name> (with --args <json>)', 'a tool');
@@ -83,8 +85,16 @@ export async function generate(options: GenerateOptions): Promise<void> {
     const args = oneShot ? parseArgsFlag(options.args) : {};
     const config = await resolveConfig(options, prompter);
     print('Connecting to MCP server...');
-    client = await connect(config);
-    const tools = await listTools(client, config);
+    const connecting = connect(config);
+    // Closes a client that connects after Ctrl+C.
+    connecting.then(
+      async (late) => {
+        if (cancelled) await closeMCPClient(late).catch(() => {});
+      },
+      () => {}
+    );
+    client = await untilCancelled(connecting, prompter);
+    const tools = await untilCancelled(listTools(client, config), prompter);
     print(status('success', `Connected! Found ${tools.length} tools`));
 
     const outputPath = resolve(options.output ?? DEFAULT_OUTPUT);
@@ -122,6 +132,7 @@ export async function generate(options: GenerateOptions): Promise<void> {
     printDone(outputPath, checks);
   } catch (error) {
     if (error instanceof PromptCancelledError) {
+      cancelled = true;
       process.exitCode = 130;
     } else if (error instanceof AuthRequiredError) {
       printAuthRequired(error.config);
@@ -134,6 +145,17 @@ export async function generate(options: GenerateOptions): Promise<void> {
     prompter?.close();
     if (client) await closeMCPClient(client).catch(() => {});
   }
+  // A connect still in flight would keep the process alive until the server
+  // answers or times out.
+  if (cancelled) process.exit(130);
+}
+
+/** `work`, or `PromptCancelledError` as soon as the user presses Ctrl+C. */
+async function untilCancelled<T>(
+  work: Promise<T>,
+  prompter: Prompter | null
+): Promise<T> {
+  return prompter ? Promise.race([work, prompter.cancelled]) : work;
 }
 
 /** The MCP config from flags, or from prompts in a terminal. */
@@ -194,7 +216,7 @@ function httpConfig(serverUrl: string): MCPConfig {
 }
 
 function stdioConfig(commandLine: string): MCPConfig {
-  const [command, ...args] = commandLine.trim().split(/\s+/);
+  const [command, ...args] = splitCommandLine(commandLine);
   return validateMCPConfig({
     transport: 'stdio',
     command,
@@ -412,7 +434,7 @@ async function recordInteractively(
     const args = await askArguments(prompter, tool);
 
     print(`Calling ${tool.name}...`);
-    const called = await callTool(client, tool, args);
+    const called = await untilCancelled(callTool(client, tool, args), prompter);
     if (called.ok) {
       print(status('success', 'Tool called successfully'));
       print('Response preview:');

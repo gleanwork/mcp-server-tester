@@ -65,10 +65,7 @@ function tokenVariables(tokens: StoredTokens): Array<[string, string]> {
   return variables;
 }
 
-function formatTokens(
-  tokens: StoredTokens,
-  format: TokenFormat
-): string {
+function formatTokens(tokens: StoredTokens, format: TokenFormat): string {
   const variables = tokenVariables(tokens);
   switch (format) {
     case 'env':
