@@ -1,97 +1,100 @@
 # Release Process
 
-A release has two halves. A maintainer runs
-[release-it](https://github.com/release-it/release-it/) locally: it picks the
-version, writes the changelog with
-[lerna-changelog](https://github.com/lerna/lerna-changelog/), commits, tags,
-pushes, and creates the GitHub Release. The tag push then runs
-[`publish.yml`](.github/workflows/publish.yml), which publishes the package to
-npm from CI with [trusted publishing](https://docs.npmjs.com/trusted-publishers):
-npm trusts that workflow, in this repository's `npm` environment, through
-GitHub's OIDC token. No npm token exists anywhere, and every tarball carries a
-provenance attestation that ties it to its commit and workflow run.
+Releases are mostly automated using
+[release-it](https://github.com/release-it/release-it/) and
+[lerna-changelog](https://github.com/lerna/lerna-changelog/).
 
 ## Preparation
 
-Confirm that every pull request merged since the last release has a
-`lerna-changelog` label and a title that makes sense to a user. Changelogs are
-for humans, not machines; see
-[keepachangelog.com](https://keepachangelog.com/en/1.0.0/).
+Since the majority of the actual release process is automated, the primary
+remaining task prior to releasing is confirming that all pull requests that
+have been merged since the last release have been labeled with the appropriate
+`lerna-changelog` labels and the titles have been updated to ensure they
+represent something that would make sense to our users. Some great information
+on why this is important can be found at
+[keepachangelog.com](https://keepachangelog.com/en/1.0.0/), but the overall
+guiding principle here is that changelogs are for humans, not machines.
 
-Labels:
+When reviewing merged PR's the labels to be used are:
 
-- breaking - a breaking change.
-- enhancement - a new feature or enhancement.
-- bug - a fix for a bug in a previous release.
-- documentation - adds or updates documentation.
-- internal - an internal change that still deserves a mention.
+- breaking - Used when the PR is considered a breaking change.
+- enhancement - Used when the PR adds a new feature or enhancement.
+- bug - Used when the PR fixes a bug included in a previous release.
+- documentation - Used when the PR adds or updates documentation.
+- internal - Used for internal changes that still require a mention in the
+  changelog/release notes.
 
 ## Release
 
-1. Install dependencies: `npm install`.
+Releases run in the Release workflow (`.github/workflows/release.yml`). It
+publishes to npm with [trusted publishing][trusted-publishing], so it needs no
+npm token and no one-time password.
 
-2. Export a [GitHub personal access token][generate-token] with the `repo`
-   scope as `GITHUB_AUTH`. release-it uses it for the changelog and the GitHub
-   Release. Your own git credentials push the release commit and tag to `main`;
-   nothing needs an npm credential.
-
-   ```bash
-   export GITHUB_AUTH=abc123def456
-   ```
-
-3. Run release-it:
+1. Check the labels and titles of the pull requests since the last release
+   (see Preparation). The changelog is generated from them, and the workflow
+   has no editor step to fix it afterwards.
+2. Do a dry run, and read the changelog in the run's log:
 
    ```sh
-   npx release-it
+   gh workflow run release.yml -f increment=prerelease -f pre_release=beta -f dry_run=true
    ```
 
-   It prompts for the version, lets you edit the changelog, then commits, tags
-   `v<version>`, pushes both, and creates the GitHub Release. It does not publish
-   to npm (`npm.publish` is off in `package.json`); don't run `npm publish` by
-   hand either.
+3. Release:
 
-4. Open the [Publish workflow](https://github.com/gleanwork/mcp-server-tester/actions/workflows/publish.yml)
-   run for the tag. Its `build` job waits for the release commit's CI run to
-   pass, checks that the tag matches `package.json`, and packs the tarball. Its
-   `publish` job then waits for the `npm` environment's approval. The environment
-   prevents self-review, so another maintainer approves it, and it publishes. A prerelease such as `2.0.0-beta.15` publishes
-   under its identifier as the dist-tag (`beta`); a release passes no dist-tag,
-   so npm sets `latest` and refuses to move it to an older version.
+   ```sh
+   gh workflow run release.yml -f increment=prerelease -f pre_release=beta
+   ```
 
-If the publish fails, fix the cause and re-run the workflow run from the Actions
-tab; the tag is unchanged. If the package itself needs a change, make it on main
-and cut the next version. A release from a maintenance branch fails the CI gate,
-which looks for push CI on the release commit; cut those from `main`.
+   `increment` is `prerelease`, `patch`, `minor` or `major`; `pre_release` is
+   the prerelease identifier, empty for a final release. From `2.0.0-beta.14`:
+   `prerelease` + `beta` gives `2.0.0-beta.15`; `prerelease` + `rc` gives
+   `2.0.0-rc.0`; `major` alone gives `2.0.0`. A prerelease publishes under its
+   identifier as the npm dist-tag (`beta`, `rc`); a final release becomes
+   `latest`.
 
-[generate-token]: https://github.com/settings/tokens/new?scopes=repo&description=GITHUB_AUTH+env+variable
+4. Check the result: the run succeeded (`gh run watch`),
+   `npm view @gleanwork/mcp-server-tester versions` lists the new version, and
+   the GitHub release exists.
 
-## One-time setup
+The workflow runs `npx release-it <increment> --ci`. That bumps the version and
+publishes to npm (`prepublishOnly` builds and tests first). Then it commits
+`Release <version>`, tags `v<version>`, pushes both to `main` as the
+`gleanwork-ci` GitHub App, and creates the GitHub release.
 
-Trusted publishing ties npm's trust to this repository, the `publish.yml`
-workflow and the `npm` environment. Anyone with write access can push a `v*`
-tag, so the environment's required approval is what keeps a tag alone from
-publishing. Set up both sides.
+A pull request that changes `release.yml` or `.release-it.js` gets a dry run.
 
-On GitHub (repository admin), Settings -> Environments -> New environment,
-named `npm`:
+[trusted-publishing]: https://docs.npmjs.com/trusted-publishers
 
-1. Required reviewers: the package maintainers, at least two, since the one who
-   pushed the tag cannot approve. Leave "Allow administrators to bypass" off
-   and "Prevent self-review" on.
-2. Deployment branches and tags: "Selected branches and tags", add the tag rule
-   `v*`.
+### One-time setup
 
-On npmjs.com (package maintainer), `@gleanwork/mcp-server-tester` -> Settings:
+- On npmjs.com, the package's Settings have a GitHub Actions trusted publisher
+  with owner `gleanwork`, repository `mcp-server-tester`, workflow
+  `release.yml`, environment `npm`, and "npm publish" allowed (new trusted
+  publishers allow only `npm stage publish` until that is enabled).
+- Publishing access is "Require two-factor authentication and disallow
+  tokens". Trusted publishing still works with that setting.
+- The repository has an `npm` environment that deploys only from `main`.
+- `main` requires pull requests, so the release commit is pushed as the org's
+  `gleanwork-ci` GitHub App, which is a bypass actor on `main`'s protection.
+  Its credentials are the `GLEANWORK_CI_CLIENT_ID` and
+  `GLEANWORK_CI_KEY` organization secrets, shared with this
+  repository; the token is scoped to this repository when it is minted.
 
-1. Trusted Publisher -> GitHub Actions. Organization or user: `gleanwork`.
-   Repository: `mcp-server-tester`. Workflow filename: `publish.yml`.
-   Environment name: `npm`.
-2. Allowed actions: enable direct publishing with `npm publish`. New
-   configurations default to `npm stage publish` only, and the workflow runs
-   `npm publish`.
-3. Publishing access: "Require two-factor authentication and disallow tokens".
-   With trusted publishing in place, the workflow and a maintainer's own 2FA
-   session are the only ways to publish.
+### If a release fails after publishing
 
-Trusted publishing needs npm 11.5.1 or later; the `publish` job uses the npm
-that ships with Node 24 and installs nothing else.
+release-it publishes to npm before it commits and tags. If a later step fails,
+npm has the new version and GitHub doesn't. Don't rerun the workflow: it would
+try to publish the same version again, and npm versions can't be republished.
+Finish the GitHub side from an up-to-date checkout of `main` instead. This is
+the command in fish; `CI=true` turns off the changelog editor and the npm
+checks:
+
+```sh
+env CI=true GITHUB_AUTH=(gh auth token) npx release-it <version> --no-npm.publish
+```
+
+### From a laptop
+
+`npx release-it` still works locally. It opens the changelog in `$EDITOR`
+before it commits, and npm asks for your one-time password when it publishes.
+It needs `GITHUB_AUTH` set to a GitHub token with the `repo` scope.
