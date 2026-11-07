@@ -18,7 +18,17 @@ import {
 } from './dryRunProxy.js';
 import { PLANNED_WRITE_KEY } from './plannedWrite.js';
 import { parseDryRunProxyArgs } from './dryRunProxyArgs.js';
-import type { SimulatedWriteRecord } from './simulatedWriteRecords.js';
+import { readWriteRecordLines } from './writeRecordLines.js';
+
+/** The lines of a write record, without their format and times. */
+async function recordLines(
+  file: string
+): Promise<Array<Record<string, unknown>>> {
+  return (await readWriteRecordLines(file)).map(({ record }) => {
+    const { format: _format, time: _time, ...rest } = record;
+    return rest;
+  });
+}
 
 const TOOLS = [
   {
@@ -64,7 +74,12 @@ const TOOLS = [
 
 /** A fake vendor MCP server behind bearer auth, reachable through `fetch`. */
 function fakeVendor(
-  options: { tools?: typeof TOOLS; instructions?: string } = {}
+  options: {
+    tools?: typeof TOOLS;
+    instructions?: string;
+    /** The result of a call to `name`; default: "ran <name>" as text. */
+    reply?: (name: string) => Record<string, unknown> | undefined;
+  } = {}
 ) {
   const calls: string[] = [];
   const tokens: string[] = [];
@@ -86,9 +101,9 @@ function fakeVendor(
     }));
     server.setRequestHandler('tools/call', async (request) => {
       calls.push(request.params.name);
-      return {
+      return (options.reply?.(request.params.name) ?? {
         content: [{ type: 'text', text: `ran ${request.params.name}` }],
-      };
+      }) as never;
     });
     return server;
   }
@@ -249,9 +264,126 @@ describe('dry-run proxy', () => {
         vendor: fakeVendor(),
         token: staticToken('token-1'),
         forwardWrites: true,
-        simulateWrites: { file: join(dir, 'w.jsonl') },
+        simulateWrites: true,
       })
     ).rejects.toThrow('exclude each other');
+  });
+
+  it('records each write it stops, and the write tools each time they change', async () => {
+    const vendor = fakeVendor();
+    const file = join(dir, 'vendor.jsonl');
+    const { client } = await start({
+      vendor,
+      token: staticToken('token-1'),
+      writeRecord: file,
+    });
+    await client.listTools();
+    await client.listTools();
+    await client.callTool({ name: 'search', arguments: { q: 'x' } });
+    const write = await client.callTool({
+      name: 'send_message',
+      arguments: { text: 'hi' },
+    });
+    expect(await recordLines(file)).toEqual([
+      {
+        kind: 'tools',
+        server: 'vendor',
+        writeTools: ['create_issue', 'get_profile', 'purge', 'send_message'],
+      },
+      {
+        kind: 'write',
+        server: 'vendor',
+        tool: 'send_message',
+        arguments: { text: 'hi' },
+        reply: write.structuredContent,
+        mode: 'planned',
+      },
+    ]);
+    expect(vendor.calls).toEqual(['search']);
+  });
+
+  it('records a write the server stopped and marked as server-planned, and an unmarked one as unclassified', async () => {
+    const mark = '_eval_planned';
+    const vendor = fakeVendor({
+      reply: (name) =>
+        name === 'send_message'
+          ? {
+              content: [{ type: 'text', text: 'planned' }],
+              structuredContent: { [mark]: { tool: name } },
+            }
+          : undefined,
+    });
+    const file = join(dir, 'vendor.jsonl');
+    const { client } = await start({
+      vendor,
+      token: staticToken('token-1'),
+      forwardWrites: true,
+      plannedWriteKey: mark,
+      writeRecord: file,
+    });
+    await client.callTool({ name: 'search', arguments: {} });
+    await client.callTool({ name: 'send_message', arguments: { text: 'hi' } });
+    await client.callTool({ name: 'purge', arguments: { all: true } });
+    const lines = await recordLines(file);
+    expect(lines.filter((line) => line.kind !== 'tools')).toEqual([
+      {
+        kind: 'write',
+        server: 'vendor',
+        tool: 'send_message',
+        arguments: { text: 'hi' },
+        reply: { [mark]: { tool: 'send_message' } },
+        mode: 'server-planned',
+      },
+      {
+        kind: 'unclassified',
+        server: 'vendor',
+        tool: 'purge',
+        arguments: { all: true },
+        reason: 'unmarked',
+      },
+    ]);
+    // The server stops writes itself: every call reaches it.
+    expect(vendor.calls).toEqual(['search', 'send_message', 'purge']);
+  });
+
+  it("records a dispatcher's calls with their target", async () => {
+    const vendor = fakeVendor({
+      tools: [
+        ...TOOLS,
+        {
+          name: 'run_tool',
+          inputSchema: { type: 'object' as const },
+          annotations: { readOnlyHint: true },
+        },
+      ],
+    });
+    const file = join(dir, 'vendor.jsonl');
+    const { client } = await start({
+      vendor,
+      token: staticToken('token-1'),
+      dispatchers: { run_tool: 'tool_name' },
+      writeRecord: file,
+    });
+    await client.listTools();
+    await client.callTool({
+      name: 'run_tool',
+      arguments: { tool_name: 'post_message', text: 'hi' },
+    });
+    const lines = await recordLines(file);
+    expect(lines[0]).toMatchObject({
+      kind: 'tools',
+      writeTools: expect.arrayContaining(['run_tool']),
+    });
+    expect(lines.slice(1)).toEqual([
+      {
+        kind: 'unclassified',
+        server: 'vendor',
+        tool: 'run_tool',
+        arguments: { tool_name: 'post_message', text: 'hi' },
+        target: 'post_message',
+        reason: 'dispatch',
+      },
+    ]);
   });
 
   it('applies the read-only and always-write lists', async () => {
@@ -313,15 +445,14 @@ describe('dry-run proxy', () => {
     const { client } = await start({
       vendor,
       token: staticToken('token-1'),
-      simulateWrites: {
-        file,
-        replies: {
-          send_message: {
-            ok: true,
-            channel: '{{arguments.channel}}',
-            ts: '{{unixTime}}',
-            message: { text: '{{arguments.text}}' },
-          },
+      simulateWrites: true,
+      writeRecord: file,
+      writeReplies: {
+        send_message: {
+          ok: true,
+          channel: '{{arguments.channel}}',
+          ts: '{{unixTime}}',
+          message: { text: '{{arguments.text}}' },
         },
       },
     });
@@ -363,18 +494,21 @@ describe('dry-run proxy', () => {
     ).toMatchObject({ ok: true, result: { all: true } });
 
     expect(vendor.calls).toEqual([]);
-    const records = (await fs.readFile(file, 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as SimulatedWriteRecord);
-    expect(records.map((r) => [r.server, r.tool, r.arguments])).toEqual([
-      ['vendor', 'send_message', { channel: 'C1', text: 'hi' }],
-      ['vendor', 'create_issue', { title: 'Bug' }],
-      ['vendor', 'purge', { all: true }],
-    ]);
+    const records = (await recordLines(file)).filter(
+      (line) => line.kind === 'write'
+    );
+    expect(records.map((r) => [r.server, r.tool, r.arguments, r.mode])).toEqual(
+      [
+        ['vendor', 'send_message', { channel: 'C1', text: 'hi' }, 'simulated'],
+        ['vendor', 'create_issue', { title: 'Bug' }, 'simulated'],
+        ['vendor', 'purge', { all: true }, 'simulated'],
+      ]
+    );
+    // What the client was told: its structured content, else its text.
     expect(records[0]!.reply).toBe(
       (sent.content as Array<{ text: string }>)[0]!.text
     );
+    expect(records[1]!.reply).toEqual(issue);
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
   });
 
@@ -383,7 +517,8 @@ describe('dry-run proxy', () => {
     const { client, logs } = await start({
       vendor,
       token: staticToken('token-1'),
-      simulateWrites: { file: join(dir, 'missing', 'vendor.jsonl') },
+      simulateWrites: true,
+      writeRecord: join(dir, 'missing', 'vendor.jsonl'),
     });
     const write = await client.callTool({
       name: 'send_message',
@@ -546,7 +681,7 @@ describe('parseDryRunProxyArgs', () => {
     expect(parsed.token?.current()).toBe('secret');
   });
 
-  it('parses simulated writes and their reply templates', () => {
+  it('parses the write record, simulated writes and their reply templates', () => {
     const base = [
       '--upstream-url',
       'https://mcp.example/mcp',
@@ -556,31 +691,69 @@ describe('parseDryRunProxyArgs', () => {
     expect(
       parseDryRunProxyArgs([
         ...base,
-        '--simulate-writes',
+        '--write-record',
         '/tmp/run/slack.jsonl',
+        '--simulate-writes',
         '--write-replies',
         '{"send":{"ok":true}}',
-      ]).simulateWrites
-    ).toEqual({
-      file: '/tmp/run/slack.jsonl',
-      replies: { send: { ok: true } },
+      ])
+    ).toMatchObject({
+      writeRecord: '/tmp/run/slack.jsonl',
+      simulateWrites: true,
+      writeReplies: { send: { ok: true } },
     });
-    expect(parseDryRunProxyArgs(base).simulateWrites).toBeUndefined();
+    const plain = parseDryRunProxyArgs(base);
+    expect(plain.simulateWrites).toBeUndefined();
+    expect(plain.writeRecord).toBeUndefined();
     expect(() =>
       parseDryRunProxyArgs([...base, '--write-replies', '{}'])
     ).toThrow('--write-replies needs --simulate-writes.');
     expect(() =>
-      parseDryRunProxyArgs([...base, '--simulate-writes', 'relative.jsonl'])
-    ).toThrow('--simulate-writes takes an absolute path.');
+      parseDryRunProxyArgs([...base, '--write-record', 'relative.jsonl'])
+    ).toThrow('--write-record takes an absolute path.');
+    // A simulated success MST can't see is never sent.
+    expect(() => parseDryRunProxyArgs([...base, '--simulate-writes'])).toThrow(
+      '--simulate-writes needs --write-record'
+    );
     expect(() =>
       parseDryRunProxyArgs([
         ...base,
-        '--simulate-writes',
+        '--write-record',
         '/tmp/x.jsonl',
+        '--simulate-writes',
         '--write-replies',
         '[1]',
       ])
     ).toThrow('--write-replies must be a JSON object.');
+  });
+
+  it('parses a server-stopped write key and dispatchers', () => {
+    const base = [
+      '--upstream-url',
+      'https://mcp.example/mcp',
+      '--name',
+      'glean',
+    ];
+    expect(
+      parseDryRunProxyArgs([
+        ...base,
+        '--forward-writes',
+        '--planned-write-key',
+        '_eval_planned',
+        '--dispatcher',
+        'run_tool=tool_name',
+      ])
+    ).toMatchObject({
+      forwardWrites: true,
+      plannedWriteKey: '_eval_planned',
+      dispatchers: { run_tool: 'tool_name' },
+    });
+    expect(() =>
+      parseDryRunProxyArgs([...base, '--planned-write-key', 'k'])
+    ).toThrow('--planned-write-key needs --forward-writes.');
+    expect(() =>
+      parseDryRunProxyArgs([...base, '--dispatcher', 'run_tool'])
+    ).toThrow('expected TOOL=ARGUMENT');
   });
 
   it('parses forwarded writes and a request timeout', () => {
@@ -609,8 +782,9 @@ describe('parseDryRunProxyArgs', () => {
       parseDryRunProxyArgs([
         ...base,
         '--forward-writes',
-        '--simulate-writes',
+        '--write-record',
         '/tmp/w.jsonl',
+        '--simulate-writes',
       ])
     ).toThrow('not both');
   });

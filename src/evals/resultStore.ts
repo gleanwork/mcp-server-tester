@@ -226,6 +226,13 @@ function stripClientTelemetry(telemetry: unknown): void {
   if (isJsonObject(telemetry)) delete telemetry.content;
 }
 
+/** A write record keeps each write's arguments, as transcripts do; its reply goes. */
+function stripWriteRecord(record: unknown): void {
+  if (!isJsonObject(record) || !Array.isArray(record.writes)) return;
+  for (const write of record.writes)
+    if (isJsonObject(write)) delete write.reply;
+}
+
 function stripResponses(value: unknown): void {
   if (Array.isArray(value)) {
     for (const item of value) stripResponses(item);
@@ -238,12 +245,14 @@ function stripResponses(value: unknown): void {
     if (isJsonObject(request) && isJsonObject(request.assertions))
       delete request.assertions.response;
     stripTranscript(value.transcript);
+    stripWriteRecord(value.writeRecord);
     stripScoreMetadata(value.scores);
     stripClientTelemetry(value.clientTelemetry);
     if (Array.isArray(value.trialResults))
       for (const trial of value.trialResults)
         if (isJsonObject(trial)) {
           stripTranscript(trial.transcript);
+          stripWriteRecord(trial.writeRecord);
           stripScoreMetadata(trial.scores);
           stripClientTelemetry(trial.clientTelemetry);
         }
@@ -257,7 +266,8 @@ function stripResponses(value: unknown): void {
  * every eval case result, wherever it is nested (runs, eval variants, reports,
  * comparisons), has no raw `response`, no echoed exact-match
  * `expect.response`, no `finalText`, event `output` or model call `text` in
- * its transcripts, no `content` in its client telemetry, and no judge score
+ * its transcripts, no `reply` in its write records, no `content` in its
+ * client telemetry, and no judge score
  * `metadata` (in it, its trials, or a combined score's `judgeResults`), and
  * every pairwise preference has no `metadata`.
  * These may hold data from the server under test. Everything else is kept,

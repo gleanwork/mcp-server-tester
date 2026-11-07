@@ -85,6 +85,50 @@ const Envelope = <K extends string>(kind: K) => ({
   kind: z.literal(kind),
 });
 
+/** How a server handles a write (ADR 0014). */
+const WriteModeSchema = z.enum([
+  'planned',
+  'simulated',
+  'server-planned',
+  'live',
+  'unguarded',
+  'read-only',
+]);
+
+/** A trial's write record (ADR 0014): what its dry-run proxies recorded. */
+const WriteRecordSchema = z.object({
+  writes: z.array(
+    z.object({
+      server: z.string(),
+      tool: z.string(),
+      arguments: z.unknown(),
+      /** What the client was told. Not in a run that redacts responses. */
+      reply: z.unknown().optional(),
+      mode: z.enum(['planned', 'simulated', 'server-planned']),
+      target: z.string().optional(),
+      eventId: z.string().optional(),
+    })
+  ),
+  unreported: z.number().int().nonnegative(),
+  unrecorded: z.array(
+    z.object({
+      server: z.string(),
+      tool: z.string(),
+      eventId: z.string().optional(),
+    })
+  ),
+  unclassified: z.array(
+    z.object({
+      server: z.string(),
+      tool: z.string(),
+      arguments: z.unknown(),
+      target: z.string().optional(),
+      reason: z.enum(['dispatch', 'unmarked']),
+    })
+  ),
+  attribution: z.enum(['exclusive', 'matched']),
+});
+
 /** `run.json`: what ran, with what, and how far it got. */
 const RunRecordSchema = z.looseObject({
   ...Envelope('run'),
@@ -107,6 +151,8 @@ const RunRecordSchema = z.looseObject({
       tools: z.record(z.string(), z.unknown()).optional(),
       inputTemplate: z.string().optional(),
       judges: z.array(z.string()).optional(),
+      /** Each server's write mode, by label (ADR 0014). */
+      writeModes: z.record(z.string(), WriteModeSchema).optional(),
       /**
        * The tools the variant's servers served before its tool metadata,
        * listed once before any client started. Only when the run was asked
@@ -326,6 +372,11 @@ const TrialRecordSchema = z.looseObject({
   gradingError: z.string().optional(),
   /** The trial's transcript: what the client did. */
   transcript: z.looseObject({}).optional(),
+  /**
+   * The writes its servers' dry-run proxies recorded (ADR 0014), when any
+   * server's writes go through one.
+   */
+  writeRecord: WriteRecordSchema.optional(),
   /** The trial's client artifacts, copied into the run: a path relative to it. */
   artifacts: z.string().optional(),
 });
@@ -760,6 +811,7 @@ function trialRecord(
     ...(t.transcript
       ? { transcript: t.transcript as unknown as Record<string, unknown> }
       : {}),
+    ...(t.writeRecord ? { writeRecord: t.writeRecord } : {}),
     ...(t.clientUsage ? { clientUsage: t.clientUsage } : {}),
     ...(t.clientTelemetry ? { clientTelemetry: t.clientTelemetry } : {}),
     ...(t.clientMetadata ? { clientMetadata: t.clientMetadata } : {}),

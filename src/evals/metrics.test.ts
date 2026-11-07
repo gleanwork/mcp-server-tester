@@ -85,6 +85,63 @@ describe('computeMetrics', () => {
     expect(metrics.aggregated['test/metric/plugin-binary_rate']).toBe(0.5);
     expect(metrics.aggregated['test/metric/plugin-continuous_mean']).toBe(1000);
   });
+  it('rates write cases and names the weakest evidence they rest on', () => {
+    const record = (
+      overrides: Partial<NonNullable<EvalCaseResult['writeRecord']>> = {}
+    ): NonNullable<EvalCaseResult['writeRecord']> => ({
+      writes: [],
+      unreported: 0,
+      unrecorded: [],
+      unclassified: [],
+      attribution: 'exclusive',
+      ...overrides,
+    });
+    const cases: EvalCaseResult[] = [
+      {
+        ...result('posted', true),
+        scores: { writes: { pass: true, writeEvidence: 'requested' } },
+        writeRecord: record(),
+      },
+      {
+        ...result('claimed-only', false),
+        scores: {
+          toolsTriggered: { pass: true, writeEvidence: 'called' },
+          writes: { pass: false, writeEvidence: 'requested' },
+        },
+        writeRecord: record({
+          unreported: 2,
+          unrecorded: [{ server: 'notes', tool: 'create_note' }],
+          unclassified: [
+            {
+              server: 'notes',
+              tool: 'run_tool',
+              arguments: {},
+              reason: 'dispatch',
+            },
+          ],
+        }),
+      },
+      // A read case: no write evidence, so it isn't a write case.
+      result('read', true),
+    ];
+    const { aggregated } = computeMetrics(
+      [
+        'write_case_passed',
+        'write_evidence',
+        'unreported_writes',
+        'unrecorded_writes',
+        'unclassified_calls',
+      ],
+      cases
+    );
+    expect(aggregated).toMatchObject({
+      write_case_passed_rate: 0.5,
+      write_evidence: 'called',
+      unreported_writes: 2,
+      unrecorded_writes: 1,
+      unclassified_calls: 1,
+    });
+  });
   it('keeps the built-in metrics read-only', () => {
     expect(Object.isFrozen(BUILT_IN_METRICS)).toBe(true);
   });

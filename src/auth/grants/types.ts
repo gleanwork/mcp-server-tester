@@ -11,6 +11,7 @@
  */
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import type { SettingsContext } from '../../plugins/plugin.js';
+import type { ProxyWrites } from '../../proxy/dryRunProxyServer.js';
 
 /** A registered OAuth client. `clientSecret` only when the provider requires it. */
 export interface OAuthClient {
@@ -65,11 +66,13 @@ export interface ConnectorLaunchContext extends SettingsContext {
   tokenFile?: string;
   platform: NodeJS.Platform;
   /**
-   * Set when the eval config sets `simulateWrites`: pass it to
-   * `dryRunProxyServer` (with the connector's reply templates), so writes get
-   * a success reply and are recorded in `file` for MST to read.
+   * Where the dry-run proxy records the server's writes, and whether it
+   * simulates them (the eval config's `simulateWrites`), with the
+   * connector's `plannedWriteKey` and `dispatchers`. Pass it to
+   * `dryRunProxyServer` as `writes`. A launch that drops it fails the run
+   * (ADR 0014). Absent outside a run, e.g. `mst auth`.
    */
-  simulateWrites?: { file: string };
+  writes?: ProxyWrites;
   /**
    * The run the server's trials belong to, when `mst run` (or a shard it
    * started) launches it. Absent elsewhere, e.g. `mst auth`. Lets a connector
@@ -98,6 +101,19 @@ export interface ConnectorDefinition {
   launch?(context: ConnectorLaunchContext): MCPConfig | Promise<MCPConfig>;
   /** Fewest tools a working sign-in must expose; catches under-scoped grants. Default 1. */
   minTools?: number;
+  /**
+   * For a server that stops writes itself (the launch sets
+   * `forwardWrites`): the key it puts in the result of each write it
+   * stopped. With it, the server's write mode is `server-planned`; without
+   * it, MST can't see the server's writes and refuses to run it unless the
+   * eval config accepts that (`"writes": { "<label>": "unguarded" }`).
+   */
+  plannedWriteKey?: string;
+  /**
+   * Tools that run another tool, by the argument that names the target
+   * (`{ run_tool: 'tool_name' }`). MST records each call with its target.
+   */
+  dispatchers?: Readonly<Record<string, string>>;
   /** Shown when signing in fails, and in `mst auth status`. */
   notes?: string;
 }

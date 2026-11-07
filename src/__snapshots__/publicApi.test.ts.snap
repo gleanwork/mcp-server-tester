@@ -173,6 +173,7 @@ exports[`public API > root 1`] = `
   "validateText",
   "validateToolCallCount",
   "validateToolCalls",
+  "validateWrites",
   "verifySkillFile",
 ]
 `;

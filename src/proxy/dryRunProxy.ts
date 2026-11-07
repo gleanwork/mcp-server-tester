@@ -3,13 +3,19 @@
  * server. The client sees the upstream server's real tools; read-only tool
  * calls go upstream; every other tool call returns a planned-write result and
  * never reaches the upstream server. With `simulateWrites`, a write instead
- * gets a success reply and is recorded in a file (see simulatedWrites.ts).
+ * gets a success reply (see simulatedWrites.ts).
  *
  * Fail closed: a tool without annotations, or one the upstream server does
  * not list, is a write. `readOnlyTools` allows reads on servers that annotate
  * nothing; `alwaysWriteTools` intercepts tools that are annotated as reads.
- * With `forwardWrites`, every call goes upstream: for a server that handles
- * writes itself, which needs the proxy only for its renewed token.
+ * With `forwardWrites`, every call goes upstream: for a server that stops
+ * writes itself, which needs the proxy only for its renewed token. Such a
+ * server marks each write it stopped with `plannedWriteKey`.
+ *
+ * With `writeRecord`, the proxy records every write it stops, every write
+ * the server marks, and every forwarded call it can't classify (a
+ * dispatcher's, say) in that file, for MST to keep with the trial (ADR 0014;
+ * writeRecordLines.ts).
  *
  * The token comes from a file MST rewrites when it renews the token. The
  * proxy re-reads the file when it changes, and after a 401 waits briefly for a
@@ -26,13 +32,10 @@ import type { FetchLike, Tool } from '@modelcontextprotocol/client';
 import { Server } from '@modelcontextprotocol/server';
 import type { Transport } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import {
-  recordSimulatedWrite,
-  simulatedReply,
-  simulatedWriteId,
-  type SimulatedWritesOptions,
-} from './simulatedWrites.js';
-import { plannedWriteResult } from './plannedWrite.js';
+import { simulatedReply, simulatedWriteId } from './simulatedWrites.js';
+import { isReadOnlyTool, plannedWriteResult } from './plannedWrite.js';
+import { appendWriteRecordLine } from './writeRecordWriter.js';
+import type { WriteRecordLine } from './writeRecordLines.js';
 
 /** Seconds a request that got a 401 waits for MST to deliver a new token. */
 const AUTH_RETRY_WAIT_MS = 90_000;
@@ -63,17 +66,32 @@ export interface DryRunProxyOptions {
   /** Extra keys for the planned-write result, for graders that read an older name. */
   plannedWriteAliases?: readonly string[];
   /**
-   * Forward every tool call, writes too: the upstream server handles writes
+   * Forward every tool call, writes too: the upstream server stops writes
    * itself (an eval endpoint, say). Not with `simulateWrites`.
    */
   forwardWrites?: boolean;
+  /**
+   * With `forwardWrites`: the key the server puts in a write's result when it
+   * stopped the write. Each marked result is a `server-planned` write.
+   */
+  plannedWriteKey?: string;
+  /**
+   * Tools that run another tool, by the argument that names it
+   * (`{ run_tool: 'tool_name' }`). Their calls are recorded with their
+   * target.
+   */
+  dispatchers?: Readonly<Record<string, string>>;
   /** How long an upstream request may take. Default: 120 seconds. */
   requestTimeoutMs?: number;
+  /** The write record file (JSONL) MST reads after each trial. */
+  writeRecord?: string;
   /**
-   * Answer writes with a success reply instead of a planned-write result,
-   * and record each in a file. The write still never reaches the server.
+   * Answer writes with a success reply instead of a planned-write result.
+   * The write still never reaches the server.
    */
-  simulateWrites?: SimulatedWritesOptions;
+  simulateWrites?: boolean;
+  /** Reply templates for simulated writes, by tool name (see simulatedWrites.ts). */
+  writeReplies?: Readonly<Record<string, unknown>>;
   /** For tests: how long to wait for a new token after a 401. */
   authRetryWaitMs?: number;
   /** For tests: a fetch to reach the upstream server with. */
@@ -179,14 +197,52 @@ export function fileToken(
   };
 }
 
-/** Read-only means readOnlyHint true and destructiveHint not true. */
-export function isReadOnlyTool(tool: Tool | undefined): boolean {
-  const annotations = tool?.annotations;
-  if (!annotations) return false;
-  return (
-    annotations.readOnlyHint === true && annotations.destructiveHint !== true
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+  ? Omit<T, K>
+  : never;
+
+function firstText(result: Record<string, unknown>): string | undefined {
+  const content = result.content;
+  if (!Array.isArray(content)) return undefined;
+  const text = (content as Array<{ type?: unknown; text?: unknown }>).find(
+    (item) => item.type === 'text' && typeof item.text === 'string'
   );
+  return text?.text as string | undefined;
 }
+
+/**
+ * Whether a tool result carries a server's planned-write mark: `key` in its
+ * structured content, or in a text item that is a JSON object.
+ */
+function hasPlannedWriteMark(
+  result: Record<string, unknown>,
+  key: string
+): boolean {
+  const structured = result.structuredContent;
+  if (
+    typeof structured === 'object' &&
+    structured !== null &&
+    Object.hasOwn(structured, key)
+  )
+    return true;
+  const content = Array.isArray(result.content) ? result.content : [];
+  return (content as Array<{ type?: unknown; text?: unknown }>).some((item) => {
+    if (item.type !== 'text' || typeof item.text !== 'string') return false;
+    try {
+      const parsed: unknown = JSON.parse(item.text);
+      return (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        !Array.isArray(parsed) &&
+        Object.hasOwn(parsed, key)
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+export { isReadOnlyTool };
 
 /** A fetch that sends the current token, and retries once with a new one after a 401. */
 function authenticatedFetch(options: DryRunProxyOptions): FetchLike {
@@ -239,8 +295,13 @@ export async function createDryRunProxy(
   const readOnly = new Set(options.readOnlyTools ?? []);
   const alwaysWrite = new Set(options.alwaysWriteTools ?? []);
   const aliases = options.plannedWriteAliases ?? [];
+  const dispatchers = new Map(Object.entries(options.dispatchers ?? {}));
   if (options.forwardWrites && options.simulateWrites)
     throw new Error('forwardWrites and simulateWrites exclude each other.');
+  if (options.plannedWriteKey !== undefined && !options.forwardWrites)
+    throw new Error(
+      'plannedWriteKey needs forwardWrites: only a server that stops writes itself marks them.'
+    );
   const requestTimeout = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   const tools = new Map<string, Tool>();
 
@@ -266,13 +327,59 @@ export async function createDryRunProxy(
       for (const tool of page.tools) tools.set(tool.name, tool);
       cursor = page.nextCursor;
     } while (cursor);
+    await recordWriteTools();
   }
 
-  function isWrite(name: string): boolean {
-    if (options.forwardWrites) return false;
+  /** Whether the proxy's rule makes `name` a write, forwarded or not. */
+  function isWriteTool(name: string): boolean {
     if (alwaysWrite.has(name)) return true;
     if (readOnly.has(name)) return false;
     return !isReadOnlyTool(tools.get(name));
+  }
+
+  /** Whether the proxy stops a call to `name`. */
+  function isWrite(name: string): boolean {
+    return !options.forwardWrites && isWriteTool(name);
+  }
+
+  async function record(
+    line: DistributiveOmit<WriteRecordLine, 'format' | 'time' | 'server'>
+  ): Promise<boolean> {
+    if (!options.writeRecord) return false;
+    try {
+      await appendWriteRecordLine(options.writeRecord, {
+        ...line,
+        time: new Date().toISOString(),
+        server: options.name,
+      } as DistributiveOmit<WriteRecordLine, 'format'>);
+      return true;
+    } catch {
+      options.log?.(
+        `dry-run proxy ${options.name}: couldn't record a ${line.kind} line in the write record`
+      );
+      return false;
+    }
+  }
+
+  // The write tools last recorded, so a listing that changes nothing adds no line.
+  let recordedWriteTools: string | undefined;
+  async function recordWriteTools(): Promise<void> {
+    if (!options.writeRecord) return;
+    const writeTools = [...new Set([...tools.keys(), ...alwaysWrite])]
+      .filter((name) => isWriteTool(name) || dispatchers.has(name))
+      .sort();
+    const key = JSON.stringify(writeTools);
+    if (key === recordedWriteTools) return;
+    if (await record({ kind: 'tools', writeTools })) recordedWriteTools = key;
+  }
+
+  /** A dispatcher call's target, from the argument the connector names. */
+  function targetOf(name: string, args: unknown): string | undefined {
+    const key = dispatchers.get(name);
+    if (key === undefined || typeof args !== 'object' || args === null)
+      return undefined;
+    const target = (args as Record<string, unknown>)[key];
+    return typeof target === 'string' ? target : undefined;
   }
 
   // The upstream's instructions tell the client what the server is for (a
@@ -285,37 +392,84 @@ export async function createDryRunProxy(
   );
 
   /**
-   * A write's success reply, once it is recorded. A write that can't be
-   * recorded gets the planned-write result: it is never forwarded either way.
+   * The reply to a write the proxy stops, once it is recorded. A simulated
+   * write that can't be recorded gets the planned-write result instead, so
+   * the client is never told a write MST can't see succeeded.
    */
-  async function simulateWrite(name: string, args: unknown): Promise<unknown> {
-    const simulate = options.simulateWrites!;
-    const now = new Date();
-    const reply = simulatedReply(
-      tools.get(name),
-      name,
-      args,
-      simulate.replies,
-      {
-        id: simulatedWriteId(),
-        now,
-      }
-    );
-    try {
-      await recordSimulatedWrite(simulate.file, {
-        time: now.toISOString(),
-        server: options.name,
-        tool: name,
-        arguments: args ?? {},
-        reply: reply.structuredContent ?? reply.content[0]?.text,
-      });
-      return reply;
-    } catch {
+  async function stopWrite(name: string, args: unknown): Promise<unknown> {
+    const target = targetOf(name, args);
+    const planned = () => {
+      const reply = plannedWriteResult(options.name, name, args, aliases);
+      return { reply, value: reply.structuredContent };
+    };
+    if (options.simulateWrites) {
+      const reply = simulatedReply(
+        tools.get(name),
+        name,
+        args,
+        options.writeReplies,
+        { id: simulatedWriteId(), now: new Date() }
+      );
+      if (
+        await record({
+          kind: 'write',
+          tool: name,
+          arguments: args ?? {},
+          reply: reply.structuredContent ?? reply.content[0]?.text,
+          mode: 'simulated',
+          ...(target !== undefined ? { target } : {}),
+        })
+      )
+        return reply;
       options.log?.(
         `Couldn't record a simulated write of ${name}; answered as planned.`
       );
-      return plannedWriteResult(options.name, name, args, aliases);
+      return planned().reply;
     }
+    const { reply, value } = planned();
+    await record({
+      kind: 'write',
+      tool: name,
+      arguments: args ?? {},
+      reply: value,
+      mode: 'planned',
+      ...(target !== undefined ? { target } : {}),
+    });
+    return reply;
+  }
+
+  /**
+   * Records a forwarded call the proxy can't classify itself: a dispatcher's,
+   * or a write tool's when the server stops writes. A result the server
+   * marked with `plannedWriteKey` is a write it stopped.
+   */
+  async function recordForwarded(
+    name: string,
+    args: unknown,
+    result: Record<string, unknown>
+  ): Promise<void> {
+    const dispatcher = dispatchers.has(name);
+    if (!dispatcher && !(options.forwardWrites && isWriteTool(name))) return;
+    const target = targetOf(name, args);
+    const key = options.plannedWriteKey;
+    if (key !== undefined && hasPlannedWriteMark(result, key)) {
+      await record({
+        kind: 'write',
+        tool: name,
+        arguments: args ?? {},
+        reply: result.structuredContent ?? firstText(result),
+        mode: 'server-planned',
+        ...(target !== undefined ? { target } : {}),
+      });
+      return;
+    }
+    await record({
+      kind: 'unclassified',
+      tool: name,
+      arguments: args ?? {},
+      reason: dispatcher ? 'dispatch' : 'unmarked',
+      ...(target !== undefined ? { target } : {}),
+    });
   }
 
   async function forward(
@@ -348,35 +502,34 @@ export async function createDryRunProxy(
       const listed = z
         .object({ tools: z.array(z.looseObject({ name: z.string() })) })
         .safeParse(result);
-      if (listed.success)
+      if (listed.success) {
         for (const tool of listed.data.tools)
           tools.set(tool.name, tool as unknown as Tool);
+        await recordWriteTools();
+      }
       return result as never;
     });
     server.setRequestHandler('tools/call', async (request, context) => {
       const name = request.params.name;
+      // A server that stops writes itself still needs its tools listed, so
+      // the record tells its write tools from its reads.
+      const classifies = !options.forwardWrites || options.writeRecord;
       if (
-        !options.forwardWrites &&
+        classifies &&
         !tools.has(name) &&
         !alwaysWrite.has(name) &&
         !readOnly.has(name)
       )
         await listAllTools().catch(() => {});
-      if (isWrite(name)) {
-        if (options.simulateWrites)
-          return (await simulateWrite(name, request.params.arguments)) as never;
-        return plannedWriteResult(
-          options.name,
-          name,
-          request.params.arguments,
-          aliases
-        ) as never;
-      }
-      return (await forward(
+      if (isWrite(name))
+        return (await stopWrite(name, request.params.arguments)) as never;
+      const result = await forward(
         'tools/call',
         request.params,
         context.mcpReq.signal
-      )) as never;
+      );
+      await recordForwarded(name, request.params.arguments, result);
+      return result as never;
     });
     upstream.setNotificationHandler(
       'notifications/tools/list_changed',

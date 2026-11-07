@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { referenceSchema } from './referenceSchemas.js';
 import type { EvalCaseResult } from '../types/reporter.js';
-import type { UsageMetrics } from '../types/index.js';
+import type {
+  UsageMetrics,
+  WriteEvidence,
+  WriteRecord,
+} from '../types/index.js';
+import { weakestWriteEvidence } from './writeEvidence.js';
 import type { Transcript } from './evalFrameworkTypes.js';
 import { isInfrastructure, isIncompleteCase } from './trialEnding.js';
 import { extensionLookup } from '../plugins/extensions.js';
@@ -394,6 +399,56 @@ function rateAggregation(
     : undefined;
 }
 
+/** The total over the cases that have a value. */
+function sumAggregation(
+  values: MetricValue[],
+  metric: ResolvedMetric
+): { key: string; value: unknown } | undefined {
+  const numbers = values.filter(
+    (value): value is number => typeof value === 'number'
+  );
+  return numbers.length > 0
+    ? { key: metric.outName, value: numbers.reduce((a, b) => a + b, 0) }
+    : undefined;
+}
+
+/**
+ * What a write case's pass rests on (ADR 0014): the weakest evidence any of
+ * its scores, in any trial, rests on. Undefined for a case that isn't a write
+ * case or wasn't graded.
+ */
+function caseWriteEvidence(result: EvalCaseResult): WriteEvidence | undefined {
+  const scores = result.trialResults?.length
+    ? result.trialResults
+        .filter((trial) => !isInfrastructure(trial))
+        .map((trial) => trial.scores)
+    : [result.scores];
+  const levels: Array<WriteEvidence | undefined> = [];
+  for (const set of scores)
+    for (const score of Object.values(set ?? {})) {
+      levels.push(score?.writeEvidence);
+      for (const judged of score?.judgeResults ?? [])
+        levels.push(judged.writeEvidence);
+    }
+  return weakestWriteEvidence(levels);
+}
+
+/** A count from each trial's write record, summed; null when no trial has one. */
+function writeRecordCount(
+  result: EvalCaseResult,
+  count: (record: WriteRecord) => number
+): number | null {
+  const records = result.trialResults?.length
+    ? result.trialResults.map((trial) => trial.writeRecord)
+    : [result.writeRecord];
+  const present = records.filter(
+    (record): record is WriteRecord => record !== undefined
+  );
+  return present.length > 0
+    ? present.reduce((total, record) => total + count(record), 0)
+    : null;
+}
+
 function judgeScoreAggregation(
   values: MetricValue[],
   metric: ResolvedMetric
@@ -690,6 +745,44 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
       const first = judgeEntries(result)[0];
       return first ? judgeName(first) : null;
     }),
+    // Write cases (ADR 0014): their pass rate, with what it rests on, and
+    // the writes the record and the transcripts disagree about.
+    write_case_passed: metric('binary', (result) =>
+      caseWriteEvidence(result) === undefined || isIncompleteCase(result)
+        ? null
+        : result.pass
+    ),
+    write_evidence: metric(
+      'categorical',
+      (result) => caseWriteEvidence(result) ?? null,
+      (values, item) => {
+        const weakest = weakestWriteEvidence(
+          values.filter(
+            (value): value is WriteEvidence => typeof value === 'string'
+          )
+        );
+        return weakest === undefined
+          ? undefined
+          : { key: item.outName, value: weakest };
+      }
+    ),
+    unreported_writes: metric(
+      'continuous',
+      (result) => writeRecordCount(result, (record) => record.unreported),
+      sumAggregation
+    ),
+    unrecorded_writes: metric(
+      'continuous',
+      (result) =>
+        writeRecordCount(result, (record) => record.unrecorded.length),
+      sumAggregation
+    ),
+    unclassified_calls: metric(
+      'continuous',
+      (result) =>
+        writeRecordCount(result, (record) => record.unclassified.length),
+      sumAggregation
+    ),
   });
 
 globalMetrics[BUILT_INS_KEY] = BUILT_IN_METRICS;
@@ -857,4 +950,9 @@ export const CORE_METRICS = [
   'duration_s',
   'judge_pass',
   'judge_score',
+  'write_case_passed',
+  'write_evidence',
+  'unreported_writes',
+  'unrecorded_writes',
+  'unclassified_calls',
 ] as const;

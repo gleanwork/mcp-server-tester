@@ -94,6 +94,29 @@ describe('checkServersReady', () => {
     });
   });
 
+  it("refuses a read-only server that lists a tool that isn't read-only", async () => {
+    const { sleep, delays } = fakeSleep();
+    const docs = {
+      ...readyStdioServer({ READINESS_WRITE_TOOL: '1' }),
+      label: 'docs',
+    };
+    const readiness = await checkServersReady([docs], {
+      sleep,
+      log: () => {},
+      readOnly: new Set(['docs']),
+    });
+    expect(readiness).toMatchObject({ ready: false });
+    expect(readiness.ready ? '' : readiness.reason).toMatch(
+      /MST can't see these servers' writes, so no trial was sent: "docs" lists tools that aren't read-only \(save\)/
+    );
+    // Retrying won't change what it lists.
+    expect(delays).toEqual([]);
+    // A server with a write mode isn't checked for it.
+    await expect(checkServersReady([docs])).resolves.toMatchObject({
+      ready: true,
+    });
+  });
+
   it('fails a server that lists no tools', async () => {
     const { sleep } = fakeSleep();
     const readiness = await checkServersReady(

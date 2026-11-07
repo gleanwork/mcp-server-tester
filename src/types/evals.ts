@@ -6,7 +6,10 @@ export type {
   CaseJudge,
   CaseJudgeConfig,
   SerializedEvalDataset,
+  ExpectedWrites,
 } from '../evals/datasetTypes.js';
+
+export type { WritesValidationResult } from '../assertions/validators/writes.js';
 
 export type { LoadDatasetOptions } from '../evals/datasetLoader.js';
 

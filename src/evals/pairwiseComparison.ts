@@ -204,6 +204,9 @@ function trial(result: EvalCaseResult) {
     ...(result.transcriptEvidence !== undefined && {
       evidence: result.transcriptEvidence,
     }),
+    ...(result.writeRecord !== undefined && {
+      writeRecord: result.writeRecord,
+    }),
   });
   // Stored responses drop the local path; the run keeps it in memory.
   return result.artifacts

@@ -1,12 +1,12 @@
 /**
  * A connector and a client for runs whose shards use connector servers,
  * loaded by `mst collect` in a child process. The `notes` connector launches
- * connectorNotesServer.ts with its token file; the `caller` client connects
+ * MST's dry-run proxy (from source) with its token file in front of a notes
+ * server (notesProxy.ts); the `caller` client connects
  * to the servers it is given, lists their tools and calls them, as a desktop
  * client would.
  */
 import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import type { MCPConfig } from '../../src/config/mcpConfig.js';
 import {
@@ -18,11 +18,7 @@ import type {
   TranscriptEvent,
 } from '../../src/evals/evalFrameworkTypes.js';
 import type { Plugin } from '../../src/plugins/plugin.js';
-
-const ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const SERVER = fileURLToPath(
-  new URL('./connectorNotesServer.ts', import.meta.url)
-);
+import { notesProxyServer } from './notesProxy.js';
 
 /**
  * The connector token a server was launched with, read from its token
@@ -65,19 +61,13 @@ export default {
     notes: {
       url: 'https://notes.example/mcp',
       auth: { type: 'oauth' },
-      launch: ({ tokenFile, simulateWrites }) => ({
-        transport: 'stdio',
-        command: process.execPath,
-        cwd: ROOT,
-        args: [
-          '--import',
-          'tsx',
-          SERVER,
-          '--token-file',
-          tokenFile!,
-          ...(simulateWrites ? ['--simulate-writes', simulateWrites.file] : []),
-        ],
-      }),
+      launch: ({ label, tokenFile, writes }) =>
+        notesProxyServer({
+          label,
+          ...(tokenFile ? { tokenFile } : {}),
+          ...(writes ? { writes } : {}),
+          writeReplies: { create_note: { ok: true } },
+        }),
     },
   },
   clients: {

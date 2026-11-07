@@ -120,6 +120,10 @@ export function clientRunToExecution(
     ...(attributedRun.diagnostics
       ? { diagnostics: attributedRun.diagnostics }
       : {}),
+    // A worker's record of its proxies' writes (withResultWriteRecord).
+    ...(attributedRun.writeRecord
+      ? { writeRecord: attributedRun.writeRecord }
+      : {}),
     evidence,
   };
 }

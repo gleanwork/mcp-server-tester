@@ -26,6 +26,8 @@ import {
   type GrantTarget,
 } from '../auth/grants/grants.js';
 import type { CredentialStore } from '../auth/grants/types.js';
+import type { ProxyWrites } from '../proxy/dryRunProxyServer.js';
+import { launchedWriteMode } from './writeModes.js';
 import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 import type { FetchFn } from '../auth/grants/oauthHttp.js';
 import {
@@ -80,8 +82,16 @@ export interface ConnectorExpansion {
   grantsByVariant: Map<string, Set<string>>;
   /** The private directory token files go in (not yet created). */
   tokenDirectory?: string;
-  /** Where the dry-run proxies record simulated writes, one file per server label. */
-  simulatedWriteFiles: string[];
+  /** Where the dry-run proxies record writes, one file per connector server. */
+  writeRecordFiles: string[];
+}
+
+/** Where a run's dry-run proxies record writes, and whether they simulate them. */
+export interface WriteRecordOptions {
+  /** The private directory the files go in (not yet created). */
+  directory: string;
+  /** The eval config's `simulateWrites`. */
+  simulate: boolean;
 }
 
 function connectorUse(
@@ -133,8 +143,8 @@ export async function expandConnectorServers(
   options: {
     tokenDirectory?: string;
     platform?: NodeJS.Platform;
-    /** With `simulateWrites`: the private directory proxies record writes in. */
-    simulatedWritesDirectory?: string;
+    /** Where proxies record writes (ADR 0014). Absent outside a run. */
+    writes?: WriteRecordOptions;
     /** The run the servers' trials belong to: given to each `launch`. */
     runId?: string;
   } = {}
@@ -146,9 +156,21 @@ export async function expandConnectorServers(
       uses,
       slots: [],
       grantsByVariant: new Map(),
-      simulatedWriteFiles: [],
+      writeRecordFiles: [],
     };
-  const simulatedWriteFiles = new Set<string>();
+  const writeRecordFiles = new Set<string>();
+  // One file per connector server: label, connector and url.
+  const fileByUse = new Map<string, string>();
+  const writeFileFor = (use: ConnectorUse, directory: string): string => {
+    const key = `${use.label}\0${use.reference}\0${use.url}`;
+    let file = fileByUse.get(key);
+    if (!file) {
+      const suffix = fileByUse.size === 0 ? '' : `-${fileByUse.size}`;
+      file = join(directory, `${encodeURIComponent(use.label)}${suffix}.jsonl`);
+      fileByUse.set(key, file);
+    }
+    return file;
+  };
   const tokenDirectory =
     options.tokenDirectory ??
     join(await realpath(tmpdir()), `${TOKEN_DIRECTORY_PREFIX}${randomUUID()}`);
@@ -188,30 +210,32 @@ export async function expandConnectorServers(
         slot.file ??= join(tokenDirectory, `${slot.target.key}.json`);
         tokenFile = slot.file;
       }
-      const writesFile = options.simulatedWritesDirectory
-        ? join(
-            options.simulatedWritesDirectory,
-            `${encodeURIComponent(use.label)}.jsonl`
-          )
+      const writes: ProxyWrites | undefined = options.writes
+        ? {
+            file: writeFileFor(use, options.writes.directory),
+            simulate: options.writes.simulate,
+            ...(use.connector.plannedWriteKey !== undefined
+              ? { plannedWriteKey: use.connector.plannedWriteKey }
+              : {}),
+            ...(use.connector.dispatchers
+              ? { dispatchers: use.connector.dispatchers }
+              : {}),
+          }
         : undefined;
       const launched = await use.connector.launch({
         url: use.url,
         label: use.label,
         ...(tokenFile ? { tokenFile } : {}),
         platform: options.platform ?? process.platform,
-        ...(writesFile ? { simulateWrites: { file: writesFile } } : {}),
+        ...(writes ? { writes } : {}),
         ...(options.runId ? { runId: options.runId } : {}),
         settings: use.settings,
       });
       const entry = validateMCPConfig({ ...launched, label: use.label });
-      if (writesFile) {
-        if (entry.transport === 'stdio' && entry.args?.includes(writesFile))
-          simulatedWriteFiles.add(writesFile);
-        else
-          console.warn(
-            `[mst] Connector server "${use.label}" doesn't pass simulateWrites to its dry-run proxy, so its writes get planned-write results.`
-          );
-      }
+      // A dry-run proxy that drops `writes`, or ignores whether to simulate,
+      // fails here: MST would see none of its writes.
+      if (writes && launchedWriteMode(entry, use.label, writes) !== undefined)
+        writeRecordFiles.add(writes.file);
       if (
         entry.transport === 'stdio' &&
         entry.minTools === undefined &&
@@ -269,7 +293,7 @@ export async function expandConnectorServers(
     slots: [...slots.values()],
     grantsByVariant,
     tokenDirectory,
-    simulatedWriteFiles: [...simulatedWriteFiles],
+    writeRecordFiles: [...writeRecordFiles],
   };
 }
 
@@ -563,20 +587,20 @@ export interface WorkerConnectors {
   servers: Map<string, MCPConfig>;
   /** Where each label's token goes: a launched connector's file, or env vars. */
   deliveries: Map<string, { file?: string; envNames: string[] }>;
-  /** Where the dry-run proxies record simulated writes. */
-  simulatedWriteFiles: string[];
+  /** Where the dry-run proxies record writes. */
+  writeRecordFiles: string[];
 }
 
 /**
  * Expands the connector servers a shard was given, with this machine's
- * paths: token files in `tokenDirectory`, simulated writes in
- * `simulatedWritesDirectory`. Writes nothing; the tokens arrive later.
+ * paths: token files in `tokenDirectory`, write records in
+ * `writes.directory`. Writes nothing; the tokens arrive later.
  */
 export async function expandWorkerConnectors(
   declarations: readonly ConnectorServerConfig[],
   options: {
     tokenDirectory: string;
-    simulatedWritesDirectory?: string;
+    writes?: WriteRecordOptions;
     runId?: string;
   }
 ): Promise<WorkerConnectors> {
@@ -601,6 +625,6 @@ export async function expandWorkerConnectors(
   return {
     servers,
     deliveries,
-    simulatedWriteFiles: expansion.simulatedWriteFiles,
+    writeRecordFiles: expansion.writeRecordFiles,
   };
 }

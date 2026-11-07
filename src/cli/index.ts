@@ -466,6 +466,10 @@ program
     'Collect the trials without grading them; grade them later with mst grade'
   )
   .option(
+    '--allow-live-writes',
+    'Let writes reach the service on servers the eval config declares "writes": { "<label>": "live" }'
+  )
+  .option(
     '--resume <run>',
     'Collect again only the trials a run is missing or lost to an infrastructure failure a retry can help, in its runner (not local; use --runner), and grade it again'
   )

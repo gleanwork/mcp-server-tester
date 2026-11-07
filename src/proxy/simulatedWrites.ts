@@ -2,8 +2,14 @@
  * Simulated writes: the dry-run proxy's other answer to a write. Instead of a
  * planned-write result, which tells the client the write didn't happen, the
  * client gets a success reply, so it carries on as it would after a real
- * write. The write never reaches the server; the proxy records it in a JSONL
- * file MST reads after each trial (simulatedWriteRecords.ts).
+ * write. The write never reaches the server; the proxy records it in the
+ * write record MST reads after each trial (writeRecordLines.ts).
+ *
+ * Reply templates are keyed by tool name: any JSON. A string that is exactly
+ * `{{arguments.<path>}}` becomes that argument's value; inside a longer
+ * string, its text. `{{id}}` is a fresh ID for the call, `{{now}}` the time
+ * (ISO 8601) and `{{unixTime}}` the time in seconds with microseconds
+ * (`1760000000.123456`, Slack's `ts` form).
  *
  * The reply, in order of preference:
  *
@@ -14,26 +20,7 @@
  * 3. `{ "ok": true, "id": "<id>", "result": <the call's arguments> }`.
  */
 import { randomBytes } from 'node:crypto';
-import { appendFile } from 'node:fs/promises';
 import type { Tool } from '@modelcontextprotocol/client';
-import type { SimulatedWriteRecord } from './simulatedWriteRecords.js';
-
-/** Where to record simulated writes, and the replies to give. */
-export interface SimulatedWritesOptions {
-  /**
-   * The JSONL file each simulated write is appended to (created private).
-   * MST passes it to a connector's `launch` as `simulateWrites.file`.
-   */
-  file: string;
-  /**
-   * Reply templates by tool name: any JSON. A string that is exactly
-   * `{{arguments.<path>}}` becomes that argument's value; inside a longer
-   * string, its text. `{{id}}` is a fresh ID for the call, `{{now}}` the
-   * time (ISO 8601) and `{{unixTime}}` the time in seconds with
-   * microseconds (`1760000000.123456`, Slack's `ts` form).
-   */
-  replies?: Readonly<Record<string, unknown>>;
-}
 
 /** A tool call result, as the proxy returns it. */
 export interface SimulatedReply {
@@ -193,19 +180,4 @@ export function simulatedReply(
     // A tool with an outputSchema returns structured content; others text.
     ...(structured ? { structuredContent: structured } : {}),
   };
-}
-
-/** Appends one simulated write to `file`, which only its owner can read. */
-export async function recordSimulatedWrite(
-  file: string,
-  record: Omit<SimulatedWriteRecord, 'format'>
-): Promise<void> {
-  const line: SimulatedWriteRecord = {
-    format: 'mst.simulated-write/v1',
-    ...record,
-  };
-  await appendFile(file, `${JSON.stringify(line)}\n`, {
-    mode: 0o600,
-    flag: 'a',
-  });
 }

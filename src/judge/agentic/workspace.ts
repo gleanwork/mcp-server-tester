@@ -8,6 +8,9 @@
  *   response.md        the final response text
  *   transcript/events.json   client events in order, with full tool output
  *   transcript/messages.json conversation turns, when the client reported them
+ *   writes.json        the writes MST's dry-run proxies recorded (ADR 0014),
+ *                      when the trial has a write record: each was stopped,
+ *                      so it is a request, not a change that happened
  *   artifacts/...      the client's artifacts stored with the trial (a Cowork
  *                      session's audit log, outputs, transcripts and saved
  *                      tool output), when it has them
@@ -95,6 +98,8 @@ export function trialFiles(
       path: at('transcript/messages.json'),
       content: json(trial.messages),
     });
+  if (trial.writeRecord)
+    files.push({ path: at('writes.json'), content: json(trial.writeRecord) });
   return files;
 }
 

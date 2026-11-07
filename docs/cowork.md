@@ -794,8 +794,15 @@ tools annotated as reads.
 
 A server that handles writes itself, such as an eval endpoint that never
 changes real data, can still use the proxy for its token: with
-`forwardWrites: true`, every call goes upstream. Use it for any connector whose
-session can outlast its access token. A token in an environment variable is
+`forwardWrites: true`, every call goes upstream. MST then sees the server's
+writes only when the connector sets `plannedWriteKey`, the key the server puts
+in the result of each write it stopped: the proxy records each marked result
+(the `server-planned` write mode). Without it, the run doesn't start unless the
+eval config accepts the server's writes as unguarded (see
+[Writes](./evaluation-framework.md#writes)). A connector whose server runs
+other tools through one tool names it in `dispatchers`, with the argument that
+holds the target (`{ run_tool: 'tool_name' }`), so the record shows the target.
+Use the proxy for any connector whose session can outlast its access token. A token in an environment variable is
 read once, when the client starts, and is never renewed. `requestTimeoutMs`
 (default 120 seconds) bounds each request; raise it for tools slower than that,
 so the client's own tool limit applies instead.
@@ -806,15 +813,21 @@ seconds, then exits; each failure goes to stderr with its kind (an error
 class, a network code or an HTTP status), never a token or response body.
 
 `dryRunProxyServer()` (from `@gleanwork/mcp-server-tester/evals`) returns the
-stdio server entry. It holds the path of a token file, never a token:
+stdio server entry. It holds the path of a token file, never a token. Pass it
+the launch context's `writes` unchanged: it says where the proxy records the
+server's writes and whether it simulates them. A launch that drops it, or
+changes whether to simulate, fails the run, because MST would see none of the
+server's writes:
 
 ```ts
 import { dryRunProxyServer } from '@gleanwork/mcp-server-tester/evals';
 
+// In a connector's launch(context):
 const slack = dryRunProxyServer({
   label: 'slack',
   upstreamUrl: 'https://mcp.slack.com/mcp',
-  tokenFile: '/private/run/slack.json', // { "version": 1, "accessToken": "..." }
+  tokenFile: context.tokenFile, // { "version": 1, "accessToken": "..." }
+  writes: context.writes,
   minTools: 10,
 });
 ```
@@ -832,7 +845,7 @@ behaves after a real write, set `"simulateWrites": true` in the eval config.
 The proxy then answers a write with a success reply. It still never forwards
 the write, and it records it. The reply, in order of preference:
 
-1. The connector's template for the tool (`simulateWrites.replies`).
+1. The connector's template for the tool (`writeReplies`).
 2. A minimal object that satisfies the tool's `outputSchema`, as structured
    content, when it declares one.
 3. `{ "ok": true, "id": "<id>", "result": <the call's arguments> }`.
@@ -846,34 +859,26 @@ microseconds, as in Slack's `ts`:
 const slack = dryRunProxyServer({
   label: 'slack',
   upstreamUrl: 'https://mcp.slack.com/mcp',
-  tokenFile,
-  // From the connector's launch context; absent without simulateWrites.
-  ...(simulateWrites && {
-    simulateWrites: {
-      ...simulateWrites,
-      replies: {
-        slack_send_message: {
-          ok: true,
-          channel: '{{arguments.channel_id}}',
-          ts: '{{unixTime}}',
-          message: { text: '{{arguments.message}}' },
-        },
-      },
+  tokenFile: context.tokenFile,
+  writes: context.writes,
+  // Used only when the eval config sets simulateWrites.
+  writeReplies: {
+    slack_send_message: {
+      ok: true,
+      channel: '{{arguments.channel_id}}',
+      ts: '{{unixTime}}',
+      message: { text: '{{arguments.message}}' },
     },
-  }),
+  },
 });
 ```
 
-With the flag, MST passes each connector's `launch` a private file,
-`simulateWrites.file`, for its proxy to record writes in: one JSONL line per
-write (`mst.simulated-write/v1`: server, tool, arguments, reply). A connector
-whose launch doesn't pass it on keeps planned-write results, and the run says
-so. After each trial, MST marks the trial's tool calls the proxy answered
-(same server, tool and arguments) `simulatedWrite: true`, in its transcript events
+After each trial, MST marks the trial's tool calls the proxy answered (same
+server, tool and arguments) `simulatedWrite: true`, in its transcript events
 and in the client response's `events` and `toolCalls`, so judges and reports
-know the write never happened; `output` is the reply.
-The files are deleted when the run ends. A write the proxy can't record gets
-the planned-write result instead. The run's `run.json` has
+know the write never happened; `output` is the reply. A write the proxy can't
+record gets the planned-write result instead: MST never tells a client a write
+succeeded without a record of it. The run's `run.json` has
 `"simulateWrites": true`. A regrade keeps it, and a resume collects the
 missing trials the same way, whatever the eval config now says. Turning the flag
 on or off starts a new era in the eval's history, since the client sees
@@ -881,6 +886,21 @@ something else after a write.
 
 The model can't read back what it "wrote": a search for the message it sent
 won't find it.
+
+#### The write record
+
+The proxy records every write it stops, planned or simulated, and every
+marked write a `forwardWrites` server stopped, in a private JSONL file MST
+gives each connector's launch (`writes.file`, `mst.write-record/v1`). It also
+records the tools it treats as writes each time it lists the server's tools,
+and each forwarded call it can't classify: a dispatcher's call, or a call to a
+tool that isn't read-only whose result has no planned-write mark.
+
+After each trial, MST takes the trial's part of each file and matches it with
+the trial's transcript, then stores the result with the trial as its
+`writeRecord`. The `writes` grader and judges read it; see
+[Writes](./evaluation-framework.md#writes). The files are deleted when the
+run ends.
 
 ### macOS setup contract
 

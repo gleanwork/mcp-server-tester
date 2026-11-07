@@ -15,6 +15,8 @@
 //   READINESS_STALL_LIST   when `1`, never answers `tools/list`
 //   READINESS_STALL_INITIALIZE  when `1`, never answers `initialize`
 //   READINESS_LIST_ERROR   when `1`, answers `tools/list` with an error
+//   READINESS_WRITE_TOOL   when `1`, also lists `save`, a tool that isn't
+//                          read-only
 //
 // Over HTTP, `startReadinessHttpServer` takes the same settings as options.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -22,12 +24,22 @@ import { createServer } from 'node:http';
 import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
-function toolList(count) {
-  return Array.from({ length: count }, (_, index) => ({
+// Its tools are reads, so MST's load check needs no write mode for it (ADR
+// 0014), unless `writeTool` adds one that isn't.
+function toolList(count, writeTool) {
+  const tools = Array.from({ length: count }, (_, index) => ({
     name: `tool_${index + 1}`,
     description: `Test tool ${index + 1}`,
     inputSchema: { type: 'object', properties: {} },
+    annotations: { readOnlyHint: true },
   }));
+  if (writeTool)
+    tools.push({
+      name: 'save',
+      description: 'Saves a note.',
+      inputSchema: { type: 'object', properties: {} },
+    });
+  return tools;
 }
 
 /**
@@ -36,7 +48,7 @@ function toolList(count) {
  */
 function respond(
   message,
-  { tools, log, stallList, stallInitialize, listError }
+  { tools, log, stallList, stallInitialize, listError, writeTool }
 ) {
   if (
     log &&
@@ -61,7 +73,7 @@ function respond(
         serverInfo: { name: 'readiness-server', version: '1.0.0' },
       });
     case 'tools/list':
-      return result({ tools: toolList(tools) });
+      return result({ tools: toolList(tools, writeTool) });
     case 'tools/call':
       return result({ content: [{ type: 'text', text: 'ok' }] });
     default:
@@ -161,6 +173,7 @@ function serveStdio() {
     stallList: process.env.READINESS_STALL_LIST === '1',
     stallInitialize: process.env.READINESS_STALL_INITIALIZE === '1',
     listError: process.env.READINESS_LIST_ERROR === '1',
+    writeTool: process.env.READINESS_WRITE_TOOL === '1',
   };
   process.stdin.on('end', () => {
     if (settings.log) appendFileSync(settings.log, 'closed\n');

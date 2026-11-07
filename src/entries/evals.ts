@@ -206,7 +206,10 @@ export {
   dryRunProxyServer,
   PLANNED_WRITE_KEY,
 } from '../proxy/dryRunProxyServer.js';
-export type { DryRunProxyServerOptions } from '../proxy/dryRunProxyServer.js';
+export type {
+  DryRunProxyServerOptions,
+  ProxyWrites,
+} from '../proxy/dryRunProxyServer.js';
 
 // Connectors: a plugin's vendor MCP servers, signed in to with `mst auth`.
 export type {

@@ -109,6 +109,9 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
         },
       },
       variants: [{ name: 'baseline', servers: ['docs'] }],
+      // MST's load check would launch `docs` once more to list its tools
+      // (ADR 0014); these tests count the readiness check's launches.
+      writes: { docs: 'unguarded' },
       redactStoredResponses: false,
     })
   );

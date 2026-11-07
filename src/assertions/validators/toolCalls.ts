@@ -64,7 +64,11 @@ function isPatternMatcher(
   );
 }
 
-function partialMatch(
+/**
+ * Whether `actual` has every key of `expected`, recursively; a string may be
+ * matched by `{ "$pattern": "regex", "$flags": "i" }`.
+ */
+export function partialMatch(
   actual: Record<string, unknown>,
   expected: Record<string, unknown>
 ): boolean {

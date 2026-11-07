@@ -29,6 +29,7 @@ import type {
   GraderCriterion,
   GraderJuryVote,
   UsageMetrics,
+  WriteRecord,
 } from '../types/index.js';
 
 /** The case and run a dataset judge grades. Matchers pass none. */
@@ -39,6 +40,8 @@ export interface JudgeRun {
   clientResponse?: unknown;
   /** How the client transcript was observed. */
   evidence?: TranscriptEvidence;
+  /** The writes MST's dry-run proxies recorded in the trial (ADR 0014). */
+  writeRecord?: WriteRecord;
   /** The eval's plugin settings; the judge gets its plugin's (ADR 0008). */
   settings?: SettingsSections;
 }

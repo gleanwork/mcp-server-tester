@@ -14,7 +14,8 @@ try {
 import { StdioServerTransport } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/server/stdio'))};
 import { z } from ${JSON.stringify(import.meta.resolve('zod'))};
 const server = new McpServer({name:'local-review-fixture',version:'1'});
-server.registerTool('echo', {description:'Local echo', inputSchema: z.object({text: z.string()})}, async ({text}) => ({content:[{type:'text',text}]}));
+// echo is a read, so MST's load check needs no write mode for the server.
+server.registerTool('echo', {description:'Local echo', inputSchema: z.object({text: z.string()}), annotations: {readOnlyHint: true}}, async ({text}) => ({content:[{type:'text',text}]}));
 await server.connect(new StdioServerTransport());`
   );
   const pluginPath = path.join(dir, 'plugin.mjs');

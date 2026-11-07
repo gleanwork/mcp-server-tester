@@ -184,6 +184,38 @@ _Avoid_: margin of error, error bars
 Grading a stored run's transcripts again with the eval config's graders as they are now (`mst grade`), without running the client. It is saved as a new run, `<run-id>.g2` and so on, whose `run.json` names the original in `gradedFrom`. Needs transcripts stored with `"redactStoredResponses": false`.
 _Avoid_: rescore, re-run
 
+### Writes
+
+**Write case**:
+A case whose `expected.writes` lists writes, or whose trials made one ([ADR 0014](docs/adr/0014-graders-check-outcomes-and-every-write-is-accounted-for.md)). Its scores say what they rest on (write evidence).
+_Avoid_: action case, mutation case
+
+**Write record**:
+The writes the dry-run proxies in front of a trial's servers recorded during the trial, each with its server, tool, arguments, reply and write mode, matched against the trial's transcript. Stored with the trial as `writeRecord`; the `writes` grader reads it, never the transcript.
+_Avoid_: write log, audit log
+
+**Write mode**:
+How a server in a variant handles a write, known before the run starts: `planned` or `simulated` (the dry-run proxy stops it), `server-planned` (the server stops it and marks it), `live` (it reaches the service), `unguarded` (MST can't see it, and the eval config accepts that) or `read-only` (the server has no write tools).
+_Avoid_: write policy, dry-run mode
+
+**Write evidence**:
+What a score of a write rests on, weakest first: `claimed` (the answer says so), `called` (the transcript has the call), `requested` (a dry-run proxy recorded the request) or `applied` (an outcome check found the expected state; reserved). A planned or simulated write is at most `requested`: the request, not a write that happened.
+_Avoid_: confidence, proof
+
+**Unreported write**:
+A write in the record with no matching call in the trial's transcript: the client made a write its transcript doesn't show. Fails the trial's `writes` grader.
+
+**Unrecorded write**:
+A write call in the transcript, to a server whose writes MST records, with no entry in the record: the call never reached the server. Fails the trial's `writes` grader.
+
+**Unclassified call**:
+A call the proxy forwarded and can't classify as a read or a write: a dispatcher's call, or a write tool's call, whose result has no planned-write mark. Gives at most `called` evidence.
+_Avoid_: unknown write
+
+**Outcome check**:
+A grader that reads the environment through MST's own connection after a trial, to find the outcome. Planned (the `outcome` grader); until it ships, no write case reaches `applied`.
+_Avoid_: state check, verification
+
 ### Runs and comparisons
 
 **Run**:
@@ -325,7 +357,7 @@ Where refresh grants are kept. MST ships `mst/credential-store/local`, files in 
 _Avoid_: keychain, vault, secret store
 
 **Dry-run proxy**:
-A local proxy in front of a vendor MCP server that lets read tools through and answers writes without sending them: by default with a planned-write result, or with a success reply when the eval config sets `simulateWrites` (a **simulated write**).
+A local proxy in front of a vendor MCP server that lets read tools through and answers writes without sending them: by default with a planned-write result, or with a success reply when the eval config sets `simulateWrites` (a **simulated write**). It records every write it stops in the trial's write record.
 _Avoid_: mock server, write blocker, sandbox
 
 **Shared config**:

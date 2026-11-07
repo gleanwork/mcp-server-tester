@@ -20,9 +20,15 @@ import type {
   RunReportScore,
   RunReportTrial,
   RunReportVariant,
+  RunReportWrites,
   TrialResult,
 } from '../types/reporter.js';
-import type { GraderScore } from '../types/index.js';
+import type {
+  GraderScore,
+  WriteEvidence,
+  WriteMode,
+  WriteRecord,
+} from '../types/index.js';
 import { totalTokens } from '../utils/usageUtils.js';
 import type {
   EvaluationSummary,
@@ -94,6 +100,7 @@ function scoresOf(trial: Trial, redacted: boolean): RunReportScore[] {
       ...(isJudge ? { judge: true } : {}),
       pass: s.pass,
       ...(s.unknown === true ? { unknown: true as const } : {}),
+      ...(s.writeEvidence ? { writeEvidence: s.writeEvidence } : {}),
       ...(typeof s.score === 'number' ? { score: s.score } : {}),
       ...(words && s.details ? { details: clip(s.details) } : {}),
       ...(words && s.reasoning ? { reasoning: clip(s.reasoning) } : {}),
@@ -131,6 +138,7 @@ interface TranscriptEventLike {
   output?: unknown;
   isError?: boolean;
   text?: string;
+  simulatedWrite?: boolean;
 }
 
 interface TranscriptLike {
@@ -152,6 +160,7 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
     ...(isInfrastructure(trial) ? { infrastructureError: true } : {}),
     ...(trial.durationMs !== undefined ? { durationMs: trial.durationMs } : {}),
     ...trialTranscript(trial),
+    ...(trial.writeRecord ? { writes: reportWrites(trial.writeRecord) } : {}),
     scores: scoresOf(trial, redacted),
     ...(usage &&
     (usage.inputTokens !== undefined || usage.outputTokens !== undefined)
@@ -186,8 +195,59 @@ export function trialTranscript(
       ...(event.output !== undefined ? { output: clip(event.output) } : {}),
       ...(event.text ? { text: clip(event.text) } : {}),
       ...(event.isError ? { isError: true } : {}),
+      ...(event.simulatedWrite ? { simulatedWrite: true as const } : {}),
     })),
   };
+}
+
+/** A trial's write record as the report shows it: arguments shortened, no replies. */
+function reportWrites(record: WriteRecord): RunReportWrites {
+  return {
+    writes: record.writes.map((write) => ({
+      server: write.server,
+      tool: write.tool,
+      mode: write.mode,
+      ...(write.target ? { target: write.target } : {}),
+      ...(write.arguments !== undefined
+        ? { input: clip(write.arguments) }
+        : {}),
+    })),
+    unreported: record.unreported,
+    unrecorded: record.unrecorded.map(({ server, tool }) => ({ server, tool })),
+    unclassified: record.unclassified.map(({ server, tool, reason }) => ({
+      server,
+      tool,
+      reason,
+    })),
+    attribution: record.attribution,
+  };
+}
+
+/** A variant's write modes and write-case metrics, when it has either. */
+function variantWrites(
+  variant: EvaluationVariantResult,
+  modes: Record<string, WriteMode> | undefined
+): RunReportVariant['writes'] {
+  const evidence = variant.metrics?.write_evidence;
+  const writes = {
+    ...(modes && Object.keys(modes).length > 0 ? { modes } : {}),
+    ...(numberMetric(variant, 'write_case_passed_rate') !== undefined
+      ? { casePassRate: numberMetric(variant, 'write_case_passed_rate') }
+      : {}),
+    ...(typeof evidence === 'string'
+      ? { evidence: evidence as WriteEvidence }
+      : {}),
+    ...(numberMetric(variant, 'unreported_writes') !== undefined
+      ? { unreported: numberMetric(variant, 'unreported_writes') }
+      : {}),
+    ...(numberMetric(variant, 'unrecorded_writes') !== undefined
+      ? { unrecorded: numberMetric(variant, 'unrecorded_writes') }
+      : {}),
+    ...(numberMetric(variant, 'unclassified_calls') !== undefined
+      ? { unclassified: numberMetric(variant, 'unclassified_calls') }
+      : {}),
+  };
+  return Object.keys(writes).length > 0 ? writes : undefined;
 }
 
 /** Graders that read only the transcript (which tools were called, how often), never the answer. */
@@ -500,6 +560,9 @@ export function buildRunReport(
         ? { medianDurationMs: median(durations) }
         : {}),
       toolsUsed: toolsUsed(details, servers.size > 1),
+      ...(variantWrites(variant, record?.writeModes)
+        ? { writes: variantWrites(variant, record?.writeModes) }
+        : {}),
       pairwise: (pairwise?.summary ?? []).map((judge) => ({
         judge: judge.judge,
         compared: judge.compared,

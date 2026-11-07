@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # MST uses Anthropic's eval vocabulary

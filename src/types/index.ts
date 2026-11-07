@@ -113,7 +113,89 @@ export type GraderType =
   | 'error'
   | 'size'
   | 'toolsTriggered'
-  | 'toolCallCount';
+  | 'toolCallCount'
+  | 'writes';
+
+/**
+ * How a server handles a write (ADR 0014). `planned` and `simulated`: the
+ * dry-run proxy stops it. `server-planned`: the server stops it and marks
+ * it. `live`: it reaches the service. `unguarded`: MST can't see it, and the
+ * eval config accepts that. `read-only`: the server has no write tools.
+ */
+export type WriteMode =
+  | 'planned'
+  | 'simulated'
+  | 'server-planned'
+  | 'live'
+  | 'unguarded'
+  | 'read-only';
+
+/** The write modes an eval config declares for a server, in `writes`. */
+export type DeclaredWriteMode = 'unguarded' | 'live';
+
+/**
+ * What a score of a write rests on, weakest first (ADR 0014): the answer
+ * says so (`claimed`), the client's transcript has the call (`called`), a
+ * boundary MST owns recorded the request (`requested`), or an outcome check
+ * found the expected state (`applied`, reserved: MST has no outcome check
+ * yet).
+ */
+export type WriteEvidence = 'claimed' | 'called' | 'requested' | 'applied';
+
+/** One write in a trial's write record. */
+export interface RecordedWrite {
+  /** The server's label. */
+  server: string;
+  tool: string;
+  arguments: unknown;
+  /** What the client was told. Absent from redacted runs. */
+  reply?: unknown;
+  /** How the write was stopped. */
+  mode: 'planned' | 'simulated' | 'server-planned';
+  /** A dispatcher's target tool. */
+  target?: string;
+  /** The transcript event of the call, when the transcript has it. */
+  eventId?: string;
+}
+
+/** A forwarded call the proxy couldn't classify as a read or a write. */
+export interface UnclassifiedCall {
+  server: string;
+  tool: string;
+  arguments: unknown;
+  target?: string;
+  /** `dispatch`: a dispatcher's call. `unmarked`: a write tool's call the server didn't mark. */
+  reason: 'dispatch' | 'unmarked';
+}
+
+/** A write call in the transcript that no record has. */
+export interface UnrecordedWrite {
+  server: string;
+  tool: string;
+  eventId?: string;
+}
+
+/**
+ * A trial's write record (ADR 0014): what the dry-run proxies in front of
+ * its servers recorded, matched against its transcript.
+ */
+export interface WriteRecord {
+  /** Every write the proxies recorded for the trial, in order. */
+  writes: RecordedWrite[];
+  /** Recorded writes the transcript doesn't show: unreported writes. */
+  unreported: number;
+  /** Write calls in the transcript, to a recorded server, with no record. */
+  unrecorded: UnrecordedWrite[];
+  /** Dispatched or unmarked calls MST can't classify. */
+  unclassified: UnclassifiedCall[];
+  /**
+   * `exclusive`: no other trial used the servers while this one ran, so
+   * every recorded write is this trial's. `matched`: trials overlapped, so
+   * only writes that match this trial's calls are counted, and unreported
+   * writes can't be told apart.
+   */
+  attribution: 'exclusive' | 'matched';
+}
 
 /**
  * A grader's score for one trial
@@ -173,7 +255,15 @@ export interface GraderScore {
   skipped?: boolean;
 
   /**
-   * The judge read the trial and its trace can't support a verdict. `pass`
+   * In a write case: what the score rests on (ADR 0014). `writes` scores are
+   * `requested`, `toolsTriggered` and `toolCallCount` scores `called`,
+   * judges `requested` when the trial has a write record and `claimed`
+   * otherwise, and text checks `claimed`.
+   */
+  writeEvidence?: WriteEvidence;
+
+  /**
+   * The judge read the trial and its transcript can't support a verdict. `pass`
    * is false, because the trial didn't earn a pass, but the judge's pass
    * rate and score metrics leave it out, and `mst judges check` counts it.
    */
@@ -320,6 +410,8 @@ export type {
   CaseJudge,
   CaseJudgeConfig,
   SerializedEvalDataset,
+  ExpectedWrites,
+  WritesValidationResult,
   LoadDatasetOptions,
   EvalContext,
   EvalRunnerResult,
