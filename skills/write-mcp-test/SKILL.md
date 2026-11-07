@@ -14,11 +14,11 @@ A test has no client and no model, so it can't tell you whether a model would pi
 
 ## Before you start
 
-1. Check that the project has `@gleanwork/mcp-server-tester` and `@playwright/test` (`npm install --save-dev @gleanwork/mcp-server-tester@beta @playwright/test`).
+1. Check that the project has `@gleanwork/mcp-server-tester` and `@playwright/test` (`npm install --save-dev @gleanwork/mcp-server-tester@rc @playwright/test`).
 2. Find the tools to test and their input schemas: the server source, or `await mcp.listTools()` in a test.
 3. Check `playwright.config.ts` for an `mcpConfig` (Step 1).
 
-For a person at a terminal, `npx mst generate` connects to a server, lets them call tools interactively, and writes the calls as a spec (default `tests/generated.spec.ts`) to edit. `npx @gleanwork/mcp-server-tester@beta init` scaffolds a new project. Both are interactive: in an agent's shell, which has no terminal, they fail with `Raw mode is not supported on the current process.stdin` and write nothing. As an agent, write `playwright.config.ts` (Step 1) and the specs (Step 2) yourself.
+For a person at a terminal, `npx mst generate` connects to a server, lets them call tools interactively, and writes the calls as a spec (default `tests/generated.spec.ts`) to edit. `npx @gleanwork/mcp-server-tester@rc init` scaffolds a new project. Both are interactive: in an agent's shell, which has no terminal, they fail with `Raw mode is not supported on the current process.stdin` and write nothing. As an agent, write `playwright.config.ts` (Step 1) and the specs (Step 2) yourself.
 
 ## Step 1: Configure the server
 

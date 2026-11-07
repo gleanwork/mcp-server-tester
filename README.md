@@ -140,10 +140,10 @@ LLM client mode makes real API calls and produces non-deterministic results. Use
 
 ## Installation
 
-Requires Node.js 22+. These docs describe 2.0, which is in beta:
+Requires Node.js 22+. These docs describe 2.0, a release candidate published under the `rc` tag:
 
 ```bash
-npm install --save-dev @gleanwork/mcp-server-tester@beta @playwright/test
+npm install --save-dev @gleanwork/mcp-server-tester@rc @playwright/test
 ```
 
 `npm install @gleanwork/mcp-server-tester` installs 1.x, whose docs are at [v1.1.1](https://github.com/gleanwork/mcp-server-tester/tree/v1.1.1). Upgrading: [Migration guide (v1.x → v2.0)](./docs/migrations/migration-2.0.md).
@@ -159,7 +159,7 @@ The SDK client's packages (`ai` and the `@ai-sdk/*` providers) are optional depe
 ## Quick Start
 
 ```bash
-npx @gleanwork/mcp-server-tester@beta init
+npx @gleanwork/mcp-server-tester@rc init
 ```
 
 The CLI wizard creates a `playwright.config.ts`, example tests, and a sample eval dataset configured for your server. See the [CLI Guide](./docs/cli.md) for all options.
