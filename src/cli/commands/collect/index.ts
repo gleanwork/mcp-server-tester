@@ -1,5 +1,5 @@
-import { collectShard } from '../../../evals/environments/collect.js';
-import { lines } from '../../../evals/environments/protocol.js';
+import { collectShard } from '../../../evals/runners/collect.js';
+import { lines } from '../../../evals/runners/protocol.js';
 
 export interface CollectOptions {
   bundle: string;
@@ -7,7 +7,7 @@ export interface CollectOptions {
 }
 
 /**
- * `mst collect`: run a shard on this machine (ADR 0004). Environments start
+ * `mst collect`: run a shard on this machine (ADR 0004). Runners start
  * it; nobody types it. stdout carries only `mst.shard/v1` lines, so anything
  * else the process logs goes to stderr.
  */

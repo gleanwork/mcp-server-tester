@@ -59,7 +59,7 @@ const writeJson = (file: string, value: unknown) =>
   fs.writeFile(file, JSON.stringify(value, null, 2));
 
 /**
- * An eval on the api client, collected in `leaky/env/unredacted`, whose
+ * An eval on the api client, collected in `leaky/runner/unredacted`, whose
  * worker answers every trial itself, so no model runs. A case in `skip`
  * isn't collected, and the run ends partial. The stored run's files are then
  * rewritten as MST wrote them before the rename: every client is `mst`.
@@ -85,7 +85,7 @@ async function runStoredAsMst(caseIds: string[], skip?: string) {
     configPath,
     JSON.stringify({
       name: 'stored-client',
-      plugins: [mock('leakyEnvPlugin.ts')],
+      plugins: [mock('leakyRunnerPlugin.ts')],
       client: 'api',
       model: 'claude-haiku-4-5',
       datasets: ['./cases.json'],
@@ -101,7 +101,7 @@ async function runStoredAsMst(caseIds: string[], skip?: string) {
     configPath,
     rootDir: dir,
     outputDir,
-    env: 'leaky/env/unredacted',
+    runner: 'leaky/runner/unredacted',
     report: false,
   });
   vi.stubEnv('LEAKY_SKIP', '');
@@ -305,7 +305,7 @@ describe('a tool optimization whose baseline was stored with mst', () => {
  * As runStoredAsMst, on the codex-app client, with each variant's client
  * options; the stored run's files are then rewritten as MST wrote them
  * before codex-app: `chatgpt` with `surface: "codex"` in run.json's
- * variants and `chatgpt` in its results. (The leaky environment's shard
+ * variants and `chatgpt` in its results. (The leaky runner's shard
  * reports no client; runWithCurrentClients' own tests cover a machine's.)
  */
 async function runStoredAsChatgptCodex(caseIds: string[], skip?: string) {
@@ -329,7 +329,7 @@ async function runStoredAsChatgptCodex(caseIds: string[], skip?: string) {
     configPath,
     JSON.stringify({
       name: 'stored-codex-app',
-      plugins: [mock('leakyEnvPlugin.ts')],
+      plugins: [mock('leakyRunnerPlugin.ts')],
       client: 'codex-app',
       model: 'gpt-test',
       datasets: ['./cases.json'],
@@ -347,7 +347,7 @@ async function runStoredAsChatgptCodex(caseIds: string[], skip?: string) {
     configPath,
     rootDir: dir,
     outputDir,
-    env: 'leaky/env/unredacted',
+    runner: 'leaky/runner/unredacted',
     report: false,
   });
   vi.stubEnv('LEAKY_SKIP', '');
@@ -608,7 +608,7 @@ describe('a tool optimization whose baseline was stored before ADR 0011', () => 
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       // codex-app can't show tool metadata, so no real round runs on it; here
       // it can, so the baseline's setup is what the round is checked against.
-      // The leaky environment answers every trial, so no app runs.
+      // The leaky runner answers every trial, so no app runs.
       const definition = getClient('codex-app') as { toolMetadata?: boolean };
       const toolMetadata = definition.toolMetadata;
       definition.toolMetadata = true;
@@ -644,7 +644,7 @@ describe('a tool optimization whose baseline was stored before ADR 0011', () => 
           configPath,
           JSON.stringify({
             name: 'stored-codex-optimization',
-            plugins: [mock('leakyEnvPlugin.ts')],
+            plugins: [mock('leakyRunnerPlugin.ts')],
             datasets: ['./cases.json'],
             servers: {
               docs: {
@@ -661,7 +661,7 @@ describe('a tool optimization whose baseline was stored before ADR 0011', () => 
         const target = {
           configPath,
           rootDir: dir,
-          env: 'leaky/env/unredacted',
+          runner: 'leaky/runner/unredacted',
         };
         const started = await startToolOptimization({ evalConfig: target });
         const baselineFile = path.join(
@@ -904,7 +904,7 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
           clientOptions: { surface: 'chatgpt-work' },
         },
       ],
-      environment: {
+      runner: {
         name: 'docker',
         machines: [{ shard: 1, client: 'chatgpt' }],
       },
@@ -914,7 +914,7 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
       { name: 'work', client: 'chatgpt' },
       { name: 'explicit', client: 'chatgpt' },
     ]);
-    expect(current.environment.machines?.[0]?.client).toBe('chatgpt');
+    expect(current.runner.machines?.[0]?.client).toBe('chatgpt');
     const summary = {
       variants: [
         {
@@ -953,7 +953,7 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
         },
         { name: 'api', client: 'api' },
       ],
-      environment: {
+      runner: {
         name: 'docker',
         machines: [{ shard: 1, client: 'chatgpt' }],
       },
@@ -994,16 +994,16 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
       summaryWithCurrentClients(summary).results.map((r) => r.request?.client)
     ).toEqual(['chatgpt', 'chatgpt', 'claude-code']);
     // One of the two chatgpt variants was ChatGPT Work: a machine can't say.
-    expect(runWithCurrentClients(run).environment.machines?.[0]?.client).toBe(
+    expect(runWithCurrentClients(run).runner.machines?.[0]?.client).toBe(
       'chatgpt'
     );
     const codexOnly = {
       ...run,
       variants: run.variants.slice(1),
     } as RunRecord;
-    expect(
-      runWithCurrentClients(codexOnly).environment.machines?.[0]?.client
-    ).toBe('codex-app');
+    expect(runWithCurrentClients(codexOnly).runner.machines?.[0]?.client).toBe(
+      'codex-app'
+    );
   });
 
   it("map a stored mst to api in variants, shards' machines and case results", () => {
@@ -1013,7 +1013,7 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
         { name: 'b', client: 'claude-code' },
         { name: 'c' },
       ],
-      environment: {
+      runner: {
         name: 'docker',
         machines: [
           { shard: 1, client: 'mst', ok: true, collected: 1 },
@@ -1027,7 +1027,7 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
       'claude-code',
       undefined,
     ]);
-    expect(current.environment.machines?.map((m) => m.client)).toEqual([
+    expect(current.runner.machines?.map((m) => m.client)).toEqual([
       'api',
       undefined,
     ]);
@@ -1068,7 +1068,7 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
         { name: 'b', client: 'mst/client/codex' },
         { name: 'c', client: 'codex-app' },
       ],
-      environment: {
+      runner: {
         name: 'docker',
         machines: [{ shard: 1, client: 'codex', ok: true, collected: 1 }],
       },
@@ -1079,7 +1079,7 @@ describe('runWithCurrentClients and summaryWithCurrentClients', () => {
       { name: 'b', client: 'codex-cli' },
       { name: 'c', client: 'codex-app' },
     ]);
-    expect(current.environment.machines?.[0]?.client).toBe('codex-cli');
+    expect(current.runner.machines?.[0]?.client).toBe('codex-cli');
     expect(run.variants[0]!.client).toBe('codex');
 
     const summary = {

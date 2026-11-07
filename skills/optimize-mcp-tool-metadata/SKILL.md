@@ -60,7 +60,7 @@ Each variant is a `ToolOverrideVariant`: a unique `id`, a `description` stating 
 
 ### As an agent, step by step: `mst optimize`
 
-This is the default for an agent with a terminal. It runs on the eval config's client, model and environment, needs no script, and you are the proposer: read the evidence, write the next round, run it. The optimization is stored with the eval's runs, so you can stop and continue later.
+This is the default for an agent with a terminal. It runs on the eval config's client, model and runner, needs no script, and you are the proposer: read the evidence, write the next round, run it. The optimization is stored with the eval's runs, so you can stop and continue later.
 
 ```bash
 npx mst optimize start -c evals/eval.json --tool search --max-variants 6
@@ -73,7 +73,7 @@ npx mst optimize try round-1.json -c evals/eval.json
 npx mst optimize finish -c evals/eval.json           # writes recommendation.md
 ```
 
-- **`start`** runs the baseline and stores the tools the server serves. `--tool` limits what candidates may change; `--env docker` collects the trials in containers; `--trials` sets trials per case for every run.
+- **`start`** runs the baseline and stores the tools the server serves. `--tool` limits what candidates may change; `--runner docker` collects the trials in containers; `--trials` sets trials per case for every run.
 - **`evidence`** shows each case's input, what it expects, and each failed trial's tool calls. Use `--json` for each tool's full input schema, to copy when you rewrite parameter descriptions.
 - **`try`** takes a JSON array of candidates (`id`, `description`, `tools`). It refuses one that changes more than text, names a tool that doesn't exist, repeats an id, or doesn't fit the budget, and runs nothing. Fix it and try again.
 - **`finish`** ends it. Stop when the budget is spent, when a round doesn't beat the best so far, or when a candidate is clearly better and more rounds would only spend budget.

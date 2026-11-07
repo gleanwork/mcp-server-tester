@@ -44,20 +44,20 @@ export interface RunOptions {
   secretsFile?: string;
   /** Credential store for connector servers: a directory or a plugin's. */
   store?: string;
-  /** `--env`: where to collect trials. */
-  env?: string;
-  /** `--env-option key=value`, each time it was given. */
-  envOption?: string[];
+  /** `--runner`: where to collect trials. */
+  runner?: string;
+  /** `--runner-option key=value`, each time it was given. */
+  runnerOption?: string[];
   /** `--no-grade`: collect the trials without grading them. */
   grade?: boolean;
   /** `--resume <run>`: collect a run's missing trials and grade it again. */
   resume?: string;
   /** `--results <store>`: the result store that keeps the run. */
   results?: string;
-  /** `--detach`: run the coordinator on a machine the environment creates (ADR 0007). */
+  /** `--detach`: run the coordinator on a machine the runner creates (ADR 0007). */
   detach?: boolean;
-  /** `--grade-env`: after collecting, grade in the environment (`mst grade --env`). */
-  gradeEnv?: boolean;
+  /** `--grade-runner`: after collecting, grade in the runner (`mst grade --runner`). */
+  gradeRunner?: boolean;
   /** `--loaded-datasets <file>` (hidden): datasets loaded where a detached run started. */
   loadedDatasets?: string;
 }
@@ -87,9 +87,9 @@ const NOT_WITH_RESUME = [
   ['dryRun', '--dry-run'],
 ] as const;
 
-import { parseEnvOptions } from '../../../evals/environments/envOptions.js';
+import { parseRunnerOptions } from '../../../evals/runners/runnerOptions.js';
 
-export { parseEnvOptions };
+export { parseRunnerOptions };
 
 function positiveInteger(flag: string, value: string | number): number {
   const number = Number(value);
@@ -154,10 +154,12 @@ export function printDetached(
 }
 
 export async function run(options: RunOptions): Promise<void> {
-  if (options.gradeEnv && !options.env)
-    throw new Error("--grade-env grades in the run's environment: give --env.");
-  if (options.gradeEnv && options.grade === false)
-    throw new Error('--grade-env grades the run: drop --no-grade.');
+  if (options.gradeRunner && !options.runner)
+    throw new Error(
+      "--grade-runner grades in the run's runner: give --runner."
+    );
+  if (options.gradeRunner && options.grade === false)
+    throw new Error('--grade-runner grades the run: drop --no-grade.');
   if (options.detach) {
     if (options.dryRun) throw new Error("--detach can't take --dry-run.");
     if (options.outputDir)
@@ -171,15 +173,15 @@ export async function run(options: RunOptions): Promise<void> {
       ...(options.resume !== undefined
         ? { run: options.resume, resume: true }
         : {}),
-      ...(options.env ? { env: options.env } : {}),
-      envOptions: options.envOption ?? [],
+      ...(options.runner ? { runner: options.runner } : {}),
+      runnerOptions: options.runnerOption ?? [],
       ...(options.results ? { results: options.results } : {}),
       ...(options.store ? { store: options.store } : {}),
       ...(options.secretsFile ? { secretsFile: options.secretsFile } : {}),
       ...(options.plugins ? { plugins: options.plugins } : {}),
       runArgs: options.resume === undefined ? selectionArgs(options) : [],
       noGrade: options.grade === false,
-      gradeEnv: options.gradeEnv === true,
+      gradeRunner: options.gradeRunner === true,
     });
     printDetached(result, options.config, options.results);
     return;
@@ -192,7 +194,7 @@ export async function run(options: RunOptions): Promise<void> {
     secretsFile: options.secretsFile,
     dryRun: options.dryRun,
     ...(options.report === false ? { report: false } : {}),
-    ...(options.grade === false || options.gradeEnv ? { grade: false } : {}),
+    ...(options.grade === false || options.gradeRunner ? { grade: false } : {}),
     ...(options.variant?.length ? { variant: options.variant } : {}),
     ...(options.case?.length ? { cases: options.case } : {}),
     ...(options.filterTag?.length ? { filterTags: options.filterTag } : {}),
@@ -203,9 +205,9 @@ export async function run(options: RunOptions): Promise<void> {
       ? { trials: positiveInteger('--trials', options.trials) }
       : {}),
     ...(options.store ? { store: options.store } : {}),
-    ...(options.env ? { env: options.env } : {}),
-    ...(options.envOption?.length
-      ? { envOptions: parseEnvOptions(options.envOption) }
+    ...(options.runner ? { runner: options.runner } : {}),
+    ...(options.runnerOption?.length
+      ? { runnerOptions: parseRunnerOptions(options.runnerOption) }
       : {}),
     ...(options.results ? { results: options.results } : {}),
     ...(await readLoadedDatasets(options.loadedDatasets)),
@@ -240,9 +242,9 @@ export async function run(options: RunOptions): Promise<void> {
               ? { secretsFile: evalOptions.secretsFile }
               : {}),
             ...(evalOptions.report === false ? { report: false } : {}),
-            ...(evalOptions.env ? { env: evalOptions.env } : {}),
-            ...(evalOptions.envOptions
-              ? { envOptions: evalOptions.envOptions }
+            ...(evalOptions.runner ? { runner: evalOptions.runner } : {}),
+            ...(evalOptions.runnerOptions
+              ? { runnerOptions: evalOptions.runnerOptions }
               : {}),
             ...(evalOptions.store ? { store: evalOptions.store } : {}),
             ...(evalOptions.results ? { results: evalOptions.results } : {}),
@@ -259,10 +261,10 @@ export async function run(options: RunOptions): Promise<void> {
     throw error;
   }
 
-  if (options.gradeEnv && !options.dryRun) {
-    // Collected; now graded on the environment's machines, as `mst grade --env`.
+  if (options.gradeRunner && !options.dryRun) {
+    // Collected; now graded on the runner's machines, as `mst grade --runner`.
     console.log(
-      `\nCollected run ${path.basename(result.outputDir)}; grading it in ${options.env}.`
+      `\nCollected run ${path.basename(result.outputDir)}; grading it in ${options.runner}.`
     );
     const graded = await gradeRun({
       run: result.outputDir,
@@ -277,8 +279,10 @@ export async function run(options: RunOptions): Promise<void> {
         : {}),
       ...(evalOptions.report === false ? { report: false } : {}),
       ...(evalOptions.results ? { results: evalOptions.results } : {}),
-      ...(evalOptions.env ? { env: evalOptions.env } : {}),
-      ...(evalOptions.envOptions ? { envOptions: evalOptions.envOptions } : {}),
+      ...(evalOptions.runner ? { runner: evalOptions.runner } : {}),
+      ...(evalOptions.runnerOptions
+        ? { runnerOptions: evalOptions.runnerOptions }
+        : {}),
       ...(evalOptions.loadedDatasets
         ? { loadedDatasets: evalOptions.loadedDatasets }
         : {}),
@@ -314,14 +318,14 @@ export async function run(options: RunOptions): Promise<void> {
           ...(result.summary.selection
             ? { selection: result.summary.selection }
             : {}),
-          env: {
-            name: result.environment.name,
-            shards: result.environment.shards,
-            ...(result.environment.keep !== 'never'
-              ? { keep: result.environment.keep }
+          runner: {
+            name: result.runner.name,
+            shards: result.runner.shards,
+            ...(result.runner.keep !== 'never'
+              ? { keep: result.runner.keep }
               : {}),
-            ...(Object.keys(result.environment.options).length
-              ? { options: result.environment.options }
+            ...(Object.keys(result.runner.options).length
+              ? { options: result.runner.options }
               : {}),
           },
         },
@@ -482,7 +486,7 @@ function printIncomplete(
   ];
   if (short > needsFix)
     parts.push(
-      `${short - needsFix} trials ended in infrastructure failures: collect them again with \`mst run --resume ${runId.split('-').pop()} -c ${config}\` (a local run needs --env).`
+      `${short - needsFix} trials ended in infrastructure failures: collect them again with \`mst run --resume ${runId.split('-').pop()} -c ${config}\` (a local run needs --runner).`
     );
   if (needsFix > 0)
     parts.push(

@@ -1,7 +1,7 @@
 /**
  * MST's own telemetry: each trial as an OpenTelemetry trace, sent over OTLP
  * (HTTP, JSON) from the record MST keeps of it, so every client, local or in
- * an environment, is traced the same way (docs/telemetry.md).
+ * a runner, is traced the same way (docs/telemetry.md).
  *
  * A trial's trace is a root span for the agent's run, with a span for each
  * model request and tool call the client reported; grading adds a span for
@@ -1071,7 +1071,7 @@ export function createTraceExporter(
           ...options,
           input,
         });
-        // A trial saved again as it was (an environment's result, then the
+        // A trial saved again as it was (a runner's result, then the
         // case's) is sent once; one that changed is sent again, same IDs.
         const digest = createHash('sha256')
           .update(JSON.stringify(spans))

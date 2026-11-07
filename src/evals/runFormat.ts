@@ -13,8 +13,8 @@ import {
   endingOf,
   isInfrastructure,
 } from './trialEnding.js';
-import type { RunEnvironment } from './environments/builtinEnvironments.js';
-import type { ShardRecord } from './environments/shardedCollect.js';
+import type { RecordedRunner } from './runners/builtinRunners.js';
+import type { ShardRecord } from './runners/shardedCollect.js';
 import type { ListedServerTools } from './toolSurface.js';
 import { storedClientName, storedClientSetup } from './clientNames.js';
 
@@ -182,13 +182,13 @@ const RunRecordSchema = z.looseObject({
     })
     .optional(),
   /** Where the trials were collected, and the machine `mst run` ran on. */
-  environment: z.looseObject({
-    /** `local`, or a plugin environment (`<namespace>/env/<name>`). */
+  runner: z.looseObject({
+    /** `local`, or a plugin runner (`<namespace>/runner/<name>`). */
     name: z.string().optional(),
     shards: z.number().int().positive().optional(),
-    /** `--env-option keep`, when not `never`. */
+    /** `--runner-option keep`, when not `never`. */
     keep: z.enum(['failed', 'always']).optional(),
-    /** The environment's own options, when it was given any. */
+    /** The runner's own options, when it was given any. */
     options: z.looseObject({}).optional(),
     node: z.string().optional(),
     platform: z.string().optional(),
@@ -219,11 +219,11 @@ const RunRecordSchema = z.looseObject({
   }),
   /**
    * Where the run was graded, when not where `mst run` or `mst grade` ran:
-   * `mst grade --env` (ADR 0005). Its machines are the grade shards'.
+   * `mst grade --runner` (ADR 0005). Its machines are the grade shards'.
    */
   grading: z
     .looseObject({
-      environment: z.looseObject({
+      runner: z.looseObject({
         name: z.string(),
         shards: z.number().int().positive(),
         keep: z.enum(['failed', 'always']).optional(),
@@ -250,7 +250,7 @@ const RunRecordSchema = z.looseObject({
   }),
 });
 
-/** A grade shard's machine, as `run.json`'s `grading.environment` records it. */
+/** A grade shard's machine, as `run.json`'s `grading.runner` records it. */
 export interface GradeShardRecord {
   /** 1-based. */
   shard: number;
@@ -651,12 +651,12 @@ export interface RunFacts {
   redactStoredResponses: boolean;
   /** The run's dry-run proxies answered writes with a success reply. */
   simulateWrites?: true;
-  /** Where the trials were collected (`--env`). Default: `local`. */
-  environment?: RunEnvironment;
-  /** What each shard ran on, in an environment with machines. */
+  /** Where the trials were collected (`--runner`). Default: `local`. */
+  runner?: RecordedRunner;
+  /** What each shard ran on, in a runner with machines. */
   machines?: ShardRecord[];
-  /** Where the run was graded, with `mst grade --env` (ADR 0005). */
-  grading?: { environment: RunEnvironment; machines: GradeShardRecord[] };
+  /** Where the run was graded, with `mst grade --runner` (ADR 0005). */
+  grading?: { runner: RecordedRunner; machines: GradeShardRecord[] };
   /**
    * How far the run got. Default: both complete. A run saved while variants
    * remain is `partial`; one that stopped on an error is `collect: failed`.
@@ -869,14 +869,14 @@ export async function writeRun(
     ...(facts.gradedFrom ? { gradedFrom: facts.gradedFrom } : {}),
     ...(facts.optimization ? { optimization: facts.optimization } : {}),
     ...(facts.resumedGrading ? { resumedGrading: facts.resumedGrading } : {}),
-    environment: {
-      name: facts.environment?.name ?? 'local',
-      shards: facts.environment?.shards ?? 1,
-      ...(facts.environment && facts.environment.keep !== 'never'
-        ? { keep: facts.environment.keep }
+    runner: {
+      name: facts.runner?.name ?? 'local',
+      shards: facts.runner?.shards ?? 1,
+      ...(facts.runner && facts.runner.keep !== 'never'
+        ? { keep: facts.runner.keep }
         : {}),
-      ...(facts.environment && Object.keys(facts.environment.options).length
-        ? { options: facts.environment.options }
+      ...(facts.runner && Object.keys(facts.runner.options).length
+        ? { options: facts.runner.options }
         : {}),
       node: process.version,
       platform: process.platform,
@@ -886,14 +886,14 @@ export async function writeRun(
     ...(facts.grading
       ? {
           grading: {
-            environment: {
-              name: facts.grading.environment.name,
-              shards: facts.grading.environment.shards,
-              ...(facts.grading.environment.keep !== 'never'
-                ? { keep: facts.grading.environment.keep }
+            runner: {
+              name: facts.grading.runner.name,
+              shards: facts.grading.runner.shards,
+              ...(facts.grading.runner.keep !== 'never'
+                ? { keep: facts.grading.runner.keep }
                 : {}),
-              ...(Object.keys(facts.grading.environment.options).length
-                ? { options: facts.grading.environment.options }
+              ...(Object.keys(facts.grading.runner.options).length
+                ? { options: facts.grading.runner.options }
                 : {}),
               ...(facts.grading.machines.length
                 ? { machines: facts.grading.machines }
@@ -1043,6 +1043,21 @@ export interface StoredRun {
 }
 
 /**
+ * Refuse a run a 2.0 release candidate stored, before ADR 0013 renamed its
+ * fields, rather than fail on a missing field.
+ */
+function assertCurrentRunLayout(record: unknown, directory: string): void {
+  const fields =
+    record && typeof record === 'object'
+      ? (record as Record<string, unknown>)
+      : {};
+  if ('environment' in fields && !('runner' in fields))
+    throw new Error(
+      `${directory} was stored by an MST 2.0 release candidate, before ADR 0013 renamed environment to runner. This MST can't read it: run the eval again.`
+    );
+}
+
+/**
  * Read a run directory written in the mst.run/v1 format. Throws, with what
  * to do, when a file is missing or in another format.
  */
@@ -1061,7 +1076,9 @@ export async function readRunDirectory(directory: string): Promise<StoredRun> {
     assertRunFormat(value, file);
     return value;
   };
-  const run = RunRecordSchema.parse(await read('run.json'));
+  const record = await read('run.json');
+  assertCurrentRunLayout(record, directory);
+  const run = RunRecordSchema.parse(record);
   const summary = (await read('summary.json')) as EvaluationSummary;
   const results = (await read('results.json')) as { cases?: EvalCaseResult[] };
   return {
@@ -1116,12 +1133,12 @@ export function runWithCurrentClients(run: RunRecord): RunRecord {
     renamed.size === chatgptVariants && machineChatgpt.size === 1
       ? [...machineChatgpt][0]!
       : 'chatgpt';
-  const machines = run.environment.machines;
+  const machines = run.runner.machines;
   return {
     ...run,
     variants: run.variants.map((variant) => storedClientSetup(variant)),
-    environment: {
-      ...run.environment,
+    runner: {
+      ...run.runner,
       ...(machines
         ? {
             machines: machines.map((machine) => {

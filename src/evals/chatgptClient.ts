@@ -471,13 +471,13 @@ const PRODUCT_DEFINITIONS: Record<
       os: ['macos', 'linux'],
       install: [
         'macOS: the ChatGPT app, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST',
-        "Linux: MST's ChatGPT image (`--env docker`)",
+        "Linux: MST's ChatGPT image (`--runner docker`)",
       ],
       credentials: [
         'macOS: `ANTHROPIC_API_KEY` or an LLM gateway, for the Computer Use planner',
         'Linux image: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`)',
       ],
-      setup: ['Docker: `mst env setup docker --config <a ChatGPT eval>`'],
+      setup: ['Docker: `mst runner setup docker --config <a ChatGPT eval>`'],
     },
   },
   'codex-app': {
@@ -486,13 +486,13 @@ const PRODUCT_DEFINITIONS: Record<
       os: ['macos', 'linux'],
       install: [
         'macOS: the ChatGPT app, signed in with access to Codex, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST',
-        "Linux: MST's ChatGPT image (`--env docker`), which runs Codex in the ChatGPT app",
+        "Linux: MST's ChatGPT image (`--runner docker`), which runs Codex in the ChatGPT app",
       ],
       credentials: [
         'macOS: `ANTHROPIC_API_KEY` or an LLM gateway, for the Computer Use planner',
         'Linux image: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`)',
       ],
-      setup: ['Docker: `mst env setup docker --config <a Codex app eval>`'],
+      setup: ['Docker: `mst runner setup docker --config <a Codex app eval>`'],
     },
   },
 };

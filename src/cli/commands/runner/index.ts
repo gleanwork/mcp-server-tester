@@ -1,14 +1,14 @@
 import path from 'node:path';
 import { resolveConfigExtends } from '../../../evals/configExtends.js';
 import { loadEvalConfig } from '../../../evals/evalConfig.js';
-import { resolveEnvironment } from '../../../evals/environments/builtinEnvironments.js';
+import { resolveRunner } from '../../../evals/runners/builtinRunners.js';
 import { installPlugins } from '../../../plugins/extensions.js';
 import {
   loadPlugins,
   resolvePluginPackage,
   type PluginPackage,
 } from '../../../plugins/loadPlugins.js';
-import { parseEnvOptions } from '../run/index.js';
+import { parseRunnerOptions } from '../run/index.js';
 import {
   settingsFor,
   type SettingsSections,
@@ -18,20 +18,20 @@ import {
   readSettingsFile,
 } from '../../../plugins/settingsFile.js';
 
-export interface EnvSetupOptions {
-  /** `--env-option key=value`, each time it was given. */
-  envOption?: string[];
-  /** Plugin modules, for a plugin's environment. */
+export interface RunnerSetupOptions {
+  /** `--runner-option key=value`, each time it was given. */
+  runnerOption?: string[];
+  /** Plugin modules, for a plugin's runner. */
   plugins?: string[];
-  /** An eval config whose plugins the environment's machines need. */
+  /** An eval config whose plugins the runner's machines need. */
   config?: string;
   rootDir?: string;
 }
 
-/** `mst env setup <environment>`: what runs in it need, prepared once. */
-export async function setupEnvironment(
+/** `mst runner setup <runner>`: what runs in it need, prepared once. */
+export async function setupRunner(
   reference: string,
-  options: EnvSetupOptions
+  options: RunnerSetupOptions
 ): Promise<void> {
   const rootDir = path.resolve(options.rootDir ?? '.');
   if (options.plugins?.length)
@@ -45,20 +45,20 @@ export async function setupEnvironment(
   const settings: SettingsSections | undefined =
     fromConfig?.settings ??
     (settingsFile ? readSettingsFile(settingsFile) : undefined);
-  // The eval's client picks the image an environment builds (docker:
+  // The eval's client picks the image a runner builds (docker:
   // Cowork's or ChatGPT's), as its shared configs (`extends`) set it.
   const client = fromConfig?.client;
-  const environment = resolveEnvironment(
+  const runner = resolveRunner(
     reference,
-    parseEnvOptions(options.envOption ?? [])
+    parseRunnerOptions(options.runnerOption ?? [])
   );
-  if (!environment.definition.setup) {
-    console.log(`${environment.name} needs no setup.`);
+  if (!runner.definition.setup) {
+    console.log(`${runner.name} needs no setup.`);
     return;
   }
-  await environment.definition.setup(environment.options, {
+  await runner.definition.setup(runner.options, {
     log: (line) => console.error(`[mst] ${line}`),
-    settings: settingsFor(settings, environment.name),
+    settings: settingsFor(settings, runner.name),
     ...(plugins ? { plugins } : {}),
     ...(client ? { client } : {}),
   });
@@ -66,7 +66,7 @@ export async function setupEnvironment(
 
 /**
  * The eval config's plugins, as packages installed on this machine, and its
- * settings. Its plugins are loaded too, in case one provides the environment.
+ * settings. Its plugins are loaded too, in case one provides the runner.
  */
 async function evalPluginPackages(
   configPath: string,
@@ -90,7 +90,7 @@ async function evalPluginPackages(
     const found = resolvePluginPackage(specifier, options);
     if (!found)
       throw new Error(
-        `Plugin "${specifier}" is a file, not a package: an environment's machines install plugins as packages. Make it a package (a directory with a package.json, installed where the eval config is) and name the package in the eval config's plugins.`
+        `Plugin "${specifier}" is a file, not a package: a runner's machines install plugins as packages. Make it a package (a directory with a package.json, installed where the eval config is) and name the package in the eval config's plugins.`
       );
     return found;
   });

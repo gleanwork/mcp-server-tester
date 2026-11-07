@@ -1001,7 +1001,7 @@ export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
       os: ['macos', 'linux'],
       install: [
         'macOS: Claude Desktop, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST',
-        "Linux: MST's Cowork image (`--env docker`), or a prepared desktop with Claude Desktop",
+        "Linux: MST's Cowork image (`--runner docker`), or a prepared desktop with Claude Desktop",
       ],
       credentials: [
         'macOS: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider; `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner',
@@ -1009,7 +1009,7 @@ export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
       ],
       setup: [
         'macOS: `mst cowork setup`, then sign in to Claude Desktop once',
-        'Docker: `mst env setup docker`',
+        'Docker: `mst runner setup docker`',
       ],
     },
     evidence: 'structured',

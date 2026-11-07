@@ -69,7 +69,7 @@ describe('retained settings-group results through evaluation and resume', () => 
           name: 'retained-groups',
           plugins: [
             mock('settingsGroupClientPlugin.ts'),
-            mock('forkEnvPlugin.ts'),
+            mock('forkRunnerPlugin.ts'),
           ],
           client: 'settings-group/client/session',
           model: 'a',
@@ -159,8 +159,8 @@ describe('retained settings-group results through evaluation and resume', () => 
       const resumed = await resumeRun({
         ...options,
         run: result.outputDir,
-        env: 'fork/env/children',
-        envOptions: { shards: '1' },
+        runner: 'fork/runner/children',
+        runnerOptions: { shards: '1' },
       });
       expect(resumed.outputDir).toBe(result.outputDir);
       const resumedActions = (await fs.readFile(actionsFile, 'utf8'))

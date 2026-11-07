@@ -173,7 +173,8 @@ export interface HistoryRun {
   supersededBy?: string;
   /** Other gradings of the same traces, on the row that shows them. */
   gradings?: string[];
-  environment?: string;
+  /** Where the trials were collected (`--runner`). */
+  runner?: string;
   baseline: string;
   datasets: Array<{
     name: string;

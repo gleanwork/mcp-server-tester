@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gradeRun, runEval } from './runEval.js';
-import { shardOf } from './environments/shardedCollect.js';
+import { shardOf } from './runners/shardedCollect.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 
 const mock = (name: string) =>
@@ -60,7 +60,7 @@ async function fixture(cases?: {
       JSON.stringify({
         name: 'grade-resume',
         plugins: [
-          mock('forkEnvPlugin.ts'),
+          mock('forkRunnerPlugin.ts'),
           mock('shardTestPlugin.ts'),
           mock('gradeTestPlugin.ts'),
         ],
@@ -321,13 +321,13 @@ describe('mst grade --resume', () => {
     expect(lost.length).toBeGreaterThan(0);
     const sharded = {
       secretsFile: f.secretsFile,
-      env: 'fork/env/children',
+      runner: 'fork/runner/children',
     } as const;
     const partial = await gradeRun({
       ...f.base,
       ...sharded,
       run: f.collectedId,
-      envOptions: { shards: '2', fail: '0' },
+      runnerOptions: { shards: '2', fail: '0' },
     });
     await f.takeCalls();
     expect(
@@ -338,7 +338,7 @@ describe('mst grade --resume', () => {
       ...f.base,
       ...sharded,
       run: path.basename(partial.outputDir),
-      envOptions: { shards: '2' },
+      runnerOptions: { shards: '2' },
       resume: true,
     });
     // Both judges of the lost cases' trials, on both variants, and their
@@ -354,8 +354,8 @@ describe('mst grade --resume', () => {
     expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
     // Only the shard that holds the lost cases ran.
     const machines = (
-      run.grading as { environment: { machines: Array<{ shard: number }> } }
-    ).environment.machines;
+      run.grading as { runner: { machines: Array<{ shard: number }> } }
+    ).runner.machines;
     expect(machines.map((m) => m.shard)).toEqual([1]);
 
     vi.stubEnv('GRADE_TEST_KEY', KEY);
@@ -372,8 +372,8 @@ describe('mst grade --resume', () => {
     const resumed = await gradeRun({
       ...f.base,
       secretsFile: f.secretsFile,
-      env: 'fork/env/children',
-      envOptions: { shards: '2', fail: '0' },
+      runner: 'fork/runner/children',
+      runnerOptions: { shards: '2', fail: '0' },
       run: path.basename(graded.outputDir),
       resume: true,
     });
@@ -381,7 +381,7 @@ describe('mst grade --resume', () => {
     expect(verdicts(resumed)).toEqual(verdicts(graded));
     const run = await f.readRun(resumed.outputDir);
     expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
-    expect(run.grading).toMatchObject({ environment: { shards: 2 } });
+    expect(run.grading).toMatchObject({ runner: { shards: 2 } });
   }, 60_000);
 
   it('refuses when the judges or the cases changed since the grading, and for a run never graded', async () => {

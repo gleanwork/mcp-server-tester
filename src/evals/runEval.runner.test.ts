@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 const plugin: Plugin = {
-  meta: { name: 'env-test-plugin', namespace: 'test' },
+  meta: { name: 'runner-test-plugin', namespace: 'test' },
   clients: {
     echo: {
       schema: z.object({ type: z.string() }),
@@ -27,12 +27,12 @@ const plugin: Plugin = {
       },
     },
   },
-  environments: {
+  runners: {
     vm: {
       schema: z.object({ zone: z.string().optional() }).strict(),
       maxShards: 4,
       async open() {
-        throw new Error('MST should not open an environment yet');
+        throw new Error('MST should not open a runner yet');
       },
     },
   },
@@ -40,7 +40,7 @@ const plugin: Plugin = {
 
 /** One case on the echo client; `run` runs it with these options. */
 async function fixture() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-run-env-'));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-run-runner-'));
   dirs.push(dir);
   await fs.writeFile(
     path.join(dir, 'cases.json'),
@@ -53,7 +53,7 @@ async function fixture() {
   await fs.writeFile(
     configPath,
     JSON.stringify({
-      name: 'env',
+      name: 'runner',
       client: 'test/client/echo',
       datasets: ['./cases.json'],
       servers: {},
@@ -73,11 +73,11 @@ async function fixture() {
   };
 }
 
-describe('runEval environments', () => {
+describe('runEval runners', () => {
   it('runs in local by default, and run.json says so', async () => {
     const f = await fixture();
     const result = await f.run();
-    expect(result.environment).toEqual({
+    expect(result.runner).toEqual({
       name: 'local',
       shards: 1,
       keep: 'never',
@@ -85,62 +85,70 @@ describe('runEval environments', () => {
     });
     const run = JSON.parse(
       await fs.readFile(path.join(result.outputDir, 'run.json'), 'utf8')
-    ) as { environment: Record<string, unknown> };
-    expect(run.environment).toMatchObject({
+    ) as Record<string, Record<string, unknown>>;
+    expect(run.runner).toMatchObject({
       name: 'local',
       shards: 1,
       platform: process.platform,
     });
+    expect(run).not.toHaveProperty('environment');
     // Defaults aren't recorded.
-    expect(run.environment).not.toHaveProperty('keep');
-    expect(run.environment).not.toHaveProperty('options');
+    expect(run.runner).not.toHaveProperty('keep');
+    expect(run.runner).not.toHaveProperty('options');
   });
 
-  it('runs --env local as it runs without --env', async () => {
+  it('runs --runner local as it runs without --runner', async () => {
     const f = await fixture();
-    const result = await f.run({ env: 'local', envOptions: { shards: '1' } });
+    const result = await f.run({
+      runner: 'local',
+      runnerOptions: { shards: '1' },
+    });
     expect(result.summary.metrics).toMatchObject({ passed: 1, total: 1 });
   });
 
   it('records the options it was given', async () => {
     const f = await fixture();
-    const result = await f.run({ envOptions: { keep: 'failed' } });
+    const result = await f.run({ runnerOptions: { keep: 'failed' } });
     const run = JSON.parse(
       await fs.readFile(path.join(result.outputDir, 'run.json'), 'utf8')
-    ) as { environment: Record<string, unknown> };
-    expect(run.environment).toMatchObject({ name: 'local', keep: 'failed' });
+    ) as { runner: Record<string, unknown> };
+    expect(run.runner).toMatchObject({ name: 'local', keep: 'failed' });
   });
 
-  it('dry-runs a plugin environment, checking its options', async () => {
+  it('dry-runs a plugin runner, checking its options', async () => {
     const f = await fixture();
     const result = await f.run({
       dryRun: true,
-      env: 'test/env/vm',
-      envOptions: { shards: '3', zone: 'eu' },
+      runner: 'test/runner/vm',
+      runnerOptions: { shards: '3', zone: 'eu' },
     });
-    expect(result.environment).toEqual({
-      name: 'test/env/vm',
+    expect(result.runner).toEqual({
+      name: 'test/runner/vm',
       shards: 3,
       keep: 'never',
       options: { zone: 'eu' },
     });
     await expect(
-      f.run({ dryRun: true, env: 'test/env/vm', envOptions: { shards: '5' } })
-    ).rejects.toThrow('test/env/vm runs at most 4 shards');
+      f.run({
+        dryRun: true,
+        runner: 'test/runner/vm',
+        runnerOptions: { shards: '5' },
+      })
+    ).rejects.toThrow('test/runner/vm runs at most 4 shards');
   });
 
-  it("stops before writing anything when the environment can't open", async () => {
+  it("stops before writing anything when the runner can't open", async () => {
     const f = await fixture();
-    await expect(f.run({ env: 'test/env/vm' })).rejects.toThrow(
-      'MST should not open an environment yet'
+    await expect(f.run({ runner: 'test/runner/vm' })).rejects.toThrow(
+      'MST should not open a runner yet'
     );
     await expect(fs.stat(f.outputDir)).rejects.toThrow();
   });
 
-  it('checks the environment before a dry run returns', async () => {
+  it('checks the runner before a dry run returns', async () => {
     const f = await fixture();
     await expect(
-      f.run({ dryRun: true, envOptions: { shards: '2' } })
-    ).rejects.toThrow('The local environment runs one shard');
+      f.run({ dryRun: true, runnerOptions: { shards: '2' } })
+    ).rejects.toThrow('The local runner runs one shard');
   });
 });

@@ -1,17 +1,17 @@
 /**
- * A test environment whose "machines" are directories on this machine and
+ * A test runner whose "machines" are directories on this machine and
  * whose channel is a child process running MST's CLI from source. It is the
- * smallest real `machineEnvironment`: put and get copy directories, exec
+ * smallest real `machineRunner`: put and get copy directories, exec
  * spawns `mst collect`.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { machineEnvironment } from '../../src/evals/environments/channel.js';
+import { machineRunner } from '../../src/evals/runners/channel.js';
 import type {
-  Environment,
-  EnvironmentContext,
+  Runner,
+  RunnerContext,
   WorkerChannel,
 } from '../../src/entries/evals.js';
 
@@ -60,14 +60,14 @@ export function forkChannel(env: Record<string, string>): WorkerChannel {
 }
 
 /** What a test can see of its machines. */
-export interface ForkEnvironment extends Environment {
+export interface ForkRunner extends Runner {
   /** `keep` for each machine disposed, in order. */
   disposed: boolean[];
 }
 
-/** An environment whose machines are directories under `root`. */
-export function forkEnvironment(
-  context: EnvironmentContext,
+/** A runner whose machines are directories under `root`. */
+export function forkRunner(
+  context: RunnerContext,
   root: string,
   env: Record<string, string>,
   options: {
@@ -76,10 +76,10 @@ export function forkEnvironment(
     /** A shard whose machine can't be created, as if its VM never came up. */
     failShard?: number;
   } = {}
-): ForkEnvironment {
+): ForkRunner {
   const { failShard, ...channelOptions } = options;
   const disposed: boolean[] = [];
-  const environment = machineEnvironment(
+  const runner = machineRunner(
     context,
     async (shard) => {
       if (shard.index === failShard)
@@ -102,5 +102,5 @@ export function forkEnvironment(
     },
     channelOptions
   );
-  return Object.assign(environment, { disposed });
+  return Object.assign(runner, { disposed });
 }

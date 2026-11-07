@@ -388,7 +388,7 @@ describe('mst clients', () => {
       };
       expect(shown.ref).toBe('codex-app');
       expect(shown.requirements.setup).toEqual([
-        'Docker: `mst env setup docker --config <a Codex app eval>`',
+        'Docker: `mst runner setup docker --config <a Codex app eval>`',
       ]);
       // `surface` is still a key, so it fails naming its replacement, but
       // it takes no value.

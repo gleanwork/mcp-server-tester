@@ -4,20 +4,20 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 
 ## Entry points
 
-| Import from                                          | Contents                                                                                                                                       | Stability                                         |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills | Stable                                            |
-| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `assertions` with the MCP fixtures and matchers                                                                                     | Stable                                            |
-| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                  | Stable                                            |
-| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                               | Stable                                            |
-| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: eval configs, evals and batches, extension definition types, metrics, result stores, comparisons, tool optimizations | Stable, except the environment interfaces (below) |
-| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                  | Stable                                            |
-| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop-run metadata types, Cowork settings and audit, client plugins                                                                          | Experimental: may change between minor versions   |
-| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                     | Stable                                            |
+| Import from                                          | Contents                                                                                                                                       | Stability                                       |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `@gleanwork/mcp-server-tester`                       | Fixtures, matchers and validators, the MCP client, config, datasets with `runEvalDataset` and `runEvalCase`, judges, conformance, Agent Skills | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `assertions` with the MCP fixtures and matchers                                                                                     | Stable                                          |
+| `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                  | Stable                                          |
+| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                               | Stable                                          |
+| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: eval configs, evals and batches, extension definition types, metrics, result stores, comparisons, tool optimizations | Stable, except the runner interfaces (below)    |
+| `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                  | Stable                                          |
+| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop-run metadata types, Cowork settings and audit, client plugins                                                                          | Experimental: may change between minor versions |
+| `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                     | Stable                                          |
 
 The `./evals`, `./auth` and `./experimental/clients` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-client fields on root result types (such as `EvalCaseResult.clientMetadata`) are typed from `./experimental/clients` and share its stability.
 
-The environment interfaces in `./evals` (`EnvironmentDefinition`, `Environment`, `EnvironmentContext`, `EnvironmentKeep`, `Machine`, `WorkerChannel`, the `Shard*` types, `ShardTokens`, `TrialKey`, `machineEnvironment` and `dockerEnvironment`) can change between 2.0 prereleases, until the `mst.shard/v1` contract is frozen ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)).
+The runner interfaces in `./evals` (`RunnerDefinition`, `Runner`, `RunnerContext`, `RunnerKeep`, `Machine`, `WorkerChannel`, the `Shard*` types, `ShardTokens`, `TrialKey`, `machineRunner` and `dockerRunner`) can change between 2.0 prereleases, until the `mst.shard/v1` contract is frozen ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)).
 
 ## Table of Contents
 
@@ -742,7 +742,7 @@ const result = await runToolOptimization({
 
 - `metric` - `passRate` (default), `trialPassRate`, or any numeric key of a variant's `metrics`. A candidate that reports no value for it is disqualified, with `metricUnavailable: true`.
 - `better` - `'higher'` (default) or `'lower'`, for tokens, cost or time. Ranking, `minImprovement` and the recommendation follow it; `metricDelta` and `proposal.delta` stay candidate minus baseline.
-- `evalConfig` also takes `rootDir`, `outputDir`, `pluginPaths`, `plugins`, `secretsFile`, `store`, `results`, `env` and `envOptions`, as `runEval` does: every run collects its trials in that environment.
+- `evalConfig` also takes `rootDir`, `outputDir`, `pluginPaths`, `plugins`, `secretsFile`, `store`, `results`, `runner` and `runnerOptions`, as `runEval` does: every run collects its trials in that runner.
 - `editableTools` - The tools candidates may change (names, or `server.tool`). Default: every tool.
 - `selection` - `{ cases, filterTags, maxCases, trials }`, narrowing every run as `mst run`'s flags do.
 

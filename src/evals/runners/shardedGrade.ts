@@ -1,5 +1,5 @@
 /**
- * Grading a stored run in an environment (`mst grade --env`, ADR 0005):
+ * Grading a stored run in a runner (`mst grade --runner`, ADR 0005):
  * split its cases into shards as collecting does, give each shard's worker
  * the coordinator's loaded datasets and the run's files for its cases, and
  * gather what each worker's grading produced, for the coordinator to
@@ -19,7 +19,7 @@ import {
 } from '../gradingSource.js';
 import { caseRunPaths, type GradeShardRecord } from '../runFormat.js';
 import type { GradedElsewhere, PreparedGrading } from '../runEval.js';
-import type { ResolvedEnvironment } from './builtinEnvironments.js';
+import type { ResolvedRunner } from './builtinRunners.js';
 import {
   bundledRunDir,
   readGradeResult,
@@ -29,8 +29,8 @@ import {
 import { settledShardOutcome, shardOf } from './shardedCollect.js';
 import { readJsonFile, writeJsonFile } from '../../utils/jsonFile.js';
 
-export interface GradeInEnvironmentOptions {
-  environment: ResolvedEnvironment;
+export interface GradeInRunnerOptions {
+  runner: ResolvedRunner;
   prepared: PreparedGrading;
   /** A private local directory for bundles and copied results. */
   workDir: string;
@@ -106,12 +106,12 @@ async function resultFiles(dir: string): Promise<string[]> {
   return entries.filter((name) => /^\d+\.json$/.test(name));
 }
 
-/** Grades the stored run's cases in the environment, `shards` at a time. */
-export async function gradeInEnvironment(
-  options: GradeInEnvironmentOptions
+/** Grades the stored run's cases in the runner, `shards` at a time. */
+export async function gradeInRunner(
+  options: GradeInRunnerOptions
 ): Promise<GradedElsewhere> {
-  const { environment, prepared } = options;
-  const count = environment.shards;
+  const { runner, prepared } = options;
+  const count = runner.shards;
   const log = options.log ?? (() => {});
   const runId = prepared.replay.run.runId;
   // The run's cases that the datasets still have, by shard.
@@ -135,7 +135,7 @@ export async function gradeInEnvironment(
       )
     ),
   })).filter((shard) => shard.cases.size > 0);
-  const { definition: _definition, ...environmentRecord } = environment;
+  const { definition: _definition, ...runnerRecord } = runner;
   if (shards.length === 0) {
     log('nothing to grade: every verdict is kept');
     return {
@@ -143,7 +143,7 @@ export async function gradeInEnvironment(
         new Map(),
         (key) => `Missing: no grade shard graded ${key.caseId}.`
       ),
-      environment: environmentRecord,
+      runner: runnerRecord,
       machines: [],
     };
   }
@@ -158,13 +158,13 @@ export async function gradeInEnvironment(
     }))
   );
 
-  const opened = await environment.definition.open(environment.options, {
+  const opened = await runner.definition.open(runner.options, {
     runId: prepared.replay.runId,
     shards: count,
-    keep: environment.keep,
+    keep: runner.keep,
     settings: settingsFor(
       prepared.configFile.settings as SettingsSections | undefined,
-      environment.name
+      runner.name
     ),
     // The image grading runs in is the one its client's trials ran in.
     ...(prepared.client ? { client: prepared.client } : {}),
@@ -175,7 +175,7 @@ export async function gradeInEnvironment(
   try {
     if (!(opened.work ?? ['collect']).includes('grade'))
       throw new Error(
-        `The environment ${environment.name} can't run grade shards: it runs ${(opened.work ?? ['collect']).join(', ')}.`
+        `The runner ${runner.name} can't run grade shards: it runs ${(opened.work ?? ['collect']).join(', ')}.`
       );
     await Promise.all(
       shards.map(async ({ index, cases }) => {
@@ -293,7 +293,7 @@ export async function gradeInEnvironment(
   });
   return {
     source: gatheredGrading(records, missing),
-    environment: environmentRecord,
+    runner: runnerRecord,
     machines,
   };
 }

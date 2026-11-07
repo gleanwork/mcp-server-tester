@@ -933,8 +933,8 @@ describe('grading elsewhere (ADR 0005)', () => {
           expect(prepared.replay.gradedFrom).toBe(runId);
           return {
             source: gatheredGrading(records, missing),
-            environment: {
-              name: 'test/env/fake',
+            runner: {
+              name: 'test/runner/fake',
               shards: 2,
               keep: 'never',
               options: {},
@@ -953,8 +953,8 @@ describe('grading elsewhere (ADR 0005)', () => {
     );
     const run = await readJson(path.join(assembled.outputDir, 'run.json'));
     expect(run.grading).toEqual({
-      environment: {
-        name: 'test/env/fake',
+      runner: {
+        name: 'test/runner/fake',
         shards: 2,
         machines: [{ shard: 1, ok: true, graded: 10, failed: 0 }],
       },
@@ -975,8 +975,8 @@ describe('grading elsewhere (ADR 0005)', () => {
             (key) =>
               `Missing: grade shard 1 ended before ${key.caseId} was graded.`
           ),
-          environment: {
-            name: 'test/env/fake',
+          runner: {
+            name: 'test/runner/fake',
             shards: 1,
             keep: 'never',
             options: {},

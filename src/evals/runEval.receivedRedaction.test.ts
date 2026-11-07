@@ -10,7 +10,7 @@ import type { Plugin } from '../plugins/plugin.js';
 const mock = (name: string) =>
   fileURLToPath(new URL(`../../tests/mocks/${name}`, import.meta.url));
 const dirs: string[] = [];
-const SNAPSHOT = Symbol.for('leaky-env-plugin.snapshot');
+const SNAPSHOT = Symbol.for('leaky-runner-plugin.snapshot');
 const KEY = 'acme-key-0123456789';
 
 afterEach(async () => {
@@ -41,7 +41,7 @@ async function allText(dir: string): Promise<string> {
 }
 
 /**
- * An eval collected in `leaky/env/unredacted`, whose worker sends back every
+ * An eval collected in `leaky/runner/unredacted`, whose worker sends back every
  * trial unredacted, quoting the secrets file's `ACME_API_KEY`.
  */
 async function leakyEval(caseIds: string[]) {
@@ -67,7 +67,7 @@ async function leakyEval(caseIds: string[]) {
     configPath,
     JSON.stringify({
       name: 'received-redaction',
-      plugins: [mock('leakyEnvPlugin.ts'), mock('shardTestPlugin.ts')],
+      plugins: [mock('leakyRunnerPlugin.ts'), mock('shardTestPlugin.ts')],
       client: 'shard-test/client/probe',
       datasets: ['./cases.json'],
       // Full traces: the answer is stored too, and a run can be resumed.
@@ -86,7 +86,7 @@ describe('a trial a worker sends back', () => {
       configPath: f.configPath,
       rootDir: f.dir,
       outputDir: f.outputDir,
-      env: 'leaky/env/unredacted',
+      runner: 'leaky/runner/unredacted',
       secretsFile: f.secretsFile,
       report: false,
     });
@@ -144,7 +144,7 @@ describe('a trial a worker sends back', () => {
       rootDir: f.dir,
       outputDir: f.outputDir,
       plugins: [connectors],
-      env: 'leaky/env/unredacted',
+      runner: 'leaky/runner/unredacted',
       secretsFile: f.secretsFile,
       report: false,
     });
@@ -183,7 +183,7 @@ describe('a trial a worker sends back', () => {
       configPath: f.configPath,
       rootDir: f.dir,
       outputDir: f.outputDir,
-      env: 'leaky/env/unredacted',
+      runner: 'leaky/runner/unredacted',
       secretsFile: f.secretsFile,
       report: false,
     });

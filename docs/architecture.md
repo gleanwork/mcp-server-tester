@@ -4,7 +4,7 @@ This document describes the internal structure of `@gleanwork/mcp-server-tester`
 
 ## Module Map
 
-This map covers the core modules. [AGENTS.md](../AGENTS.md#architecture) is the full list, including `plugins/`, `proxy/`, `llm/`, `skills/`, `entries/`, `evals/environments/` and `auth/grants/`.
+This map covers the core modules. [AGENTS.md](../AGENTS.md#architecture) is the full list, including `plugins/`, `proxy/`, `llm/`, `skills/`, `entries/`, `evals/runners/` and `auth/grants/`.
 
 ### `src/config/`
 

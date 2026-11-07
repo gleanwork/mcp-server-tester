@@ -658,13 +658,13 @@ export function assertClientSupports(
     concurrency?: number;
     context: string;
     /**
-     * The OS the trials will run on, when MST knows it (the environment's):
+     * The OS the trials will run on, when MST knows it (the runner's):
      * a desktop client's options that OS can't use fail now, not on the
      * machine that runs them.
      */
     os?: NodeJS.Platform;
-    /** The selected environment's name, for config-load errors. */
-    environment?: string;
+    /** The selected runner's name, for config-load errors. */
+    runner?: string;
   }
 ): void {
   const definition = getClient(clientConfig.type);
@@ -674,11 +674,11 @@ export function assertClientSupports(
     supported &&
     !supported.some((os) => (os === 'macos' ? 'darwin' : os) === options.os)
   ) {
-    const where = options.environment
-      ? `in environment "${options.environment}" (${osName(options.os)})`
+    const where = options.runner
+      ? `in runner "${options.runner}" (${osName(options.os)})`
       : `on ${osName(options.os)}`;
     throw new Error(
-      `${options.context}: client "${clientConfig.type}" can't run ${where}; supported OS: ${supported.map((os) => osName(os === 'macos' ? 'darwin' : os)).join(', ')}. Choose an environment with a supported OS.`
+      `${options.context}: client "${clientConfig.type}" can't run ${where}; supported OS: ${supported.map((os) => osName(os === 'macos' ? 'darwin' : os)).join(', ')}. Choose a runner with a supported OS.`
     );
   }
   const configured = clientConfig as Record<string, unknown>;

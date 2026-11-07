@@ -4,7 +4,7 @@
  * coordinator as a process of its own session, so it outlives the channel,
  * and returns. The coordinator then runs the same commands a user would
  * type: `mst run`, `mst run --resume` while the run is partial, and
- * `mst grade --env`, keeping its status in the result store.
+ * `mst grade --runner`, keeping its status in the result store.
  */
 import { spawn as spawnProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -50,7 +50,7 @@ export function coordinatorPaths(bundleDir: string, plan: DetachPlan) {
   };
 }
 
-/** Each command's flags for the run's environment and stores. */
+/** Each command's flags for the run's runner and stores. */
 function sharedArgs(
   plan: DetachPlan,
   paths: ReturnType<typeof coordinatorPaths>,
@@ -68,13 +68,13 @@ function sharedArgs(
     paths.datasets,
     ...(secretsFile ? ['--secrets-file', secretsFile] : []),
     ...(plan.results ? ['--results', plan.results] : []),
-    '--env',
-    plan.env,
+    '--runner',
+    plan.runner,
   ];
 }
 
-function envOptionArgs(options: readonly string[]): string[] {
-  return options.flatMap((option) => ['--env-option', option]);
+function runnerOptionArgs(options: readonly string[]): string[] {
+  return options.flatMap((option) => ['--runner-option', option]);
 }
 
 /** The commands a plan runs, as MST arguments. */
@@ -89,7 +89,7 @@ export function planCommands(
     run: [
       'run',
       ...shared,
-      ...envOptionArgs(plan.envOptions),
+      ...runnerOptionArgs(plan.runnerOptions),
       ...store,
       ...plan.runArgs,
       ...(plan.noGrade ? ['--no-grade'] : []),
@@ -99,14 +99,14 @@ export function planCommands(
       '--resume',
       runDir,
       ...shared,
-      ...envOptionArgs(plan.envOptions),
+      ...runnerOptionArgs(plan.runnerOptions),
       ...store,
     ],
     grade: (run: string) => [
       'grade',
       run,
       ...shared,
-      ...envOptionArgs(plan.gradeEnvOptions ?? plan.envOptions),
+      ...runnerOptionArgs(plan.gradeRunnerOptions ?? plan.runnerOptions),
       // `mst grade --detach`'s own flags (`--no-report`, `--resume`).
       ...(plan.command === 'grade' ? plan.runArgs : []),
     ],
@@ -175,7 +175,7 @@ export async function runPlan(
     command: plan.command,
     state: 'running',
     machine: deps.machine,
-    env: plan.env,
+    runner: plan.runner,
     createdAt: plan.createdAt,
     updatedAt: now().toISOString(),
     collected: 0,
@@ -260,7 +260,7 @@ export async function runPlan(
         ({ partial } = await step('resume', commands.resume(runDir)));
       }
       status.missing = partial;
-      if (plan.gradeEnv && !cancelled) {
+      if (plan.gradeRunner && !cancelled) {
         const graded = await step('grade', commands.grade(status.runId));
         status.gradedRunId = path.basename(graded.output);
       }

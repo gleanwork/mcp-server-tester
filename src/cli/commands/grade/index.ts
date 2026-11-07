@@ -3,7 +3,7 @@ import { describeError } from '../../../utils/describeError.js';
 import { gradeRun } from '../../../evals/runEval.js';
 import { detach } from '../../../evals/detach/launch.js';
 import {
-  parseEnvOptions,
+  parseRunnerOptions,
   printDetached,
   printRunResult,
   readLoadedDatasets,
@@ -17,13 +17,13 @@ export interface GradeOptions {
   secretsFile?: string;
   /** `--no-report`: don't write the regrade's report. */
   report?: boolean;
-  /** `--env`: grade in this environment (ADR 0005). */
-  env?: string;
-  /** `--env-option key=value`, each time it was given. */
-  envOption?: string[];
+  /** `--runner`: grade in this runner (ADR 0005). */
+  runner?: string;
+  /** `--runner-option key=value`, each time it was given. */
+  runnerOption?: string[];
   /** `--results <store>`: the result store that keeps the regrade. */
   results?: string;
-  /** `--detach`: grade from a coordinator machine the environment creates (ADR 0007). */
+  /** `--detach`: grade from a coordinator machine the runner creates (ADR 0007). */
   detach?: boolean;
   /** `--resume`: keep the run's verdicts, and grade only what has none. */
   resume?: boolean;
@@ -43,8 +43,8 @@ export async function grade(run: string, options: GradeOptions): Promise<void> {
       configPath: options.config,
       ...(options.rootDir ? { rootDir: options.rootDir } : {}),
       run,
-      ...(options.env ? { env: options.env } : {}),
-      envOptions: options.envOption ?? [],
+      ...(options.runner ? { runner: options.runner } : {}),
+      runnerOptions: options.runnerOption ?? [],
       ...(options.results ? { results: options.results } : {}),
       ...(options.secretsFile ? { secretsFile: options.secretsFile } : {}),
       ...(options.plugins ? { plugins: options.plugins } : {}),
@@ -53,7 +53,7 @@ export async function grade(run: string, options: GradeOptions): Promise<void> {
         ...(options.resume ? ['--resume'] : []),
       ],
       noGrade: false,
-      gradeEnv: false,
+      gradeRunner: false,
     });
     printDetached(detached, options.config, options.results);
     return;
@@ -70,9 +70,9 @@ export async function grade(run: string, options: GradeOptions): Promise<void> {
       ...(options.report === false ? { report: false } : {}),
       ...(options.resume ? { resume: true } : {}),
       ...(options.results ? { results: options.results } : {}),
-      ...(options.env ? { env: options.env } : {}),
-      ...(options.envOption?.length
-        ? { envOptions: parseEnvOptions(options.envOption) }
+      ...(options.runner ? { runner: options.runner } : {}),
+      ...(options.runnerOption?.length
+        ? { runnerOptions: parseRunnerOptions(options.runnerOption) }
         : {}),
       ...(await readLoadedDatasets(options.loadedDatasets)),
     });

@@ -4,6 +4,8 @@ status: accepted
 
 # Grading runs in an environment
 
+> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed the environment to the **runner**: `mst grade --env` is `mst grade --runner`, `--grade-env` is `--grade-runner`, and `run.json`'s `grading.environment` is `grading.runner`. The decision itself stands.
+
 ADR 0004 moved collecting into environments, and kept grading on the coordinator: the explainer's step 7 says "Judge credentials stay on the coordinator. The VMs never need them," and ADR 0004 says a worker "never runs a judge". That holds while grading is cheap. It no longer is.
 
 - An agentic pairwise judge reads both sides' traces and artifacts, and takes minutes per case. An eval of 100 cases and three variants has 200 comparisons (two candidates against the baseline), and 400 judge runs in both orders. At the default concurrency of 4, that takes several hours.

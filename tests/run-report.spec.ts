@@ -261,13 +261,13 @@ test.describe('run report', () => {
     page,
   }) => {
     const report = await reportFor([{ name: 'searching' }]);
-    // A regrade on an environment's machines (mst grade --env) records them.
+    // A regrade on a runner's machines (mst grade --runner) records them.
     const runDirectory = path.dirname(path.dirname(report));
     const runJson = path.join(runDirectory, 'run.json');
     const run = JSON.parse(await fs.readFile(runJson, 'utf8'));
     run.grading = {
-      environment: {
-        name: 'acme/env/cloud-vm',
+      runner: {
+        name: 'acme/runner/cloud-vm',
         shards: 2,
         machines: [1, 2].map((shard) => ({
           shard,
@@ -284,9 +284,9 @@ test.describe('run report', () => {
     await page.goto(`file://${report}`);
     await page.getByText('Run details').click();
     const details = page.getByText('Run details').locator('..');
-    await expect(details).toContainText('Environmentlocal');
+    await expect(details).toContainText('Runnerlocal');
     await expect(details).toContainText(
-      'Grading environmentacme/env/cloud-vm · 2 shards'
+      'Grading runneracme/runner/cloud-vm · 2 shards'
     );
     await expect(details).toContainText(
       'shard 2: acme-grader:1@sha256:feed · MST 2.0.0'

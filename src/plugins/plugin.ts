@@ -6,7 +6,7 @@ import type {
   MetricDefinition,
   MetricKind,
   ResultStoreDefinition,
-  EnvironmentDefinition,
+  RunnerDefinition,
 } from '../evals/evalFrameworkTypes.js';
 import type { PairwiseJudgeDefinition } from '../judge/pairwiseContract.js';
 import type { PluginConfig } from '../evals/evalConfig.js';
@@ -76,10 +76,10 @@ export interface Plugin {
    */
   readonly connectors?: Readonly<Record<string, ConnectorDefinition>>;
   /**
-   * Where a run's trials can be collected: `--env <namespace>/env/<name>`
-   * (ADR 0004).
+   * Where a run's trials can be collected: `--runner <namespace>/runner/<name>`
+   * (ADR 0004, ADR 0013).
    */
-  readonly environments?: Readonly<Record<string, EnvironmentDefinition>>;
+  readonly runners?: Readonly<Record<string, RunnerDefinition>>;
   /**
    * Where connector sign-ins (refresh grants) are kept, beside MST's local
    * directory: `--store <namespace>/credential-store/<name>`. A detached run
@@ -104,7 +104,7 @@ export const EXTENSION_KINDS = [
   'metrics',
   'resultStores',
   'connectors',
-  'environments',
+  'runners',
   'credentialStores',
 ] as const;
 export type ExtensionKind = (typeof EXTENSION_KINDS)[number];
@@ -121,7 +121,7 @@ export const KIND_SEGMENTS = {
   metrics: 'metric',
   resultStores: 'result-store',
   connectors: 'connector',
-  environments: 'env',
+  runners: 'runner',
   credentialStores: 'credential-store',
 } as const satisfies Record<ExtensionKind, string>;
 export type KindSegment = (typeof KIND_SEGMENTS)[ExtensionKind] | 'config';
@@ -143,7 +143,7 @@ export interface ExtensionsByKind {
   metrics: MetricDefinition;
   resultStores: ResultStoreDefinition;
   connectors: ConnectorDefinition;
-  environments: EnvironmentDefinition;
+  runners: RunnerDefinition;
   credentialStores: CredentialStoreDefinition;
 }
 
@@ -166,7 +166,7 @@ const REQUIRED_FUNCTIONS: Record<ExtensionKind, readonly string[]> = {
   resultStores: ['create'],
   // A connector is data plus optional functions; checked in extensionProblem.
   connectors: [],
-  environments: ['open'],
+  runners: ['open'],
   credentialStores: ['create'],
 };
 
@@ -297,14 +297,14 @@ function extensionProblem(
   )
     return `${label} needs a kind: ${Object.keys(METRIC_KINDS).join(', ')}`;
   if (
-    kind === 'environments' &&
+    kind === 'runners' &&
     definition.os !== undefined &&
     definition.os !== 'macos' &&
     definition.os !== 'linux'
   )
     return `${label}: os must be macos or linux`;
   if (
-    kind === 'environments' &&
+    kind === 'runners' &&
     definition.maxShards !== undefined &&
     !(
       Number.isInteger(definition.maxShards) && Number(definition.maxShards) > 0
@@ -410,6 +410,7 @@ export function assertPlugin(value: unknown, source: string): Plugin {
     fail('meta.namespace "mst" is reserved for MST\'s built-ins');
   for (const key of Object.keys(value)) {
     if (key === 'hosts') fail('`hosts` is now `clients`');
+    if (key === 'environments') fail('`environments` is now `runners`');
     if (!TOP_LEVEL_KEYS.has(key)) fail(`unknown key "${key}"`);
   }
   if (value.settings !== undefined) {

@@ -1,5 +1,5 @@
 /**
- * Run-wide limits on concurrent trials across an environment's shards
+ * Run-wide limits on concurrent trials across a runner's shards
  * (ADR 0004): N desktops share one LLM gateway and the same vendor servers.
  */
 import { mcpServerLabel, type MCPConfig } from '../../config/mcpConfig.js';

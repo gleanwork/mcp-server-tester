@@ -2,7 +2,7 @@
 
 > **Design proposal.** This is how we intend evals to be run. Some of these commands and config keys don't exist yet; each is marked planned where it appears. The [explainer](./explainer.md) covers the design, the run lifecycle, and what exists today versus what's planned.
 
-This walkthrough runs one eval end to end. It uses a fictional company, Acme, whose private plugin `@acme/mst-plugin` provides datasets, judges, a VM environment and a result store.
+This walkthrough runs one eval end to end. It uses a fictional company, Acme, whose private plugin `@acme/mst-plugin` provides datasets, judges, a VM runner and a result store.
 
 **Goal:** find out whether rewritten tool descriptions for Acme's own MCP server make Cowork pick the right tools and answer Acme's info-seeking questions better. Every variant uses the same servers (Acme's, Slack's and GitHub's) and the same model; only the descriptions change.
 
@@ -27,7 +27,7 @@ npm i -D @gleanwork/mcp-server-tester@rc @acme/mst-plugin
 npx mst cowork setup
 
 # Once, to run Cowork in containers (section 6)
-npx mst env setup docker
+npx mst runner setup docker
 # → built mst-cowork-linux:2.0.0-beta.9
 ```
 
@@ -45,7 +45,7 @@ npx mst plugins --plugins @acme/mst-plugin
   connector          acme/connector/acme, acme/connector/slack, acme/connector/github, …
   credential-store   acme/credential-store/secret-manager   (planned kind)
   setup              acme/setup/reset-test-tenant           (planned kind)
-  env                acme/env/cloud-vm
+  runner             acme/runner/cloud-vm
   result-store       acme/result-store/eval-results
   config             acme/config/cowork
 ```
@@ -169,13 +169,13 @@ cowork-tool-descriptions
               rewritten-terse · tool metadata for 2 tools
   graders     acme/judge/correctness, acme/judge/completeness (12 cases)
               acme/pairwise-judge/preference (each variant vs current)
-  env         local (macOS) · 1 shard
+  runner      local (macOS) · 1 shard
   results     .mcp-test-results/cowork-tool-descriptions/
   total       450 trials · 100 pairwise preferences
   credentials 1 of 3 servers needs `mst auth` (slack)
 ```
 
-The `env` line says where the trials would run. With `--env docker --env-option shards=4`, it reads `docker (linux/amd64) · 4 shards · image mst-desktop@sha256:9c1e…`.
+The `runner` line says where the trials would run. With `--runner docker --runner-option shards=4`, it reads `docker (linux/amd64) · 4 shards · image mst-desktop@sha256:9c1e…`.
 
 ## 4. Authenticate once
 
@@ -222,12 +222,12 @@ The client runs the trials first. Judges then grade the collected traces.
 
 ## 6. Run in containers
 
-> **Built, with limits.** See [Cowork in Docker](../cowork-docker.md). Each Docker host runs one Cowork container at a time, so 4 shards need 4 Docker contexts (`--env-option contexts=a,b,c,d`); on one host they run one after another. The progress display below, and `mst runs view`, are planned.
+> **Built, with limits.** See [Cowork in Docker](../cowork-docker.md). Each Docker host runs one Cowork container at a time, so 4 shards need 4 Docker contexts (`--runner-option contexts=a,b,c,d`); on one host they run one after another. The progress display below, and `mst runs view`, are planned.
 
 Run the same config in 4 Linux containers on your machine:
 
 ```bash
-npx mst run --config evals/cowork-tool-descriptions.json --env docker --env-option shards=4
+npx mst run --config evals/cowork-tool-descriptions.json --runner docker --runner-option shards=4
 ```
 
 ```text
@@ -242,13 +242,13 @@ grade     …
 
 Cowork runs in the containers, so you can keep using your Mac. Each container is a fresh desktop: it has nothing from your own Claude Desktop, and leaves nothing behind. A case's variants and trials all run in one container, so each comparison is made on one desktop, minutes apart.
 
-To use an image your organization publishes instead of building one, add `--env-option image=registry.acme.example/mst-desktop@sha256:…`.
+To use an image your organization publishes instead of building one, add `--runner-option image=registry.acme.example/mst-desktop@sha256:…`.
 
 Watch a container's desktop while it runs (`mst runs` is planned), or keep a container that failed so you can look at it:
 
 ```bash
 npx mst runs view <run-id> --shard 2
-npx mst run --config evals/cowork-tool-descriptions.json --env docker --env-option shards=4 --env-option keep=failed
+npx mst run --config evals/cowork-tool-descriptions.json --runner docker --runner-option shards=4 --runner-option keep=failed
 ```
 
 ## 7. Run remotely
@@ -257,17 +257,17 @@ Use the same config, on 5 fresh VMs. They run the same image as the containers i
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json \
-  --env acme/env/cloud-vm --env-option shards=5 \
+  --runner acme/runner/cloud-vm --runner-option shards=5 \
   --results acme/result-store/eval-results
 ```
 
-The VMs run the trials. Your machine gathers their traces, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the traces collected so far. Rerun with `--resume <run-id>` to collect only what's missing. `--env-option keep=failed` keeps a VM whose shard failed, as it does for containers.
+The VMs run the trials. Your machine gathers their traces, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the traces collected so far. Rerun with `--resume <run-id>` to collect only what's missing. `--runner-option keep=failed` keeps a VM whose shard failed, as it does for containers.
 
-To walk away from a long run, detach it ([ADR 0007](../adr/0007-detached-runs-move-the-coordinator.md)). The run's coordinator then runs on a machine the environment creates, with a cloud identity of its own, and your machine can go offline. It needs a result store and, for connector servers, a credential store that machine reaches:
+To walk away from a long run, detach it ([ADR 0007](../adr/0007-detached-runs-move-the-coordinator.md)). The run's coordinator then runs on a machine the runner creates, with a cloud identity of its own, and your machine can go offline. It needs a result store and, for connector servers, a credential store that machine reaches:
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json \
-  --env acme/env/cloud-vm --env-option shards=5 --grade-env \
+  --runner acme/runner/cloud-vm --runner-option shards=5 --grade-runner \
   --results acme/result-store/eval-results \
   --store acme/credential-store/secret-manager \
   --secrets-file .env --detach
@@ -278,7 +278,7 @@ npx mst runs watch e33763 -c evals/cowork-tool-descriptions.json --results acme/
 npx mst runs cancel e33763 -c evals/cowork-tool-descriptions.json --results acme/result-store/eval-results
 ```
 
-`--grade-env` grades the run on the environment's machines once it is collected, so the coordinator runs no judges.
+`--grade-runner` grades the run on the runner's machines once it is collected, so the coordinator runs no judges.
 
 ### On a schedule
 
@@ -299,7 +299,7 @@ jobs:
       - run: npm ci
       - run: >
           npx mst run --config evals/cowork-tool-descriptions.json
-          --env acme/env/cloud-vm --env-option shards=5
+          --runner acme/runner/cloud-vm --runner-option shards=5
           --results acme/result-store/eval-results
 ```
 
@@ -308,16 +308,16 @@ jobs:
 Judges read stored traces, so you can change or add judges and regrade without running Cowork again. This needs the run stored with `"redactStoredResponses": false`, as the config in section 3 sets:
 
 ```bash
-npx mst run --config evals/cowork-tool-descriptions.json --env acme/env/cloud-vm --no-grade
+npx mst run --config evals/cowork-tool-descriptions.json --runner acme/runner/cloud-vm --no-grade
 npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json
 # → run 7f3c2a.g2 (traces from 7f3c2a)
 ```
 
-Grading takes hours when an agentic judge reads every trial. Grade on the environment's machines instead, with the judges' keys in the secrets file ([ADR 0005](../adr/0005-grading-runs-in-an-environment.md)):
+Grading takes hours when an agentic judge reads every trial. Grade on the runner's machines instead, with the judges' keys in the secrets file ([ADR 0005](../adr/0005-grading-runs-in-an-environment.md)):
 
 ```bash
 npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json \
-  --env acme/env/cloud-vm --env-option shards=5 --secrets-file judge-keys.env
+  --runner acme/runner/cloud-vm --runner-option shards=5 --secrets-file judge-keys.env
 ```
 
 A run kept in a result store (section 7) can be graded on another machine, such as your laptop after a scheduled run. `mst grade` fetches a run that isn't local from the store, checks it against the run's manifest, and keeps the regrade there too:
@@ -347,7 +347,7 @@ Runs are written locally by default:
 ├── latest.json         # the newest complete, full run
 └── runs/<run-id>/
     ├── run.json        # the config's identity, each variant's setup, resolved datasets and judges,
-    │                   #   environment, phase status
+    │                   #   runner, phase status
     ├── traces/         # one trace per trial
     ├── artifacts/      # each trial's client artifacts, for judges
     ├── scores/         # one score per grader per trial; pairwise preferences per case
@@ -368,7 +368,7 @@ Runs are written locally by default:
 npx mst stores --plugins @acme/mst-plugin   # planned
 ```
 
-`run.json` records where the run ran: the environment, its options, the number of shards, and each shard's machine (its image digest, worker MST and OS, which decides how a desktop client ran); each trial records its client app. A regrade on an environment's machines (section 8) also records where it graded, in `grading.environment`. The report shows both under _Run details_. Recording each trace's shard is planned for 2.0.
+`run.json` records where the run ran: the runner, its options, the number of shards, and each shard's machine (its image digest, worker MST and OS, which decides how a desktop client ran); each trial records its client app. A regrade on a runner's machines (section 8) also records where it graded, in `grading.runner`. The report shows both under _Run details_. Recording each trace's shard is planned for 2.0.
 
 ## 10. Read your results
 

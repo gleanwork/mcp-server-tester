@@ -4,17 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import {
-  collectInEnvironment,
+  collectInRunner,
   placeArtifacts,
   requestGroups,
   shardOf,
 } from './shardedCollect.js';
 import type { ClientRunResult } from '../evalFrameworkTypes.js';
 import { SHARD_PROTOCOL } from './protocol.js';
-import type { ResolvedEnvironment } from './builtinEnvironments.js';
+import type { ResolvedRunner } from './builtinRunners.js';
 import type { EvalConfig } from '../evalConfig.js';
-import type { Environment } from '../evalFrameworkTypes.js';
-import type { CollectInEnvironmentOptions } from './shardedCollect.js';
+import type { Runner } from '../evalFrameworkTypes.js';
+import type { CollectInRunnerOptions } from './shardedCollect.js';
 
 describe('requestGroups', () => {
   const request = (caseId: string, config: Record<string, unknown>) => ({
@@ -53,12 +53,9 @@ afterEach(async () => {
   );
 });
 
-function environment(
-  runShard: Environment['runShard'],
-  shards = 1
-): ResolvedEnvironment {
+function fakeRunner(runShard: Runner['runShard'], shards = 1): ResolvedRunner {
   return {
-    name: 'test/env/fake',
+    name: 'test/runner/fake',
     shards,
     keep: 'never',
     options: {},
@@ -72,14 +69,14 @@ function environment(
 }
 
 async function collect(
-  env: ResolvedEnvironment,
+  runner: ResolvedRunner,
   caseIds: string[],
-  onResult?: CollectInEnvironmentOptions['onResult']
+  onResult?: CollectInRunnerOptions['onResult']
 ) {
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
   dirs.push(workDir);
-  return collectInEnvironment({
-    environment: env,
+  return collectInRunner({
+    runner,
     runId: 'run-1',
     evalConfig: { name: 'gather' } as EvalConfig,
     plugins: [],
@@ -160,19 +157,19 @@ describe('placeArtifacts', () => {
   });
 });
 
-describe('collectInEnvironment', () => {
-  it("opens the environment with the eval's client, so it can pick that client's image", async () => {
+describe('collectInRunner', () => {
+  it("opens the runner with the eval's client, so it can pick that client's image", async () => {
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
     dirs.push(workDir);
     let client: string | undefined;
-    const env = environment(async () => ok);
+    const env = fakeRunner(async () => ok);
     const open = env.definition.open;
     env.definition.open = async (options, context) => {
       client = context.client;
       return open(options, context);
     };
-    await collectInEnvironment({
-      environment: env,
+    await collectInRunner({
+      runner: env,
       runId: 'run-1',
       evalConfig: { name: 'gather', client: 'chatgpt' } as EvalConfig,
       plugins: [],
@@ -186,7 +183,7 @@ describe('collectInEnvironment', () => {
 
   it("records the OS each shard's worker ran on, not the coordinator's", async () => {
     const gathered = await collect(
-      environment(async (_shard, events) => {
+      fakeRunner(async (_shard, events) => {
         events.progress({
           type: 'hello',
           mst: '9.9.9',
@@ -209,14 +206,14 @@ describe('collectInEnvironment', () => {
     ]);
   });
 
-  it('contains an environment that throws to its shard: the other shards finish, keep their results, and close once', async () => {
+  it('contains a runner that throws to its shard: the other shards finish, keep their results, and close once', async () => {
     // 'a' hashes to shard 1, 'c' to shard 2 (shardOf).
     const order: string[] = [];
     let releaseHealthy!: () => void;
     const healthyMayFinish = new Promise<void>((resolve) => {
       releaseHealthy = resolve;
     });
-    const env = environment(async (shard, events) => {
+    const env = fakeRunner(async (shard, events) => {
       if (shard.index === 0) {
         order.push('shard-1 threw');
         // Let the healthy sibling finish only after the throw has propagated.
@@ -277,15 +274,15 @@ describe('collectInEnvironment', () => {
   it("fails only the shard whose bundle can't be written; the other shard runs", async () => {
     // 'a' hashes to shard 1, 'c' to shard 2. Shard 1's directory is a file.
     const ran: number[] = [];
-    const env = environment(async (shard) => {
+    const env = fakeRunner(async (shard) => {
       ran.push(shard.index);
       return ok;
     }, 2);
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-gather-'));
     dirs.push(workDir);
     await fs.writeFile(path.join(workDir, 'shard-0'), 'not a directory');
-    const gathered = await collectInEnvironment({
-      environment: env,
+    const gathered = await collectInRunner({
+      runner: env,
       runId: 'run-1',
       evalConfig: { name: 'gather' } as EvalConfig,
       plugins: [],
@@ -337,7 +334,7 @@ describe('collectInEnvironment', () => {
       caseId,
       trial,
     });
-    const env = environment(async (shard, events) => {
+    const env = fakeRunner(async (shard, events) => {
       if (shard.index === 0) {
         await healthyHasRoom;
         void events.acquire!(key('a')).then(() => order.push('a got room'));
@@ -367,8 +364,8 @@ describe('collectInEnvironment', () => {
     };
     let hangGuard: NodeJS.Timeout | undefined;
     const gathered = await Promise.race([
-      collectInEnvironment({
-        environment: env,
+      collectInRunner({
+        runner: env,
         runId: 'run-1',
         evalConfig: { name: 'gather' } as EvalConfig,
         plugins: [],
@@ -409,7 +406,7 @@ describe('collectInEnvironment', () => {
 
   it('finds a result announced before its file was copied back', async () => {
     const gathered = await collect(
-      environment(async (shard, events) => {
+      fakeRunner(async (shard, events) => {
         // Announced first; the file only lands with the final copy.
         events.progress({
           type: 'trial',
@@ -445,7 +442,7 @@ describe('collectInEnvironment', () => {
     const errors: Array<string | undefined> = [];
     const key = { variant: 'baseline', caseId: 'a', trial: 0 };
     const gathered = await collect(
-      environment(async (shard, events) => {
+      fakeRunner(async (shard, events) => {
         const file = path.join(shard.resultsDir, '0/0.json');
         await fs.mkdir(path.dirname(file), { recursive: true });
         const initial = {
@@ -492,7 +489,7 @@ describe('collectInEnvironment', () => {
 
   it("marks a failed shard's trials missing, with why", async () => {
     const gathered = await collect(
-      environment(async () => ({
+      fakeRunner(async () => ({
         ok: false,
         reason: 'the VM was preempted',
         collected: 0,

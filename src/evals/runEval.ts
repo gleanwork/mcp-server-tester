@@ -134,14 +134,14 @@ import type { ListedServerTools } from './toolSurface.js';
 import type { RunOptimization } from './runFormat.js';
 import { carryLabels } from './labels.js';
 import {
-  collectInEnvironment,
+  collectInRunner,
   gatheredQueues,
   requestGroups,
   type GatheredResults,
   type RequestGroup,
   type ShardRecord,
-} from './environments/shardedCollect.js';
-import { gradeInEnvironment } from './environments/shardedGrade.js';
+} from './runners/shardedCollect.js';
+import { gradeInRunner } from './runners/shardedGrade.js';
 import {
   createRunStore,
   getResultStore,
@@ -208,12 +208,12 @@ import { credentialStoreFor } from '../auth/grants/stores.js';
 import { resolveServerSecrets } from './serverSecrets.js';
 import type { CredentialStore } from '../auth/grants/types.js';
 import {
-  LOCAL_ENVIRONMENT,
-  environmentOS,
-  resolveEnvironment,
-  type ResolvedEnvironment,
-  type RunEnvironment,
-} from './environments/builtinEnvironments.js';
+  LOCAL_RUNNER,
+  runnerOS,
+  resolveRunner,
+  type RecordedRunner,
+  type ResolvedRunner,
+} from './runners/builtinRunners.js';
 
 export interface RunEvalOptions {
   configPath: string;
@@ -309,10 +309,10 @@ export interface RunEvalOptions {
    * `~/.mcp-server-tester/grants`.
    */
   store?: string;
-  /** Where to collect trials (`--env`). Default: `local`. */
-  env?: string;
-  /** The environment's options (`--env-option key=value`), as strings. */
-  envOptions?: Readonly<Record<string, string>>;
+  /** Where to collect trials (`--runner`). Default: `local`. */
+  runner?: string;
+  /** The runner's options (`--runner-option key=value`), as strings. */
+  runnerOptions?: Readonly<Record<string, string>>;
   /**
    * The result store that keeps the run (`--results`), instead of the eval
    * config's `results.store`: `gs://<bucket>/<prefix>`, `file:<dir>`, or a
@@ -335,7 +335,7 @@ export interface RunEvalResult {
   /** The result store the run was saved to, when it has one. */
   storedIn?: string;
   /** Where the trials were (or, in a dry run, would be) collected. */
-  environment: RunEnvironment;
+  runner: RecordedRunner;
   datasets: Array<{
     source: DatasetConfig;
     dataset?: EvalDataset;
@@ -470,7 +470,7 @@ function resolveClient(
  * (`requireIdenticalClientSettings` checks it when the batch starts), so
  * every case runs with the variant's client settings. A case that names one
  * of them in a variant on another client runs on its own locally and in a
- * batch of the cases with its settings in an environment, so it needs no
+ * batch of the cases with its settings in a runner, so it needs no
  * check.
  */
 const ONE_APP_PER_VARIANT: ReadonlySet<string> = new Set([
@@ -525,7 +525,7 @@ function assertCaseClients(
   variants: EvalVariant[],
   datasets: EvalDataset[],
   os: NodeJS.Platform | undefined,
-  environment: string
+  runner: string
 ): void {
   for (const variant of variants) {
     const rawVariant = rawConfig.variants?.find(
@@ -551,7 +551,7 @@ function assertCaseClients(
           concurrency: evalConfig.concurrency,
           context,
           os,
-          environment,
+          runner,
         });
         variantClient ??= parseClientConfig(declaration, rawConfig);
         assertCaseUsesVariantClient(variantClient, caseClient, context);
@@ -925,6 +925,12 @@ export async function runEval(options: RunEvalOptions): Promise<RunEvalResult> {
   return evaluate(options);
 }
 
+/** Run options ADR 0013 renamed: an environment is now a runner. */
+const RENAMED_RUNNER_OPTIONS = {
+  env: 'runner',
+  envOptions: 'runnerOptions',
+} as const;
+
 /** What `mst grade` grades, and with which eval config. */
 export interface GradeRunOptions extends Pick<
   RunEvalOptions,
@@ -945,12 +951,12 @@ export interface GradeRunOptions extends Pick<
    */
   run: string;
   /**
-   * `--env`: grade in this environment (ADR 0005), its shards holding whole
+   * `--runner`: grade in this runner (ADR 0005), its shards holding whole
    * cases. Default `local`: in this process.
    */
-  env?: string;
-  /** `--env-option`s: `shards`, `keep`, and the environment's own. */
-  envOptions?: Readonly<Record<string, string>>;
+  runner?: string;
+  /** `--runner-option`s: `shards`, `keep`, and the runner's own. */
+  runnerOptions?: Readonly<Record<string, string>>;
   /**
    * `--resume`: keep every verdict the run's grading has, and grade only the
    * judges and pairwise judges that failed to run (or never ran).
@@ -973,13 +979,14 @@ export async function gradeRun(
 
 /**
  * `gradeRun`, grading where `plan` says (ADR 0005): a grade worker records
- * what its grading produced; the coordinator of `mst grade --env` grades
+ * what its grading produced; the coordinator of `mst grade --runner` grades
  * elsewhere and assembles the regrade from what came back.
  */
 export async function gradeStoredRun(
   options: GradeRunOptions,
   given: GradingPlan
 ): Promise<RunEvalResult> {
+  rejectRenamedOptions(options, RENAMED_RUNNER_OPTIONS, 'gradeRun');
   let plan: GradingPlan =
     given.datasets || !options.loadedDatasets
       ? given
@@ -996,19 +1003,19 @@ export async function gradeStoredRun(
     rootDir,
     plan.datasets !== undefined
   );
-  // With the eval's plugins loaded, so a plugin environment resolves, and a
-  // bad --env-option fails before any dataset loads.
-  const environment =
-    options.env !== undefined || options.envOptions !== undefined
-      ? resolveEnvironment(
-          options.env ?? LOCAL_ENVIRONMENT,
-          options.envOptions ?? {}
+  // With the eval's plugins loaded, so a plugin runner resolves, and a
+  // bad --runner-option fails before any dataset loads.
+  const runner =
+    options.runner !== undefined || options.runnerOptions !== undefined
+      ? resolveRunner(
+          options.runner ?? LOCAL_RUNNER,
+          options.runnerOptions ?? {}
         )
       : undefined;
-  if (environment && environment.name !== LOCAL_ENVIRONMENT && !plan.elsewhere)
+  if (runner && runner.name !== LOCAL_RUNNER && !plan.elsewhere)
     plan = {
       ...plan,
-      elsewhere: (prepared) => gradeInShards(environment, prepared),
+      elsewhere: (prepared) => gradeInShards(runner, prepared),
     };
   const directory = await locateRun(
     options,
@@ -1291,13 +1298,13 @@ function workerPluginsOf(
 }
 
 /**
- * What the coordinator of `mst grade --env` has once the run's datasets are
+ * What the coordinator of `mst grade --runner` has once the run's datasets are
  * loaded (ADR 0005): what every grade shard grades with.
  */
 export interface PreparedGrading {
   /** The eval config as its file has it, for the workers to load. */
   configFile: { name: string } & Record<string, unknown>;
-  /** Its client, as its shared configs (`extends`) set it: the environment runs that client's image. */
+  /** Its client, as its shared configs (`extends`) set it: the runner runs that client's image. */
   client?: string;
   /** The datasets, as loaded: one per eval config source, in order. */
   datasets: EvalDataset[];
@@ -1318,13 +1325,13 @@ export interface PreparedGrading {
 /** Where a regrade's grading came from, when not this process. */
 export interface GradedElsewhere {
   source: GradingSource;
-  environment: RunEnvironment;
+  runner: RecordedRunner;
   machines: GradeShardRecord[];
 }
 
 /**
  * Where `evaluate` grades, beyond a run's options (ADR 0005). Internal: a
- * worker's and a coordinator's `mst grade --env` set it.
+ * worker's and a coordinator's `mst grade --runner` set it.
  */
 export interface GradingPlan {
   /** Where each trial and case is graded. Default: here. */
@@ -1341,17 +1348,17 @@ export interface GradingPlan {
   datasets?: readonly EvalDataset[];
   /**
    * Grades elsewhere once the datasets are loaded, and returns where the
-   * grading came from: the coordinator of `mst grade --env`.
+   * grading came from: the coordinator of `mst grade --runner`.
    */
   elsewhere?: (prepared: PreparedGrading) => Promise<GradedElsewhere>;
 }
 
 /**
- * `mst grade --env`: the stored run's cases graded in the environment's
+ * `mst grade --runner`: the stored run's cases graded in the runner's
  * shards (ADR 0005), stopped by Ctrl-C as collecting's shards are.
  */
 async function gradeInShards(
-  environment: ResolvedEnvironment,
+  runner: ResolvedRunner,
   prepared: PreparedGrading
 ): Promise<GradedElsewhere> {
   const controller = new AbortController();
@@ -1366,8 +1373,8 @@ async function gradeInShards(
   process.on('SIGINT', onInterrupt);
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-shards-'));
   try {
-    return await gradeInEnvironment({
-      environment,
+    return await gradeInRunner({
+      runner,
       prepared,
       workDir,
       signal: controller.signal,
@@ -1381,10 +1388,10 @@ async function gradeInShards(
 
 /** What `mst run --resume` completes, and where. */
 export interface ResumeRunOptions extends GradeRunOptions {
-  /** The environment to collect in. Default: the one the run used. */
-  env?: string;
+  /** The runner to collect in. Default: the one the run used. */
+  runner?: string;
   /** Its options. Default: the run's (`shards`, `keep` and its own). */
-  envOptions?: Readonly<Record<string, string>>;
+  runnerOptions?: Readonly<Record<string, string>>;
   credentialStore?: CredentialStore;
   /** `--store`, as for `runEval`. */
   store?: string;
@@ -1392,13 +1399,14 @@ export interface ResumeRunOptions extends GradeRunOptions {
 
 /**
  * Complete a run whose shards ended early (`mst run --resume`, ADR 0004):
- * collect only its missing trials, in its environment, and grade the run
+ * collect only its missing trials, in its runner, and grade the run
  * again into its own directory, with every other trial graded from its
  * stored trace. Needs traces stored unredacted, as `mst grade` does.
  */
 export async function resumeRun(
   options: ResumeRunOptions
 ): Promise<RunEvalResult> {
+  rejectRenamedOptions(options, RENAMED_RUNNER_OPTIONS, 'resumeRun');
   const rootDir = options.rootDir ?? process.cwd();
   // Datasets loaded where a detached run started: their paths aren't here.
   const loadedElsewhere = options.loadedDatasets !== undefined;
@@ -1449,22 +1457,22 @@ export async function resumeRun(
       }`
     );
   }
-  const recorded = run.environment as {
+  const recorded = run.runner as {
     name?: string;
     shards?: number;
     keep?: string;
     options?: Record<string, unknown>;
   };
-  const env = options.env ?? recorded.name ?? LOCAL_ENVIRONMENT;
-  // Only an environment collects a run's trials (ADR 0004). In the local
-  // environment a resume would grade the stored failures again and collect
+  const runner = options.runner ?? recorded.name ?? LOCAL_RUNNER;
+  // Only a runner with machines collects a run's trials (ADR 0004). In the
+  // local runner a resume would grade the stored failures again and collect
   // nothing.
-  if (env === LOCAL_ENVIRONMENT)
+  if (runner === LOCAL_RUNNER)
     throw new Error(
-      `Run ${run.runId} has ${missing} trial${missing === 1 ? '' : 's'} to collect, but a resume collects trials only in an environment, and this one would run locally. Name one with --env, or run those cases again with mst run --case.`
+      `Run ${run.runId} has ${missing} trial${missing === 1 ? '' : 's'} to collect, but a resume collects trials only in a runner with machines, and this one would run locally. Name one with --runner, or run those cases again with mst run --case.`
     );
-  const envOptions =
-    options.envOptions ??
+  const runnerOptions =
+    options.runnerOptions ??
     Object.fromEntries(
       Object.entries({
         ...recorded.options,
@@ -1474,7 +1482,12 @@ export async function resumeRun(
         value === undefined ? [] : [[key, String(value)]]
       )
     );
-  const { run: _run, env: _env, envOptions: _envOptions, ...rest } = options;
+  const {
+    run: _run,
+    runner: _runner,
+    runnerOptions: _runnerOptions,
+    ...rest
+  } = options;
   const replay = runReplay(
     run,
     directory,
@@ -1489,10 +1502,10 @@ export async function resumeRun(
       rootDir,
       outputDir: evalDirectory,
       redactStoredResponses: run.redactStoredResponses,
-      env,
-      envOptions,
+      runner,
+      runnerOptions,
       // A run collected with --no-grade stays ungraded: grade it with
-      // `mst grade` (and its --env) once it's complete.
+      // `mst grade` (and its --runner) once it's complete.
       ...(run.phases?.grade === 'skipped' ? { grade: false } : {}),
     },
     { ...replay, resume: true }
@@ -1543,7 +1556,12 @@ async function evaluate(
 ): Promise<RunEvalResult> {
   rejectRenamedOptions(
     options,
-    { manifestPath: 'configPath', arm: 'variant', arms: 'variants' },
+    {
+      manifestPath: 'configPath',
+      arm: 'variant',
+      arms: 'variants',
+      ...RENAMED_RUNNER_OPTIONS,
+    },
     'runEval'
   );
   // A regrade grades stored traces into a new run; a resume completes its run.
@@ -1573,7 +1591,7 @@ async function evaluate(
       (entry): entry is [string, string] => typeof entry[1] === 'string'
     )
   );
-  // The secrets file's values: all a worker in an environment is sent.
+  // The secrets file's values: all a worker in a runner is sent.
   const fileSecrets = options.secretsFile
     ? await loadSecretsFile(
         path.isAbsolute(options.secretsFile)
@@ -1655,24 +1673,24 @@ async function evaluate(
       ? connectors.evalConfig
       : { ...connectors.evalConfig, simulateWrites };
 
-  // With the plugins loaded, so a plugin environment resolves too.
-  const resolvedEnvironment = resolveEnvironment(
-    options.env ?? LOCAL_ENVIRONMENT,
-    options.envOptions ?? {}
+  // With the plugins loaded, so a plugin runner resolves too.
+  const resolvedRunner = resolveRunner(
+    options.runner ?? LOCAL_RUNNER,
+    options.runnerOptions ?? {}
   );
-  // The OS the trials run on, when the environment says: a desktop client's
+  // The OS the trials run on, when the runner says: a desktop client's
   // options it can't use fail now. Otherwise the worker checks its own. A
   // regrade runs no client, so its traces' OS doesn't matter.
-  const trialOS = regrade ? undefined : environmentOS(resolvedEnvironment.name);
+  const trialOS = regrade ? undefined : runnerOS(resolvedRunner.name);
   evalConfig = validateEvalConfig(
     {
       ...evalConfig,
       client: evalConfig.client ?? DEFAULT_CLIENT,
     },
-    { namespaces, os: trialOS, environment: resolvedEnvironment.name }
+    { namespaces, os: trialOS, runner: resolvedRunner.name }
   );
-  const { definition: _definition, ...environment } = resolvedEnvironment;
-  const inEnvironment = environment.name !== LOCAL_ENVIRONMENT;
+  const { definition: _definition, ...runner } = resolvedRunner;
+  const onMachines = runner.name !== LOCAL_RUNNER;
   // Where the run is kept besides its directory: --results, else the eval
   // config's store. Resolved before any trial runs, so a bad store fails first.
   const resultStore = openResultStore(options.results, evalConfig, namespaces, {
@@ -1782,12 +1800,12 @@ async function evaluate(
       variants,
       loaded,
       trialOS,
-      environment.name
+      runner.name
     );
     return {
       evalConfig,
       outputDir,
-      environment,
+      runner,
       datasets: datasets.map((source, index) => ({
         source,
         dataset: loaded[index],
@@ -1822,7 +1840,7 @@ async function evaluate(
   const allResults: EvalCaseResult[] = [];
   // Saved with the first trial: from then on, run.json says how far the run got.
   let started: Promise<void> | undefined;
-  // Trials an environment's shards didn't bring back: the run is partial.
+  // Trials a runner's shards didn't bring back: the run is partial.
   let missingTrials = 0;
   const sourceVariant = variants[0] ?? { name: 'default' };
   if (givenDatasets && givenDatasets.length !== datasets.length)
@@ -1899,7 +1917,7 @@ async function evaluate(
       `[mst] Resuming the grading of ${previous.runId}: ${toResume.trials} trials and ${toResume.comparisons} pairwise comparisons have a judge without a verdict, in ${toResume.cases.size} cases. Every other verdict is kept.`
     );
   }
-  // `mst grade --env`: the shards grade with these datasets, and the regrade
+  // `mst grade --runner`: the shards grade with these datasets, and the regrade
   // below reads what they brought back (ADR 0005).
   if (options.grading?.elsewhere) {
     if (!regrade)
@@ -1950,7 +1968,7 @@ async function evaluate(
         }
       );
   // The connector tokens a shard's workers ask this machine for, once the
-  // run collects in an environment (a resume's included).
+  // run collects in a runner with machines (a resume's included).
   let workerTokens: ReturnType<typeof connectorTokenSource> | undefined;
   // What MST replaces in every client result besides the secrets in `env`
   // (the secrets file's included) and the servers': the connector tokens,
@@ -1999,7 +2017,7 @@ async function evaluate(
       variants,
       canonicalDatasets.map(({ dataset }) => dataset),
       trialOS,
-      environment.name
+      runner.name
     );
 
     // A variant's servers, client and settings, worked out once.
@@ -2089,11 +2107,11 @@ async function evaluate(
     };
 
     /**
-     * Collects every variant's trials in the environment, `shards` machines
+     * Collects every variant's trials in the runner, `shards` machines
      * at a time, saving each trial as it comes back. Ctrl-C stops the shards
      * and keeps what came back; a second Ctrl-C quits.
      */
-    const collectEnvironmentTrials = async (): Promise<GatheredResults> => {
+    const collectRunnerTrials = async (): Promise<GatheredResults> => {
       // A connector server goes to a worker as its declaration: the worker
       // expands it with its own paths, and asks for its tokens.
       const declarations = connectorDeclarations(connectors);
@@ -2163,8 +2181,8 @@ async function evaluate(
       process.on('SIGINT', onInterrupt);
       const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-shards-'));
       try {
-        const result = await collectInEnvironment({
-          environment: resolvedEnvironment,
+        const result = await collectInRunner({
+          runner: resolvedRunner,
           runId: executionId,
           evalConfig,
           plugins: workerPlugins,
@@ -2264,10 +2282,11 @@ async function evaluate(
         })),
       });
 
-    // In an environment, every variant's trials are collected first, on
-    // shards that each hold whole cases (ADR 0004); the loop below grades them.
+    // In a runner with machines, every variant's trials are collected first,
+    // on shards that each hold whole cases (ADR 0004); the loop below grades
+    // them.
     const gathered =
-      inEnvironment && !regrade ? await collectEnvironmentTrials() : undefined;
+      onMachines && !regrade ? await collectRunnerTrials() : undefined;
     missingTrials = gathered?.missing.length ?? 0;
 
     // Where the running variant's results start, to drop them if it fails.
@@ -2786,9 +2805,9 @@ async function evaluate(
         );
         return {
           name: variant.name,
-          // In an environment, a connector server ran as each worker
+          // On a runner's machines, a connector server ran as each worker
           // expanded it: record its declaration, not this machine's launch.
-          servers: inEnvironment
+          servers: onMachines
             ? variant.servers.map(
                 (server) =>
                   (recordedDeclarations.get(server.label ?? '') as
@@ -2826,12 +2845,12 @@ async function evaluate(
       ...((replay ? replay.run.simulateWrites : simulatedWritesDirectory)
         ? { simulateWrites: true as const }
         : {}),
-      environment,
+      runner,
       ...(shardRecords?.length ? { machines: shardRecords } : {}),
       ...(gradedElsewhere
         ? {
             grading: {
-              environment: gradedElsewhere.environment,
+              runner: gradedElsewhere.runner,
               machines: gradedElsewhere.machines,
             },
           }
@@ -2959,7 +2978,7 @@ async function evaluate(
     evalConfig,
     outputDir,
     ...(resultStore ? { storedIn: resultStore.location } : {}),
-    environment,
+    runner,
     datasets: allDatasets,
     summary,
     ...(regrade ? { gradedFrom: regrade.gradedFrom } : {}),

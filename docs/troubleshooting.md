@@ -76,7 +76,7 @@ Common issues and how to fix them.
 
 1. Start the server, or fix its URL, command or credential, and check that it lists its tools: `mcp.listTools()` in a Playwright test connects the same way.
 2. For a server that starts slowly, set longer retry delays: `MST_MCP_READINESS_RETRY_S=10,30,60` (comma-separated seconds; the default is `10,30`).
-3. Complete the run with `mst run --resume <run>` in its environment: these trials are retryable. A local run's cases run again with `--case`.
+3. Complete the run with `mst run --resume <run>` in its runner: these trials are retryable. A local run's cases run again with `--case`.
 
 The retry setting was `MST_COWORK_MCP_PREFLIGHT_RETRY_S`, for Cowork only. A run that still sets it fails when it starts and names the new one.
 

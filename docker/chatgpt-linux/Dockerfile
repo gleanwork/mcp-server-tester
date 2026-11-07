@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 #
-# A Linux desktop that runs the ChatGPT desktop app for `mst run --env docker`.
-# Build it with `mst env setup docker --config <a chatgpt eval>`, which passes
+# A Linux desktop that runs the ChatGPT desktop app for `mst run --runner docker`.
+# Build it with `mst runner setup docker --config <a chatgpt eval>`, which passes
 # MST's own package so the worker runs the same MST as the run. See
 # docs/chatgpt-docker.md.
 #
@@ -42,7 +42,7 @@ RUN set -e; \
   test -x /usr/lib/chatgpt/resources/codex; \
   dpkg-query -W -f='ChatGPT ${Version}\n' chatgpt
 
-# MST itself: the published package, or the tarball `mst env setup docker`
+# MST itself: the published package, or the tarball `mst runner setup docker`
 # packs from a source checkout (in ./mst-package).
 COPY mst-package/ /tmp/mst-package/
 RUN set -e; \
@@ -59,7 +59,7 @@ RUN usermod -l mst -d /home/mst -m node && groupmod -n mst node
 
 COPY --chmod=755 bin/ /opt/mst/bin/
 
-# The eval's plugin packages (`mst env setup docker --config`), packed from
+# The eval's plugin packages (`mst runner setup docker --config`), packed from
 # the machine that runs MST, with their dependencies. A plugin's own
 # @gleanwork/mcp-server-tester is the MST above, so both share one instance.
 COPY plugins/ /tmp/mst-plugins/

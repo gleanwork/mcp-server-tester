@@ -80,9 +80,9 @@ interface OptimizationSelection {
 export interface StoredOptimizationTarget extends ToolOptimizationEval {
   /** The eval's directory (`mst run --output-dir`). Default: `.mcp-test-results/<eval name>`. */
   outputDir?: string;
-  /** Where every run collects its trials (`--env`). Default: `local`. */
-  env?: string;
-  envOptions?: Readonly<Record<string, string>>;
+  /** Where every run collects its trials (`--runner`). Default: `local`. */
+  runner?: string;
+  runnerOptions?: Readonly<Record<string, string>>;
   /** Credential store for connector servers, as `runEval`'s. */
   store?: string;
   credentialStore?: CredentialStore;
@@ -247,7 +247,7 @@ function assertCandidateIds(
 function runOptionsOf(
   target: StoredOptimizationTarget,
   selection: OptimizationSelection | undefined,
-  environment: OptimizationRecord['environment']
+  runner: OptimizationRecord['runner']
 ): Omit<RunEvalOptions, 'variants'> {
   return {
     configPath: target.configPath,
@@ -261,8 +261,8 @@ function runOptionsOf(
       ? { credentialStore: target.credentialStore }
       : {}),
     ...(target.results ? { results: target.results } : {}),
-    ...(environment ? { env: environment.name } : {}),
-    ...(environment?.options ? { envOptions: environment.options } : {}),
+    ...(runner ? { runner: runner.name } : {}),
+    ...(runner?.options ? { runnerOptions: runner.options } : {}),
     ...(selection?.cases?.length ? { cases: selection.cases } : {}),
     ...(selection?.filterTags?.length
       ? { filterTags: selection.filterTags }
@@ -474,15 +474,15 @@ export async function startToolOptimization(
     throw new Error(
       `maxVariants must be a positive integer, got ${options.maxVariants}.`
     );
-  const environment = target.env
+  const runner = target.runner
     ? {
-        name: target.env,
-        ...(target.envOptions && Object.keys(target.envOptions).length
-          ? { options: { ...target.envOptions } }
+        name: target.runner,
+        ...(target.runnerOptions && Object.keys(target.runnerOptions).length
+          ? { options: { ...target.runnerOptions } }
           : {}),
       }
     : undefined;
-  const runOptions = runOptionsOf(target, options.selection, environment);
+  const runOptions = runOptionsOf(target, options.selection, runner);
   let baseName: string | undefined;
   const baselineRun = await measure(evalDirectory, {
     ...runOptions,
@@ -540,7 +540,7 @@ export async function startToolOptimization(
     ...(options.selection && Object.keys(options.selection).length
       ? { selection: { ...options.selection } }
       : {}),
-    ...(environment ? { environment } : {}),
+    ...(runner ? { runner } : {}),
     baseline: { runId: baselineRun.run.runId },
     // A grouping run without a run id is still to run.
     grouping: { source: state.declared ? 'declared' : 'grouping-run' },
@@ -657,7 +657,7 @@ function session(
 ): OptimizationSession {
   const servedTools = servedToolsOf(baselineRun);
   const directory = optimizationDirectory(evalDirectory, record.id);
-  const runOptions = runOptionsOf(target, record.selection, record.environment);
+  const runOptions = runOptionsOf(target, record.selection, record.runner);
   const pending = () => record.rounds.find((round) => !round.runId);
   const budget = (): OptimizationBudget => {
     const tried = variantsTriedOf(state);

@@ -1,5 +1,5 @@
-import { gradeShard } from '../../../evals/environments/gradeShard.js';
-import { lines } from '../../../evals/environments/protocol.js';
+import { gradeShard } from '../../../evals/runners/gradeShard.js';
+import { lines } from '../../../evals/runners/protocol.js';
 
 export interface GradeShardCommandOptions {
   bundle: string;
@@ -8,7 +8,7 @@ export interface GradeShardCommandOptions {
 
 /**
  * `mst grade-shard`: grade a shard of a stored run on this machine (ADR
- * 0005). Environments start it; nobody types it. stdout carries only
+ * 0005). Runners start it; nobody types it. stdout carries only
  * `mst.shard/v1` lines, so anything else the process logs goes to stderr.
  */
 export async function gradeShardCommand(

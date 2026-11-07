@@ -12,6 +12,7 @@ import {
   assertUniqueCaseIds,
   assertUniqueVariantNames,
   newRunId,
+  readRunDirectory,
 } from './runFormat.js';
 import { runJsonSchema } from './runSchemas.js';
 import { RUN_FORMAT, assertRunFormat } from './resultFormat.js';
@@ -368,6 +369,19 @@ describe('older and newer formats', () => {
     expect(() =>
       assertRunFormat({ format: RUN_FORMAT }, 'Run x')
     ).not.toThrow();
+  });
+
+  it("refuse a run a release candidate stored before ADR 0013's renames", async () => {
+    const result = await run();
+    const runJson = path.join(result.outputDir, 'run.json');
+    const { runner, ...record } = await read(runJson);
+    await fs.writeFile(
+      runJson,
+      JSON.stringify({ ...record, environment: runner })
+    );
+    await expect(readRunDirectory(result.outputDir)).rejects.toThrow(
+      `${result.outputDir} was stored by an MST 2.0 release candidate, before ADR 0013 renamed environment to runner. This MST can't read it: run the eval again.`
+    );
   });
 });
 

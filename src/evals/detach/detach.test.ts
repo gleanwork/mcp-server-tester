@@ -55,13 +55,13 @@ function plan(overrides: Partial<DetachPlan> = {}): DetachPlan {
     evalName: 'cowork',
     command: 'run',
     config: 'eval.json',
-    env: 'acme/env/cloud-vm',
-    envOptions: ['shards=20'],
+    runner: 'acme/runner/cloud-vm',
+    runnerOptions: ['shards=20'],
     results: 'gs://bucket/evals',
     store: 'acme/credential-store/secrets',
     runArgs: ['--trials', '1'],
     noGrade: true,
-    gradeEnv: true,
+    gradeRunner: true,
     resumes: 1,
     secrets: true,
     finish: ['delete-me'],
@@ -106,7 +106,7 @@ describe('detached run status', () => {
       command: 'run',
       state: 'running',
       machine: 'vm',
-      env: 'acme/env/cloud-vm',
+      runner: 'acme/runner/cloud-vm',
       createdAt: '2026-10-20T12:34:56.789Z',
       updatedAt: '2026-10-20T12:34:56.789Z',
       collected: 3,
@@ -147,7 +147,7 @@ describe('the coordinator', () => {
     plan()
   );
 
-  it('runs from the work directory its environment installed MST in', () => {
+  it('runs from the work directory its runner installed MST in', () => {
     expect(paths).toMatchObject({
       workDir: '/opt/mst',
       config: '/opt/mst/detached/d20261020T120000Z-abc123/eval.json',
@@ -155,7 +155,7 @@ describe('the coordinator', () => {
     });
   });
 
-  it('collects without grading, then resumes and grades with the same environment and stores', () => {
+  it('collects without grading, then resumes and grades with the same runner and stores', () => {
     const commands = planCommands(plan(), paths, '/dev/shm/x/secrets.json');
     const shared = [
       '--config',
@@ -170,13 +170,13 @@ describe('the coordinator', () => {
       '/dev/shm/x/secrets.json',
       '--results',
       'gs://bucket/evals',
-      '--env',
-      'acme/env/cloud-vm',
+      '--runner',
+      'acme/runner/cloud-vm',
     ];
     expect(commands.run).toEqual([
       'run',
       ...shared,
-      '--env-option',
+      '--runner-option',
       'shards=20',
       '--store',
       'acme/credential-store/secrets',
@@ -189,7 +189,7 @@ describe('the coordinator', () => {
       '--resume',
       '/r/run1',
       ...shared,
-      '--env-option',
+      '--runner-option',
       'shards=20',
       '--store',
       'acme/credential-store/secrets',
@@ -199,7 +199,7 @@ describe('the coordinator', () => {
       'grade',
       'run1',
       ...shared,
-      '--env-option',
+      '--runner-option',
       'shards=20',
     ]);
     // `mst grade --detach --resume`: the coordinator's grade resumes too.
@@ -212,7 +212,7 @@ describe('the coordinator', () => {
       'grade',
       'run1.g3',
       ...shared,
-      '--env-option',
+      '--runner-option',
       'shards=20',
       '--resume',
     ]);
@@ -234,7 +234,7 @@ describe('the coordinator', () => {
     expect(readLine('Eval complete: cowork')).toEqual({});
   });
 
-  it('resumes a partial run once, grades it in the environment, then finishes its machine', async () => {
+  it('resumes a partial run once, grades it in the runner, then finishes its machine', async () => {
     const store = fileRunStore(await tempDir());
     const finished: string[][] = [];
     const log: string[] = [];
@@ -365,12 +365,12 @@ describe('--detach', () => {
 
   const base = {
     command: 'run' as const,
-    env: 'detach/env/remote',
-    envOptions: ['zone=us-central1-a'],
+    runner: 'detach/runner/remote',
+    runnerOptions: ['zone=us-central1-a'],
     results: 'detach/result-store/memory',
     runArgs: ['--trials', '1'],
     noGrade: false,
-    gradeEnv: true,
+    gradeRunner: true,
     log: () => {},
   };
 
@@ -415,9 +415,9 @@ describe('--detach', () => {
     );
     expect(sentPlan).toMatchObject({
       evalName: 'detached',
-      env: 'detach/env/remote',
+      runner: 'detach/runner/remote',
       noGrade: true,
-      gradeEnv: true,
+      gradeRunner: true,
       resumes: 1,
       secrets: true,
       finish: ['delete-me'],
@@ -471,8 +471,8 @@ describe('--detach', () => {
         rootDir: f.dir,
         ...overrides,
       });
-    await expect(run({ env: undefined })).rejects.toThrow(
-      /--detach needs --env/
+    await expect(run({ runner: undefined })).rejects.toThrow(
+      /--detach needs --runner/
     );
     await expect(run({ results: 'file:/tmp/x' })).rejects.toThrow(
       /a result store other machines reach, not file:\/tmp\/x/

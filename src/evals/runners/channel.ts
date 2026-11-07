@@ -1,16 +1,16 @@
 /**
  * The coordinator side of a shard (ADR 0004): stage the bundle on a machine,
  * start `mst collect` over its channel, answer the worker's messages, and
- * copy its results back. `machineEnvironment` builds a whole environment
- * from a function that creates machines.
+ * copy its results back. `machineRunner` builds a whole runner from a
+ * function that creates machines.
  */
 import path from 'node:path';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { namedSecretValues, redactClientSecrets } from '../clientSecrets.js';
 import type {
-  Environment,
-  EnvironmentContext,
   Machine,
+  Runner,
+  RunnerContext,
   ShardEvents,
   ShardOutcome,
   ShardSpec,
@@ -259,15 +259,15 @@ export async function runShardOverChannel(
 }
 
 /**
- * An environment that creates a machine per shard with `provision` and runs
+ * A runner that creates a machine per shard with `provision` and runs
  * the shard over the machine's channel (ADR 0004). Each machine is deleted
  * when its shard ends, or kept as `context.keep` says.
  */
-export function machineEnvironment(
-  context: EnvironmentContext,
+export function machineRunner(
+  context: RunnerContext,
   provision: (shard: ShardSpec, signal: AbortSignal) => Promise<Machine>,
   options: Omit<ShardChannelOptions, 'workDir'> = {}
-): Environment {
+): Runner {
   const live = new Set<Machine>();
   return {
     // Its shards run over the machine's channel, whatever their work.
@@ -323,7 +323,7 @@ export function machineEnvironment(
 /**
  * One shard on its machine: the worker over the machine's channel, then,
  * for a shard in trouble, what the machine knows about why. A throw from
- * either is the shard's outcome, as `Environment.runShard` promises.
+ * either is the shard's outcome, as `Runner.runShard` promises.
  */
 async function runOnMachine(
   machine: Machine,

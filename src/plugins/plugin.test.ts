@@ -16,7 +16,7 @@ describe('assertPlugin', () => {
       judges: { complete: { schema, evaluate: async () => ({ score: 1 }) } },
       metrics: { hits: { schema, kind: 'continuous', compute: () => 1 } },
       resultStores: { bucket: { schema, create: () => ({}) } },
-      environments: { vm: { schema, open: async () => ({}) } },
+      runners: { vm: { schema, open: async () => ({}) } },
       configs: { recommended: {} },
     });
 
@@ -31,24 +31,24 @@ describe('assertPlugin', () => {
     expect(assertPlugin(value, './acme.js')).toBe(value);
   });
 
-  it.each(['macos', 'linux', undefined])('accepts environment OS %s', (os) => {
+  it.each(['macos', 'linux', undefined])('accepts runner OS %s', (os) => {
     const value = plugin({
-      environments: { vm: { schema, os, open: async () => ({}) } },
+      runners: { vm: { schema, os, open: async () => ({}) } },
     });
     expect(assertPlugin(value, './acme.js')).toBe(value);
   });
 
   it.each(['darwin', 'windows', '', ['linux'], null, 1])(
-    'rejects invalid environment OS %j',
+    'rejects invalid runner OS %j',
     (os) => {
       expect(() =>
         assertPlugin(
           plugin({
-            environments: { vm: { schema, os, open: async () => ({}) } },
+            runners: { vm: { schema, os, open: async () => ({}) } },
           }),
           './acme.js'
         )
-      ).toThrow('environments.vm: os must be macos or linux');
+      ).toThrow('runners.vm: os must be macos or linux');
     }
   );
 
@@ -141,11 +141,11 @@ describe('assertPlugin', () => {
       'metrics.x needs a compute function',
     ],
     ['resultStores', { schema }, 'resultStores.x needs a create function'],
-    ['environments', { schema }, 'environments.x needs an open function'],
+    ['runners', { schema }, 'runners.x needs an open function'],
     [
-      'environments',
+      'runners',
       { schema, open: async () => ({}), maxShards: 0 },
-      'environments.x: maxShards must be a positive integer',
+      'runners.x: maxShards must be a positive integer',
     ],
     [
       'judges',

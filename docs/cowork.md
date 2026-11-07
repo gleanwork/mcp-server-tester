@@ -266,8 +266,8 @@ Use `client: "cowork"` with `mst run` (or `batch`) on the Linux machine. Cowork
 runs there with the accessibility automation, because the machine runs Linux.
 `computerUseModel` and `appVersion` are macOS options and fail: there is no LLM
 desktop planner, and the prepared desktop is the app that runs. MST checks them
-when the config loads, against this machine's OS for `--env local` (the default)
-and against Linux for `--env docker`. A plugin's environment checks them on its
+when the config loads, against this machine's OS for `--runner local` (the default)
+and against Linux for `--runner docker`. A plugin's runner checks them on its
 worker, before any app is prepared.
 
 The caller supplies a working Claude Desktop session with the desired model/MCP
@@ -318,14 +318,14 @@ file as above, and probes. When the variant ends, or if the desktop isn't ready,
 the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
 stays read-only.
 
-**In an environment.** A plugin environment (`mst run --env <namespace>/env/<name>`)
+**In a runner.** A plugin runner (`mst run --runner <namespace>/runner/<name>`)
 can run Cowork shards on Linux workers in owned-desktop mode. Connector servers
 and variants with tool metadata work there as they do locally: the worker
 launches each connector with its own paths and gets its access token from the
 coordinator, and runs the tool-variant proxy itself. The worker image must
 install the plugin packages the eval loads, at the versions the coordinator
 runs, where the worker resolves them (`MST_PLUGIN_DIR`); a worker with another
-version refuses to run. The built-in `docker` environment runs shards in
+version refuses to run. The built-in `docker` runner runs shards in
 containers from MST's own image, and installs the eval's plugins in it: see
 [Cowork in Docker](./cowork-docker.md).
 

@@ -4,7 +4,7 @@
  * the process it ran in and whether it could read its key; its preflight
  * needs `GRADE_TEST_KEY`, which reaches a worker only from the secrets
  * file. `grade-test/pairwise-judge/longer` prefers the longer answer, from
- * the process it ran in. `grade-test/env/collect-only` runs collect shards,
+ * the process it ran in. `grade-test/runner/collect-only` runs collect shards,
  * not grade shards.
  *
  * For `mst grade --resume`: `grade-test/judge/flaky` and
@@ -17,7 +17,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { forkEnvironment } from './forkEnvironment.js';
+import { forkRunner } from './forkRunner.js';
 import type { Plugin } from '../../src/plugins/plugin.js';
 
 const KEY = 'GRADE_TEST_KEY';
@@ -95,19 +95,19 @@ export default {
       },
     },
   },
-  environments: {
+  runners: {
     'collect-only': {
       schema: z.object({}).strict(),
       async open(_options, context) {
         const root = await fs.mkdtemp(
           path.join(os.tmpdir(), 'mst-collect-only-')
         );
-        const environment = forkEnvironment(context, root, {});
+        const runner = forkRunner(context, root, {});
         // A wrapper that doesn't pass `work` on runs collect shards only.
         return {
-          runShard: environment.runShard.bind(environment),
+          runShard: runner.runShard.bind(runner),
           async close() {
-            await environment.close();
+            await runner.close();
             await fs.rm(root, { recursive: true, force: true });
           },
         };

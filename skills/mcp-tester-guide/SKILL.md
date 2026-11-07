@@ -106,9 +106,9 @@ In a test, `toPassToolJudge(rubric, options?)` grades a tool response. In a case
 
 ## Plugin names
 
-A plugin is a plain object, the default export of a module or package, with `meta: { name, version, namespace }` and keys such as `judges`, `clients`, `datasetSources`, `metrics`, `resultStores`, `connectors`, `configs` and `environments`. It never calls MST to register.
+A plugin is a plain object, the default export of a module or package, with `meta: { name, version, namespace }` and keys such as `judges`, `clients`, `datasetSources`, `metrics`, `resultStores`, `connectors`, `configs` and `runners`. It never calls MST to register.
 
-An extension's name is `<namespace>/<kind>/<name>`, where the kind comes from the key: `acme/judge/…`, `acme/client/…`, `acme/dataset/…`, `acme/pairwise-judge/…`, `acme/metric/…`, `acme/result-store/…`, `acme/connector/…`, `acme/config/…`, `acme/env/…`. A two-part name such as `acme/completeness` fails with the full one. Built-ins use bare names (`file`, `rubric`, `passed`) or `mst/<kind>/<name>`; plugins can't use the `mst` namespace.
+An extension's name is `<namespace>/<kind>/<name>`, where the kind comes from the key: `acme/judge/…`, `acme/client/…`, `acme/dataset/…`, `acme/pairwise-judge/…`, `acme/metric/…`, `acme/result-store/…`, `acme/connector/…`, `acme/config/…`, `acme/runner/…`. A two-part name such as `acme/completeness` fails with the full one. Built-ins use bare names (`file`, `rubric`, `passed`) or `mst/<kind>/<name>`; plugins can't use the `mst` namespace.
 
 ## CLI
 
@@ -127,7 +127,7 @@ An extension's name is `<namespace>/<kind>/<name>`, where the kind comes from th
 | `mst clients`, `mst datasets`                   | List clients and plugin datasets                                                                                           |
 | `mst auth --config <path>`                      | Sign in to an eval config's connector servers (`status`, `revoke`)                                                         |
 | `mst optimize start --config <path>`            | Improve tool metadata a round at a time (`optimize-mcp-tool-metadata`)                                                     |
-| `mst env setup docker`, `mst runs list`         | Prepare Docker; follow detached runs                                                                                       |
+| `mst runner setup docker`, `mst runs list`      | Prepare Docker; follow detached runs                                                                                       |
 | `mst cowork setup`                              | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                           |
 
 No command needs a terminal. In one, `init` and `generate` ask for what the flags leave out; in an agent's shell they take every answer from flags and name the flag they need. `generate` without `--tool` asks which tools to call, so an agent passes `--tool`. Without a terminal, `mst login` prints the sign-in URL instead of opening a browser and waits: run it in the background and give the user the URL. `2.0.0-rc.0` and older fail in an agent's shell with `Raw mode is not supported on the current process.stdin`; upgrade it.

@@ -91,10 +91,10 @@ export type {
   MetricKind,
   MetricValue,
   ResultStoreDefinition,
-  EnvironmentDefinition,
-  Environment,
-  EnvironmentContext,
-  EnvironmentKeep,
+  RunnerDefinition,
+  Runner,
+  RunnerContext,
+  RunnerKeep,
   Machine,
   WorkerChannel,
   CoordinatorMachine,
@@ -121,10 +121,10 @@ export {
   resolveResultStoreConfig,
   validateEvalConfig,
 } from '../evals/configValidation.js';
-export { machineEnvironment } from '../evals/environments/channel.js';
-export type { ShardChannelOptions } from '../evals/environments/channel.js';
-export { dockerEnvironment } from '../evals/environments/docker.js';
-export type { ShardTokens, TrialKey } from '../evals/environments/protocol.js';
+export { machineRunner } from '../evals/runners/channel.js';
+export type { ShardChannelOptions } from '../evals/runners/channel.js';
+export { dockerRunner } from '../evals/runners/docker.js';
+export type { ShardTokens, TrialKey } from '../evals/runners/protocol.js';
 export { resolveConfigExtends } from '../evals/configExtends.js';
 export type { ValidateEvalConfigOptions } from '../evals/configValidation.js';
 export {

@@ -3,7 +3,7 @@
 # desktop user and writes Claude Desktop's base settings; as that user, it
 # starts the X server, the session bus, AT-SPI and Claude Desktop, then waits.
 #
-# Base settings come from the environment (`mst run --env docker` sets them):
+# Base settings come from the environment (`mst run --runner docker` sets them):
 #   MST_INFERENCE_GATEWAY_URL   an LLM gateway's Anthropic-compatible base URL
 #   MST_INFERENCE_AUTH_SCHEME   how the token is sent (default: bearer)
 #   MST_INFERENCE_MODELS        comma-separated models Claude Desktop offers
