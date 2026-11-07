@@ -326,7 +326,7 @@ test.describe('get_weather', () => {
 });
 ```
 
-Run with `npx playwright test`, and read the results in Playwright's own report (`npx playwright show-report` with its `html` reporter). MST's reporter and `npx mst open` show evals only, not tests or conformance checks.
+Run with `npx playwright test`. Tests and conformance checks are in Playwright's own output: the `list` reporter prints them, and with `['html', { open: 'never' }]` added to `reporter`, `npx playwright show-report` opens them. MST's reporter and `npx mst open` show evals only.
 
 ## Checklist
 

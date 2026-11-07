@@ -23,7 +23,7 @@ Then check the credentials the run needs:
 - **The judge's key**, when the config has judges. A judge's provider can differ from the client's.
 - **Server tokens**: a server's `auth.accessTokenEnv` names an environment variable. Connector servers need `mst auth --config eval.json` once.
 
-Keep keys out of the config. Put them in a file and pass `--secrets-file run.env` (JSON or dotenv). Results replace values named as credentials (`*_TOKEN`, `*_KEY`, ...). A local run also reads the environment, but workers in Docker or another environment get only the secrets file's values.
+Keep keys out of the config. Put them in a file and pass `--secrets-file run.env` (JSON or dotenv). Results replace values named as credentials (`*_TOKEN`, `*_KEY`, ...). A local run also reads the environment. A worker in Docker or another environment doesn't inherit this machine's environment, so put what its client and servers need in the secrets file.
 
 ## Step 2: Run a little first
 
@@ -108,7 +108,7 @@ npx mst grade 7f3c2a.g2 --config eval.json --resume           # run only the jud
 
 ## Step 7: Run in CI
 
-- Pass secrets with `--secrets-file`, written from the CI's secrets. Environment variables work only when trials run on the CI machine itself.
+- Pass secrets with `--secrets-file`, written from the CI's secrets. When trials run in Docker or another environment, its workers get the file's values, not the CI machine's environment.
 - `mst run` exits 1 when a case fails or is incomplete, so an infrastructure failure fails the job too. An eval whose cases pass only some of the time fails some jobs: set `trials` and `passThreshold` on those cases rather than retrying the job.
 - Keep runs across machines with a result store (`--results gs://bucket/prefix`, or `results.store` in the config). The previous run is then the store's newest one, so a fresh CI machine still compares with the last run.
 - Upload `.mcp-test-results/<eval name>/runs/<run-id>/report/` as an artifact to read it later.
