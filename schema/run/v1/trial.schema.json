@@ -51,6 +51,73 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "writeRecord": {
+      "type": "object",
+      "properties": {
+        "writes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "server": { "type": "string" },
+              "tool": { "type": "string" },
+              "arguments": {},
+              "reply": {},
+              "mode": {
+                "type": "string",
+                "enum": ["planned", "simulated", "server-planned"]
+              },
+              "target": { "type": "string" },
+              "eventId": { "type": "string" }
+            },
+            "required": ["server", "tool", "arguments", "mode"],
+            "additionalProperties": false
+          }
+        },
+        "unreported": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unrecorded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "server": { "type": "string" },
+              "tool": { "type": "string" },
+              "eventId": { "type": "string" }
+            },
+            "required": ["server", "tool"],
+            "additionalProperties": false
+          }
+        },
+        "unclassified": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "server": { "type": "string" },
+              "tool": { "type": "string" },
+              "arguments": {},
+              "target": { "type": "string" },
+              "reason": { "type": "string", "enum": ["dispatch", "unmarked"] }
+            },
+            "required": ["server", "tool", "arguments", "reason"],
+            "additionalProperties": false
+          }
+        },
+        "attribution": { "type": "string", "enum": ["exclusive", "matched"] }
+      },
+      "required": [
+        "writes",
+        "unreported",
+        "unrecorded",
+        "unclassified",
+        "attribution"
+      ],
+      "additionalProperties": false
+    },
     "artifacts": { "type": "string" }
   },
   "required": [

@@ -257,6 +257,40 @@ test.describe('run report', () => {
     ).toBeVisible();
   });
 
+  test("shows each variant's write modes, and says what its write cases rest on", async ({
+    page,
+  }) => {
+    const report = await reportFor([{ name: 'searching' }]);
+    // A run whose server MST couldn't see the writes of (ADR 0014).
+    const runDirectory = path.dirname(path.dirname(report));
+    const runJson = path.join(runDirectory, 'run.json');
+    const run = JSON.parse(await fs.readFile(runJson, 'utf8'));
+    run.variants[0].writeModes = { acme: 'unguarded', notes: 'planned' };
+    await fs.writeFile(runJson, JSON.stringify(run));
+    const summaryJson = path.join(runDirectory, 'summary.json');
+    const summary = JSON.parse(await fs.readFile(summaryJson, 'utf8'));
+    Object.assign(summary.variants[0].metrics, {
+      write_case_passed_rate: 0.5,
+      write_evidence: 'called',
+      unreported_writes: 1,
+    });
+    await fs.writeFile(summaryJson, JSON.stringify(summary));
+    await writeRunReport(runDirectory);
+    await page.goto(`file://${report}`);
+    const writes = page.getByRole('heading', { name: 'Writes' }).locator('..');
+    await expect(writes).toContainText(
+      'searching: 50% of write cases passed, resting at weakest on called (the transcript has the call)'
+    );
+    await expect(writes).toContainText(
+      'acme: unguarded (writes not recorded) · notes: planned (stopped)'
+    );
+    await expect(writes).toContainText('1 unreported');
+    await expect(writes).toContainText(
+      "write cases are unguarded: MST didn't record acme's writes"
+    );
+    await expect(writes).toContainText('No write case reaches applied');
+  });
+
   test('says where a regrade graded the trials, and on which machines', async ({
     page,
   }) => {

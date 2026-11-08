@@ -404,8 +404,42 @@ export function sampleTranscripts(reference: boolean | undefined): string[] {
       }),
       { ...options, maxToolOutputSize: 4 }
     ),
+    renderJudgeTranscript(
+      sampleInput({ writeRecord: SAMPLE_WRITE_RECORD }),
+      options
+    ),
+    renderJudgeTranscript(
+      sampleInput({
+        writeRecord: { ...SAMPLE_WRITE_RECORD, writes: [] },
+      }),
+      options
+    ),
   ];
 }
+
+/** A write record that reaches every part of its rendering (ADR 0014). */
+const SAMPLE_WRITE_RECORD: NonNullable<JudgeInput['trial']['writeRecord']> = {
+  writes: (['planned', 'simulated', 'server-planned'] as const).map((mode) => ({
+    server: '{server}',
+    tool: '{tool}',
+    arguments: { '{argument}': '{value}' },
+    reply: '{reply}',
+    mode,
+    ...(mode === 'server-planned' ? { target: '{target}' } : {}),
+  })),
+  unreported: 1,
+  unrecorded: [{ server: '{server}', tool: '{tool}' }],
+  unclassified: [
+    {
+      server: '{server}',
+      tool: '{dispatcher}',
+      arguments: {},
+      target: '{target}',
+      reason: 'dispatch',
+    },
+  ],
+  attribution: 'exclusive',
+};
 
 export interface QuestionJudgeSpec<Options extends z.ZodRawShape> {
   description: string;

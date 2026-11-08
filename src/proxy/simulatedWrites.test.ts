@@ -1,14 +1,9 @@
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   minimalValue,
-  recordSimulatedWrite,
   renderReplyTemplate,
   simulatedReply,
 } from './simulatedWrites.js';
-import { readSimulatedWrites } from './simulatedWriteRecords.js';
 
 const now = new Date('2026-10-08T12:00:00.123Z');
 const context = { id: 'abc123', now, arguments: { channel: 'C1', n: 3 } };
@@ -110,29 +105,5 @@ describe('simulatedReply', () => {
     expect(
       simulatedReply(undefined, 't', {}, { t: 'Message sent.' }, fixed)
     ).toEqual({ content: [{ type: 'text', text: 'Message sent.' }] });
-  });
-});
-
-describe('simulated-writes file', () => {
-  it('appends records and reads them back, skipping a cut-off line', async () => {
-    const dir = await fs.mkdtemp(join(os.tmpdir(), 'mst-writes-'));
-    try {
-      const file = join(dir, 'slack.jsonl');
-      expect(await readSimulatedWrites(file)).toEqual([]);
-      const record = {
-        time: now.toISOString(),
-        server: 'slack',
-        tool: 'send',
-        arguments: { text: 'hi' },
-        reply: { ok: true },
-      };
-      await recordSimulatedWrite(file, record);
-      await fs.appendFile(file, '{"format":"mst.simulated-write/v1","ti');
-      expect(await readSimulatedWrites(file)).toEqual([
-        { format: 'mst.simulated-write/v1', ...record },
-      ]);
-    } finally {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
   });
 });

@@ -23,6 +23,8 @@ Then check the credentials the run needs:
 - **The judge's key**, when the config has judges. A judge's provider can differ from the client's.
 - **Server tokens**: a server's `auth.accessTokenEnv` names an environment variable. Connector servers need `mst auth --config eval.json` once.
 
+A server that lists tools that aren't annotated read-only stops the run when it starts (`MST can't see these servers' writes`), unless a connector's dry-run proxy guards it or the config accepts its writes with `"writes": { "<label>": "unguarded" }`. The `write-mcp-eval` skill's `references/eval-configs.md` has the write modes.
+
 Keep keys out of the config. Put them in a file and pass `--secrets-file run.env` (JSON or dotenv). Results replace values named as credentials (`*_TOKEN`, `*_KEY`, ...). A local run also reads the environment. A worker in Docker or another runner doesn't inherit this machine's environment, so put what its client and servers need in the secrets file.
 
 Decide now whether you may resume, regrade or label this run later. Each needs the run's full transcripts, which MST redacts by default, so set `"redactStoredResponses": false` in the eval config before you run (Step 5).

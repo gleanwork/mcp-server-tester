@@ -588,7 +588,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L135-L224
+```typescript snippet=src/evals/evalRunner.ts#L140-L229
 /**
  * Overall result of running an eval dataset
  */
@@ -1427,7 +1427,7 @@ The `{ code, message, data? }` of the protocol error a result was made from, or 
 
 ### `EvalAssertions`
 
-```typescript snippet=src/evals/datasetTypes.ts#L187-L241
+```typescript snippet=src/evals/datasetTypes.ts#L189-L243
 /**
  * A case's assertions
  *
@@ -1489,7 +1489,7 @@ export interface EvalAssertions {
 
 A case's `judges` entries, written like an eval config's `judges`.
 
-```typescript snippet=src/evals/datasetTypes.ts#L122-L172
+```typescript snippet=src/evals/datasetTypes.ts#L124-L174
 /**
  * One of a case's judges, written like an eval config's: a reference
  * (`acme/judge/completeness`) or `{ "type": <reference>, ...options }`.
@@ -1545,7 +1545,7 @@ export interface CaseJudgeConfig extends JudgeSettings {
 
 ### `EvalCase`
 
-````typescript snippet=src/evals/datasetTypes.ts#L13-L120
+````typescript snippet=src/evals/datasetTypes.ts#L13-L122
 /**
  * A single eval case: an input the client under test acts on, and what to
  * assert about what it did. The case runs on the `client`, `model` and
@@ -1601,12 +1601,14 @@ export interface EvalCase extends ClientFields {
   /**
    * What the case expects, for graders: `answer` (the reference answer,
    * passed to judges as `reference` unless a judge sets its own),
-   * `criteria` (rubric criteria keyed by name), and any other ground truth.
-   * Judges read it as `case.expected`.
+   * `criteria` (rubric criteria keyed by name), `writes` (the writes the
+   * `writes` grader checks the trial's write record for), and any other
+   * ground truth. Judges read it as `case.expected`.
    */
   expected?: {
     answer?: unknown;
     criteria?: Record<string, string>;
+    writes?: ExpectedWrites;
     [key: string]: unknown;
   };
 

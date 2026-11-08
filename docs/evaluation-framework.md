@@ -969,6 +969,80 @@ Every client's trials wait for one readiness check ([ADR 0011](./adr/0011-a-clie
 - **Proxied servers.** For a client that gets [tool metadata](#tool-metadata-on-every-client) through the proxy, MST checks the servers as declared, with their `minTools` and retries, before it starts the proxy, and before Cowork's preparation too. The check never goes through the proxy, so it doesn't count as the client listing the variant's tools. If the proxy still can't reach a server once the check passed, the batch ends the same way, with a reason that names the server and says the proxy was starting.
 - **When a server isn't ready.** No trial of the batch is sent. Each trial ends as an [infrastructure failure](./adr/0010-a-trial-ending-is-decided-where-it-ends.md) with `broke: 'setup'` and `retryable: true`, and a reason that names the server and what failed, for example `MCP server not ready, so no trial was sent: search listed no tools. Checked 3 times.` Its case is incomplete, the run goes on with its other batches, and `mst run --resume` collects those trials again.
 - **Not checked.** A stdio server with client-resolved fields (`url`, `auth`, `files`, or `${...}` placeholders) has no launch until its client resolves it; only Cowork checks it, after preparation. `runEvalDataset` in a Playwright test isn't checked either: the test's fixture already connected.
+- **Write tools.** A server with no [write mode](#writes) that lists a tool that isn't read-only fails the check, without retries: `MST can't see these servers' writes, so no trial was sent: "docs" lists tools that aren't read-only (save).` The load check stops the run for this before any trial when it can list the server; the readiness check covers the servers it can't (one only a client can launch, one on a runner's machines, or one that was down).
+
+## Writes
+
+A write case passes only on evidence that MST saw its writes ([ADR 0014](./adr/0014-graders-check-outcomes-and-every-write-is-accounted-for.md)). A **write case** is a case whose `expected.writes` lists writes, or whose trials made one.
+
+### Write modes
+
+Every server in every variant has a write mode before the run starts, or the run doesn't start:
+
+| Mode             | What happens to a write                                                                                                      | Set by                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `planned`        | The [dry-run proxy](./cowork.md#dry-run-proxy) stops it and answers with a planned-write result.                             | A connector whose `launch` returns `dryRunProxyServer({ writes: context.writes, ... })` |
+| `simulated`      | The proxy stops it and answers with a success reply.                                                                         | The same, with `"simulateWrites": true` in the eval config                              |
+| `server-planned` | The server stops it and marks its result with the connector's `plannedWriteKey`; the proxy forwards the call and records it. | A connector with `plannedWriteKey` whose proxy sets `forwardWrites`                     |
+| `unguarded`      | It reaches the server, and MST can't see it.                                                                                 | `"writes": { "<label>": "unguarded" }` in the eval config                               |
+| `live`           | It reaches the service.                                                                                                      | `"writes": { "<label>": "live" }`, and `mst run --allow-live-writes`                    |
+| `read-only`      | The server has no write tools.                                                                                               | None of the above                                                                       |
+
+When the run loads, MST lists the tools of each `read-only` server it can launch. A tool that isn't read-only, by the proxy's rule (`readOnlyHint: true` and not `destructiveHint: true`), stops the run and names the server and its tools. A server MST can't list here is checked by the [readiness check](#server-readiness) before its first trial instead. The run also doesn't start when:
+
+- a server is `live` without `--allow-live-writes`, or a case lists writes on a run with a `live` server: a live write case needs an outcome check, which MST doesn't have yet;
+- compared variants' servers stop writes in different ways (`planned`, `simulated`, `server-planned`), so the same request gets different replies;
+- a case lists writes on a server whose writes MST doesn't record;
+- a connector's launch doesn't pass `context.writes` to its proxy, or changes whether it simulates;
+- `writes` names a server that isn't in a variant, or one whose proxy already gives it a mode.
+
+`run.json` keeps each variant's write modes (`variants[].writeModes`), and a regrade grades with them.
+
+### The write record and the `writes` grader
+
+The proxy records each write it stops, with its server, tool, arguments, the reply the client got and its mode ([the write record](./cowork.md#the-write-record)). After each trial, MST matches the record with the trial's transcript and stores it with the trial as `writeRecord`:
+
+- `writes`: the trial's recorded writes, each with the transcript event of its call;
+- `unreported`: recorded writes with no call in the transcript;
+- `unrecorded`: write calls in the transcript, to a server whose writes MST records, that never reached its proxy;
+- `unclassified`: forwarded calls MST can't classify: a dispatcher's calls without the server's mark, and calls to write tools whose result has no mark;
+- `attribution`: `exclusive` when no other trial used the servers at the same time, else `matched` (only writes that match the trial's calls count, and unreported writes can't be told apart).
+
+A case lists the writes it expects in `expected.writes`, with `toolsTriggered`'s matching rules:
+
+```json
+{
+  "id": "post-summary",
+  "input": "Post the summary in #team",
+  "expected": {
+    "writes": {
+      "calls": [
+        {
+          "server": "slack",
+          "tool": "slack_send_message",
+          "arguments": { "channel_id": "C123" }
+        }
+      ],
+      "exclusive": true
+    }
+  }
+}
+```
+
+The `writes` grader checks a write case's record, never its transcript. It fails a trial with no record, a missing write, a write outside the list when `exclusive` is set, or out of order when `order` is `strict`, and it fails any unreported or unrecorded write whatever the case expects. A dispatcher's write matches by its target tool.
+
+### Write evidence
+
+Every score of a write case records what it rests on, as `writeEvidence`, weakest first:
+
+1. `claimed`: the answer says the write happened (judges).
+2. `called`: the client's transcript has the call (`toolsTriggered`, and a `writes` match found only as an unclassified call).
+3. `requested`: a dry-run proxy recorded the request (`writes`).
+4. `applied`: a check read the service's state. Reserved: MST has no outcome check yet, so no write case reaches it, and `outcome` in a case's assertions fails.
+
+Judges get the write record (question judges as `write_record` in the transcript they read, agentic judges as `writes.json` in their workspace) and are told that a planned or simulated write is the action the client requested, not one that happened.
+
+The [metrics](#metrics) `write_case_passed` (its rate over write cases), `write_evidence` (the weakest level across them), `unreported_writes`, `unrecorded_writes` and `unclassified_calls` summarize a variant's writes, and the run report shows them with its write modes. A stored run with `redactStoredResponses` drops each write's reply, and keeps its arguments.
 
 ## Execution lifecycle
 
@@ -978,6 +1052,7 @@ EvalConfig
   -> validate tagged blocks, extension names and namespaces, schemas, and server labels
   -> resolve DatasetSource entries into EvalDataset values
   -> derive one or more variants from the eval config (baseline first)
+  -> resolve every server's write mode, and list the read-only servers' tools
   -> check each batch's servers are ready, then run each variant through its
      client (built-in or plugin) with its MCPConfig[] server set
   -> compute metrics and judges
@@ -1190,17 +1265,18 @@ A trial is one run of a case: one trial, or the case itself when it runs once. A
 
 An eval config's or variant's `metrics` list adds more. Built-in names:
 
-| Metric                                                                                                 | Reports                                                                                   |
-| ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| `passed`, `trial_pass`                                                                                 | The share of cases, and of trials, that passed.                                           |
-| `tool_count`, `mcp_call_count`, `builtin_event_count`, `first_tool`, `is_no_action`                    | Tool calls and client-native events in the transcript. MCP calls are named `server.tool`. |
-| `input_tokens`, `input_tokens_uncached`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | Client token usage. `input_tokens` includes cache reads and writes.                       |
-| `cost_usd`                                                                                             | Client-reported cost, or an estimate from the eval config's `pricing`.                    |
-| `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the client reports it.                                       |
-| `response_success`, `response_len`, `response_words`                                                   | Trials without a client error, and the answer's length.                                   |
-| `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                                                       |
-| `tool_search_hit`                                                                                      | Trials where a tool search returned a tool the trial then called.                         |
-| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge scores, from the case's last trial.                                                 |
+| Metric                                                                                                 | Reports                                                                                                         |
+| ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `passed`, `trial_pass`                                                                                 | The share of cases, and of trials, that passed.                                                                 |
+| `tool_count`, `mcp_call_count`, `builtin_event_count`, `first_tool`, `is_no_action`                    | Tool calls and client-native events in the transcript. MCP calls are named `server.tool`.                       |
+| `input_tokens`, `input_tokens_uncached`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | Client token usage. `input_tokens` includes cache reads and writes.                                             |
+| `cost_usd`                                                                                             | Client-reported cost, or an estimate from the eval config's `pricing`.                                          |
+| `duration_s`, `duration_api_s`                                                                         | Wall time, and API time when the client reports it.                                                             |
+| `response_success`, `response_len`, `response_words`                                                   | Trials without a client error, and the answer's length.                                                         |
+| `skill_loaded`, `skill_before_tool`, `skill_verification_failed`                                       | Agent Skills loads.                                                                                             |
+| `tool_search_hit`                                                                                      | Trials where a tool search returned a tool the trial then called.                                               |
+| `judge_pass`, `judge_score`, `judge_name`, `judge_pass_for`, `judge_score_for`                         | Judge scores, from the case's last trial.                                                                       |
+| `write_case_passed`, `write_evidence`, `unreported_writes`, `unrecorded_writes`, `unclassified_calls`  | Write cases' pass rate and the weakest evidence it rests on, and the write record's counts ([Writes](#writes)). |
 
 - **Per trial.** Usage, timing, tool and answer metrics are measured per trial. A case's value is the mean over its trials, and a variant's is the mean over its cases (`<name>_mean`, or `<name>_rate` for shares). `first_tool` lists the first tool of each case's first trial. Runs that failed on infrastructure, such as a network error or a client that couldn't start, aren't trials, as they don't count toward accuracy.
 - **How an attempt ended.** Each trial record has an `ending` ([ADR 0010](./adr/0010-a-trial-ending-is-decided-where-it-ends.md)): `{ "kind": "trial" }`, graded as usual even when the client errored or ran out of its own turns, time or context, or `{ "kind": "infrastructure", "broke", "retryable", "reason" }`, where `broke` is what failed around the client: `client-app`, `workspace`, `network`, `provider`, `collection`, `deadline` or `setup`. `infrastructureError` is still written, derived from it. A run stored before `ending` gets one from its old fields when it's read, and keeps the classification it was recorded with, except an ungraded trial, which is a trial.

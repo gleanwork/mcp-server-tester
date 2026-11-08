@@ -88,30 +88,81 @@ describe('dryRunProxyServer', () => {
       dryRunProxyServer({
         ...base,
         forwardWrites: true,
-        simulateWrites: { file: '/tmp/w.jsonl' },
+        writes: { file: '/tmp/w.jsonl', simulate: true },
       })
-    ).toThrow('exclude each other');
+    ).toThrow("stops writes itself (forwardWrites), so MST can't simulate");
+    expect(() =>
+      dryRunProxyServer({
+        ...base,
+        writes: { file: '/tmp/w.jsonl', simulate: false, plannedWriteKey: 'k' },
+      })
+    ).toThrow("has a plannedWriteKey but doesn't forward writes");
     for (const requestTimeoutMs of [0, -1, 1.5, Number.NaN])
       expect(() => dryRunProxyServer({ ...base, requestTimeoutMs })).toThrow(
         'positive whole number'
       );
   });
 
-  it('passes simulated writes and their reply templates', () => {
+  it('names its replacement when given the old simulateWrites option', () => {
+    expect(() =>
+      dryRunProxyServer({
+        label: 'x',
+        upstreamUrl: 'https://x.example',
+        simulateWrites: { file: '/tmp/w.jsonl' },
+      } as never)
+    ).toThrow(
+      "simulateWrites is now writes: pass the launch context's `writes`"
+    );
+  });
+
+  it('passes the write record, simulated writes and their reply templates', () => {
     if (!built()) return;
     const entry = dryRunProxyServer({
       label: 'slack',
       upstreamUrl: 'https://mcp.slack.com/mcp',
-      simulateWrites: {
-        file: '/private/run/slack.jsonl',
-        replies: { send: { ok: true } },
-      },
+      writes: { file: '/private/run/slack.jsonl', simulate: true },
+      writeReplies: { send: { ok: true } },
     });
-    expect(entry.args?.slice(-4)).toEqual([
-      '--simulate-writes',
+    expect(entry.args?.slice(-5)).toEqual([
+      '--write-record',
       '/private/run/slack.jsonl',
+      '--simulate-writes',
       '--write-replies',
       '{"send":{"ok":true}}',
+    ]);
+    // Reply templates only matter when MST simulates writes.
+    const planned = dryRunProxyServer({
+      label: 'slack',
+      upstreamUrl: 'https://mcp.slack.com/mcp',
+      writes: { file: '/private/run/slack.jsonl', simulate: false },
+      writeReplies: { send: { ok: true } },
+    });
+    expect(planned.args?.slice(-2)).toEqual([
+      '--write-record',
+      '/private/run/slack.jsonl',
+    ]);
+  });
+
+  it('passes a server-stopped write key and dispatchers', () => {
+    if (!built()) return;
+    const entry = dryRunProxyServer({
+      label: 'glean',
+      upstreamUrl: 'https://glean.example/mcp',
+      forwardWrites: true,
+      writes: {
+        file: '/private/run/glean.jsonl',
+        simulate: false,
+        plannedWriteKey: '_eval_planned',
+        dispatchers: { run_tool: 'tool_name' },
+      },
+    });
+    expect(entry.args?.slice(-6)).toEqual([
+      '--write-record',
+      '/private/run/glean.jsonl',
+      '--planned-write-key',
+      '_eval_planned',
+      '--dispatcher',
+      'run_tool=tool_name',
     ]);
   });
 });
@@ -268,10 +319,8 @@ describe.skipIf(!built())('built dry-run proxy (stdio)', () => {
         label: 'vendor',
         upstreamUrl: url,
         tokenFile,
-        simulateWrites: {
-          file,
-          replies: { post: { ok: true, text: '{{arguments.text}}' } },
-        },
+        writes: { file, simulate: true },
+        writeReplies: { post: { ok: true, text: '{{arguments.text}}' } },
       }),
       connectTimeoutMs: 10_000,
     });
@@ -284,15 +333,19 @@ describe.skipIf(!built())('built dry-run proxy (stdio)', () => {
         { type: 'text', text: '{"ok":true,"text":"hi"}' },
       ]);
       expect(calls).toEqual([]);
-      const [record] = (await fs.readFile(file, 'utf8'))
+      // The proxy listed the tools to classify the call: a `tools` line first.
+      const record = (await fs.readFile(file, 'utf8'))
         .trim()
         .split('\n')
-        .map((line) => JSON.parse(line) as Record<string, unknown>);
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((line) => line.kind === 'write');
       expect(record).toMatchObject({
-        format: 'mst.simulated-write/v1',
+        format: 'mst.write-record/v1',
+        kind: 'write',
         server: 'vendor',
         tool: 'post',
         arguments: { text: 'hi' },
+        mode: 'simulated',
       });
     } finally {
       await closeMCPClient(client);

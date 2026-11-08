@@ -6,8 +6,9 @@ import { fileToken, staticToken, type TokenSource } from './dryRunProxy.js';
 export const DRY_RUN_PROXY_USAGE = `Usage: dryRun --upstream-url <url> --name <label>
   [--token-file <path> | --token-env <NAME>]
   [--header NAME:VALUE]... [--read-only TOOL]... [--always-write TOOL]...
-  [--planned-write-alias KEY]... [--forward-writes] [--request-timeout-ms <ms>]
-  [--simulate-writes <file> [--write-replies <json>]]`;
+  [--planned-write-alias KEY]... [--request-timeout-ms <ms>]
+  [--write-record <file>] [--dispatcher TOOL=ARGUMENT]...
+  [--forward-writes [--planned-write-key KEY] | --simulate-writes [--write-replies <json>]]`;
 
 export function parseDryRunProxyArgs(
   argv: readonly string[],
@@ -25,8 +26,11 @@ export function parseDryRunProxyArgs(
       'always-write': { type: 'string', multiple: true, default: [] },
       'planned-write-alias': { type: 'string', multiple: true, default: [] },
       'forward-writes': { type: 'boolean', default: false },
+      'planned-write-key': { type: 'string' },
+      dispatcher: { type: 'string', multiple: true, default: [] },
       'request-timeout-ms': { type: 'string' },
-      'simulate-writes': { type: 'string' },
+      'write-record': { type: 'string' },
+      'simulate-writes': { type: 'boolean', default: false },
       'write-replies': { type: 'string' },
     },
     strict: true,
@@ -57,19 +61,35 @@ export function parseDryRunProxyArgs(
       );
     headers[raw.slice(0, colon).trim()] = raw.slice(colon + 1).trim();
   }
-  const writesFile = values['simulate-writes'];
-  if (values['forward-writes'] && writesFile)
+  const simulate = values['simulate-writes'];
+  const writeRecord = values['write-record'];
+  if (values['forward-writes'] && simulate)
     throw new Error('Use --forward-writes or --simulate-writes, not both.');
+  if (values['planned-write-key'] !== undefined && !values['forward-writes'])
+    throw new Error('--planned-write-key needs --forward-writes.');
+  if (simulate && !writeRecord)
+    throw new Error(
+      "--simulate-writes needs --write-record: a simulated write MST can't see is never answered as done."
+    );
+  if (writeRecord !== undefined && !isAbsolute(writeRecord))
+    throw new Error('--write-record takes an absolute path.');
+  const dispatchers: Record<string, string> = {};
+  for (const raw of values.dispatcher) {
+    const equals = raw.indexOf('=');
+    if (equals < 1 || equals === raw.length - 1)
+      throw new Error(
+        `Malformed --dispatcher ${JSON.stringify(raw)}; expected TOOL=ARGUMENT.`
+      );
+    dispatchers[raw.slice(0, equals)] = raw.slice(equals + 1);
+  }
   let requestTimeoutMs: number | undefined;
   if (values['request-timeout-ms'] !== undefined) {
     requestTimeoutMs = Number(values['request-timeout-ms']);
     if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs <= 0)
       throw new Error('--request-timeout-ms takes a positive whole number.');
   }
-  if (values['write-replies'] !== undefined && !writesFile)
+  if (values['write-replies'] !== undefined && !simulate)
     throw new Error('--write-replies needs --simulate-writes.');
-  if (writesFile !== undefined && !isAbsolute(writesFile))
-    throw new Error('--simulate-writes takes an absolute path.');
   let replies: Record<string, unknown> | undefined;
   if (values['write-replies'] !== undefined) {
     let parsed: unknown;
@@ -91,14 +111,13 @@ export function parseDryRunProxyArgs(
     alwaysWriteTools: values['always-write'],
     plannedWriteAliases: values['planned-write-alias'],
     ...(values['forward-writes'] ? { forwardWrites: true } : {}),
-    ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
-    ...(writesFile
-      ? {
-          simulateWrites: {
-            file: writesFile,
-            ...(replies ? { replies } : {}),
-          },
-        }
+    ...(values['planned-write-key'] !== undefined
+      ? { plannedWriteKey: values['planned-write-key'] }
       : {}),
+    ...(Object.keys(dispatchers).length > 0 ? { dispatchers } : {}),
+    ...(requestTimeoutMs !== undefined ? { requestTimeoutMs } : {}),
+    ...(writeRecord ? { writeRecord } : {}),
+    ...(simulate ? { simulateWrites: true } : {}),
+    ...(replies ? { writeReplies: replies } : {}),
   };
 }

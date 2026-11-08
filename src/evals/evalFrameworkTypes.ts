@@ -4,7 +4,11 @@ import type { RUN_FORMAT } from './resultFormat.js';
 import type { ZodType } from 'zod';
 import type { EvalDataset, EvalCase } from './datasetTypes.js';
 import type { EvalCaseResult, PairedChange } from '../types/reporter.js';
-import type { ClientDiagnostics, UsageMetrics } from '../types/index.js';
+import type {
+  ClientDiagnostics,
+  UsageMetrics,
+  WriteRecord,
+} from '../types/index.js';
 import type { TrialEnding } from '../types/trialEnding.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type {
@@ -312,6 +316,11 @@ export interface ClientRunResult {
    * keeps the copy, so `mst grade` reads it later. Never stored as a path.
    */
   artifacts?: ClientArtifacts;
+  /**
+   * The writes MST's dry-run proxies recorded for the trial (ADR 0014). MST
+   * sets it; a client's own is dropped.
+   */
+  writeRecord?: WriteRecord;
 }
 
 /**

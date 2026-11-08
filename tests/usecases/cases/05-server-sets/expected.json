@@ -64,11 +64,11 @@
     },
     {
       "path": "variants[name=one-server].metrics.cost_usd_mean",
-      "equals": 0.002181
+      "equals": 0.002424
     },
     {
       "path": "variants[name=four-servers].metrics.cost_usd_mean",
-      "equals": 0.008211
+      "equals": 0.009507
     },
     {
       "path": "variants[name=four-servers].costSource",

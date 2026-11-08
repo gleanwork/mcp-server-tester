@@ -26,6 +26,7 @@ export type {
   RunReportPreference,
   RunReportTrial,
   RunReportVariant,
+  RunReportWrites,
 } from '../../types/reporter.js';
 
 export type {

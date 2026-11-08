@@ -13,6 +13,7 @@
  */
 
 import type { UsageMetrics } from './judgeTypes.js';
+import type { WriteRecord } from '../types/index.js';
 import type {
   TranscriptEvent,
   TranscriptEvidence,
@@ -78,6 +79,13 @@ export interface JudgeTrial {
   artifactsDir?: string;
   /** Client model usage for this run. */
   usage?: Partial<UsageMetrics>;
+  /**
+   * The writes MST's dry-run proxies recorded in this run (ADR 0014), when
+   * its servers' writes go through one. A planned or simulated write is the
+   * action the client requested, not one that happened. Grade a write from
+   * here, never from what the answer says about it.
+   */
+  writeRecord?: WriteRecord;
 }
 
 /** The argument of `evaluate`. */
@@ -220,7 +228,11 @@ function toolCallEvents(calls: LLMToolCall[]): TranscriptEvent[] {
 /** One run, built from the graded response and the client response, if any. */
 export function buildJudgeTrial(
   response: unknown,
-  client?: { clientResponse?: unknown; evidence?: TranscriptEvidence }
+  client?: {
+    clientResponse?: unknown;
+    evidence?: TranscriptEvidence;
+    writeRecord?: WriteRecord;
+  }
 ): JudgeTrial {
   const clientResponse = (
     isRecord(client?.clientResponse)
@@ -249,6 +261,9 @@ export function buildJudgeTrial(
     ...(clientResponse?.usage !== undefined && { usage: clientResponse.usage }),
     ...(typeof clientResponse?.artifactsDir === 'string' && {
       artifactsDir: clientResponse.artifactsDir,
+    }),
+    ...(client?.writeRecord !== undefined && {
+      writeRecord: client.writeRecord,
     }),
   };
 }

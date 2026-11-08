@@ -4,7 +4,8 @@
 //
 // The catalog is { name, tools: [{ name, description, response }] }. A tool
 // call returns its `response` text, with `{query}` replaced by the call's
-// `query` argument. Each line on stdin is one JSON-RPC message (MCP stdio);
+// `query` argument. Every tool is a read (`readOnlyHint`), so MST's load
+// check needs no write mode for the server (ADR 0014). Each line on stdin is one JSON-RPC message (MCP stdio);
 // it speaks the initialize-handshake protocol revisions.
 import fs from 'node:fs';
 import readline from 'node:readline';
@@ -20,6 +21,7 @@ function tool(entry) {
       type: 'object',
       properties: { query: { type: 'string' }, id: { type: 'string' } },
     },
+    annotations: { readOnlyHint: true },
   };
 }
 

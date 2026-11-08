@@ -10,6 +10,7 @@ import { parseExtensionReference } from '../plugins/plugin.js';
 import { removedKeys, renamedKeys } from './renamedKeys.js';
 import { clientFieldSchemas, type ClientFields } from './clientFields.js';
 import { MCPConfigSchema, type MCPConfig } from '../config/mcpConfig.js';
+import type { DeclaredWriteMode } from '../types/index.js';
 import type {
   ToolMetadataOverride,
   ToolOverrideVariant,
@@ -182,6 +183,14 @@ export interface EvalConfig {
    * reach the server. Default false.
    */
   simulateWrites?: boolean;
+  /**
+   * Write modes for servers no dry-run proxy guards, by server label (ADR
+   * 0014). `unguarded`: MST can't see the server's writes, and the run
+   * accepts that; its results are marked. `live`: writes reach the service,
+   * which also needs `--allow-live-writes`. A server with neither and no
+   * proxy must list no tool that isn't read-only, or the run doesn't start.
+   */
+  writes?: Record<string, DeclaredWriteMode>;
   results?: {
     store: ExtensionConfig;
   };
@@ -604,6 +613,9 @@ export const EvalConfigSchema = z
       .optional(),
     redactStoredResponses: z.boolean().optional(),
     simulateWrites: z.boolean().optional(),
+    writes: z
+      .record(z.string().min(1), z.enum(['unguarded', 'live']))
+      .optional(),
     /**
      * USD per million tokens, by model, for clients that report tokens but not
      * cost. MST ships no prices: they change, and every estimate should be
@@ -692,6 +704,7 @@ const PluginConfigSchema = EvalConfigSchema.pick({
   maxTokens: true,
   redactStoredResponses: true,
   simulateWrites: true,
+  writes: true,
 }).strict();
 
 /** A plugin's shared config: any eval config setting but its name, datasets, variants, plugins and extends. */

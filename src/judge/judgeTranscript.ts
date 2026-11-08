@@ -1,7 +1,8 @@
 /**
  * The transcript as a judge reads it (ADR 0009): the user's request, each event
  * the client recorded in order (a tool call with its arguments and result,
- * a skill load, a command), and the final answer.
+ * a skill load, a command), the writes MST's dry-run proxies recorded (ADR
+ * 0014), when its servers' writes go through one, and the final answer.
  *
  * Every value is the run's data, not instructions, so each sits in its own
  * tag and the system prompt says to ignore instructions inside tags. A tag
@@ -10,6 +11,7 @@
  */
 import type { JudgeInput } from './judgeContract.js';
 import type { TranscriptEvent } from '../evals/evalFrameworkTypes.js';
+import type { WriteRecord } from '../types/index.js';
 
 /** How much of each tool result a judge reads when no size is set (bytes). */
 export const DEFAULT_TOOL_OUTPUT_BYTES = 20_000;
@@ -29,6 +31,9 @@ const TAGS = [
   'event',
   'arguments',
   'result',
+  'write_record',
+  'write',
+  'reply',
   'final_answer',
 ];
 /**
@@ -96,6 +101,81 @@ function eventView(event: TranscriptEvent, index: number, max: number): string {
   } else if (event.kind === 'tool_call')
     lines.push('<result observed="false"/>');
   lines.push('</event>');
+  return lines.join('\n');
+}
+
+/** What each write mode means to a judge. */
+const WRITE_MODE_NOTES: Record<WriteRecord['writes'][number]['mode'], string> =
+  {
+    planned:
+      'stopped; the client was told the write was not made (a planned-write result)',
+    simulated:
+      'stopped; the client got a made-up success reply, so it may believe the write happened',
+    'server-planned':
+      'the server says it stopped this write; MST saw the request and the reply',
+  };
+
+function writeView(
+  write: WriteRecord['writes'][number],
+  index: number,
+  max: number
+): string {
+  const lines = [
+    `<write n="${index + 1}"` +
+      attribute('server', write.server) +
+      attribute('tool', write.tool) +
+      attribute('target', write.target) +
+      attribute('mode', write.mode) +
+      '>',
+    `(${WRITE_MODE_NOTES[write.mode]})`,
+  ];
+  if (
+    write.arguments !== undefined &&
+    !(
+      typeof write.arguments === 'object' &&
+      write.arguments !== null &&
+      Object.keys(write.arguments).length === 0
+    )
+  )
+    lines.push(`<arguments>\n${text(write.arguments)}\n</arguments>`);
+  if (write.reply !== undefined) {
+    const escaped = text(write.reply);
+    const reply = cut(escaped, max);
+    const total = Buffer.byteLength(escaped, 'utf8');
+    lines.push(
+      `<reply${reply.cut ? ` cut="first ${max} of ${total} bytes"` : ''}>\n${reply.text}\n</reply>`
+    );
+  }
+  lines.push('</write>');
+  return lines.join('\n');
+}
+
+/**
+ * The trial's write record, as a judge reads it: each write the proxies
+ * stopped or saw, what it means, and how the record and transcript
+ * disagree. None of these writes happened: grade them as requests.
+ */
+function writeRecordView(record: WriteRecord, max: number): string {
+  const lines = [
+    '<write_record>',
+    "MST's dry-run proxies recorded the writes this trial requested. A planned or simulated write was stopped: it is the action the client requested, not one that happened. Grade a write's tool, target and arguments from here. What the final answer says about a write is no evidence that it happened, and a write that isn't here was not requested through the servers MST records.",
+  ];
+  if (record.writes.length === 0) lines.push('No writes were recorded.');
+  else lines.push(...record.writes.map((write, i) => writeView(write, i, max)));
+  if (record.unreported > 0)
+    lines.push(
+      `${record.unreported} recorded write${record.unreported === 1 ? ' is' : 's are'} missing from the transcript.`
+    );
+  for (const call of record.unrecorded)
+    lines.push(
+      `The transcript has a call to ${text(`${call.server}/${call.tool}`)} that never reached its server.`
+    );
+  const dispatches = record.unclassified.length;
+  if (dispatches > 0)
+    lines.push(
+      `${dispatches} call${dispatches === 1 ? '' : 's'} went through to ${dispatches === 1 ? 'its server' : 'their servers'} without a mark saying whether ${dispatches === 1 ? 'it' : 'they'} wrote: ${record.unclassified.map((call) => text(`${call.server}/${call.target ?? call.tool}`)).join(', ')}.`
+    );
+  lines.push('</write_record>');
   return lines.join('\n');
 }
 
@@ -185,6 +265,7 @@ function trialParts(
     parts.push(
       `${open}\n${partial ? "The client records tool calls on a best-effort basis, so it may have made calls that aren't shown.\n" : ''}${trial.events.map((event, i) => eventView(event, i, max)).join('\n')}\n</transcript>`
     );
+  if (trial.writeRecord) parts.push(writeRecordView(trial.writeRecord, max));
   parts.push(`<final_answer>\n${text(trial.text)}\n</final_answer>`);
   return parts;
 }

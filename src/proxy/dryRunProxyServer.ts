@@ -7,6 +7,22 @@ export { PLANNED_WRITE_KEY } from './plannedWrite.js';
 
 const PACKAGE_NAME = '@gleanwork/mcp-server-tester';
 
+/**
+ * Where the proxy records writes and how it answers them: what MST gives a
+ * connector's `launch` as `context.writes`. Pass it to `dryRunProxyServer`
+ * unchanged.
+ */
+export interface ProxyWrites {
+  /** The write record file MST reads after each trial. */
+  file: string;
+  /** Answer writes with a success reply instead of a planned-write result. */
+  simulate: boolean;
+  /** The connector's `plannedWriteKey`: used when the proxy forwards writes. */
+  plannedWriteKey?: string;
+  /** The connector's `dispatchers`. */
+  dispatchers?: Readonly<Record<string, string>>;
+}
+
 /** Options for {@link dryRunProxyServer}. */
 export interface DryRunProxyServerOptions {
   /** The server's label in the eval config. */
@@ -24,8 +40,10 @@ export interface DryRunProxyServerOptions {
   /** Extra keys for the planned-write result, for graders that read an older name. */
   plannedWriteAliases?: readonly string[];
   /**
-   * Forward writes too, for a server that handles writes itself: the proxy
-   * then only carries the token MST renews. Not with `simulateWrites`.
+   * Forward writes too, for a server that stops writes itself: the proxy
+   * then carries the token MST renews and records the writes the server
+   * marks with the connector's `plannedWriteKey`. Not when MST simulates
+   * writes.
    */
   forwardWrites?: boolean;
   /**
@@ -35,15 +53,17 @@ export interface DryRunProxyServerOptions {
    */
   requestTimeoutMs?: number;
   /**
-   * Answer writes with a success reply and record them in `file` instead of
-   * a planned-write result. Pass a connector's `launch` context
-   * `simulateWrites` here, with the connector's reply templates.
+   * The launch context's `writes`: where the proxy records every write, and
+   * whether it simulates them. Without it, MST can't see the server's writes
+   * and refuses to run it (ADR 0014).
    */
-  simulateWrites?: {
-    file: string;
-    /** Reply templates by tool name (see `SimulatedWritesOptions.replies`). */
-    replies?: Readonly<Record<string, unknown>>;
-  };
+  writes?: ProxyWrites;
+  /**
+   * Reply templates for simulated writes, by tool name: any JSON, with
+   * `{{arguments.<path>}}`, `{{id}}`, `{{now}}` and `{{unixTime}}`
+   * placeholders (see simulatedWrites.ts).
+   */
+  writeReplies?: Readonly<Record<string, unknown>>;
   /** Readiness fails closed below this many tools. */
   minTools?: number;
   /** Node to run the proxy with. Default: the Node running MST. */
@@ -85,10 +105,30 @@ export function dryRunProxyEntry(): string {
 export function dryRunProxyServer(
   options: DryRunProxyServerOptions
 ): StdioMCPConfig {
+  return dryRunProxyServerAt([dryRunProxyEntry()], options);
+}
+
+/**
+ * {@link dryRunProxyServer}, running the proxy from `entry` (the arguments
+ * before its own): for tests, which run it from source.
+ */
+export function dryRunProxyServerAt(
+  entry: readonly string[],
+  options: DryRunProxyServerOptions
+): StdioMCPConfig {
   // Fail here, where the connector is defined, not when the proxy starts.
-  if (options.forwardWrites && options.simulateWrites)
+  if ('simulateWrites' in options)
     throw new Error(
-      'dryRunProxyServer: forwardWrites and simulateWrites exclude each other.'
+      "dryRunProxyServer: simulateWrites is now writes: pass the launch context's `writes`, and the reply templates as `writeReplies` (ADR 0014)."
+    );
+  const writes = options.writes;
+  if (options.forwardWrites && writes?.simulate)
+    throw new Error(
+      `dryRunProxyServer: server "${options.label}" stops writes itself (forwardWrites), so MST can't simulate its writes. Run it without simulateWrites.`
+    );
+  if (writes?.plannedWriteKey !== undefined && !options.forwardWrites)
+    throw new Error(
+      `dryRunProxyServer: server "${options.label}" has a plannedWriteKey but doesn't forward writes; the key marks writes a server stopped itself.`
     );
   const { requestTimeoutMs } = options;
   if (
@@ -99,7 +139,7 @@ export function dryRunProxyServer(
       'dryRunProxyServer: requestTimeoutMs takes a positive whole number of milliseconds.'
     );
   const args = [
-    dryRunProxyEntry(),
+    ...entry,
     '--upstream-url',
     options.upstreamUrl,
     '--name',
@@ -117,13 +157,17 @@ export function dryRunProxyServer(
   if (options.forwardWrites) args.push('--forward-writes');
   if (options.requestTimeoutMs !== undefined)
     args.push('--request-timeout-ms', String(options.requestTimeoutMs));
-  if (options.simulateWrites) {
-    args.push('--simulate-writes', options.simulateWrites.file);
-    if (options.simulateWrites.replies)
-      args.push(
-        '--write-replies',
-        JSON.stringify(options.simulateWrites.replies)
-      );
+  if (writes) {
+    args.push('--write-record', writes.file);
+    if (writes.plannedWriteKey !== undefined)
+      args.push('--planned-write-key', writes.plannedWriteKey);
+    for (const [tool, argument] of Object.entries(writes.dispatchers ?? {}))
+      args.push('--dispatcher', `${tool}=${argument}`);
+    if (writes.simulate) {
+      args.push('--simulate-writes');
+      if (options.writeReplies)
+        args.push('--write-replies', JSON.stringify(options.writeReplies));
+    }
   }
   return {
     transport: 'stdio',

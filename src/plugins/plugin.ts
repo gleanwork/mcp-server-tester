@@ -369,6 +369,21 @@ function connectorProblem(
     typeof definition.launch !== 'function'
   )
     return `${label}: launch must be a function`;
+  if (
+    definition.plannedWriteKey !== undefined &&
+    (typeof definition.plannedWriteKey !== 'string' ||
+      !definition.plannedWriteKey)
+  )
+    return `${label}: plannedWriteKey must be a non-empty string`;
+  const dispatchers = definition.dispatchers;
+  if (
+    dispatchers !== undefined &&
+    (!isRecord(dispatchers) ||
+      Object.values(dispatchers).some(
+        (argument) => typeof argument !== 'string' || !argument
+      ))
+  )
+    return `${label}: dispatchers maps each dispatcher tool to the argument that names its target: { "run_tool": "tool_name" }`;
   return undefined;
 }
 

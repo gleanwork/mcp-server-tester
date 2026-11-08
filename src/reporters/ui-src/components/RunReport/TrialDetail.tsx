@@ -3,6 +3,7 @@ import type {
   RunReportEvent,
   RunReportPreference,
   RunReportTrial,
+  RunReportWrites,
 } from '../../types';
 import { TONE, graderName } from '../Comparison/format';
 
@@ -70,6 +71,14 @@ function EventRow({ event }: { event: RunReportEvent }) {
             error
           </span>
         )}
+        {event.simulatedWrite && (
+          <span
+            className={`rounded px-1.5 font-semibold ${TONE.warn}`}
+            title="MST made up this reply. Nothing was written."
+          >
+            simulated
+          </span>
+        )}
       </div>
       {event.input && <Block label="input" text={event.input} />}
       {event.output && <Block label="output" text={event.output} />}
@@ -109,6 +118,70 @@ export function transcriptSummary(trial: RunReportTrial): string {
   if (calls.length) return calls.map((e) => callText(e)).join(' → ');
   if (trial.events.length || trial.hasTranscript) return 'called no tools';
   return 'no transcript recorded';
+}
+
+const WRITE_MODE_TEXT: Record<
+  RunReportWrites['writes'][number]['mode'],
+  string
+> = {
+  planned: 'stopped',
+  simulated: 'stopped, simulated reply',
+  'server-planned': 'stopped by the server',
+};
+
+/**
+ * What the trial's dry-run proxies recorded (ADR 0014): each write they
+ * stopped, and the writes the record and the transcript disagree about.
+ */
+function WriteRecordView({ writes }: { writes: RunReportWrites }) {
+  const problems = [
+    writes.unreported > 0 &&
+      `${writes.unreported} unreported (recorded, not in the transcript)`,
+    writes.unrecorded.length > 0 &&
+      `${writes.unrecorded.length} unrecorded (in the transcript, never reached the server): ${writes.unrecorded.map((w) => `${w.server}.${w.tool}`).join(', ')}`,
+    writes.unclassified.length > 0 &&
+      `${writes.unclassified.length} unclassified: ${writes.unclassified.map((c) => `${c.server}.${c.tool} (${c.reason})`).join(', ')}`,
+  ].filter((problem): problem is string => typeof problem === 'string');
+  return (
+    <div
+      className="grid grid-cols-[minmax(0,1fr)] gap-1 text-xs"
+      aria-label="Write record"
+    >
+      <span className="font-semibold">
+        Write record
+        <span className="ml-2 font-normal text-muted-foreground">
+          {writes.writes.length === 0
+            ? 'no writes'
+            : `${writes.writes.length} write${writes.writes.length === 1 ? '' : 's'}`}
+          {writes.attribution === 'matched' &&
+            ' · trials overlapped: only writes matching this trial’s calls'}
+        </span>
+      </span>
+      {writes.writes.length > 0 && (
+        <ol className="grid gap-1">
+          {writes.writes.map((write, i) => (
+            <li key={i} className="grid grid-cols-[minmax(0,1fr)] gap-1">
+              <span className="flex flex-wrap items-baseline gap-2">
+                <span className="font-mono font-semibold">
+                  {write.server}.{write.tool}
+                  {write.target && ` → ${write.target}`}
+                </span>
+                <span className="text-muted-foreground">
+                  {WRITE_MODE_TEXT[write.mode]}
+                </span>
+              </span>
+              {write.input && <Block label="arguments" text={write.input} />}
+            </li>
+          ))}
+        </ol>
+      )}
+      {problems.map((problem, i) => (
+        <p key={i} className={`rounded px-2 py-1 ${TONE.warn}`}>
+          {problem}
+        </p>
+      ))}
+    </div>
+  );
 }
 
 const EXCERPT = 280;
@@ -182,6 +255,14 @@ export function TrialView({
                     score {Number(score.score.toFixed(2))}
                   </span>
                 )}
+                {score.writeEvidence && (
+                  <span
+                    className="text-muted-foreground"
+                    title="What this score of a write rests on: the answer (claimed), the transcript (called), or a dry-run proxy's record (requested)."
+                  >
+                    write evidence: {score.writeEvidence}
+                  </span>
+                )}
               </span>
               {(score.reasoning ?? score.details) && (
                 <span className="text-muted-foreground">
@@ -225,6 +306,7 @@ export function TrialView({
           {transcriptSummary(trial)}
         </p>
       )}
+      {trial.writes && <WriteRecordView writes={trial.writes} />}
       {trial.finalText && <Answer text={trial.finalText} />}
     </li>
   );

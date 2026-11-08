@@ -48,6 +48,8 @@ import {
 import { ClientUnavailableError } from './clientUnavailable.js';
 import { stableJson } from '../skills/skillEntry.js';
 import { checkServersReady, notReadyResult } from './readinessCheck.js';
+import { readOnlyServerLabels } from './writeModes.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import { failedAfterClient, thrownEnding } from './trialEnding.js';
 
 /**
@@ -538,6 +540,8 @@ export async function collectClientBatch(
           reportResult: context.reportResult
             ? (index, result) => context.reportResult!(indices[index]!, result)
             : undefined,
+          readOnly: (servers) =>
+            readOnlyServerLabels(servers, context.evalConfig.writes),
         },
         secrets,
         cancelled
@@ -580,7 +584,10 @@ async function runSessionBatch(
   openSession: () => Promise<ClientSession>,
   name: string,
   requests: ClientBatchRequest[],
-  context: Pick<ClientRunContext, 'reportResult' | 'acquire'>,
+  context: Pick<ClientRunContext, 'reportResult' | 'acquire'> & {
+    /** The session's servers with no write mode (ADR 0014). */
+    readOnly?: (servers: readonly MCPConfig[]) => ReadonlySet<string>;
+  },
   secrets: readonly string[],
   cancelled?: () => boolean
 ): Promise<ClientRunResult[]> {
@@ -608,6 +615,9 @@ async function runSessionBatch(
       ? await checkServersReady(target.servers, {
           ...(target.resolve ? { resolve: target.resolve } : {}),
           ...(target.env ? { env: target.env } : {}),
+          ...(context.readOnly
+            ? { readOnly: context.readOnly(target.servers) }
+            : {}),
         })
       : undefined;
     // No case is sent: each ends as a setup failure a retry can help.

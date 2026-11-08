@@ -50,7 +50,11 @@ import {
 } from '../mcp/clientFactory.js';
 import { createMCPFixture } from '../mcp/fixtures/mcpFixture.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import { isHttpConfig } from '../config/mcpConfig.js';
+import {
+  isHttpConfig,
+  mcpServerLabel,
+  usesClientResolvedFields,
+} from '../config/mcpConfig.js';
 import {
   variantEvalConfig,
   variantToolMetadata,
@@ -97,7 +101,13 @@ import {
 import type { CaseJudge } from './datasetTypes.js';
 import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
-import { withSimulatedWriteMarks } from './simulatedWriteMarks.js';
+import { WriteRecordLedger, withWriteRecords } from './writeRecord.js';
+import {
+  assertWriteModes,
+  launchedWriteMode,
+  resolveWriteModes,
+  type WriteMode,
+} from './writeModes.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import { readinessRetryDelaysMs } from './readinessCheck.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
@@ -255,11 +265,17 @@ export interface RunEvalOptions {
   redactStoredResponses?: boolean;
   /**
    * Grade the trials: assertions, judges and pairwise judges. `false` only
-   * collects (`mst run --no-grade`): the run keeps its traces, with no scores,
-   * for `mst grade` to grade later.
+   * collects (`mst run --no-grade`): the run keeps its transcripts, with no
+   * scores, for `mst grade` to grade later.
    * @default true
    */
   grade?: boolean;
+  /**
+   * Let writes reach the service on servers the eval config declares
+   * `"writes": { "<label>": "live" }` (`mst run --allow-live-writes`; ADR
+   * 0014). Without it, such a run doesn't start.
+   */
+  allowLiveWrites?: boolean;
   /** Skip the eval config's pairwise judges (tool optimization ranks variants itself). */
   skipPairwise?: boolean;
   /**
@@ -1401,13 +1417,16 @@ export interface ResumeRunOptions extends GradeRunOptions {
   credentialStore?: CredentialStore;
   /** `--store`, as for `runEval`. */
   store?: string;
+  /** `--allow-live-writes`, as for `runEval`: the collected trials write too. */
+  allowLiveWrites?: boolean;
 }
 
 /**
  * Complete a run whose shards ended early (`mst run --resume`, ADR 0004):
  * collect only its missing trials, in its runner, and grade the run
  * again into its own directory, with every other trial graded from its
- * stored trace. Needs traces stored unredacted, as `mst grade` does.
+ * stored transcript. Needs transcripts stored unredacted, as `mst grade`
+ * does.
  */
 export async function resumeRun(
   options: ResumeRunOptions
@@ -1650,8 +1669,7 @@ async function evaluate(
   const identity = configIdentity(rawConfig);
   // Connector servers become the entries their connectors launch. Paths and
   // env names only; tokens arrive when the run starts.
-  // With `simulateWrites`, proxies record the writes they answer here. A
-  // resume collects the missing trials as its run collected the others.
+  // A resume collects the missing trials as its run collected the others.
   const configSimulatesWrites =
     (rawConfig as { simulateWrites?: unknown }).simulateWrites === true;
   const simulateWrites = replay?.resume
@@ -1661,18 +1679,21 @@ async function evaluate(
     console.warn(
       `[mst] Run ${replay.run.runId} was collected with simulateWrites ${simulateWrites}; its missing trials are collected the same way, not as the eval config now says.`
     );
-  const simulatedWritesDirectory = simulateWrites
-    ? path.join(
-        await fs.realpath(os.tmpdir()),
-        `mst-simulated-writes-${randomUUID()}`
-      )
-    : undefined;
+  // The dry-run proxies record every write they see here (ADR 0014).
+  const writesDirectory = path.join(
+    await fs.realpath(os.tmpdir()),
+    `mst-writes-${randomUUID()}`
+  );
   // The run's ID, known before connectors launch so they can tag requests with it.
   const executionId = replay?.runId ?? newRunId();
   const connectors = await expandConnectorServers(rawConfig, {
     runId: executionId,
-    ...(simulatedWritesDirectory ? { simulatedWritesDirectory } : {}),
+    writes: {
+      directory: writesDirectory,
+      simulate: simulateWrites,
+    },
   });
+  const writeLedger = new WriteRecordLedger(connectors.writeRecordFiles);
   // Workers read the mode from the eval config they're sent.
   let evalConfig: EvalConfig =
     simulateWrites === configSimulatesWrites
@@ -1715,6 +1736,10 @@ async function evaluate(
         variant.name,
         variant.servedTools as unknown as ListedServerTools[]
       );
+  // Each variant's servers' write modes (ADR 0014), for run.json.
+  const writeModes = new Map<string, Record<string, WriteMode>>();
+  for (const variant of replay?.run.variants ?? [])
+    if (variant.writeModes) writeModes.set(variant.name, variant.writeModes);
   const optimization = options.optimization ?? replay?.run.optimization;
 
   // Which run a host's own telemetry belongs to (`telemetry.host`).
@@ -2000,8 +2025,7 @@ async function evaluate(
   try {
     Object.assign(env, credentials.env);
     // Private, like the token files: it holds what the client tried to write.
-    if (simulatedWritesDirectory)
-      await fs.mkdir(simulatedWritesDirectory, { mode: 0o700 });
+    if (writeLedger.recording) await fs.mkdir(writesDirectory, { mode: 0o700 });
     const sourceServers = (
       options.mcpConfig
         ? [options.mcpConfig]
@@ -2271,6 +2295,57 @@ async function evaluate(
       }
     }
 
+    // Every server's write mode is known before any client starts, or the
+    // run doesn't start (ADR 0014). A regrade keeps the modes it ran with;
+    // a resume collects, so it checks again.
+    if (!regrade) {
+      const declared = evalConfig.writes ?? {};
+      const checked = variants.map((variant) => {
+        const { resolvedServers } = setupVariant(variant);
+        const established = new Map<string, WriteMode>();
+        resolvedServers.forEach((server, index) => {
+          const label = mcpServerLabel(server, index);
+          const mode = launchedWriteMode(server, label);
+          if (mode) established.set(label, mode);
+        });
+        return {
+          ...resolveWriteModes(
+            variant.name,
+            resolvedServers,
+            established,
+            declared
+          ),
+          servers: resolvedServers,
+        };
+      });
+      await assertWriteModes({
+        variants: checked,
+        allowLiveWrites: options.allowLiveWrites === true,
+        declared,
+        writeCases: canonicalDatasets.flatMap(({ dataset }) =>
+          dataset.cases
+            .filter((evalCase) => evalCase.expected?.writes !== undefined)
+            .map((evalCase) => ({
+              id: evalCase.id,
+              servers: [
+                ...new Set(
+                  (evalCase.expected?.writes?.calls ?? []).flatMap((call) =>
+                    call.server !== undefined ? [call.server] : []
+                  )
+                ),
+              ],
+            }))
+        ),
+        // A server only its client can launch is checked after it prepares,
+        // and one a runner's machines launch is checked there.
+        listTools: async (server) =>
+          onMachines || usesClientResolvedFields(server)
+            ? undefined
+            : ((await listServedTools([server]))[0]?.tools ?? []),
+      });
+      for (const { variant, modes } of checked) writeModes.set(variant, modes);
+    }
+
     if (options.beforeCollect && !replay)
       options.beforeCollect({
         // As run.json records them: the narrowed cases, once per dataset.
@@ -2396,6 +2471,7 @@ async function evaluate(
                     toolVariant,
                     {
                       secrets: runSecrets,
+                      writeRecords: writeLedger,
                       // A transcript the client reports before its batch ends is saved
                       // as the trial it will be graded as.
                       onTranscript: async (request, transcript) => {
@@ -2488,8 +2564,8 @@ async function evaluate(
                                     )
                                 : undefined
                             )
-                          : // Writes the proxy simulated are marked in the transcript.
-                            withSimulatedWriteMarks(
+                          : batchTranscripts
+                            ? // A batch's transcripts have their write records.
                               createEvalCaseExecutor({
                                 servers: resolvedServers,
                                 client: clientConfig.declaration,
@@ -2499,14 +2575,25 @@ async function evaluate(
                                 batchTranscripts,
                                 toolVariant,
                                 secrets: runSecrets,
-                              }),
-                              connectors.simulatedWriteFiles,
-                              // What the executor redacts its transcripts with.
-                              () => [
-                                ...clientSecretValues(env, resolvedServers),
-                                ...runSecrets(),
-                              ]
-                            ),
+                              })
+                            : // Each trial gets the writes its proxies recorded.
+                              withWriteRecords(
+                                createEvalCaseExecutor({
+                                  servers: resolvedServers,
+                                  client: clientConfig.declaration,
+                                  evalConfig: effectiveConfig,
+                                  variant,
+                                  env,
+                                  toolVariant,
+                                  secrets: runSecrets,
+                                }),
+                                writeLedger,
+                                // What the executor redacts its transcripts with.
+                                () => [
+                                  ...clientSecretValues(env, resolvedServers),
+                                  ...runSecrets(),
+                                ]
+                              ),
                         await artifactsRoot(),
                         variant.name
                       ),
@@ -2581,8 +2668,8 @@ async function evaluate(
     throw error;
   } finally {
     await credentials.stop();
-    if (simulatedWritesDirectory)
-      await fs.rm(simulatedWritesDirectory, { recursive: true, force: true });
+    if (writeLedger.recording)
+      await fs.rm(writesDirectory, { recursive: true, force: true });
   }
 
   /**
@@ -2670,7 +2757,7 @@ async function evaluate(
     }
 
   // Graders are done with the artifacts' copies; a run that redacts its
-  // traces doesn't keep them.
+  // transcripts doesn't keep them.
   await removeArtifacts();
 
   const summary = buildSummary(pairwiseUsage);
@@ -2825,6 +2912,9 @@ async function evaluate(
           ...(servedTools.has(variant.name)
             ? { servedTools: servedTools.get(variant.name) }
             : {}),
+          ...(writeModes.has(variant.name)
+            ? { writeModes: writeModes.get(variant.name) }
+            : {}),
         };
       }),
       ...(optimization ? { optimization } : {}),
@@ -2849,7 +2939,7 @@ async function evaluate(
       redactStoredResponses: redact,
       // A regrade or a resume keeps the setting its transcripts were collected
       // with.
-      ...((replay ? replay.run.simulateWrites : simulatedWritesDirectory)
+      ...((replay ? replay.run.simulateWrites : simulateWrites)
         ? { simulateWrites: true as const }
         : {}),
       runner,

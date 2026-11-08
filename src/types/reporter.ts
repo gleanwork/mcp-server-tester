@@ -18,6 +18,9 @@ import type {
   MCPProtocolInfo,
   SkillLoad,
   TrialEnding,
+  WriteEvidence,
+  WriteMode,
+  WriteRecord,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
 import type {
@@ -266,6 +269,8 @@ export interface TrialResult {
   transcriptEvidence?: TranscriptEvidence;
   /** What the client did in this trial: its transcript. */
   transcript?: Transcript;
+  /** The writes the dry-run proxies recorded in this trial (ADR 0014). */
+  writeRecord?: WriteRecord;
   /** Token usage from the client's model calls in this trial */
   clientUsage?: UsageMetrics;
   /** Token usage of this trial's judges, from judges that report it. */
@@ -502,6 +507,11 @@ export interface EvalCaseResult {
    * several trials, each one's transcript is in `trialResults`.
    */
   transcript?: Transcript;
+  /**
+   * The writes the dry-run proxies recorded (client cases with one trial;
+   * ADR 0014). With several trials, each one's is in `trialResults`.
+   */
+  writeRecord?: WriteRecord;
   /** The eval variant that produced this result. */
   variant?: string;
 
@@ -844,6 +854,8 @@ export interface RunReportScore {
   judge?: boolean;
   /** The judge couldn't tell from the transcript: no verdict, though not a pass. */
   unknown?: true;
+  /** In a write case, what the score rests on (ADR 0014). */
+  writeEvidence?: WriteEvidence;
   /** A jury's members' verdicts (ADR 0009). */
   jury?: Array<{
     model?: string;
@@ -861,6 +873,27 @@ export interface RunReportEvent {
   output?: string;
   text?: string;
   isError?: boolean;
+  /** A simulated write: the reply was made up, and nothing was written. */
+  simulatedWrite?: true;
+}
+
+/** A trial's write record as the report shows it (ADR 0014), long fields shortened. */
+export interface RunReportWrites {
+  writes: Array<{
+    server: string;
+    tool: string;
+    mode: 'planned' | 'simulated' | 'server-planned';
+    target?: string;
+    input?: string;
+  }>;
+  unreported: number;
+  unrecorded: Array<{ server: string; tool: string }>;
+  unclassified: Array<{
+    server: string;
+    tool: string;
+    reason: 'dispatch' | 'unmarked';
+  }>;
+  attribution: 'exclusive' | 'matched';
 }
 
 /** One trial of one case by one variant: its transcript and scores. */
@@ -873,6 +906,8 @@ export interface RunReportTrial {
   /** Whether the client recorded a transcript; `events` is empty when it called nothing. */
   hasTranscript?: boolean;
   events: RunReportEvent[];
+  /** What its servers' dry-run proxies recorded, when any did. */
+  writes?: RunReportWrites;
   scores: RunReportScore[];
   tokens?: number;
 }
@@ -972,6 +1007,19 @@ export interface RunReportVariant {
   medianDurationMs?: number;
   /** Share of tool calls per tool, or per server when the run has several. */
   toolsUsed: Array<{ name: string; share: number }>;
+  /**
+   * Its servers' write modes and its write cases (ADR 0014): their pass rate,
+   * the weakest evidence it rests on, and the writes the write records and
+   * transcripts disagree about.
+   */
+  writes?: {
+    modes?: Record<string, WriteMode>;
+    casePassRate?: number;
+    evidence?: WriteEvidence;
+    unreported?: number;
+    unrecorded?: number;
+    unclassified?: number;
+  };
   /** Each pairwise judge's verdict against the baseline. */
   pairwise: Array<{
     judge: string;

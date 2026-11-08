@@ -5,6 +5,7 @@
  */
 import path from 'node:path';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import type { WriteRecord } from '../types/index.js';
 import type { EvalCase, EvalDataset } from './datasetTypes.js';
 import type {
   ClientRunResult,
@@ -284,6 +285,11 @@ async function storedExecution(
           clientMetadata:
             trial.clientMetadata as ClientExecution['clientMetadata'],
         }
+      : {}),
+    // What its proxies recorded when it ran (ADR 0014): a regrade checks the
+    // same writes.
+    ...(trial.writeRecord
+      ? { writeRecord: trial.writeRecord as WriteRecord }
       : {}),
     // The trial took this long when it ran; grading adds its own time.
     preExecutionDurationMs: trial.durationMs,

@@ -22,13 +22,18 @@ import type { TranscriptEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import type { ClientMetadata } from './clientTelemetryTypes.js';
 import type { SettingsSections } from '../plugins/settings.js';
-import type { GraderScore } from '../types/index.js';
+import type {
+  GraderScore,
+  WriteEvidence,
+  WriteRecord,
+} from '../types/index.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import {
   validateText,
   validatePattern,
   validateToolCalls,
   validateToolCallCount,
+  validateWrites,
   validateJudge,
   type JudgeRun,
 } from '../assertions/validators/index.js';
@@ -56,6 +61,8 @@ export interface GradedExecution {
   clientMetadata?: ClientMetadata;
   /** The eval's plugin settings, for its judges (ADR 0008). */
   settings?: SettingsSections;
+  /** The writes MST's dry-run proxies recorded (ADR 0014). */
+  writeRecord?: WriteRecord;
 }
 
 export interface GradingOutcome {
@@ -350,7 +357,7 @@ function toolCallView(
  * can't support them; every other grader runs normally.
  */
 export async function gradeTrial(
-  evalCase: Pick<EvalCase, 'assertions' | 'judges' | 'judgeReps'> &
+  evalCase: Pick<EvalCase, 'assertions' | 'judges' | 'judgeReps' | 'expected'> &
     JudgeCaseSource,
   graded: GradedExecution,
   /**
@@ -420,6 +427,19 @@ export async function gradeTrial(
     }
   }
 
+  const { writeRecord } = graded;
+  const writeCase = isWriteCase(evalCase, writeRecord);
+  // A write case's writes are checked against the record (ADR 0014), and a
+  // record that disagrees with the transcript fails, whatever the case lists.
+  if (writeCase) {
+    const validation = validateWrites(writeRecord, evalCase.expected?.writes);
+    results.writes = {
+      pass: validation.pass,
+      details: validation.message,
+      writeEvidence: validation.evidence,
+    };
+  }
+
   if (evalCase.judges?.length)
     results.judge = await evaluateJudges(
       response,
@@ -428,12 +448,63 @@ export async function gradeTrial(
         evalCase,
         clientResponse: graded.clientResponse,
         evidence: graded.evidence,
+        ...(writeRecord ? { writeRecord } : {}),
         settings: graded.settings,
       },
       judgeVerdicts(previous?.scores.judge)
     );
 
+  // Every score of a write case says what it rests on.
+  if (writeCase)
+    for (const [grader, score] of Object.entries(results) as Array<
+      [keyof typeof results, GraderScore | undefined]
+    >) {
+      if (!score || score.writeEvidence !== undefined) continue;
+      const level = graderWriteEvidence(grader, graded);
+      score.writeEvidence = level;
+      for (const result of score.judgeResults ?? [])
+        result.writeEvidence ??= level;
+    }
+
   return outcome;
+}
+
+/**
+ * A write case (ADR 0014): its case lists writes, or its trial made one
+ * that MST recorded or should have.
+ */
+export function isWriteCase(
+  evalCase: Pick<EvalCase, 'expected'>,
+  record: WriteRecord | undefined
+): boolean {
+  if (evalCase.expected?.writes !== undefined) return true;
+  if (!record) return false;
+  return (
+    record.writes.length > 0 ||
+    record.unreported > 0 ||
+    record.unrecorded.length > 0 ||
+    record.unclassified.length > 0
+  );
+}
+
+/**
+ * What a grader's score of a write rests on: the answer (text checks), the
+ * client's transcript (tool-call assertions), or the write record (judges,
+ * when the trial has one; they read it).
+ */
+function graderWriteEvidence(
+  grader: string,
+  graded: GradedExecution
+): WriteEvidence {
+  if (grader === 'toolsTriggered' || grader === 'toolCallCount')
+    return 'called';
+  if (grader === 'judge')
+    return graded.writeRecord
+      ? 'requested'
+      : clientEvidenceProblem(graded.evidence) === undefined
+        ? 'called'
+        : 'claimed';
+  return 'claimed';
 }
 
 /** The judge results in a trial's `judge` score that gave a verdict, by judge name. */

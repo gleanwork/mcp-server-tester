@@ -65,12 +65,14 @@ export interface EvalCase extends ClientFields {
   /**
    * What the case expects, for graders: `answer` (the reference answer,
    * passed to judges as `reference` unless a judge sets its own),
-   * `criteria` (rubric criteria keyed by name), and any other ground truth.
-   * Judges read it as `case.expected`.
+   * `criteria` (rubric criteria keyed by name), `writes` (the writes the
+   * `writes` grader checks the trial's write record for), and any other
+   * ground truth. Judges read it as `case.expected`.
    */
   expected?: {
     answer?: unknown;
     criteria?: Record<string, string>;
+    writes?: ExpectedWrites;
     [key: string]: unknown;
   };
 
@@ -333,6 +335,46 @@ const CaseJudgeSchema = z
   });
 
 /**
+ * The writes a case expects (ADR 0014): what the `writes` grader checks each
+ * trial's write record for, with `toolsTriggered`'s matching rules. A case
+ * that lists any is a write case.
+ */
+export interface ExpectedWrites {
+  calls: Array<{
+    /** The server's label. Default: any server whose writes MST records. */
+    server?: string;
+    /** The tool, or a dispatcher's target tool. */
+    tool: string;
+    /** Expected arguments (partial match: extra keys are allowed). */
+    arguments?: Record<string, unknown>;
+    /** Whether this write must be in the record (default: true). */
+    required?: boolean;
+  }>;
+  /** 'strict': the writes are in the record in this order. Default 'any'. */
+  order?: 'strict' | 'any';
+  /** If true, the record has no writes outside `calls`. */
+  exclusive?: boolean;
+}
+
+const ExpectedWritesSchema = z
+  .object({
+    calls: z.array(
+      z
+        .object({
+          server: z.string().min(1).optional(),
+          tool: z.string().min(1),
+          arguments: z.record(z.string(), z.unknown()).optional(),
+          required: z.boolean().optional(),
+          ...renamedKeys({ name: 'tool' }),
+        })
+        .strict()
+    ),
+    order: z.enum(['strict', 'any']).optional(),
+    exclusive: z.boolean().optional(),
+  })
+  .strict();
+
+/**
  * Zod schema for EvalAssertions
  */
 export const EvalAssertionsSchema = z
@@ -398,6 +440,15 @@ export const EvalAssertionsSchema = z
       passesJudge:
         'list the case\'s judges in `judges`, beside `assertions`: "judges": [{ "type": "rubric", "rubric": "correctness" }]. See docs/migrations/migration-2.0.md#case-judges-sit-beside-assertions',
     }),
+    // The writes grader reads what a case expects, not an assertion.
+    ...renamedKeys({ writes: 'expected.writes' }),
+    // Reserved for the outcome check (ADR 0014), which ships after 2.0.
+    outcome: z
+      .never({
+        message:
+          "`outcome` is reserved: MST has no outcome check yet (ADR 0014). Check a write case's writes with `expected.writes`.",
+      })
+      .optional(),
   })
   // An unknown key is a mistake: a misspelt assertion would never run.
   .strict();
@@ -436,6 +487,7 @@ export const EvalCaseSchema = z
       .object({
         answer: z.unknown().optional(),
         criteria: z.record(z.string(), z.string()).optional(),
+        writes: ExpectedWritesSchema.optional(),
       })
       .passthrough()
       .optional(),

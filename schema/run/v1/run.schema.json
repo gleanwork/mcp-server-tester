@@ -50,6 +50,21 @@
           },
           "inputTemplate": { "type": "string" },
           "judges": { "type": "array", "items": { "type": "string" } },
+          "writeModes": {
+            "type": "object",
+            "propertyNames": { "type": "string" },
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "planned",
+                "simulated",
+                "server-planned",
+                "live",
+                "unguarded",
+                "read-only"
+              ]
+            }
+          },
           "servedTools": {
             "type": "array",
             "items": {

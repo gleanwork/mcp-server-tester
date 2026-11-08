@@ -14,6 +14,7 @@ import type {
   SkillLoad,
   TrialEnding,
   UsageMetrics,
+  WriteRecord,
 } from '../types/index.js';
 import type { EvalCase } from './datasetTypes.js';
 import { settingsFor } from '../plugins/settings.js';
@@ -47,6 +48,7 @@ import { runApiClient } from './mstClient/run.js';
 import type { LLMToolCall } from './mstClient/types.js';
 import { endingOf, thrownEnding } from './trialEnding.js';
 import { readinessSetup, readyBatch } from './readinessCheck.js';
+import { readOnlyServerLabels } from './writeModes.js';
 import { batchName } from './prepareClientBatch.js';
 import { collectClientBatch } from './desktopBatch.js';
 
@@ -102,6 +104,8 @@ export interface ClientExecution extends ExecutionBase {
   transcript?: Transcript;
   /** Declared transcript evidence. Custom executors may omit it. */
   evidence?: TranscriptEvidence;
+  /** The writes MST's dry-run proxies recorded (ADR 0014). MST sets it. */
+  writeRecord?: WriteRecord;
   usage?: UsageMetrics;
   telemetry?: Record<string, unknown>;
   diagnostics?: ClientDiagnostics;
@@ -318,6 +322,7 @@ function clientExecutor(
       ready = readyBatch(definition, servers, startProxy, {
         ...(env ? { env } : {}),
         batch: batchName(client, { variant }),
+        readOnly: readOnlyServerLabels(servers, evalConfig.writes),
       }).then((result) => result.notReady);
       readiness.set(setup, ready);
     }

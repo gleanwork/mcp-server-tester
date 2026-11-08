@@ -25,6 +25,7 @@ import {
 } from '../Comparison/format';
 import { SetupDiff } from './SetupDiff';
 import { JudgeCalibration } from './JudgeCalibration';
+import { WriteSummary } from './WriteSummary';
 import { ComparisonView } from '../Comparison/ComparisonView';
 import { TrialLookupContext } from './TrialDetail';
 
@@ -963,6 +964,8 @@ function EvalRunReport({ data }: { data: MCPRunReportData }) {
         />
 
         <JudgeCalibration variants={data.variants} />
+
+        <WriteSummary variants={data.variants} />
 
         {!single && baseline && (
           <SetupDiff

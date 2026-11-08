@@ -36,7 +36,12 @@ import {
   type ToolSurface,
 } from './toolSurface.js';
 import type { Tool } from '@modelcontextprotocol/client';
-import { gradeTrial, gradingErrorOf, type GradingOutcome } from './grading.js';
+import {
+  gradeTrial,
+  gradingErrorOf,
+  isWriteCase,
+  type GradingOutcome,
+} from './grading.js';
 import type {
   MCPProtocolInfo,
   SkillLoad,
@@ -798,6 +803,9 @@ export function executedTrialResult(
     clientTelemetry: clientExecution?.telemetry,
     clientMetadata,
     ...(artifacts ? { artifacts } : {}),
+    ...(clientExecution?.writeRecord
+      ? { writeRecord: clientExecution.writeRecord }
+      : {}),
   };
 }
 
@@ -834,7 +842,9 @@ async function runTrial(
   if (
     options.grade !== false &&
     !executed.error &&
-    (evalCase.assertions || evalCase.judges?.length)
+    (evalCase.assertions ||
+      evalCase.judges?.length ||
+      isWriteCase(evalCase, executed.writeRecord))
   ) {
     // Without an error, the execution completed: its response is the client's,
     // and judges get its artifacts' copy (results don't keep the path).
@@ -851,6 +861,9 @@ async function runTrial(
           evidence: executed.transcriptEvidence,
           clientMetadata: executed.clientMetadata,
           ...(options.settings ? { settings: options.settings } : {}),
+          ...(executed.writeRecord
+            ? { writeRecord: executed.writeRecord }
+            : {}),
         },
         previous
       );
@@ -952,6 +965,7 @@ export async function runEvalCase(
         toolCallTranscript: result.toolCallTranscript,
         transcriptEvidence: result.transcriptEvidence,
         ...(result.transcript ? { transcript: result.transcript } : {}),
+        ...(result.writeRecord ? { writeRecord: result.writeRecord } : {}),
         ...(result.clientDiagnostics
           ? { clientDiagnostics: result.clientDiagnostics }
           : {}),
@@ -998,6 +1012,7 @@ export async function runEvalCase(
   // A case with trials has no grading error of its own: each trial says.
   const {
     transcript: _lastTranscript,
+    writeRecord: _lastWriteRecord,
     ending: _lastEnding,
     gradingError: lastGradingError,
     ...lastWithoutTranscript

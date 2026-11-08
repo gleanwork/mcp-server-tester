@@ -14,11 +14,9 @@ import type { MCPConfig } from '../config/mcpConfig.js';
 import { isClientUnavailable } from './clientUnavailable.js';
 import { readyBatch } from './readinessCheck.js';
 import { collectClientBatch } from './desktopBatch.js';
-import {
-  clientSecretValues,
-  redactClientError,
-  redactedClientRun,
-} from './clientSecrets.js';
+import { clientSecretValues, redactClientError } from './clientSecrets.js';
+import { BatchWriteRecords, WriteRecordLedger } from './writeRecord.js';
+import { readOnlyServerLabels } from './writeModes.js';
 import {
   settleProxiedTranscript,
   usesToolSurfaceProxy,
@@ -178,6 +176,11 @@ export interface ClientBatchOptions {
     request: ClientBatchRequest,
     transcript: ClientRunResult
   ) => Promise<void>;
+  /**
+   * The run's write record files: each transcript gets the writes its trial's
+   * proxies recorded (ADR 0014).
+   */
+  writeRecords?: WriteRecordLedger;
 }
 
 /**
@@ -219,8 +222,17 @@ export async function prepareClientBatch(
     ...clientSecretValues(context.env ?? {}, servers),
     ...(options.secrets?.() ?? []),
   ];
-  const received = (transcript: ClientRunResult): ClientRunResult =>
-    redactedClientRun(transcript, secrets());
+  // Each transcript gets its trial's write record. The batch runs one trial at a
+  // time, so each window closes when the next trial starts.
+  const records = new BatchWriteRecords(
+    options.writeRecords ?? new WriteRecordLedger([]),
+    secrets
+  );
+  const received = (
+    index: number | undefined,
+    transcript: ClientRunResult
+  ): Promise<ClientRunResult> =>
+    records.attach(index === undefined ? 'none' : String(index), transcript);
   // MST's readiness check, before the batch's first trial and before the
   // proxy starts. Proxied clients connect to the variant's servers through
   // the proxy.
@@ -233,11 +245,14 @@ export async function prepareClientBatch(
     {
       ...(context.env ? { env: context.env } : {}),
       batch: batchName(config.type, context),
+      readOnly: readOnlyServerLabels(servers, context.evalConfig.writes),
     }
   );
   if (ready.notReady) {
     for (const request of declared)
-      queues.get(request.caseId)!.push(received(ready.notReady()));
+      queues
+        .get(request.caseId)!
+        .push(await received(undefined, ready.notReady()));
     return queues;
   }
   const proxied = ready.proxy
@@ -250,8 +265,8 @@ export async function prepareClientBatch(
     ? async (index: number, reported: ClientRunResult): Promise<void> => {
         const request = requests[index];
         if (!request) return;
-        const transcript = received(reported);
         try {
+          const transcript = await received(index, reported);
           await onTranscript(
             request,
             proxied ? proxied.settle(index, transcript, false) : transcript
@@ -267,9 +282,14 @@ export async function prepareClientBatch(
     ...context,
     settings: settingsFor(context.evalConfig.settings, config.type),
   };
-  const batchContext = proxied
-    ? withoutToolVariant(withSettings)
-    : withSettings;
+  const contextAcquire = context.acquire;
+  const batchContext: ClientRunContext = {
+    ...(proxied ? withoutToolVariant(withSettings) : withSettings),
+    acquire: async (index: number): Promise<void> => {
+      await contextAcquire?.(index);
+      await records.begin(String(index));
+    },
+  };
   let transcripts: ClientRunResult[];
   try {
     transcripts = await collectClientBatch(
@@ -295,11 +315,11 @@ export async function prepareClientBatch(
     throw new Error(
       'Batch client returned an incomplete transcript set; refusing to resubmit.'
     );
-  requests.forEach((request, index) => {
-    const transcript = received(transcripts[index]!);
+  for (const [index, request] of requests.entries()) {
+    const transcript = await received(index, transcripts[index]!);
     queues
       .get(request.caseId)!
       .push(proxied ? proxied.settle(index, transcript, true) : transcript);
-  });
+  }
   return queues;
 }

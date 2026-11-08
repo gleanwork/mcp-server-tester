@@ -36,7 +36,8 @@ import {
 } from '../prepareClientBatch.js';
 import { readinessRetryDelaysMs, readyBatch } from '../readinessCheck.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
-import { markResultSimulatedWrites } from '../simulatedWriteMarks.js';
+import { BatchWriteRecords, WriteRecordLedger } from '../writeRecord.js';
+import { readOnlyServerLabels } from '../writeModes.js';
 import { ALL_ARTIFACTS } from '../allArtifacts.js';
 import { afterCopyFailed, copyArtifacts } from '../trialArtifacts.js';
 import {
@@ -220,10 +221,10 @@ export async function collectShard(
         if (isConnectorServer(server))
           declarations.set(server.label ?? server.connector, server);
   let connectors: WorkerConnectors | undefined;
-  // With `simulateWrites`, where this machine's dry-run proxies record writes.
-  let simulatedWritesDir: string | undefined;
-  // Simulated writes already matched to a trial, across trials.
-  const usedWrites = new Set<string>();
+  // Where this machine's dry-run proxies record writes (ADR 0014).
+  let writesDir: string | undefined;
+  // Each trial's writes, from those files. Created once the connectors are.
+  let writeRecords: BatchWriteRecords | undefined;
 
   // Values the worker never lets out in an error: tokens and secrets.
   const secrets = new Set<string>();
@@ -291,15 +292,10 @@ export async function collectShard(
     transcript: ClientRunResult,
     previous?: { transcript: ClientRunResult; stored: ClientRunResult }
   ): Promise<ClientRunResult> {
-    // The writes this machine's proxies simulated, marked in the redacted
-    // transcript.
-    const redacted: ClientRunResult = connectors?.simulatedWriteFiles.length
-      ? await markResultSimulatedWrites(
-          transcript,
-          connectors.simulatedWriteFiles,
-          usedWrites,
-          [...secrets]
-        )
+    // Redacted, with the writes this machine's proxies recorded for the
+    // trial: the coordinator can't read these files.
+    const redacted: ClientRunResult = writeRecords
+      ? await writeRecords.attach(`${batch}:${index}`, transcript)
       : redactedClientRun(transcript, [...secrets]);
     // The client's artifacts (a Cowork session folder) are on this machine:
     // copy them beside the result, which the coordinator copies back, and
@@ -371,17 +367,19 @@ export async function collectShard(
       await loadWorkerPlugins(bundle, options.bundleDir, env.MST_PLUGIN_DIR)
     );
     if (declarations.size) {
-      if (bundle.evalConfig.simulateWrites === true)
-        simulatedWritesDir = await fs.mkdtemp(
-          path.join(os.tmpdir(), 'mst-simulated-writes-')
-        );
+      writesDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-writes-'));
       connectors = await expandWorkerConnectors([...declarations.values()], {
         tokenDirectory: path.join(tokensDir, 'connectors'),
         runId: bundle.runId,
-        ...(simulatedWritesDir
-          ? { simulatedWritesDirectory: simulatedWritesDir }
-          : {}),
+        writes: {
+          directory: writesDir,
+          simulate: bundle.evalConfig.simulateWrites === true,
+        },
       });
+      writeRecords = new BatchWriteRecords(
+        new WriteRecordLedger(connectors.writeRecordFiles),
+        () => [...secrets]
+      );
     }
     await receiveTokens('start');
     const runtimeEnv = {
@@ -469,6 +467,7 @@ export async function collectShard(
         {
           env: runtimeEnv,
           batch: batchName(batch.requests[0]!.config.type, batch),
+          readOnly: readOnlyServerLabels(servers, bundle.evalConfig.writes),
         }
       );
       if (ready.notReady) {
@@ -500,7 +499,9 @@ export async function collectShard(
           {
             ...context,
             acquire: async (index) => {
-              if (requests[index]) await acquire(keyOf(index));
+              if (!requests[index]) return;
+              await acquire(keyOf(index));
+              await writeRecords?.begin(`${batchIndex}:${index}`);
             },
             reportResult: async (index, result) => {
               if (reported.has(index) || !requests[index]) return;
@@ -541,8 +542,7 @@ export async function collectShard(
   } finally {
     clearInterval(heartbeat);
     clearTimeout(renewal);
-    if (simulatedWritesDir)
-      await fs.rm(simulatedWritesDir, { recursive: true, force: true });
+    if (writesDir) await fs.rm(writesDir, { recursive: true, force: true });
   }
   let cleanup: 'ok' | 'failed' = 'ok';
   try {

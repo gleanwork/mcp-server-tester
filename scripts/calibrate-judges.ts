@@ -193,6 +193,10 @@ function evalConfig(
         args: ['-y', FILESYSTEM_SERVER, path.join(CALIBRATION, 'files')],
       },
     },
+    // Both list tools that aren't read-only, and no proxy stops their writes
+    // (ADR 0014). The scripted client makes only the calls each case scripts,
+    // none of which writes.
+    writes: { mock: 'unguarded', files: 'unguarded' },
     judges,
   };
 }

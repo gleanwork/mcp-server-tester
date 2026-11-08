@@ -101,6 +101,13 @@ export interface ReadinessCheckOptions {
   sleep?: (ms: number) => Promise<void>;
   /** Bounds each probe. */
   timeoutMs?: number;
+  /**
+   * The labels of servers with no write mode (ADR 0014,
+   * `readOnlyServerLabels`). A batch doesn't run when one of them lists a
+   * tool that isn't read-only: MST couldn't see its writes. The load check
+   * stops the run for this when it can list the server first.
+   */
+  readOnly?: ReadonlySet<string>;
 }
 
 /** Whether a batch's servers are ready, and why not. */
@@ -154,6 +161,25 @@ export async function checkServersReady(
     });
   }
   const notReady = results.filter((result) => !isMcpServerReady(result));
+  const unguarded = results.filter(
+    (result) =>
+      isMcpServerReady(result) &&
+      options.readOnly?.has(result.label) === true &&
+      (result.writeTools?.length ?? 0) > 0
+  );
+  if (notReady.length === 0 && unguarded.length > 0)
+    return {
+      ready: false,
+      servers: results,
+      reason: `MST can't see these servers' writes, so no trial was sent: ${unguarded
+        .map(
+          (result) =>
+            `"${result.label}" lists tools that aren't read-only (${result.writeTools!.join(', ')})`
+        )
+        .join(
+          '; '
+        )}. Put each behind a connector's dry-run proxy, or accept its writes in the eval config with \`"writes": { "<label>": "unguarded" }\` (ADR 0014).`,
+    };
   if (notReady.length === 0) return { ready: true, servers: results };
   return {
     ready: false,

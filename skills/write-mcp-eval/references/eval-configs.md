@@ -28,6 +28,8 @@ An eval config is the JSON file that defines one eval: its datasets, the servers
 | `extends`                                                         | Shared configs from those plugins: `["acme/config/recommended"]`                                                           |
 | `pricing`                                                         | USD per million tokens by model, to estimate cost for clients that report only tokens                                      |
 | `redactStoredResponses`                                           | Set `false` to keep answers and tool outputs in stored results (removed by default)                                        |
+| `writes`                                                          | Write modes for servers no dry-run proxy guards, by label: `unguarded` or `live` (below)                                   |
+| `simulateWrites`                                                  | Connector proxies answer writes with a success reply instead of a planned-write result                                     |
 
 ## Datasets
 
@@ -66,6 +68,38 @@ Define each server once, keyed by its label. A variant lists the labels it uses.
 - `auth.accessTokenEnv` names the environment variable that holds a bearer token. Supply it from the environment or `--secrets-file`; never write a token into the file.
 - A plugin connector names a vendor server instead of a transport: `"slack": { "connector": "acme/connector/slack" }`. Sign in once with `npx mst auth --config <path>`.
 - Point servers that can write data at test tenants or test accounts.
+
+### Writes
+
+Every server needs a write mode, or the run doesn't start. A server behind a connector's dry-run proxy has one. Any other server must list only read-only tools (annotated `readOnlyHint: true`, not `destructiveHint: true`); MST lists its tools when the run loads and names the ones that aren't. For a server that does write, either put it behind a connector's dry-run proxy, or accept its writes by label:
+
+```json
+"writes": { "local": "unguarded" }
+```
+
+`unguarded` means MST can't see the server's writes. `live` means writes reach the service, and also needs `mst run --allow-live-writes`.
+
+A case that asks for a write lists what it expects in `expected.writes`; the `writes` grader checks the proxy's write record for it, never the transcript:
+
+```json
+{
+  "id": "post-summary",
+  "input": "Post the summary in #team",
+  "expected": {
+    "writes": {
+      "calls": [
+        {
+          "server": "slack",
+          "tool": "slack_send_message",
+          "arguments": { "channel_id": "C123" }
+        }
+      ]
+    }
+  }
+}
+```
+
+It needs a server behind a dry-run proxy. See [Writes](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/evaluation-framework.md#writes).
 
 ## Clients
 

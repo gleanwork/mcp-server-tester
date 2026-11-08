@@ -50,6 +50,8 @@ export interface RunOptions {
   runnerOption?: string[];
   /** `--no-grade`: collect the trials without grading them. */
   grade?: boolean;
+  /** `--allow-live-writes`: let writes reach servers declared `live` (ADR 0014). */
+  allowLiveWrites?: boolean;
   /** `--resume <run>`: collect a run's missing trials and grade it again. */
   resume?: string;
   /** `--results <store>`: the result store that keeps the run. */
@@ -179,7 +181,10 @@ export async function run(options: RunOptions): Promise<void> {
       ...(options.store ? { store: options.store } : {}),
       ...(options.secretsFile ? { secretsFile: options.secretsFile } : {}),
       ...(options.plugins ? { plugins: options.plugins } : {}),
-      runArgs: options.resume === undefined ? selectionArgs(options) : [],
+      runArgs: [
+        ...(options.resume === undefined ? selectionArgs(options) : []),
+        ...(options.allowLiveWrites ? ['--allow-live-writes'] : []),
+      ],
       noGrade: options.grade === false,
       gradeRunner: options.gradeRunner === true,
     });
@@ -195,6 +200,7 @@ export async function run(options: RunOptions): Promise<void> {
     dryRun: options.dryRun,
     ...(options.report === false ? { report: false } : {}),
     ...(options.grade === false || options.gradeRunner ? { grade: false } : {}),
+    ...(options.allowLiveWrites ? { allowLiveWrites: true } : {}),
     ...(options.variant?.length ? { variant: options.variant } : {}),
     ...(options.case?.length ? { cases: options.case } : {}),
     ...(options.filterTag?.length ? { filterTags: options.filterTag } : {}),
@@ -248,6 +254,7 @@ export async function run(options: RunOptions): Promise<void> {
               : {}),
             ...(evalOptions.store ? { store: evalOptions.store } : {}),
             ...(evalOptions.results ? { results: evalOptions.results } : {}),
+            ...(evalOptions.allowLiveWrites ? { allowLiveWrites: true } : {}),
             ...(evalOptions.loadedDatasets
               ? { loadedDatasets: evalOptions.loadedDatasets }
               : {}),

@@ -7,6 +7,7 @@ import {
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { formatMCPConnectionFailure } from '../mcp/connectionDiagnostics.js';
 import { mcpServerLabel } from '../config/mcpConfig.js';
+import { isReadOnlyTool } from '../proxy/plannedWrite.js';
 
 /** Sanitized direct-connection readiness. Never raw errors, bodies, or headers. */
 export interface McpServerReadiness {
@@ -19,6 +20,11 @@ export interface McpServerReadiness {
   toolCount?: number;
   /** The server's declared `minTools`, when it listed fewer. */
   minTools?: number;
+  /**
+   * The tools it lists that aren't read-only, by the dry-run proxy's rule
+   * (ADR 0014). Absent when there are none.
+   */
+  writeTools?: string[];
   elapsedMs: number;
   error?: string;
 }
@@ -29,6 +35,9 @@ export interface McpServerReadiness {
  * close (`probeLimitMs`).
  */
 export const MCP_READINESS_TIMEOUT_MS = 30_000;
+
+/** The most pages of tools a probe reads, so a cursor that never ends stops. */
+const MAX_TOOL_PAGES = 100;
 
 /** One server's whole probe limit, and how long its connect may take. */
 function probeLimitMs(
@@ -96,6 +105,17 @@ async function probe(
     );
     deadline.opened(client);
     const tools = await client.listTools();
+    // Every page, for the write check: a write tool on a later page counts.
+    const listed = [...tools.tools];
+    let cursor = tools.nextCursor;
+    for (let page = 1; cursor !== undefined && page < MAX_TOOL_PAGES; page++) {
+      const next = await client.listTools({ cursor });
+      listed.push(...next.tools);
+      cursor = next.nextCursor;
+    }
+    const writeTools = listed
+      .filter((tool) => !isReadOnlyTool(tool))
+      .map((tool) => tool.name);
     // A degraded server (e.g. static tools only, after an auth failure)
     // can still list tools. Fail closed below the declared minimum.
     const minTools =
@@ -113,6 +133,7 @@ async function probe(
       label,
       status: 'connected',
       toolCount: tools.tools.length,
+      ...(writeTools.length > 0 ? { writeTools } : {}),
       elapsedMs: Date.now() - started,
     };
   } catch (error) {

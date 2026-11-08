@@ -18,9 +18,11 @@ const dirs: string[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // One tool, so MST's readiness check passes.
+  // One read-only tool, so MST's readiness check passes.
   vi.mocked(openMCPClient).mockResolvedValue({
-    listTools: vi.fn(async () => ({ tools: [{ name: 'weather' }] })),
+    listTools: vi.fn(async () => ({
+      tools: [{ name: 'weather', annotations: { readOnlyHint: true } }],
+    })),
   } as unknown as Awaited<ReturnType<typeof openMCPClient>>);
   vi.mocked(runApiClient).mockResolvedValue({
     finalText: 'OK',
