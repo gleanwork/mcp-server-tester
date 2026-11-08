@@ -1,6 +1,6 @@
 ---
 name: mcp-tester-guide
-description: Reference for @gleanwork/mcp-server-tester (MST) 2.0, the Playwright-based testing and evaluation framework for MCP servers, with the `mst` CLI. Covers the vocabulary (test, eval, case, client, variant, trial, assertion, judge), entry points, server config and auth, the mcp fixture and matchers, eval datasets and eval configs, clients, judges, plugins, the reporter, CLI commands, what 1.x names became, and common mistakes. Use when working on MCP server tests or evals, or reading or upgrading code that uses MST.
+description: Reference for @gleanwork/mcp-server-tester (MST) 2.0, the Playwright-based testing and evaluation framework for MCP servers, with the `mst` CLI. Covers which skill to use for a task, the vocabulary (test, eval, case, client, variant, trial, assertion, judge), entry points, server config and auth, clients, judges, plugin names, CLI commands, what 1.x names became, and common mistakes. Use when working on MCP server tests or evals, or reading or upgrading code that uses MST.
 metadata:
   author: gleanwork
   version: '2.0.0'
@@ -8,11 +8,20 @@ metadata:
 
 # MST reference
 
-MST (`@gleanwork/mcp-server-tester`, CLI `mst`) tests and evaluates MCP servers. Requires Node.js 22 or later. 2.0 is in beta: `npm install --save-dev @gleanwork/mcp-server-tester@beta @playwright/test`.
+MST (`@gleanwork/mcp-server-tester`, CLI `mst`) tests and evaluates MCP servers. Requires Node.js 22 or later. 2.0 is a release candidate, published under the `rc` tag: `npm install --save-dev @gleanwork/mcp-server-tester@rc @playwright/test`. The `beta` tag is older and lacks `mst label` and `mst judges check`.
 
-- **Tests** check a server directly, with no client: a Playwright test calls a tool through the `mcp` fixture and checks the result with MST's matchers. Deterministic; run once. Skill: `write-mcp-test`.
-- **Evals** have a client act on cases and grade what it did. A client (such as Claude Code) runs each case's input with a model; assertions and judges score each trial. Non-deterministic; run several trials. Skill: `write-mcp-eval`.
-- **Tool optimization** runs tool-metadata variants against a baseline and recommends applying one or none. Skill: `optimize-mcp-tool-metadata`.
+- **Tests** check a server directly, with no client: a Playwright test calls a tool through the `mcp` fixture and checks the result with MST's matchers. Deterministic; run once.
+- **Evals** have a client act on cases and grade what it did. A client (such as Claude Code) runs each case's input with a model; assertions and judges score each trial. Non-deterministic; run several trials.
+
+## Which skill
+
+| Task                                                                    | Skill                        |
+| ----------------------------------------------------------------------- | ---------------------------- |
+| Write Playwright tests: tool calls, matchers, snapshots, auth, protocol | `write-mcp-test`             |
+| Write eval datasets, cases, assertions, judges and eval configs         | `write-mcp-eval`             |
+| Run an eval, read its results, resume or regrade a run, Docker, CI      | `run-mcp-eval`               |
+| Decide whether a judge can be trusted: label trials, `mst judges check` | `calibrate-mcp-judge`        |
+| Improve tool names and descriptions, measured against a baseline        | `optimize-mcp-tool-metadata` |
 
 ## Vocabulary
 
@@ -35,8 +44,9 @@ MST uses these terms in its API, config keys, CLI and reports. Use them, and not
 | trace          | What a client did in a trial: tool calls, skill loads, usage, final answer                                 | transcript         |
 | grader         | An assertion (code) or a judge (model)                                                                     | scorer             |
 | assertion      | A deterministic check of a trial's trace or answer (`toolsTriggered`, `containsText`, ...)                 | expectation        |
-| judge          | An LLM that scores a trial against expected or a rubric                                                    | evaluator          |
+| judge          | An LLM that scores a trial against expected, a question or a rubric                                        | evaluator          |
 | score          | A grader's result for one trial: 0 to 1, pass, and why                                                     | verdict            |
+| label          | A person's pass or fail for a judge's question on one trial, which a judge is measured against             | annotation         |
 | pass threshold | The share of a case's trials that must pass (`passThreshold`, default 1)                                   | accuracy threshold |
 | metric         | An aggregate over a run's trials or cases: pass rate, tool count, tokens, cost                             |                    |
 | run            | One execution of an eval: every variant on every case                                                      | experiment         |
@@ -51,7 +61,7 @@ MST uses these terms in its API, config keys, CLI and reports. Use them, and not
 | `@gleanwork/mcp-server-tester`                       | Config, the MCP client, validators, datasets, `runEvalDataset`, `runEvalCase`, judges, conformance, Agent Skills, types               |
 | `@gleanwork/mcp-server-tester/evals`                 | `runEval`, `runEvalBatch`, eval configs, `runToolOptimization`, `compareEvalRuns`, baselines, result stores, metrics, pairwise judges |
 | `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | The `mcpAuthProvider` fixture, for building your own authenticated client                                                             |
-| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The Playwright reporter                                                                                                               |
+| `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The Playwright reporter: eval results as a run that `mst open` opens                                                                  |
 | `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                         |
 | `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop client types and Cowork helpers; may change between minor versions                                                            |
 
@@ -59,148 +69,16 @@ The subpaths are ESM only. MCP SDK types come from `@modelcontextprotocol/client
 
 ## Server config
 
-A Playwright project's `use.mcpConfig`, an eval config's `servers` entries, and `createMCPClientForConfig(config)` take the same shape:
-
-```typescript
-import type { MCPConfig } from '@gleanwork/mcp-server-tester';
-
-// stdio: MST starts the server
-const local: MCPConfig = {
-  transport: 'stdio',
-  command: 'node',
-  args: ['./dist/server.js'],
-  env: { LOG_LEVEL: 'warn' },
-  cwd: '.',
-};
-
-// HTTP: a running server
-const staging: MCPConfig = {
-  transport: 'http',
-  serverUrl: 'https://mcp.example.com/mcp',
-  headers: { 'X-Team': 'docs' },
-};
-```
+A Playwright project's `use.mcpConfig`, an eval config's `servers` entries, and `createMCPClientForConfig(config)` take the same shape: `{ transport: 'stdio', command, args?, env?, cwd? }`, where MST starts the server, or `{ transport: 'http', serverUrl, headers? }` for a running one.
 
 `auth` (HTTP only), in the order MST uses them:
 
-1. `oauth: { serverUrl, scopes, authStatePath, clientId?, clientSecret?, redirectUri? }`: the state file a Playwright global setup wrote with `performOAuthSetup()`.
+1. `oauth: { serverUrl, scopes, authStatePath, ... }`: the state file a Playwright global setup wrote with `performOAuthSetup()`.
 2. `accessToken: process.env.MCP_ACCESS_TOKEN`, or `accessTokenEnv: 'MCP_ACCESS_TOKEN'` (the name of the variable; use this in eval configs).
 3. `clientCredentials: { tokenEndpoint, scopes? }`, with `MCP_CLIENT_ID` and `MCP_CLIENT_SECRET`.
 4. In the `mcp` fixture only: a login stored by `mst login <server-url>`, refreshed as it nears expiry.
 
-`protocol`: `'legacy'` (default, the 1.x handshake), `'auto'`, or a revision such as `'2026-07-28'`. `protocolMatrix(project, ['legacy', '2026-07-28'])` expands one Playwright project per protocol.
-
-## The `mcp` fixture
-
-| Member                              | Does                                                                                  |
-| ----------------------------------- | ------------------------------------------------------------------------------------- |
-| `callTool(name, args)`              | Calls a tool; JSON-RPC protocol errors come back as error results (`isError: true`)   |
-| `listTools()`                       | Every tool the server lists                                                           |
-| `request(method, params, schema)`   | Any MCP request, its result parsed with a Zod schema                                  |
-| `listResources()`, `readResource()` | Resources                                                                             |
-| `skills`                            | Agent Skills over MCP: `supported()`, `settings()`, `list()`, `get(uri)`, `read(uri)` |
-| `discover()`                        | `server/discover` on 2026-07-28 connections; `null` on legacy                         |
-| `protocol`                          | Requested and negotiated protocol, and era                                            |
-| `getServerInfo()`, `client`         | Server name and version; the raw SDK client                                           |
-
-Fixture options (`test.use({...})` or a project's `use`): `mcpConfig`, `mcpProtocol` (overrides `mcpConfig.protocol`), `mcpPlugins` (plugin objects whose judges matchers use).
-
-## Matchers
-
-Use them on a `callTool` result in a Playwright test.
-
-| Matcher                                            | Passes when                                                          |
-| -------------------------------------------------- | -------------------------------------------------------------------- |
-| `toMatchToolResponse(expected)`                    | Deep-equals `expected`                                               |
-| `toContainToolText(text, { caseSensitive? })`      | Text contains every substring                                        |
-| `toMatchToolPattern(patterns)`                     | Text matches every pattern                                           |
-| `toMatchToolSchema(zodSchema)`                     | Structured content (or JSON text) validates                          |
-| `toMatchToolSnapshot(name, sanitizers?)`           | Matches the saved snapshot. Async                                    |
-| `toBeToolError(expected?)`                         | Is an error; a string or list checks the message                     |
-| `toHaveToolResponseSize({ minBytes?, maxBytes? })` | Text size in UTF-8 bytes is within bounds                            |
-| `toSatisfyToolPredicate(fn, description?)`         | `fn(response, text)` returns `true` or `{ pass: true }`. Async       |
-| `toPassToolJudge(rubric, options?)`                | A judge's mean score reaches `passingThreshold` (default 0.7). Async |
-| `toHaveToolCalls(assertion)`                       | A client response has the expected calls                             |
-| `toHaveToolCallCount({ min?, max?, exact? })`      | A client trace has that many calls                                   |
-
-Sanitizers: `'uuid'`, `'iso-date'`, `'timestamp'`, `'jwt'`, `'objectId'`, `{ pattern, replacement }`, `{ remove: ['field', 'nested.field'] }`. Update snapshots with `npx playwright test --update-snapshots`.
-
-For use outside Playwright, each matcher has a function that returns `{ pass, message }`: `validateText`, `validatePattern`, `validateSchema`, `validateError`, `validateSize`, `validateResponse`, `validatePredicate`, `validateJudge`, `validateSnapshot`, `validateToolCalls`, `validateToolCallCount`.
-
-## Eval datasets
-
-```json
-{
-  "name": "search-evals",
-  "cases": [
-    {
-      "id": "find-planning-doc",
-      "input": "Find the Q3 planning document",
-      "expected": { "answer": "The Q3 plan is in Planning/Q3.md." },
-      "tags": ["regression"],
-      "trials": 10,
-      "passThreshold": 0.8,
-      "assertions": {
-        "toolsTriggered": { "calls": [{ "name": "search", "required": true }] },
-        "toolCallCount": { "max": 4 }
-      },
-      "judges": [
-        { "type": "rubric", "rubric": "correctness", "threshold": 0.7 }
-      ]
-    }
-  ]
-}
-```
-
-Case keys: `id`, `input` (both required), `description`, `expected`, `assertions`, `judges`, `tags`, `trials`, `passThreshold`, `judgeReps`, `client`, `model`, `clientOptions`, `metadata`. Assertions: `toolsTriggered` (`calls` with `name`, `required`, `arguments` with `$pattern`/`$flags`, `server`, `kind`, `source`; `order`; `exclusive`), `toolCallCount`, `containsText`, `matchesPattern` (on the final answer). Judges go in `judges`, beside `assertions`. Unknown keys fail validation. Load with `loadEvalDataset(path)` or `loadEvalDatasetFromObject(object)`; check with `validateEvalDataset(object)`.
-
-Run in a Playwright test, on the `api` client and the test's MCP connection:
-
-```typescript
-import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp';
-import { loadEvalDataset, runEvalDataset } from '@gleanwork/mcp-server-tester';
-
-test('search evals', async ({ mcp }, testInfo) => {
-  const dataset = await loadEvalDataset('./evals/search-evals.json');
-  const result = await runEvalDataset(
-    { dataset, client: 'api', model: 'claude-haiku-4-5', defaultTrials: 10 },
-    { mcp, testInfo }
-  );
-  expect(result.failed).toBe(0);
-});
-```
-
-One case: `runEvalCase(evalCase, { mcp, testInfo }, { client: 'api', model })`. With one trial, its result's `response` is the client trace that `toHaveToolCalls` reads.
-
-## Eval configs
-
-```json
-{
-  "name": "search-evals",
-  "datasets": ["./search-evals.json"],
-  "servers": {
-    "docs": {
-      "transport": "stdio",
-      "command": "node",
-      "args": ["./dist/server.js"]
-    }
-  },
-  "client": "claude-code",
-  "model": "claude-sonnet-4-6",
-  "trials": 10,
-  "variants": [
-    { "name": "current" },
-    {
-      "name": "explicit-search",
-      "tools": {
-        "search": { "description": "Search internal documents first." }
-      }
-    }
-  ]
-}
-```
-
-`servers` is a map keyed by label; a variant lists labels (none means all). Without `client`, an eval config runs on `claude-code`. Run with `npx mst run --config eval.json` (`--dry-run` to validate), or `runEval({ configPath })` from `./evals`. Every key: the `write-mcp-eval` skill's `references/eval-configs.md`.
+`protocol`: `'legacy'` (default, the 1.x handshake), `'auto'`, or a revision such as `'2026-07-28'`. Examples: `write-mcp-test`.
 
 ## Clients
 
@@ -214,77 +92,47 @@ One case: `runEvalCase(evalCase, { mcp, testInfo }, { client: 'api', model })`. 
 | `codex-app`                 | The Codex surface of the ChatGPT desktop app                         | `mst run`                             |
 | `<namespace>/client/<name>` | A plugin's client                                                    | `mst run`                             |
 
-The `api` client infers the API from the model id (`claude-*` Anthropic, `claude-*@date` Vertex, `gpt-*` OpenAI, `gemini-*` Google). It needs `ai` and the provider package (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`, `@ai-sdk/google-vertex`, `@ai-sdk/mistral`, `@ai-sdk/azure`, `@ai-sdk/deepseek`, `@ai-sdk/xai`, `@openrouter/ai-sdk-provider`), installed as optional dependencies, and the API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, ...). Its `clientOptions`: `provider`, `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout`, `apiKeyEnvVar`, `systemPrompt`, `skills` (`off`, `catalog`, `preload`), `env`. Gateways: set `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL` with a gateway credential ([LLM gateways](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/llm-gateways.md)).
+The `api` client needs `ai`, its provider's package (such as `@ai-sdk/anthropic`) and the API key. Options and the other clients' needs: `write-mcp-eval`.
 
 ## Judges
 
-- Built-in rubrics: `correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`, or `{ "text": "..." }`.
-- Providers: `anthropic` (default; needs `@anthropic-ai/sdk`), `vertex-anthropic`, `anthropic-agent-sdk` (needs `@anthropic-ai/claude-agent-sdk`), `openai`, `google`.
-- In a case: `judges: [{ "type": "rubric", rubric, threshold?, reference?, reps?, provider?, model? }]`, or a plugin judge's name. `expected.answer` is the default reference. Every listed judge must pass. An eval config's `judges` apply to every case, on top of its own; the case's settings win for a judge both name.
-- In a matcher: `toPassToolJudge(rubric, { passingThreshold, reference, reps, provider, model })`.
-- A plugin's judge: `"acme/judge/completeness"` in `judges` (or `{ judge: 'acme/judge/completeness' }` in `toPassToolJudge`), with the plugin loaded (`plugins` in `runEvalDataset` or the eval config, `mcpPlugins` for matchers).
+- **Yes-or-no judges** read the whole trace and answer yes, no or `unknown`: `task-completion`, `grounded-in-tools`, `tool-use`, and `criteria` (the case's own criteria, one question each).
+- **`rubric`** scores the answer from 0 to 1 against a built-in rubric (`correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`) or your own text.
+- **`preference`** is a pairwise judge: which variant did better on a case, against the baseline.
+- **Plugin judges** are named `<namespace>/judge/<name>`, such as `"acme/judge/completeness"`.
+- **Trust is measured, not assumed.** No judge is calibrated for your data until you label trials and run `mst judges check`: `calibrate-mcp-judge`.
 
-## Plugins
+In a test, `toPassToolJudge(rubric, options?)` grades a tool response. In a case or an eval config, judges go in `judges`, beside `assertions`: `write-mcp-eval`.
 
-A plugin is a plain object, the default export of a module or package, that MST reads. It never calls MST to register.
+## Plugin names
 
-```typescript
-import type { Plugin } from '@gleanwork/mcp-server-tester';
-import { z } from 'zod';
+A plugin is a plain object, the default export of a module or package, with `meta: { name, version, namespace }` and keys such as `judges`, `clients`, `datasetSources`, `metrics`, `resultStores`, `connectors`, `configs` and `environments`. It never calls MST to register.
 
-export default {
-  meta: { name: '@acme/mst-plugin', version: '1.0.0', namespace: 'acme' },
-  judges: {
-    completeness: {
-      schema: z.object({}).passthrough(),
-      evaluate: async ({ case: c, trial }) => ({
-        score: trial.text.includes(String(c.expected.answer ?? '')) ? 1 : 0,
-        reasoning: 'Answer contains the expected text',
-      }),
-    },
-  },
-} satisfies Plugin;
-```
-
-Keys: `datasetSources`, `clients`, `judges`, `pairwiseJudges`, `metrics`, `resultStores`, `connectors`, `configs`. An extension's name is `<namespace>/<kind>/<name>`, where the kind comes from the key: `acme/dataset/…`, `acme/client/…`, `acme/judge/…`, `acme/pairwise-judge/…`, `acme/metric/…`, `acme/result-store/…`, `acme/connector/…`, `acme/config/…`. A two-part name such as `acme/completeness` fails with the full one. Built-ins use bare names (`file`, `rubric`, `passed`) or `mst/<kind>/<name>`; plugins can't use the `mst` namespace.
-
-## Reporter
-
-```typescript
-// playwright.config.ts
-import { defineConfig } from '@playwright/test';
-
-export default defineConfig({
-  reporter: [
-    ['list'],
-    [
-      '@gleanwork/mcp-server-tester/reporters/mcpReporter',
-      { outputDir: '.mcp-test-results', autoOpen: false },
-    ],
-  ],
-});
-```
-
-Options: `outputDir` (default `.mcp-test-results`), `name` (the eval's name, default `playwright`), `autoOpen`, `quiet`, `resultStore`, `runMetadata`. Each Playwright run's eval results are a run directory (`<outputDir>/<name>/runs/<run-id>/`) with a variant per project and the same report `mst run` writes; open it with `npx mst open`. Tests and conformance checks are in Playwright's own report.
+An extension's name is `<namespace>/<kind>/<name>`, where the kind comes from the key: `acme/judge/…`, `acme/client/…`, `acme/dataset/…`, `acme/pairwise-judge/…`, `acme/metric/…`, `acme/result-store/…`, `acme/connector/…`, `acme/config/…`, `acme/env/…`. A two-part name such as `acme/completeness` fails with the full one. Built-ins use bare names (`file`, `rubric`, `passed`) or `mst/<kind>/<name>`; plugins can't use the `mst` namespace.
 
 ## CLI
 
-| Command                                                     | Does                                                                                                                           |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `npx @gleanwork/mcp-server-tester@beta init`                | Scaffold a project: Playwright config, a tool test, a dataset. Interactive                                                     |
-| `mst generate [-o tests/generated.spec.ts] [--snapshot]`    | Call tools interactively and write the calls as a Playwright spec. Interactive                                                 |
-| `mst login <server-url> [--scopes a,b] [--force]`           | OAuth login in a browser; the `mcp` fixture uses the stored tokens. Interactive                                                |
-| `mst token <server-url> [--format env\|json\|gh]`           | Print stored tokens for CI                                                                                                     |
-| `mst run --config <path>`                                   | Run an eval config. `--variant`, `--case <ids...>`, `--trials <n>`, `--plugins`, `--output-dir`, `--secrets-file`, `--dry-run` |
-| `mst batch --config-dir <dir>`                              | Run several eval configs. `--configs`, `--workers`, `--skip-existing`, `--dry-run`                                             |
-| `mst auth --config <path>`                                  | Sign in to an eval config's connector servers (`status`, `revoke`)                                                             |
-| `mst optimize start\|evidence\|try\|finish --config <path>` | Improve tool metadata a round at a time, ending in a recommendation (see `optimize-mcp-tool-metadata`)                         |
-| `mst open [run or eval dir]`                                | Open a run's report: the newest run, or the one named. `--print` prints its path                                               |
-| `mst cowork setup`                                          | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                               |
+| Command                                         | Does                                                                                                                       |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `npx @gleanwork/mcp-server-tester@rc init`      | Scaffold a project: Playwright config, a tool test, a dataset. `--command` or `--url`, `--name`, `--no-install`, `--force` |
+| `mst generate --tool <name> --args <json>`      | Call a tool and write the call as a Playwright test. `--command`, `--url` or `--config`; `-o`, `--snapshot`, `--name`      |
+| `mst login <server-url>`                        | OAuth login in a browser; the `mcp` fixture uses the stored tokens. `--scopes a,b`, `--force`                              |
+| `mst token <server-url> --format env\|json\|gh` | Print stored tokens for CI                                                                                                 |
+| `mst run --config <path>`                       | Run an eval config (`run-mcp-eval`)                                                                                        |
+| `mst grade <run> --config <path>`               | Grade a stored run's traces again, as a new run                                                                            |
+| `mst open`                                      | Open a run's report: the newest run, or the run or eval directory named                                                    |
+| `mst batch --config-dir <dir>`                  | Run several eval configs                                                                                                   |
+| `mst label page <run> --judge <name>`           | Label a judge's trials on a local page (`calibrate-mcp-judge`); `export` and `import` for spreadsheets                     |
+| `mst judges check <run> --judge <name>`         | Measure a judge against labels; `mst judges` lists judges                                                                  |
+| `mst clients`, `mst datasets`                   | List clients and plugin datasets                                                                                           |
+| `mst auth --config <path>`                      | Sign in to an eval config's connector servers (`status`, `revoke`)                                                         |
+| `mst optimize start --config <path>`            | Improve tool metadata a round at a time (`optimize-mcp-tool-metadata`)                                                     |
+| `mst env setup docker`, `mst runs list`         | Prepare Docker; follow detached runs                                                                                       |
+| `mst cowork setup`                              | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                           |
 
-`init`, `generate` and `login` need a terminal. An agent's shell has none, so there they fail with `Raw mode is not supported on the current process.stdin` and write nothing. As an agent, write the Playwright config and specs yourself (the `write-mcp-test` skill), and ask the user to run `mst login` in their own terminal. Every other command runs without a terminal.
+No command needs a terminal. In one, `init` and `generate` ask for what the flags leave out; in an agent's shell they take every answer from flags and name the flag they need. `generate` without `--tool` asks which tools to call, so an agent passes `--tool`. Without a terminal, `mst login` prints the sign-in URL instead of opening a browser and waits: run it in the background and give the user the URL. `2.0.0-rc.0` and older fail in an agent's shell with `Raw mode is not supported on the current process.stdin`; upgrade it.
 
-Inside a project, `npx mst` and `npx mcp-server-tester` run the same binary. Before installing, use `npx @gleanwork/mcp-server-tester@beta`: `npx mst` alone downloads an unrelated package.
+Inside a project, `npx mst` and `npx mcp-server-tester` run the same binary. Before installing, use `npx @gleanwork/mcp-server-tester@rc`: `npx mst` alone downloads an unrelated package. Every flag: [CLI reference](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/cli.md).
 
 ## What 1.x names became
 
@@ -320,5 +168,5 @@ Full list: [the 2.0 migration guide](https://github.com/gleanwork/mcp-server-tes
 - **No `client` in an eval config.** It runs on `claude-code`. Name the client.
 - **A server array.** `servers` is a map keyed by label; variants list labels.
 - **Secrets in configs.** Use `accessTokenEnv`, the environment, or `--secrets-file`.
-- **`runEvalDataset(dataset, mcp)`.** It takes two objects: `runEvalDataset({ dataset, ... }, { mcp, testInfo })`.
 - **A non-api client in Playwright.** `runEvalDataset` runs only `api`. Run `claude-code`, `codex-cli`, `cowork`, `chatgpt`, `codex-app` and plugin clients with `mst run`.
+- **Trusting a judge's pass rate unchecked.** Calibrate it against your own labels first.

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runEval } from './runEval.js';
+import { gradeRun, resumeRun, runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import { localCredentialStore } from '../auth/grants/localStore.js';
 import type { TraceEvent } from './evalFrameworkTypes.js';
@@ -161,6 +161,12 @@ describe('connector servers and tool metadata in an environment', () => {
     });
 
     expect(result.summary.metrics).toMatchObject({ passed: 4, total: 4 });
+    // run.json says how writes were answered, so the history can tell.
+    expect(
+      JSON.parse(
+        await fs.readFile(path.join(result.outputDir, 'run.json'), 'utf8')
+      ) as { simulateWrites?: boolean }
+    ).toMatchObject({ simulateWrites: true });
     // Every trial came back from the shard's worker.
     const lines = log.mock.calls.map((call) => String(call[0]));
     expect(lines).toContain('[mst] shard 1/1: done');
@@ -235,5 +241,100 @@ describe('connector servers and tool metadata in an environment', () => {
           label: 'notes',
         }),
       ]);
+  }, 120_000);
+
+  it('collects and records a resumed run with the write mode it started with, whatever the config now says', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-resume-writes-'));
+    dirs.push(dir);
+    vi.stubEnv('MST_TOKENS_DIR', path.join(dir, 'tokens'));
+    const store = localCredentialStore(path.join(dir, 'grants'));
+    await store.put('sc.notes', {
+      version: 1,
+      type: 'oauth',
+      tokenEndpoint: 'https://auth.example/token',
+      clientId: 'c',
+      refreshToken: 'refresh',
+      accessToken: 'notes-token-1',
+      accessTokenExpiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      scopes: [],
+      resource: 'https://notes.example/mcp',
+      signedInAt: new Date().toISOString(),
+    });
+    const caseIds = ['alpha', 'bravo', 'charlie', 'delta'];
+    await fs.writeFile(
+      path.join(dir, 'cases.json'),
+      JSON.stringify({
+        name: 'cases',
+        cases: caseIds.map((id) => ({
+          id,
+          input: id,
+          assertions: { containsText: 'token ok' },
+        })),
+      })
+    );
+    const configPath = path.join(dir, 'eval.json');
+    const config = {
+      name: 'resume-writes',
+      plugins: [mock('forkEnvPlugin.ts'), mock('shardConnectorPlugin.ts')],
+      client: 'sc/client/caller',
+      datasets: ['./cases.json'],
+      servers: { notes: { connector: 'sc/connector/notes' } },
+      simulateWrites: true,
+      redactStoredResponses: false,
+    };
+    await fs.writeFile(configPath, JSON.stringify(config));
+    const options = {
+      configPath,
+      rootDir: dir,
+      outputDir: path.join(dir, 'out'),
+      credentialStore: store,
+      report: false,
+    };
+    const runJson = async (outputDir: string) =>
+      JSON.parse(
+        await fs.readFile(path.join(outputDir, 'run.json'), 'utf8')
+      ) as { simulateWrites?: boolean; phases: { collect: string } };
+    // One of two shards fails: the run is partial.
+    const first = await runEval({
+      ...options,
+      env: 'fork/env/children',
+      envOptions: { shards: '2', fail: '1' },
+    });
+    expect(await runJson(first.outputDir)).toMatchObject({
+      simulateWrites: true,
+      phases: { collect: 'partial' },
+    });
+    const runId = path.basename(first.outputDir);
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, simulateWrites: false })
+    );
+    // A regrade keeps the mode its traces were collected with.
+    const regrade = await gradeRun({ ...options, run: runId });
+    expect((await runJson(regrade.outputDir)).simulateWrites).toBe(true);
+    // So does a resume, for the trials it collects as well as the record.
+    const resumed = await resumeRun({
+      ...options,
+      run: runId,
+      envOptions: { shards: '2' },
+    });
+    expect((await runJson(resumed.outputDir)).simulateWrites).toBe(true);
+    for (const caseId of caseIds) {
+      const stored = JSON.parse(
+        await fs.readFile(
+          path.join(resumed.outputDir, 'traces', 'default', caseId, '0.json'),
+          'utf8'
+        )
+      ) as StoredTrace;
+      expect(
+        stored.trace.events.find((event) => event.name === 'create_note')
+          ?.simulatedWrite
+      ).toBe(true);
+    }
+    expect(warn.mock.calls.map((call) => String(call[0]))).toContainEqual(
+      expect.stringContaining('was collected with simulateWrites true')
+    );
   }, 120_000);
 });

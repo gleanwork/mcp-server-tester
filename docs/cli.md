@@ -1,10 +1,12 @@
 # CLI Commands
 
-The `@gleanwork/mcp-server-tester` CLI provides interactive commands to help you get started quickly and generate eval datasets.
+The `@gleanwork/mcp-server-tester` CLI sets up projects, writes tests from your server's tools, and runs evals.
+
+No command needs a terminal. `init` and `generate` ask for what you leave out when they run in one. Without a terminal (an agent's shell, CI, a pipe), they take every answer from flags and name the flag they need.
 
 The package installs the CLI under two names: `mst` (short for MCP Server Tester) and `mcp-server-tester`. They are the same binary. Once the package is installed in your project, use `npx mst <command>`.
 
-Before the package is installed (for example, running `init` in a new directory), use the scoped package name: `npx @gleanwork/mcp-server-tester@beta init` for 2.0, which these docs describe (without `@beta`, npx fetches 1.x). A bare `npx mst` or `npx mcp-server-tester` with nothing installed fetches unrelated, unscoped npm packages of those names.
+Before the package is installed (for example, running `init` in a new directory), use the scoped package name: `npx @gleanwork/mcp-server-tester@rc init` for 2.0, which these docs describe (without `@rc`, npx fetches 1.x). A bare `npx mst` or `npx mcp-server-tester` with nothing installed fetches unrelated, unscoped npm packages of those names.
 
 ## Table of Contents
 
@@ -39,27 +41,42 @@ npx @gleanwork/mcp-server-tester init [options]
 
 ### Options
 
-- `-n, --name <name>` - Project name
+- `-n, --name <name>` - Project name (default: `my-mcp-tests`)
 - `-d, --dir <directory>` - Target directory (default: ".")
+- `--command <command>` - The command that starts a stdio MCP server, such as `"node server.js"`. Quote an argument that holds spaces: `'node "/Users/a/My Server/index.js"'`. Nothing else is expanded: no variables, globs or backslash escapes
+- `--url <url>` - The URL of an HTTP MCP server. Pass `--command` or `--url`, not both
+- `--install` / `--no-install` - Run `npm install` in the new project (default: yes)
+- `--force` - Write into a project directory that already exists
 - `-h, --help` - Display help
 
-### Interactive Mode
+### In a Terminal
 
-Running `init` without options starts an interactive setup:
+`init` asks for each answer you didn't pass as a flag:
 
 ```bash
 npx @gleanwork/mcp-server-tester init
 
-? Project name: my-mcp-tests
-? MCP transport type: stdio (local server process)
-? Server command (for stdio): node server.js
-? Install dependencies now? Yes
+Project name (my-mcp-tests):
+MCP transport type:
+  1) stdio (local server process)
+  2) http (remote server)
+Choose 1-2 (1): 1
+Server command (node server.js):
+Install dependencies now? (Y/n)
 
 ✓ Project initialized successfully!
 
 Next steps:
   cd my-mcp-tests
   npm test
+```
+
+### Without a Terminal
+
+Pass the server, and any other answer, as flags. `init` fails, naming the flag, if it needs `--command` or `--url`, and refuses to write into an existing directory without `--force`:
+
+```bash
+npx @gleanwork/mcp-server-tester init --name my-mcp-tests --command "node server.js" --no-install
 ```
 
 ### What Gets Created
@@ -138,7 +155,7 @@ test('lists tools', async ({ mcp }) => {
 
 ## `generate` - Generate Playwright Tests
 
-Interactively record Playwright tests by connecting to your MCP server and calling its tools. Each call becomes a `test()` that calls the tool and asserts on its response with MST's matchers.
+Record Playwright tests by connecting to your MCP server and calling its tools. Each call becomes a `test()` that calls the tool and asserts on its response with MST's matchers. With `--tool`, `generate` records one call from flags and asks nothing. Without it, it asks in a terminal which tools to call.
 
 ### Usage
 
@@ -149,9 +166,28 @@ npx mst generate [options]
 ### Options
 
 - `-c, --config <path>` - Path to MCP config JSON file
+- `--url <url>` - The URL of an HTTP MCP server, instead of `--config`
+- `--command <command>` - The command that starts a stdio MCP server, instead of `--config`. Quote an argument that holds spaces, as for `init`
 - `-o, --output <path>` - Spec file to write or add to (default: "tests/generated.spec.ts")
 - `-s, --snapshot` - Compare every response with a saved snapshot
+- `--tool <name>` - Record one call to this tool, without asking
+- `--args <json>` - The call's arguments, as a JSON object (default: `{}`)
+- `--name <title>` - The test's title (default: `<tool>-<n>`, with the first `n` the spec doesn't use)
+- `--description <text>` - A comment above the test
+- `--suite <name>` - The `describe()` name of a new spec (default: `MCP tools`)
+- `--exact` - Also assert the exact response
 - `-h, --help` - Display help
+
+### One Call from Flags
+
+With `--tool`, `generate` connects, calls that tool once with `--args`, and writes the test. It keeps every suggested assertion, or only a snapshot with `--snapshot`. It needs no terminal, so an agent or a script can run it. Run it again to add tests to the same spec:
+
+```bash
+npx mst generate --command "node server.js" --tool get_weather --args '{"city":"London"}'
+npx mst generate --command "node server.js" --tool get_weather --args '{"city":"Paris"}' --snapshot
+```
+
+A call that throws or returns an error result writes no test, and the command exits 1. So do an unknown tool and a `--name` the spec already has.
 
 ### Snapshot Mode
 
@@ -169,49 +205,43 @@ Each test ends with `await expect(result).toMatchToolSnapshot('<test name>')`. W
 
 This is ideal for regression testing - capture known-good responses once, then verify they don't change unexpectedly.
 
-### Interactive Workflow
+### In a Terminal
 
-The `generate` command guides you through creating test cases:
+Without `--tool`, `generate` asks which server to use (unless you pass `--config`, `--url` or `--command`), then which tools to call and which assertions to keep:
 
 ```bash
-npx mst generate
+npx mst generate --command "node server.js"
 
-# Step 1: Connect to MCP server
-? MCP transport type: stdio
-? Server command: node server.js
-✓ Connected to MCP server
-✓ Found 3 tools
+✓ Connected! Found 3 tools
+Test suite name (MCP tools):
 
-# Step 2: Select tool and provide arguments
-? Select tool to test: get_weather
-? Tool arguments (JSON): { "city": "London" }
+--- New Test Case ---
+Select tool to test:
+  1) echo
+  2) get_weather
+  3) get_city_info
+Choose 1-3 (1): 2
+Field 1 of 1
+City name
+city (string)*: London
+Calling get_weather...
 ✓ Tool called successfully
-
-# Step 3: Preview response
 Response preview:
-{
-  "city": "London",
-  "temperature": 20,
-  "conditions": "Sunny"
-}
-
-# Step 4: Auto-suggested assertions
-Suggested assertions:
-  Text contains:
-    - "London"
-    - "temperature"
-  Regex patterns:
-    - \d+
-
-# Step 5: Configure the test
-? Test name: weather-london
-? Add text contains assertions? Yes
-? Add regex assertions? Yes
+  {
+    "city": "London",
+    "temperature": 20,
+    "conditions": "Sunny"
+  }
+Test name (get_weather-1): weather-london
+Description (optional, press Enter to skip):
+Add text contains assertions? ("London", "temperature") (Y/n)
+Add exact match assertion? (Y/n) n
+Use Playwright snapshot testing? (Y/n) n
 ✓ Added test "weather-london"
+Total tests: 1
+Add another test? (Y/n) n
 
-# Step 6: Continue or finish
-? Add another test? No
-✓ Spec saved to tests/generated.spec.ts
+✓ Spec generation complete!
 ```
 
 ### Features
@@ -252,10 +282,10 @@ The generator can add tests to a spec it wrote earlier, above its `// mst genera
 ```bash
 npx mst generate -o tests/weather.spec.ts
 
-Spec file exists at tests/weather.spec.ts. Add tests to it? Yes
+Spec file exists at tests/weather.spec.ts. Add tests to it? (Y/n)
 ```
 
-A spec without the marker (one you wrote by hand) is left alone: choose a new `--output` file.
+With `--tool`, it adds to an existing spec without asking. A spec without the marker (one you wrote by hand) is left alone: choose a new `--output` file.
 
 ### Using a Config File
 
@@ -375,6 +405,8 @@ Solutions:
 ## `login` - OAuth Authentication
 
 Authenticate with MCP servers that require OAuth. Tokens are cached locally and automatically refreshed when expired.
+
+`login` asks nothing. Without a terminal or a display (an agent's shell, SSH), it prints the sign-in URL instead of opening a browser, then waits for the redirect, so a person can open the URL on the same machine.
 
 ### Usage
 
@@ -574,6 +606,8 @@ npx mst token <server-url> [options]
 
 ### Output Formats
 
+Each value is on one line, however long, so piped output (`>> $GITHUB_ENV`) holds whole tokens.
+
 #### `env` (default)
 
 Outputs tokens as shell-compatible environment variable assignments:
@@ -668,7 +702,7 @@ gh secret set MCP_TOKEN_EXPIRES_AT --body "1736956200000"
 
 ### Error Handling
 
-If no tokens are found for the specified server:
+If no tokens are found for the specified server, `token` prints this to stderr and exits 1:
 
 ```bash
 npx mst token https://api.example.com/mcp
@@ -767,13 +801,13 @@ npx mst judges show rubric --json
 ```
 
 ```text
-acme/judge/completeness         judge     requires case.expected.answer  Did the answer cover every point of the expected answer?
-rubric                          judge                                    An LLM grades the answer against a rubric: ...
-acme/pairwise-judge/preference  pairwise                                 Which answer would the asker rather get?
-preference                      pairwise                                 Asks which run better did what the user asked: ...
+acme/judge/completeness         judge     1.4.0         requires case.expected.answer  Did the answer cover every point of the expected answer?
+rubric                          judge     d6fd641dc6c8                                 An LLM grades the answer against a rubric: ...
+acme/pairwise-judge/preference  pairwise  unversioned                                  Which answer would the asker rather get?
+preference                      pairwise  ff685f10a4f3                                 Asks which run better did what the user asked: ...
 ```
 
-A `judge` scores each trial; a `pairwise` judge compares each variant's trial with the baseline's. `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options as JSON Schema: what an eval config's `judges` entry may set besides `type`. Plugins add `description` to a judge or pairwise judge for these commands.
+A `judge` scores each trial; a `pairwise` judge compares each variant's trial with the baseline's. Each judge shows its version, the one its identity covers ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)): a built-in's covers its prompts and defaults (a content hash, cut to 12 characters in the table), a plugin judge's is the `version` it declares or else its plugin's package version, and a judge with neither is **unversioned** (with `--json`, `"unversioned": true` and no `version`). `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options as JSON Schema: what an eval config's `judges` entry may set besides `type`. Plugins add `description` to a judge or pairwise judge for these commands.
 
 Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
 
@@ -1142,7 +1176,7 @@ glean
 ```
 
 - **Where the runs are.** With an eval's directory, its runs. With `--config`, the result store's runs (`--results`, else the eval config's `results.store`), or with no store, the local runs under `--output-dir` (default `.mcp-test-results/<name>`).
-- **Since previous** is the paired test `mst run` reports against its previous run, on the headline cases, against the previous run of the variant's era that was complete for it. An era starts when the datasets, the eval config's judges or the variant's setup change; a run in a new era says `new era`. See [The eval's history](./evaluation-framework.md#the-evals-history).
+- **Since previous** is the paired test `mst run` reports against its previous run, on the headline cases, against the previous run of the variant's era that was complete for it. An era starts when the datasets, the eval config's judges, `simulateWrites` or the variant's setup change, even in a run the variant skipped; a run in a new era says `new era`. See [The eval's history](./evaluation-framework.md#the-evals-history).
 - **The runs are the truth.** `mst history` reads `history.json` and builds the rows of runs it doesn't have yet, so a run another machine just finished shows. It writes nothing; `--rebuild` builds every row again and writes `history.json` and the history page. `mst open --history` opens the page.
 - **Options:** `--variant <names...>`, `--since <date>` (runs collected on or after it), `--limit <n>` (most runs per variant, default 20), `--json`, `--rebuild`, `--output-dir`, `--root-dir`.
 

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import { RUN_FORMAT } from './resultFormat.js';
@@ -19,7 +19,7 @@ import {
   updateHistory,
 } from './runHistory.js';
 import type { HistoryIndex } from '../types/history.js';
-import { formatHistory } from '../cli/commands/history/index.js';
+import { formatHistory, history } from '../cli/commands/history/index.js';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -52,6 +52,7 @@ interface RunSpec {
   datasetHash?: string;
   infra?: Record<string, string[]>;
   grade?: 'complete' | 'skipped';
+  simulateWrites?: boolean;
 }
 
 function caseResult(
@@ -204,6 +205,7 @@ async function writeSpec(evalDirectory: string, spec: RunSpec): Promise<void> {
         }
       : {}),
     redactStoredResponses: true,
+    ...(spec.simulateWrites ? { simulateWrites: true as const } : {}),
     ...(spec.gradedFrom ? { gradedFrom: spec.gradedFrom } : {}),
     phases: { collect: 'complete', grade: spec.grade ?? 'complete' },
   };
@@ -465,6 +467,94 @@ describe('the history of an eval', () => {
     ]);
   });
 
+  it('starts a new era for a variant that skipped the run where the dataset changed', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    const failing = {
+      'case-0': [0, 1],
+      'case-1': [0, 1],
+    } as RunSpec['variants'][string];
+    await writeSpec(dir, {
+      id: '20261001T090000Z-000001',
+      at: '2026-10-01T09:00:00.000Z',
+      datasetHash: 'd1',
+      variants: { official: ids(2), glean: ids(2) },
+    });
+    await writeSpec(dir, {
+      id: '20261002T090000Z-000002',
+      at: '2026-10-02T09:00:00.000Z',
+      datasetHash: 'd2',
+      variants: { official: ids(2) },
+    });
+    await writeSpec(dir, {
+      id: '20261003T090000Z-000003',
+      at: '2026-10-03T09:00:00.000Z',
+      datasetHash: 'd2',
+      variants: { official: ids(2), glean: failing },
+    });
+    const [third] = await buildHistory(localHistoryLocation(dir)).then(
+      (index) => index.runs
+    );
+    const glean = third!.variants.find((v) => v.name === 'glean')!;
+    // Not compared with week 1, which ran on the old dataset.
+    expect(glean.era).toBe(1);
+    expect(glean.sincePrevious).toBeUndefined();
+    expect(third!.changes).toEqual([
+      { reason: 'dataset cases changed', variant: 'glean', breaks: true },
+    ]);
+    const official = third!.variants.find((v) => v.name === 'official')!;
+    expect(official.era).toBe(1);
+    expect(official.sincePrevious?.runId).toBe('20261002T090000Z-000002');
+  });
+
+  it('names a change once when a returning variant also sees it in the run it returns to', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    for (const [n, hash, variants] of [
+      [1, 'd1', { official: ids(2), glean: ids(2) }],
+      [2, 'd2', { official: ids(2) }],
+      [3, 'd3', { official: ids(2), glean: ids(2) }],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        datasetHash: hash,
+        variants,
+      });
+    const [third] = await buildHistory(localHistoryLocation(dir)).then(
+      (index) => index.runs
+    );
+    expect(third!.changes).toEqual([
+      { reason: 'dataset cases changed', breaks: true },
+    ]);
+    expect(third!.variants.find((v) => v.name === 'glean')!.era).toBe(1);
+  });
+
+  it('starts an era when writes go from planned-write results to simulated successes', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    await writeSpec(dir, {
+      id: '20261001T090000Z-000001',
+      at: '2026-10-01T09:00:00.000Z',
+      variants: { official: ids(2), glean: ids(2) },
+    });
+    await writeSpec(dir, {
+      id: '20261002T090000Z-000002',
+      at: '2026-10-02T09:00:00.000Z',
+      simulateWrites: true,
+      variants: { official: ids(2), glean: ids(2) },
+    });
+    const [second, first] = await buildHistory(localHistoryLocation(dir)).then(
+      (index) => index.runs
+    );
+    expect(first!.simulateWrites).toBeUndefined();
+    expect(second!.simulateWrites).toBe(true);
+    expect([first!.era, second!.era]).toEqual([0, 1]);
+    expect(second!.changes).toEqual([
+      { reason: 'writes: planned → simulated', breaks: true },
+    ]);
+    expect(
+      second!.variants.every((variant) => variant.sincePrevious === undefined)
+    ).toBe(true);
+  });
+
   it('counts infrastructure failures and incomplete cases, and never measures against an incomplete run', async () => {
     const dir = path.join(await tempDir(), 'weekly');
     await writeSpec(dir, {
@@ -645,6 +735,20 @@ describe('the history in a result store', () => {
       await fs.readFile(path.join(root, 'e', 'history.json'), 'utf8')
     ).toBe('{"a":2}');
   });
+
+  it('never lists a file a put left behind', async () => {
+    const root = await tempDir();
+    const store = fileRunStore(root);
+    await store.put('e/runs/r/run.json', '{}');
+    // As a put that crashed before its rename leaves it.
+    await fs.writeFile(
+      path.join(root, 'e', 'runs', 'r', 'run.json.mst-0a1b2c3d.tmp'),
+      '{'
+    );
+    await fs.writeFile(path.join(root, 'e', 'notes.mst-0a1b2c3d.tmp'), '{');
+    expect(await store.list('e/')).toEqual(['e/runs/r/run.json']);
+    expect(await store.list('e/', { shallow: true })).toEqual(['e/runs/']);
+  });
 });
 
 function parseStored(bytes: Uint8Array): HistoryIndex {
@@ -673,5 +777,69 @@ describe('mst history', () => {
     expect(text).toMatch(/000002 .*no change/);
     expect(text).toMatch(/Cost\/trial/);
     expect(text).toContain('$0.030');
+  });
+
+  /** What `mst history` printed, with its options. */
+  async function printed(
+    dir: string | undefined,
+    options: Parameters<typeof history>[1]
+  ): Promise<string> {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await history(dir, options);
+      return log.mock.calls.map((call) => String(call[0])).join('\n');
+    } finally {
+      log.mockRestore();
+    }
+  }
+
+  it('prints the runs it is asked for as JSON: --variant, --since and --limit', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    await weekly(dir);
+    const shown = JSON.parse(
+      await printed(dir, {
+        json: true,
+        variant: ['glean'],
+        since: '2026-10-02',
+        limit: '2',
+      })
+    ) as HistoryIndex;
+    expect(shown.format).toBe(HISTORY_FORMAT);
+    expect(shown.runs.map((run) => run.runId.slice(-1))).toEqual(['6', '5']);
+    expect(
+      shown.runs.every(
+        (run) => run.variants.length === 1 && run.variants[0]!.name === 'glean'
+      )
+    ).toBe(true);
+    // Reading writes nothing.
+    await expect(fs.access(path.join(dir, 'history.json'))).rejects.toThrow();
+  });
+
+  it('writes history.json with --rebuild, and says so', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    await weekly(dir);
+    const text = await printed(dir, { rebuild: true });
+    expect(text).toContain('History of weekly: 6 runs, newest first');
+    expect(text).toContain(`Rebuilt the history.json of ${dir}.`);
+    expect(
+      (
+        JSON.parse(
+          await fs.readFile(path.join(dir, 'history.json'), 'utf8')
+        ) as HistoryIndex
+      ).runs
+    ).toHaveLength(6);
+  });
+
+  it('refuses a bad --since or --limit, and a directory without runs', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    await weekly(dir);
+    await expect(printed(dir, { since: 'last week' })).rejects.toThrow(
+      '--since "last week" isn\'t a date'
+    );
+    await expect(printed(dir, { limit: '0' })).rejects.toThrow(
+      '--limit must be a whole number above 0'
+    );
+    const empty = await tempDir();
+    await expect(printed(empty, {})).rejects.toThrow('it has no runs/');
   });
 });

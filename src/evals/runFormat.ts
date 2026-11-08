@@ -161,6 +161,11 @@ const RunRecordSchema = z.looseObject({
   partial: z.boolean(),
   selection: z.looseObject({}).optional(),
   redactStoredResponses: z.boolean(),
+  /**
+   * The run's dry-run proxies answered writes with a success reply
+   * (`simulateWrites`). Absent: with a planned-write result.
+   */
+  simulateWrites: z.literal(true).optional(),
   /** A regrade's run: the run whose traces it graded (`mst grade`). */
   gradedFrom: z.string().regex(RUN_ID_PATTERN).optional(),
   /**
@@ -644,6 +649,8 @@ export interface RunFacts {
   }>;
   judges?: JudgeRecord[];
   redactStoredResponses: boolean;
+  /** The run's dry-run proxies answered writes with a success reply. */
+  simulateWrites?: true;
   /** Where the trials were collected (`--env`). Default: `local`. */
   environment?: RunEnvironment;
   /** What each shard ran on, in an environment with machines. */
@@ -858,6 +865,7 @@ export async function writeRun(
     partial: summary.partial ?? false,
     ...(summary.selection ? { selection: summary.selection } : {}),
     redactStoredResponses: facts.redactStoredResponses,
+    ...(facts.simulateWrites ? { simulateWrites: true } : {}),
     ...(facts.gradedFrom ? { gradedFrom: facts.gradedFrom } : {}),
     ...(facts.optimization ? { optimization: facts.optimization } : {}),
     ...(facts.resumedGrading ? { resumedGrading: facts.resumedGrading } : {}),

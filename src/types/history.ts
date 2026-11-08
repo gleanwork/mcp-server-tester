@@ -197,6 +197,8 @@ export interface HistoryRun {
     optionsHash: string;
   }>;
   redacted: boolean;
+  /** The run's dry-run proxies answered writes with a success reply (`simulateWrites`). */
+  simulateWrites?: true;
   variants: HistoryVariant[];
   /** The eval-wide era; full runs only. */
   era?: number;

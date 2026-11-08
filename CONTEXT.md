@@ -215,7 +215,7 @@ An eval's runs over time: a row per run with what it ran with and what each vari
 _Avoid_: trend, timeline, dashboard, log
 
 **Era**:
-Consecutive full runs in an eval's history that measured the same way: the same datasets, the same eval config judges, and for one variant the same setup. A change starts a new era, with the reasons; runs on either side of an era's start are never compared. A new client app build doesn't start one.
+Consecutive full runs in an eval's history that measured the same way: the same datasets, the same eval config judges, the same `simulateWrites`, and for one variant the same setup. A change starts a new era, with the reasons; runs on either side of an era's start are never compared. A new client app build doesn't start one.
 _Avoid_: epoch, segment, baseline period
 
 **Result store**:

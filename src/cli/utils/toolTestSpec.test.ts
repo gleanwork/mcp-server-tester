@@ -35,6 +35,27 @@ function syntaxErrors(source: string): string[] {
 }
 
 describe('renderToolTestSpec', () => {
+  it('comments every line of a multiline description, so none of it runs', () => {
+    const source = renderToolTestSpec('weather tools', [
+      {
+        ...weather,
+        description:
+          'Recorded\nglobalThis.ran = true;\r\nsecond\u2028third\rfourth',
+      },
+    ]);
+    expect(syntaxErrors(source)).toEqual([]);
+    expect(source).toContain(
+      [
+        '  // Recorded',
+        '  // globalThis.ran = true;',
+        '  // second',
+        '  // third',
+        '  // fourth',
+        '  test("get_weather-1"',
+      ].join('\n')
+    );
+  });
+
   it('writes one test per call, asserting with the matchers', () => {
     const source = renderToolTestSpec('weather tools', [weather]);
     expect(syntaxErrors(source)).toEqual([]);

@@ -131,6 +131,7 @@
       "additionalProperties": {}
     },
     "redactStoredResponses": { "type": "boolean" },
+    "simulateWrites": { "type": "boolean", "const": true },
     "gradedFrom": {
       "type": "string",
       "pattern": "^\\d{8}T\\d{6}Z-[0-9a-f]{6}(\\.g\\d+)?$"
