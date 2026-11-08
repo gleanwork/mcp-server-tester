@@ -60,6 +60,7 @@ import {
   measureAgainstBaseline,
 } from './variantComparison.js';
 import { wilson } from './judgeCheck.js';
+import { reporterUiDirectory } from './runReport.js';
 import { HISTORY_FORMAT, HistoryIndexSchema } from './historyFormat.js';
 
 export { HISTORY_FORMAT };
@@ -1041,30 +1042,88 @@ async function writeHistoryIndex(
 /**
  * Brings the eval's `history.json` up to date with its runs and writes it.
  * Two processes can finish runs at once, and a store has no compare-and-
- * swap, so after writing it lists the runs again and writes once more when
- * one appeared meanwhile. A history that still misses a run is rebuilt by
+ * swap, so after writing it reads the runs again and writes once more when
+ * one appeared or changed meanwhile. A history that still misses a run is rebuilt by
  * the next write or read: the runs are the truth, the index a cache.
+ *
+ * The history page (`history/index.html`) gets its files first, and its
+ * data with each write of `history.json`, so the two always hold the same
+ * index. The page is a view: failing to write it is a warning, and
+ * `history.json` is still written.
  */
 export async function updateHistory(
   location: HistoryLocation,
-  options: { rebuild?: boolean; evalName?: string } = {}
+  options: {
+    rebuild?: boolean;
+    evalName?: string;
+    warn?: (message: string) => void;
+  } = {}
 ): Promise<HistoryIndex> {
+  const warn = options.warn ?? ((message: string) => console.warn(message));
+  let page = true;
+  async function tryPage(write: () => Promise<void>): Promise<void> {
+    if (!page) return;
+    try {
+      await write();
+    } catch (error) {
+      page = false;
+      warn(
+        `[mst] The history page in ${location.store.location} wasn't written: ${error instanceof Error ? error.message : String(error)}. \`mst open --history\` writes it again.`
+      );
+    }
+  }
+  await tryPage(() => writeHistoryPageFiles(location));
   let index = await buildHistory(location, options);
   for (let attempt = 0; attempt < 3; attempt++) {
     await writeHistoryIndex(location, index);
+    await tryPage(() => writeHistoryPageData(location, index));
     const again = await buildHistory(location, {
       cached: index,
       ...(options.evalName ? { evalName: options.evalName } : {}),
     });
-    const known = new Set(index.runs.map((row) => row.runId));
+    // The same rows, not just the same runs: a resume changes a run's row.
     if (
-      again.runs.length === index.runs.length &&
-      again.runs.every((row) => known.has(row.runId))
+      JSON.stringify([again.runs, again.skipped]) ===
+      JSON.stringify([index.runs, index.skipped])
     )
-      return index;
+      break;
     index = again;
   }
   return index;
+}
+
+/**
+ * Writes the history page's files into `<eval>/history/`: the reporter UI.
+ * With its `data.js` (`writeHistoryPageData`) it opens from `file://` with
+ * nothing else. Its links to runs' reports are relative
+ * (`../runs/<id>/report/index.html`).
+ */
+async function writeHistoryPageFiles(location: HistoryLocation): Promise<void> {
+  const ui = reporterUiDirectory();
+  const prefix = `${location.evalKey}/history/`;
+  const files = (await fs.readdir(ui, { recursive: true, withFileTypes: true }))
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(entry.parentPath, entry.name));
+  for (const file of files)
+    await location.store.put(
+      prefix + path.relative(ui, file).split(path.sep).join('/'),
+      await fs.readFile(file)
+    );
+}
+
+/**
+ * Writes the history page's data, `<eval>/history/data.js`. It holds no
+ * answers, tool outputs or reasoning: only IDs and numbers, so a redacted
+ * run's history is as redacted as the run.
+ */
+async function writeHistoryPageData(
+  location: HistoryLocation,
+  index: HistoryIndex
+): Promise<void> {
+  await location.store.put(
+    `${location.evalKey}/history/data.js`,
+    `window.MST_HISTORY = ${JSON.stringify(index)};\n`
+  );
 }
 
 /**
@@ -1078,7 +1137,7 @@ export async function recordInHistory(
   warn: (message: string) => void = (message) => console.warn(message)
 ): Promise<HistoryIndex | undefined> {
   try {
-    return await updateHistory(location, { evalName });
+    return await updateHistory(location, { evalName, warn });
   } catch (error) {
     warn(
       `[mst] The eval's history in ${location.store.location} wasn't updated: ${error instanceof Error ? error.message : String(error)}. \`mst history --rebuild\` builds it again from the runs.`

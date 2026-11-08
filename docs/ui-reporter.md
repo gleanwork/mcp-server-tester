@@ -37,6 +37,39 @@ A run with one variant opens on the cases that need attention, or on all cases w
 
 **Redaction.** Runs store responses redacted by default (`redactStoredResponses`), so their reports show no answers, tool outputs or judges' reasoning, and say so. Set `redactStoredResponses: false` in the eval config (or the reporter options) to keep them.
 
+## The history page
+
+Every run also writes its eval's history page, `<eval>/history/index.html`, from the eval's [history](./evaluation-framework.md#the-evals-history). It shows the eval's runs over time, one line for each variant, so you can follow a variant week over week and against the baseline. Each run report's header links to it (_History_). `mst open` adds the link to a report written before the eval had a history page.
+
+![The history page: pass rate, judge, win rate, cost, tokens, time and infrastructure failures over six weekly runs, with a new era where the judge changed](img/history-page.png)
+
+```bash
+npx mst open --history                                  # the newest eval's history
+npx mst open --history .mcp-test-results/<eval name>    # that eval's
+npx mst open --history --config ./eval.json             # the eval config's
+```
+
+- **Over time:** a chart for each measurement the runs have:
+  - the pass rate (headline cases, with its likely range as a band)
+  - cases passed
+  - each judge's pass rate
+  - each pairwise judge's win rate against the baseline (with its 95% range)
+  - cost and tokens per trial
+  - median trial time (dashed: the 95th percentile)
+  - infrastructure failures
+
+  A dashed vertical line marks where an era starts, and a variant's line breaks there. A hollow point is a run with incomplete cases for that variant. A red ring marks a pass rate that is clearly worse than the variant's previous comparable run. Hover over a point to see its run and value. Click it to open that run's report. The variant chips hide and show variants.
+
+- **Where eras start:** each run that starts an era, and what changed (a judge, a dataset, a variant's setup).
+- **Runs, newest first:** each variant's pass rate, its change since the previous comparable run (the run report's paired test), _regressed_ when that change is clearly worse, and the cost per trial. The table also lists what changed since the previous run, including notes that don't start an era, such as a new client app build. Partial, ungraded and regraded runs are listed but greyed out, and they aren't on the charts.
+- **Cases that changed:** pick two runs. By default these are the latest run and the run it was compared with. For each variant, the panel lists the cases that now fail or now pass, with their trials (`3/3 → 1/3`). When the two runs are in different eras, the panel says so.
+
+The page is static and self-contained, like a run's report. It opens from `file://`, makes no network requests and adds no chart library. It holds only IDs and numbers: no answers, tool outputs or reasoning, whatever the runs' redaction. With a result store, the store gets its own page at `<eval>/history/`, built from the store's runs. Its links are relative to the store's layout. `mst open --history` opens local runs only.
+
+The page is a view of `history.json`: when it can't be written, the run still writes `history.json` and warns, and `mst open --history` writes the page again.
+
+To try it without a model: `npm run build:ui && npm run preview-history` runs six scripted weekly runs and prints the page's path.
+
 ## The MCP Playwright reporter
 
 Add it next to Playwright's own reporter:

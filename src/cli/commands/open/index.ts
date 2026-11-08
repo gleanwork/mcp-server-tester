@@ -11,12 +11,25 @@ import {
   evalDirectoryOf,
   newestCalibrationTime,
 } from '../../../evals/judgeCheck.js';
+import {
+  hasLocalRuns,
+  localHistoryLocation,
+  updateHistory,
+} from '../../../evals/runHistory.js';
+import { loadEvalConfig } from '../../../evals/evalConfig.js';
 
 export interface OpenOptions {
   /** Where runs are written. @default '.mcp-test-results' */
   dir?: string;
   /** Print the report's path instead of opening it. */
   print?: boolean;
+  /** Open the eval's history page instead of a run's report. */
+  history?: boolean;
+  /** With `history`: the eval config whose history to open. */
+  config?: string;
+  /** With `config`: the eval's directory, if `mst run` was given `--output-dir`. */
+  outputDir?: string;
+  rootDir?: string;
 }
 
 interface Latest {
@@ -78,6 +91,7 @@ export async function open(
   path: string | undefined,
   options: OpenOptions
 ): Promise<void> {
+  if (options.history) return openHistory(path, options);
   const root = resolve(options.dir ?? '.mcp-test-results');
   const run = path !== undefined ? await runAt(path) : await newestRun(root);
   if (!run) {
@@ -87,9 +101,93 @@ export async function open(
     process.exit(1);
   }
   let reportPath = runReportPath(run);
-  if (!existsSync(reportPath) || (await calibratedSince(run)))
+  if (
+    !existsSync(reportPath) ||
+    (await calibratedSince(run)) ||
+    (await historySince(run))
+  )
     reportPath = await writeRunReport(run);
   await show(reportPath, options);
+}
+
+/**
+ * The eval directory `mst open --history` means: the one a path names (an
+ * eval's directory, or a run's), the eval config's, or the newest eval's.
+ * With an eval config, its name too: the history is named for it.
+ */
+async function historyDirectory(
+  path: string | undefined,
+  options: OpenOptions
+): Promise<{ directory: string; evalName?: string } | undefined> {
+  if (path !== undefined) {
+    const target = resolve(path);
+    return {
+      directory: existsSync(join(target, 'run.json'))
+        ? evalDirectoryOf(target)
+        : target,
+    };
+  }
+  if (options.config) {
+    const rootDir = resolve(options.rootDir ?? '.');
+    const { name } = loadEvalConfig(options.config, {
+      rootDir,
+      skipDatasetValidation: true,
+    });
+    return {
+      directory: resolve(
+        options.outputDir ?? join(rootDir, '.mcp-test-results', name)
+      ),
+      evalName: name,
+    };
+  }
+  const run = await newestRun(resolve(options.dir ?? '.mcp-test-results'));
+  return run ? { directory: evalDirectoryOf(run) } : undefined;
+}
+
+/**
+ * Open an eval's history page, `<eval>/history/index.html`, brought up to
+ * date with the eval's local runs first.
+ */
+async function openHistory(
+  path: string | undefined,
+  options: OpenOptions
+): Promise<void> {
+  const target = await historyDirectory(path, options);
+  const directory = target?.directory;
+  if (!directory || !(await hasLocalRuns(directory))) {
+    console.error(
+      directory
+        ? `${directory} has no runs. Name an eval's directory (.mcp-test-results/<eval name>) or its eval config (--config).`
+        : `No eval runs found under ${resolve(options.dir ?? '.mcp-test-results')}. Run an eval with \`mst run <eval config>\`.`
+    );
+    process.exit(1);
+  }
+  const location = localHistoryLocation(directory);
+  await updateHistory(
+    location,
+    target?.evalName ? { evalName: target.evalName } : {}
+  );
+  await show(join(directory, 'history', 'index.html'), options);
+}
+
+/**
+ * Whether the eval got its history page after the run's report was built,
+ * so the report has no link to it yet: a run from before MST wrote one.
+ */
+async function historySince(run: string): Promise<boolean> {
+  if (!existsSync(join(evalDirectoryOf(run), 'history', 'index.html')))
+    return false;
+  const data = await fs
+    .readFile(join(run, 'report', 'data.js'), 'utf8')
+    .catch(() => '');
+  try {
+    const report = JSON.parse(
+      data.replace(/^window\.MST_RUN_REPORT = /, '').replace(/;\s*$/, '')
+    ) as { run?: { historyPath?: unknown } };
+    return typeof report.run?.historyPath !== 'string';
+  } catch {
+    return true;
+  }
 }
 
 /**

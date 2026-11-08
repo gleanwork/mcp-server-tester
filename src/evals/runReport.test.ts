@@ -183,9 +183,15 @@ describe('the run report', () => {
       await expect(
         fs.stat(path.join(result.outputDir, 'report', file))
       ).resolves.toBeTruthy();
-    expect(report).toEqual(
-      buildRunReport(await readRunDirectory(result.outputDir))
-    );
+    // With a link to the eval's history page, which the run wrote first.
+    const built = buildRunReport(await readRunDirectory(result.outputDir));
+    expect(report).toEqual({
+      ...built,
+      run: { ...built.run, historyPath: '../../../history/index.html' },
+    });
+    await expect(
+      fs.stat(path.resolve(result.outputDir, 'report', report.run.historyPath!))
+    ).resolves.toBeTruthy();
 
     expect(report.run).toMatchObject({
       evalName: 'run-report',

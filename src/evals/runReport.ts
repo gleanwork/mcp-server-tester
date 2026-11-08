@@ -849,7 +849,7 @@ function verdictOf(
 }
 
 /** The built reporter UI: in the package's dist, or in src when running from source. */
-function reporterUiDirectory(): string {
+export function reporterUiDirectory(): string {
   const here =
     typeof __filename === 'string'
       ? __filename
@@ -893,12 +893,21 @@ export async function writeRunReport(
   runDirectory: string,
   data?: MCPRunReportData
 ): Promise<string> {
-  const report =
+  const built =
     data ??
     buildRunReport(
       await readRunDirectory(runDirectory),
       await readCalibrations(evalDirectoryOf(runDirectory))
     );
+  // A link to the eval's history page, when the eval has one beside its runs.
+  const report: MCPRunReportData = existsSync(
+    path.join(evalDirectoryOf(runDirectory), 'history', 'index.html')
+  )
+    ? {
+        ...built,
+        run: { ...built.run, historyPath: '../../../history/index.html' },
+      }
+    : built;
   const target = path.join(runDirectory, 'report');
   await fs.mkdir(target, { recursive: true });
   await fs.cp(reporterUiDirectory(), target, { recursive: true, force: true });
