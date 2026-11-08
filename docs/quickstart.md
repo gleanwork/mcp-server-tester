@@ -49,7 +49,7 @@ This creates:
 
 - `playwright.config.ts` - Configured for your MCP server
 - `tests/mcp.spec.ts` - Example tests
-- `data/example-dataset.json` - Sample eval dataset
+- `data/example-dataset.json` - Example eval dataset
 - `package.json` - With all dependencies
 
 See the [CLI Guide](./cli.md) for all options.

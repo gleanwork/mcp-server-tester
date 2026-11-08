@@ -330,7 +330,7 @@ MST's LLM calls now resolve their endpoint and credential in one place (`src/llm
 }
 ```
 
-Run it with `mst run --config server-ab.json`, or `runEval({ configPath })` from code. The run summary's `variants` has each variant's metrics and results, and `variantDeltas` their changes against the first variant. For per-case outcomes, compare the two variants' results:
+Run it with `mst run --config server-ab.json`, or `runEval({ configPath })` from code. The run summary's `variants` has each variant's metrics and results, and `variantDeltas` their changes against the first variant. For each case, compare the two variants' results:
 
 ```typescript
 import { compareEvalRuns, runEval } from '@gleanwork/mcp-server-tester/evals';

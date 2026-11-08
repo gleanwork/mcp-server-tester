@@ -105,7 +105,7 @@ A case with `input` runs on the client. In a Playwright test, `runEvalDataset` n
 
 The most important thing to understand about LLM client evals is that a single run tells you almost nothing.
 
-Suppose you run your eval once and the LLM calls the right tool. Did you write a good tool description? Maybe. Did you get lucky? Also maybe. You can't tell from one sample.
+Suppose you run your eval once and the LLM calls the right tool. Did you write a good tool description? Maybe. Did you get lucky? Also maybe. You can't tell from one trial.
 
 **Pass rate** is the fraction of trials where every assertion passed:
 
@@ -235,7 +235,7 @@ Useful for detecting runaway tool use (the LLM calling tools in a loop) or for c
 
 ### `judges`
 
-Did an LLM evaluator (judge) say the response was good? This is for quality, not just correctness. Judges aren't assertions: a case lists them in `judges`, beside `assertions`. Each entry is a judge reference (`"acme/judge/completeness"`) or `{ "type": <reference>, ...options }`, the same shape as an eval config's `judges`. The built-in rubric judge is `{ "type": "rubric", "rubric": "correctness" }`.
+Did a model grader (a judge) say the response was good? This is for quality, not just correctness. Judges aren't assertions: a case lists them in `judges`, beside `assertions`. Each entry is a judge reference (`"acme/judge/completeness"`) or `{ "type": <reference>, ...options }`, the same shape as an eval config's `judges`. The built-in rubric judge is `{ "type": "rubric", "rubric": "correctness" }`.
 
 ```json snippet=snippets/evals-passes-judge.json
 {
@@ -546,7 +546,7 @@ expect(result.regressions).toBe(0);
 
 **Step 3: Refresh the baseline when you intentionally change behavior.**
 
-After a deliberate improvement that changes pass/fail outcomes, run with `saveResultsTo` again to update the file. Treat this the same way you would treat a snapshot update — review the diff, confirm it reflects intended changes, and commit.
+After a deliberate improvement that changes which cases pass or fail, run with `saveResultsTo` again to update the file. Treat this the same way you would treat a snapshot update — review the diff, confirm it reflects intended changes, and commit.
 
 The combination of `saveResultsTo` and `baselineResultsFrom` can be used in the same run to simultaneously update the baseline and compare against the previous one. Pass both options if you want a rolling comparison.
 

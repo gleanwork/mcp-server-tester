@@ -162,7 +162,7 @@ The SDK client's packages (`ai` and the `@ai-sdk/*` providers) are optional depe
 npx @gleanwork/mcp-server-tester@rc init
 ```
 
-The CLI wizard creates a `playwright.config.ts`, example tests, and a sample eval dataset configured for your server. See the [CLI Guide](./docs/cli.md) for all options.
+The CLI wizard creates a `playwright.config.ts`, example tests, and an example eval dataset configured for your server. See the [CLI Guide](./docs/cli.md) for all options.
 
 ## Configuration
 
@@ -203,7 +203,7 @@ for client-specific fields, environment rules, and setup ownership.
 - [Assertions](./docs/assertions.md) — all assertion types including snapshot sanitizers
 - [LLM Client Simulation](docs/mst-client.md) — tool discoverability testing
 - [LLM Gateways](./docs/llm-gateways.md) — routing MST's LLM calls through a gateway
-- [Traces](./docs/telemetry.md) — sending each trial to an OpenTelemetry collector
+- [OpenTelemetry traces](./docs/telemetry.md) — sending each trial to an OpenTelemetry collector
 - [API Reference](./docs/api-reference.md)
 - [Transports](./docs/transports.md) — stdio and HTTP configuration, OAuth
 - [Protocol Versions](./docs/protocol-versions.md) — legacy and 2026-07-28, protocol matrices, era-aware conformance

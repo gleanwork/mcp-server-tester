@@ -109,11 +109,11 @@ _Avoid_: native (unqualified)
 ### Grading
 
 **Grader**:
-Logic that scores a trial. A code grader is deterministic: each key of a case's `assertions`, such as `toolsTriggered` or `textContains`, is one, and records its own score. A model grader is a judge. A person who gives labels is a human grader.
+Logic that scores a trial. A code grader is deterministic: each key of a case's `assertions`, such as `toolsTriggered` or `containsText`, is one, and records its own score. A model grader is a judge. A person who gives labels is a human grader.
 _Avoid_: scorer, evaluator
 
 **Assertion**:
-One condition a code grader checks, such as one expected call in `toolsTriggered` or one string in `textContains`. A case's `assertions` lists them, grouped by grader.
+One condition a code grader checks, such as one expected call in `toolsTriggered` or one string in `containsText`. A case's `assertions` lists them, grouped by grader.
 _Avoid_: expectation, validator
 
 **Judge**:

@@ -23,13 +23,18 @@ const features: Feature[] = [
   },
   {
     title: 'Evals on real clients',
-    body: 'Run the same cases on the api client, Claude Code, the Codex CLI, Cowork, ChatGPT and the Codex app, and see which tools each one calls.',
+    body: "Run the same cases on the api client, Claude Code, the Codex CLI, Cowork, ChatGPT and the Codex app. Each trial's transcript records what the client did: its tool calls, skill loads and final answer.",
     to: '/docs/mst-client',
   },
   {
-    title: 'Judges you can trust',
-    body: 'Score answers with rubric and plugin judges, label a sample yourself with mst label, and measure a judge against your labels with mst judges check.',
+    title: 'Graders you can check',
+    body: "Code graders check tool calls and text. Model graders, MST's judges, read the transcript. Label trials yourself with mst label, and mst judges check tells you whether a judge is usable against your labels.",
     to: '/docs/judges',
+  },
+  {
+    title: 'Every write accounted for',
+    body: 'Every server has a write mode before a run starts. A dry-run proxy stops writes and records each one, and the writes grader checks that record, not what the client says it did.',
+    to: '/docs/evaluation-framework#writes',
   },
   {
     title: 'Both protocol eras',
@@ -38,7 +43,7 @@ const features: Feature[] = [
   },
   {
     title: 'Desktop clients in Docker',
-    body: 'Run Cowork and ChatGPT evals in disposable Linux containers, one per shard, while your machine stays usable.',
+    body: 'The docker runner collects Cowork and ChatGPT trials in disposable Linux containers, one per shard, while your machine stays usable.',
     to: '/docs/cowork-docker',
   },
   {
@@ -48,12 +53,12 @@ const features: Feature[] = [
   },
   {
     title: 'Plugins for the rest',
-    body: 'Datasets, clients, judges, connectors, environments and result stores are all extension kinds. Your organization adds its own in a plugin.',
+    body: 'Datasets, clients, judges, connectors, runners and result stores are all extension kinds. Your organization adds its own in a plugin.',
     to: '/docs/evaluation-framework',
   },
   {
     title: 'Agent Skills over MCP',
-    body: 'Test and evaluate the skills a server serves through the MCP skills extension, and check whether the model loads them when it should.',
+    body: 'Test the skills a server serves through the MCP skills extension, and evaluate whether the client loads them when it should.',
     to: '/docs/skills',
   },
 ];
@@ -137,9 +142,9 @@ function TestsAndEvals(): ReactNode {
       <div className="container">
         <h2>Tests and evals</h2>
         <p className={styles.lead}>
-          A test calls a tool directly and checks what it returns. An eval gives
-          a client a task, lets its model pick the tools, and grades what it did
-          over several trials. MST runs both.
+          A test calls a tool directly and checks what it returns. An eval has a
+          client act on each case over several trials, and graders score each
+          trial from its transcript. MST is the evaluation harness for both.
         </p>
         <div className={styles.split}>
           <div>
@@ -186,7 +191,7 @@ function ForAgents(): ReactNode {
 
 export default function Home(): ReactNode {
   return (
-    <Layout description="Playwright tests, evals on real AI clients, calibrated judges and protocol conformance for Model Context Protocol servers.">
+    <Layout description="An evaluation harness for Model Context Protocol servers: Playwright tests, evals on real AI clients, judges you calibrate against your own labels, and protocol conformance.">
       <Hero />
       <main>
         <Features />

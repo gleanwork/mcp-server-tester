@@ -48,7 +48,7 @@ npm run test:watch
 
 - Configuration validation
 - Dataset types and loading
-- Assertions (exact, schema, textContains, regex, snapshot, judge)
+- Assertions (exact, schema, containsText, regex, snapshot, judge)
 - MCP client factory and fixtures
 - LLM client simulation
 - Judge implementations (OpenAI, Anthropic)
