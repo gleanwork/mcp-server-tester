@@ -146,7 +146,7 @@ function missingPreferences(
 }
 
 /**
- * What an earlier grading of the same traces produced (`mst grade --resume`):
+ * What an earlier grading of the same transcripts produced (`mst grade --resume`):
  * each graded trial's scores and each compared case's preferences, by key.
  */
 export interface PreviousGrades {

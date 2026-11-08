@@ -83,25 +83,27 @@ async function readJson<T>(file: string): Promise<T> {
   return JSON.parse(await fs.readFile(file, 'utf8')) as T;
 }
 
-const trace = (variant: string, id: string, trial: number) =>
+const transcript = (variant: string, id: string, trial: number) =>
   path.join(variant, id, `${trial}.json`);
 
-/** What the run has on disk so far: run.json's phases and variants, and its traces. */
+/** What the run has on disk so far: run.json's phases and variants, and its transcripts. */
 async function onDisk(f: Fixture) {
   const runDirectory = await f.runDirectory();
   const run = await readJson<{
     phases: unknown;
     variants: Array<{ name: string }>;
   }>(path.join(runDirectory, 'run.json'));
-  const traces = (
-    await fs.readdir(path.join(runDirectory, 'traces'), { recursive: true })
+  const transcripts = (
+    await fs.readdir(path.join(runDirectory, 'transcripts'), {
+      recursive: true,
+    })
   )
     .filter((name) => name.endsWith('.json'))
     .sort();
   return {
     phases: run.phases,
     variants: run.variants.map((variant) => variant.name),
-    traces,
+    transcripts,
   };
 }
 
@@ -127,7 +129,10 @@ describe('a run saves each trial when it finishes', () => {
       {
         phases: { collect: 'partial', grade: 'partial' },
         variants: [],
-        traces: [trace('baseline', 'one', 0), trace('baseline', 'one', 1)],
+        transcripts: [
+          transcript('baseline', 'one', 0),
+          transcript('baseline', 'one', 1),
+        ],
       },
     ]);
   });
@@ -151,7 +156,7 @@ describe('a run saves each trial when it finishes', () => {
     expect(seen).toEqual({
       phases: { collect: 'partial', grade: 'partial' },
       variants: [],
-      traces: [trace('baseline', 'one', 0)],
+      transcripts: [transcript('baseline', 'one', 0)],
     });
   });
 
@@ -168,8 +173,8 @@ describe('a run saves each trial when it finishes', () => {
             early ??= await readJson(
               path.join(
                 await f.runDirectory(),
-                'traces',
-                trace('baseline', 'one', 0)
+                'transcripts',
+                transcript('baseline', 'one', 0)
               )
             );
           },
@@ -178,7 +183,11 @@ describe('a run saves each trial when it finishes', () => {
     });
     await f.run();
     const final = await readJson<Record<string, unknown>>(
-      path.join(await f.runDirectory(), 'traces', trace('baseline', 'one', 0))
+      path.join(
+        await f.runDirectory(),
+        'transcripts',
+        transcript('baseline', 'one', 0)
+      )
     );
     expect(RUN_SCHEMAS.trial.safeParse(early).success).toBe(true);
     // Grading adds to the trial's wall clock; nothing else changes.
@@ -187,7 +196,7 @@ describe('a run saves each trial when it finishes', () => {
     expect(earlyRecord).toEqual(finalRecord);
   });
 
-  it('stores an early trace redacted', async () => {
+  it('stores an early transcript redacted', async () => {
     let early: string | undefined;
     const f: Fixture = await fixture({
       async open() {
@@ -203,8 +212,8 @@ describe('a run saves each trial when it finishes', () => {
             early ??= await fs.readFile(
               path.join(
                 await f.runDirectory(),
-                'traces',
-                trace('baseline', 'one', 0)
+                'transcripts',
+                transcript('baseline', 'one', 0)
               ),
               'utf8'
             );
@@ -240,6 +249,6 @@ describe('a run saves each trial when it finishes', () => {
         .filter((c) => c.id === 'two')
         .every((c) => c.error?.includes('the desktop went away'))
     ).toBe(true);
-    expect((await onDisk(f)).traces).toHaveLength(4);
+    expect((await onDisk(f)).transcripts).toHaveLength(4);
   });
 });

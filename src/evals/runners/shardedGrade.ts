@@ -41,7 +41,7 @@ export interface GradeInRunnerOptions {
 /**
  * Each shard's cases' results, as the shard's `results.json`: a run's holds
  * every case. The run's is parsed once, here, and each shard's written in
- * turn, so the coordinator holds one copy of the run's traces, not one per
+ * turn, so the coordinator holds one copy of the run's transcripts, not one per
  * shard: a 278 MB results.json is about 450 MB of heap, and 20 shards parsing
  * it at once ran a coordinator out of memory. Read and written in chunks: it
  * can pass V8's string limit.

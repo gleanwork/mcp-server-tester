@@ -521,7 +521,7 @@ program
 program
   .command('grade')
   .description(
-    "Grade a stored run's traces again with the eval config's graders, as a new run (<run-id>.g<n>)"
+    "Grade a stored run's transcripts again with the eval config's graders, as a new run (<run-id>.g<n>)"
   )
   .argument('<run>', 'Run directory, run ID, or its short form (7f3c2a)')
   .requiredOption('-c, --config <path>', 'Path to the eval config the run ran')

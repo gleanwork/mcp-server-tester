@@ -1,7 +1,7 @@
 /**
  * The built-in `tool-use` judge (ADR 0009): did the client choose the right
  * tools, pass valid arguments, avoid calls it didn't need, and recover from
- * errors? It asks four yes-or-no questions about the trace, one model call
+ * errors? It asks four yes-or-no questions about the transcript, one model call
  * each, and fails when any answer is no. It goes beside `toolsTriggered`
  * and `toolCallCount`, which check named tools and counts without a model,
  * and doesn't replace them. It doesn't send the reference answer: the

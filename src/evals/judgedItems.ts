@@ -28,7 +28,7 @@ export interface JudgedItem {
   criterion?: string;
   variant: string;
   caseId: string;
-  /** Pointwise: the trial's index, as in `traces/<variant>/<case-id>/<trial>.json`. */
+  /** Pointwise: the trial's index, as in `transcripts/<variant>/<case-id>/<trial>.json`. */
   trial?: number;
   /** Pairwise: the variant this one was compared with. */
   baseline?: string;
@@ -98,8 +98,8 @@ export function judgedItems(stored: StoredRun): JudgedItem[] {
         // on keeps the other judges' verdicts.
         if (isInfrastructure(result)) continue;
         const answer =
-          'trace' in result && result.trace?.finalText !== undefined
-            ? result.trace.finalText
+          'transcript' in result && result.transcript?.finalText !== undefined
+            ? result.transcript.finalText
             : undefined;
         for (const score of judgeResults(result.scores?.judge)) {
           if (score.judgeName === undefined) continue;

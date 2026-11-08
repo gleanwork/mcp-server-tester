@@ -122,8 +122,13 @@ export interface ClientRunContext extends SettingsContext {
   acquire?: (index: number) => Promise<void>;
 }
 
-export type TraceEvidence = 'structured' | 'observed' | 'none';
-export interface TraceEvent {
+/**
+ * How a transcript was observed: `structured` from the client's own record,
+ * `observed` on a best-effort basis (calls may be missing), `none` not at all.
+ */
+export type TranscriptEvidence = 'structured' | 'observed' | 'none';
+/** One event of a transcript: a tool call, skill load, command, subagent or tool search. */
+export interface TranscriptEvent {
   /**
    * `tool_call` for MCP and host tools; host-native `skill` loads, `command`
    * runs, `subagent` starts, and `tool_search` catalog searches.
@@ -191,7 +196,7 @@ export interface ModelCall {
    * summaries), when it returned any. Stored results drop it, as `text`.
    */
   reasoningText?: string;
-  /** The `TraceEvent.id`s of the tool calls the model asked for. */
+  /** The `TranscriptEvent.id`s of the tool calls the model asked for. */
   toolCallIds?: string[];
 }
 
@@ -258,11 +263,11 @@ export interface HostTelemetry {
   dropped?: number;
 }
 
-/** One execution trace. Clients never return evaluation scores. */
+/** What a client reports for one trial. Clients never return evaluation scores. */
 export interface ClientRunResult {
   diagnostics?: ClientDiagnostics;
   finalText: string;
-  events: TraceEvent[];
+  events: TranscriptEvent[];
   /** The trial's model requests, in order (see `ModelCall`). */
   modelCalls?: ModelCall[];
   /**
@@ -286,7 +291,7 @@ export interface ClientRunResult {
    * What the client observed: counts, ids, statuses, timings. Put anything
    * that may quote the prompt, the model or the server (a conversation, app
    * text) under `telemetry.content`: stored results drop it unless they keep
-   * full traces (`redactStoredResponses: false`). UI actions are not LLM
+   * full transcripts (`redactStoredResponses: false`). UI actions are not LLM
    * usage.
    */
   telemetry?: Record<string, unknown>;
@@ -303,7 +308,7 @@ export interface ClientRunResult {
    * The client's own record of this trial, such as a desktop session folder
    * with its audit log, transcripts, spilled tool output and the files it
    * wrote. MST copies what `include` names before grading, and judges read
-   * the copy. A run that keeps full traces (`redactStoredResponses: false`)
+   * the copy. A run that keeps full transcripts (`redactStoredResponses: false`)
    * keeps the copy, so `mst grade` reads it later. Never stored as a path.
    */
   artifacts?: ClientArtifacts;
@@ -340,13 +345,13 @@ export interface ClientArtifacts {
 }
 
 /**
- * What a client did in one trial: the `ClientRunResult` it returned, without
+ * A trial's transcript, what a client did in one trial: the `ClientRunResult` it returned, without
  * telemetry and diagnostics, plus the evidence it declared. Case results keep
  * it for client cases (one per trial). In an eval, every MCP event names its
  * `server` label. Stored results drop `finalText` and event `output`, which
  * can hold data from the server under test.
  */
-export type Trace = Pick<
+export type Transcript = Pick<
   ClientRunResult,
   | 'events'
   | 'modelCalls'
@@ -358,7 +363,7 @@ export type Trace = Pick<
 > & {
   finalText?: string;
   /** Declared evidence; absent for the legacy simulated client. */
-  evidence?: TraceEvidence;
+  evidence?: TranscriptEvidence;
 };
 
 export interface ClientBatchRequest {
@@ -418,7 +423,7 @@ export interface ClientSession {
   readonly readiness?: ClientSessionReadiness;
   /**
    * Client-defined setup/cleanup timings and statuses. Read after close and
-   * copy to each result's `telemetry.batchLifecycle`, not into the trace.
+   * copy to each result's `telemetry.batchLifecycle`, not into the transcript.
    */
   readonly lifecycle?: Record<string, unknown>;
   run(trial: ClientSessionTrial): Promise<ClientSessionResult>;
@@ -455,7 +460,7 @@ export interface ClientDefinition {
   /** What a machine needs to run it (`mst clients show`). */
   readonly requirements?: ClientRequirements;
   /** Missing evidence declarations are treated as unverified. */
-  readonly evidence?: TraceEvidence;
+  readonly evidence?: TranscriptEvidence;
   /**
    * The client shows the model a variant's tool metadata (`tools`, read from
    * `context.variant` or `context.evalConfig`) itself. Without it, an eval
@@ -880,7 +885,7 @@ export interface EvaluationVariantResult {
   /** Outcomes, calls, tokens, cost and time, plus the listed metrics. */
   metrics?: Record<string, unknown>;
   /** The weakest evidence among the variant's cases. */
-  evidence?: TraceEvidence;
+  evidence?: TranscriptEvidence;
   /** Listed metrics with no value for this variant (unavailable, not zero). */
   unavailableMetrics?: string[];
   /** Where `cost_usd` comes from: clients, the eval config's `pricing`, or both. */
@@ -971,7 +976,7 @@ export interface RunSummary {
    */
   graded?: false;
   /**
-   * A regrade's: when the run that collected its traces finished (that run's
+   * A regrade's: when the run that collected its transcripts finished (that run's
    * `timestamp`). Runs are ordered by when they collected, so a regrade of an
    * older run stays older than a newer run.
    */

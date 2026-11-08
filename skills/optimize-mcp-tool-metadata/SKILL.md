@@ -43,7 +43,7 @@ Tool metadata changes what the client sees, not what the server accepts. The mod
 | `toolPrecision` | The model calls extra tools: descriptions overlap or over-reach |
 | `toolF1`        | Both                                                            |
 
-Run the baseline once (a `runEvalDataset` test, or `mst run`) and read each failing case's `toolCallTrace`: `calls` marked `unexpected`, and `missed` tools. Note which tools fail, on which inputs, and what the model called instead.
+Run the baseline once (a `runEvalDataset` test, or `mst run`) and read each failing case's `toolCallTranscript`: `calls` marked `unexpected`, and `missed` tools. Note which tools fail, on which inputs, and what the model called instead.
 
 ## Step 2: Write variants from the evidence
 
@@ -244,7 +244,7 @@ With it, a short summary: what changed, the hypothesis it tested and why it work
 
 ## Checklist
 
-- [ ] The metric follows the failure seen in `toolCallTrace`
+- [ ] The metric follows the failure seen in `toolCallTranscript`
 - [ ] Regression cases tagged `regression`; some cases tagged `held-out`
 - [ ] Each variant has a unique `id` and a `description` stating its hypothesis
 - [ ] Variants change descriptive text or names only, never parameter names, types or `required`

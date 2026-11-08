@@ -8,7 +8,7 @@ import type {
   ClientRunResult,
   ClientSessionOptions,
 } from './evalFrameworkTypes.js';
-import { toolCallEvents } from './clientTrace.js';
+import { toolCallEvents } from './clientTranscript.js';
 import { runChatgptTurn, type ChatgptTurn } from './chatgpt/turn.js';
 import type { ChatgptAppConfig } from './chatgpt/config.js';
 import { ChatgptAppSession } from './chatgptSetup/session.js';
@@ -356,26 +356,27 @@ function desktopAdapter(
         appSession,
         { caseId: request.caseId }
       );
-      const trace = turnRunResult(result, requests[0]!.input.servers);
-      if (trace.error) trace.error = redactClientSecrets(trace.error, secrets);
+      const transcript = turnRunResult(result, requests[0]!.input.servers);
+      if (transcript.error)
+        transcript.error = redactClientSecrets(transcript.error, secrets);
       if (result.success) {
         const id = result.clientMetadata.session.id;
         if (!id || !result.clientMetadata.session.turnId || !ledger.claim(id))
-          trace.error = `${label} requires a distinct native session and turn for each fresh query; refusing duplicate attribution.`;
+          transcript.error = `${label} requires a distinct native session and turn for each fresh query; refusing duplicate attribution.`;
       }
-      if (trace.usage) {
+      if (transcript.usage) {
         // Native OpenAI input totals include cache reads; V2 counts cache separately.
         const uncached =
-          trace.usage.inputTokens -
-          (trace.usage.cacheReadInputTokens ?? 0) -
-          (trace.usage.cacheCreationInputTokens ?? 0);
+          transcript.usage.inputTokens -
+          (transcript.usage.cacheReadInputTokens ?? 0) -
+          (transcript.usage.cacheCreationInputTokens ?? 0);
         if (uncached < 0)
-          trace.error = 'Native cached input exceeds total input tokens.';
-        else trace.usage = { ...trace.usage, inputTokens: uncached };
+          transcript.error = 'Native cached input exceeds total input tokens.';
+        else transcript.usage = { ...transcript.usage, inputTokens: uncached };
       }
       // Native/controller/evidence failures restart the app before the next case.
       // A completed, attributed turn can fail the MCP measurement without a restart.
-      const executionTrusted = result.success && !trace.error;
+      const executionTrusted = result.success && !transcript.error;
       const mcpCalls = result.toolCalls.filter(
         (call) => call.source !== 'builtin'
       );
@@ -398,21 +399,21 @@ function desktopAdapter(
         !selectedCalls.length
       )
         measurementError = `${label} completed without calling a required evaluation MCP tool on the configured server selection.`;
-      if (measurementError) trace.error = measurementError;
+      if (measurementError) transcript.error = measurementError;
       const session = result.clientMetadata?.session;
       // How a failed turn ended, from the failure kind the turn typed
       // (ADR 0010): the metadata goes under telemetry, where no reader
       // looks. A completed turn that missed the servers is a trial.
       const ending =
-        trace.ending ??
+        transcript.ending ??
         (result.success
           ? undefined
           : endingOf({
-              error: trace.error,
+              error: transcript.error,
               clientMetadata: result.clientMetadata,
             }));
       const caseResult: ClientRunResult = {
-        ...trace,
+        ...transcript,
         ...(ending ? { ending } : {}),
         // The native turn's own times, when it was bound.
         ...(session?.startedAt ? { startedAt: session.startedAt } : {}),
@@ -445,7 +446,7 @@ function desktopAdapter(
           nativeController: result.clientMetadata.nativeController,
           // Failed bound turns keep their partial native history. It
           // quotes the prompt and the answer, so it is content, which
-          // stored results drop unless they keep full traces.
+          // stored results drop unless they keep full transcripts.
           ...(result.conversationHistory
             ? { content: { conversationHistory: result.conversationHistory } }
             : {}),

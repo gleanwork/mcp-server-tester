@@ -201,8 +201,8 @@ function caseSource(
 function trial(result: EvalCaseResult) {
   const judged = buildJudgeTrial(result.response, {
     clientResponse: result.response,
-    ...(result.traceEvidence !== undefined && {
-      evidence: result.traceEvidence,
+    ...(result.transcriptEvidence !== undefined && {
+      evidence: result.transcriptEvidence,
     }),
   });
   // Stored responses drop the local path; the run keeps it in memory.

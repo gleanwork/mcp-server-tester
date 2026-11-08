@@ -12,7 +12,7 @@ import { z } from 'zod';
 import type { MCPConfig } from '../../src/config/mcpConfig.js';
 import type {
   ClientRunResult,
-  TraceEvent,
+  TranscriptEvent,
 } from '../../src/evals/evalFrameworkTypes.js';
 import type { Plugin } from '../../src/plugins/plugin.js';
 
@@ -110,7 +110,7 @@ async function runScript(
     throw new Error(
       'A calibration case gives its steps and answer in clientOptions.'
     );
-  const events: TraceEvent[] = [];
+  const events: TranscriptEvent[] = [];
   for (const step of config.steps) {
     const connection = connections.find(({ label }) => label === step.server);
     if (!connection)

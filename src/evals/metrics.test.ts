@@ -469,7 +469,7 @@ describe('per-trial metrics', () => {
     source: 'mcp' as const,
     name,
   });
-  const trace = (
+  const transcript = (
     calls: number,
     evidence: 'structured' | 'none' = 'structured'
   ) => ({
@@ -491,11 +491,16 @@ describe('per-trial metrics', () => {
     clientUsage: usage(600),
     passRate: 0.5,
     trialResults: [
-      { pass: true, durationMs: 100, trace: trace(2), clientUsage: usage(100) },
+      {
+        pass: true,
+        durationMs: 100,
+        transcript: transcript(2),
+        clientUsage: usage(100),
+      },
       {
         pass: false,
         durationMs: 300,
-        trace: trace(1),
+        transcript: transcript(1),
         clientUsage: usage(300),
       },
       // Infrastructure failures don't count, as for the pass rate.
@@ -560,9 +565,11 @@ describe('per-trial metrics', () => {
     expect(aggregated.duration_s_mean).toBe((0.2 + 0.2) / 2);
   });
 
-  it('reports no trace metrics for a client with no evidence, and lists them as unavailable', () => {
+  it('reports no transcript metrics for a client with no evidence, and lists them as unavailable', () => {
     const blind = iterated({
-      trialResults: [{ pass: true, durationMs: 100, trace: trace(0, 'none') }],
+      trialResults: [
+        { pass: true, durationMs: 100, transcript: transcript(0, 'none') },
+      ],
     });
     const { aggregated, unavailable } = computeMetrics(
       ['tool_count', 'first_tool', 'cost_usd', 'passed'],
@@ -572,7 +579,7 @@ describe('per-trial metrics', () => {
     expect(unavailable).toEqual(['tool_count', 'first_tool', 'cost_usd']);
   });
 
-  it('falls back to the response for results without a trace', () => {
+  it('falls back to the response for results without a transcript', () => {
     const direct: EvalCaseResult = {
       id: 'direct',
       datasetName: 'd',
@@ -594,7 +601,7 @@ describe('per-trial metrics', () => {
         {
           pass: true,
           durationMs: 1,
-          trace: {
+          transcript: {
             events: [
               {
                 kind: 'tool_call',
@@ -606,7 +613,7 @@ describe('per-trial metrics', () => {
             ],
           },
         },
-        { pass: true, durationMs: 1, trace: trace(1) },
+        { pass: true, durationMs: 1, transcript: transcript(1) },
       ],
     });
     expect(computeMetrics(['first_tool'], [labelled]).aggregated).toEqual({
@@ -632,7 +639,7 @@ describe('per-trial metrics', () => {
       ...base,
       id: 'crash',
       error: 'Client execution failed.',
-      trace: { events: [], error: 'Client execution failed.' },
+      transcript: { events: [], error: 'Client execution failed.' },
     };
     const { aggregated } = computeMetrics(
       ['response_success', 'duration_s', 'trial_pass'],
@@ -646,11 +653,11 @@ describe('per-trial metrics', () => {
     });
   });
 
-  it("doesn't borrow the case's response for a trial without a trace", () => {
+  it("doesn't borrow the case's response for a trial without a transcript", () => {
     const partial = iterated({
       response: { toolCalls: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] },
       trialResults: [
-        { pass: true, durationMs: 1, trace: trace(1) },
+        { pass: true, durationMs: 1, transcript: transcript(1) },
         { pass: false, durationMs: 1, error: 'assertion threw' },
       ],
     });
@@ -661,7 +668,7 @@ describe('per-trial metrics', () => {
 });
 
 describe('tool_search_hit', () => {
-  type Event = NonNullable<EvalCaseResult['trace']>['events'][number];
+  type Event = NonNullable<EvalCaseResult['transcript']>['events'][number];
   const search = (...names: Array<[string, string?]>): Event => ({
     kind: 'tool_search',
     source: 'builtin',
@@ -677,35 +684,41 @@ describe('tool_search_hit', () => {
     name,
     ...(server ? { server } : {}),
   });
-  const traced = (
+  const withTranscript = (
     id: string,
     events: Event[],
     evidence: 'structured' | 'none' = 'structured'
   ): EvalCaseResult => ({
     ...result(id, true),
-    trace: { events, finalText: '', evidence },
+    transcript: { events, finalText: '', evidence },
   });
 
   it('is the share of trials whose search led to a call', () => {
     const { perCase, aggregated, unavailable } = computeMetrics(
       ['tool_search_hit'],
       [
-        traced('hit', [
+        withTranscript('hit', [
           search(['find_skills', 'agg']),
           call('find_skills', 'agg'),
         ]),
-        traced('bare', [search(['find_skills']), call('find_skills', 'agg')]),
-        traced('miss', [search(['search', 'agg']), call('find_skills', 'agg')]),
-        traced('before', [
+        withTranscript('bare', [
+          search(['find_skills']),
+          call('find_skills', 'agg'),
+        ]),
+        withTranscript('miss', [
+          search(['search', 'agg']),
+          call('find_skills', 'agg'),
+        ]),
+        withTranscript('before', [
           call('find_skills', 'agg'),
           search(['find_skills', 'agg']),
         ]),
-        traced('other-server', [
+        withTranscript('other-server', [
           search(['find_skills', 'b']),
           call('find_skills', 'agg'),
         ]),
-        traced('no-search', [call('find_skills', 'agg')]),
-        traced('no-evidence', [search(['x']), call('x')], 'none'),
+        withTranscript('no-search', [call('find_skills', 'agg')]),
+        withTranscript('no-evidence', [search(['x']), call('x')], 'none'),
       ]
     );
     expect(perCase.hit!.tool_search_hit).toBe(1);

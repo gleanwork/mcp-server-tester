@@ -15,7 +15,7 @@ vi.mock('./judgeClient.js', async (original) => ({
 
 afterEach(() => vi.mocked(createJudgeCompletion).mockReset());
 
-/** A trace whose only call failed, with an answer that claims success. */
+/** A transcript whose only call failed, with an answer that claims success. */
 const FALSE_SUCCESS: JudgeInput = {
   case: {
     input: { prompt: 'What is the weather in Oslo?' },
@@ -71,10 +71,10 @@ describe('the task-completion judge', () => {
     expect(rule('no')).toContain('the only call failed');
     // A request that needs no tool can still pass.
     expect(rule('yes')).toContain('the request needed no tool');
-    // A result the trace can't show is unknown, not no.
+    // A result the transcript can't show is unknown, not no.
     expect(rule('unknown')).toContain('observed="false"');
     expect(rule('unknown')).toContain('complete="false"');
-    // A reference wins over the answer, unless the trace shows it's stale.
+    // A reference wins over the answer, unless the transcript shows it's stale.
     expect(
       rules.find((r) => r.startsWith('When there is a reference answer'))
     ).toContain('out of date');
@@ -82,7 +82,7 @@ describe('the task-completion judge', () => {
     expect(rules.at(-1)).toContain('an extra claim beside it');
   });
 
-  it('asks its one question about the trace, with the reference answer', async () => {
+  it('asks its one question about the transcript, with the reference answer', async () => {
     const requests = model('no');
     const score = await TASK_COMPLETION_JUDGE.evaluate(FALSE_SUCCESS, {});
     expect(requests).toHaveLength(1);

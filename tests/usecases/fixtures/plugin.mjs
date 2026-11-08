@@ -9,7 +9,7 @@
 // see, renaming or re-describing a tool changes what it does, as it would
 // for a real model.
 //
-// Every trace the client returns is appended to the JSONL file named by
+// Every transcript the client returns is appended to the JSONL file named by
 // USECASE_LEDGER, so tests can check MST's aggregates against what the client
 // actually reported.
 import fs from 'node:fs';
@@ -251,7 +251,7 @@ async function runModel(request, config, connections) {
   const calls = events.filter((event) => event.kind === 'tool_call').length;
   const durationMs = 100 + 50 * calls;
   return {
-    // The model answers from the last thing it read, so the trace can hold
+    // The model answers from the last thing it read, so the transcript can hold
     // facts the answer leaves out (and a judge must read the answer only).
     finalText: outputs.length
       ? `Answer: ${outputs.at(-1)}`
@@ -286,7 +286,11 @@ export default {
         const clients = await connect(options.input.servers);
         return {
           async run(trial) {
-            const request = { ...options, ...trial, input: { ...options.input, ...trial.input } };
+            const request = {
+              ...options,
+              ...trial,
+              input: { ...options.input, ...trial.input },
+            };
             const result = await runModel(request, config, clients);
             record({
               variant: context.variant?.name ?? 'default',
@@ -303,7 +307,9 @@ export default {
             return { result, continuation: 'continue' };
           },
           async reset() {},
-          async close() { await closeAll(clients); },
+          async close() {
+            await closeAll(clients);
+          },
         };
       },
     },
@@ -330,7 +336,7 @@ export default {
     keywords: {
       schema: z.object({ keywords: z.array(z.string()).min(1) }).strict(),
       async evaluate({ trial }, options) {
-        // Judge the client's answer, never its trace.
+        // Judge the client's answer, never its transcript.
         const answer = trial.text;
         if (!answer)
           throw new Error('usecase/judge/keywords judges a text response.');

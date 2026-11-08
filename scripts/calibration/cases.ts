@@ -1,12 +1,12 @@
 /**
- * The calibration set's cases. Each one is a trace whose right label is
+ * The calibration set's cases. Each one is a transcript whose right label is
  * known from how it was built: a scripted client (./plugin.mjs) makes real
  * tool calls against MST's mock server and the filesystem reference server
  * (over ./files), then gives an answer written to be right or wrong in one
  * way. No person reviewed these labels; docs/judges.md says so.
  *
  * Each template is a task with its right call, a wrong call and a failing
- * call. Each trace kind combines them into one trace, and `LABELS` gives the
+ * call. Each transcript kind combines them into one transcript, and `LABELS` gives the
  * label it has for each judge question.
  */
 
@@ -43,8 +43,8 @@ interface Template {
    * Without this, it's `answer`: only a tool could have given it, so giving
    * it claims the call worked. A task a model can do without a tool
    * (arithmetic) has to say it used the tool, or the answer claims nothing.
-   * Saying so is a claim the trace contradicts, so, like an unsupported
-   * claim, it leaves the trace with no correctness label (`labelOf`).
+   * Saying so is a claim the transcript contradicts, so, like an unsupported
+   * claim, it leaves the transcript with no correctness label (`labelOf`).
    */
   falseSuccessAnswer?: string;
   /** An answer that reports the failing call's error and stops. */
@@ -54,10 +54,10 @@ interface Template {
 }
 
 /**
- * The kinds of trace. Each changes one thing about a sound trace, so it
+ * The kinds of transcript. Each changes one thing about a sound transcript, so it
  * has one right label for each question.
  */
-export const TRACE_KINDS = [
+export const TRANSCRIPT_KINDS = [
   'sound',
   'recovered',
   'wrong-fact',
@@ -67,7 +67,7 @@ export const TRACE_KINDS = [
   'extra-calls',
   'gave-up',
 ] as const;
-export type TraceKind = (typeof TRACE_KINDS)[number];
+export type TranscriptKind = (typeof TRANSCRIPT_KINDS)[number];
 
 /**
  * The judge questions the set has labels for, by the judge's name in
@@ -82,11 +82,11 @@ export type CalibrationQuestion =
 type Label = 'pass' | 'fail';
 
 /**
- * Each trace kind's label for each question. `null` means the kind has no
- * one right answer to the question, so its traces get no label for it.
+ * Each transcript kind's label for each question. `null` means the kind has no
+ * one right answer to the question, so its transcripts get no label for it.
  */
 export const LABELS: Record<
-  TraceKind,
+  TranscriptKind,
   Record<CalibrationQuestion, Label | null>
 > = {
   // The right call, and an answer it supports.
@@ -443,18 +443,18 @@ const TEMPLATES: Template[] = [
   forecast('Lima', 'That is the warmest day this month.'),
 ];
 
-/** One trace of the set, as a dataset case. */
+/** One transcript of the set, as a dataset case. */
 export interface CalibrationCase {
   id: string;
   input: string;
   expected: { answer: string };
   clientOptions: { steps: ScriptedCall[]; answer: string };
-  metadata: { template: string; kind: TraceKind };
+  metadata: { template: string; kind: TranscriptKind };
 }
 
-function trace(
+function transcript(
   template: Template,
-  kind: TraceKind
+  kind: TranscriptKind
 ): CalibrationCase['clientOptions'] {
   const { call, answer } = template;
   switch (kind) {
@@ -486,7 +486,7 @@ function trace(
 /**
  * A case's label for a question: its kind's, except that a false-success
  * answer that credits the tool (`falseSuccessAnswer`) makes a claim the
- * trace contradicts. Whether that makes a right answer incorrect depends on
+ * transcript contradicts. Whether that makes a right answer incorrect depends on
  * how strict a reader is, as for `unsupported-claim`, so it has no
  * correctness label.
  */
@@ -504,14 +504,14 @@ export function labelOf(
     : LABELS[c.metadata.kind][question];
 }
 
-/** Every template in every trace kind: 16 templates by 8 kinds, 128 cases. */
+/** Every template in every transcript kind: 16 templates by 8 kinds, 128 cases. */
 export function calibrationCases(): CalibrationCase[] {
   return TEMPLATES.flatMap((template) =>
-    TRACE_KINDS.map((kind) => ({
+    TRANSCRIPT_KINDS.map((kind) => ({
       id: `${template.id}--${kind}`,
       input: template.input,
       expected: { answer: template.reference },
-      clientOptions: trace(template, kind),
+      clientOptions: transcript(template, kind),
       metadata: { template: template.id, kind },
     }))
   );

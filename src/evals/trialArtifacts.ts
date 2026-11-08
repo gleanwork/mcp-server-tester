@@ -1,7 +1,7 @@
 /**
  * Client artifacts (see `ClientRunResult.artifacts`): what each trial's
  * client names as evidence is copied before anything grades the trial, and
- * judges read the copy. A run that keeps full traces keeps the copies in its
+ * judges read the copy. A run that keeps full transcripts keeps the copies in its
  * directory (`artifacts/<variant>/<case-id>/<trial>/`), so `mst grade` reads
  * exactly what the first grading read.
  */

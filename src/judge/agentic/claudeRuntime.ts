@@ -28,7 +28,7 @@ import {
 } from './runtime.js';
 
 export interface ClaudeRuntimeOptions {
-  /** In-process tools, such as a plugin's trace helpers. */
+  /** In-process tools, such as a plugin's transcript helpers. */
   tools?: readonly AgentJudgeTool[];
   /** Extra environment variable names to pass through, such as proxy settings. */
   env?: readonly string[];

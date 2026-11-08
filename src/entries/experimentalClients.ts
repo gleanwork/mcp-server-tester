@@ -57,7 +57,7 @@ export type {
   ClientCapability,
   ClientDriverId,
   ObservationConfidence,
-  TraceSource,
+  TranscriptSource,
 } from '../evals/clientTelemetryTypes.js';
 export type {
   ComputerUseTelemetry,

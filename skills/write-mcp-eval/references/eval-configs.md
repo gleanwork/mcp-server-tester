@@ -62,7 +62,7 @@ Define each server once, keyed by its label. A variant lists the labels it uses.
 }
 ```
 
-- An entry doesn't set `label`: the key is the label. Tool calls in traces and metrics carry it (`staging.search`).
+- An entry doesn't set `label`: the key is the label. Tool calls in transcripts and metrics carry it (`staging.search`).
 - `auth.accessTokenEnv` names the environment variable that holds a bearer token. Supply it from the environment or `--secrets-file`; never write a token into the file.
 - A plugin connector names a vendor server instead of a transport: `"slack": { "connector": "acme/connector/slack" }`. Sign in once with `npx mst auth --config <path>`.
 - Point servers that can write data at test tenants or test accounts.
@@ -173,6 +173,6 @@ Each run writes a directory under `.mcp-test-results/<name>/runs/` (or `--output
 - `variants`: each variant's metrics, results and evidence.
 - `variantDeltas`: each variant's change from the baseline (`passRate`, `trialPassRate`, `metricDeltas`).
 - `previousRun`: the change since the previous run of the same eval config, with `regressed` and `improved` case ids per variant. `sameConfig: false` means the config changed between the runs.
-- `results`: every case result, each with its `variant` and `trace`.
+- `results`: every case result, each with its `variant` and `transcript`.
 
 Stored results drop answers and tool outputs by default; tool calls, arguments, servers and usage stay.

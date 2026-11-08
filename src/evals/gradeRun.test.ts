@@ -245,7 +245,7 @@ const readJson = async (file: string) =>
   JSON.parse(await fs.readFile(file, 'utf8')) as Record<string, unknown>;
 
 describe('mst run --no-grade and mst grade', () => {
-  it('grades stored traces as a normal run would, without running the client', async () => {
+  it('grades stored transcripts as a normal run would, without running the client', async () => {
     const t = await setup({ trials: 2, keyword: '41 minutes' });
     const graded = await runEval(t.base);
     const collected = await runEval({ ...t.base, grade: false });
@@ -352,7 +352,7 @@ describe('mst run --no-grade and mst grade', () => {
         .filter((result) => result.pass)
         .map((result) => result.variant)
     ).toEqual(['better', 'better']);
-    // A regrade of a regrade still names the run that collected the traces.
+    // A regrade of a regrade still names the run that collected the transcripts.
     const g3 = await gradeRun({ ...t.base, run: g2.outputDir });
     expect(path.basename(g3.outputDir)).toBe(
       `${path.basename(first.outputDir)}.g3`
@@ -427,16 +427,16 @@ describe('mst run --no-grade and mst grade', () => {
     expect(runs).toEqual([path.basename(collected.outputDir)]);
   });
 
-  it('refuses to collect or grade traces stored without their answers', async () => {
+  it('refuses to collect or grade transcripts stored without their answers', async () => {
     const t = await setup({ redact: true });
     await expect(runEval({ ...t.base, grade: false })).rejects.toThrow(
-      /--no-grade keeps the traces.*"redactStoredResponses": false/
+      /--no-grade keeps the transcripts.*"redactStoredResponses": false/
     );
     expect(t.client).not.toHaveBeenCalled();
     const graded = await runEval(t.base);
     await expect(
       gradeRun({ ...t.base, run: graded.outputDir })
-    ).rejects.toThrow(/stored redacted traces/);
+    ).rejects.toThrow(/stored redacted transcripts/);
   });
 
   it("fails for a run of another eval, or a variant or case the config doesn't have", async () => {
@@ -716,10 +716,10 @@ describe("trials' client artifacts", () => {
       ]);
       expect(view.answer).toMatch(/^(baseline|better) wrote: /);
     }
-    const trace = await readJson(
-      path.join(collected.outputDir, 'traces', 'better', 'cause', '0.json')
+    const transcript = await readJson(
+      path.join(collected.outputDir, 'transcripts', 'better', 'cause', '0.json')
     );
-    expect(trace.artifacts).toBe(
+    expect(transcript.artifacts).toBe(
       path.join('artifacts', 'better', 'cause', '0')
     );
     // No stored file holds the session's path.
@@ -749,15 +749,15 @@ describe("trials' client artifacts", () => {
     const collected = await runEval(t.base);
     const file = path.join(
       collected.outputDir,
-      'traces',
+      'transcripts',
       'better',
       'cause',
       '0.json'
     );
-    const trace = await readJson(file);
+    const transcript = await readJson(file);
     await fs.writeFile(
       file,
-      JSON.stringify({ ...trace, artifacts: '../../..' })
+      JSON.stringify({ ...transcript, artifacts: '../../..' })
     );
     await expect(
       gradeRun({ ...t.base, run: collected.outputDir })
@@ -791,11 +791,11 @@ describe("trials' client artifacts", () => {
       expect(result.error).toMatch(
         /^Couldn't copy the trial's client artifacts: /
       );
-    const trace = await readJson(
-      path.join(collected.outputDir, 'traces', 'better', 'cause', '0.json')
+    const transcript = await readJson(
+      path.join(collected.outputDir, 'transcripts', 'better', 'cause', '0.json')
     );
-    expect(trace.infrastructureError).toBe(true);
-    expect(trace.clientDiagnostics).toEqual({ failureKind: 'artifacts' });
+    expect(transcript.infrastructureError).toBe(true);
+    expect(transcript.clientDiagnostics).toEqual({ failureKind: 'artifacts' });
     const stored = await fs.readFile(
       path.join(collected.outputDir, 'results.json'),
       'utf8'
@@ -803,7 +803,7 @@ describe("trials' client artifacts", () => {
     expect(stored).not.toContain('/nonexistent/mst-session"');
   });
 
-  it('a run that redacts its traces lets judges read a copy, then removes it', async () => {
+  it('a run that redacts its transcripts lets judges read a copy, then removes it', async () => {
     const t = await setup({ artifacts: true, redact: true });
     const collected = await runEval(t.base);
     expect(t.seen).toHaveLength(12);

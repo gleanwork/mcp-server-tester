@@ -116,12 +116,12 @@ describe('a run in a runner with shards', () => {
     await expect(
       fs.stat(path.join(f.outputDir, 'latest.json'))
     ).resolves.toBeDefined();
-    const traces = (
-      await fs.readdir(path.join(result.outputDir, 'traces'), {
+    const transcripts = (
+      await fs.readdir(path.join(result.outputDir, 'transcripts'), {
         recursive: true,
       })
     ).filter((name) => name.endsWith('.json'));
-    expect(traces).toHaveLength(8);
+    expect(transcripts).toHaveLength(8);
   }, 60_000);
 
   it("marks a lost shard's trials missing, not failed, and leaves the run partial", async () => {
@@ -195,20 +195,20 @@ describe('a run in a runner with shards', () => {
       path.join(f.outputDir, 'latest.json')
     );
     expect(latest.runId).toBe(runId);
-    // Every stored trace, the ones collected before the resume too, keeps
-    // what the client recorded beyond its events.
-    const traces = (
-      await fs.readdir(path.join(resumed.outputDir, 'traces'), {
+    // Every stored transcript, the ones collected before the resume too,
+    // keeps what the client recorded beyond its events.
+    const transcripts = (
+      await fs.readdir(path.join(resumed.outputDir, 'transcripts'), {
         recursive: true,
       })
     ).filter((name) => name.endsWith('.json'));
-    expect(traces).toHaveLength(8);
-    for (const name of traces) {
-      const { caseId, trace } = await f.readJson<{
+    expect(transcripts).toHaveLength(8);
+    for (const name of transcripts) {
+      const { caseId, transcript } = await f.readJson<{
         caseId: string;
-        trace: Record<string, unknown>;
-      }>(path.join(resumed.outputDir, 'traces', name));
-      expect(trace).toMatchObject({
+        transcript: Record<string, unknown>;
+      }>(path.join(resumed.outputDir, 'transcripts', name));
+      expect(transcript).toMatchObject({
         startedAt: '2026-01-01T00:00:00.000Z',
         completedAt: '2026-01-01T00:00:02.000Z',
         modelCalls: [{ requestId: `req-${caseId}` }],
@@ -245,7 +245,7 @@ describe('a run in a runner with shards', () => {
     });
     const trial = (name: string) =>
       f.readJson<{ ending: unknown; infrastructureError: boolean }>(
-        path.join(first.outputDir, 'traces', 'baseline', name, '0.json')
+        path.join(first.outputDir, 'transcripts', 'baseline', name, '0.json')
       );
     expect(await trial('flaky-once')).toMatchObject({
       infrastructureError: true,
@@ -350,6 +350,6 @@ describe('a run in a runner with shards', () => {
     const partial = await f.run({ shards: '2', fail: '1' });
     await expect(
       f.resume(path.basename(partial.outputDir), { shards: '2' })
-    ).rejects.toThrow('stored redacted traces');
+    ).rejects.toThrow('stored redacted transcripts');
   }, 60_000);
 });

@@ -3,7 +3,7 @@ import { skillRootUri } from '../../skills/skillEntry.js';
 import type { SkillEntry } from '../../skills/skillsTypes.js';
 import type { ClientSkillsMode, SkillLoad } from '../../types/index.js';
 import { errorMessage } from '../../utils/errorMessage.js';
-import type { TraceEvent } from '../evalFrameworkTypes.js';
+import type { TranscriptEvent } from '../evalFrameworkTypes.js';
 
 /**
  * Client-side Agent Skills support for the simulated (SDK) client, following the
@@ -349,14 +349,14 @@ export async function createClientSkillsSession(
  * the model, so they produce no events.
  */
 export function withSkillEvents(
-  toolEvents: TraceEvent[],
+  toolEvents: TranscriptEvent[],
   loads: readonly SkillLoad[]
-): TraceEvent[] {
+): TranscriptEvent[] {
   const skillEvents = loads.filter(
     (load) =>
       load.kind === 'skill' && load.via !== 'preload' && load.verified !== false
   );
-  const events: TraceEvent[] = [];
+  const events: TranscriptEvent[] = [];
   let next = 0;
   toolEvents.forEach((event, index) => {
     while (
@@ -374,7 +374,7 @@ export function withSkillEvents(
   return events;
 }
 
-function skillEvent(load: SkillLoad): TraceEvent {
+function skillEvent(load: SkillLoad): TranscriptEvent {
   return {
     kind: 'skill',
     source: 'mcp',

@@ -19,35 +19,35 @@
       "equals": 5
     },
     {
-      "path": "variants[name=four-servers].result.caseResults[0].toolCallTrace.calls.length",
+      "path": "variants[name=four-servers].result.caseResults[0].toolCallTranscript.calls.length",
       "equals": 5
     },
     {
-      "path": "variants[name=four-servers].result.caseResults[0].toolCallTrace.calls[0].name",
+      "path": "variants[name=four-servers].result.caseResults[0].toolCallTranscript.calls[0].name",
       "equals": "github.search_issues"
     },
     {
-      "path": "variants[name=one-server].result.caseResults[0].trace.events[1].server",
+      "path": "variants[name=one-server].result.caseResults[0].transcript.events[1].server",
       "equals": "docs"
     },
     {
-      "path": "variants[name=one-server].result.caseResults[0].trace.events[1].name",
+      "path": "variants[name=one-server].result.caseResults[0].transcript.events[1].name",
       "equals": "read_document"
     },
     {
-      "path": "variants[name=four-servers].result.caseResults[0].trace.events[0].server",
+      "path": "variants[name=four-servers].result.caseResults[0].transcript.events[0].server",
       "equals": "github"
     },
     {
-      "path": "variants[name=four-servers].result.caseResults[0].trace.events[0].output",
+      "path": "variants[name=four-servers].result.caseResults[0].transcript.events[0].output",
       "exists": false
     },
     {
-      "path": "variants[name=four-servers].result.caseResults[0].trace.finalText",
+      "path": "variants[name=four-servers].result.caseResults[0].transcript.finalText",
       "exists": false
     },
     {
-      "path": "variants[name=four-servers].result.caseResults[0].trace.usage.inputTokens",
+      "path": "variants[name=four-servers].result.caseResults[0].transcript.usage.inputTokens",
       "exists": true
     },
     {

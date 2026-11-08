@@ -122,7 +122,7 @@ function scoresOf(trial: Trial, redacted: boolean): RunReportScore[] {
   });
 }
 
-interface TraceEventLike {
+interface TranscriptEventLike {
   kind?: string;
   name?: string;
   server?: string;
@@ -133,25 +133,25 @@ interface TraceEventLike {
   text?: string;
 }
 
-interface TraceLike {
-  events?: TraceEventLike[];
+interface TranscriptLike {
+  events?: TranscriptEventLike[];
   finalText?: string;
   evidence?: string;
   usage?: { inputTokens?: number; outputTokens?: number };
 }
 
-function traceOf(trial: Trial): TraceLike | undefined {
-  return (trial as { trace?: TraceLike }).trace;
+function transcriptOf(trial: Trial): TranscriptLike | undefined {
+  return (trial as { transcript?: TranscriptLike }).transcript;
 }
 
 function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
-  const usage = traceOf(trial)?.usage;
+  const usage = transcriptOf(trial)?.usage;
   return {
     pass: trial.pass,
     ...(trial.error ? { error: clip(trial.error) } : {}),
     ...(isInfrastructure(trial) ? { infrastructureError: true } : {}),
     ...(trial.durationMs !== undefined ? { durationMs: trial.durationMs } : {}),
-    ...trialTrace(trial),
+    ...trialTranscript(trial),
     scores: scoresOf(trial, redacted),
     ...(usage &&
     (usage.inputTokens !== undefined || usage.outputTokens !== undefined)
@@ -164,18 +164,19 @@ function trialDetail(trial: Trial, redacted: boolean): RunReportTrial {
 
 /**
  * What a trial did, as the report shows it: its final answer and each event
- * of its trace, long fields shortened. No scores, so `mst label` can show it
- * without the judge's verdict.
+ * of its transcript, long fields shortened. No scores, so `mst label` can show
+ * it without the judge's verdict.
  */
-export function trialTrace(
+export function trialTranscript(
   trial: Trial
-): Pick<RunReportTrial, 'finalText' | 'traced' | 'events'> {
-  const trace = traceOf(trial);
+): Pick<RunReportTrial, 'finalText' | 'hasTranscript' | 'events'> {
+  const transcript = transcriptOf(trial);
   return {
-    ...(trace?.finalText ? { finalText: clip(trace.finalText) } : {}),
-    // A client that can't observe calls (evidence 'none') has no trace to read.
-    traced: trace?.events !== undefined && trace.evidence !== 'none',
-    events: (trace?.events ?? []).map((event) => ({
+    ...(transcript?.finalText ? { finalText: clip(transcript.finalText) } : {}),
+    // A client that can't observe calls (evidence 'none') has no transcript to read.
+    hasTranscript:
+      transcript?.events !== undefined && transcript.evidence !== 'none',
+    events: (transcript?.events ?? []).map((event) => ({
       kind: event.kind ?? 'event',
       ...(event.name ? { name: event.name } : {}),
       ...(event.server ? { server: event.server } : {}),
@@ -189,8 +190,8 @@ export function trialTrace(
   };
 }
 
-/** Graders that read only the trace (which tools were called, how often), never the answer. */
-const TRACE_GRADERS = new Set(['toolsTriggered', 'toolCallCount']);
+/** Graders that read only the transcript (which tools were called, how often), never the answer. */
+const TRANSCRIPT_GRADERS = new Set(['toolsTriggered', 'toolCallCount']);
 
 /** Every grader that scored a trial in the run, assertions first, then judges. */
 function gradersOf(
@@ -206,7 +207,7 @@ function gradersOf(
     .map(([name, judge]) => ({
       name,
       judge,
-      readsAnswer: judge || !TRACE_GRADERS.has(name),
+      readsAnswer: judge || !TRANSCRIPT_GRADERS.has(name),
     }))
     .sort((a, b) => Number(a.judge) - Number(b.judge));
 }
@@ -401,7 +402,9 @@ export function buildRunReport(
       (variant.result?.caseResults ?? []).flatMap((result) =>
         trialsOf(result).flatMap(
           (trial) =>
-            (trial as { trace?: { events?: TraceEventLike[] } }).trace?.events
+            (
+              trial as { transcript?: { events?: TranscriptEventLike[] } }
+            ).transcript?.events
               ?.filter((event) => event.kind === 'tool_call' && event.server)
               .map((event) => event.server) ?? []
         )

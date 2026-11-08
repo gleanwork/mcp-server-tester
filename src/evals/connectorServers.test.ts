@@ -670,19 +670,19 @@ describe('simulateWrites', () => {
     const { result, warnings } = await run(true);
     const file = (launches[0]!.simulateWrites as { file: string }).file;
     expect(path.basename(file)).toBe('notes.jsonl');
-    const events = result.summary.results[0]!.trace!.events;
+    const events = result.summary.results[0]!.transcript!.events;
     expect(events.map((event) => event.simulatedWrite)).toEqual([
       true,
       undefined,
     ]);
-    // The trace MST stored says so too.
+    // The transcript MST stored says so too.
     const stored = JSON.parse(
       await fs.readFile(
-        path.join(result.outputDir, 'traces', 'default', 'c1', '0.json'),
+        path.join(result.outputDir, 'transcripts', 'default', 'c1', '0.json'),
         'utf8'
       )
     );
-    expect(stored.trace.events[0].simulatedWrite).toBe(true);
+    expect(stored.transcript.events[0].simulatedWrite).toBe(true);
     await expect(fs.stat(path.dirname(file))).rejects.toThrow();
     expect(warnings.join('\n')).toContain(
       'Connector server "legacy" doesn\'t pass simulateWrites to its dry-run proxy'
@@ -702,7 +702,7 @@ describe('simulateWrites', () => {
       true
     );
     expect(
-      result.summary.results[0]!.trace!.events.some(
+      result.summary.results[0]!.transcript!.events.some(
         (event) => event.simulatedWrite
       )
     ).toBe(false);

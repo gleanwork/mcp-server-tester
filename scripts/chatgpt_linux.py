@@ -436,7 +436,7 @@ INLINE_CODE = re.compile(r'(?<!`)`([^`\n]+)`(?!`)')
 def matches_prompt(text, prompt):
     # Same bounded representation as native exact_prompt correlation. Do not
     # trim text or alter the prompt handed to MST for the deep link. The sent
-    # message is still correlated with the exact prompt from the native trace.
+    # message is still correlated with the exact prompt from the native transcript.
     candidates = {prompt, INLINE_CODE.sub(r'\1', prompt)}
     return any(text in (value, value + '\n') for value in candidates)
 
@@ -698,7 +698,7 @@ class Driver:
         nodes = self.wait(lambda ns: self.ready(ns, surface)
                           and matches_prompt(self.desktop.text(composer(ns)), prompt)
                           and len(controls(ns, {'Send'})) == 1)
-        # Exactly one send. No retry, Enter fallback, or resubmission on missing trace.
+        # Exactly one send. No retry, Enter fallback, or resubmission on missing transcript.
         self.step = 'send'
         self.click(unique(controls(nodes, {'Send'}), 'send_missing_or_ambiguous'))
         self.step = None

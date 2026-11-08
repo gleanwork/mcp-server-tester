@@ -4,22 +4,28 @@ status: accepted
 
 # MST uses common eval vocabulary
 
+> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) made Anthropic's guide the reference where it names a concept. The table below follows it: the record of an attempt is a **transcript**, assertions are the conditions a code grader checks, and the table has rows for the outcome, the environment and the evaluation harness. The reasons below record the decision as it was made, including the one for "trace".
+
 MST grew its own names: manifests, arms, scenarios, iterations, expectations, verdicts, variant experiments. Someone who knows evals from Inspect, LangSmith, Braintrust, OpenAI Evals, promptfoo or Anthropic's guidance had to translate each one. For 2.0 we adopt the terms those frameworks share and rename MST's API, eval configs, CLI, docs and reports to match, breaking compatibility where needed. `CONTEXT.md` is the glossary. This record is the mapping, so anyone can carry their own vocabulary across.
 
 ## Mapping
 
 | Concept                           | MST                          | Anthropic                    | Inspect        | LangSmith         | Braintrust | OpenAI Evals | promptfoo         |
 | --------------------------------- | ---------------------------- | ---------------------------- | -------------- | ----------------- | ---------- | ------------ | ----------------- |
+| What runs the evals               | MST                          | evaluation harness           | Inspect        | LangSmith         | Braintrust | OpenAI Evals | promptfoo         |
 | What to evaluate and how          | eval (eval config)           | eval suite                   | task           | —                 | eval       | eval         | config            |
 | Collection of inputs              | dataset                      | —                            | dataset        | dataset           | dataset    | data source  | tests             |
 | One input with success criteria   | case                         | task (test case)             | sample         | example           | example    | item         | test case         |
 | What the client is given          | input                        | input                        | input          | inputs            | input      | item         | vars              |
 | Ground truth                      | expected                     | success criteria             | target         | reference outputs | expected   | —            | —                 |
 | What acts on the input            | client, with a model         | agent harness, with a model  | solver / agent | target            | task       | —            | provider          |
+| What the client acts on           | environment                  | environment                  | sandbox        | —                 | —          | —            | —                 |
+| Its final state after a trial     | outcome                      | outcome                      | —              | —                 | —          | —            | —                 |
 | A setup being compared            | variant (baseline)           | —                            | —              | experiment        | experiment | run          | prompt × provider |
 | One attempt                       | trial                        | trial                        | epoch          | repetition        | trial      | —            | repeat            |
-| Record of an attempt              | trace                        | transcript (trace)           | transcript     | trace             | trace      | —            | —                 |
-| Grading logic                     | grader: assertion or judge   | grader (code, model)         | scorer         | evaluator         | scorer     | grader       | assertion         |
+| Record of an attempt              | transcript                   | transcript (trace)           | transcript     | trace             | trace      | —            | —                 |
+| Grading logic                     | grader: code grader or judge | grader (code, model, human)  | scorer         | evaluator         | scorer     | grader       | assertion         |
+| One condition a grader checks     | assertion                    | assertion (check)            | —              | —                 | —          | —            | assertion         |
 | Grader output                     | score                        | score                        | score          | feedback          | score      | result       | result            |
 | One execution                     | run                          | —                            | eval log       | experiment        | experiment | run          | eval              |
 | Baseline-passing / -failing cases | regression / capability case | regression / capability eval | —              | —                 | —          | —            | —                 |

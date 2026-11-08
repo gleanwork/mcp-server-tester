@@ -6,8 +6,8 @@
  *
  *   case.json          the case: input, expected data, tags, metadata
  *   response.md        the final response text
- *   trace/events.json  client events in order, with full tool output
- *   trace/messages.json conversation turns, when the client reported them
+ *   transcript/events.json   client events in order, with full tool output
+ *   transcript/messages.json conversation turns, when the client reported them
  *   artifacts/...      the client's artifacts stored with the trial (a Cowork
  *                      session's audit log, outputs, transcripts and saved
  *                      tool output), when it has them
@@ -88,11 +88,11 @@ export function trialFiles(
   const files: WorkspaceFile[] = [
     { path: at('case.json'), content: json(evalCase) },
     { path: at('response.md'), content: trial.text },
-    { path: at('trace/events.json'), content: json(trial.events) },
+    { path: at('transcript/events.json'), content: json(trial.events) },
   ];
   if (trial.messages)
     files.push({
-      path: at('trace/messages.json'),
+      path: at('transcript/messages.json'),
       content: json(trial.messages),
     });
   return files;

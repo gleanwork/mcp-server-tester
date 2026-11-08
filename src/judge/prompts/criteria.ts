@@ -12,7 +12,7 @@ export const CRITERION_QUESTION = `Does the assistant's work meet this criterion
 
 Criterion: ${CRITERION_PLACEHOLDER}
 
-Judge only this criterion, whatever else the work does well or badly. A criterion about the final answer is met when the answer does what it says; one about what the assistant did is met when the trace shows it. When there is a reference answer, use it as what a right answer says.`;
+Judge only this criterion, whatever else the work does well or badly. A criterion about the final answer is met when the answer does what it says; one about what the assistant did is met when the transcript shows it. When there is a reference answer, use it as what a right answer says.`;
 
 /** The question for one criterion. */
 export function criterionQuestion(text: string): string {

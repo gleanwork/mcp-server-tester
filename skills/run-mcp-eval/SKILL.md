@@ -25,7 +25,7 @@ Then check the credentials the run needs:
 
 Keep keys out of the config. Put them in a file and pass `--secrets-file run.env` (JSON or dotenv). Results replace values named as credentials (`*_TOKEN`, `*_KEY`, ...). A local run also reads the environment. A worker in Docker or another runner doesn't inherit this machine's environment, so put what its client and servers need in the secrets file.
 
-Decide now whether you may resume, regrade or label this run later. Each needs the run's full traces, which MST redacts by default, so set `"redactStoredResponses": false` in the eval config before you run (Step 5).
+Decide now whether you may resume, regrade or label this run later. Each needs the run's full transcripts, which MST redacts by default, so set `"redactStoredResponses": false` in the eval config before you run (Step 5).
 
 ## Step 2: Run a little first
 
@@ -61,9 +61,9 @@ npx mst open .mcp-test-results/my-eval                                # that eva
 
 A bare `mst open` opens the newest full, graded run. A partial run, a `--no-grade` run or a regrade of an older run never becomes the latest, so open it by its directory.
 
-The report's sections are **Result** (each variant clearly better, clearly worse or unclear against the baseline), **Variants compared**, **What differs** (each variant's setup next to the baseline's), **Case by case** (every trial's trace and scores) and **Why trials failed**. Read the failing trials' traces before you change anything: the client may have called the right tool with the wrong arguments, or not called a tool at all.
+The report's sections are **Result** (each variant clearly better, clearly worse or unclear against the baseline), **Variants compared**, **What differs** (each variant's setup next to the baseline's), **Case by case** (every trial's transcript and scores) and **Why trials failed**. Read the failing trials' transcripts before you change anything: the client may have called the right tool with the wrong arguments, or not called a tool at all.
 
-`mst open` opens the report in the user's browser. An agent reads the run's files instead, in `.mcp-test-results/<eval name>/runs/<run-id>/`: `summary.json` has the per-variant totals, `results.json` every case result, `traces/<variant>/<case-id>/<trial>.json` what the client did in each trial, and `scores/<grader>/<variant>/<case-id>/<trial>.json` each grader's score and reasoning. Without `"redactStoredResponses": false`, traces have no answers or tool outputs. A run ID's last six characters (`7f3c2a`) are its short form, which every command below accepts.
+`mst open` opens the report in the user's browser. An agent reads the run's files instead, in `.mcp-test-results/<eval name>/runs/<run-id>/`: `summary.json` has the per-variant totals, `results.json` every case result, `transcripts/<variant>/<case-id>/<trial>.json` what the client did in each trial, and `scores/<grader>/<variant>/<case-id>/<trial>.json` each grader's score and reasoning. Without `"redactStoredResponses": false`, transcripts have no answers or tool outputs. A run ID's last six characters (`7f3c2a`) are its short form, which every command below accepts.
 
 ## Step 4: Tell a failed case from a broken run
 
@@ -83,7 +83,7 @@ To finish a run, resume it in a runner (`--resume <run> --runner docker`, Step 5
 
 ## Step 5: Resume or grade again
 
-Both need the run's full traces. Set this in the eval config before the run you want to resume or regrade:
+Both need the run's full transcripts. Set this in the eval config before the run you want to resume or regrade:
 
 ```json
 "redactStoredResponses": false
@@ -93,12 +93,12 @@ The default redacts answers and tool outputs from stored files. A redacted run c
 
 ```bash
 npx mst run --config eval.json --resume 7f3c2a --runner docker   # collect only the missing trials
-npx mst grade 7f3c2a --config eval.json                          # grade the stored traces with today's graders
+npx mst grade 7f3c2a --config eval.json                          # grade the stored transcripts with today's graders
 npx mst grade 7f3c2a.g2 --config eval.json --resume              # run only the judges that failed to run
 ```
 
 - **`run --resume`** collects only the trials that are missing or ended in a retryable infrastructure failure, then grades the whole run again. Only a runner collects trials, so a run collected locally needs `--runner`, or run its cases again with `--case`.
-- **`grade`** runs no client. It grades the stored traces with the config's assertions and judges as they are now, and writes a new run, `<run-id>.g2`, then `.g3`. Use it after you change a judge, a threshold or an assertion.
+- **`grade`** runs no client. It grades the stored transcripts with the config's assertions and judges as they are now, and writes a new run, `<run-id>.g2`, then `.g3`. Use it after you change a judge, a threshold or an assertion.
 - **`--no-grade`** collects without grading, for grading later or somewhere else: `mst run --config eval.json --no-grade`, then `mst grade`.
 - **`grade --resume`** keeps every verdict the run has and runs only the judges that timed out or failed. It refuses when the judges changed. Grade in full then.
 
@@ -122,7 +122,7 @@ npx mst grade 7f3c2a.g2 --config eval.json --resume              # run only the 
 - **Treating an incomplete case as a failure.** Infrastructure failures are left out of the pass rates on purpose. Finish the run (Step 4).
 - **Comparing a partial run with a full one.** MST won't, and the printed comparison is empty. Run the whole config to compare.
 - **Regrading a redacted run.** Set `"redactStoredResponses": false` before the run, not after.
-- **Changing a judge and rerunning the clients.** `mst grade` grades the stored traces again without paying for the clients.
+- **Changing a judge and rerunning the clients.** `mst grade` grades the stored transcripts again without paying for the clients.
 
 ## References
 

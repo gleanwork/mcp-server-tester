@@ -249,7 +249,7 @@ export async function collectInRunner(
           held.delete(key);
         };
         // Read sequentially. A final result may add lifecycle or cleanup facts
-        // to an early trace at the same path.
+        // to an early transcript at the same path.
         let reading = Promise.resolve();
         const seen = new Map<string, string>();
         // A read that fails doesn't stop the ones after it.

@@ -28,10 +28,10 @@ The runner copies the directory to a temp directory, then fills in each `"{{serv
 
   Because tools are picked by what the client can see, renaming or re-describing a tool changes what it does.
 
-  The model answers from the last tool output it read, so a trace can hold facts its answer leaves out. Token usage grows with the tool definitions and outputs.
+  The model answers from the last tool output it read, so a transcript can hold facts its answer leaves out. Token usage grows with the tool definitions and outputs.
 
-- **`usecase/client/assistant`**, a client with `evidence: "none"`: it returns an answer and no trace.
-- **`usecase/judge/keywords`**, a judge that scores the share of keywords in the client's answer. It never reads the trace.
+- **`usecase/client/assistant`**, a client with `evidence: "none"`: it returns an answer and no transcript.
+- **`usecase/judge/keywords`**, a judge that scores the share of keywords in the client's answer. It never reads the transcript.
 
 ## Checks
 
@@ -42,11 +42,11 @@ Each check is a `path` into the run's `summary.json` (its `results` are the case
 
 `expected.json` is validated, so a misspelt field fails the eval instead of checking nothing.
 
-The model client appends every trace it returns to a ledger. This catches aggregation errors without hand-computed constants:
+The model client appends every transcript it returns to a ledger. This catches aggregation errors without hand-computed constants:
 
 - **`ledger.metrics`** recompute each variant's per-trial means from the ledger and compare them with MST's numbers.
 - **`ledger.deltas`** do the same for variant deltas.
-- **Variant names:** every variant in the ledger must appear in the results, and every reported variant must have ledger traces, unless it's listed in `ledger.noTrace`.
+- **Variant names:** every variant in the ledger must appear in the results, and every reported variant must have ledger transcripts, unless it's listed in `ledger.noTranscript`.
 
 ## Gaps
 

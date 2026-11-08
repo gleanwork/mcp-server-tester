@@ -1,6 +1,6 @@
 ---
 name: write-mcp-eval
-description: Write evals for MCP servers with @gleanwork/mcp-server-tester (MST). An eval gives a client and model the cases of a dataset (an input, what is expected, and assertions) and grades each trial's trace. Run the cases in a Playwright test with runEvalDataset on the api client, or with `mst run` and an eval config that compares variants (servers, client, model, system prompt, tool metadata). Use when asked to write evals, eval datasets or eval configs, to test whether a model picks the right tools, or to compare MCP server setups.
+description: Write evals for MCP servers with @gleanwork/mcp-server-tester (MST). An eval gives a client and model the cases of a dataset (an input, what is expected, and assertions) and grades each trial's transcript. Run the cases in a Playwright test with runEvalDataset on the api client, or with `mst run` and an eval config that compares variants (servers, client, model, system prompt, tool metadata). Use when asked to write evals, eval datasets or eval configs, to test whether a model picks the right tools, or to compare MCP server setups.
 metadata:
   author: gleanwork
   version: '2.0.0'
@@ -8,7 +8,7 @@ metadata:
 
 # Write MCP evals
 
-An eval has a client act on cases and grades what it did. Each case gives the client an `input` (the user's request). The client runs it with a model and returns a trace: the tools it called and its final answer. Assertions and judges grade each trial, and MST decides whether the case passed.
+An eval has a client act on cases and grades what it did. Each case gives the client an `input` (the user's request). The client runs it with a model and returns a transcript: the tools it called and its final answer. Assertions and judges grade each trial, and MST decides whether the case passed.
 
 A check that calls a tool with fixed arguments has no client, so it is a test, not an eval. Write those with the `write-mcp-test` skill. Datasets hold only cases for a client.
 
@@ -129,9 +129,9 @@ Every assertion in a case's `assertions` must pass for a trial to pass.
   ```
 
 - With several servers, name the server: `"server": "docs"`, or `"name": "docs.search"` (the server's label, a dot, the tool).
-- `kind` (`tool_call`, `skill`, `command`, `subagent`, `tool_search`) and `source` (`mcp` or `builtin`) match other events in the trace, such as a skill the client loaded.
+- `kind` (`tool_call`, `skill`, `command`, `subagent`, `tool_search`) and `source` (`mcp` or `builtin`) match other events in the transcript, such as a skill the client loaded.
 
-Tool assertions need a client whose trace is `structured` evidence. All built-in clients are. A plugin client that doesn't declare `structured` evidence can only pass text and judge assertions.
+Tool assertions need a client whose transcript is `structured` evidence. All built-in clients are. A plugin client that doesn't declare `structured` evidence can only pass text and judge assertions.
 
 ### `containsText` and `matchesPattern`
 
@@ -148,7 +148,7 @@ Escape backslashes in JSON (`\\d`).
 
 A judge is an LLM that grades the trial. A case lists its judges in `judges`, beside `assertions`. The built-in judges:
 
-- **Yes-or-no judges** read the trace (the request, each tool call and result, the answer) and answer yes (1), no (0) or `unknown` when the trace can't settle it. `task-completion`: did the assistant do what was asked? `grounded-in-tools`: does a tool result support every claim? `tool-use`: right tools, fitting arguments, no needless calls, errors recovered? `criteria`: does the trial meet each of the case's own criteria, `{ "id", "text", "required"? }`? Prefer these: one narrow question is easier for a judge to get right and for a person to check.
+- **Yes-or-no judges** read the transcript (the request, each tool call and result, the answer) and answer yes (1), no (0) or `unknown` when the transcript can't settle it. `task-completion`: did the assistant do what was asked? `grounded-in-tools`: does a tool result support every claim? `tool-use`: right tools, fitting arguments, no needless calls, errors recovered? `criteria`: does the trial meet each of the case's own criteria, `{ "id", "text", "required"? }`? Prefer these: one narrow question is easier for a judge to get right and for a person to check.
 - **`rubric`** scores the answer from 0 to 1 against a built-in rubric (`correctness`, `completeness`, `groundedness`, `instruction-following`, `conciseness`) or your own text.
 
 ```json
@@ -255,7 +255,7 @@ test('search evals', async ({ mcp }, testInfo) => {
 
 The `api` client infers the API from the model id (`claude-*` is Anthropic, `claude-*@date` Vertex, `gpt-*` OpenAI, `gemini-*` Google). Its `clientOptions`: `provider` (to override that), `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout` (ms), `apiKeyEnvVar`, `systemPrompt`, and `skills` (`off`, `catalog`, `preload`, for servers that serve Agent Skills).
 
-The result has `total`, `passed`, `failed`, and `caseResults`. Each case result has `pass`, `scores` (one per grader), `toolCallTrace` (calls marked `expected` or `unexpected`, and `missed` tools), `toolPrecision` and `toolRecall`, and for several trials `passRate` and `trialResults`.
+The result has `total`, `passed`, `failed`, and `caseResults`. Each case result has `pass`, `scores` (one per grader), `toolCallTranscript` (calls marked `expected` or `unexpected`, and `missed` tools), `toolPrecision` and `toolRecall`, and for several trials `passRate` and `trialResults`.
 
 To see whether a change broke cases that passed before, save one run and compare the next with it:
 
@@ -298,7 +298,7 @@ An eval config is a JSON file that names the datasets, the servers, the client a
 }
 ```
 
-- `servers` is a map: the key is the server's label in traces and the report.
+- `servers` is a map: the key is the server's label in transcripts and the report.
 - Without `client`, an eval config runs on `claude-code`. Name the client every time.
 - Dataset paths are relative to the eval config's directory.
 - Credentials don't go in the file. Use `auth.accessTokenEnv` on an HTTP server and pass values with `--secrets-file` or the environment.
@@ -309,7 +309,7 @@ npx mst run --config evals/eval.json --case find-planning-doc --trials 1
 npx mst run --config evals/eval.json
 ```
 
-`mst run` prints a row per variant (cases passed, trial pass rate, MCP calls, tokens, cost, time) and the change since the previous run of the same eval config. It writes the run to `.mcp-test-results/<name>/runs/<run-id>/` (`results.json`, `summary.json`, traces, scores and `report/`) and exits 1 if any case failed. `npx mst open` opens the newest run's report: the result, the variants compared, what differs, every case and trial, and why trials failed. Set `redactStoredResponses: false` in the eval config to see answers and tool outputs in it.
+`mst run` prints a row per variant (cases passed, trial pass rate, MCP calls, tokens, cost, time) and the change since the previous run of the same eval config. It writes the run to `.mcp-test-results/<name>/runs/<run-id>/` (`results.json`, `summary.json`, transcripts, scores and `report/`) and exits 1 if any case failed. `npx mst open` opens the newest run's report: the result, the variants compared, what differs, every case and trial, and why trials failed. Set `redactStoredResponses: false` in the eval config to see answers and tool outputs in it.
 
 Every key, the clients, and what variants inherit: [references/eval-configs.md](references/eval-configs.md). Reading the results, incomplete cases, resuming and regrading a run: `run-mcp-eval`.
 

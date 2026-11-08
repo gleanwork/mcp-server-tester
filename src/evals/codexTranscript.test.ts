@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildCodexTrace,
+  buildCodexTranscript,
   parseCodexRollout,
   type TimedCodexEvent,
-} from './codexTrace.js';
+} from './codexTranscript.js';
 
 const servers = new Map([['glean_eval', 'glean.eval']]);
 
@@ -226,13 +226,13 @@ const ROLLOUT = [
 
 const context = { servers, startedAt: at(0), endedAt: at(9) };
 
-describe('buildCodexTrace', () => {
-  it('traces calls, answer and usage from the events alone', () => {
-    const trace = buildCodexTrace(STREAM, undefined, context);
-    expect(trace.finalText).toBe('Unlimited PTO.');
-    expect(trace.error).toBeUndefined();
-    expect(trace.threadId).toBe('thread-1');
-    expect(trace.events).toEqual([
+describe('buildCodexTranscript', () => {
+  it('records calls, answer and usage from the events alone', () => {
+    const transcript = buildCodexTranscript(STREAM, undefined, context);
+    expect(transcript.finalText).toBe('Unlimited PTO.');
+    expect(transcript.error).toBeUndefined();
+    expect(transcript.threadId).toBe('thread-1');
+    expect(transcript.events).toEqual([
       {
         kind: 'tool_call',
         source: 'mcp',
@@ -260,7 +260,7 @@ describe('buildCodexTrace', () => {
       },
     ]);
     // Input is MST's uncached count; cached input is apart.
-    expect(trace.usage).toEqual({
+    expect(transcript.usage).toEqual({
       inputTokens: 400,
       outputTokens: 50,
       durationMs: 9000,
@@ -268,23 +268,23 @@ describe('buildCodexTrace', () => {
       cacheCreationInputTokens: 0,
       reasoningOutputTokens: 10,
     });
-    expect(trace.modelCalls).toBeUndefined();
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript.modelCalls).toBeUndefined();
+    expect(transcript.telemetry).toMatchObject({
       mcpToolCallCount: 1,
       builtinToolCallCount: 1,
       transientErrorCount: 1,
-      traceSource: 'codex-events',
+      transcriptSource: 'codex-events',
     });
   });
 
   it('adds model calls, tool searches and native call IDs from the rollout', () => {
-    const trace = buildCodexTrace(STREAM, ROLLOUT, context);
-    expect(trace.events.map((event) => [event.kind, event.id])).toEqual([
+    const transcript = buildCodexTranscript(STREAM, ROLLOUT, context);
+    expect(transcript.events.map((event) => [event.kind, event.id])).toEqual([
       ['tool_search', 'call_search'],
       ['tool_call', 'call_search_1'],
       ['tool_call', 'item_2'],
     ]);
-    expect(trace.events[0]).toMatchObject({
+    expect(transcript.events[0]).toMatchObject({
       source: 'builtin',
       name: 'tool_search',
       arguments: { query: 'glean search', limit: 5 },
@@ -293,7 +293,7 @@ describe('buildCodexTrace', () => {
         { name: 'loose_tool' },
       ],
     });
-    expect(trace.modelCalls).toEqual([
+    expect(transcript.modelCalls).toEqual([
       {
         id: 'resp_1',
         model: 'gpt-5.5',
@@ -331,19 +331,19 @@ describe('buildCodexTrace', () => {
         text: 'Unlimited PTO.',
       },
     ]);
-    expect(trace.usage?.durationMs).toBe(8000);
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript.usage?.durationMs).toBe(8000);
+    expect(transcript.telemetry).toMatchObject({
       models: ['gpt-5.5'],
       reasoningEffort: 'medium',
       apiCallCount: 3,
       timeToFirstTokenMs: 900,
       toolSearchCount: 1,
-      traceSource: 'codex-events+rollout',
+      transcriptSource: 'codex-events+rollout',
     });
   });
 
   it('reports a failed turn, and a turn that never completed', () => {
-    const failed = buildCodexTrace(
+    const failed = buildCodexTranscript(
       [
         ...STREAM.slice(0, 2),
         {
@@ -356,7 +356,7 @@ describe('buildCodexTrace', () => {
     );
     expect(failed.error).toBe('quota exceeded');
     expect(failed.usage).toBeUndefined();
-    const cut = buildCodexTrace(
+    const cut = buildCodexTranscript(
       [
         ...STREAM.slice(0, 3),
         { at: at(2), event: { type: 'error', message: 'stream closed' } },
@@ -365,13 +365,13 @@ describe('buildCodexTrace', () => {
       context
     );
     expect(cut.error).toBe('stream closed');
-    expect(buildCodexTrace(STREAM.slice(0, 2), undefined, context).error).toBe(
-      'Codex ended without completing its turn.'
-    );
+    expect(
+      buildCodexTranscript(STREAM.slice(0, 2), undefined, context).error
+    ).toBe('Codex ended without completing its turn.');
   });
 
   it('keeps MCP errors, non-text results, web searches and file changes', () => {
-    const trace = buildCodexTrace(
+    const transcript = buildCodexTranscript(
       [
         {
           at: at(1),
@@ -453,7 +453,7 @@ describe('buildCodexTrace', () => {
       context
     );
     expect(
-      trace.events.map(
+      transcript.events.map(
         ({ name, server, arguments: args, output, isError }) => ({
           name,
           server,
@@ -500,8 +500,8 @@ describe('buildCodexTrace', () => {
       },
     ]);
     // A turn without token counts has no usage.
-    expect(trace.usage).toBeUndefined();
-    expect(trace.finalText).toBe('');
+    expect(transcript.usage).toBeUndefined();
+    expect(transcript.finalText).toBe('');
   });
 });
 

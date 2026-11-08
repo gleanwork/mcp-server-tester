@@ -11,7 +11,7 @@ import type { ClientRunResult } from './evalFrameworkTypes.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
 import {
   ProxyUpstreamError,
-  settleProxiedTrace,
+  settleProxiedTranscript,
   type ToolSurfaceProxy,
 } from './toolSurfaceProxy.js';
 import { startToolSurfaceProxy } from './toolSurfaceProxyServer.js';
@@ -237,11 +237,11 @@ const call = (name: string, server?: string) => ({
   arguments: {},
 });
 
-describe('settleProxiedTrace', () => {
+describe('settleProxiedTranscript', () => {
   const two: MCPConfig[] = [catalog('docs', 'docs'), catalog('docs', 'b')];
 
   it('maps calls named by server field, label prefix, or the one server', () => {
-    const trace: ClientRunResult = {
+    const transcript: ClientRunResult = {
       finalText: '',
       events: [
         call('find_more', 'docs'),
@@ -250,7 +250,7 @@ describe('settleProxiedTrace', () => {
       ],
     };
     expect(
-      settleProxiedTrace(trace, stubProxy(), true, two, 'v').events
+      settleProxiedTranscript(transcript, stubProxy(), true, two, 'v').events
     ).toMatchObject([
       { name: 'find_skills', server: 'docs', rawName: 'find_more' },
       { name: 'docs.find_skills', rawName: 'docs.find_more' },
@@ -258,7 +258,7 @@ describe('settleProxiedTrace', () => {
     ]);
     const unlabelled: MCPConfig[] = [{ transport: 'stdio', command: 'x' }];
     expect(
-      settleProxiedTrace(
+      settleProxiedTranscript(
         { finalText: '', events: [call('find_more', 'mcp-server')] },
         stubProxy(),
         true,
@@ -270,7 +270,7 @@ describe('settleProxiedTrace', () => {
 
   it('fails a request that never listed tools, unless the client already failed', () => {
     expect(
-      settleProxiedTrace(
+      settleProxiedTranscript(
         { finalText: '', events: [] },
         stubProxy(false),
         false,
@@ -279,7 +279,7 @@ describe('settleProxiedTrace', () => {
       ).error
     ).toContain('didn\'t see tool variant "v"');
     expect(
-      settleProxiedTrace(
+      settleProxiedTranscript(
         { finalText: '', events: [], error: 'client crashed' },
         stubProxy(false),
         false,
@@ -294,7 +294,7 @@ describe('prepareClientBatch with a tool variant', () => {
   const evalConfig = { name: 'm', datasets: [] };
   const servers: MCPConfig[] = [catalog('docs', 'docs')];
 
-  it('gives an open session one fixed proxy scope and settles each trace', async () => {
+  it('gives an open session one fixed proxy scope and settles each transcript', async () => {
     const seen: string[] = [];
     const proxy = stubProxy();
     const queues = await prepareClientBatch(
@@ -332,8 +332,8 @@ describe('prepareClientBatch with a tool variant', () => {
     ]);
   });
 
-  it('reports each settled trace as the client finishes it', async () => {
-    const reported: Array<{ id: string; trace: ClientRunResult }> = [];
+  it('reports each settled transcript as the client finishes it', async () => {
+    const reported: Array<{ id: string; transcript: ClientRunResult }> = [];
     const queues = await prepareClientBatch(
       {
         schema: z.object({}),
@@ -341,7 +341,7 @@ describe('prepareClientBatch with a tool variant', () => {
           let index = 0;
           return {
             async run() {
-              // MST reported the previous trace before this trial runs.
+              // MST reported the previous transcript before this trial runs.
               expect(reported).toHaveLength(index++);
               return {
                 result: { finalText: '', events: [call('find_more')] },
@@ -362,20 +362,23 @@ describe('prepareClientBatch with a tool variant', () => {
       { evalConfig },
       { id: 'v', proxy: async () => stubProxy() },
       {
-        onTrace: async (request, trace) => {
-          reported.push({ id: `${request.caseId}/${request.trial}`, trace });
+        onTranscript: async (request, transcript) => {
+          reported.push({
+            id: `${request.caseId}/${request.trial}`,
+            transcript,
+          });
         },
       }
     );
     expect(reported.map(({ id }) => id)).toEqual(['a/0', 'a/1', 'b/0']);
-    // Settled, like the trace the eval grades.
-    expect(reported[0]?.trace).toEqual(queues?.get('a')?.[0]);
-    expect(reported[0]?.trace.events).toMatchObject([
+    // Settled, like the transcript the eval grades.
+    expect(reported[0]?.transcript).toEqual(queues?.get('a')?.[0]);
+    expect(reported[0]?.transcript.events).toMatchObject([
       { name: 'find_skills', rawName: 'find_more' },
     ]);
   });
 
-  it('goes on with the batch when saving a trace fails', async () => {
+  it('goes on with the batch when saving a transcript fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const queues = await prepareClientBatch(
       {
@@ -399,7 +402,7 @@ describe('prepareClientBatch with a tool variant', () => {
       { evalConfig },
       undefined,
       {
-        onTrace: async () => {
+        onTranscript: async () => {
           throw new Error('disk full');
         },
       }
@@ -436,9 +439,9 @@ describe('prepareClientBatch with a tool variant', () => {
   });
 });
 
-describe('settleProxiedTrace tool searches', () => {
+describe('settleProxiedTranscript tool searches', () => {
   it('records the tools a search found under their original names', () => {
-    const settled = settleProxiedTrace(
+    const settled = settleProxiedTranscript(
       {
         finalText: '',
         events: [
@@ -533,7 +536,8 @@ describe('a batch client that connects to one server set for the batch', () => {
     });
     expect(new Set(seen).size).toBe(1);
     for (const id of ['a', 'b'])
-      for (const trace of queues.get(id)!) expect(trace.error).toBeUndefined();
+      for (const transcript of queues.get(id)!)
+        expect(transcript.error).toBeUndefined();
   });
 
   it('does not borrow a tool listing from a session with different settings', async () => {
@@ -579,7 +583,7 @@ describe('a batch client that connects to one server set for the batch', () => {
       await listFrom(check);
     });
     for (const id of ['a', 'b'])
-      for (const trace of queues.get(id)!)
-        expect(trace.error).toContain('tool variant "v2"');
+      for (const transcript of queues.get(id)!)
+        expect(transcript.error).toContain('tool variant "v2"');
   });
 });

@@ -6,7 +6,7 @@ import {
   findMatchingClaudeSessions,
   snapshotClaudeSessions,
   waitForClaudeSession,
-  waitForClaudeTrace,
+  waitForClaudeTranscript,
 } from './sessions.js';
 
 async function fixture() {
@@ -61,7 +61,7 @@ it('binds the exact initial prompt among new recent sessions, never updated old 
     startedAtMs: f.startedAtMs,
     exactPrompt: f.prompt,
   });
-  expect(matches.map((trace) => trace.candidate.metadataPath)).toEqual([
+  expect(matches.map((match) => match.candidate.metadataPath)).toEqual([
     expected,
   ]);
 });
@@ -86,8 +86,8 @@ it('fails ambiguous prompt binding; fresh snapshots distinguish repeated prompts
       .candidate.metadataPath
   ).toBe(second);
   expect(
-    (await waitForClaudeTrace({ ...options, sessionPath: first })).candidate
-      .metadataPath
+    (await waitForClaudeTranscript({ ...options, sessionPath: first }))
+      .candidate.metadataPath
   ).toBe(first);
 });
 it('binds the only new session when Claude changed its stored prompt, recording how, never the text', async () => {

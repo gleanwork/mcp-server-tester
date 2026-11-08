@@ -4,7 +4,7 @@ status: accepted
 
 # Environments run shards over a channel
 
-> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed the environment to the **runner**: `--env` is `--runner`, `--env-option` is `--runner-option`, the `env` kind is `runner` (`acme/runner/cloud-vm`), `machineEnvironment` is `machineRunner`, and `mst env setup` is `mst runner setup`. "Environment" now means what the client acts on. The decision itself stands.
+> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed the environment to the **runner**: `--env` is `--runner`, `--env-option` is `--runner-option`, the `env` kind is `runner` (`acme/runner/cloud-vm`), `machineEnvironment` is `machineRunner`, and `mst env setup` is `mst runner setup`. "Environment" now means what the client acts on. It also renamed a trial's trace to its **transcript**; "trace" now means an OpenTelemetry trace. The decision itself stands.
 
 A desktop client runs one conversation at a time per machine, and today that machine is the user's own. While an eval runs, the machine can't be used for anything else, and its state can break or skew the results: in one Cowork run, a stray window kept taking focus, and from case 13 on no submission reached the client. The run is also slow. The walkthrough's 450 trials take about 8.5 hours on one desktop.
 

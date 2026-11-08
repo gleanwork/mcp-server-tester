@@ -109,8 +109,8 @@ describe('stored ChatGPT trials from earlier versions', () => {
     clientName: 'ChatGPT Native Linux Desktop',
     clientType: 'desktop',
     capabilitiesUsed: ['control', 'input', 'completion', 'trace', 'normalize'],
-    traceSource: 'none',
-    traceConfidence: 'unknown',
+    transcriptSource: 'none',
+    transcriptConfidence: 'unknown',
     artifacts: [],
     session: {},
     correlation: {
@@ -139,7 +139,7 @@ describe('stored ChatGPT trials from earlier versions', () => {
     // Stored before endings: the failure kind says how it ended.
     infrastructureError: true,
     error,
-    trace: { events: [], finalText: '', error },
+    transcript: { events: [], finalText: '', error },
     clientTelemetry: {
       clientMetadata: oldMetadata,
       // Cowork used these same receipts for submission and HITL.
@@ -156,7 +156,7 @@ describe('stored ChatGPT trials from earlier versions', () => {
     expect(RUN_SCHEMAS.trial.safeParse(record).success).toBe(true);
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-old-chatgpt-'));
     try {
-      const file = path.join(dir, 'traces', 'default', 'case', '0.json');
+      const file = path.join(dir, 'transcripts', 'default', 'case', '0.json');
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, JSON.stringify(record));
       const [stored] = await readRunTrials(dir);

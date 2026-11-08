@@ -12,18 +12,18 @@ import type {
   ClientRunOptions,
   ClientDefinition,
 } from './evalFrameworkTypes.js';
-import { clientRunToExecution } from './clientTrace.js';
+import { clientRunToExecution } from './clientTranscript.js';
 async function run(
   clientDefinition: ClientDefinition,
   options: ClientRunOptions
 ) {
-  const trace = await clientDefinition.run!(
+  const transcript = await clientDefinition.run!(
     { prompt: options.cases[0]!.input, servers: options.servers },
     options.client,
     { evalConfig: options.evalConfig, variant: options.variant }
   );
   return clientRunToExecution(
-    trace,
+    transcript,
     clientDefinition.evidence ?? 'none',
     options.servers
   );
@@ -136,7 +136,7 @@ describe('built-in client execution', () => {
       })),
       variant: { name: 'renamed', tools: { 'a.search': { name: 'find' } } },
     });
-    expect(execution.trace?.events).toMatchObject([
+    expect(execution.transcript?.events).toMatchObject([
       {
         kind: 'tool_call',
         source: 'mcp',
@@ -149,7 +149,7 @@ describe('built-in client execution', () => {
   });
 
   it('retains a failed Claude Code run and its partial native evidence', async () => {
-    const trace = {
+    const transcript = {
       finalText: 'partial',
       events: [
         {
@@ -172,7 +172,7 @@ describe('built-in client execution', () => {
       llmDurationMs: 4,
       telemetry: { content: { input: 'query', conversationHistory: [] } },
     };
-    vi.mocked(runClaudeCodeClient).mockResolvedValue(trace);
+    vi.mocked(runClaudeCodeClient).mockResolvedValue(transcript);
     const execution = await run(getClient('claude-code'), {
       ...options(),
       client: { type: 'claude-code' },
@@ -180,12 +180,15 @@ describe('built-in client execution', () => {
     });
     expect(execution).toMatchObject({
       kind: 'completed',
-      error: trace.error,
-      ending: trace.ending,
-      diagnostics: trace.diagnostics,
-      usage: trace.usage,
-      telemetry: trace.telemetry,
-      trace: { events: trace.events, modelCalls: trace.modelCalls },
+      error: transcript.error,
+      ending: transcript.ending,
+      diagnostics: transcript.diagnostics,
+      usage: transcript.usage,
+      telemetry: transcript.telemetry,
+      transcript: {
+        events: transcript.events,
+        modelCalls: transcript.modelCalls,
+      },
       response: { success: false, llmDurationMs: 4 },
     });
     expect(runApiClient).not.toHaveBeenCalled();

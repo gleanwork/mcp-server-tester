@@ -127,7 +127,7 @@ describe('redactStoredResponses', () => {
             args: { response: 'tool argument' },
             assertions: { response: { content: [] } },
           },
-          toolCallTrace: {
+          toolCallTranscript: {
             calls: [
               {
                 name: 'reply',
@@ -142,7 +142,7 @@ describe('redactStoredResponses', () => {
     });
     expect(responsePaths(redactStoredResponses(value))).toEqual([
       'caseResults.0.request.args.response',
-      'caseResults.0.toolCallTrace.calls.0.arguments.response',
+      'caseResults.0.toolCallTranscript.calls.0.arguments.response',
     ]);
     // Outside a case result, nothing is stripped.
     expect(redactStoredResponses({ response: 'x' })).toEqual({ response: 'x' });

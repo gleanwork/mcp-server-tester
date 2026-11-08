@@ -10,7 +10,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { CaseExecution } from './caseExecution.js';
 import type { EvalCase } from './datasetTypes.js';
-import type { ClientRunResult, TraceEvent } from './evalFrameworkTypes.js';
+import type { ClientRunResult, TranscriptEvent } from './evalFrameworkTypes.js';
 import { redactedClientRun } from './clientSecrets.js';
 import {
   readSimulatedWrites,
@@ -25,7 +25,7 @@ type Executor = (evalCase: EvalCase) => Promise<CaseExecution>;
  * Returns how many it marked.
  */
 function markSimulatedWrites(
-  events: readonly TraceEvent[],
+  events: readonly TranscriptEvent[],
   records: ReadonlyArray<{ key: string; record: SimulatedWriteRecord }>,
   used: Set<string>
 ): number {
@@ -122,13 +122,13 @@ export function withSimulatedWriteMarks(
     if (execution.kind !== 'completed') return execution;
     const records = await readRecords(files, secrets());
     if (records.length === 0) return execution;
-    // The trace and the response may hold the same event objects, or copies.
+    // The transcript and the response may hold the same event objects, or copies.
     const { toolCalls } = execution.response as { toolCalls?: unknown };
     const lists = [
-      execution.trace?.events,
+      execution.transcript?.events,
       execution.response.events,
       toolCalls,
-    ].filter((events): events is TraceEvent[] => Array.isArray(events));
+    ].filter((events): events is TranscriptEvent[] => Array.isArray(events));
     const seen = new Set<string>(used);
     for (const events of lists) {
       const local = new Set(seen);

@@ -90,7 +90,7 @@ async function runStoredAsMst(caseIds: string[], skip?: string) {
       model: 'claude-haiku-4-5',
       datasets: ['./cases.json'],
       servers: {},
-      // Full traces, so the run can be graded again and resumed.
+      // Full transcripts, so the run can be graded again and resumed.
       redactStoredResponses: false,
       variants: [{ name: 'baseline' }, { name: 'candidate' }],
     })

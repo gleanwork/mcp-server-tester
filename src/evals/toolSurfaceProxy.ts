@@ -1,7 +1,7 @@
 /**
  * The tool-surface proxy's interface, and the eval's side of using it: which
- * clients get it, and how their traces are settled. The proxy itself is in
- * toolSurfaceProxyServer.ts, so bundles that only settle traces don't carry an
+ * clients get it, and how their transcripts are settled. The proxy itself is in
+ * toolSurfaceProxyServer.ts, so bundles that only settle transcripts don't carry an
  * HTTP and MCP server.
  */
 import type { MCPConfig } from '../config/mcpConfig.js';
@@ -107,26 +107,26 @@ export function withoutToolVariant(
 
 /**
  * Settles one proxied client request. A client that never listed the proxied
- * tools never showed the model the variant, so its trace becomes an error
+ * tools never showed the model the variant, so its transcript becomes an error
  * rather than a result for a variant it ignored. Tool calls the client reports
  * are recorded under the tools' original names, with the client's in `rawName`.
  */
-export function settleProxiedTrace(
-  trace: ClientRunResult,
+export function settleProxiedTranscript(
+  transcript: ClientRunResult,
   proxy: ToolSurfaceProxy,
   listedTools: boolean,
   servers: readonly MCPConfig[],
   variantId: string
 ): ClientRunResult {
-  if (!trace.error && !listedTools) {
+  if (!transcript.error && !listedTools) {
     return {
-      ...trace,
+      ...transcript,
       error: `The client never listed tools from the servers it was given, so the model didn't see tool variant "${variantId}". Variants reach clients that connect to input.servers.`,
     };
   }
   return {
-    ...trace,
-    events: trace.events.map((event) => {
+    ...transcript,
+    events: transcript.events.map((event) => {
       if (event.kind === 'tool_search' && event.results) {
         // A search shows the variant's names; record the tools it found.
         return {

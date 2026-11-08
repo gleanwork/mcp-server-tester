@@ -31,7 +31,7 @@ export interface GradeOptions {
   loadedDatasets?: string;
 }
 
-/** `mst grade <run>`: grade a stored run's traces again, as a new run. */
+/** `mst grade <run>`: grade a stored run's transcripts again, as a new run. */
 export async function grade(run: string, options: GradeOptions): Promise<void> {
   if (options.detach) {
     if (options.outputDir)
@@ -83,6 +83,6 @@ export async function grade(run: string, options: GradeOptions): Promise<void> {
       });
     throw error;
   }
-  console.log(`Graded the traces of run ${result.gradedFrom}.`);
+  console.log(`Graded the transcripts of run ${result.gradedFrom}.`);
   printRunResult(result, options.config);
 }

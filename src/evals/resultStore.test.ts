@@ -132,7 +132,7 @@ describe('FileEvalResultStore', () => {
     await expect(
       store.loadArtifact('eval-runner-result', 'older')
     ).rejects.toThrow(
-      "Stored eval-runner-result 'older' was written by an earlier MST. 2.0 renamed result fields (mcpHostTrace → toolCallTrace"
+      "Stored eval-runner-result 'older' was written by an earlier MST. 2.0 renamed result fields (mcpHostTrace → toolCallTranscript"
     );
     await expect(
       store.loadLatestArtifact('eval-runner-result')
@@ -354,7 +354,7 @@ describe('redactStoredResponses', () => {
     });
   });
 
-  const trace = () => ({
+  const transcript = () => ({
     events: [
       {
         kind: 'tool_call',
@@ -371,7 +371,7 @@ describe('redactStoredResponses', () => {
     evidence: 'structured',
     usage: { inputTokens: 10, outputTokens: 2, durationMs: 5 },
   });
-  const redactedTrace = {
+  const redactedTranscript = {
     events: [
       {
         kind: 'tool_call',
@@ -387,25 +387,27 @@ describe('redactStoredResponses', () => {
     usage: { inputTokens: 10, outputTokens: 2, durationMs: 5 },
   };
 
-  it("keeps a trace's events, servers, arguments and usage, without its answer, outputs or model text", () => {
+  it("keeps a transcript's events, servers, arguments and usage, without its answer, outputs or model text", () => {
     const result = {
       id: 'one',
       pass: true,
       scores: {},
       response: { private: true },
-      trace: trace(),
-      trialResults: [{ pass: true, durationMs: 1, trace: trace() }],
+      transcript: transcript(),
+      trialResults: [{ pass: true, durationMs: 1, transcript: transcript() }],
     };
     const redacted = redactStoredResponses({ results: [result] });
     expect(redacted.results[0]).toEqual({
       id: 'one',
       pass: true,
       scores: {},
-      trace: redactedTrace,
-      trialResults: [{ pass: true, durationMs: 1, trace: redactedTrace }],
+      transcript: redactedTranscript,
+      trialResults: [
+        { pass: true, durationMs: 1, transcript: redactedTranscript },
+      ],
     });
     // The input is not changed.
-    expect(result.trace.finalText).toBe('private answer');
+    expect(result.transcript.finalText).toBe('private answer');
   });
 
   it("drops a client's telemetry content, keeping the rest of its telemetry", () => {

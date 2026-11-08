@@ -1,7 +1,7 @@
 /**
  * Agent judge runtimes.
  *
- * An agentic judge does not get the whole trace in one prompt. It gets a
+ * An agentic judge does not get the whole transcript in one prompt. It gets a
  * read-only workspace of the run's evidence and works through it over several
  * turns with tools, the way a reviewer would. A runtime is the agent loop that
  * does this; judges never import an agent SDK, so a judge can move from one
@@ -47,12 +47,12 @@ export interface AgentJudgeTask {
   commands?: readonly WorkspaceCommand[];
 }
 
-/** A plugin helper program, such as a trace parser in the workspace. */
+/** A plugin helper program, such as a transcript parser in the workspace. */
 export interface WorkspaceCommand {
-  /** Tool name, such as `trace`. */
+  /** Tool name, such as `transcript`. */
   name: string;
   description: string;
-  /** Program and leading arguments, such as `['python3', 'scripts/trace.py']`. */
+  /** Program and leading arguments, such as `['python3', 'scripts/transcript.py']`. */
   argv: readonly string[];
   /** Per-call limit. Default 60 s. */
   timeoutMs?: number;

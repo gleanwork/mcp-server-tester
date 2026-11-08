@@ -288,19 +288,19 @@ export async function collectShard(
     batch: number,
     index: number,
     key: TrialKey,
-    trace: ClientRunResult,
-    previous?: { trace: ClientRunResult; stored: ClientRunResult }
+    transcript: ClientRunResult,
+    previous?: { transcript: ClientRunResult; stored: ClientRunResult }
   ): Promise<ClientRunResult> {
     // The writes this machine's proxies simulated, marked in the redacted
-    // trace.
+    // transcript.
     const redacted: ClientRunResult = connectors?.simulatedWriteFiles.length
       ? await markResultSimulatedWrites(
-          trace,
+          transcript,
           connectors.simulatedWriteFiles,
           usedWrites,
           [...secrets]
         )
-      : redactedClientRun(trace, [...secrets]);
+      : redactedClientRun(transcript, [...secrets]);
     // The client's artifacts (a Cowork session folder) are on this machine:
     // copy them beside the result, which the coordinator copies back, and
     // name them relative to the results directory.
@@ -308,7 +308,7 @@ export async function collectShard(
     let stored = redacted;
     if (
       redacted.artifacts &&
-      previous?.trace.artifacts?.dir === redacted.artifacts.dir
+      previous?.transcript.artifacts?.dir === redacted.artifacts.dir
     ) {
       // An early save may have consumed temporary diagnosis files. Reuse its
       // copy, or retain its copy failure, rather than recopying missing files.
@@ -483,7 +483,7 @@ export async function collectShard(
           : undefined;
       const requests = proxied?.requests ?? declared;
       const context = proxied ? withoutToolVariant(baseContext) : baseContext;
-      // A trace under the tools' original names (`final`: its request is over).
+      // A transcript under the tools' original names (`final`: its request is over).
       const settled = (
         index: number,
         result: ClientRunResult,
@@ -492,7 +492,7 @@ export async function collectShard(
       try {
         const reported = new Map<
           number,
-          { trace: ClientRunResult; stored: ClientRunResult }
+          { transcript: ClientRunResult; stored: ClientRunResult }
         >();
         const results = await collectClientBatch(
           definition,
@@ -504,12 +504,17 @@ export async function collectShard(
             },
             reportResult: async (index, result) => {
               if (reported.has(index) || !requests[index]) return;
-              const trace = settled(index, result, false);
+              const transcript = settled(index, result, false);
               // The batch's scope stays open for the requests still running.
-              const stored = await save(batchIndex, index, keyOf(index), trace);
+              const stored = await save(
+                batchIndex,
+                index,
+                keyOf(index),
+                transcript
+              );
               // Cleanup can mutate the live result after this early save.
               reported.set(index, {
-                trace: structuredClone(trace),
+                transcript: structuredClone(transcript),
                 stored: structuredClone(stored),
               });
             },
@@ -521,10 +526,12 @@ export async function collectShard(
         // timings can change, and the proxy must settle its final scope.
         for (const [index, result] of results.entries()) {
           if (!result || !requests[index]) continue;
-          const trace = settled(index, result, true);
+          const transcript = settled(index, result, true);
           const previous = reported.get(index);
-          if (JSON.stringify(trace) !== JSON.stringify(previous?.trace))
-            await save(batchIndex, index, keyOf(index), trace, previous);
+          if (
+            JSON.stringify(transcript) !== JSON.stringify(previous?.transcript)
+          )
+            await save(batchIndex, index, keyOf(index), transcript, previous);
         }
       } finally {
         proxied?.endChecks();

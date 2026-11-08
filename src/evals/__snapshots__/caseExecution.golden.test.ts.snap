@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`golden: client traces through executeCase > client trace error 1`] = `
+exports[`golden: client transcripts through executeCase > client transcript error 1`] = `
 {
   "authType": "none",
   "clientTelemetry": {
@@ -17,7 +17,7 @@ exports[`golden: client traces through executeCase > client trace error 1`] = `
     "kind": "trial",
   },
   "error": "native session missing",
-  "id": "trace",
+  "id": "transcript",
   "pass": false,
   "project": "golden",
   "request": {
@@ -98,7 +98,7 @@ exports[`golden: client traces through executeCase > client trace error 1`] = `
   },
   "scores": {},
   "source": "eval",
-  "trace": {
+  "transcript": {
     "error": "native session missing",
     "events": [
       {
@@ -130,11 +130,11 @@ exports[`golden: client traces through executeCase > client trace error 1`] = `
       "outputTokens": 10,
     },
   },
-  "traceEvidence": "structured",
+  "transcriptEvidence": "structured",
 }
 `;
 
-exports[`golden: client traces through executeCase > executeCase that throws 1`] = `
+exports[`golden: client transcripts through executeCase > executeCase that throws 1`] = `
 {
   "authType": "none",
   "datasetName": "single-case",
@@ -143,7 +143,7 @@ exports[`golden: client traces through executeCase > executeCase that throws 1`]
     "kind": "trial",
   },
   "error": "client crashed",
-  "id": "trace",
+  "id": "transcript",
   "pass": false,
   "project": "golden",
   "request": {
@@ -174,7 +174,7 @@ exports[`golden: client traces through executeCase > executeCase that throws 1`]
 }
 `;
 
-exports[`golden: client traces through executeCase > none evidence 1`] = `
+exports[`golden: client transcripts through executeCase > none evidence 1`] = `
 {
   "authType": "none",
   "clientTelemetry": {
@@ -190,7 +190,7 @@ exports[`golden: client traces through executeCase > none evidence 1`] = `
   "ending": {
     "kind": "trial",
   },
-  "id": "trace",
+  "id": "transcript",
   "pass": false,
   "project": "golden",
   "request": {
@@ -284,7 +284,7 @@ exports[`golden: client traces through executeCase > none evidence 1`] = `
     },
   },
   "source": "eval",
-  "trace": {
+  "transcript": {
     "events": [
       {
         "arguments": {
@@ -315,11 +315,11 @@ exports[`golden: client traces through executeCase > none evidence 1`] = `
       "outputTokens": 10,
     },
   },
-  "traceEvidence": "none",
+  "transcriptEvidence": "none",
 }
 `;
 
-exports[`golden: client traces through executeCase > observed evidence 1`] = `
+exports[`golden: client transcripts through executeCase > observed evidence 1`] = `
 {
   "authType": "none",
   "clientTelemetry": {
@@ -335,7 +335,7 @@ exports[`golden: client traces through executeCase > observed evidence 1`] = `
   "ending": {
     "kind": "trial",
   },
-  "id": "trace",
+  "id": "transcript",
   "pass": false,
   "project": "golden",
   "request": {
@@ -429,7 +429,7 @@ exports[`golden: client traces through executeCase > observed evidence 1`] = `
     },
   },
   "source": "eval",
-  "trace": {
+  "transcript": {
     "events": [
       {
         "arguments": {
@@ -460,11 +460,11 @@ exports[`golden: client traces through executeCase > observed evidence 1`] = `
       "outputTokens": 10,
     },
   },
-  "traceEvidence": "observed",
+  "transcriptEvidence": "observed",
 }
 `;
 
-exports[`golden: client traces through executeCase > structured evidence 1`] = `
+exports[`golden: client transcripts through executeCase > structured evidence 1`] = `
 {
   "authType": "none",
   "clientTelemetry": {
@@ -480,7 +480,7 @@ exports[`golden: client traces through executeCase > structured evidence 1`] = `
   "ending": {
     "kind": "trial",
   },
-  "id": "trace",
+  "id": "transcript",
   "pass": false,
   "project": "golden",
   "request": {
@@ -574,7 +574,7 @@ exports[`golden: client traces through executeCase > structured evidence 1`] = `
     },
   },
   "source": "eval",
-  "toolCallTrace": {
+  "toolCallTranscript": {
     "calls": [
       {
         "arguments": {
@@ -593,7 +593,7 @@ exports[`golden: client traces through executeCase > structured evidence 1`] = `
   },
   "toolPrecision": 0.6666666666666666,
   "toolRecall": 1,
-  "trace": {
+  "transcript": {
     "events": [
       {
         "arguments": {
@@ -624,7 +624,7 @@ exports[`golden: client traces through executeCase > structured evidence 1`] = `
       "outputTokens": 10,
     },
   },
-  "traceEvidence": "structured",
+  "transcriptEvidence": "structured",
 }
 `;
 
@@ -708,7 +708,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
         },
       },
       "source": "eval",
-      "trace": {
+      "transcript": {
         "events": [
           {
             "arguments": {
@@ -736,7 +736,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
           "outputTokens": 20,
         },
       },
-      "traceEvidence": "structured",
+      "transcriptEvidence": "structured",
     },
     {
       "authType": "none",
@@ -839,7 +839,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
         },
       },
       "source": "eval",
-      "toolCallTrace": {
+      "toolCallTranscript": {
         "calls": [
           {
             "arguments": {
@@ -864,7 +864,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
       },
       "toolPrecision": 0.5,
       "toolRecall": 0.5,
-      "trace": {
+      "transcript": {
         "events": [
           {
             "arguments": {
@@ -892,7 +892,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
           "outputTokens": 20,
         },
       },
-      "traceEvidence": "structured",
+      "transcriptEvidence": "structured",
     },
   ],
   "summary": {
@@ -1063,7 +1063,7 @@ exports[`golden: judges > judges a client response 1`] = `
       },
     },
     "source": "eval",
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -1091,7 +1091,7 @@ exports[`golden: judges > judges a client response 1`] = `
         "outputTokens": 20,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
   },
 }
 `;
@@ -1292,7 +1292,7 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
       },
     },
     "source": "eval",
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -1320,7 +1320,7 @@ exports[`golden: judges > one judge with case reps and the canonical answer as r
         "outputTokens": 20,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
   },
 }
 `;
@@ -1645,7 +1645,7 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
       },
     },
     "source": "eval",
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -1673,7 +1673,7 @@ exports[`golden: judges > several judges, one failing, with an explicit referenc
         "outputTokens": 20,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
   },
 }
 `;
@@ -1825,7 +1825,7 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
       },
     },
     "source": "eval",
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -1853,7 +1853,7 @@ exports[`golden: rubric judges > a built-in rubric with the default provider and
         "outputTokens": 20,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
   },
 }
 `;
@@ -2023,7 +2023,7 @@ Answer carefully.",
       },
     },
     "source": "eval",
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -2051,7 +2051,7 @@ Answer carefully.",
         "outputTokens": 20,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
   },
 }
 `;
@@ -2201,7 +2201,7 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
       },
     },
     "source": "eval",
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -2229,7 +2229,7 @@ exports[`golden: rubric judges > a judge client error leaves the trial ungraded,
         "outputTokens": 20,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
   },
 }
 `;
@@ -2561,7 +2561,7 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
       },
     },
     "source": "eval",
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -2589,7 +2589,7 @@ exports[`golden: rubric judges > a rubric judge and a plugin judge under case-le
         "outputTokens": 20,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
   },
 }
 `;
@@ -2855,7 +2855,7 @@ exports[`golden: rubric judges > reps average the scores and report their spread
       },
     },
     "source": "eval",
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -2883,7 +2883,7 @@ exports[`golden: rubric judges > reps average the scores and report their spread
         "outputTokens": 20,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
   },
 }
 `;
@@ -3134,7 +3134,7 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
         },
       },
       "source": "eval",
-      "trace": {
+      "transcript": {
         "completedAt": "<time>",
         "events": [
           {
@@ -3167,7 +3167,7 @@ exports[`golden: runEval clients > an eval config declares two rubric judges and
           "outputTokens": 10,
         },
       },
-      "traceEvidence": "structured",
+      "transcriptEvidence": "structured",
       "variant": "default",
     },
   ],
@@ -3413,7 +3413,7 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
         },
       },
       "source": "eval",
-      "trace": {
+      "transcript": {
         "completedAt": "<time>",
         "events": [
           {
@@ -3446,7 +3446,7 @@ exports[`golden: runEval clients > eval config judges merge with case judges 1`]
           "outputTokens": 10,
         },
       },
-      "traceEvidence": "structured",
+      "transcriptEvidence": "structured",
       "variant": "default",
     },
   ],
@@ -3550,7 +3550,7 @@ exports[`golden: runEval clients > run client 1`] = `
       },
     },
     "source": "eval",
-    "toolCallTrace": {
+    "toolCallTranscript": {
       "calls": [
         {
           "arguments": {
@@ -3569,7 +3569,7 @@ exports[`golden: runEval clients > run client 1`] = `
     },
     "toolPrecision": 0.3333333333333333,
     "toolRecall": 1,
-    "trace": {
+    "transcript": {
       "completedAt": "<time>",
       "events": [
         {
@@ -3602,7 +3602,7 @@ exports[`golden: runEval clients > run client 1`] = `
         "outputTokens": 10,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
     "variant": "default",
   },
 ]
@@ -3705,7 +3705,7 @@ exports[`golden: runEval clients > runBatch client 1`] = `
       },
     },
     "source": "eval",
-    "toolCallTrace": {
+    "toolCallTranscript": {
       "calls": [
         {
           "arguments": {
@@ -3724,7 +3724,7 @@ exports[`golden: runEval clients > runBatch client 1`] = `
     },
     "toolPrecision": 0.3333333333333333,
     "toolRecall": 1,
-    "trace": {
+    "transcript": {
       "events": [
         {
           "arguments": {
@@ -3755,7 +3755,7 @@ exports[`golden: runEval clients > runBatch client 1`] = `
         "outputTokens": 10,
       },
     },
-    "traceEvidence": "structured",
+    "transcriptEvidence": "structured",
     "variant": "default",
   },
 ]
@@ -3863,7 +3863,7 @@ exports[`golden: the api client (dataset API) > maps native tool names through t
     },
   },
   "source": "eval",
-  "toolCallTrace": {
+  "toolCallTranscript": {
     "calls": [
       {
         "arguments": {
@@ -3884,7 +3884,7 @@ exports[`golden: the api client (dataset API) > maps native tool names through t
   },
   "toolPrecision": 1,
   "toolRecall": 1,
-  "trace": {
+  "transcript": {
     "events": [
       {
         "arguments": {
@@ -3912,7 +3912,7 @@ exports[`golden: the api client (dataset API) > maps native tool names through t
       "outputTokens": 20,
     },
   },
-  "traceEvidence": "structured",
+  "transcriptEvidence": "structured",
 }
 `;
 
@@ -4058,7 +4058,7 @@ exports[`golden: the api client (dataset API) > succeeds with tool evidence and 
     },
   },
   "source": "eval",
-  "toolCallTrace": {
+  "toolCallTranscript": {
     "calls": [
       {
         "arguments": {
@@ -4083,7 +4083,7 @@ exports[`golden: the api client (dataset API) > succeeds with tool evidence and 
   },
   "toolPrecision": 0.5,
   "toolRecall": 0.5,
-  "trace": {
+  "transcript": {
     "events": [
       {
         "arguments": {
@@ -4111,7 +4111,7 @@ exports[`golden: the api client (dataset API) > succeeds with tool evidence and 
       "outputTokens": 20,
     },
   },
-  "traceEvidence": "structured",
+  "transcriptEvidence": "structured",
 }
 `;
 
@@ -4223,7 +4223,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
     },
   },
   "source": "eval",
-  "toolCallTrace": {
+  "toolCallTranscript": {
     "calls": [
       {
         "arguments": {
@@ -4248,7 +4248,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
   },
   "toolPrecision": 0.5,
   "toolRecall": 0.5,
-  "traceEvidence": "structured",
+  "transcriptEvidence": "structured",
   "trialResults": [
     {
       "clientUsage": {
@@ -4276,7 +4276,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
           "pass": false,
         },
       },
-      "toolCallTrace": {
+      "toolCallTranscript": {
         "calls": [
           {
             "arguments": {
@@ -4299,7 +4299,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
           },
         ],
       },
-      "trace": {
+      "transcript": {
         "events": [
           {
             "arguments": {
@@ -4327,7 +4327,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
           "outputTokens": 20,
         },
       },
-      "traceEvidence": "structured",
+      "transcriptEvidence": "structured",
     },
     {
       "durationMs": "<time>",
@@ -4368,7 +4368,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
           "pass": false,
         },
       },
-      "toolCallTrace": {
+      "toolCallTranscript": {
         "calls": [
           {
             "arguments": {
@@ -4391,7 +4391,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
           },
         ],
       },
-      "trace": {
+      "transcript": {
         "events": [
           {
             "arguments": {
@@ -4419,7 +4419,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
           "outputTokens": 20,
         },
       },
-      "traceEvidence": "structured",
+      "transcriptEvidence": "structured",
     },
   ],
 }

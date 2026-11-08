@@ -6,7 +6,7 @@
  */
 
 import type { ClientSkillsMode } from '../../types/index.js';
-import type { TraceEvent } from '../evalFrameworkTypes.js';
+import type { TranscriptEvent } from '../evalFrameworkTypes.js';
 
 /**
  * Client type for client simulation.
@@ -238,7 +238,7 @@ export interface LLMToolCall {
    * The event this call is: a host-native skill load, command, subagent or
    * tool search the parser typed, or a tool call (also when absent).
    */
-  kind?: TraceEvent['kind'];
+  kind?: TranscriptEvent['kind'];
   /** `tool_search` only: the tools the search returned. */
-  results?: TraceEvent['results'];
+  results?: TranscriptEvent['results'];
 }

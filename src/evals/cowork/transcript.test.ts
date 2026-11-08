@@ -6,9 +6,9 @@ import {
   findMatchingClaudeSessions,
   getClaudeDataDir,
   snapshotClaudeSessions,
-  waitForClaudeTrace,
+  waitForClaudeTranscript,
 } from './sessions.js';
-import { parseClaudeTrace, type SessionCandidate } from './trace.js';
+import { parseClaudeTranscript, type SessionCandidate } from './transcript.js';
 
 async function writeJsonl(path: string, events: unknown[]): Promise<void> {
   await writeFile(
@@ -21,13 +21,13 @@ async function writeJsonl(path: string, events: unknown[]): Promise<void> {
 async function parseNativeEvents(
   audit: unknown[],
   transcript: unknown[] = [],
-  options: Parameters<typeof parseClaudeTrace>[2] = {}
+  options: Parameters<typeof parseClaudeTranscript>[2] = {}
 ) {
   const sessionDir = await mkdtemp(join(tmpdir(), 'claude-native-telemetry-'));
   onTestFinished(() => rm(sessionDir, { recursive: true, force: true }));
   await writeJsonl(join(sessionDir, 'audit.jsonl'), audit);
   await writeJsonl(join(sessionDir, 'cli.jsonl'), transcript);
-  return parseClaudeTrace(
+  return parseClaudeTranscript(
     {
       id: 'native-telemetry',
       metadataPath: join(sessionDir, 'metadata.json'),
@@ -48,7 +48,7 @@ function toolUseEvent(id: string, name: string, timestamp?: string) {
   };
 }
 
-describe('Claude local-agent trace parsing', () => {
+describe('Claude local-agent transcript parsing', () => {
   it('reads back a large tool result the transcript only points to', async () => {
     const id = 'toolu_bdrk_01QnnrBzoJ7qWyZbzHvwEouZ';
     const full = '[{"type":"text","text":"# Search Results (16 found)"}]';
@@ -97,7 +97,7 @@ describe('Claude local-agent trace parsing', () => {
     async (coverage) => {
       const read = toolUseEvent('z-read', 'Read');
       const write = toolUseEvent('a-write', 'Write');
-      const trace = await parseNativeEvents(
+      const transcript = await parseNativeEvents(
         [
           write,
           ...(coverage === 'conflicting' ? [read] : []),
@@ -132,21 +132,21 @@ describe('Claude local-agent trace parsing', () => {
           },
         ]
       );
-      expect(trace.toolCalls.map((call) => call.name)).toEqual([
+      expect(transcript.toolCalls.map((call) => call.name)).toEqual([
         'Read',
         'Write',
       ]);
-      expect(trace.toolCalls).toMatchObject([
+      expect(transcript.toolCalls).toMatchObject([
         { id: 'z-read', output: 'false', isError: false },
         { id: 'a-write', output: '', isError: true },
       ]);
-      expect(trace.telemetry.toolCallCount).toBe(2);
+      expect(transcript.telemetry.toolCallCount).toBe(2);
     }
   );
 
   it('places audit-only earlier calls before a common anchor and retains trailing calls', async () => {
     const anchor = toolUseEvent('a-anchor', 'Write');
-    const trace = await parseNativeEvents(
+    const transcript = await parseNativeEvents(
       [
         toolUseEvent('z-earlier', 'Read'),
         toolUseEvent('y-earlier', 'Grep'),
@@ -164,20 +164,20 @@ describe('Claude local-agent trace parsing', () => {
       ],
       [anchor, toolUseEvent('c-transcript', 'Read')]
     );
-    expect(trace.toolCalls.map((call) => call.id)).toEqual([
+    expect(transcript.toolCalls.map((call) => call.id)).toEqual([
       'z-earlier',
       'y-earlier',
       'a-anchor',
       'c-transcript',
       'b-later',
     ]);
-    expect(trace.toolCalls[0]).toHaveProperty('output', '0');
-    expect(trace.toolCalls[1]).not.toHaveProperty('output');
-    expect(trace.toolCalls[4]).toHaveProperty('output', 'null');
+    expect(transcript.toolCalls[0]).toHaveProperty('output', '0');
+    expect(transcript.toolCalls[1]).not.toHaveProperty('output');
+    expect(transcript.toolCalls[4]).toHaveProperty('output', 'null');
   });
 
   it('uses timestamps to place audit-only calls without sorting transcript calls or IDs', async () => {
-    const trace = await parseNativeEvents(
+    const transcript = await parseNativeEvents(
       [
         {
           type: 'stream_event',
@@ -198,7 +198,7 @@ describe('Claude local-agent trace parsing', () => {
         toolUseEvent('c-fifth', 'Read', '2026-09-17T00:00:00Z'),
       ]
     );
-    expect(trace.toolCalls.map((call) => call.id)).toEqual([
+    expect(transcript.toolCalls.map((call) => call.id)).toEqual([
       'z-first',
       'b-second',
       'y-middle',
@@ -209,7 +209,7 @@ describe('Claude local-agent trace parsing', () => {
   });
 
   it("reads the task's model requests, tool times and start from its audit log's timestamps", async () => {
-    const trace = await parseNativeEvents([
+    const transcript = await parseNativeEvents([
       {
         type: 'user',
         timestamp: '2026-09-17T00:00:00Z',
@@ -256,8 +256,8 @@ describe('Claude local-agent trace parsing', () => {
         result: '3',
       },
     ]);
-    expect(trace.startedAt).toBe('2026-09-17T00:00:00.000Z');
-    expect(trace.modelCalls).toEqual([
+    expect(transcript.startedAt).toBe('2026-09-17T00:00:00.000Z');
+    expect(transcript.modelCalls).toEqual([
       expect.objectContaining({
         id: 'msg_1',
         model: 'claude-x',
@@ -273,7 +273,7 @@ describe('Claude local-agent trace parsing', () => {
         text: '3',
       }),
     ]);
-    expect(trace.toolCalls[0]).toMatchObject({
+    expect(transcript.toolCalls[0]).toMatchObject({
       id: 'toolu_1',
       startedAt: '2026-09-17T00:00:04.000Z',
       completedAt: '2026-09-17T00:00:06.000Z',
@@ -297,11 +297,11 @@ describe('Claude local-agent trace parsing', () => {
         content: [{ type: 'text', text: 'Done.' }],
       },
     });
-    const trace = await parseNativeEvents(
+    const transcript = await parseNativeEvents(
       [message(1, '2026-09-17T00:00:04Z'), { type: 'result', result: 'Done.' }],
       [message(321, '2026-09-17T00:00:09Z')]
     );
-    expect(trace.modelCalls).toEqual([
+    expect(transcript.modelCalls).toEqual([
       expect.objectContaining({
         id: 'msg_1',
         // The audit log's time, the transcript's usage.
@@ -314,7 +314,7 @@ describe('Claude local-agent trace parsing', () => {
   });
 
   it("records when the task last did something, from either source's latest event", async () => {
-    const trace = await parseNativeEvents(
+    const transcript = await parseNativeEvents(
       [
         toolUseEvent('a', 'Read', '2026-09-17T00:00:01Z'),
         toolUseEvent('b', 'Bash', '2026-09-17T00:05:00Z'),
@@ -322,7 +322,7 @@ describe('Claude local-agent trace parsing', () => {
       ],
       [toolUseEvent('d', 'Write', '2026-09-17T00:03:00Z')]
     );
-    expect(trace.lastEventAt).toBe('2026-09-17T00:05:00.000Z');
+    expect(transcript.lastEventAt).toBe('2026-09-17T00:05:00.000Z');
     expect(
       (await parseNativeEvents([toolUseEvent('a', 'Read')])).lastEventAt
     ).toBeUndefined();
@@ -375,11 +375,11 @@ describe('Claude local-agent trace parsing', () => {
       result: 'done',
       is_error: true,
     };
-    const trace = await parseNativeEvents(
+    const transcript = await parseNativeEvents(
       [results, calls, terminal],
       [calls, results, terminal]
     );
-    expect(trace.toolCalls).toEqual([
+    expect(transcript.toolCalls).toEqual([
       {
         id: 'a',
         name: 'search',
@@ -400,15 +400,15 @@ describe('Claude local-agent trace parsing', () => {
         isError: false,
       },
     ]);
-    expect(trace.telemetry.toolErrorCount).toBe(2);
-    expect(trace.telemetry.toolCallCount).toBe(2);
-    expect(trace.telemetry.resultCount).toBe(1);
+    expect(transcript.telemetry.toolErrorCount).toBe(2);
+    expect(transcript.telemetry.toolCallCount).toBe(2);
+    expect(transcript.telemetry.resultCount).toBe(1);
   });
 
   it.each(['', false, 0, null, [], {}])(
     'retains present falsy or empty tool output %j',
     async (content) => {
-      const trace = await parseNativeEvents([
+      const transcript = await parseNativeEvents([
         {
           type: 'assistant',
           message: { content: [{ type: 'tool_use', id: 'a', name: 'Read' }] },
@@ -420,17 +420,17 @@ describe('Claude local-agent trace parsing', () => {
           },
         },
       ]);
-      expect(trace.toolCalls[0]).toHaveProperty(
+      expect(transcript.toolCalls[0]).toHaveProperty(
         'output',
         typeof content === 'string' ? content : JSON.stringify(content)
       );
-      expect(trace.toolCalls[0]).not.toHaveProperty('isError');
-      expect(trace.telemetry.toolErrorCount).toBe(0);
+      expect(transcript.toolCalls[0]).not.toHaveProperty('isError');
+      expect(transcript.telemetry.toolErrorCount).toBe(0);
     }
   );
 
   it('keeps missing result fields unknown and never pairs a result by position', async () => {
-    const trace = await parseNativeEvents([
+    const transcript = await parseNativeEvents([
       {
         type: 'assistant',
         message: {
@@ -451,11 +451,11 @@ describe('Claude local-agent trace parsing', () => {
         },
       },
     ]);
-    for (const call of trace.toolCalls) {
+    for (const call of transcript.toolCalls) {
       expect(call).not.toHaveProperty('output');
       expect(call).not.toHaveProperty('isError');
     }
-    expect(trace.toolCalls).toHaveLength(3);
+    expect(transcript.toolCalls).toHaveLength(3);
   });
 
   it('merges streamed chunks and completed blocks without conflating multiple IDs', async () => {
@@ -508,14 +508,16 @@ describe('Claude local-agent trace parsing', () => {
         delta: { type: 'input_json_delta', partial_json: '{"path":"c"}' },
       }),
     ];
-    const trace = await parseNativeEvents(events, events);
-    expect(trace.toolCalls.map((call) => [call.id, call.arguments])).toEqual([
+    const transcript = await parseNativeEvents(events, events);
+    expect(
+      transcript.toolCalls.map((call) => [call.id, call.arguments])
+    ).toEqual([
       ['a', { path: 'a' }],
       ['b', { path: 'b' }],
       ['c', { path: 'c' }],
     ]);
-    expect(trace.telemetry.observedAssistantMessageCount).toBe(2);
-    expect(trace.telemetry).not.toHaveProperty('apiCallCount');
+    expect(transcript.telemetry.observedAssistantMessageCount).toBe(2);
+    expect(transcript.telemetry).not.toHaveProperty('apiCallCount');
   });
 
   it('counts stable native request/message observations, not terminal records or stream chunks', async () => {
@@ -544,8 +546,8 @@ describe('Claude local-agent trace parsing', () => {
         total_cost_usd: 0.25,
       },
     ];
-    const trace = await parseNativeEvents(events, events);
-    expect(trace.telemetry).toMatchObject({
+    const transcript = await parseNativeEvents(events, events);
+    expect(transcript.telemetry).toMatchObject({
       resultCount: 1,
       observedRequestCount: 2,
       observedAssistantMessageCount: 2,
@@ -554,8 +556,8 @@ describe('Claude local-agent trace parsing', () => {
       outputTokens: 3,
       totalCostUsd: 0.25,
     });
-    expect(trace.telemetry).not.toHaveProperty('apiCallCount');
-    expect(trace.telemetry).not.toHaveProperty('toolErrorCount');
+    expect(transcript.telemetry).not.toHaveProperty('apiCallCount');
+    expect(transcript.telemetry).not.toHaveProperty('toolErrorCount');
   });
 
   it('keeps aggregate usage deduplication across distinct terminal result identities', async () => {
@@ -587,9 +589,9 @@ describe('Claude local-agent trace parsing', () => {
         duration_api_ms: 150,
       },
     ];
-    const trace = await parseNativeEvents(results, results);
-    expect(trace.telemetry.resultCount).toBe(2);
-    expect(trace.usage).toEqual({
+    const transcript = await parseNativeEvents(results, results);
+    expect(transcript.telemetry.resultCount).toBe(2);
+    expect(transcript.usage).toEqual({
       inputTokens: 12,
       outputTokens: 6,
       cacheReadInputTokens: 3,
@@ -598,8 +600,8 @@ describe('Claude local-agent trace parsing', () => {
       durationMs: 300,
       durationApiMs: 230,
     });
-    expect(trace.finalAnswer).toBe('second');
-    expect(trace.telemetry).not.toHaveProperty('apiCallCount');
+    expect(transcript.finalAnswer).toBe('second');
+    expect(transcript.telemetry).not.toHaveProperty('apiCallCount');
   });
 
   it("sums the results' thinking tokens, only when every result reports them", async () => {
@@ -616,10 +618,10 @@ describe('Claude local-agent trace parsing', () => {
       },
     });
     const both = [result('turn-1', 7), result('turn-2', 9)];
-    const trace = await parseNativeEvents(both, both);
-    expect(trace.usage?.reasoningOutputTokens).toBe(16);
-    expect(trace.knownUsageFields).toContain('reasoningOutputTokens');
-    expect(trace.telemetry.reasoningOutputTokens).toBe(16);
+    const transcript = await parseNativeEvents(both, both);
+    expect(transcript.usage?.reasoningOutputTokens).toBe(16);
+    expect(transcript.knownUsageFields).toContain('reasoningOutputTokens');
+    expect(transcript.telemetry.reasoningOutputTokens).toBe(16);
 
     const one = [result('turn-1', 7), result('turn-2')];
     const partial = await parseNativeEvents(one, one);
@@ -667,8 +669,8 @@ describe('Claude local-agent trace parsing', () => {
         permission_denials: [{ tool_name: 'AskUserQuestion' }],
       },
     ];
-    const trace = await parseNativeEvents(events, events);
-    expect(trace.telemetry).toMatchObject({
+    const transcript = await parseNativeEvents(events, events);
+    expect(transcript.telemetry).toMatchObject({
       timeToFirstTokenMs: 3500,
       timeToFirstTokenStreamMs: 1200,
       firstRequestAt: '2026-01-01T00:00:00.500Z',
@@ -723,8 +725,8 @@ describe('Claude local-agent trace parsing', () => {
         usage: { server_tool_use: { web_search_requests: 4 } },
       },
     ];
-    const trace = await parseNativeEvents(events, events);
-    expect(trace.telemetry).toMatchObject({
+    const transcript = await parseNativeEvents(events, events);
+    expect(transcript.telemetry).toMatchObject({
       finalContextTokens: 480,
       webSearchRequests: 7,
     });
@@ -736,7 +738,7 @@ describe('Claude local-agent trace parsing', () => {
   });
 
   it('omits unknown identity and error counts even when a terminal result has usage', async () => {
-    const trace = await parseNativeEvents([
+    const transcript = await parseNativeEvents([
       {
         type: 'user',
         requestId: 'user-id',
@@ -756,7 +758,7 @@ describe('Claude local-agent trace parsing', () => {
       'observedAssistantMessageCount',
       'toolErrorCount',
     ]) {
-      expect(trace.telemetry).not.toHaveProperty(key);
+      expect(transcript.telemetry).not.toHaveProperty(key);
     }
     const empty = await parseNativeEvents([]);
     expect(empty.telemetry).not.toHaveProperty('toolErrorCount');
@@ -838,7 +840,7 @@ describe('Claude local-agent trace parsing', () => {
       expect(found).toHaveLength(1);
       expect(found[0]!.isComplete).toBe(mode === 'current');
       if (mode === 'current') {
-        const trace = await waitForClaudeTrace({
+        const transcript = await waitForClaudeTranscript({
           dataDir: root,
           marker,
           snapshot: new Map(),
@@ -849,28 +851,28 @@ describe('Claude local-agent trace parsing', () => {
             includedInPrompt: true,
           },
         });
-        expect(trace.finalAnswer).toBe('READY');
-        expect(trace.telemetry.models).toEqual(['claude-opus-4-6']);
-        expect(trace.toolCalls[0]).toMatchObject({
+        expect(transcript.finalAnswer).toBe('READY');
+        expect(transcript.telemetry.models).toEqual(['claude-opus-4-6']);
+        expect(transcript.toolCalls[0]).toMatchObject({
           name: 'search',
           source: 'mcp',
           server: 'acme',
         });
-        expect(trace.toolCalls[1]).toMatchObject({
+        expect(transcript.toolCalls[1]).toMatchObject({
           name: 'Grep',
           source: 'builtin',
         });
-        expect(trace.toolCalls[2]).toMatchObject({
+        expect(transcript.toolCalls[2]).toMatchObject({
           name: 'bash',
           source: 'mcp',
           server: 'workspace',
         });
-        expect(trace.usage?.inputTokens).toBe(5);
+        expect(transcript.usage?.inputTokens).toBe(5);
       }
     }
   );
   it('parses final answer, usage, tool calls, and artifacts from local Claude files', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'claude-trace-'));
+    const root = await mkdtemp(join(tmpdir(), 'claude-transcript-'));
     const sessionId = 'local_test';
     const cliSessionId = 'cli-session';
     const sessionDir = join(root, sessionId);
@@ -898,7 +900,7 @@ describe('Claude local-agent trace parsing', () => {
     await writeJsonl(join(sessionDir, 'audit.jsonl'), [
       {
         type: 'result',
-        result: 'trace spike acknowledged.',
+        result: 'transcript spike acknowledged.',
         requestId: 'req_123',
         duration_ms: 1234,
         duration_api_ms: 1000,
@@ -941,11 +943,11 @@ describe('Claude local-agent trace parsing', () => {
       },
     };
 
-    const trace = await parseClaudeTrace(candidate);
+    const transcript = await parseClaudeTranscript(candidate);
 
-    expect(trace.finalAnswer).toBe('trace spike acknowledged.');
-    expect(trace.requestId).toBe('req_123');
-    expect(trace.usage).toMatchObject({
+    expect(transcript.finalAnswer).toBe('transcript spike acknowledged.');
+    expect(transcript.requestId).toBe('req_123');
+    expect(transcript.usage).toMatchObject({
       inputTokens: 10,
       outputTokens: 5,
       totalCostUsd: 0.01,
@@ -953,7 +955,7 @@ describe('Claude local-agent trace parsing', () => {
       durationApiMs: 1000,
       cacheReadInputTokens: 2,
     });
-    expect(trace.toolCalls).toEqual([
+    expect(transcript.toolCalls).toEqual([
       {
         id: 'toolu_1',
         name: 'search',
@@ -963,12 +965,12 @@ describe('Claude local-agent trace parsing', () => {
         arguments: { query: 'planning' },
       },
     ]);
-    expect(trace.transcriptPath).toContain(`${cliSessionId}.jsonl`);
-    expect(trace.isComplete).toBe(true);
-    expect(trace.auditParsed).toBe(true);
-    expect(trace.transcriptParsed).toBe(true);
-    expect(trace.usageAvailable).toBe(true);
-    expect(trace.costAvailable).toBe(true);
+    expect(transcript.transcriptPath).toContain(`${cliSessionId}.jsonl`);
+    expect(transcript.isComplete).toBe(true);
+    expect(transcript.auditParsed).toBe(true);
+    expect(transcript.transcriptParsed).toBe(true);
+    expect(transcript.usageAvailable).toBe(true);
+    expect(transcript.costAvailable).toBe(true);
   });
 
   it('does not treat assistant text without a result event as a completed run', async () => {
@@ -1006,10 +1008,10 @@ describe('Claude local-agent trace parsing', () => {
       },
     };
 
-    const trace = await parseClaudeTrace(candidate);
+    const transcript = await parseClaudeTranscript(candidate);
 
-    expect(trace.finalAnswer).toBe('partial assistant response');
-    expect(trace.isComplete).toBe(false);
+    expect(transcript.finalAnswer).toBe('partial assistant response');
+    expect(transcript.isComplete).toBe(false);
   });
 
   it('continues parsing valid JSONL events when one line is malformed', async () => {
@@ -1047,11 +1049,11 @@ describe('Claude local-agent trace parsing', () => {
       },
     };
 
-    const trace = await parseClaudeTrace(candidate);
+    const transcript = await parseClaudeTranscript(candidate);
 
-    expect(trace.finalAnswer).toBe('final answer');
-    expect(trace.isComplete).toBe(true);
-    expect(trace.parseWarnings.join('\n')).toContain(
+    expect(transcript.finalAnswer).toBe('final answer');
+    expect(transcript.isComplete).toBe(true);
+    expect(transcript.parseWarnings.join('\n')).toContain(
       'discarded 1 malformed JSONL line'
     );
   });
@@ -1069,15 +1071,15 @@ describe('Claude local-agent trace parsing', () => {
       { type: 'result', result: 'final answer' },
     ]);
     await writeFile(join(sessionDir, `${cliSessionId}.jsonl`), '');
-    const trace = await parseClaudeTrace({
+    const transcript = await parseClaudeTranscript({
       id: sessionId,
       metadataPath,
       sessionDir,
       statMtimeMs: Date.now(),
       metadata: { sessionId, cliSessionId },
     });
-    expect(trace.isComplete).toBe(true);
-    expect(trace.transcriptParsed).toBe(false);
+    expect(transcript.isComplete).toBe(true);
+    expect(transcript.transcriptParsed).toBe(false);
   });
 
   it('uses a configured Claude data directory over the default', () => {
@@ -1230,7 +1232,7 @@ describe('Claude local-agent trace parsing', () => {
       },
     ]);
 
-    const trace = await parseClaudeTrace(
+    const transcript = await parseClaudeTranscript(
       {
         id: sessionId,
         metadataPath,
@@ -1244,10 +1246,10 @@ describe('Claude local-agent trace parsing', () => {
       'MCP_SERVER_TESTER_REUSED_MARKER'
     );
 
-    expect(trace.finalAnswer).toBe(
+    expect(transcript.finalAnswer).toBe(
       'MCP_SERVER_TESTER_REUSED_MARKER partial new response'
     );
-    expect(trace.isComplete).toBe(false);
+    expect(transcript.isComplete).toBe(false);
   });
 
   it('does not use a pre-marker result when metadata contains the marker but the audit is still pending', async () => {
@@ -1279,7 +1281,7 @@ describe('Claude local-agent trace parsing', () => {
       },
     ]);
 
-    const trace = await parseClaudeTrace(
+    const transcript = await parseClaudeTranscript(
       {
         id: sessionId,
         metadataPath,
@@ -1293,10 +1295,10 @@ describe('Claude local-agent trace parsing', () => {
       'MCP_SERVER_TESTER_METADATA_MARKER'
     );
 
-    expect(trace.finalAnswer).toBe(
+    expect(transcript.finalAnswer).toBe(
       'MCP_SERVER_TESTER_METADATA_MARKER partial new response'
     );
-    expect(trace.isComplete).toBe(false);
+    expect(transcript.isComplete).toBe(false);
   });
 
   it('does not combine a transcript marker with a pre-marker audit result', async () => {
@@ -1333,7 +1335,7 @@ describe('Claude local-agent trace parsing', () => {
       },
     ]);
 
-    const trace = await parseClaudeTrace(
+    const transcript = await parseClaudeTranscript(
       {
         id: sessionId,
         metadataPath,
@@ -1348,10 +1350,10 @@ describe('Claude local-agent trace parsing', () => {
       'MCP_SERVER_TESTER_CROSS_SOURCE'
     );
 
-    expect(trace.finalAnswer).toBe(
+    expect(transcript.finalAnswer).toBe(
       'MCP_SERVER_TESTER_CROSS_SOURCE partial new response'
     );
-    expect(trace.isComplete).toBe(false);
+    expect(transcript.isComplete).toBe(false);
   });
 
   it('normalizes MCP tool names when server names contain underscores', async () => {
@@ -1390,7 +1392,7 @@ describe('Claude local-agent trace parsing', () => {
       },
     ]);
 
-    const trace = await parseClaudeTrace({
+    const transcript = await parseClaudeTranscript({
       id: sessionId,
       metadataPath,
       sessionDir,
@@ -1402,10 +1404,10 @@ describe('Claude local-agent trace parsing', () => {
       },
     });
 
-    expect(trace.toolCalls[0]?.name).toBe('search');
+    expect(transcript.toolCalls[0]?.name).toBe('search');
   });
 
-  it('waits for a terminal result event before returning a matched trace', async () => {
+  it('waits for a terminal result event before returning a matched transcript', async () => {
     const root = await mkdtemp(join(tmpdir(), 'claude-wait-result-'));
     const sessionDir = join(root, 'local_wait');
     await mkdir(sessionDir, { recursive: true });
@@ -1425,7 +1427,7 @@ describe('Claude local-agent trace parsing', () => {
       },
     ]);
 
-    const tracePromise = waitForClaudeTrace({
+    const transcriptPromise = waitForClaudeTranscript({
       dataDir: root,
       marker: 'MCP_SERVER_TESTER_WAIT',
       correlation: {
@@ -1446,7 +1448,7 @@ describe('Claude local-agent trace parsing', () => {
       { type: 'result', result: 'complete' },
     ]);
 
-    await expect(tracePromise).resolves.toMatchObject({
+    await expect(transcriptPromise).resolves.toMatchObject({
       finalAnswer: 'complete',
       isComplete: true,
     });
@@ -1473,7 +1475,7 @@ describe('Claude local-agent trace parsing', () => {
       { type: 'result', result: 'complete' },
     ]);
 
-    const tracePromise = waitForClaudeTrace({
+    const transcriptPromise = waitForClaudeTranscript({
       dataDir: root,
       marker: 'MCP_SERVER_TESTER_TRANSCRIPT',
       correlation: {
@@ -1502,7 +1504,7 @@ describe('Claude local-agent trace parsing', () => {
       },
     ]);
 
-    await expect(tracePromise).resolves.toMatchObject({
+    await expect(transcriptPromise).resolves.toMatchObject({
       finalAnswer: 'complete',
       transcriptParsed: true,
       toolCalls: [{ name: 'search', arguments: { query: 'planning' } }],
@@ -1572,7 +1574,7 @@ describe('Claude local-agent trace parsing', () => {
 
 describe('Claude Code client-native events', () => {
   it('types skill loads and tool searches from a Cowork session', async () => {
-    const trace = await parseNativeEvents([
+    const transcript = await parseNativeEvents([
       {
         type: 'assistant',
         message: {
@@ -1607,7 +1609,7 @@ describe('Claude Code client-native events', () => {
         },
       },
     ]);
-    expect(trace.toolCalls).toMatchObject([
+    expect(transcript.toolCalls).toMatchObject([
       {
         kind: 'tool_search',
         source: 'builtin',
@@ -1620,7 +1622,7 @@ describe('Claude Code client-native events', () => {
 
 describe('Claude session MCP names', () => {
   it('splits a name with `__` as the CLI parser does', async () => {
-    const trace = await parseNativeEvents([
+    const transcript = await parseNativeEvents([
       {
         type: 'assistant',
         message: {
@@ -1630,7 +1632,10 @@ describe('Claude session MCP names', () => {
         },
       },
     ]);
-    expect(trace.toolCalls[0]).toMatchObject({ server: 'a', name: 'b__c' });
+    expect(transcript.toolCalls[0]).toMatchObject({
+      server: 'a',
+      name: 'b__c',
+    });
   });
 });
 
@@ -1661,7 +1666,7 @@ describe('the final turn answer', () => {
     const sessionDir = join(root, 'local_answer');
     await mkdir(sessionDir, { recursive: true });
     await writeJsonl(join(sessionDir, 'audit.jsonl'), events);
-    return parseClaudeTrace({
+    return parseClaudeTranscript({
       id: 'local_answer',
       metadataPath: join(root, 'local_answer.json'),
       sessionDir,
@@ -1671,7 +1676,7 @@ describe('the final turn answer', () => {
   }
 
   it('keeps the answer Cowork wrote before saving memory and a short wrap-up, without the narration before it', async () => {
-    const trace = await parse([
+    const transcript = await parse([
       prompt,
       text('m1', 'Let me search for that.'),
       tool('m1', 'search'),
@@ -1686,17 +1691,17 @@ describe('the final turn answer', () => {
       text('m4', 'Saved the context to memory.'),
       { type: 'result', result: 'Saved the context to memory.' },
     ]);
-    expect(trace.finalAnswer).toBe(
+    expect(transcript.finalAnswer).toBe(
       `${answer.trim()}\n\nSaved the context to memory.`
     );
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript.telemetry).toMatchObject({
       answerSource: 'longest-text-onward',
       finalMessageChars: 'Saved the context to memory.'.length,
     });
   });
 
   it("is the native result when the last message is the turn's longest text", async () => {
-    const trace = await parse([
+    const transcript = await parse([
       prompt,
       text('m1', 'Let me search.'),
       tool('m1', 'search'),
@@ -1704,8 +1709,8 @@ describe('the final turn answer', () => {
       text('m2', answer),
       { type: 'result', result: answer },
     ]);
-    expect(trace.finalAnswer).toBe(answer);
-    expect(trace.telemetry).toMatchObject({
+    expect(transcript.finalAnswer).toBe(answer);
+    expect(transcript.telemetry).toMatchObject({
       answerSource: 'final-message',
       finalMessageChars: answer.length,
     });
@@ -1731,7 +1736,7 @@ describe('the final turn answer', () => {
   });
 
   it('gives an unfinished task its answer so far', async () => {
-    const trace = await parse([
+    const transcript = await parse([
       prompt,
       text('m1', 'Let me look.'),
       tool('m1', 'search'),
@@ -1739,7 +1744,7 @@ describe('the final turn answer', () => {
       text('m2', answer),
       tool('m2', 'search'),
     ]);
-    expect(trace.isComplete).toBe(false);
-    expect(trace.finalAnswer).toBe(answer);
+    expect(transcript.isComplete).toBe(false);
+    expect(transcript.finalAnswer).toBe(answer);
   });
 });

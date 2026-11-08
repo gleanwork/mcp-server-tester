@@ -14,12 +14,15 @@ import { createJudgeCompletion, preflightJudge } from './judgeClient.js';
 import { contentHash } from './judgeIdentity.js';
 import { DEFAULT_JUDGE_MODELS } from './adapterSupport.js';
 import { DEFAULT_JUDGE_PROVIDER, JudgeLLMSchema } from './judgeTypes.js';
-import { renderJudgePair, type JudgeTraceOptions } from './judgeTrace.js';
+import {
+  renderJudgePair,
+  type JudgeTranscriptOptions,
+} from './judgeTranscript.js';
 import {
   askJudge,
   JUDGE_DEFAULTS,
   judgeLLMConfig,
-  sampleTraces,
+  sampleTranscripts,
   UNREADABLE_ANSWER_RETRIES,
   type JudgeAnswerShape,
 } from './questionJudge.js';
@@ -47,8 +50,8 @@ const PreferenceOptionsSchema = JudgeLLMSchema.extend({
   reference: z.boolean().default(true),
 }).strict();
 
-/** A pair that reaches the parts of the format a single trace doesn't. */
-function samplePair(options: JudgeTraceOptions): string {
+/** A pair that reaches the parts of the format a single transcript doesn't. */
+function samplePair(options: JudgeTranscriptOptions): string {
   const trial = {
     response: '{answer}',
     text: '{answer}',
@@ -73,7 +76,7 @@ function samplePair(options: JudgeTraceOptions): string {
 const VERSION = contentHash({
   system: PREFERENCE_SYSTEM_PROMPT,
   prompt: preferencePrompt('{pair}'),
-  traces: sampleTraces(true),
+  transcripts: sampleTranscripts(true),
   pairs: [samplePair({ reference: true }), samplePair({ reference: false })],
   answer: PREFERENCE_ANSWER,
   sides: SIDES,

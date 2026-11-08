@@ -1,5 +1,5 @@
 /**
- * The trace as a judge reads it (ADR 0009): the user's request, each event
+ * The transcript as a judge reads it (ADR 0009): the user's request, each event
  * the client recorded in order (a tool call with its arguments and result,
  * a skill load, a command), and the final answer.
  *
@@ -9,23 +9,23 @@
  * early and write outside it.
  */
 import type { JudgeInput } from './judgeContract.js';
-import type { TraceEvent } from '../evals/evalFrameworkTypes.js';
+import type { TranscriptEvent } from '../evals/evalFrameworkTypes.js';
 
 /** How much of each tool result a judge reads when no size is set (bytes). */
-export const DEFAULT_TRACE_OUTPUT_BYTES = 20_000;
+export const DEFAULT_TOOL_OUTPUT_BYTES = 20_000;
 
-export interface JudgeTraceOptions {
+export interface JudgeTranscriptOptions {
   /** Each tool result is cut to this many bytes. @default 20000 */
   maxToolOutputSize?: number;
   /** Show the case's reference answer, when it has one. @default false */
   reference?: boolean;
 }
 
-/** The tags the trace uses; a value can't contain one, opening or closing. */
+/** The tags the transcript uses; a value can't contain one, opening or closing. */
 const TAGS = [
   'request',
   'reference_answer',
-  'trace',
+  'transcript',
   'event',
   'arguments',
   'result',
@@ -33,12 +33,12 @@ const TAGS = [
 ];
 /**
  * The tags a pair adds around each trial. They are escaped only in a pair,
- * so a single trace renders as it did before pairs existed.
+ * so a single transcript renders as it did before pairs existed.
  */
 const PAIR_TAG_PATTERN = /<(\/?)(assistant_a|assistant_b)\b/gi;
 const TAG_PATTERN = new RegExp(`<(/?)(${TAGS.join('|')})\\b`, 'gi');
 
-/** A value as text, with the trace's own tags escaped. */
+/** A value as text, with the transcript's own tags escaped. */
 function text(value: unknown): string {
   const raw =
     typeof value === 'string'
@@ -70,7 +70,7 @@ function attribute(name: string, value: string | undefined): string {
   return ` ${name}="${escaped}"`;
 }
 
-function eventView(event: TraceEvent, index: number, max: number): string {
+function eventView(event: TranscriptEvent, index: number, max: number): string {
   const name = event.server ? `${event.server}/${event.name}` : event.name;
   const head =
     `<event n="${index + 1}"` +
@@ -105,19 +105,19 @@ function eventView(event: TraceEvent, index: number, max: number): string {
  * unrecorded; a client trial whose client declares none is `structured`
  * (see `buildJudgeTrial`).
  */
-export function traceRecorded(trial: JudgeInput['trial']): boolean {
+export function transcriptRecorded(trial: JudgeInput['trial']): boolean {
   return (trial.evidence ?? 'none') !== 'none';
 }
 
 /**
- * The trial as the judge reads it. A trace the client didn't record says so
+ * The trial as the judge reads it. A transcript the client didn't record says so
  * (`observed="false"`), and one it recorded on a best-effort basis (evidence
  * `observed`) says it may be incomplete (`complete="false"`), so the judge
  * can answer unknown rather than read a missing call as a no.
  */
-export function renderJudgeTrace(
+export function renderJudgeTranscript(
   input: JudgeInput,
-  options: JudgeTraceOptions = {}
+  options: JudgeTranscriptOptions = {}
 ): string {
   return [
     ...caseParts(input.case, options),
@@ -127,7 +127,7 @@ export function renderJudgeTrace(
 
 /**
  * Two trials of one case, as a pairwise judge reads them: the request once,
- * then each trial's trace and answer, A first.
+ * then each trial's transcript and answer, A first.
  */
 export function renderJudgePair(
   input: {
@@ -135,7 +135,7 @@ export function renderJudgePair(
     a: JudgeInput['trial'];
     b: JudgeInput['trial'];
   },
-  options: JudgeTraceOptions = {}
+  options: JudgeTranscriptOptions = {}
 ): string {
   // A trial's own parts hold no pair tag but its data's, so each one there
   // is escaped; the request and reference are outside both trials.
@@ -152,7 +152,7 @@ export function renderJudgePair(
 
 function caseParts(
   judgeCase: JudgeInput['case'],
-  options: JudgeTraceOptions
+  options: JudgeTranscriptOptions
 ): string[] {
   const parts = [
     `<request>\n${text(judgeCase.input.prompt ?? '')}\n</request>`,
@@ -165,25 +165,25 @@ function caseParts(
 
 function trialParts(
   trial: JudgeInput['trial'],
-  options: JudgeTraceOptions
+  options: JudgeTranscriptOptions
 ): string[] {
-  const max = options.maxToolOutputSize ?? DEFAULT_TRACE_OUTPUT_BYTES;
+  const max = options.maxToolOutputSize ?? DEFAULT_TOOL_OUTPUT_BYTES;
   const parts: string[] = [];
   const partial = trial.evidence === 'observed';
-  const open = partial ? '<trace complete="false">' : '<trace>';
-  if (!traceRecorded(trial))
+  const open = partial ? '<transcript complete="false">' : '<transcript>';
+  if (!transcriptRecorded(trial))
     parts.push(
-      '<trace observed="false">\nThe client did not report its tool calls.\n</trace>'
+      '<transcript observed="false">\nThe client did not report its tool calls.\n</transcript>'
     );
   else if (trial.events.length === 0)
     parts.push(
       partial
-        ? `${open}\nThe client recorded no tool calls. It records them on a best-effort basis, so it may have made calls that aren't shown.\n</trace>`
-        : '<trace>\nThe client made no tool calls.\n</trace>'
+        ? `${open}\nThe client recorded no tool calls. It records them on a best-effort basis, so it may have made calls that aren't shown.\n</transcript>`
+        : '<transcript>\nThe client made no tool calls.\n</transcript>'
     );
   else
     parts.push(
-      `${open}\n${partial ? "The client records tool calls on a best-effort basis, so it may have made calls that aren't shown.\n" : ''}${trial.events.map((event, i) => eventView(event, i, max)).join('\n')}\n</trace>`
+      `${open}\n${partial ? "The client records tool calls on a best-effort basis, so it may have made calls that aren't shown.\n" : ''}${trial.events.map((event, i) => eventView(event, i, max)).join('\n')}\n</transcript>`
     );
   parts.push(`<final_answer>\n${text(trial.text)}\n</final_answer>`);
   return parts;

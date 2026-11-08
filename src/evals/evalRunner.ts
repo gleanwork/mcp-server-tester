@@ -1,6 +1,6 @@
 import { rejectRenamedOptions } from './renamedKeys.js';
 import type { MCPFixtureApi } from '../mcp/fixtures/mcpFixture.js';
-import { responseTrace } from './clientTrace.js';
+import { responseTranscript } from './clientTranscript.js';
 import {
   completeCases,
   endingOf,
@@ -8,7 +8,7 @@ import {
   isInfrastructure,
   thrownEnding,
 } from './trialEnding.js';
-import type { Trace } from './evalFrameworkTypes.js';
+import type { Transcript } from './evalFrameworkTypes.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { SettingsSections } from '../plugins/settings.js';
@@ -28,7 +28,7 @@ import {
   type ClientResponse,
 } from './caseExecution.js';
 import { bareClientName } from './clientNames.js';
-import type { TraceEvent } from './evalFrameworkTypes.js';
+import type { TranscriptEvent } from './evalFrameworkTypes.js';
 import type { TestInfo } from '@playwright/test';
 import {
   buildToolSurface,
@@ -91,7 +91,7 @@ export interface ToolMetadataOverride {
   /**
    * Replacement tool name shown to clients. Calls to it reach the original
    * tool and are recorded under the original name, so a dataset's
-   * assertions read the same in every variant; the trace's `rawName` keeps the
+   * assertions read the same in every variant; the transcript's `rawName` keeps the
    * name the model used.
    */
   name?: string;
@@ -289,7 +289,7 @@ export interface EvalRunnerOptions {
 
   /**
    * Grade each trial (assertions and judges). `false` only collects: trials
-   * keep their traces and get no scores (`mst run --no-grade`).
+   * keep their transcripts and get no scores (`mst run --no-grade`).
    * @default true
    */
   grade?: boolean;
@@ -541,7 +541,7 @@ function mapToolNames(
     }
   }
   function mapCall<
-    T extends { name: string; server?: string; kind?: TraceEvent['kind'] },
+    T extends { name: string; server?: string; kind?: TranscriptEvent['kind'] },
   >(call: T): T {
     if (call.kind !== undefined && call.kind !== 'tool_call') return call;
     const qualified = call.server ? `${call.server}.${call.name}` : call.name;
@@ -714,21 +714,21 @@ function normalizeEvidence(
  * Extracted from runEvalCase to support multi-trial pass rate loops.
  */
 /**
- * The trace a client case result keeps: the execution's (or one derived from
- * its response), with the case's evidence and error, so they always agree.
+ * The transcript a client case result keeps: the execution's (or one derived
+ * from its response), with the case's evidence and error, so they always agree.
  */
-function caseTrace(
+function caseTranscript(
   client: ClientExecution,
   evidence: ClientExecution['evidence'],
   error: string | undefined
-): Trace {
+): Transcript {
   const {
     evidence: _evidence,
     error: _error,
-    ...trace
-  } = client.trace ?? responseTrace(client.response);
+    ...transcript
+  } = client.transcript ?? responseTranscript(client.response);
   return {
-    ...trace,
+    ...transcript,
     ...(evidence !== undefined ? { evidence } : {}),
     ...(error !== undefined ? { error } : {}),
   };
@@ -736,8 +736,8 @@ function caseTrace(
 
 /**
  * A trial's result before grading: what the client did, with no scores. A
- * trial's trace record comes from it (see `writeTrial`), so a trace saved
- * before grading matches the one the run ends with.
+ * trial's transcript record comes from it (see `writeTrial`), so a transcript
+ * saved before grading matches the one the run ends with.
  */
 export function executedTrialResult(
   evalCase: EvalCase,
@@ -784,13 +784,13 @@ export function executedTrialResult(
     scores: {},
     authType: context.mcp?.authType,
     project: context.mcp?.project,
-    // Only pre-executed traces need extra time. Live execution is already
+    // Only pre-executed transcripts need extra time. Live execution is already
     // included in this trial's wall clock.
     durationMs: durationMs + (execution.preExecutionDurationMs ?? 0),
     tags: evalCase.tags,
-    traceEvidence: evidence,
+    transcriptEvidence: evidence,
     ...(clientExecution
-      ? { trace: caseTrace(clientExecution, evidence, error) }
+      ? { transcript: caseTranscript(clientExecution, evidence, error) }
       : {}),
     ...(clientDiagnostics ? { clientDiagnostics } : {}),
     ending: executionEnding(execution),
@@ -848,7 +848,7 @@ async function runTrial(
         {
           response: mapToolNames(clientResponse, options.toolMap),
           clientResponse,
-          evidence: executed.traceEvidence,
+          evidence: executed.transcriptEvidence,
           clientMetadata: executed.clientMetadata,
           ...(options.settings ? { settings: options.settings } : {}),
         },
@@ -873,7 +873,7 @@ async function runTrial(
     durationMs: Date.now() - startTime + executed.durationMs,
     toolPrecision: outcome.toolPrecision,
     toolRecall: outcome.toolRecall,
-    toolCallTrace: outcome.toolCallTrace,
+    toolCallTranscript: outcome.toolCallTranscript,
     ...(judgeUsage !== undefined && { judgeUsage }),
   };
 }
@@ -949,9 +949,9 @@ export async function runEvalCase(
         ...(result.gradingError ? { gradingError: result.gradingError } : {}),
         ending,
         isInfrastructureError: ending.kind === 'infrastructure',
-        toolCallTrace: result.toolCallTrace,
-        traceEvidence: result.traceEvidence,
-        ...(result.trace ? { trace: result.trace } : {}),
+        toolCallTranscript: result.toolCallTranscript,
+        transcriptEvidence: result.transcriptEvidence,
+        ...(result.transcript ? { transcript: result.transcript } : {}),
         ...(result.clientDiagnostics
           ? { clientDiagnostics: result.clientDiagnostics }
           : {}),
@@ -994,17 +994,17 @@ export async function runEvalCase(
   const threshold = evalCase.passThreshold ?? 1.0;
 
   // Fall back to a synthetic result if all trials threw infrastructure
-  // errors. Each trial's trace is in trialResults; none is the case's.
+  // errors. Each trial's transcript is in trialResults; none is the case's.
   // A case with trials has no grading error of its own: each trial says.
   const {
-    trace: _lastTrace,
+    transcript: _lastTranscript,
     ending: _lastEnding,
     gradingError: lastGradingError,
-    ...lastWithoutTrace
+    ...lastWithoutTranscript
   }: Partial<EvalCaseResult> = lastResult ?? {};
-  if (lastGradingError !== undefined) delete lastWithoutTrace.error;
+  if (lastGradingError !== undefined) delete lastWithoutTranscript.error;
   const baseResult: EvalCaseResult = lastResult
-    ? (lastWithoutTrace as EvalCaseResult)
+    ? (lastWithoutTranscript as EvalCaseResult)
     : {
         id: evalCase.id,
         datasetName: options.datasetName ?? 'single-case',

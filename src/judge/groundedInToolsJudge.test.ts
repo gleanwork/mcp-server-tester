@@ -72,7 +72,7 @@ describe('the grounded-in-tools judge', () => {
     const rules = GROUNDED_IN_TOOLS_QUESTION.split('\n\n');
     const rule = (start: string) => rules.find((r) => r.startsWith(start))!;
     expect(rules[0]).toBe(
-      'Is every claim in the final answer supported by a tool result in the trace?'
+      'Is every claim in the final answer supported by a tool result in the transcript?'
     );
     // Claims about the assistant's own calls count.
     expect(rule('A claim is anything')).toContain('what the assistant did');
@@ -84,18 +84,18 @@ describe('the grounded-in-tools judge', () => {
     expect(supported).toContain('but not what the assistant works out');
     // Reporting a failure is supported by the failed call.
     expect(supported).toContain('"the call failed" is supported');
-    expect(rule('Answer "yes"')).toContain('reports, as the trace shows');
+    expect(rule('Answer "yes"')).toContain('reports, as the transcript shows');
     // General knowledge, and a value only a failed call could give, aren't.
     expect(rule('Answer "no"')).toContain('general knowledge');
     expect(rule('Answer "no"')).toContain(
       'a value that only a call that failed could have given'
     );
-    // An invented claim is a no, whatever calls the trace has.
+    // An invented claim is a no, whatever calls the transcript has.
     expect(rule('Answer "no"')).toContain('nothing in the request supports');
     expect(rule('Answer "no"')).not.toContain('the results it would need');
     expect(rule('Answer "unknown"')).toContain('only when');
     expect(rule('Answer "unknown"')).toContain('cut off');
-    // A result the trace can't show is unknown, not no.
+    // A result the transcript can't show is unknown, not no.
     expect(rule('Answer "unknown"')).toContain('observed="false"');
     expect(rule('Answer "unknown"')).toContain('complete="false"');
     // Correctness and tool choice are other judges' questions.
@@ -104,7 +104,7 @@ describe('the grounded-in-tools judge', () => {
     );
   });
 
-  it('asks its one question about the trace, without the reference answer', async () => {
+  it('asks its one question about the transcript, without the reference answer', async () => {
     const requests = model('no');
     const score = await GROUNDED_IN_TOOLS_JUDGE.evaluate(UNSUPPORTED_CLAIM, {});
     expect(requests).toHaveLength(1);

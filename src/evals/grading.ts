@@ -4,7 +4,7 @@
  *
  * It owns the rules every execution path shares:
  * - whether the evidence can support tool-call assertions (decided once, here);
- * - the tool-trace view reported next to `toolsTriggered`;
+ * - the tool-call view reported next to `toolsTriggered`;
  * - how judge settings resolve (case defaults, eval config judges).
  *
  * Validators stay pure leaves: this module decides what to grade and with
@@ -18,7 +18,7 @@ import type {
   JudgeExpectConfig,
 } from './datasetTypes.js';
 import type { ClientResponse } from './caseExecution.js';
-import type { TraceEvidence } from './evalFrameworkTypes.js';
+import type { TranscriptEvidence } from './evalFrameworkTypes.js';
 import type { JudgeCaseSource } from '../judge/judgeContract.js';
 import type { ClientMetadata } from './clientTelemetryTypes.js';
 import type { SettingsSections } from '../plugins/settings.js';
@@ -48,11 +48,11 @@ import {
 export interface GradedExecution {
   /** What validators grade: the client's response with native tool names mapped. */
   response: unknown;
-  /** The client's response as reported; the tool trace shows its names. */
+  /** The client's response as reported; the tool-call view shows its names. */
   clientResponse?: ClientResponse;
   /** Normalized client evidence. Absent for clients that don't report it. */
-  evidence?: TraceEvidence;
-  /** External client metadata, whose trace source decides tool-evidence quality. */
+  evidence?: TranscriptEvidence;
+  /** External client metadata, whose transcript source decides tool-evidence quality. */
   clientMetadata?: ClientMetadata;
   /** The eval's plugin settings, for its judges (ADR 0008). */
   settings?: SettingsSections;
@@ -67,7 +67,7 @@ export interface GradingOutcome {
    * Expected, unexpected and missed calls, when `toolsTriggered` was graded
    * on sufficient evidence and the case ran on a client.
    */
-  toolCallTrace?: EvalCaseResult['toolCallTrace'];
+  toolCallTranscript?: EvalCaseResult['toolCallTranscript'];
 }
 
 /**
@@ -319,10 +319,10 @@ function isToolCall(entry: { kind?: string }): boolean {
  * Calls are shown with the client's own names; skills and other events are
  * left out of the view.
  */
-function toolTraceView(
+function toolCallView(
   assertion: NonNullable<EvalAssertions['toolsTriggered']>,
   graded: GradedExecution & { clientResponse: ClientResponse }
-): NonNullable<EvalCaseResult['toolCallTrace']> {
+): NonNullable<EvalCaseResult['toolCallTranscript']> {
   // Match on the mapped response the validator graded.
   const mapped = graded.response as ClientResponse;
   const match = matchToolCalls(mapped.events ?? mapped.toolCalls, assertion);
@@ -354,7 +354,7 @@ export async function gradeTrial(
     JudgeCaseSource,
   graded: GradedExecution,
   /**
-   * An earlier grading of the same trace (`mst grade --resume`): each judge
+   * An earlier grading of the same transcript (`mst grade --resume`): each judge
    * that gave a verdict there isn't run again. Assertions always run.
    */
   previous?: GradingOutcome
@@ -398,7 +398,7 @@ export async function gradeTrial(
       outcome.toolPrecision = validation.metrics?.precision;
       outcome.toolRecall = validation.metrics?.recall;
       if (graded.clientResponse)
-        outcome.toolCallTrace = toolTraceView(expectBlock.toolsTriggered, {
+        outcome.toolCallTranscript = toolCallView(expectBlock.toolsTriggered, {
           ...graded,
           clientResponse: graded.clientResponse,
         });

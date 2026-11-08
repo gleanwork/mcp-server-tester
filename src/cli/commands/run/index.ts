@@ -287,7 +287,7 @@ export async function run(options: RunOptions): Promise<void> {
         ? { loadedDatasets: evalOptions.loadedDatasets }
         : {}),
     });
-    console.log(`Graded the traces of run ${graded.gradedFrom}.`);
+    console.log(`Graded the transcripts of run ${graded.gradedFrom}.`);
     printRunResult(graded, options.config);
     return;
   }

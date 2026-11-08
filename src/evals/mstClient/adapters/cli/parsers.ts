@@ -5,7 +5,7 @@ import type {
   ClientRunResult,
   ModelCall,
 } from '../../../evalFrameworkTypes.js';
-import { toolCallEvents } from '../../../clientTrace.js';
+import { toolCallEvents } from '../../../clientTranscript.js';
 import {
   mstScratchRoots,
   resolvePersistedOutput,
@@ -271,7 +271,7 @@ export function createJsonParser(paths: {
 /** Malformed CLI wire output, distinct from invalid JSON. */
 export class InvalidCliOutput extends Error {}
 
-/** Validate normalized CLI wire fields before making common trace events. */
+/** Validate normalized CLI wire fields before making common transcript events. */
 export function validateCliOutput(result: unknown): string | null {
   if (result === null || typeof result !== 'object') {
     return `Expected object, got ${typeof result}`;

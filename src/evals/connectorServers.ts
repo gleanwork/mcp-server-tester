@@ -512,7 +512,7 @@ export function connectorTokenSource(
   tokens(labels: readonly string[]): Promise<Record<string, WorkerToken>>;
   /**
    * Every token handed out so far: secrets this machine replaces in the
-   * traces the workers send back, since a worker may not redact them.
+   * transcripts the workers send back, since a worker may not redact them.
    */
   secrets(): string[];
 } {

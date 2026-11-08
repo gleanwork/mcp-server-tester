@@ -14,14 +14,14 @@ import {
 } from './variantComparison.js';
 import type { CaseGrouping } from './variantComparison.js';
 
-type Trace = NonNullable<TrialResult['toolCallTrace']>;
+type ToolCallTranscript = NonNullable<TrialResult['toolCallTranscript']>;
 
 interface CaseSpec {
   id: string;
   /** One entry per trial. */
   trials: boolean[];
   tags?: string[];
-  traces?: Array<Trace | undefined>;
+  transcripts?: Array<ToolCallTranscript | undefined>;
   error?: Array<string | undefined>;
   infra?: boolean[];
   tokens?: number;
@@ -33,7 +33,9 @@ function caseResult(spec: CaseSpec): EvalCaseResult {
   const trials: TrialResult[] = spec.trials.map((pass, i) => ({
     pass,
     durationMs: 1,
-    ...(spec.traces?.[i] ? { toolCallTrace: spec.traces[i] } : {}),
+    ...(spec.transcripts?.[i]
+      ? { toolCallTranscript: spec.transcripts[i] }
+      : {}),
     ...(spec.error?.[i] ? { error: spec.error[i] } : {}),
     ...(spec.infra?.[i] ? { isInfrastructureError: true } : {}),
     ...(spec.tokens !== undefined
@@ -67,8 +69,8 @@ function caseResult(spec: CaseSpec): EvalCaseResult {
       assertions: { toolsTriggered: { calls: [{ name: 'search' }] } },
     },
     ...(trials.length > 1 ? { trialResults: trials } : {}),
-    ...(trials.length === 1 && trials[0]!.toolCallTrace
-      ? { toolCallTrace: trials[0]!.toolCallTrace }
+    ...(trials.length === 1 && trials[0]!.toolCallTranscript
+      ? { toolCallTranscript: trials[0]!.toolCallTranscript }
       : {}),
   };
 }
@@ -88,15 +90,18 @@ const all = (pass: boolean, n = 5) => Array.from({ length: n }, () => pass);
 const some = (passes: number, n = 5) =>
   Array.from({ length: n }, (_, i) => i < passes);
 
-const searchCall: Trace = {
+const searchCall: ToolCallTranscript = {
   calls: [{ name: 'search', arguments: {}, status: 'expected' }],
   missed: [],
 };
-const wrongCall: Trace = {
+const wrongCall: ToolCallTranscript = {
   calls: [{ name: 'get_status', arguments: {}, status: 'unexpected' }],
   missed: [{ name: 'search' }],
 };
-const noCall: Trace = { calls: [], missed: [{ name: 'search' }] };
+const noCall: ToolCallTranscript = {
+  calls: [],
+  missed: [{ name: 'search' }],
+};
 
 describe('signFlipTest', () => {
   it('is exact: the share of sign flips at least as extreme', () => {
@@ -464,14 +469,14 @@ describe('compareVariants', () => {
     {
       id: 'find-doc',
       trials: all(false, 3),
-      traces: [noCall, noCall, wrongCall],
+      transcripts: [noCall, noCall, wrongCall],
       tokens: 100,
     },
     {
       id: 'live-status',
       trials: all(true, 3),
       tags: ['regression'],
-      traces: [searchCall, searchCall, searchCall],
+      transcripts: [searchCall, searchCall, searchCall],
       tokens: 100,
     },
   ]);
@@ -479,7 +484,7 @@ describe('compareVariants', () => {
     {
       id: 'find-doc',
       trials: [true, true, false],
-      traces: [searchCall, searchCall, searchCall],
+      transcripts: [searchCall, searchCall, searchCall],
       // 300 tokens a trial, 200 of them from the cache.
       tokens: 100,
       cacheRead: 200,
@@ -488,7 +493,7 @@ describe('compareVariants', () => {
       id: 'live-status',
       trials: [true, false, true],
       tags: ['regression'],
-      traces: [searchCall, wrongCall, searchCall],
+      transcripts: [searchCall, wrongCall, searchCall],
       error: [undefined, undefined, undefined],
       tokens: 100,
       cacheRead: 200,

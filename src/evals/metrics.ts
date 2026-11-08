@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { referenceSchema } from './referenceSchemas.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
-import type { Trace } from './evalFrameworkTypes.js';
+import type { Transcript } from './evalFrameworkTypes.js';
 import { isInfrastructure, isIncompleteCase } from './trialEnding.js';
 import { extensionLookup } from '../plugins/extensions.js';
 import { settingsFor, type SettingsSections } from '../plugins/settings.js';
@@ -46,7 +46,7 @@ function responseObject(caseResult: EvalCaseResult): Record<string, unknown> {
 /** One run of a case: a trial, or the case itself when it runs once. */
 interface Trial {
   pass: boolean;
-  trace?: Trace;
+  transcript?: Transcript;
   usage?: UsageMetrics;
   /** Usage of the trial's judges, from judges that report it. */
   judgeUsage?: Partial<UsageMetrics>;
@@ -66,7 +66,7 @@ function caseTrials(caseResult: EvalCaseResult): Trial[] {
       .filter((trial) => !isInfrastructure(trial))
       .map((trial) => ({
         pass: trial.pass,
-        trace: trial.trace,
+        transcript: trial.transcript,
         usage: trial.clientUsage,
         judgeUsage: trial.judgeUsage,
         durationMs: trial.durationMs,
@@ -78,7 +78,7 @@ function caseTrials(caseResult: EvalCaseResult): Trial[] {
   return [
     {
       pass: caseResult.pass,
-      trace: caseResult.trace,
+      transcript: caseResult.transcript,
       usage: caseResult.clientUsage,
       judgeUsage: caseResult.judgeUsage,
       durationMs: caseResult.durationMs,
@@ -109,16 +109,16 @@ function perTrial(
 /**
  * A trial's tool calls, each named `server.tool` when an MCP call names its
  * server; null when the client declares no evidence of them or the trial has
- * no record of them. A result without a trace (stored before traces were
- * recorded) falls back to its response.
+ * no record of them. A result without a transcript (stored before
+ * transcripts were recorded) falls back to its response.
  */
 function trialToolCalls(
   trial: Trial,
   caseResult: EvalCaseResult
 ): Array<{ name?: unknown }> | null {
-  if (trial.trace) {
-    if (trial.trace.evidence === 'none') return null;
-    return trial.trace.events
+  if (trial.transcript) {
+    if (trial.transcript.evidence === 'none') return null;
+    return trial.transcript.events
       .filter((event) => event.kind === 'tool_call')
       .map((event) => ({
         name:
@@ -134,14 +134,15 @@ function trialToolCalls(
 
 /**
  * A trial's events from one source: MCP tool calls, or everything the client
- * did natively. Null without a trace, or when the client declares no evidence.
+ * did natively. Null without a transcript, or when the client declares no
+ * evidence.
  */
-function traceEventCount(
+function transcriptEventCount(
   trial: Trial,
   source: 'mcp' | 'builtin'
 ): number | null {
-  if (!trial.trace || trial.trace.evidence === 'none') return null;
-  return trial.trace.events.filter(
+  if (!trial.transcript || trial.transcript.evidence === 'none') return null;
+  return trial.transcript.events.filter(
     (event) =>
       event.source === source &&
       (source === 'builtin' || event.kind === 'tool_call')
@@ -154,10 +155,10 @@ function traceEventCount(
  * evidence of the trial's calls.
  */
 function toolSearchHit(trial: Trial): boolean | null {
-  if (!trial.trace || trial.trace.evidence === 'none') return null;
+  if (!trial.transcript || trial.transcript.evidence === 'none') return null;
   const found: Array<{ name: string; server?: string }> = [];
   let searched = false;
-  for (const event of trial.trace.events) {
+  for (const event of trial.transcript.events) {
     if (event.kind === 'tool_search') {
       searched = true;
       found.push(...(event.results ?? []));
@@ -178,9 +179,9 @@ function toolSearchHit(trial: Trial): boolean | null {
   return searched ? false : null;
 }
 
-/** The trial's answer: its trace's, or the case's response text. */
+/** The trial's answer: its transcript's, or the case's response text. */
 function trialText(trial: Trial, caseResult: EvalCaseResult): string | null {
-  if (trial.trace) return trial.trace.finalText ?? '';
+  if (trial.transcript) return trial.transcript.finalText ?? '';
   return trial.isCase ? responseText(caseResult) : null;
 }
 
@@ -491,8 +492,8 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
       'continuous',
       (result) =>
         perTrial(result, (trial) =>
-          trial.trace
-            ? trial.trace.error === undefined
+          trial.transcript
+            ? trial.transcript.error === undefined
             : trial.error === undefined &&
               responseObject(result).success !== false
         ),
@@ -597,14 +598,15 @@ export const BUILT_IN_METRICS: Readonly<Record<string, MetricDefinition>> =
     // MCP tool calls, and host-native events (host tools, skills, commands).
     mcp_call_count: metric(
       'continuous',
-      (result) => perTrial(result, (trial) => traceEventCount(trial, 'mcp')),
+      (result) =>
+        perTrial(result, (trial) => transcriptEventCount(trial, 'mcp')),
       meanAggregation,
       'calls'
     ),
     builtin_event_count: metric(
       'continuous',
       (result) =>
-        perTrial(result, (trial) => traceEventCount(trial, 'builtin')),
+        perTrial(result, (trial) => transcriptEventCount(trial, 'builtin')),
       meanAggregation,
       'calls'
     ),

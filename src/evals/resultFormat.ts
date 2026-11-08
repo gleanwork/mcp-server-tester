@@ -27,11 +27,11 @@ export function assertRunFormat(value: unknown, what: string): void {
 
 /** 1.x result field names and what 2.0 calls them. */
 const RENAMED_RESULT_FIELDS: Record<string, string> = {
-  mcpHostTrace: 'toolCallTrace',
+  mcpHostTrace: 'toolCallTranscript',
   hostUsage: 'clientUsage',
   hostTelemetry: 'clientTelemetry',
   hostDiagnostics: 'clientDiagnostics',
-  hostEvidence: 'traceEvidence',
+  hostEvidence: 'transcriptEvidence',
   externalHost: 'clientMetadata',
   expectations: 'scores',
   iterationResults: 'trialResults',
@@ -60,6 +60,27 @@ export function olderResultsError(what: string, format?: unknown): Error {
 
 function isRenamed(key: string): boolean {
   return Object.hasOwn(RENAMED_RESULT_FIELDS, key);
+}
+
+/** Result fields a 2.0 release candidate wrote, and what ADR 0013 renamed them. */
+const PRERELEASE_RESULT_FIELDS: Record<string, string> = {
+  trace: 'transcript',
+  toolCallTrace: 'toolCallTranscript',
+  traceEvidence: 'transcriptEvidence',
+};
+
+function isPrereleaseField(key: string): boolean {
+  return Object.hasOwn(PRERELEASE_RESULT_FIELDS, key);
+}
+
+function hasPrereleaseFields(result: Record<string, unknown>): boolean {
+  if (Object.keys(result).some(isPrereleaseField)) return true;
+  return (
+    Array.isArray(result.trialResults) &&
+    result.trialResults.some(
+      (trial) => isObject(trial) && Object.keys(trial).some(isPrereleaseField)
+    )
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -91,4 +112,15 @@ export function assertCurrentRunResult(value: unknown, what: string): void {
     cases.some((result) => isObject(result) && hasOlderFields(result))
   )
     throw olderResultsError(what);
+  if (
+    Array.isArray(cases) &&
+    cases.some((result) => isObject(result) && hasPrereleaseFields(result))
+  ) {
+    const renames = Object.entries(PRERELEASE_RESULT_FIELDS)
+      .map(([from, to]) => `${from} → ${to}`)
+      .join(', ');
+    throw new Error(
+      `${what} was written by an MST 2.0 release candidate, before ADR 0013 renamed its result fields (${renames}; see docs/migrations/2.0-prereleases.md#traces-are-transcripts). Rerun to write it again.`
+    );
+  }
 }

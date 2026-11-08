@@ -5,7 +5,7 @@ import path from 'node:path';
 import { ClaudeStartup } from './claudeStartup.js';
 import { runCLIClient } from './runner.js';
 import { getClient } from '../../../builtinClients.js';
-import { clientRunToExecution } from '../../../clientTrace.js';
+import { clientRunToExecution } from '../../../clientTranscript.js';
 import { runEvalDataset } from '../../../evalRunner.js';
 
 const init = {
@@ -224,7 +224,7 @@ setTimeout(() => { console.log(${JSON.stringify(line(init))}); console.log(JSON.
   });
 
   it(
-    'retains the partial trace and startup evidence at the enclosing client deadline',
+    'retains the partial transcript and startup evidence at the enclosing client deadline',
     async () => {
       const result = await host(
         `
@@ -242,7 +242,7 @@ setInterval(() => {}, 1000);
       ]);
       expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
       // Claude Code ran out of the case's own time: a trial that failed, its
-      // partial trace graded (ADR 0010). The failure kind stays for people.
+      // partial transcript graded (ADR 0010). The failure kind stays for people.
       expect(result.ending).toEqual({ kind: 'trial' });
       expect(result.diagnostics?.failureKind).toBe('timeout');
       expect(result.usage).toBeUndefined();

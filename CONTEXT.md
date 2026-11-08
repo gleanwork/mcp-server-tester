@@ -1,14 +1,14 @@
 # MCP Server Tester
 
-Tests and evaluates MCP servers. Tests check a server's tools and protocol directly; evals have a client act on cases and grade what it did, comparing variants of the setup. The vocabulary follows common eval usage ([ADR 0002](docs/adr/0002-common-eval-vocabulary.md)). Extension follows ESLint's plugin model.
+Tests and evaluates MCP servers. Tests check a server's tools and protocol directly; evals have a client act on cases and grade what it did, comparing variants of the setup. MST is an evaluation harness. The vocabulary follows Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) ([ADR 0013](docs/adr/0013-mst-uses-anthropics-eval-vocabulary.md)); [ADR 0002](docs/adr/0002-common-eval-vocabulary.md) maps it to other frameworks' terms. Extension follows ESLint's plugin model.
 
 ## Language
 
 ### Evals
 
 **Eval**:
-A definition of what to evaluate and how: its datasets, variants, graders and metrics.
-_Avoid_: suite, manifest, task, benchmark
+A definition of what to evaluate and how: its datasets, variants, graders and metrics. Anthropic's longer name is eval suite.
+_Avoid_: manifest, task, benchmark
 
 **Eval config**:
 The JSON file that defines one eval. `mst run` runs one.
@@ -35,8 +35,8 @@ A case's ground truth that graders check against: an answer, rubric criteria, or
 _Avoid_: canonical answer, golden, target, reference
 
 **Client**:
-The MCP client application an eval tests, named canonically: `claude-code`, `codex-cli` (the Codex CLI; it was `codex`), `cowork`, `chatgpt`, `codex-app` (the Codex surface of the ChatGPT desktop app; it was `chatgpt` with `surface: "codex"`), or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). One client is one product: no option changes which product it is. How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. Desktop execution uses the product's `macos.ts` or `linux.ts` entry point, selected on the machine running the trial. New results record no driver identity; old stored results keep theirs. A client returns a trace, never a score. Built-in and plugin clients return the same `ClientRunResult`: a final answer, ordered events and optional usage, diagnostics and telemetry. MST derives the assertion/report view from it. `mst clients` lists each client's requirements, options and defaults from its definition and schema. It describes OS-dependent defaults without resolving them on the coordinator.
-_Avoid_: host, harness, agent, runner, solver, provider
+The MCP client application an eval tests, named canonically: `claude-code`, `codex-cli` (the Codex CLI; it was `codex`), `cowork`, `chatgpt`, `codex-app` (the Codex surface of the ChatGPT desktop app; it was `chatgpt` with `surface: "codex"`), or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). One client is one product: no option changes which product it is. How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. Desktop execution uses the product's `macos.ts` or `linux.ts` entry point, selected on the machine running the trial. New results record no driver identity; old stored results keep theirs. A client returns a transcript, never a score. Built-in and plugin clients return the same `ClientRunResult`: a final answer, ordered events and optional usage, diagnostics and telemetry. MST derives the assertion/report view from it. `mst clients` lists each client's requirements, options and defaults from its definition and schema. It describes OS-dependent defaults without resolving them on the coordinator. A client with its model is an agent harness.
+_Avoid_: host, harness (unqualified), agent, runner, solver, provider
 
 **Client session**:
 One client kept open with fixed options, model, servers and environment. Each trial supplies its identity and prompt. The session returns a `ClientRunResult` and says whether MST can continue, must reset, or must stop. MST owns the readiness, reset and diagnosis policy. Shared timeout enforcement and reset retry timings remain deferred in [ADR 0011](docs/adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md). Built-in and plugin clients expose this through `open()`; local and worker dispatch use the same session loop. A client may supply `run`, `open`, or both. Run-only clients keep their concurrency and use one-shot sessions where needed. Different fixed settings get separate sessions.
@@ -78,12 +78,20 @@ _Avoid_: tool variant, tool overrides, override set
 One attempt at a case by one variant. A case runs a set number of trials; attempts that failed on infrastructure aren't trials.
 _Avoid_: iteration, attempt, epoch, repetition, sample
 
-**Trace**:
-What a client did in one trial, in order: tool calls (MCP or the client's own), skill loads, commands, subagents and tool searches, with usage and the final answer.
-_Avoid_: transcript, trajectory, log, response
+**Environment**:
+What the client acts on: the services behind the MCP servers and their data, such as a Slack workspace or a Jira project. Not where trials are collected, which is the runner, and not a process's environment variables.
+_Avoid_: backend, system under test
+
+**Outcome**:
+The final state of the environment at the end of a trial, such as whether the reservation exists. It is not what the client says it did, which is in its transcript, and not how the attempt ended, which is its ending.
+_Avoid_: result, end state
+
+**Transcript**:
+What a client did in one trial, in order: tool calls (MCP or the client's own), skill loads, commands, subagents and tool searches, with usage and the final answer. Stored in a run's `transcripts/` directory ([ADR 0013](docs/adr/0013-mst-uses-anthropics-eval-vocabulary.md)). "Trace" means only an OpenTelemetry trace, which MST builds from transcripts.
+_Avoid_: trace, trajectory, log, response
 
 **Client artifacts**:
-A bounded copy of the files a client kept for one trial (such as Cowork's session folder), taken from the paths the client names as evidence, for judges to read. A run that keeps full traces stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
+A bounded copy of the files a client kept for one trial (such as Cowork's session folder), taken from the paths the client names as evidence, for judges to read. A run that keeps full transcripts stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
 _Avoid_: attachments, session dump
 
 **Failure diagnosis**:
@@ -91,7 +99,7 @@ What a desktop client captured when a case failed and left the app in an unknown
 _Avoid_: crash dump, debug bundle
 
 **Evidence**:
-How far a client's trace can be trusted for tool assertions: `structured` (protocol or the client's own records), `observed` (best effort) or `none`. Only `structured` evidence can pass tool-call assertions; a client that declares nothing counts as unverified.
+How far a client's transcript can be trusted for tool assertions: `structured` (protocol or the client's own records), `observed` (best effort) or `none`. Only `structured` evidence can pass tool-call assertions; a client that declares nothing counts as unverified.
 _Avoid_: confidence, fidelity
 
 **Client-native**:
@@ -101,19 +109,19 @@ _Avoid_: native (unqualified)
 ### Grading
 
 **Grader**:
-Logic that scores a trial: an assertion or a judge.
-_Avoid_: scorer, evaluator, checker
+Logic that scores a trial. A code grader is deterministic: each key of a case's `assertions`, such as `toolsTriggered` or `textContains`, is one, and records its own score. A model grader is a judge. A person who gives labels is a human grader.
+_Avoid_: scorer, evaluator
 
 **Assertion**:
-A code grader: a deterministic check of a trial's trace or answer, such as the tools it triggered or text the answer contains.
-_Avoid_: expectation, check, validator
+One condition a code grader checks, such as one expected call in `toolsTriggered` or one string in `textContains`. A case's `assertions` lists them, grouped by grader.
+_Avoid_: expectation, validator
 
 **Judge**:
-A model grader: an LLM that scores a trial against the case's expected result or a rubric.
+A model grader: an LLM that scores a trial against the case's expected result or a rubric. Anthropic uses the name too.
 _Avoid_: LLM grader, evaluator, rater
 
 **Unknown answer**:
-A judge's answer when the trace can't support a verdict, for example when the client didn't record its tool calls. Unlike a skip, the trial doesn't pass. It has no score, the judge's pass rate and score metrics leave it out, and a calibration counts it in the `unknown` rate, as it does a skip.
+A judge's answer when the transcript can't support a verdict, for example when the client didn't record its tool calls. Unlike a skip, the trial doesn't pass. It has no score, the judge's pass rate and score metrics leave it out, and a calibration counts it in the `unknown` rate, as it does a skip.
 _Avoid_: abstain, no verdict, indeterminate
 
 **Judge identity**:
@@ -173,7 +181,7 @@ Where a pass rate's true value, the rate over unlimited trials, lies with 95% co
 _Avoid_: margin of error, error bars
 
 **Regrade**:
-Grading a stored run's traces again with the eval config's graders as they are now (`mst grade`), without running the client. It is saved as a new run, `<run-id>.g2` and so on, whose `run.json` names the original in `gradedFrom`. Needs traces stored with `"redactStoredResponses": false`.
+Grading a stored run's transcripts again with the eval config's graders as they are now (`mst grade`), without running the client. It is saved as a new run, `<run-id>.g2` and so on, whose `run.json` names the original in `gradedFrom`. Needs transcripts stored with `"redactStoredResponses": false`.
 _Avoid_: rescore, re-run
 
 ### Runs and comparisons
@@ -192,7 +200,7 @@ _Avoid_: stage, step
 
 **Ending**:
 How a client's attempt at a case ended, decided where it ended (by the client, the batch or the shard): a trial, which is graded as usual even when the client errored or ran out of turns, time or context; or an infrastructure failure. Collection decides it; grading never changes it.
-_Avoid_: outcome, status, result
+_Avoid_: outcome (that is the environment's final state), status, result
 
 **Infrastructure failure**:
 An attempt that ended because something around the client broke (the desktop crashed or was leased, a machine couldn't be reached), not because of what the client did. MST must be able to name what broke, one of: the client app (the desktop or CLI program MST drives crashed, wasn't available, didn't take the prompt, or gave output MST couldn't read), the client's workspace (Cowork's VM), the network, the model provider's API, collection (MST couldn't collect the trial's result: its shard ended without it, or its artifacts couldn't be copied), an MST deadline, or setup (the eval, the case, a client setting or a permission). A client that ran out of its own turns, time or context failed the trial. An infrastructure failure isn't a trial: it is recorded with why, its case is incomplete, and `--resume` collects it again unless a retry can't help (a prompt the desktop truncates or the model's context can't hold, a client setting the eval can't run with). Those are reported as needing a fix to the eval, the case or the setup.
@@ -277,7 +285,7 @@ The eval config's run-wide caps on trials running at once, per LLM provider and 
 _Avoid_: rate limit (that is the provider's), quota, concurrency
 
 **Missing trial**:
-A trial with no trace after collect, because its shard failed: an infrastructure failure with nothing recorded but its absence. It isn't a failed trial: its case is incomplete, and `--resume` collects it.
+A trial with no transcript after collect, because its shard failed: an infrastructure failure with nothing recorded but its absence. It isn't a failed trial: its case is incomplete, and `--resume` collects it.
 _Avoid_: failed trial, skipped trial
 
 ### Tests

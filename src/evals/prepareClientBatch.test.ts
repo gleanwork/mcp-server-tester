@@ -8,11 +8,11 @@ describe('prepareClientBatch redaction', () => {
   const envSecret = 'env-secret-value';
   const fileSecret = 'file-secret-value';
 
-  it('redacts every trace a batch client hands MST, early or at the end', async () => {
+  it('redacts every transcript a batch client hands MST, early or at the end', async () => {
     const early: ClientRunResult[] = [];
     // Like a run's connector tokens: every token delivered so far.
     const delivered = ['token-before-renewal'];
-    const traceWith = (secret: string): ClientRunResult => ({
+    const transcriptWith = (secret: string): ClientRunResult => ({
       finalText: `answer with ${secret}`,
       events: [],
       telemetry: { content: { history: [`said ${secret}`] } },
@@ -28,8 +28,8 @@ describe('prepareClientBatch redaction', () => {
               // The token renews between trials of the open session.
               const result =
                 index++ === 0
-                  ? traceWith(`${envSecret} token-before-renewal`)
-                  : traceWith(`${fileSecret} token-after-renewal`);
+                  ? transcriptWith(`${envSecret} token-before-renewal`)
+                  : transcriptWith(`${fileSecret} token-after-renewal`);
               delivered.push('token-after-renewal');
               return { result, continuation: 'continue' };
             },
@@ -45,8 +45,8 @@ describe('prepareClientBatch redaction', () => {
       undefined,
       {
         secrets: () => [fileSecret, ...delivered],
-        onTrace: async (_request, trace) => {
-          early.push(trace);
+        onTranscript: async (_request, transcript) => {
+          early.push(transcript);
         },
       }
     );

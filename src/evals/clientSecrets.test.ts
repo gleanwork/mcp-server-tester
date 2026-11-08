@@ -24,7 +24,7 @@ describe('clientSecretValues', () => {
           headers: {
             'X-Api-Key': 'header-value',
             Cookie: 'session=cookie-value',
-            // Not credentials: rewriting them would garble every trace.
+            // Not credentials: rewriting them would garble every transcript.
             Accept: 'application/json',
             'X-Tenant': 'acme-production',
           },
@@ -61,7 +61,7 @@ describe('clientSecretValues', () => {
         GLEAN_AUTH: 'auth-12345678',
         'X-Session-Cookie': 'cookie-12345678',
         SERVICE_CREDENTIALS: 'cred-12345678',
-        // Settings: their values stay in the traces graders read.
+        // Settings: their values stay in the transcripts graders read.
         OPENAI_BASE_URL: 'https://gateway.example.test',
         GLEAN_INSTANCE: 'acme-prod',
         PATH: '/usr/local/bin:/usr/bin',

@@ -193,7 +193,7 @@ function result(id: string, judged: JudgeTrial): EvalCaseResult {
     durationMs: 1,
     request: { input: 'What is the weather in Oslo?' },
     response: { response: judged.text, events: judged.events },
-    traceEvidence: 'structured',
+    transcriptEvidence: 'structured',
   } as EvalCaseResult;
 }
 

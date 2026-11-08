@@ -659,7 +659,7 @@ async function runSessionBatch(
     }
   } catch (error) {
     if (results.length > 0) {
-      // Cases already ran: keep their traces, and say why the rest didn't.
+      // Cases already ran: keep their transcripts, and say why the rest didn't.
       const reason = redact(error, `${name} batch execution failed.`);
       // The case that threw may have been submitted: its outcome is unknown.
       if (results.length < requests.length) {

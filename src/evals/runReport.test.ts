@@ -359,7 +359,7 @@ describe('the run report', () => {
         reasoning: 'the longer answer',
       },
     ]);
-    expect(trials[0]!.traced).toBe(true);
+    expect(trials[0]!.hasTranscript).toBe(true);
     // Everything the model read, cached or not, and wrote.
     expect(trials[0]!.tokens).toBe(135);
     // Provenance: the client app the trials ran, and the dataset's hash.
@@ -607,7 +607,7 @@ describe('the run report', () => {
       { name: 'textContains', judge: false, readsAnswer: true },
       { name: 'rr/judge/length', judge: true, readsAnswer: true },
     ]);
-    // A trace-only grader never reads the answer.
+    // A transcript-only grader never reads the answer.
     const stored = await readRunDirectory((await run()).outputDir);
     for (const result of stored.summary.results)
       for (const trial of result.trialResults ?? [result])
@@ -619,15 +619,15 @@ describe('the run report', () => {
     ]);
   });
 
-  it('has no trace for a client that cannot see tool calls', async () => {
+  it('has no transcript for a client that cannot see tool calls', async () => {
     const stored = await readRunDirectory((await run()).outputDir);
     const result = stored.summary.results.find((r) => r.variant === 'longer')!;
     const trial = (result.trialResults ?? [result])[0] as {
-      trace?: { evidence?: string; events?: unknown[] };
+      transcript?: { evidence?: string; events?: unknown[] };
     };
-    trial.trace = { ...trial.trace, evidence: 'none', events: [] };
+    trial.transcript = { ...trial.transcript, evidence: 'none', events: [] };
     const report = buildRunReport(stored);
-    expect(report.trials.longer![result.id]![0]!.traced).toBe(false);
+    expect(report.trials.longer![result.id]![0]!.hasTranscript).toBe(false);
   });
 });
 

@@ -213,7 +213,7 @@ describe('shared configs', () => {
       resetPluginsForTests();
       const dir = await evalDir({
         name: 'redaction',
-        extends: ['acme/config/full-traces'],
+        extends: ['acme/config/full-transcripts'],
         datasets: ['./cases.json'],
         ...own,
       });
@@ -222,7 +222,7 @@ describe('shared configs', () => {
         rootDir: dir,
         plugins: [
           acme({
-            'full-traces': {
+            'full-transcripts': {
               client: 'acme/client/echo',
               redactStoredResponses: false,
               simulateWrites: true,

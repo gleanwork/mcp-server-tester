@@ -73,8 +73,8 @@ const ExpectedSchema = z
           )
           .default([]),
         gaps: z.record(z.string(), z.string()).default({}),
-        /** Variants whose client returns no trace, so the ledger has nothing to compare. */
-        noTrace: z.array(z.string()).default([]),
+        /** Variants whose client returns no transcript, so the ledger has nothing to compare. */
+        noTranscript: z.array(z.string()).default([]),
       })
       .strict()
       .optional(),
@@ -302,7 +302,7 @@ function assertCheck(results: unknown, check: Check): void {
   }
 }
 
-/** Per-trial mean of a ledger metric over one variant's traces, or null with none. */
+/** Per-trial mean of a ledger metric over one variant's transcripts, or null with none. */
 function ledgerMean(
   entries: LedgerEntry[],
   metric: LedgerMetric
@@ -333,8 +333,11 @@ interface VariantResult {
   metrics: Record<string, unknown>;
 }
 
-/** The variants that must have ledger truth: every reported variant with a trace. */
-function tracedVariants(outcome: Outcome, noTrace: string[]): VariantResult[] {
+/** The variants that must have ledger truth: every reported variant with a transcript. */
+function transcribedVariants(
+  outcome: Outcome,
+  noTranscript: string[]
+): VariantResult[] {
   const variants = (outcome.results?.variants ?? []) as VariantResult[];
   expect(variants.length, 'variants in results.json').toBeGreaterThan(0);
   const reported = new Set(variants.map((variant) => variant.name));
@@ -344,7 +347,7 @@ function tracedVariants(outcome: Outcome, noTrace: string[]): VariantResult[] {
       `ledger variant "${entry.variant}" is reported`
     ).toBe(true);
   }
-  return variants.filter((variant) => !noTrace.includes(variant.name));
+  return variants.filter((variant) => !noTranscript.includes(variant.name));
 }
 
 if (!fs.existsSync(CLI)) {
@@ -441,14 +444,17 @@ for (const name of caseDirs) {
           ? `variant ${metric} matches the client ledger (gap: ${gap})`
           : `variant ${metric} matches the client ledger`,
         track(gap, () => {
-          for (const variant of tracedVariants(outcome, ledger!.noTrace)) {
+          for (const variant of transcribedVariants(
+            outcome,
+            ledger!.noTranscript
+          )) {
             const truth = ledgerMean(
               outcome.ledger.filter((entry) => entry.variant === variant.name),
               metric
             );
             expect(
               truth,
-              `ledger has traces for ${variant.name}`
+              `ledger has transcripts for ${variant.name}`
             ).not.toBeNull();
             expect(
               variant.metrics[metric],
@@ -469,9 +475,9 @@ for (const name of caseDirs) {
           ? `variantDeltas.*.${delta.key} matches the client ledger (gap: ${gap})`
           : `variantDeltas.*.${delta.key} matches the client ledger`,
         track(gap, () => {
-          const [baseline, ...others] = tracedVariants(
+          const [baseline, ...others] = transcribedVariants(
             outcome,
-            ledger!.noTrace
+            ledger!.noTranscript
           );
           const mean = (variant: VariantResult) =>
             ledgerMean(

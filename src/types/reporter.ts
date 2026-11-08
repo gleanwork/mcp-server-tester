@@ -20,7 +20,10 @@ import type {
   TrialEnding,
 } from './index.js';
 import type { EvalResultStoreLike } from '../evals/resultStore.js';
-import type { TraceEvidence, Trace } from '../evals/evalFrameworkTypes.js';
+import type {
+  TranscriptEvidence,
+  Transcript,
+} from '../evals/evalFrameworkTypes.js';
 import type { ClientMetadata } from '../evals/clientTelemetryTypes.js';
 
 /**
@@ -245,11 +248,11 @@ export interface TrialResult {
   /** Whether `ending` is an infrastructure failure: something around the client broke. */
   isInfrastructureError?: boolean;
   /**
-   * Ordered trace of tool calls the client made in this trial (client cases only).
-   * Captures what was actually called so you can distinguish "LLM didn't call the tool"
+   * The tool calls the client made in this trial, in order (client cases only),
+   * matched against `toolsTriggered`. Distinguishes "LLM didn't call the tool"
    * from "LLM called the wrong tool" from "tool was called but assertion failed".
    */
-  toolCallTrace?: {
+  toolCallTranscript?: {
     calls: Array<{
       name: string;
       arguments: Record<string, unknown>;
@@ -260,9 +263,9 @@ export interface TrialResult {
   /** Sanitized client evidence for this specific trial. */
   clientDiagnostics?: ClientDiagnostics;
   /** Evidence level retained even when raw responses are redacted. */
-  traceEvidence?: TraceEvidence;
-  /** What the client did in this trial. */
-  trace?: Trace;
+  transcriptEvidence?: TranscriptEvidence;
+  /** What the client did in this trial: its transcript. */
+  transcript?: Transcript;
   /** Token usage from the client's model calls in this trial */
   clientUsage?: UsageMetrics;
   /** Token usage of this trial's judges, from judges that report it. */
@@ -468,10 +471,10 @@ export interface EvalCaseResult {
   infrastructureErrorCount?: number;
 
   /**
-   * Ordered trace of tool calls the client made.
+   * The tool calls the client made, in order, matched against `toolsTriggered`.
    * Only populated when the eval case uses toolsTriggered assertions.
    */
-  toolCallTrace?: {
+  toolCallTranscript?: {
     /** The ordered sequence of tool calls made by the LLM */
     calls: Array<{
       name: string;
@@ -493,12 +496,12 @@ export interface EvalCaseResult {
    */
   ending?: TrialEnding;
   /** Evidence level retained in persisted comparisons after response redaction. */
-  traceEvidence?: TraceEvidence;
+  transcriptEvidence?: TranscriptEvidence;
   /**
-   * What the client did (client cases with one trial). With several
-   * trials, each one's trace is in `trialResults`.
+   * What the client did (client cases with one trial): its transcript. With
+   * several trials, each one's transcript is in `trialResults`.
    */
-  trace?: Trace;
+  transcript?: Transcript;
   /** The eval variant that produced this result. */
   variant?: string;
 
@@ -516,7 +519,7 @@ export interface EvalCaseResult {
   clientTelemetry?: Record<string, unknown>;
 
   /**
-   * External client trace and evidence metadata.
+   * External client transcript and evidence metadata.
    * Populated for clients that drive a desktop app, such as ChatGPT.
    */
   clientMetadata?: ClientMetadata;
@@ -583,7 +586,7 @@ export type VariantGrouping = 'declared' | 'grouping-run';
 export type ChangeAssessment = 'better' | 'worse' | 'unclear';
 
 /**
- * What went wrong in a failed trial, read from its tool-call trace.
+ * What went wrong in a failed trial, read from its tool calls.
  *
  * - `no-tool-call`: the client called no tools.
  * - `wrong-tool`: the client called an unexpected tool or missed a required one.
@@ -667,7 +670,7 @@ export interface VariantTrial {
   pass: boolean;
   /** Why the trial failed, when it did. */
   failure?: TrialFailureKind;
-  /** Tools the client called, in order, when a trace was recorded. */
+  /** Tools the client called, in order, when a transcript was recorded. */
   calls?: string[];
   /** Required tools the client never called. */
   missed?: string[];
@@ -839,7 +842,7 @@ export interface RunReportScore {
   reasoning?: string;
   /** Whether a judge gave the score. */
   judge?: boolean;
-  /** The judge couldn't tell from the trace: no verdict, though not a pass. */
+  /** The judge couldn't tell from the transcript: no verdict, though not a pass. */
   unknown?: true;
   /** A jury's members' verdicts (ADR 0009). */
   jury?: Array<{
@@ -849,7 +852,7 @@ export interface RunReportScore {
   }>;
 }
 
-/** One event of a trial's trace, with long fields shortened. */
+/** One event of a trial's transcript, with long fields shortened. */
 export interface RunReportEvent {
   kind: string;
   name?: string;
@@ -860,15 +863,15 @@ export interface RunReportEvent {
   isError?: boolean;
 }
 
-/** One trial of one case by one variant: its trace and scores. */
+/** One trial of one case by one variant: its transcript and scores. */
 export interface RunReportTrial {
   pass: boolean;
   error?: string;
   infrastructureError?: boolean;
   durationMs?: number;
   finalText?: string;
-  /** Whether the client recorded a trace; `events` is empty when it called nothing. */
-  traced?: boolean;
+  /** Whether the client recorded a transcript; `events` is empty when it called nothing. */
+  hasTranscript?: boolean;
   events: RunReportEvent[];
   scores: RunReportScore[];
   tokens?: number;
@@ -1089,7 +1092,7 @@ export interface MCPRunReportData {
   preferences: Record<string, Record<string, RunReportPreference[]>>;
   /**
    * What graded the run's trials: each assertion and judge that scored one.
-   * `readsAnswer` is false for graders that read only the trace (which tools
+   * `readsAnswer` is false for graders that read only the transcript (which tools
    * were called), so a run graded only by those never checked an answer.
    */
   graders: Array<{ name: string; judge: boolean; readsAnswer: boolean }>;

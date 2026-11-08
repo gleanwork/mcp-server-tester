@@ -1,18 +1,18 @@
 /**
- * The `codex-cli` client's trace: what Codex reported while it ran (the SDK's
+ * The `codex-cli` client's transcript: what Codex reported while it ran (the SDK's
  * `codex exec --experimental-json` events, each timed as it arrived), joined
  * with the session's rollout file in its `CODEX_HOME`, which records each
  * model response with its usage and the tool calls it asked for.
  *
- * The events are the trace's backbone: every MCP call, shell command, web
+ * The events are the transcript's backbone: every MCP call, shell command, web
  * search and file change, with arguments, result and status. The rollout
  * adds what the events don't carry: one model call per response (its ID,
  * usage and the calls it requested), the tool searches Codex runs to load
  * deferred MCP tools, and native call IDs. A missing or unreadable rollout
- * only loses those; the events alone are a complete trace.
+ * only loses those; the events alone are a complete transcript.
  */
 import type { UsageMetrics } from '../types/index.js';
-import type { ModelCall, TraceEvent } from './evalFrameworkTypes.js';
+import type { ModelCall, TranscriptEvent } from './evalFrameworkTypes.js';
 
 type ObjectValue = Record<string, unknown>;
 
@@ -22,18 +22,18 @@ export interface TimedCodexEvent {
   event: { type: string } & ObjectValue;
 }
 
-/** What the trace builder needs to know about the run. */
-export interface CodexTraceContext {
+/** What the transcript builder needs to know about the run. */
+export interface CodexTranscriptContext {
   /** Codex's `mcp_servers` keys, mapped back to the eval's server labels. */
   servers: ReadonlyMap<string, string>;
   /** The model the client asked for, when the rollout doesn't say. */
   model?: string;
 }
 
-export interface CodexTrace {
+export interface CodexTranscript {
   threadId?: string;
   finalText: string;
-  events: TraceEvent[];
+  events: TranscriptEvent[];
   modelCalls?: ModelCall[];
   usage?: UsageMetrics;
   startedAt?: string;
@@ -80,7 +80,7 @@ function serverOfNamespace(
 }
 
 /**
- * An MCP result as the trace keeps it: the text of its text blocks, or the
+ * An MCP result as the transcript keeps it: the text of its text blocks, or the
  * content as JSON when it has other blocks or structured content only.
  */
 function mcpOutput(item: ObjectValue): string | undefined {
@@ -111,13 +111,13 @@ function arguments_(value: unknown): Record<string, unknown> {
   return object(value) ?? {};
 }
 
-/** A completed SDK item as a trace event, or undefined for messages and plans. */
+/** A completed SDK item as a transcript event, or undefined for messages and plans. */
 function eventOf(
   item: ObjectValue,
   startedAt: string | undefined,
   completedAt: string,
   servers: ReadonlyMap<string, string>
-): TraceEvent | undefined {
+): TranscriptEvent | undefined {
   const id = string(item.id);
   const timing = {
     ...(startedAt ? { startedAt } : {}),
@@ -197,7 +197,7 @@ interface RolloutFacts {
   reasoningEffort?: string;
   /** Native `call_id`s of MCP calls, in order, per `mcp__<key>__<tool>`. */
   mcpCallIds: Map<string, string[]>;
-  toolSearches: TraceEvent[];
+  toolSearches: TranscriptEvent[];
   modelCalls: ModelCall[];
   durationMs?: number;
   timeToFirstTokenMs?: number;
@@ -213,7 +213,7 @@ function assistantText(payload: ObjectValue): string {
 
 /**
  * Reads a rollout file's JSONL. Lines that don't parse (a record the writer
- * was still writing) are skipped: the rollout only enriches the trace.
+ * was still writing) are skipped: the rollout only enriches the transcript.
  */
 export function parseCodexRollout(
   content: string,
@@ -224,7 +224,7 @@ export function parseCodexRollout(
     toolSearches: [],
     modelCalls: [],
   };
-  const searches = new Map<string, TraceEvent>();
+  const searches = new Map<string, TranscriptEvent>();
   let boundary: string | undefined;
   let pendingCalls: string[] = [];
   let pendingText: string[] = [];
@@ -264,7 +264,7 @@ export function parseCodexRollout(
         }
         pendingCalls.push(callId);
       } else if (payload.type === 'tool_search_call' && callId) {
-        const search: TraceEvent = {
+        const search: TranscriptEvent = {
           kind: 'tool_search',
           source: 'builtin',
           name: 'tool_search',
@@ -280,7 +280,7 @@ export function parseCodexRollout(
       } else if (payload.type === 'tool_search_output' && callId) {
         const search = searches.get(callId);
         if (search) {
-          const results: NonNullable<TraceEvent['results']> = [];
+          const results: NonNullable<TranscriptEvent['results']> = [];
           for (const entry of Array.isArray(payload.tools)
             ? payload.tools
             : []) {
@@ -384,7 +384,7 @@ function usageOf(
 }
 
 /** The union of the events' intervals, in ms. */
-function busyMs(events: readonly TraceEvent[]): number {
+function busyMs(events: readonly TranscriptEvent[]): number {
   const spans = events
     .map((event) => [ms(event.startedAt), ms(event.completedAt)] as const)
     .filter(([start, end]) => Number.isFinite(start) && end >= start)
@@ -402,16 +402,16 @@ function busyMs(events: readonly TraceEvent[]): number {
 }
 
 /**
- * The trial's trace from Codex's events and, when there is one, its rollout.
+ * The trial's transcript from Codex's events and, when there is one, its rollout.
  * `startedAt` is when MST started the turn.
  */
-export function buildCodexTrace(
+export function buildCodexTranscript(
   stream: readonly TimedCodexEvent[],
   rollout: string | undefined,
-  context: CodexTraceContext & { startedAt: string; endedAt: string }
-): CodexTrace {
+  context: CodexTranscriptContext & { startedAt: string; endedAt: string }
+): CodexTranscript {
   const started = new Map<string, string>();
-  const events: TraceEvent[] = [];
+  const events: TranscriptEvent[] = [];
   const messages: string[] = [];
   let threadId: string | undefined;
   let turnUsage: ObjectValue | undefined;
@@ -442,13 +442,13 @@ export function buildCodexTrace(
           break;
         }
         const id = string(item.id);
-        const traced = eventOf(
+        const recorded = eventOf(
           item,
           id ? started.get(id) : undefined,
           at,
           context.servers
         );
-        if (traced) events.push(traced);
+        if (recorded) events.push(recorded);
         break;
       }
       case 'turn.completed':
@@ -529,7 +529,7 @@ export function buildCodexTrace(
       toolSearchCount: facts?.toolSearches.length ?? 0,
       toolWallDurationMs: busyMs(mcpCalls.concat(builtinCalls)),
       ...(notices ? { transientErrorCount: notices } : {}),
-      traceSource: facts ? 'codex-events+rollout' : 'codex-events',
+      transcriptSource: facts ? 'codex-events+rollout' : 'codex-events',
     },
   };
 }

@@ -4,6 +4,8 @@ status: accepted
 
 # Users calibrate judges against their own labels
 
+> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed a trial's trace to its **transcript**: a judge reads the transcript, and `needsTrace` is `needsTranscript`. The decision itself stands.
+
 MST grades with judges, but it can't say how far to trust one.
 
 - The built-in `rubric` judge gives a holistic score on a five-point scale (0, 0.25, 0.5, 0.75, 1). It reads only the final answer (`trial.response`), not the tool calls and tool results that led to it.

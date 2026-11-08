@@ -4,7 +4,7 @@ status: accepted
 
 # Grading runs in an environment
 
-> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed the environment to the **runner**: `mst grade --env` is `mst grade --runner`, `--grade-env` is `--grade-runner`, and `run.json`'s `grading.environment` is `grading.runner`. The decision itself stands.
+> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed the environment to the **runner**: `mst grade --env` is `mst grade --runner`, `--grade-env` is `--grade-runner`, and `run.json`'s `grading.environment` is `grading.runner`. It also renamed a trial's trace to its **transcript**. The decision itself stands.
 
 ADR 0004 moved collecting into environments, and kept grading on the coordinator: the explainer's step 7 says "Judge credentials stay on the coordinator. The VMs never need them," and ADR 0004 says a worker "never runs a judge". That holds while grading is cheap. It no longer is.
 

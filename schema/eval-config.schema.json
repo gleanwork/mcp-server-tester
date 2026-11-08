@@ -401,7 +401,7 @@
     },
     "redactStoredResponses": {
       "type": "boolean",
-      "description": "Omit raw responses and trace text from stored results (default true)."
+      "description": "Omit raw responses and transcript text from stored results (default true)."
     },
     "simulateWrites": {
       "type": "boolean",

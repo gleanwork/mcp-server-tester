@@ -1,13 +1,13 @@
 /**
  * Yes-or-no judges (ADR 0009): a judge asks one question per model call
- * about the trial's trace, and each answer is yes, no or unknown. A judge
+ * about the trial's transcript, and each answer is yes, no or unknown. A judge
  * that checks several things asks several questions, and combines them:
  * any required "no" fails the trial; otherwise any required "unknown"
  * makes the verdict unknown; otherwise it passes.
  *
  * `defineQuestionJudge` turns a judge's questions into a judge definition,
  * with the LLM settings every built-in judge takes and a version that
- * covers its prompts, the trace format and the defaults it falls back on.
+ * covers its prompts, the transcript format and the defaults it falls back on.
  */
 import type { z } from 'zod';
 import type { JudgeDefinition } from '../evals/evalFrameworkTypes.js';
@@ -35,10 +35,10 @@ import {
   type JudgeCompletionAdapter,
 } from './llmJudge.js';
 import {
-  DEFAULT_TRACE_OUTPUT_BYTES,
-  renderJudgeTrace,
-  traceRecorded,
-} from './judgeTrace.js';
+  DEFAULT_TOOL_OUTPUT_BYTES,
+  renderJudgeTranscript,
+  transcriptRecorded,
+} from './judgeTranscript.js';
 import { QUESTION_SYSTEM_PROMPT, questionPrompt } from './prompts/question.js';
 
 export type QuestionVerdict = 'yes' | 'no' | 'unknown';
@@ -197,7 +197,7 @@ export function parseJudgeAnswer<Choice extends string>(
   );
 }
 
-/** Asks one question about a rendered trace: one model call. */
+/** Asks one question about a rendered transcript: one model call. */
 /**
  * How many times a question is asked again when its answer can't be read.
  * A model that writes JSON into its reasoning without escaping it (a tool
@@ -209,12 +209,15 @@ export const UNREADABLE_ANSWER_RETRIES = 1;
 
 async function askJudgeQuestion(
   complete: JudgeCompletionAdapter,
-  trace: string,
+  transcript: string,
   question: string
 ): Promise<QuestionAnswer> {
   const { choice, ...answer } = await askJudge(
     complete,
-    { system: QUESTION_SYSTEM_PROMPT, prompt: questionPrompt(trace, question) },
+    {
+      system: QUESTION_SYSTEM_PROMPT,
+      prompt: questionPrompt(transcript, question),
+    },
     VERDICT_ANSWER
   );
   return { verdict: choice, ...answer };
@@ -346,7 +349,7 @@ const SAMPLE_EVENTS: JudgeInput['trial']['events'] = [
   { kind: 'skill', source: 'builtin', name: '{skill}' },
 ];
 
-/** A trial for the version's sample traces. */
+/** A trial for the version's sample transcripts. */
 function sampleInput(trial: Partial<JudgeInput['trial']>): JudgeInput {
   return {
     case: {
@@ -366,23 +369,29 @@ function sampleInput(trial: Partial<JudgeInput['trial']>): JudgeInput {
 }
 
 /**
- * Traces that reach every part of the trace format (each evidence level,
- * empty traces, a cut result), so a change to how traces render changes the
- * version.
+ * Transcripts that reach every part of the transcript format (each evidence
+ * level, empty transcripts, a cut result), so a change to how transcripts
+ * render changes the version.
  */
-export function sampleTraces(reference: boolean | undefined): string[] {
+export function sampleTranscripts(reference: boolean | undefined): string[] {
   const options = { reference };
   return [
-    renderJudgeTrace(sampleInput({}), options),
-    renderJudgeTrace(sampleInput({ events: [] }), options),
-    renderJudgeTrace(sampleInput({ evidence: 'observed' }), options),
-    renderJudgeTrace(
+    renderJudgeTranscript(sampleInput({}), options),
+    renderJudgeTranscript(sampleInput({ events: [] }), options),
+    renderJudgeTranscript(sampleInput({ evidence: 'observed' }), options),
+    renderJudgeTranscript(
       sampleInput({ evidence: 'observed', events: [] }),
       options
     ),
-    renderJudgeTrace(sampleInput({ evidence: 'none', events: [] }), options),
-    renderJudgeTrace(sampleInput({ evidence: undefined, events: [] }), options),
-    renderJudgeTrace(
+    renderJudgeTranscript(
+      sampleInput({ evidence: 'none', events: [] }),
+      options
+    ),
+    renderJudgeTranscript(
+      sampleInput({ evidence: undefined, events: [] }),
+      options
+    ),
+    renderJudgeTranscript(
       sampleInput({
         events: [
           {
@@ -402,21 +411,21 @@ export interface QuestionJudgeSpec<Options extends z.ZodRawShape> {
   description: string;
   /**
    * The judge's prompt text, as written in its prompt file. It is part of
-   * the judge's version, with the shared question prompt and trace format.
+   * the judge's version, with the shared question prompt and transcript format.
    */
   prompts: Readonly<Record<string, string>>;
   /** Options the judge takes besides the LLM settings. */
   options?: Options;
   /** Paths in the judge input the judge needs (see `JudgeDefinition.requires`). */
   requires?: readonly string[];
-  /** Show the case's reference answer in the trace. @default false */
+  /** Show the case's reference answer in the transcript. @default false */
   reference?: boolean;
   /**
    * The questions need the tool calls. When the client didn't report them
    * (evidence `none`), the judge answers unknown without a model call.
    * @default true
    */
-  needsTrace?: boolean;
+  needsTranscript?: boolean;
   /**
    * Each question is a criterion a person labels on its own: the score lists
    * each one's verdict as `criteria`, so it is its own label question.
@@ -481,23 +490,27 @@ export const JUDGE_DEFAULTS = {
   models: DEFAULT_JUDGE_MODELS,
   maxTokens: DEFAULT_JUDGE_MAX_TOKENS,
   temperature: DEFAULT_JUDGE_TEMPERATURE,
-  maxToolOutputSize: DEFAULT_TRACE_OUTPUT_BYTES,
+  maxToolOutputSize: DEFAULT_TOOL_OUTPUT_BYTES,
 };
 
 /** A yes-or-no judge from its questions. */
 export function defineQuestionJudge<
   Options extends z.ZodRawShape = Record<never, never>,
 >(spec: QuestionJudgeSpec<Options>): JudgeDefinition {
+  if (Object.hasOwn(spec, 'needsTrace'))
+    throw new Error(
+      'defineQuestionJudge: needsTrace is now needsTranscript (ADR 0013). Rename the option.'
+    );
   const schema = JudgeLLMSchema.extend(
     spec.options ?? ({} as Options)
   ).strict();
   const version = contentHash({
     system: QUESTION_SYSTEM_PROMPT,
-    prompt: questionPrompt('{trace}', '{question}'),
-    traces: sampleTraces(spec.reference),
+    prompt: questionPrompt('{transcript}', '{question}'),
+    transcripts: sampleTranscripts(spec.reference),
     prompts: spec.prompts,
     questions: sampleQuestions(spec, schema),
-    needsTrace: spec.needsTrace !== false,
+    needsTranscript: spec.needsTranscript !== false,
     unreadableAnswerRetries: UNREADABLE_ANSWER_RETRIES,
     defaults: JUDGE_DEFAULTS,
   });
@@ -518,15 +531,15 @@ export function defineQuestionJudge<
       const questions = spec.questions(input, options);
       if (questions.length === 0)
         return { score: 0, skipped: true, reasoning: 'no questions to ask' };
-      if (spec.needsTrace !== false && !traceRecorded(input.trial))
+      if (spec.needsTranscript !== false && !transcriptRecorded(input.trial))
         return {
           score: 0,
           unknown: true,
           reasoning:
-            "The client didn't report its tool calls, so the trace can't answer this judge's questions.",
+            "The client didn't report its tool calls, so the transcript can't answer this judge's questions.",
         };
       const complete = createJudgeCompletion(config);
-      const trace = renderJudgeTrace(input, {
+      const transcript = renderJudgeTranscript(input, {
         reference: spec.reference,
         ...(options.maxToolOutputSize !== undefined
           ? { maxToolOutputSize: options.maxToolOutputSize }
@@ -535,7 +548,7 @@ export function defineQuestionJudge<
       const answers = await Promise.all(
         questions.map(async (question) => ({
           question,
-          ...(await askJudgeQuestion(complete, trace, question.text)),
+          ...(await askJudgeQuestion(complete, transcript, question.text)),
         }))
       );
       const provider = config.provider ?? DEFAULT_JUDGE_PROVIDER;

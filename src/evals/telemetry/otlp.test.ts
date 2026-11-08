@@ -30,7 +30,7 @@ function trial(overrides: Partial<EvalCaseResult> = {}): EvalCaseResult {
     pass: true,
     durationMs: 9_000,
     request: { input: 'What is 17 + 25?', model: 'claude-x' },
-    trace: {
+    transcript: {
       finalText: 'It is 42.',
       startedAt: t(0),
       completedAt: t(9),
@@ -157,7 +157,7 @@ describe('trialSpans', () => {
 
   it("keeps a tool call's own times", () => {
     const result = trial();
-    Object.assign(result.trace!.events[0]!, {
+    Object.assign(result.transcript!.events[0]!, {
       startedAt: t(3.5),
       completedAt: t(4),
     });
@@ -198,7 +198,7 @@ describe('trialSpans', () => {
   it('places what has no times at the start, marked untimed, and fails an errored trial', () => {
     const result = trial({
       error: 'Native task timed out.',
-      trace: {
+      transcript: {
         events: [{ kind: 'tool_call', source: 'builtin', name: 'Bash' }],
         modelCalls: [{ id: 'r' }],
       },
@@ -235,9 +235,9 @@ describe('trialSpans', () => {
   describe("with the host's own telemetry", () => {
     function hosted(): EvalCaseResult {
       const base = trial();
-      base.trace!.modelCalls![0]!.entryIds = ['entry-1'];
-      base.trace!.modelCalls![1]!.requestId = 'req_b';
-      base.trace!.hostTelemetry = {
+      base.transcript!.modelCalls![0]!.entryIds = ['entry-1'];
+      base.transcript!.modelCalls![1]!.requestId = 'req_b';
+      base.transcript!.hostTelemetry = {
         resource: { 'service.name': 'claude-code', 'service.version': '2.1' },
         events: [
           {

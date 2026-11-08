@@ -2,17 +2,17 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { POLL_INTERVAL_MS, delay, findFile } from './sessionFiles.js';
-import { NativeTraceError } from '../nativeTraceError.js';
+import { NativeTranscriptError } from '../nativeTranscriptError.js';
 import {
   type ClaudeSessionBinding,
   type ClaudeSessionMetadata,
-  type ClaudeTrace,
+  type ClaudeTranscript,
   type SessionCandidate,
   metadataTimestampMs,
-  parseClaudeTrace,
-} from './trace.js';
+  parseClaudeTranscript,
+} from './transcript.js';
 
-const TRACE_SETTLE_AFTER_COMPLETE_MS = 1_500;
+const TRANSCRIPT_SETTLE_AFTER_COMPLETE_MS = 1_500;
 
 /** The parts of a run's correlation that session matching reads. */
 interface ClaudeSessionCorrelation {
@@ -63,29 +63,29 @@ interface ClaudeSessionMatchOptions {
    */
   exactPrompt?: string;
   sessionPath?: string;
-  /** Bound pending trace inspection; never submits or changes session identity. */
-  onPending?: (trace: ClaudeTrace) => Promise<void>;
+  /** Bound pending transcript inspection; never submits or changes session identity. */
+  onPending?: (transcript: ClaudeTranscript) => Promise<void>;
 }
 
 export async function waitForClaudeSession(
   options: ClaudeSessionMatchOptions & { timeoutMs: number }
-): Promise<ClaudeTrace> {
+): Promise<ClaudeTranscript> {
   return waitForClaudeMatch(options, false);
 }
 
-export async function waitForClaudeTrace(
+export async function waitForClaudeTranscript(
   options: ClaudeSessionMatchOptions & { timeoutMs: number }
-): Promise<ClaudeTrace> {
+): Promise<ClaudeTranscript> {
   return waitForClaudeMatch(options, true);
 }
 
 async function waitForClaudeMatch(
   options: ClaudeSessionMatchOptions & { timeoutMs: number },
   requireCompletion: boolean
-): Promise<ClaudeTrace> {
+): Promise<ClaudeTranscript> {
   const deadline = Date.now() + options.timeoutMs;
-  let lastPending: ClaudeTrace | undefined;
-  let completeTraceFirstSeenAtMs: number | undefined;
+  let lastPending: ClaudeTranscript | undefined;
+  let completeTranscriptFirstSeenAtMs: number | undefined;
   // The only new session, seen on the previous poll without an exact match.
   let onlyNewSeen: string | undefined;
 
@@ -93,7 +93,7 @@ async function waitForClaudeMatch(
     const matches = await findMatchingClaudeSessions(options);
 
     if (matches.length > 1) {
-      throw new NativeTraceError(
+      throw new NativeTranscriptError(
         'ambiguous_matching_sessions',
         `Ambiguous Claude sessions for ${describeCorrelation(options)}: ${matches
           .map((m) => m.candidate.id)
@@ -102,71 +102,78 @@ async function waitForClaudeMatch(
     }
 
     if (matches.length === 1) {
-      const trace = matches[0]!;
+      const transcript = matches[0]!;
       // Bind the only new session only once it stayed the only one for a
       // poll: a second session appearing makes the binding ambiguous.
       if (
         !options.sessionPath &&
-        trace.binding?.kind === 'only-new-session' &&
-        onlyNewSeen !== trace.candidate.metadataPath
+        transcript.binding?.kind === 'only-new-session' &&
+        onlyNewSeen !== transcript.candidate.metadataPath
       ) {
-        onlyNewSeen = trace.candidate.metadataPath;
+        onlyNewSeen = transcript.candidate.metadataPath;
         await delay(POLL_INTERVAL_MS);
         continue;
       }
       if (
         !requireCompletion ||
-        isTraceReady(trace, completeTraceFirstSeenAtMs)
+        isTranscriptReady(transcript, completeTranscriptFirstSeenAtMs)
       ) {
-        return trace;
+        return transcript;
       }
-      if (trace.isComplete && completeTraceFirstSeenAtMs === undefined) {
-        completeTraceFirstSeenAtMs = Date.now();
+      if (
+        transcript.isComplete &&
+        completeTranscriptFirstSeenAtMs === undefined
+      ) {
+        completeTranscriptFirstSeenAtMs = Date.now();
       }
-      lastPending = trace;
-      if (requireCompletion && !trace.isComplete && options.onPending)
-        await options.onPending(trace);
+      lastPending = transcript;
+      if (requireCompletion && !transcript.isComplete && options.onPending)
+        await options.onPending(transcript);
     }
 
     await delay(POLL_INTERVAL_MS);
   }
 
   if (lastPending) {
-    throw new NativeTraceError(
+    throw new NativeTranscriptError(
       'timeout',
       `Timed out waiting for Claude session ${lastPending.candidate.id} to complete`
     );
   }
 
-  throw new NativeTraceError(
+  throw new NativeTranscriptError(
     'no_matching_session',
     `No matching Claude session found for ${describeCorrelation(options)}`
   );
 }
 
-function isTraceReady(
-  trace: ClaudeTrace,
-  completeTraceFirstSeenAtMs: number | undefined
+function isTranscriptReady(
+  transcript: ClaudeTranscript,
+  completeTranscriptFirstSeenAtMs: number | undefined
 ): boolean {
-  if (!trace.isComplete) {
+  if (!transcript.isComplete) {
     return false;
   }
 
-  if (!trace.candidate.metadata.cliSessionId || trace.transcriptParsed) {
+  if (
+    !transcript.candidate.metadata.cliSessionId ||
+    transcript.transcriptParsed
+  ) {
     return true;
   }
 
   return (
-    completeTraceFirstSeenAtMs !== undefined &&
-    Date.now() - completeTraceFirstSeenAtMs >= TRACE_SETTLE_AFTER_COMPLETE_MS
+    completeTranscriptFirstSeenAtMs !== undefined &&
+    Date.now() - completeTranscriptFirstSeenAtMs >=
+      TRANSCRIPT_SETTLE_AFTER_COMPLETE_MS
   );
 }
 
 export async function findMatchingClaudeSessions(
   options: ClaudeSessionMatchOptions
-): Promise<ClaudeTrace[]> {
+): Promise<ClaudeTranscript[]> {
   const sessions = await listSessionCandidates(options.dataDir);
-  const traces: ClaudeTrace[] = [];
+  const transcripts: ClaudeTranscript[] = [];
   // Fresh-session correlation: the sessions the submission could have created.
   const fresh: SessionCandidate[] = [];
 
@@ -198,7 +205,7 @@ export async function findMatchingClaudeSessions(
 
     if (!options.marker && options.correlation?.includedInPrompt !== false)
       continue;
-    const trace = await parseClaudeTrace(
+    const transcript = await parseClaudeTranscript(
       session,
       options.correlation?.includedInPrompt === false
         ? undefined
@@ -208,18 +215,18 @@ export async function findMatchingClaudeSessions(
     if (
       sessionMatchesCorrelation({
         session,
-        trace,
+        transcript,
         marker: options.marker ?? '',
         correlation: options.correlation,
         isNewOrUpdated,
         isRecent,
       })
     ) {
-      traces.push(trace);
+      transcripts.push(transcript);
     }
   }
 
-  if (options.exactPrompt === undefined) return traces;
+  if (options.exactPrompt === undefined) return transcripts;
   return bindFreshSessions(fresh, options.exactPrompt);
 }
 
@@ -232,12 +239,12 @@ export async function findMatchingClaudeSessions(
 async function bindFreshSessions(
   fresh: readonly SessionCandidate[],
   prompt: string
-): Promise<ClaudeTrace[]> {
+): Promise<ClaudeTranscript[]> {
   const exact = fresh.filter((s) => s.metadata.initialMessage === prompt);
   const bound = exact.length > 0 ? exact : fresh;
   return Promise.all(
     bound.map(async (session) => ({
-      ...(await parseClaudeTrace(session, undefined, LIVE_COLLECTION)),
+      ...(await parseClaudeTranscript(session, undefined, LIVE_COLLECTION)),
       binding: sessionBinding(session.metadata.initialMessage, prompt),
     }))
   );
@@ -381,28 +388,32 @@ async function findClaudeMetadataFiles(root: string): Promise<string[]> {
 
 function sessionMatchesMarker(
   session: SessionCandidate,
-  trace: ClaudeTrace,
+  transcript: ClaudeTranscript,
   marker: string
 ): boolean {
   if (session.metadata.initialMessage?.includes(marker)) {
     return true;
   }
-  if (trace.finalAnswer?.includes(marker)) {
+  if (transcript.finalAnswer?.includes(marker)) {
     return true;
   }
-  return trace.rawText.includes(marker);
+  return transcript.rawText.includes(marker);
 }
 
 function sessionMatchesCorrelation(options: {
   session: SessionCandidate;
-  trace: ClaudeTrace;
+  transcript: ClaudeTranscript;
   marker: string;
   correlation?: ClaudeSessionCorrelation;
   isNewOrUpdated: boolean;
   isRecent: boolean;
 }): boolean {
   if (options.correlation?.includedInPrompt !== false) {
-    return sessionMatchesMarker(options.session, options.trace, options.marker);
+    return sessionMatchesMarker(
+      options.session,
+      options.transcript,
+      options.marker
+    );
   }
 
   return options.isNewOrUpdated || options.isRecent;

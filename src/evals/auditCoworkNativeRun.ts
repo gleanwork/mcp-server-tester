@@ -16,11 +16,11 @@ import { isDeepStrictEqual } from 'node:util';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import type { UsageMetrics } from '../types/index.js';
 import {
-  parseClaudeTrace,
-  type ClaudeTrace,
+  parseClaudeTranscript,
+  type ClaudeTranscript,
   awaitingUserAnswer,
-} from './cowork/trace.js';
-import { clientRunToExecution, toolCallEvents } from './clientTrace.js';
+} from './cowork/transcript.js';
+import { clientRunToExecution, toolCallEvents } from './clientTranscript.js';
 import { matchesPersistedPreview } from './persistedToolOutput.js';
 
 export interface AuditCoworkNativeRunOptions {
@@ -171,11 +171,11 @@ function same(a: unknown, b: unknown): boolean {
  */
 function replayedCorrelation(
   saved: ObjectValue,
-  trace: ClaudeTrace
+  transcript: ClaudeTranscript
 ): Record<string, unknown> | undefined {
   const prompt = object(saved.request).input;
   if (typeof prompt !== 'string') return undefined;
-  const stored = trace.candidate.metadata.initialMessage;
+  const stored = transcript.candidate.metadata.initialMessage;
   if (stored === prompt) return { correlation: 'exact-initial-prompt' };
   const recorded = object(saved.clientTelemetry);
   if (recorded.correlation !== 'only-new-session') return undefined;
@@ -293,10 +293,10 @@ async function sessionFiles(root: string): Promise<string[]> {
   return files;
 }
 
-async function nativeTrace(
+async function nativeTranscript(
   root: string,
   sessionId: string
-): Promise<ClaudeTrace> {
+): Promise<ClaudeTranscript> {
   const sessionDir = join(root, sessionId);
   const files = await sessionFiles(sessionDir);
   const metadataPath = join(sessionDir, `${sessionId}.json`);
@@ -329,7 +329,7 @@ async function nativeTrace(
       transcript,
       { mode: 0o600 }
     );
-    return await parseClaudeTrace({
+    return await parseClaudeTranscript({
       id: sessionId,
       sessionDir: snapshot,
       metadataPath,
@@ -388,12 +388,12 @@ function attachmentPath(
   return target;
 }
 async function attachments(
-  trace: ClaudeTrace,
+  transcript: ClaudeTranscript,
   root: string,
   sessionId: string
 ): Promise<CoworkNativeAuditAttachment[]> {
   const results: CoworkNativeAuditAttachment[] = [];
-  for (const [toolCallIndex, tool] of trace.toolCalls.entries()) {
+  for (const [toolCallIndex, tool] of transcript.toolCalls.entries()) {
     const output = typeof tool.output === 'string' ? tool.output : '';
     // Also inspect structured block text serialized by the native normalizer.
     let texts = [output];
@@ -444,9 +444,12 @@ async function attachments(
   }
   return results;
 }
-function numeric(trace: ClaudeTrace, key: keyof UsageMetrics): number | null {
-  const value = trace.usage?.[key];
-  return trace.knownUsageFields.includes(key) &&
+function numeric(
+  transcript: ClaudeTranscript,
+  key: keyof UsageMetrics
+): number | null {
+  const value = transcript.usage?.[key];
+  return transcript.knownUsageFields.includes(key) &&
     typeof value === 'number' &&
     Number.isFinite(value) &&
     value >= 0
@@ -488,20 +491,23 @@ async function auditCase(
     return;
   }
   result.sessionId = sessionId;
-  const trace = await nativeTrace(resolve(options.nativeRoot), sessionId);
+  const transcript = await nativeTranscript(
+    resolve(options.nativeRoot),
+    sessionId
+  );
   if (object(saved.clientTelemetry).awaitingUser !== undefined) {
     // A headless run stopped on an unanswered AskUserQuestion. Verified only when
     // the native transcript itself ends on that pending client call and the case
     // failed: a model outcome (quality failure), never a passing case.
     result.awaitingUser = true;
-    const models = trace.telemetry.models;
+    const models = transcript.telemetry.models;
     if (models.length === 1 && MODEL.test(models[0]!))
       result.model = models[0]!;
     if (
       object(saved.clientTelemetry).awaitingUser !== 'AskUserQuestion' ||
-      !awaitingUserAnswer(trace) ||
+      !awaitingUserAnswer(transcript) ||
       saved.pass !== false ||
-      !trace.transcriptParsed ||
+      !transcript.transcriptParsed ||
       (options.expectedModel &&
         (models.length !== 1 || models[0] !== options.expectedModel))
     )
@@ -509,15 +515,16 @@ async function auditCase(
     return;
   }
   result.validity = {
-    auditParsed: trace.auditParsed,
-    transcriptParsed: trace.transcriptParsed,
-    complete: trace.isComplete,
-    nonError: trace.isError === false,
+    auditParsed: transcript.auditParsed,
+    transcriptParsed: transcript.transcriptParsed,
+    complete: transcript.isComplete,
+    nonError: transcript.isError === false,
     hasUsage:
-      numeric(trace, 'inputTokens') !== null &&
-      numeric(trace, 'outputTokens') !== null,
-    hasCost: trace.costAvailable && numeric(trace, 'totalCostUsd') !== null,
-    noWarnings: trace.parseWarnings.length === 0,
+      numeric(transcript, 'inputTokens') !== null &&
+      numeric(transcript, 'outputTokens') !== null,
+    hasCost:
+      transcript.costAvailable && numeric(transcript, 'totalCostUsd') !== null,
+    noWarnings: transcript.parseWarnings.length === 0,
   };
   const flags: [
     keyof CoworkNativeAuditCase['validity'],
@@ -533,7 +540,7 @@ async function auditCase(
   ];
   for (const [flag, code] of flags)
     if (!result.validity[flag]) result.issues.push(code);
-  const models = trace.telemetry.models;
+  const models = transcript.telemetry.models;
   if (models.length === 1 && MODEL.test(models[0]!)) result.model = models[0]!;
   else result.issues.push('MODEL_UNAVAILABLE');
   if (
@@ -542,25 +549,26 @@ async function auditCase(
   )
     result.issues.push('MODEL_MISMATCH');
   result.usage = {
-    inputTokens: numeric(trace, 'inputTokens'),
-    outputTokens: numeric(trace, 'outputTokens'),
-    cacheReadInputTokens: numeric(trace, 'cacheReadInputTokens'),
-    cacheCreationInputTokens: numeric(trace, 'cacheCreationInputTokens'),
-    totalCostUsd: numeric(trace, 'totalCostUsd'),
+    inputTokens: numeric(transcript, 'inputTokens'),
+    outputTokens: numeric(transcript, 'outputTokens'),
+    cacheReadInputTokens: numeric(transcript, 'cacheReadInputTokens'),
+    cacheCreationInputTokens: numeric(transcript, 'cacheCreationInputTokens'),
+    totalCostUsd: numeric(transcript, 'totalCostUsd'),
   };
   result.timing = {
-    durationMs: numeric(trace, 'durationMs'),
-    durationApiMs: numeric(trace, 'durationApiMs'),
+    durationMs: numeric(transcript, 'durationMs'),
+    durationApiMs: numeric(transcript, 'durationApiMs'),
   };
   if (result.timing.durationMs === null || result.timing.durationApiMs === null)
     result.issues.push('TIMING_UNAVAILABLE');
   result.toolCounts = {
-    total: trace.toolCalls.length,
-    mcp: trace.toolCalls.filter((call) => call.source === 'mcp').length,
-    builtin: trace.toolCalls.filter((call) => call.source === 'builtin').length,
-    errors: trace.telemetry.toolErrorCount ?? null,
+    total: transcript.toolCalls.length,
+    mcp: transcript.toolCalls.filter((call) => call.source === 'mcp').length,
+    builtin: transcript.toolCalls.filter((call) => call.source === 'builtin')
+      .length,
+    errors: transcript.telemetry.toolErrorCount ?? null,
   };
-  if (trace.toolCalls.some((call) => call.output === undefined))
+  if (transcript.toolCalls.some((call) => call.output === undefined))
     result.issues.push('TOOL_OUTPUT_UNAVAILABLE');
   const response = object(saved.response);
   // Collection read back the large results Claude Code saved to files; the
@@ -569,7 +577,7 @@ async function auditCase(
   const storedCalls = Array.isArray(response.toolCalls)
     ? (response.toolCalls as Array<{ id?: unknown; output?: unknown }>)
     : [];
-  for (const call of trace.toolCalls) {
+  for (const call of transcript.toolCalls) {
     if (typeof call.output !== 'string' || call.id === undefined) continue;
     const stored = storedCalls.find((candidate) => candidate.id === call.id);
     if (
@@ -582,11 +590,11 @@ async function auditCase(
   const replay = object(
     clientRunToExecution(
       {
-        finalText: trace.finalAnswer ?? '',
-        events: toolCallEvents(trace.toolCalls, servers),
-        usage: trace.usage,
+        finalText: transcript.finalAnswer ?? '',
+        events: toolCallEvents(transcript.toolCalls, servers),
+        usage: transcript.usage,
         error:
-          !trace.isError && trace.finalAnswer !== undefined
+          !transcript.isError && transcript.finalAnswer !== undefined
             ? undefined
             : 'Client execution failed.',
       },
@@ -594,11 +602,11 @@ async function auditCase(
       servers
     ).response
   );
-  const correlation = replayedCorrelation(saved, trace);
+  const correlation = replayedCorrelation(saved, transcript);
   if (!correlation) result.issues.push('PROMPT_MISMATCH');
   if (
-    trace.finalAnswer === undefined ||
-    response.response !== trace.finalAnswer
+    transcript.finalAnswer === undefined ||
+    response.response !== transcript.finalAnswer
   )
     result.issues.push('FINAL_RESPONSE_MISMATCH');
   if (!same(response.events, replay.events))
@@ -606,22 +614,22 @@ async function auditCase(
   if (!same(response.toolCalls, replay.toolCalls))
     result.issues.push('TOOL_CALLS_MISMATCH');
   if (
-    !same(response.usage, trace.usage) ||
-    !same(saved.clientUsage, trace.usage)
+    !same(response.usage, transcript.usage) ||
+    !same(saved.clientUsage, transcript.usage)
   )
     result.issues.push('USAGE_MISMATCH');
-  if (response.llmDurationMs !== trace.llmDurationMs)
+  if (response.llmDurationMs !== transcript.llmDurationMs)
     result.issues.push('TIMING_MISMATCH');
   if (
     response.success !== true ||
     response.evidence !== 'structured' ||
-    saved.traceEvidence !== 'structured'
+    saved.transcriptEvidence !== 'structured'
   )
     result.issues.push('EVIDENCE_FLAGS_MISMATCH');
   const telemetry = {
     source: 'claude-native',
     costScope: 'native-inference-only',
-    ...trace.telemetry,
+    ...transcript.telemetry,
     nativeSessionId: sessionId,
     ...(correlation ?? { correlation: 'exact-initial-prompt' }),
   };
@@ -644,7 +652,7 @@ async function auditCase(
     if (!same(native, telemetry)) result.issues.push('TELEMETRY_MISMATCH');
   }
   result.attachments = await attachments(
-    trace,
+    transcript,
     resolve(options.nativeRoot),
     sessionId
   );

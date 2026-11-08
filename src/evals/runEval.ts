@@ -74,7 +74,7 @@ import type {
   EvaluationSummary,
   ClientDefinition,
   ClientRunResult,
-  TraceEvidence,
+  TranscriptEvidence,
   RunSelection,
   RunTelemetry,
 } from './evalFrameworkTypes.js';
@@ -86,7 +86,7 @@ import { executedTrialResult, runEvalDataset } from './evalRunner.js';
 import { passRate } from './evalRunComparison.js';
 import { buildVariantDeltas } from './variantDeltas.js';
 import {
-  batchTraceExecution,
+  batchTranscriptExecution,
   createEvalCaseExecutor,
 } from './caseExecution.js';
 import {
@@ -342,7 +342,7 @@ export interface RunEvalResult {
     result?: EvalRunnerResult;
   }>;
   summary: EvaluationSummary;
-  /** A regrade's source: the run whose traces it graded. */
+  /** A regrade's source: the run whose transcripts it graded. */
   gradedFrom?: string;
   /** Each variant's servers' tools, by variant name, with `recordServedTools`. */
   servedTools?: Record<string, ListedServerTools[]>;
@@ -560,13 +560,19 @@ function assertCaseClients(
   }
 }
 
-const EVIDENCE_STRENGTH: TraceEvidence[] = ['none', 'observed', 'structured'];
+const EVIDENCE_STRENGTH: TranscriptEvidence[] = [
+  'none',
+  'observed',
+  'structured',
+];
 
-/** The weakest evidence among a variant's cases: what its trace metrics rest on. */
-function variantEvidence(results: EvalCaseResult[]): TraceEvidence | undefined {
+/** The weakest evidence among a variant's cases: what its transcript metrics rest on. */
+function variantEvidence(
+  results: EvalCaseResult[]
+): TranscriptEvidence | undefined {
   const levels = results
-    .map((result) => result.traceEvidence)
-    .filter((level): level is TraceEvidence => level !== undefined);
+    .map((result) => result.transcriptEvidence)
+    .filter((level): level is TranscriptEvidence => level !== undefined);
   return EVIDENCE_STRENGTH.find((level) => levels.includes(level));
 }
 
@@ -966,7 +972,7 @@ export interface GradeRunOptions extends Pick<
 
 /**
  * Grade a stored run again (`mst grade`): the eval config's current
- * assertions, judges and pairwise judges score the traces the run stored,
+ * assertions, judges and pairwise judges score the transcripts the run stored,
  * and the scores are a new run (`<run-id>.g<n>`) next to it, whose
  * `gradedFrom` names the run. No client runs, so it needs no tokens. The
  * datasets are loaded again: a case's `expected` and judges are today's.
@@ -1515,7 +1521,7 @@ export async function resumeRun(
 /**
  * Whether a regrade becomes the eval's latest run: only a regrade of a run
  * that collected every trial, and only when the latest run collected its
- * traces no later. A regrade of an older run leaves a newer run the latest.
+ * transcripts no later. A regrade of an older run leaves a newer run the latest.
  */
 async function regradeTakesLatest(
   evalDirectory: string,
@@ -1523,7 +1529,7 @@ async function regradeTakesLatest(
 ): Promise<boolean> {
   if (replay.run.phases.collect !== 'complete') return false;
   const latest = await readLatestRunId(evalDirectory);
-  // Missing, or already a grading of these traces.
+  // Missing, or already a grading of these transcripts.
   if (
     latest === undefined ||
     latest.replace(/\.g\d+$/, '') === replay.gradedFrom
@@ -1547,7 +1553,7 @@ async function regradeTakesLatest(
 
 /**
  * Run an eval, or (with `replay`) grade the trials a run stored: the same
- * pipeline from datasets to report, with each trial's stored trace in place
+ * pipeline from datasets to report, with each trial's stored transcript in place
  * of a client run.
  */
 async function evaluate(
@@ -1564,7 +1570,7 @@ async function evaluate(
     },
     'runEval'
   );
-  // A regrade grades stored traces into a new run; a resume completes its run.
+  // A regrade grades stored transcripts into a new run; a resume completes its run.
   const regrade = replay?.resume ? undefined : replay;
   const runStartTime = Date.now();
   const rootDir = options.rootDir ?? process.cwd();
@@ -1680,7 +1686,7 @@ async function evaluate(
   );
   // The OS the trials run on, when the runner says: a desktop client's
   // options it can't use fail now. Otherwise the worker checks its own. A
-  // regrade runs no client, so its traces' OS doesn't matter.
+  // regrade runs no client, so its transcripts' OS doesn't matter.
   const trialOS = regrade ? undefined : runnerOS(resolvedRunner.name);
   evalConfig = validateEvalConfig(
     {
@@ -1753,7 +1759,7 @@ async function evaluate(
       redact ? redactStoredResponses(summary) : structuredClone(summary)
     );
   // Trials' client artifacts are copied before grading: into the run when it
-  // keeps full traces, else into a directory removed once graders are done.
+  // keeps full transcripts, else into a directory removed once graders are done.
   let temporaryArtifacts: string | undefined;
   const artifactsRoot = async (): Promise<string> =>
     redact
@@ -1766,10 +1772,10 @@ async function evaluate(
       await fs.rm(temporaryArtifacts, { recursive: true, force: true });
     temporaryArtifacts = undefined;
   };
-  // Before any client starts: an ungraded run is only worth its traces.
+  // Before any client starts: an ungraded run is only worth its transcripts.
   if (options.grade === false && redact)
     throw new Error(
-      'mst run --no-grade keeps the traces for mst grade, but this eval redacts stored responses, which leaves the answers and tool outputs out of them. Set "redactStoredResponses": false in the eval config.'
+      'mst run --no-grade keeps the transcripts for mst grade, but this eval redacts stored responses, which leaves the answers and tool outputs out of them. Set "redactStoredResponses": false in the eval config.'
     );
 
   // Datasets load with the eval's selection controls removed: each variant
@@ -1955,7 +1961,7 @@ async function evaluate(
   };
   // Before any client starts: a fresh token for every connector server, kept
   // fresh until the run ends.
-  // Grading stored traces starts no client, so it needs no tokens.
+  // Grading stored transcripts starts no client, so it needs no tokens.
   const credentials: ConnectorCredentials = replay
     ? { env: {}, secrets: () => [], stop: async () => {} }
     : await startConnectorCredentials(
@@ -1978,17 +1984,17 @@ async function evaluate(
     ...credentials.secrets(),
     ...(workerTokens?.secrets() ?? []),
   ];
-  // A trace a worker sent back, with this machine's secrets replaced too
+  // A transcript a worker sent back, with this machine's secrets replaced too
   // before it is saved, exported or graded: the worker knows only its own.
-  const receivedTrace = (
-    trace: ClientRunResult,
+  const receivedTranscript = (
+    transcript: ClientRunResult,
     servers: readonly MCPConfig[]
   ): ClientRunResult =>
-    redactedClientRun(trace, [
+    redactedClientRun(transcript, [
       ...clientSecretValues(env, servers),
       ...runSecrets(),
     ]);
-  // A replay's servers only name the trace's tools: no secrets, no endpoint.
+  // A replay's servers only name the transcript's tools: no secrets, no endpoint.
   const serverFor = (server: MCPConfig): MCPConfig =>
     replay ? server : resolveServerSecrets(server, env);
   try {
@@ -2208,7 +2214,7 @@ async function evaluate(
           ...(evalConfig.limits ? { limits: evalConfig.limits } : {}),
           signal: controller.signal,
           log: (line) => console.error(`[mst] ${line}`),
-          onResult: async (key, trace) => {
+          onResult: async (key, transcript) => {
             const entry = trialCases.get(`${key.variant}\u0000${key.caseId}`);
             if (!entry) return;
             const { clientConfig, resolvedServers } = setupVariant(
@@ -2218,8 +2224,8 @@ async function evaluate(
               {
                 ...executedTrialResult(
                   entry.evalCase,
-                  batchTraceExecution(
-                    receivedTrace(trace, resolvedServers),
+                  batchTranscriptExecution(
+                    receivedTranscript(transcript, resolvedServers),
                     clientConfig.definition,
                     resolvedServers
                   ),
@@ -2368,7 +2374,7 @@ async function evaluate(
               datasetName: effectiveDataset.name,
               toolVariantId: toolMetadata?.id,
             };
-            const batchTraces = replay
+            const batchTranscripts = replay
               ? undefined
               : gathered
                 ? gatheredQueues(
@@ -2390,13 +2396,13 @@ async function evaluate(
                     toolVariant,
                     {
                       secrets: runSecrets,
-                      // A trace the client reports before its batch ends is saved
+                      // A transcript the client reports before its batch ends is saved
                       // as the trial it will be graded as.
-                      onTrace: async (request, trace) => {
+                      onTranscript: async (request, transcript) => {
                         const evalCase = casesById.get(request.caseId);
                         if (!evalCase) return;
-                        const execution = batchTraceExecution(
-                          trace,
+                        const execution = batchTranscriptExecution(
+                          transcript,
                           clientConfig.definition,
                           resolvedServers
                         );
@@ -2417,7 +2423,7 @@ async function evaluate(
                   );
             // Batch execution (including shared setup/cleanup) precedes the runner's
             // wall clock. Count its elapsed time once, not the sum of request times.
-            const batchDurationMs = batchTraces
+            const batchDurationMs = batchTranscripts
               ? Date.now() - batchStartTime
               : 0;
             const result = await runEvalDataset(
@@ -2468,8 +2474,8 @@ async function evaluate(
                               // A resume's missing trials, as collected again.
                               gathered
                                 ? (caseId, trial) =>
-                                    batchTraceExecution(
-                                      receivedTrace(
+                                    batchTranscriptExecution(
+                                      receivedTranscript(
                                         gathered.result({
                                           variant: variant.name,
                                           caseId,
@@ -2482,7 +2488,7 @@ async function evaluate(
                                     )
                                 : undefined
                             )
-                          : // Writes the proxy simulated are marked in the trace.
+                          : // Writes the proxy simulated are marked in the transcript.
                             withSimulatedWriteMarks(
                               createEvalCaseExecutor({
                                 servers: resolvedServers,
@@ -2490,12 +2496,12 @@ async function evaluate(
                                 evalConfig: effectiveConfig,
                                 variant,
                                 env,
-                                batchTraces,
+                                batchTranscripts,
                                 toolVariant,
                                 secrets: runSecrets,
                               }),
                               connectors.simulatedWriteFiles,
-                              // What the executor redacts its traces with.
+                              // What the executor redacts its transcripts with.
                               () => [
                                 ...clientSecretValues(env, resolvedServers),
                                 ...runSecrets(),
@@ -2594,7 +2600,7 @@ async function evaluate(
         executionId,
         runFacts(
           stored,
-          // A regrade collected nothing: its traces are the source run's.
+          // A regrade collected nothing: its transcripts are the source run's.
           regrade
             ? {
                 collect: regrade.run.phases.collect,
@@ -2613,7 +2619,7 @@ async function evaluate(
   }
 
   /**
-   * Saves one trial's trace when it finishes, as the run stores it. The
+   * Saves one trial's transcript when it finishes, as the run stores it. The
    * first also saves the run as it stands (`collect: partial`), so a run
    * that is killed says it didn't finish. Never costs the run its results.
    */
@@ -2759,7 +2765,7 @@ async function evaluate(
     };
 
     summary.runId = executionId;
-    // A regrade is as partial as the run whose traces it graded.
+    // A regrade is as partial as the run whose transcripts it graded.
     const selection = replay
       ? (replay.run.selection as RunSelection | undefined)
       : runSelection(options);
@@ -2841,7 +2847,8 @@ async function evaluate(
       // settings that shouldn't be stored.
       judges: judgeRecords(evalConfig, rawConfig),
       redactStoredResponses: redact,
-      // A regrade or a resume keeps the setting its traces were collected with.
+      // A regrade or a resume keeps the setting its transcripts were collected
+      // with.
       ...((replay ? replay.run.simulateWrites : simulatedWritesDirectory)
         ? { simulateWrites: true as const }
         : {}),
@@ -2871,7 +2878,7 @@ async function evaluate(
       const previous = await findPreviousRun({
         configId: summary.configId,
         runId: executionId,
-        // A regrade compares with the same traces' last grading.
+        // A regrade compares with the same transcripts' last grading.
         ...(regrade
           ? {
               regradeOf: {

@@ -4,6 +4,8 @@ status: accepted
 
 # A client is a product, and how it runs is not configuration
 
+> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed a trial's trace to its **transcript**. The decision itself stands.
+
 Every client returns one trace, and the same graders score it. Nothing in grading or reporting branches on a client's name. What differs from client to client is how MST runs it, and part of that reaches the eval config:
 
 - **An option changes the product.** `chatgpt` with `clientOptions.surface: "codex"` tests the Codex surface of the desktop app, not ChatGPT. Its name also collides with the `codex` client, which is the Codex CLI, and the two Codex products need names that tell them apart.

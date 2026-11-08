@@ -36,8 +36,8 @@ const mapped: ClientResponse = {
 
 function external(overrides: Partial<ClientMetadata> = {}): ClientMetadata {
   return {
-    traceSource: 'client-local-transcript',
-    traceConfidence: 'high',
+    transcriptSource: 'client-local-transcript',
+    transcriptConfidence: 'high',
     ...overrides,
   } as ClientMetadata;
 }
@@ -75,14 +75,14 @@ describe('gradeTrial', () => {
     evidence: 'structured',
   };
 
-  it('grades tool calls, metrics and the trace view on structured evidence', async () => {
+  it('grades tool calls, metrics and the transcript view on structured evidence', async () => {
     const outcome = await gradeTrial({ assertions: toolExpect }, graded);
     expect(outcome.scores.toolsTriggered?.pass).toBe(false);
     expect(outcome.scores.toolCallCount?.pass).toBe(true);
     expect(outcome.toolPrecision).toBe(0.5);
     expect(outcome.toolRecall).toBe(0.5);
     // Matched on mapped names, shown with the client's own names.
-    expect(outcome.toolCallTrace).toEqual({
+    expect(outcome.toolCallTranscript).toEqual({
       calls: [
         {
           name: 'native_weather',
@@ -115,7 +115,7 @@ describe('gradeTrial', () => {
     expect(outcome.scores.textContains?.pass).toBe(true);
     expect(outcome.toolPrecision).toBeUndefined();
     expect(outcome.toolRecall).toBeUndefined();
-    expect(outcome.toolCallTrace).toBeUndefined();
+    expect(outcome.toolCallTranscript).toBeUndefined();
   });
 
   it('lists a required call made with the wrong arguments as missed', async () => {
@@ -139,7 +139,7 @@ describe('gradeTrial', () => {
     expect(outcome.toolRecall).toBe(0);
     // Precision counts the call by identity; recall misses it on arguments.
     expect(outcome.toolPrecision).toBe(0.5);
-    expect(outcome.toolCallTrace).toEqual({
+    expect(outcome.toolCallTranscript).toEqual({
       calls: [
         {
           name: 'native_weather',
@@ -166,10 +166,10 @@ describe('gradeTrial', () => {
     });
   });
 
-  it("grades on the client's evidence, not external trace metadata", async () => {
+  it("grades on the client's evidence, not external transcript metadata", async () => {
     const outcome = await gradeTrial(
       { assertions: toolExpect },
-      { ...graded, clientMetadata: external({ traceConfidence: 'low' }) }
+      { ...graded, clientMetadata: external({ transcriptConfidence: 'low' }) }
     );
     expect(outcome.scores.toolCallCount?.pass).toBe(true);
     expect(outcome.toolPrecision).toBe(0.5);

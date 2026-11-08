@@ -20,7 +20,7 @@ import {
 } from './resultStore.js';
 import { createFixtureExtensions } from '../mcp/fixtures/fixtureExtensions.js';
 import type { CaseExecution } from './caseExecution.js';
-import { clientRunToExecution } from './clientTrace.js';
+import { clientRunToExecution } from './clientTranscript.js';
 import { caseIncompleteness } from './trialEnding.js';
 import { passRate } from './evalRunComparison.js';
 import type * as ClientRunModule from './mstClient/run.js';

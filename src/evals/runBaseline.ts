@@ -127,23 +127,23 @@ export async function findPreviousRun(options: {
   store?: EvalResultStore;
   outputRoot: string;
   /**
-   * For a regrade: the run that collected its traces, and when. That run's
+   * For a regrade: the run that collected its transcripts, and when. That run's
    * gradings (it and its `.g<n>` regrades) come first; failing those, a run
    * collected before it. Never a run collected after it.
    */
   regradeOf?: { runId: string; collectedAt: string };
 }): Promise<PreviousRun | undefined> {
   const regradeOf = options.regradeOf;
-  const sameTraces = (runId: string | undefined) =>
+  const sameTranscripts = (runId: string | undefined) =>
     regradeOf !== undefined &&
     runId?.replace(/\.g\d+$/, '') === regradeOf.runId;
-  // Another grading of the same traces always is; another run, only one
+  // Another grading of the same transcripts always is; another run, only one
   // collected no later.
   const eligible = (summary: EvaluationSummary) =>
     regradeOf === undefined ||
-    sameTraces(summary.runId) ||
+    sameTranscripts(summary.runId) ||
     (summary.collectedAt ?? summary.timestamp) <= regradeOf.collectedAt;
-  const rank = (runId: string) => (sameTraces(runId) ? 0 : 1);
+  const rank = (runId: string) => (sameTranscripts(runId) ? 0 : 1);
   if (!options.history && options.store) {
     const candidates = (await options.store.listArtifacts('eval-run-summary'))
       .filter(

@@ -25,8 +25,8 @@ import type {
   HostTelemetry,
   HostTelemetryEvent,
   ModelCall,
-  Trace,
-  TraceEvent,
+  Transcript,
+  TranscriptEvent,
 } from '../evalFrameworkTypes.js';
 import { isHostContentAttribute } from './hostContent.js';
 import {
@@ -337,7 +337,7 @@ function inferredToolTimes(
 }
 
 function toolSpan(
-  event: TraceEvent,
+  event: TranscriptEvent,
   index: number,
   traceId: string,
   parent: string,
@@ -474,7 +474,7 @@ function hostEventTimes(
 function hostEventIndex(
   telemetry: HostTelemetry | undefined,
   modelCalls: readonly ModelCall[],
-  events: readonly TraceEvent[]
+  events: readonly TranscriptEvent[]
 ): {
   byModelCall: Map<number, HostTelemetryEvent[]>;
   byTool: Map<number, HostTelemetryEvent[]>;
@@ -625,11 +625,12 @@ export function trialSpans(
   run: RunAttributes,
   options: SpanOptions & { input?: string; model?: string; now?: number }
 ): OtlpSpan[] {
-  const trace: Trace | undefined = result.trace;
+  // The trial's transcript, which this OpenTelemetry trace is built from.
+  const transcript: Transcript | undefined = result.transcript;
   const traceId = trialTraceId(identity);
   const root = spanId(traceId, 'root');
-  const events = trace?.events ?? [];
-  const modelCalls = trace?.modelCalls ?? [];
+  const events = transcript?.events ?? [];
+  const modelCalls = transcript?.modelCalls ?? [];
   const childTimes = [
     ...events.flatMap((event) => [
       epochMs(event.startedAt),
@@ -641,8 +642,8 @@ export function trialSpans(
     ]),
   ].filter((value): value is number => value !== undefined);
   const now = options.now ?? Date.now();
-  let start = epochMs(trace?.startedAt);
-  let end = epochMs(trace?.completedAt);
+  let start = epochMs(transcript?.startedAt);
+  let end = epochMs(transcript?.completedAt);
   start ??= childTimes.length ? Math.min(...childTimes) : undefined;
   end ??= childTimes.length ? Math.max(...childTimes) : undefined;
   if (end === undefined)
@@ -659,12 +660,12 @@ export function trialSpans(
   const request = 'request' in result ? result.request : undefined;
   const input = options.input ?? request?.input;
   const model = options.model ?? request?.model;
-  const usage = trace?.usage ?? result.clientUsage;
-  const error = trace?.error ?? result.error;
+  const usage = transcript?.usage ?? result.clientUsage;
+  const error = transcript?.error ?? result.error;
   const ending = endingOf(result);
   const infrastructure = ending.kind === 'infrastructure';
   const inferred = inferredToolTimes(modelCalls);
-  const host = hostEventIndex(trace?.hostTelemetry, modelCalls, events);
+  const host = hostEventIndex(transcript?.hostTelemetry, modelCalls, events);
   const toolNames = new Map(
     events
       .filter((event) => event.id)
@@ -691,11 +692,17 @@ export function trialSpans(
       'mst.duration_ms': result.durationMs,
       'mst.cost_usd': usage?.totalCostUsd ?? usage?.estimatedCostUsd,
       'mst.tool_call_count': events.length,
-      'mst.model_call_count': trace?.modelCalls ? modelCalls.length : undefined,
-      'mst.evidence': trace?.evidence,
-      'mst.host.event_count': trace?.hostTelemetry?.events.length,
-      ...(trace?.hostTelemetry?.resource
-        ? hostAttributes(trace.hostTelemetry.resource, options, 'mst.host.')
+      'mst.model_call_count': transcript?.modelCalls
+        ? modelCalls.length
+        : undefined,
+      'mst.evidence': transcript?.evidence,
+      'mst.host.event_count': transcript?.hostTelemetry?.events.length,
+      ...(transcript?.hostTelemetry?.resource
+        ? hostAttributes(
+            transcript.hostTelemetry.resource,
+            options,
+            'mst.host.'
+          )
         : {}),
       'mst.infrastructure_error': infrastructure || undefined,
       'mst.infrastructure.broke':
@@ -713,11 +720,11 @@ export function trialSpans(
               { role: 'user', parts: [{ type: 'text', content: input }] },
             ])
           : undefined,
-      'gen_ai.output.messages': trace?.finalText
+      'gen_ai.output.messages': transcript?.finalText
         ? content(options, [
             {
               role: 'assistant',
-              parts: [{ type: 'text', content: trace.finalText }],
+              parts: [{ type: 'text', content: transcript.finalText }],
             },
           ])
         : undefined,
@@ -729,7 +736,7 @@ export function trialSpans(
   // The host's events no request or tool call names, and its metrics.
   const rootEvents = [
     ...(hostSpanEvents(host.rest, options).events ?? []),
-    ...(trace?.hostTelemetry?.metrics ?? []).map((metric) => ({
+    ...(transcript?.hostTelemetry?.metrics ?? []).map((metric) => ({
       timeUnixNano: nanos(epochMs(metric.time) ?? end),
       name: `metric ${metric.name}`,
       attributes: attributes({
@@ -769,7 +776,7 @@ export function trialSpans(
     ...host.requests.map((event, index) =>
       hostRequestSpan(event, index, traceId, root, start, options)
     ),
-    ...hostSpans(trace?.hostTelemetry, traceId, root, options),
+    ...hostSpans(transcript?.hostTelemetry, traceId, root, options),
   ];
 }
 

@@ -4,7 +4,7 @@
  * judge and plugin judges).
  */
 import type { ValidationResult } from '../assertions/validators/types.js';
-import type { TraceEvidence } from '../evals/evalFrameworkTypes.js';
+import type { TranscriptEvidence } from '../evals/evalFrameworkTypes.js';
 import { parseExtensionOptions } from '../plugins/plugin.js';
 import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 import { getJudge } from './builtinJudges.js';
@@ -37,8 +37,8 @@ export interface JudgeRun {
   evalCase?: JudgeCaseSource;
   /** The client response as reported, with built-in tool names. */
   clientResponse?: unknown;
-  /** How the client trace was observed. */
-  evidence?: TraceEvidence;
+  /** How the client transcript was observed. */
+  evidence?: TranscriptEvidence;
   /** The eval's plugin settings; the judge gets its plugin's (ADR 0008). */
   settings?: SettingsSections;
 }

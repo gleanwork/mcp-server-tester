@@ -144,10 +144,10 @@ Each case has an `input`, an `expected` answer, tags, and optional default judge
 }
 ```
 
-- **`servers`** defines each server once. The key is its label in traces and the report. Each one names a plugin connector, which says where the server is, how to sign in, and how Cowork reaches it (here, through a dry-run proxy). A server can also be a plain `http` or `stdio` entry with a literal or environment-backed token; `mst auth` signs in only to connector servers.
+- **`servers`** defines each server once. The key is its label in transcripts and the report. Each one names a plugin connector, which says where the server is, how to sign in, and how Cowork reaches it (here, through a dry-run proxy). A server can also be a plain `http` or `stdio` entry with a literal or environment-backed token; `mst auth` signs in only to connector servers.
 - **`variants`** run the same cases with the same client, model and servers, and only the tool descriptions differ. A variant that lists no `servers` uses all of them. `current` shows the servers' own descriptions. `rewritten` and `rewritten-terse` set **tool metadata** (`tools`) for Acme's two tools, keyed `server.tool`; calls are still recorded under the tools' original names, so assertions read the same in every variant. The first variant is the baseline; set `"baseline"` to choose another.
 - **`datasets`** use the snapshot by default. To pin a snapshot: `{ "type": "acme/dataset/info-seeking", "snapshot": "2026-10-01" }`. For live data: `{ "type": "…", "source": "live" }`. `run.json` records which copy each dataset came from.
-- **`redactStoredResponses: false`** keeps full traces in the run. Stored traces are redacted by default, and a redacted run can't be collected with `--no-grade`, regraded (section 8) or resumed (section 7). A plugin's shared config can set it for every eval that extends the config.
+- **`redactStoredResponses: false`** keeps full transcripts in the run. Stored transcripts are redacted by default, and a redacted run can't be collected with `--no-grade`, regraded (section 8) or resumed (section 7). A plugin's shared config can set it for every eval that extends the config.
 - **`judges`** apply to every case, on top of each case's own judges. Pointwise judges score each trial. Pairwise judges compare each variant with the baseline on each case.
 - **`setup`** (planned, optional) lists plugin steps that run before collection and tear down afterwards, e.g. `acme/setup/reset-test-tenant`.
 
@@ -218,7 +218,7 @@ grade     current           e2e-0000 ✓✗✓  e2e-0001 ✓✓✓  e2e-0002 ✓
 ● collected  ! infrastructure error  ✓ passed  ✗ failed  – missing
 ```
 
-The client runs the trials first. Judges then grade the collected traces.
+The client runs the trials first. Judges then grade the collected transcripts.
 
 ## 6. Run in containers
 
@@ -261,7 +261,7 @@ npx mst run --config evals/cowork-tool-descriptions.json \
   --results acme/result-store/eval-results
 ```
 
-The VMs run the trials. Your machine gathers their traces, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the traces collected so far. Rerun with `--resume <run-id>` to collect only what's missing. `--runner-option keep=failed` keeps a VM whose shard failed, as it does for containers.
+The VMs run the trials. Your machine gathers their transcripts, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the transcripts collected so far. Rerun with `--resume <run-id>` to collect only what's missing. `--runner-option keep=failed` keeps a VM whose shard failed, as it does for containers.
 
 To walk away from a long run, detach it ([ADR 0007](../adr/0007-detached-runs-move-the-coordinator.md)). The run's coordinator then runs on a machine the runner creates, with a cloud identity of its own, and your machine can go offline. It needs a result store and, for connector servers, a credential store that machine reaches:
 
@@ -305,12 +305,12 @@ jobs:
 
 ## 8. Regrade without re-running
 
-Judges read stored traces, so you can change or add judges and regrade without running Cowork again. This needs the run stored with `"redactStoredResponses": false`, as the config in section 3 sets:
+Judges read stored transcripts, so you can change or add judges and regrade without running Cowork again. This needs the run stored with `"redactStoredResponses": false`, as the config in section 3 sets:
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json --runner acme/runner/cloud-vm --no-grade
 npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json
-# → run 7f3c2a.g2 (traces from 7f3c2a)
+# → run 7f3c2a.g2 (transcripts from 7f3c2a)
 ```
 
 Grading takes hours when an agentic judge reads every trial. Grade on the runner's machines instead, with the judges' keys in the secrets file ([ADR 0005](../adr/0005-grading-runs-in-an-environment.md)):
@@ -326,7 +326,7 @@ A run kept in a result store (section 7) can be graded on another machine, such 
 npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json \
   --results acme/result-store/eval-results
 # → [mst] Fetched run 7f3c2a from the result store acme/result-store/eval-results (…)
-# → run 7f3c2a.g2 (traces from 7f3c2a)
+# → run 7f3c2a.g2 (transcripts from 7f3c2a)
 ```
 
 `--resume 7f3c2a` fetches the same way, then collects what's missing.
@@ -348,10 +348,10 @@ Runs are written locally by default:
 └── runs/<run-id>/
     ├── run.json        # the config's identity, each variant's setup, resolved datasets and judges,
     │                   #   runner, phase status
-    ├── traces/         # one trace per trial
+    ├── transcripts/    # one transcript per trial
     ├── artifacts/      # each trial's client artifacts, for judges
     ├── scores/         # one score per grader per trial; pairwise preferences per case
-    ├── results.json    # traces and scores joined
+    ├── results.json    # transcripts and scores joined
     ├── summary.json    # per-variant metrics and comparisons
     └── report/
 ```
@@ -368,7 +368,7 @@ Runs are written locally by default:
 npx mst stores --plugins @acme/mst-plugin   # planned
 ```
 
-`run.json` records where the run ran: the runner, its options, the number of shards, and each shard's machine (its image digest, worker MST and OS, which decides how a desktop client ran); each trial records its client app. A regrade on a runner's machines (section 8) also records where it graded, in `grading.runner`. The report shows both under _Run details_. Recording each trace's shard is planned for 2.0.
+`run.json` records where the run ran: the runner, its options, the number of shards, and each shard's machine (its image digest, worker MST and OS, which decides how a desktop client ran); each trial records its client app. A regrade on a runner's machines (section 8) also records where it graded, in `grading.runner`. The report shows both under _Run details_. Recording each transcript's shard is planned for 2.0.
 
 ## 10. Read your results
 
@@ -402,5 +402,5 @@ The report has the same sections for every eval:
 - **Result:** which variants are better, worse, or unclear compared with the baseline.
 - **Variants compared:** the summary table above. _Show statistics_ adds confidence intervals, p-values and pass^k.
 - **What differs:** each variant's setup next to the baseline's.
-- **Case by case:** every trial, with its trace, each grader's score, and the pairwise preference against the baseline.
+- **Case by case:** every trial, with its transcript, each grader's score, and the pairwise preference against the baseline.
 - **Why trials failed:** failed trials grouped by cause.

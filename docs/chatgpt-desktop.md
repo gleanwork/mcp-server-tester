@@ -419,7 +419,7 @@ inline code: the composer shows `` `x` `` as a code span, so its accessible text
 omits those two backticks. A draft that equals the prompt with every single-backtick
 span (no backticks or line feeds inside, not part of a longer backtick run) shown
 without its backticks also matches. The sent message is still matched with the
-exact prompt in the native trace. This also applies
+exact prompt in the native transcript. This also applies
 when the original prompt already ends in LF; only one additional LF is allowed.
 MST activates Send once. It never presses Enter or retries an uncertain Send.
 
@@ -462,7 +462,7 @@ after a successful UI receipt.
 
 ## Evidence and continuation
 
-The existing strict native trace contract is shared across both platforms:
+The existing strict native transcript contract is shared across both platforms:
 unchanged `exact_prompt` matching (only exact text or one additional native
 terminal LF, reported as `native_terminal_lf`; on Linux only, Markdown
 punctuation backslash-escaped by the app, reported as
@@ -493,8 +493,8 @@ Native originator acceptance is surface-specific and case-sensitive:
   Native metadata never selects or changes the configured surface. `source` alone
   does not establish the surface.
 
-The internal parser API preserves existing callers: `findChatgptTrace` accepts
-`surface` in its fifth-argument options; `parseChatgptTrace` accepts an optional
+The internal parser API preserves existing callers: `findChatgptTranscript` accepts
+`surface` in its fifth-argument options; `parseChatgptTranscript` accepts an optional
 fifth argument `{ surface, mcpServers }` after `observedBeforeMs`. Both default to
 Work and no configured labels.
 `expectedChatgptOriginator(surface)` provides the same fixed mapping.
@@ -508,7 +508,7 @@ matched transcript cannot be preserved fails as `client_run_failed`. Unmatched
 sessions are not copied. macOS does not copy evidence; its artifact references
 the native transcript path.
 
-The preserved Codex trace above contains `gpt-5.6-terra`, medium effort, and the
+The preserved Codex transcript above contains `gpt-5.6-terra`, medium effort, and the
 native terminal-LF prompt form. It ends in `turn_aborted`, without `task_complete`.
 It is evidence for originator binding, **not a completed or passing evaluation**.
 The parser's `complete` flag means terminal: an abort also sets `error`, and the
@@ -544,14 +544,14 @@ The parser reads only native structure in the matched turn, never tool-result te
   nested built-in tool names (for example `web__run`, `exec_command`), input length,
   and sha256, never the code. Each nested `tools.mcp__<label>__<tool>` reference
   (or `executed_tool_calls` entry) is also an MCP call on that label. These nested
-  calls have no separate arguments or latency, and a trace limitation says so.
+  calls have no separate arguments or latency, and a transcript limitation says so.
 - `item_completed` `McpToolCall`, `CommandExecution`, and `Extension` `web.search`
   items (other builds) remain supported; a shared id counts once.
 - Usage comes from `token_usage_record` (`turn_token_usage`).
 
 A bound turn that times out or aborts still fails (`timeout` or
 `client_run_failed`). The result keeps the recorded tool calls, usage, and
-conversation, with `telemetry.partial: true`, `traceConfidence: 'low'`, and the
+conversation, with `telemetry.partial: true`, `transcriptConfidence: 'low'`, and the
 limitation "Turn did not complete; tool calls and usage are partial." Partial
 usage duration is the native elapsed time so far.
 

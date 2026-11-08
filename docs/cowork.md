@@ -2,7 +2,7 @@
 
 Cowork is the `cowork` client. `mst run --config <eval.json>` runs an eval config
 on it, as for any client, and `mst batch` runs several configs. A platform-specific
-desktop driver submits each case, and MST builds each trace from Claude's own
+desktop driver submits each case, and MST builds each transcript from Claude's own
 session records. macOS uses managed application setup and Anthropic Computer Use.
 Linux attaches to an externally prepared desktop and uses bounded AT-SPI actions;
 it does not provision or authenticate that runtime.
@@ -459,8 +459,8 @@ session/model identifiers are not echoed. Errors use fixed issue codes.
 Bounds: 1–1,000 expected cases, 32 MiB raw results, 16 MiB per native file,
 64 MiB per session, 4,096 directory entries per session, depth 12, and 1,024 output
 notices per case. The parser reads a private temporary snapshot of the two bounded
-trace files, which is removed after parsing. User-controlled symlinks are rejected
-(including roots and trace paths); fixed macOS `/tmp` and `/var` system aliases are
+transcript files, which is removed after parsing. User-controlled symlinks are rejected
+(including roots and transcript paths); fixed macOS `/tmp` and `/var` system aliases are
 allowed. Audit a quiescent archive under trusted filesystem ownership: portable
 Node path checks cannot eliminate hostile concurrent directory-replacement races.
 A verified report establishes internal consistency, not cryptographic authenticity
@@ -470,7 +470,7 @@ the bytes present at audit time; notices contain no original digest to authentic
 ## Structure and behavior
 
 - `desktopBatch.ts`: the batch lifecycle shared with the ChatGPT client: the desktop lease, per-case reset policy, native-session de-duplication, redaction, and cleanup.
-- `coworkClient.ts`: selects the concrete OS entry point on the trial's machine; owns setup, one case (submit, bind, HITL, native collection), reset, and trace conversion.
+- `coworkClient.ts`: selects the concrete OS entry point on the trial's machine; owns setup, one case (submit, bind, HITL, native collection), reset, and transcript conversion.
 - `cowork/desktop.ts`: the native operations shared by the two OS entry points, with no selector.
 - `cowork/macos.ts`: the macOS entry point, using the existing setup, recovery, and Computer Use functions.
 - `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
@@ -517,14 +517,14 @@ A new session whose native `initialMessage` equals the prompt binds at once.
 Claude can store a prompt changed from what the deep link carried (its
 surrounding quotes dropped, say), so when no new session has it exactly, the only new
 session binds, once it has stayed the only one for two polls. Two new sessions without exactly one exact match are
-ambiguous, and the case fails. The trace's `correlation` says which binding
+ambiguous, and the case fails. The transcript's `correlation` says which binding
 held (`exact-initial-prompt` or `only-new-session`); for `only-new-session`,
 `promptDifference` gives the stored and submitted lengths and the first
 differing index, never the text. Answers and tool output are never prompt
 matches. MST binds within 30 seconds after submission and pins collection to
 the bound session. A failed case is never
 retried or resent. Each case is self-contained: after a submit, binding, HITL, or
-trace failure, MST records that case's failure and resets the app before the next
+transcript failure, MST records that case's failure and resets the app before the next
 case. On Linux the reset first stops the failed case's task if it still runs (a
 task past its deadline, or one waiting on a prompt): it clicks the task's Stop
 response and waits until it's gone, about 2 seconds. A task that won't stop fails
@@ -550,14 +550,14 @@ The case's answer is the last turn's assistant text from its longest text block
 on. Cowork often writes its answer, then saves memory or files and ends with a
 short message ("Saved the context…"); the native result holds only that last
 message, so grading it would grade the wrap-up. Shorter text before the longest
-block, the narration between tool calls, is left out. The trace's
+block, the narration between tool calls, is left out. The transcript's
 `answerSource` says which held: `final-message` when the last text block is the
 longest, else `longest-text-onward`, with `finalMessageChars`, the last block's
 length.
 
 A case has `timeout` milliseconds from submission (default 900000, 15 minutes)
 to complete. When the session hasn't completed by then, the case fails with
-`Native Claude trace deadline exceeded` but keeps what the session did: its
+`Native Claude transcript deadline exceeded` but keeps what the session did: its
 tool calls, usage, its answer so far, and the session folder, with
 `deadlineExceeded: true` in its telemetry. `deadlineWait` says what the task
 was waiting on and since when: `{ "on": "tool", "tool": "mcp__slack__…" }` for a
@@ -585,7 +585,7 @@ names, never the query.
 
 Claude Code replaces a large tool result in its transcript with a
 `<persisted-output>` placeholder and saves the result to a file, which the model
-reads. MST reads that file back while it collects the trial, so the trace (and
+reads. MST reads that file back while it collects the trial, so the transcript (and
 any judge) sees the full result, up to 1 MB. A server writes the placeholder's
 text and can know the call's `tool_use_id`, so MST reads only a regular file
 whose real path is named for that id, in a `tool-results` directory, inside
@@ -869,7 +869,7 @@ With the flag, MST passes each connector's `launch` a private file,
 write (`mst.simulated-write/v1`: server, tool, arguments, reply). A connector
 whose launch doesn't pass it on keeps planned-write results, and the run says
 so. After each trial, MST marks the trial's tool calls the proxy answered
-(same server, tool and arguments) `simulatedWrite: true`, in its trace events
+(same server, tool and arguments) `simulatedWrite: true`, in its transcript events
 and in the client response's `events` and `toolCalls`, so judges and reports
 know the write never happened; `output` is the reply.
 The files are deleted when the run ends. A write the proxy can't record gets
