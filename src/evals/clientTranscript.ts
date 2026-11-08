@@ -21,12 +21,23 @@ function attributed(
       "A client returned a transcript event with `source: 'host'`; it is now `source: 'builtin'` (the client's built-in tools)."
     );
   if (servers.length !== 1) return events;
-  const label = mcpServerLabel(servers[0]!, 0);
   return events.map((event) =>
     event.source === 'mcp' && event.server === undefined
-      ? { ...event, server: label }
+      ? { ...event, server: eventServer(event, servers) }
       : event
   );
+}
+
+/**
+ * The server an MCP event's call went to: its own `server`, or on a
+ * one-server run, that server's label.
+ */
+export function eventServer(
+  event: TranscriptEvent,
+  servers: readonly MCPConfig[]
+): string | undefined {
+  if (event.server !== undefined || servers.length !== 1) return event.server;
+  return mcpServerLabel(servers[0]!, 0);
 }
 
 /** Only built-in fixtures qualify tool names with their server label. */

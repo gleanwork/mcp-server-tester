@@ -663,7 +663,8 @@ async function runSessionBatch(
         resetBeforeCase && outcome.result.error
           ? await withDiagnosis(session, outcome.result)
           : outcome.result,
-        readiness?.ready ? readiness.readOnlyTools : undefined
+        readiness?.ready ? readiness.readOnlyTools : undefined,
+        target?.servers ?? []
       );
       results.push(result);
       // A copy: the batch adds to its results when it ends.

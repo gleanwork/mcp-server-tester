@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { resumeRun, runEval } from './runEval.js';
 import { shardOf } from './runners/shardedCollect.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
+import { readyStdioServer } from '../../tests/mocks/readyServers.js';
 
 const mock = (name: string) =>
   fileURLToPath(new URL(`../../tests/mocks/${name}`, import.meta.url));
@@ -275,6 +276,33 @@ describe('a run in a runner with shards', () => {
       `Run ${runId} has no trials to collect again: there is nothing to resume. 1 trials ended in infrastructure failures a retry can't help: fix the eval, the case or the setup, and run it again.`
     );
   }, 90_000);
+
+  it("fails a trial on a worker that called a tool its read-only server didn't list", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture({
+      redact: false,
+      cases: ['alpha', 'unlisted-write'],
+      extra: {
+        servers: { docs: readyStdioServer() },
+        variants: [{ name: 'baseline' }],
+      },
+    });
+    const result = await f.run({ shards: '1' });
+    expect(result.summary.metrics).toMatchObject({ passed: 1, incomplete: 1 });
+    const trial = await f.readJson<{ ending: unknown; error?: string }>(
+      path.join(
+        result.outputDir,
+        'transcripts',
+        'baseline',
+        'unlisted-write',
+        '0.json'
+      )
+    );
+    expect(trial).toMatchObject({
+      ending: { kind: 'infrastructure', broke: 'setup', retryable: false },
+    });
+    expect(trial.error).toMatch(/^The client called docs\.save/);
+  }, 60_000);
 
   it('--resume refuses to collect in the local runner', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -359,7 +359,7 @@ function clientExecutor(
         servers
       );
     const checked = (result: ClientRunResult) =>
-      checkReadOnlyCalls(result, batch.readOnlyTools);
+      checkReadOnlyCalls(result, batch.readOnlyTools, servers);
     if (batchTranscripts) {
       const transcript = batchTranscripts.get(evalCase.id)?.shift();
       if (!transcript)

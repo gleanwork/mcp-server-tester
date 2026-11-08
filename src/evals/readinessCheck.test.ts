@@ -25,7 +25,9 @@ import { prepareClientBatch } from './prepareClientBatch.js';
 import type {
   ClientDefinition,
   ClientRunResult,
+  ClientSession,
 } from './evalFrameworkTypes.js';
+import { collectClientBatch } from './desktopBatch.js';
 import type { EvalCase } from './datasetTypes.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import {
@@ -459,11 +461,20 @@ describe('readinessRetryDelaysMs', () => {
 
 describe('checkReadOnlyCalls', () => {
   const listed = new Map([['docs', new Set(['search'])]]);
-  function calling(server: string, name: string): ClientRunResult {
+  const docs = { ...readyStdioServer(), label: 'docs' };
+  const slack = { ...readyStdioServer(), label: 'slack' };
+  const servers = [docs, slack];
+  function calling(server: string | undefined, name: string): ClientRunResult {
     return {
       finalText: 'Done.',
       events: [
-        { kind: 'tool_call', source: 'mcp', server, name, arguments: {} },
+        {
+          kind: 'tool_call',
+          source: 'mcp',
+          ...(server ? { server } : {}),
+          name,
+          arguments: {},
+        },
       ],
     };
   }
@@ -471,12 +482,16 @@ describe('checkReadOnlyCalls', () => {
   it('passes a trial that calls only the tools a read-only server listed', () => {
     for (const name of ['search', 'docs.search']) {
       const result = calling('docs', name);
-      expect(checkReadOnlyCalls(result, listed)).toBe(result);
+      expect(checkReadOnlyCalls(result, listed, servers)).toBe(result);
     }
   });
 
   it("ends a trial that calls a tool its read-only server didn't list as setup, for good", () => {
-    const checked = checkReadOnlyCalls(calling('docs', 'docs.save'), listed);
+    const checked = checkReadOnlyCalls(
+      calling('docs', 'docs.save'),
+      listed,
+      servers
+    );
     expect(checked.error).toMatch(
       /^The client called docs\.save, which its server didn't list when MST checked it: MST can't tell whether that call wrote\./
     );
@@ -487,11 +502,23 @@ describe('checkReadOnlyCalls', () => {
     });
   });
 
+  it("checks a call with no server as its one server's, as its transcript will say", () => {
+    const checked = checkReadOnlyCalls(calling(undefined, 'save'), listed, [
+      docs,
+    ]);
+    expect(checked.error).toMatch(/^The client called docs\.save/);
+    // With several servers, MST can't tell which one it went to.
+    const unattributed = calling(undefined, 'save');
+    expect(checkReadOnlyCalls(unattributed, listed, servers)).toBe(
+      unattributed
+    );
+  });
+
   it('leaves servers with a write mode, and trials no check covered, alone', () => {
     const other = calling('slack', 'send_message');
-    expect(checkReadOnlyCalls(other, listed)).toBe(other);
+    expect(checkReadOnlyCalls(other, listed, servers)).toBe(other);
     const unchecked = calling('docs', 'save');
-    expect(checkReadOnlyCalls(unchecked, undefined)).toBe(unchecked);
+    expect(checkReadOnlyCalls(unchecked, undefined, servers)).toBe(unchecked);
   });
 });
 
@@ -842,6 +869,80 @@ describe('the readiness check before a batch', () => {
     expect(open).not.toHaveBeenCalled();
     expect(queues?.get('two')).toMatchObject([{ ending: setupEnding }]);
     expect(await count(empty.log)).toBe(1);
+  });
+
+  /** A session whose trials call `save`, which its one server never lists. */
+  function unlistedWriter(
+    readiness?: ClientSession['readiness']
+  ): ClientDefinition {
+    return {
+      schema: z.object({ type: z.string() }),
+      async open() {
+        return {
+          ...(readiness ? { readiness } : {}),
+          async run() {
+            return {
+              result: {
+                finalText: 'Saved.',
+                events: [
+                  {
+                    kind: 'tool_call',
+                    source: 'mcp',
+                    name: 'save',
+                    arguments: {},
+                  },
+                ],
+              },
+              continuation: 'continue' as const,
+            };
+          },
+          async reset() {},
+          async close() {},
+        };
+      },
+    };
+  }
+  const unlistedEnding = {
+    kind: 'infrastructure',
+    broke: 'setup',
+    retryable: false,
+  };
+
+  it("fails a batch trial that called a tool its read-only server didn't list", async () => {
+    const queues = await prepareClientBatch(
+      unlistedWriter(),
+      cases,
+      { type: 'readiness-test/client/batch' },
+      [{ ...readyStdioServer(), label: 'docs' }],
+      { evalConfig, env }
+    );
+    for (const evalCase of cases)
+      expect(queues?.get(evalCase.id)).toMatchObject([
+        {
+          error: expect.stringMatching(/^The client called docs\.save/),
+          ending: unlistedEnding,
+        },
+      ]);
+  });
+
+  it("fails a desktop trial that called a tool its read-only server didn't list when MST checked it after prepare", async () => {
+    const docs = { ...readyStdioServer(), label: 'docs' };
+    const results = await collectClientBatch(
+      unlistedWriter({ servers: [docs], env }),
+      cases.map((evalCase) => ({
+        caseId: evalCase.id,
+        trial: 0,
+        input: { prompt: evalCase.input, servers: [docs] },
+        config: { type: 'readiness-test/client/desktop' },
+      })),
+      { evalConfig, env }
+    );
+    expect(results).toHaveLength(cases.length);
+    for (const result of results)
+      expect(result).toMatchObject({
+        error: expect.stringMatching(/^The client called docs\.save/),
+        ending: unlistedEnding,
+      });
   });
 });
 

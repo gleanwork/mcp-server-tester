@@ -268,7 +268,8 @@ export async function prepareClientBatch(
   ): ClientRunResult =>
     checkReadOnlyCalls(
       proxied ? proxied.settle(index, transcript, final) : transcript,
-      ready.readOnlyTools
+      ready.readOnlyTools,
+      servers
     );
   // A transcript reported early is settled with the proxy's traffic so far;
   // the batch's returned transcripts are settled again when it ends.

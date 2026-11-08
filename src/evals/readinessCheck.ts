@@ -34,6 +34,7 @@ import {
   type McpServerReadiness,
 } from './mcpReadiness.js';
 import { infrastructureEnding } from './trialEnding.js';
+import { eventServer } from './clientTranscript.js';
 import { ProxyUpstreamError } from './toolSurfaceProxy.js';
 import { formatMCPConnectionFailure } from '../mcp/connectionDiagnostics.js';
 
@@ -268,22 +269,27 @@ export function readinessSetup(
  * sit between a direct server and its client, so a server that lists more
  * tools to the client than to MST's check (one whose tools depend on who
  * signs in, say) could take a write MST never saw. The trial can't count:
- * it ends as a `setup` failure that a retry can't fix.
+ * it ends as a `setup` failure that a retry can't fix. `servers` are the
+ * trial's, so a call with no server on a one-server run is that server's,
+ * as its transcript will say.
  */
 export function checkReadOnlyCalls(
   result: ClientRunResult,
-  readOnlyTools: ReadOnlyTools | undefined
+  readOnlyTools: ReadOnlyTools | undefined,
+  servers: readonly MCPConfig[]
 ): ClientRunResult {
   if (!readOnlyTools?.size) return result;
   const unlisted = new Set<string>();
   for (const event of result.events) {
     if (event.kind !== 'tool_call' || event.source !== 'mcp') continue;
-    const listed = event.server ? readOnlyTools.get(event.server) : undefined;
-    if (!listed) continue;
-    const tool = event.name.startsWith(`${event.server}.`)
-      ? event.name.slice(event.server!.length + 1)
+    const server = eventServer(event, servers);
+    const listed = server === undefined ? undefined : readOnlyTools.get(server);
+    if (!server || !listed) continue;
+    // As the write ledger names a tool: bare, or `<server>.<tool>`.
+    const tool = event.name.startsWith(`${server}.`)
+      ? event.name.slice(server.length + 1)
       : event.name;
-    if (!listed.has(tool)) unlisted.add(`${event.server}.${tool}`);
+    if (!listed.has(tool)) unlisted.add(`${server}.${tool}`);
   }
   if (unlisted.size === 0) return result;
   const reason = `The client called ${[...unlisted].join(', ')}, which ${unlisted.size === 1 ? 'its server' : 'their servers'} didn't list when MST checked ${unlisted.size === 1 ? 'it' : 'them'}: MST can't tell whether ${unlisted.size === 1 ? 'that call' : 'those calls'} wrote. Put the server behind a connector's dry-run proxy, or declare its write mode in the eval config's \`writes\` (ADR 0014).`;

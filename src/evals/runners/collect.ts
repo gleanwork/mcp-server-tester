@@ -496,7 +496,8 @@ export async function collectShard(
       ) =>
         checkReadOnlyCalls(
           proxied ? proxied.settle(index, result, final) : result,
-          ready.readOnlyTools
+          ready.readOnlyTools,
+          servers
         );
       try {
         const reported = new Map<

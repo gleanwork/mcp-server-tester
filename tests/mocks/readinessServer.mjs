@@ -94,7 +94,10 @@ function respond(
  * Serves over HTTP on a free local port. `failTimes` answers the first N
  * `initialize` requests with a 503. `stallList` never answers `tools/list`
  * or a session DELETE, and logs `closed` when the client drops a stalled
- * request. Resolves to its URL and `close`.
+ * request. `tools` is a count or the tools' names. Resolves to its URL and
+ * `close`.
+ *
+ * @param {{ tools?: number | string[], failTimes?: number, log?: string, stallList?: boolean }} [options]
  */
 export function startReadinessHttpServer({
   tools = 1,
