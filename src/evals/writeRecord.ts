@@ -61,16 +61,12 @@ function redacted(value: unknown, secrets: readonly string[]): unknown {
   return event?.arguments;
 }
 
-function namesTool(event: TranscriptEvent, server: string, tool: string) {
-  return event.name === tool || event.name === `${server}.${tool}`;
-}
-
 function matches(event: TranscriptEvent, line: Line): boolean {
   return (
     event.kind === 'tool_call' &&
     event.source === 'mcp' &&
     event.server === line.server &&
-    namesTool(event, line.server, line.tool) &&
+    event.name === line.tool &&
     isDeepStrictEqual(line.arguments ?? {}, event.arguments ?? {})
   );
 }
@@ -175,13 +171,10 @@ export class WriteRecordLedger {
       const server = event.server;
       const tools = server === undefined ? undefined : writeTools.get(server);
       if (!server || !tools) continue;
-      const tool = event.name.startsWith(`${server}.`)
-        ? event.name.slice(server.length + 1)
-        : event.name;
-      if (tools.has(tool))
+      if (tools.has(event.name))
         unrecorded.push({
           server,
-          tool,
+          tool: event.name,
           ...(event.id !== undefined ? { eventId: event.id } : {}),
         });
     }
@@ -247,7 +240,7 @@ function markSimulatedWrites(
           !used.has(candidate) &&
           event.server === candidate.server &&
           (event.source === undefined || event.source === 'mcp') &&
-          namesTool(event, candidate.server, candidate.tool) &&
+          event.name === candidate.tool &&
           isDeepStrictEqual(candidate.arguments ?? {}, event.arguments ?? {})
       );
       if (!write) continue;

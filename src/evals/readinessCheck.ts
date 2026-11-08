@@ -285,11 +285,7 @@ export function checkReadOnlyCalls(
     const server = eventServer(event, servers);
     const listed = server === undefined ? undefined : readOnlyTools.get(server);
     if (!server || !listed) continue;
-    // As the write ledger names a tool: bare, or `<server>.<tool>`.
-    const tool = event.name.startsWith(`${server}.`)
-      ? event.name.slice(server.length + 1)
-      : event.name;
-    if (!listed.has(tool)) unlisted.add(`${server}.${tool}`);
+    if (!listed.has(event.name)) unlisted.add(`${server}.${event.name}`);
   }
   if (unlisted.size === 0) return result;
   const reason = `The client called ${[...unlisted].join(', ')}, which ${unlisted.size === 1 ? 'its server' : 'their servers'} didn't list when MST checked ${unlisted.size === 1 ? 'it' : 'them'}: MST can't tell whether ${unlisted.size === 1 ? 'that call' : 'those calls'} wrote. Put the server behind a connector's dry-run proxy, or declare its write mode in the eval config's \`writes\` (ADR 0014).`;

@@ -974,7 +974,7 @@ describe('V2 Cowork client', () => {
         { id: 'request-1', model: 'native-model', durationMs: 150 },
       ];
       const call = {
-        name: 'primary.search',
+        name: 'search',
         source: 'mcp' as const,
         server: 'primary',
         rawName: 'mcp__primary__search',

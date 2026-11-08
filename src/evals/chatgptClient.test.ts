@@ -749,7 +749,7 @@ describe('ChatGPT V2 batch client', () => {
       { id: 'request-1', model: config.model, durationMs: 150 },
     ];
     const search = {
-      name: 'primary.search',
+      name: 'search',
       source: 'mcp' as const,
       server: 'primary',
       rawName: 'mcp__primary__search',

@@ -135,6 +135,25 @@ describe('withWriteRecords', () => {
     });
   });
 
+  it("matches a call to a write by the tool's own name, never a `<server>.` form", async () => {
+    const ledger = new WriteRecordLedger([slack]);
+    const execute = withWriteRecords(async () => {
+      await stopWrite(slack, 'slack', 'hi');
+      // A different tool from `send_message`, though it names the label.
+      return completed([
+        { ...call('slack', 'hi'), name: 'slack.send_message' },
+      ]);
+    }, ledger);
+
+    const { writeRecord } = await execute(evalCase);
+
+    expect(writeRecord).toMatchObject({
+      writes: [{ tool: 'send_message' }],
+      unreported: 1,
+      unrecorded: [],
+    });
+  });
+
   it('gives a write two overlapping trials both report to only one of them', async () => {
     const ledger = new WriteRecordLedger([slack, notes]);
     let release!: () => void;

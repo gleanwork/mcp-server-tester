@@ -480,15 +480,23 @@ describe('checkReadOnlyCalls', () => {
   }
 
   it('passes a trial that calls only the tools a read-only server listed', () => {
-    for (const name of ['search', 'docs.search']) {
-      const result = calling('docs', name);
-      expect(checkReadOnlyCalls(result, listed, servers)).toBe(result);
-    }
+    const result = calling('docs', 'search');
+    expect(checkReadOnlyCalls(result, listed, servers)).toBe(result);
+  });
+
+  it("takes a name that names its server's label as the tool's own name", () => {
+    // `docs.search` is a different tool from `search`: MST never strips it.
+    const checked = checkReadOnlyCalls(
+      calling('docs', 'docs.search'),
+      listed,
+      servers
+    );
+    expect(checked.error).toMatch(/^The client called docs\.docs\.search/);
   });
 
   it("ends a trial that calls a tool its read-only server didn't list as setup, for good", () => {
     const checked = checkReadOnlyCalls(
-      calling('docs', 'docs.save'),
+      calling('docs', 'save'),
       listed,
       servers
     );

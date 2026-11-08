@@ -187,9 +187,14 @@ export function toolCallEvents(
   servers: MCPConfig[] = []
 ): TranscriptEvent[] {
   return calls.map((call) => {
-    const server = servers.find(
-      (server) => server.label && call.name.startsWith(`${server.label}.`)
-    );
+    // Only a call with no server can carry MST's `<server>.` prefix; a
+    // call that names its server names the tool as that server lists it.
+    const server =
+      call.server === undefined
+        ? servers.find(
+            (server) => server.label && call.name.startsWith(`${server.label}.`)
+          )
+        : undefined;
     const source =
       call.source ?? (server || servers.length === 1 ? 'mcp' : 'builtin');
     return {
