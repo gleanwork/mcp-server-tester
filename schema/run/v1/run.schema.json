@@ -173,7 +173,7 @@
       ],
       "additionalProperties": {}
     },
-    "environment": {
+    "runner": {
       "type": "object",
       "properties": {
         "name": { "type": "string" },
@@ -223,7 +223,7 @@
     "grading": {
       "type": "object",
       "properties": {
-        "environment": {
+        "runner": {
           "type": "object",
           "properties": {
             "name": { "type": "string" },
@@ -272,7 +272,7 @@
           "additionalProperties": {}
         }
       },
-      "required": ["environment"],
+      "required": ["runner"],
       "additionalProperties": {}
     },
     "phases": {
@@ -305,7 +305,7 @@
     "datasets",
     "partial",
     "redactStoredResponses",
-    "environment",
+    "runner",
     "phases"
   ],
   "additionalProperties": {}

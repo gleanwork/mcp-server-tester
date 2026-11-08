@@ -141,7 +141,7 @@ describe('runEvalBatch skipExisting', () => {
         evalConfig,
         summary,
         outputDir: options.outputDir ?? rootDir,
-        environment: { name: 'local', shards: 1, keep: 'never', options: {} },
+        runner: { name: 'local', shards: 1, keep: 'never', options: {} },
         datasets: [],
       };
     });
@@ -242,7 +242,7 @@ describe('runEvalBatch skipExisting', () => {
         completedSummary(loadEvalConfig(options.configPath, { rootDir }))
       ),
       outputDir: options.outputDir ?? rootDir,
-      environment: { name: 'local', shards: 1, keep: 'never', options: {} },
+      runner: { name: 'local', shards: 1, keep: 'never', options: {} },
       datasets: [],
     }));
     expect(await run()).toMatchObject({ skipped: 0, failed: 1, passed: 0 });

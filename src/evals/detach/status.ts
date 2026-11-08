@@ -28,20 +28,20 @@ export const DetachPlanSchema = z.object({
   run: z.string().optional(),
   /** `mst run --resume`: complete `run` instead of starting a run. */
   resume: z.boolean().optional(),
-  /** The environment, its `--env-option`s, and the grade's, if they differ. */
-  env: z.string(),
-  envOptions: z.array(z.string()),
-  gradeEnvOptions: z.array(z.string()).optional(),
+  /** The runner, its `--runner-option`s, and the grade's, if they differ. */
+  runner: z.string(),
+  runnerOptions: z.array(z.string()),
+  gradeRunnerOptions: z.array(z.string()).optional(),
   /** `--results`, when given; else the eval config's store. */
   results: z.string().optional(),
   /** `--store`: a credential store the coordinator machine reaches. */
   store: z.string().optional(),
   /** `mst run`'s selection and report flags, passed through. */
   runArgs: z.array(z.string()),
-  /** Collect without grading on the coordinator (`--no-grade` or `--grade-env`). */
+  /** Collect without grading on the coordinator (`--no-grade` or `--grade-runner`). */
   noGrade: z.boolean(),
-  /** After collecting, grade in the environment (`--grade-env`). */
-  gradeEnv: z.boolean(),
+  /** After collecting, grade in the runner (`--grade-runner`). */
+  gradeRunner: z.boolean(),
   /** How many times a partial run is resumed before grading. */
   resumes: z.number().int().nonnegative(),
   /** Whether the coordinator gets a secrets file over its channel. */
@@ -69,7 +69,7 @@ const DetachStatusSchema = z.object({
   /** What the coordinator is doing: collecting, resuming or grading. */
   phase: z.enum(['collect', 'resume', 'grade']).optional(),
   machine: z.string(),
-  env: z.string(),
+  runner: z.string(),
   createdAt: z.string(),
   /** The coordinator's last heartbeat. */
   updatedAt: z.string(),

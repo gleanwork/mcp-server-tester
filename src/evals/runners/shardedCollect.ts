@@ -1,5 +1,5 @@
 /**
- * Collecting a run's trials in an environment (ADR 0004): split them into
+ * Collecting a run's trials in a runner (ADR 0004): split them into
  * shards by case, run the shards in parallel, and gather their results into
  * one set the run grades as it grades a batch's.
  */
@@ -15,7 +15,7 @@ import type {
   ShardProgress,
 } from '../evalFrameworkTypes.js';
 import type { EvalConfig, EvalVariant } from '../evalConfig.js';
-import type { ResolvedEnvironment } from './builtinEnvironments.js';
+import type { ResolvedRunner } from './builtinRunners.js';
 import { createLimiter, trialResources, type RunLimits } from './limiter.js';
 import {
   readClientResult,
@@ -56,9 +56,9 @@ export async function placeArtifacts(
 }
 
 /**
- * A shard's outcome from `run` (its bundle, then its environment), even when
+ * A shard's outcome from `run` (its bundle, then its runner), even when
  * that throws. `runShard` promises its failures as its outcome; a bundle
- * that can't be written, or an environment (a plugin's) that rejects anyway,
+ * that can't be written, or a runner (a plugin's) that rejects anyway,
  * fails only its own shard, so the run's other shards finish and keep what
  * they collected, rather than being closed mid-shard.
  */
@@ -112,8 +112,8 @@ export function requestGroups(
   }));
 }
 
-export interface CollectInEnvironmentOptions {
-  environment: ResolvedEnvironment;
+export interface CollectInRunnerOptions {
+  runner: ResolvedRunner;
   runId: string;
   evalConfig: EvalConfig;
   /** Plugin specifiers the workers load. */
@@ -184,12 +184,12 @@ export interface GatheredResults {
 const keyString = (key: TrialKey) =>
   JSON.stringify([key.variant, key.caseId, key.trial]);
 
-/** Runs every group's requests in the environment, `environment.shards` at a time. */
-export async function collectInEnvironment(
-  options: CollectInEnvironmentOptions
+/** Runs every group's requests in the runner, `runner.shards` at a time. */
+export async function collectInRunner(
+  options: CollectInRunnerOptions
 ): Promise<GatheredResults> {
-  const { environment } = options;
-  const count = environment.shards;
+  const { runner } = options;
+  const count = runner.shards;
   const log = options.log ?? (() => {});
   const results = new Map<string, ClientRunResult>();
   const expected: TrialKey[] = options.groups.flatMap((group) =>
@@ -199,11 +199,11 @@ export async function collectInEnvironment(
       trial: request.trial,
     }))
   );
-  const opened = await environment.definition.open(environment.options, {
+  const opened = await runner.definition.open(runner.options, {
     runId: options.runId,
     shards: count,
-    keep: environment.keep,
-    settings: settingsFor(options.evalConfig.settings, environment.name),
+    keep: runner.keep,
+    settings: settingsFor(options.evalConfig.settings, runner.name),
     ...(options.evalConfig.client ? { client: options.evalConfig.client } : {}),
   });
   const reasons = new Map<number, string>();

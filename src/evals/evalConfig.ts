@@ -610,7 +610,7 @@ export const EvalConfigSchema = z
      * traceable to a table someone chose.
      */
     /**
-     * The most trials that may run at once across an environment's shards,
+     * The most trials that may run at once across a runner's shards,
      * per LLM provider (`anthropic`, `openai`, ...) and per server label, so
      * shards don't trip rate limits (ADR 0004).
      */

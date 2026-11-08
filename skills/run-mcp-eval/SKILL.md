@@ -15,7 +15,7 @@ Every command below is `npx mst ...` in a project that has `@gleanwork/mcp-serve
 npx mst run --config eval.json --dry-run
 ```
 
-`--dry-run` loads the config, its plugins and its datasets, and prints the eval's name, output directory, datasets, variants and environment as JSON. It catches unknown keys, plugins and config-level extension names that don't resolve, datasets that don't load, a case that sets client options its variant's desktop app can't take, and a `--variant` or `--case` the config doesn't have. A case's own plugin judge is checked only for its namespace: a misspelt judge name in a loaded plugin fails when the run grades. Fix what it reports before you spend tokens.
+`--dry-run` loads the config, its plugins and its datasets, and prints the eval's name, output directory, datasets, variants and runner as JSON. It catches unknown keys, plugins and config-level extension names that don't resolve, datasets that don't load, a case that sets client options its variant's desktop app can't take, and a `--variant` or `--case` the config doesn't have. A case's own plugin judge is checked only for its namespace: a misspelt judge name in a loaded plugin fails when the run grades. Fix what it reports before you spend tokens.
 
 Then check the credentials the run needs:
 
@@ -23,7 +23,7 @@ Then check the credentials the run needs:
 - **The judge's key**, when the config has judges. A judge's provider can differ from the client's.
 - **Server tokens**: a server's `auth.accessTokenEnv` names an environment variable. Connector servers need `mst auth --config eval.json` once.
 
-Keep keys out of the config. Put them in a file and pass `--secrets-file run.env` (JSON or dotenv). Results replace values named as credentials (`*_TOKEN`, `*_KEY`, ...). A local run also reads the environment. A worker in Docker or another environment doesn't inherit this machine's environment, so put what its client and servers need in the secrets file.
+Keep keys out of the config. Put them in a file and pass `--secrets-file run.env` (JSON or dotenv). Results replace values named as credentials (`*_TOKEN`, `*_KEY`, ...). A local run also reads the environment. A worker in Docker or another runner doesn't inherit this machine's environment, so put what its client and servers need in the secrets file.
 
 Decide now whether you may resume, regrade or label this run later. Each needs the run's full traces, which MST redacts by default, so set `"redactStoredResponses": false` in the eval config before you run (Step 5).
 
@@ -79,7 +79,7 @@ A trial ends one of two ways:
 - **An unavailable client**, such as a desktop app another batch still holds. The run goes on with the other variants. Finish the run.
 - **A failure a retry can't help**, such as a missing permission. Fix the setup and run again.
 
-To finish a run, resume it in an environment (`--resume <run> --env docker`, Step 5). A run collected locally can't be resumed locally: run its incomplete cases again with `--case`.
+To finish a run, resume it in a runner (`--resume <run> --runner docker`, Step 5). A run collected locally can't be resumed locally: run its incomplete cases again with `--case`.
 
 ## Step 5: Resume or grade again
 
@@ -92,25 +92,25 @@ Both need the run's full traces. Set this in the eval config before the run you 
 The default redacts answers and tool outputs from stored files. A redacted run can't be resumed, graded again or labeled on `mst label`'s page.
 
 ```bash
-npx mst run --config eval.json --resume 7f3c2a --env docker   # collect only the missing trials
-npx mst grade 7f3c2a --config eval.json                       # grade the stored traces with today's graders
-npx mst grade 7f3c2a.g2 --config eval.json --resume           # run only the judges that failed to run
+npx mst run --config eval.json --resume 7f3c2a --runner docker   # collect only the missing trials
+npx mst grade 7f3c2a --config eval.json                          # grade the stored traces with today's graders
+npx mst grade 7f3c2a.g2 --config eval.json --resume              # run only the judges that failed to run
 ```
 
-- **`run --resume`** collects only the trials that are missing or ended in a retryable infrastructure failure, then grades the whole run again. Only an environment collects trials, so a run collected locally needs `--env`, or run its cases again with `--case`.
+- **`run --resume`** collects only the trials that are missing or ended in a retryable infrastructure failure, then grades the whole run again. Only a runner collects trials, so a run collected locally needs `--runner`, or run its cases again with `--case`.
 - **`grade`** runs no client. It grades the stored traces with the config's assertions and judges as they are now, and writes a new run, `<run-id>.g2`, then `.g3`. Use it after you change a judge, a threshold or an assertion.
 - **`--no-grade`** collects without grading, for grading later or somewhere else: `mst run --config eval.json --no-grade`, then `mst grade`.
 - **`grade --resume`** keeps every verdict the run has and runs only the judges that timed out or failed. It refuses when the judges changed. Grade in full then.
 
 ## Step 6: Run somewhere else
 
-- **Docker.** `--env docker` runs trials in containers from MST's Linux images: the ChatGPT image for `chatgpt` and `codex-app`, else the Cowork image. Build the image once with `mst env setup docker --config eval.json`. `--env-option shards=4` splits cases over four containers. Each Docker context runs one Cowork container at a time, so four `cowork` shards run side by side only with four contexts (`--env-option contexts=a,b,c,d`).
-- **Detached.** `--detach` runs the coordinator on a machine a plugin environment creates, so your machine can go offline. It needs `--env`, a result store other machines reach (`--results gs://bucket/prefix`), secrets in `--secrets-file`, and for connector servers a shared credential store (`--store`). Follow it with `mst runs list`, `mst runs watch <id>` and `mst runs logs <id>`, each with the same `--config` and `--results`. `mst runs cancel <id>` stops it and keeps what it collected.
+- **Docker.** `--runner docker` runs trials in containers from MST's Linux images: the ChatGPT image for `chatgpt` and `codex-app`, else the Cowork image. Build the image once with `mst runner setup docker --config eval.json`. `--runner-option shards=4` splits cases over four containers. Each Docker context runs one Cowork container at a time, so four `cowork` shards run side by side only with four contexts (`--runner-option contexts=a,b,c,d`).
+- **Detached.** `--detach` runs the coordinator on a machine a plugin runner creates, so your machine can go offline. It needs `--runner`, a result store other machines reach (`--results gs://bucket/prefix`), secrets in `--secrets-file`, and for connector servers a shared credential store (`--store`). Follow it with `mst runs list`, `mst runs watch <id>` and `mst runs logs <id>`, each with the same `--config` and `--results`. `mst runs cancel <id>` stops it and keeps what it collected.
 - **Several configs.** `mst batch --config-dir ./evals --workers 2` runs every eval config in a directory, and exits 1 when any failed. `--skip-existing` skips configs whose result store already has a completed run.
 
 ## Step 7: Run in CI
 
-- Pass secrets with `--secrets-file`, written from the CI's secrets. When trials run in Docker or another environment, its workers get the file's values, not the CI machine's environment.
+- Pass secrets with `--secrets-file`, written from the CI's secrets. When trials run in Docker or another runner, its workers get the file's values, not the CI machine's environment.
 - `mst run` exits 1 when a case fails or is incomplete, so an infrastructure failure fails the job too. An eval whose cases pass only some of the time fails some jobs: set `trials` and `passThreshold` on those cases rather than retrying the job.
 - Keep runs across machines with a result store (`--results gs://bucket/prefix`, or `results.store` in the config). The previous run is then the store's newest one, so a fresh CI machine still compares with the last run.
 - Upload `.mcp-test-results/<eval name>/runs/<run-id>/report/` as an artifact to read it later.

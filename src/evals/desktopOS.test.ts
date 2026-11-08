@@ -3,7 +3,7 @@
  * trial (ADR 0011). `computerUseProvider` is gone at every level, and the
  * options only one OS uses fail when the eval config loads, when MST knows
  * the OS its trials run on: the host's for `local`, Linux for `docker`. A
- * plugin's environment can declare its OS; without one, it leaves the check
+ * plugin's runner can declare its OS; without one, it leaves the check
  * to its worker, before app setup (`coworkClient.test.ts`, `chatgptClient.test.ts`).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { runEval, type RunEvalOptions } from './runEval.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
-import { environmentOS } from './environments/builtinEnvironments.js';
+import { runnerOS } from './runners/builtinRunners.js';
 import { COMPUTER_USE_PROVIDER_GONE } from './desktopOS.js';
 
 const dirs: string[] = [];
@@ -40,25 +40,25 @@ const plugin: Plugin = {
       },
     },
   },
-  environments: {
+  runners: {
     vm: {
       schema: z.object({}).strict(),
       async open() {
-        throw new Error('A dry run opens no environment.');
+        throw new Error('A dry run opens no runner.');
       },
     },
     linux: {
       schema: z.object({}).strict(),
       os: 'linux',
       async open() {
-        throw new Error('A dry run opens no environment.');
+        throw new Error('A dry run opens no runner.');
       },
     },
     mac: {
       schema: z.object({}).strict(),
       os: 'macos',
       async open() {
-        throw new Error('A dry run opens no environment.');
+        throw new Error('A dry run opens no runner.');
       },
     },
   },
@@ -146,27 +146,27 @@ describe('computerUseProvider', () => {
   );
 });
 
-describe("the OS an environment's trials run on", () => {
+describe("the OS a runner's trials run on", () => {
   it('uses local, docker, or declared plugin OS without opening machines', () => {
     installPlugins([plugin]);
-    expect(environmentOS('local')).toBe(process.platform);
-    expect(environmentOS('mst/env/local')).toBe(process.platform);
-    expect(environmentOS('docker')).toBe('linux');
-    expect(environmentOS('mst/env/docker')).toBe('linux');
-    expect(environmentOS('test/env/vm')).toBeUndefined();
-    expect(environmentOS('test/env/linux')).toBe('linux');
-    expect(environmentOS('test/env/mac')).toBe('darwin');
+    expect(runnerOS('local')).toBe(process.platform);
+    expect(runnerOS('mst/runner/local')).toBe(process.platform);
+    expect(runnerOS('docker')).toBe('linux');
+    expect(runnerOS('mst/runner/docker')).toBe('linux');
+    expect(runnerOS('test/runner/vm')).toBeUndefined();
+    expect(runnerOS('test/runner/linux')).toBe('linux');
+    expect(runnerOS('test/runner/mac')).toBe('darwin');
   });
 });
 
 describe('client OS requirements', () => {
-  it.each(['docker', 'mst/env/docker', 'test/env/linux'])(
+  it.each(['docker', 'mst/runner/docker', 'test/runner/linux'])(
     'rejects a macOS-only client on %s even from a Mac',
-    async (env) => {
+    async (runner) => {
       vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
       const run = await fixture('test/client/mac', 'eval', {});
-      await expect(run({ env })).rejects.toThrow(
-        `client "test/client/mac" can't run in environment "${env === 'mst/env/docker' ? 'docker' : env}" (Linux); supported OS: macOS.`
+      await expect(run({ runner })).rejects.toThrow(
+        `client "test/client/mac" can't run in runner "${runner === 'mst/runner/docker' ? 'docker' : runner}" (Linux); supported OS: macOS.`
       );
     }
   );
@@ -175,8 +175,8 @@ describe('client OS requirements', () => {
     'checks the %s client, not only the eval client',
     async (level) => {
       const run = await fixture('api', level, {}, 'test/client/mac');
-      await expect(run({ env: 'docker' })).rejects.toThrow(
-        `${level === 'case' ? 'Case "one" in variant "default"' : 'Variant "only"'}: client "test/client/mac" can't run in environment "docker" (Linux); supported OS: macOS.`
+      await expect(run({ runner: 'docker' })).rejects.toThrow(
+        `${level === 'case' ? 'Case "one" in variant "default"' : 'Variant "only"'}: client "test/client/mac" can't run in runner "docker" (Linux); supported OS: macOS.`
       );
     }
   );
@@ -187,20 +187,20 @@ describe('client OS requirements', () => {
     await expect(run()).resolves.toBeDefined();
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     await expect(run()).rejects.toThrow(
-      'environment "local" (Linux); supported OS: macOS.'
+      'runner "local" (Linux); supported OS: macOS.'
     );
-    await expect(run({ env: 'test/env/mac' })).resolves.toBeDefined();
-    await expect(run({ env: 'test/env/vm' })).resolves.toBeDefined();
+    await expect(run({ runner: 'test/runner/mac' })).resolves.toBeDefined();
+    await expect(run({ runner: 'test/runner/vm' })).resolves.toBeDefined();
   });
 
   it.each(CLIENTS)('rejects %s on an unsupported local OS', async (client) => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const run = await fixture(client, 'eval', {});
     await expect(run()).rejects.toThrow(
-      `client "${client}" can't run in environment "local" (win32); supported OS: macOS, Linux.`
+      `client "${client}" can't run in runner "local" (win32); supported OS: macOS, Linux.`
     );
     // Docker's Linux, not the coordinator's OS, also decides desktop defaults.
-    const result = await run({ env: 'docker' });
+    const result = await run({ runner: 'docker' });
     if (client !== 'cowork')
       expect(result.evalConfig.clientOptions).not.toHaveProperty('maxActions');
   });
@@ -217,7 +217,7 @@ describe('options only one OS uses', () => {
     'fail at load for docker, which runs Linux, when set in the %s',
     async (level) => {
       const run = await fixture('cowork', level, { appVersion: '1.2.3' });
-      await expect(run({ env: 'docker' })).rejects.toThrow(
+      await expect(run({ runner: 'docker' })).rejects.toThrow(
         'client "cowork" can\'t run as configured. appVersion pins Claude Desktop on macOS, and this trial runs on Linux'
       );
     }
@@ -244,10 +244,10 @@ describe('options only one OS uses', () => {
     }
   );
 
-  it("load for a plugin's environment, whose worker checks its own OS", async () => {
+  it("load for a plugin's runner, whose worker checks its own OS", async () => {
     const run = await fixture('cowork', 'variant', { appVersion: '1.2.3' });
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     await expect(run()).rejects.toThrow('appVersion pins');
-    await expect(run({ env: 'test/env/vm' })).resolves.toBeDefined();
+    await expect(run({ runner: 'test/runner/vm' })).resolves.toBeDefined();
   });
 });

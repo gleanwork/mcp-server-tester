@@ -41,8 +41,8 @@ macOS, and 1 to 64 (default 24) on Linux. It was `computerUseMaxActions` on
 macOS and `nativeMaxActions` on Linux; both now fail validation, naming
 `maxActions`. An option the trial's OS can't use,
 or a `maxActions` outside its range, fails when the eval config loads, against
-this machine's OS for `--env local` (the default) and against Linux for
-`--env docker`. A plugin's environment checks it on its worker, before the app
+this machine's OS for `--runner local` (the default) and against Linux for
+`--runner docker`. A plugin's runner checks it on its worker, before the app
 is prepared.
 
 `timeout` is the trial's time limit in ms, default 300000. `reasoningEffort`

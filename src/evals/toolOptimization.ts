@@ -308,10 +308,10 @@ export interface ToolOptimizationEval {
    * `.mcp-test-results/<eval name>` under `rootDir`.
    */
   outputDir?: string;
-  /** Where every run collects its trials (`--env`). Default: `local`. */
-  env?: string;
-  /** The environment's options (`--env-option key=value`). */
-  envOptions?: Readonly<Record<string, string>>;
+  /** Where every run collects its trials (`--runner`). Default: `local`. */
+  runner?: string;
+  /** The runner's options (`--runner-option key=value`). */
+  runnerOptions?: Readonly<Record<string, string>>;
   /** Credential store for connector servers (`--store`), as `runEval`'s. */
   store?: string;
   /** A result store that also keeps every run (`--results`), as `runEval`'s. */
@@ -432,7 +432,12 @@ export async function runToolOptimization(
   if ('evalConfig' in options) {
     rejectRenamedOptions(
       options.evalConfig,
-      { manifestPath: 'configPath', arm: 'baseVariant' },
+      {
+        manifestPath: 'configPath',
+        arm: 'baseVariant',
+        env: 'runner',
+        envOptions: 'runnerOptions',
+      },
       'runToolOptimization evalConfig'
     );
     // Loaded on use: the stored optimization builds on this module.

@@ -1,5 +1,5 @@
 /**
- * A client for tests of the `docker` environment, loaded by `mst collect`
+ * A client for tests of the `docker` runner, loaded by `mst collect`
  * in a fake container. It answers each case, and leaves an artifact in a
  * folder in the container's home, as Cowork leaves its session folder.
  */

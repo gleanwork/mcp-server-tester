@@ -68,8 +68,8 @@ const OptimizationRecordSchema = z.looseObject({
       trials: z.number().int().positive().optional(),
     })
     .optional(),
-  /** Where every run collects its trials (`--env`), when not locally. */
-  environment: z
+  /** Where every run collects its trials (`--runner`), when not locally. */
+  runner: z
     .looseObject({
       name: z.string(),
       options: z.record(z.string(), z.string()).optional(),

@@ -13,10 +13,10 @@ import type {
   MCPComparisonData,
   MCPRunReportData,
   RunReportDifference,
-  RunReportEnvironment,
   RunReportEvidence,
   RunReportJudgeCalibration,
   RunReportPreference,
+  RunReportRunner,
   RunReportScore,
   RunReportTrial,
   RunReportVariant,
@@ -541,16 +541,16 @@ export function buildRunReport(
         caseCount,
         contentHash,
       })),
-      ...(run.environment.name
+      ...(run.runner.name
         ? {
-            environment: reportEnvironment({
-              ...run.environment,
-              name: run.environment.name,
+            runner: reportRunner({
+              ...run.runner,
+              name: run.runner.name,
             }),
           }
         : {}),
       ...(run.grading
-        ? { gradingEnvironment: reportEnvironment(run.grading.environment) }
+        ? { gradingRunner: reportRunner(run.grading.runner) }
         : {}),
       ...(clientApps(ran).length ? { clientApps: clientApps(ran) } : {}),
       // Cases any variant ran; the grid shows the ones the baseline ran.
@@ -919,8 +919,8 @@ export async function writeRunReport(
   return runReportPath(runDirectory);
 }
 
-/** An environment and its shards' machines, as the report shows them. */
-function reportEnvironment(environment: {
+/** A runner and its shards' machines, as the report shows them. */
+function reportRunner(runner: {
   name: string;
   shards?: number;
   machines?: Array<{
@@ -929,20 +929,18 @@ function reportEnvironment(environment: {
     mst?: string;
     platform?: string;
   }>;
-}): RunReportEnvironment {
+}): RunReportRunner {
   return {
-    name: environment.name,
-    shards: environment.shards ?? 1,
-    ...(environment.machines?.length
+    name: runner.name,
+    shards: runner.shards ?? 1,
+    ...(runner.machines?.length
       ? {
-          machines: environment.machines.map(
-            ({ shard, image, mst, platform }) => ({
-              shard,
-              ...(image ? { image } : {}),
-              ...(mst ? { mst } : {}),
-              ...(platform ? { platform } : {}),
-            })
-          ),
+          machines: runner.machines.map(({ shard, image, mst, platform }) => ({
+            shard,
+            ...(image ? { image } : {}),
+            ...(mst ? { mst } : {}),
+            ...(platform ? { platform } : {}),
+          })),
         }
       : {}),
   };

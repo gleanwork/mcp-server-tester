@@ -41,7 +41,7 @@ function describe(status: DetachStatus): string {
   const state = shownState(status);
   return [
     `${status.id}  ${state}${status.phase ? ` (${status.phase})` : ''}`,
-    `  ${status.command} on ${status.env}, coordinator ${status.machine}; started ${age(status.createdAt)}, last heard ${age(status.updatedAt)}`,
+    `  ${status.command} on ${status.runner}, coordinator ${status.machine}; started ${age(status.createdAt)}, last heard ${age(status.updatedAt)}`,
     `  ${status.collected} collected, ${status.graded} graded` +
       (status.runId ? `; run ${status.runId}` : '') +
       (status.gradedRunId ? `, graded as ${status.gradedRunId}` : '') +

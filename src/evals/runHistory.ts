@@ -456,7 +456,7 @@ function historyRunOf(run: RunRecord, summary: EvaluationSummary): HistoryRun {
     contentHash: run.contentHash,
     mstVersion: run.mst.version,
     ...(run.gradedFrom ? { gradedFrom: run.gradedFrom } : {}),
-    ...(run.environment.name ? { environment: run.environment.name } : {}),
+    ...(run.runner.name ? { runner: run.runner.name } : {}),
     baseline,
     datasets: run.datasets.map((dataset) => ({
       name: dataset.name,

@@ -1,5 +1,5 @@
 /**
- * A plugin for `--detach` tests (ADR 0007): `detach/env/remote`, whose
+ * A plugin for `--detach` tests (ADR 0007): `detach/runner/remote`, whose
  * coordinator machine records what it is sent; `detach/result-store/memory`,
  * a store other machines could reach; and credential stores, one shared and
  * one not. What happened is kept on `globalThis.__detachTest`.
@@ -107,7 +107,7 @@ export default {
     shared: { shared: true, create: () => credentialStore() },
     local: { create: () => credentialStore() },
   },
-  environments: {
+  runners: {
     remote: {
       schema: z.object({ zone: z.string().optional() }).strict(),
       async open() {

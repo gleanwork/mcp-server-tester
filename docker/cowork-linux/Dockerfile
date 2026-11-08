@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 #
-# A Linux desktop that runs Claude Desktop's Cowork for `mst run --env docker`.
-# Build it with `mst env setup docker`, which passes MST's own package so the
+# A Linux desktop that runs Claude Desktop's Cowork for `mst run --runner docker`.
+# Build it with `mst runner setup docker`, which passes MST's own package so the
 # worker runs the same MST as the run. See docs/cowork-docker.md.
 #
 # Nothing secret is baked in: the inference token arrives at run time in
@@ -51,7 +51,7 @@ RUN real="$(command -v virtiofsd || echo /usr/libexec/virtiofsd)" \
   && printf '#!/bin/sh\nexec %s.real --seccomp none "$@"\n' "${real}" > "${real}" \
   && chmod 755 "${real}"
 
-# MST itself: the tarball `mst env setup docker` packs from the coordinator's
+# MST itself: the tarball `mst runner setup docker` packs from the coordinator's
 # MST, a checkout or an installed package (in ./mst-package), so the worker
 # runs the coordinator's MST; else the published package.
 COPY mst-package/ /tmp/mst-package/
@@ -83,7 +83,7 @@ RUN usermod -l mst -d /home/mst -m node && groupmod -n mst node \
 
 COPY --chmod=755 bin/ /opt/mst/bin/
 
-# The eval's plugin packages (`mst env setup docker --config`), packed from
+# The eval's plugin packages (`mst runner setup docker --config`), packed from
 # the machine that runs MST, with their dependencies. A plugin's own
 # @gleanwork/mcp-server-tester is the MST above, so both share one instance.
 COPY plugins/ /tmp/mst-plugins/

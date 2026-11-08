@@ -2,7 +2,7 @@ import {
   runCoordinatorDaemon,
   startCoordinator,
 } from '../../../evals/detach/coordinate.js';
-import { lines } from '../../../evals/environments/protocol.js';
+import { lines } from '../../../evals/runners/protocol.js';
 
 export interface CoordinateOptions {
   bundle: string;

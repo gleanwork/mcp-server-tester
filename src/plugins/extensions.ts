@@ -39,7 +39,7 @@ const KIND_LABELS: Record<ExtensionKind, string> = {
   metrics: 'Metric',
   resultStores: 'Result store',
   connectors: 'Connector',
-  environments: 'Environment',
+  runners: 'Runner',
   credentialStores: 'Credential store',
 };
 
@@ -64,7 +64,7 @@ function emptyState(): ExtensionTableState {
       metrics: new Map(),
       resultStores: new Map(),
       connectors: new Map(),
-      environments: new Map(),
+      runners: new Map(),
       credentialStores: new Map(),
     },
   };
@@ -234,12 +234,20 @@ const SEGMENT_LABELS: Record<string, string> = {
   metric: 'metric',
   'result-store': 'result store',
   connector: 'connector',
-  env: 'environment',
+  runner: 'runner',
   'credential-store': 'credential store',
   config: 'shared config',
 };
 
-/** `label` with its indefinite article: "a judge", "an environment". */
+/**
+ * Kind segments 2.0 renamed (ADR 0013), recognized only to say what replaced
+ * them. There are no aliases: `acme/env/x` never names a runner.
+ */
+const RENAMED_SEGMENTS: Readonly<Record<string, KindSegment>> = {
+  env: 'runner',
+};
+
+/** `label` with its indefinite article: "a judge", "an ...". */
 function withArticle(label: string): string {
   return `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label}`;
 }
@@ -267,6 +275,13 @@ function checkKind(
   if (parsed.kind === undefined)
     throw new Error(`${label} "${reference}" needs its kind: use "${full}".`);
   if (parsed.kind !== segment) {
+    const renamed = Object.hasOwn(RENAMED_SEGMENTS, parsed.kind)
+      ? RENAMED_SEGMENTS[parsed.kind]
+      : undefined;
+    if (renamed === segment)
+      throw new Error(
+        `${label} "${reference}": the \`${parsed.kind}\` kind is now \`${renamed}\`: use "${extensionName(parsed.namespace, renamed, parsed.name)}".`
+      );
     const actual = Object.hasOwn(SEGMENT_LABELS, parsed.kind)
       ? SEGMENT_LABELS[parsed.kind]
       : undefined;

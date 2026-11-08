@@ -1,5 +1,5 @@
 /**
- * An environment, `leaky/env/unredacted`, whose "worker" writes every trial's
+ * A runner, `leaky/runner/unredacted`, whose "worker" writes every trial's
  * result itself and redacts nothing: it quotes the secrets file's
  * `ACME_API_KEY` in the answer and the error, and any connector token it
  * was handed in the answer. A run must still store no
@@ -7,7 +7,7 @@
  *
  * When `LEAKY_SNAPSHOT_DIR` is set, the text of every file under it, read
  * once the shard's trials are saved and before the run grades them, is left
- * in `globalThis[Symbol.for('leaky-env-plugin.snapshot')]`. A case named in
+ * in `globalThis[Symbol.for('leaky-runner-plugin.snapshot')]`. A case named in
  * `LEAKY_SKIP` is never collected, so the run ends partial.
  */
 import fs from 'node:fs/promises';
@@ -16,7 +16,7 @@ import { z } from 'zod';
 import {
   readShardBundle,
   SHARD_PROTOCOL,
-} from '../../src/evals/environments/protocol.js';
+} from '../../src/evals/runners/protocol.js';
 import type { Plugin } from '../../src/plugins/plugin.js';
 
 async function allText(dir: string): Promise<string> {
@@ -38,8 +38,8 @@ async function allText(dir: string): Promise<string> {
 }
 
 export default {
-  meta: { name: 'leaky-env-plugin', namespace: 'leaky' },
-  environments: {
+  meta: { name: 'leaky-runner-plugin', namespace: 'leaky' },
+  runners: {
     unredacted: {
       schema: z.object({}).strict(),
       maxShards: 1,
@@ -102,7 +102,7 @@ export default {
                 await new Promise((resolve) => setTimeout(resolve, 25));
               }
               (globalThis as Record<symbol, unknown>)[
-                Symbol.for('leaky-env-plugin.snapshot')
+                Symbol.for('leaky-runner-plugin.snapshot')
               ] = text;
             }
             return { ok: true, collected, infra: 0, cancelled: false };

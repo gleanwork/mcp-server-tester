@@ -49,7 +49,7 @@ function baseExtensions(): Required<TestExtensions> {
     metrics: { passed: metric },
     resultStores: { file: resultStore },
     connectors: {},
-    environments: {},
+    runners: {},
     credentialStores: {},
   };
 }

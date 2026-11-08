@@ -27,11 +27,11 @@ afterEach(async () => {
 
 const plugin: Plugin = {
   meta: { name: 'option-names-test-plugin', namespace: 'test' },
-  environments: {
+  runners: {
     vm: {
       schema: z.object({}).strict(),
       async open() {
-        throw new Error('A dry run opens no environment.');
+        throw new Error('A dry run opens no runner.');
       },
     },
   },
@@ -211,7 +211,9 @@ describe('maxActions at load', () => {
     }
     for (const maxActions of [0, 65]) {
       const run = await at('variant', 'cowork', { maxActions });
-      await expect(run({ env: 'test/env/vm' })).rejects.toThrow(/maxActions/);
+      await expect(run({ runner: 'test/runner/vm' })).rejects.toThrow(
+        /maxActions/
+      );
     }
   });
 
@@ -234,16 +236,18 @@ describe('maxActions at load', () => {
     }
   );
 
-  it("on ChatGPT, fails outside Linux's range for docker, and loads for a plugin's environment, whose worker checks it", async () => {
+  it("on ChatGPT, fails outside Linux's range for docker, and loads for a plugin's runner, whose worker checks it", async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
     const run = await at('variant', 'chatgpt', { maxActions: 65 });
-    await expect(run({ env: 'docker' })).rejects.toThrow(
+    await expect(run({ runner: 'docker' })).rejects.toThrow(
       'maxActions is 65, and on Linux, where this trial runs, it is 1 to 64 (default 24).'
     );
-    await expect(run({ env: 'test/env/vm' })).resolves.toBeDefined();
+    await expect(run({ runner: 'test/runner/vm' })).resolves.toBeDefined();
     // Below 1 is outside every OS's range.
     const zero = await at('variant', 'chatgpt', { maxActions: 0 });
-    await expect(zero({ env: 'test/env/vm' })).rejects.toThrow(/maxActions/);
+    await expect(zero({ runner: 'test/runner/vm' })).rejects.toThrow(
+      /maxActions/
+    );
   });
 });
 
@@ -252,8 +256,8 @@ describe('a case override a desktop client runs in one app', () => {
     'fails at load on %s when the case sets its own model',
     async (client) => {
       const run = await fixture({ client, caseFields: { model: 'other' } });
-      // A plugin's environment too: nothing about the OS decides it.
-      await expect(run({ env: 'test/env/vm' })).rejects.toThrow(
+      // A plugin's runner too: nothing about the OS decides it.
+      await expect(run({ runner: 'test/runner/vm' })).rejects.toThrow(
         `Case "one" in variant "only" sets its own \`model\`, which client "${client}" can't honour: it runs a variant's cases in one app, with the variant's settings. Use a variant for a different setting.`
       );
     }

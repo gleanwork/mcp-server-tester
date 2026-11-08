@@ -783,21 +783,21 @@ function phaseNote(
   return null;
 }
 
-/** An environment's name, shards and each shard's machine. */
-function EnvironmentDetails({
+/** A runner's name, shards and each shard's machine. */
+function RunnerDetails({
   label,
-  environment,
+  runner,
 }: {
   label: string;
-  environment: NonNullable<MCPRunReportData['run']['environment']>;
+  runner: NonNullable<MCPRunReportData['run']['runner']>;
 }) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="font-mono">
-        {environment.name}
-        {environment.shards > 1 ? ` · ${environment.shards} shards` : ''}
-        {environment.machines?.map((machine) => (
+        {runner.name}
+        {runner.shards > 1 ? ` · ${runner.shards} shards` : ''}
+        {runner.machines?.map((machine) => (
           <div key={machine.shard} className="text-muted-foreground">
             shard {machine.shard}:{' '}
             {[
@@ -838,17 +838,9 @@ function RunDetails({ data }: { data: MCPRunReportData }) {
             )
             .join(', ')}
         </dd>
-        {run.environment && (
-          <EnvironmentDetails
-            label="Environment"
-            environment={run.environment}
-          />
-        )}
-        {run.gradingEnvironment && (
-          <EnvironmentDetails
-            label="Grading environment"
-            environment={run.gradingEnvironment}
-          />
+        {run.runner && <RunnerDetails label="Runner" runner={run.runner} />}
+        {run.gradingRunner && (
+          <RunnerDetails label="Grading runner" runner={run.gradingRunner} />
         )}
         {run.clientApps && (
           <>

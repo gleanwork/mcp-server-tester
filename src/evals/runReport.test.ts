@@ -365,7 +365,7 @@ describe('the run report', () => {
     // Provenance: the client app the trials ran, and the dataset's hash.
     expect(report.run.clientApps).toEqual(['Claude 2.31226.1']);
     expect(report.run.datasets[0]!.contentHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(report.run.environment).toEqual({ name: 'local', shards: 1 });
+    expect(report.run.runner).toEqual({ name: 'local', shards: 1 });
   });
 
   it("shows a judge's unknown answers, and leaves them out of its pass rate", async () => {

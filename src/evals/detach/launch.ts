@@ -1,7 +1,7 @@
 /**
  * `--detach` on the machine it's typed on (ADR 0007): check the run can
  * outlive this machine, create the coordinator machine through the
- * environment, copy the plan and eval config there, hand the coordinator the
+ * runner, copy the plan and eval config there, hand the coordinator the
  * secrets over its channel, and return once it has started.
  */
 import fs from 'node:fs/promises';
@@ -16,10 +16,7 @@ import { connectorUses } from '../connectorServers.js';
 import { loadEvalConfig } from '../evalConfig.js';
 import { loadEvalPlugins } from '../evalPlugins.js';
 import { parseResultsFlag } from '../builtinResultStores.js';
-import {
-  resolveEnvironment,
-  LOCAL_ENVIRONMENT,
-} from '../environments/builtinEnvironments.js';
+import { resolveRunner, LOCAL_RUNNER } from '../runners/builtinRunners.js';
 import {
   evalResultStore,
   loadEvalDatasets,
@@ -27,7 +24,7 @@ import {
 } from '../runEval.js';
 import { DATASETS_FILE, PLAN_FILE } from './coordinate.js';
 import { newDetachId, writeStatus, type DetachPlan } from './status.js';
-import { parseEnvOptions } from '../environments/envOptions.js';
+import { parseRunnerOptions } from '../runners/runnerOptions.js';
 import { loadedNamespaces } from '../../plugins/extensions.js';
 import { settingsFor } from '../../plugins/settings.js';
 
@@ -39,15 +36,15 @@ export interface DetachOptions {
   run?: string;
   /** `mst run --resume <run> --detach`. */
   resume?: boolean;
-  env?: string;
-  envOptions: readonly string[];
+  runner?: string;
+  runnerOptions: readonly string[];
   results?: string;
   store?: string;
   secretsFile?: string;
   /** `mst run`'s selection and report flags, passed through. */
   runArgs: readonly string[];
   noGrade: boolean;
-  gradeEnv: boolean;
+  gradeRunner: boolean;
   /** `--plugins`: local modules, which a coordinator machine doesn't have. */
   plugins?: readonly string[];
   log?: (line: string) => void;
@@ -66,9 +63,9 @@ async function refusal(
   rootDir: string
 ): Promise<string | undefined> {
   if (options.plugins?.length)
-    return "--detach can't take --plugins: the coordinator machine loads the eval config's plugins as its environment installed them.";
-  if (!options.env || options.env === LOCAL_ENVIRONMENT)
-    return "--detach needs --env: an environment whose machines run the shards, and that creates the coordinator's machine.";
+    return "--detach can't take --plugins: the coordinator machine loads the eval config's plugins as its runner installed them.";
+  if (!options.runner || options.runner === LOCAL_RUNNER)
+    return "--detach needs --runner: a runner whose machines run the shards, and that creates the coordinator's machine.";
   if (options.results?.startsWith('file:'))
     return `--detach needs a result store other machines reach, not ${options.results}.`;
   const loaded = loadEvalConfig(options.configPath, { rootDir });
@@ -113,8 +110,11 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
     ...(options.results ? { results: options.results } : {}),
   });
   if (!store) throw new Error('--detach needs a result store.');
-  const env = options.env!;
-  const resolved = resolveEnvironment(env, parseEnvOptions(options.envOptions));
+  const runner = options.runner!;
+  const resolved = resolveRunner(
+    runner,
+    parseRunnerOptions(options.runnerOptions)
+  );
   if (!resolved.definition.coordinator)
     throw new Error(
       `${resolved.name} can't run a detached run's coordinator: it has no coordinator machine (ADR 0007).`
@@ -146,13 +146,13 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
     config: path.basename(options.configPath),
     ...(options.run ? { run: options.run } : {}),
     ...(options.resume ? { resume: true } : {}),
-    env,
-    envOptions: [...options.envOptions],
+    runner,
+    runnerOptions: [...options.runnerOptions],
     ...(options.results ? { results: options.results } : {}),
     ...(options.store ? { store: options.store } : {}),
     runArgs: [...options.runArgs],
-    noGrade: options.noGrade || options.gradeEnv,
-    gradeEnv: options.gradeEnv,
+    noGrade: options.noGrade || options.gradeRunner,
+    gradeRunner: options.gradeRunner,
     resumes: 1,
     secrets: secrets !== undefined,
     ...(machine.finish ? { finish: [...machine.finish] } : {}),
@@ -186,7 +186,7 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
       command: options.command,
       state: 'starting',
       machine: machine.id,
-      env,
+      runner,
       createdAt,
       updatedAt: new Date().toISOString(),
       collected: 0,

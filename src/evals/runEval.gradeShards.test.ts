@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gradeRun, runEval } from './runEval.js';
-import { shardOf } from './environments/shardedCollect.js';
+import { shardOf } from './runners/shardedCollect.js';
 import { readRunDirectory } from './runFormat.js';
 import { buildRunReport } from './runReport.js';
 import packageJson from '../../package.json' with { type: 'json' };
@@ -42,7 +42,7 @@ afterEach(async () => {
 /**
  * Four cases and two variants, collected locally on the shard-test client,
  * then graded by grade-test's judges: in this process, or in
- * fork/env/children, whose machines run `mst grade-shard` in child processes.
+ * fork/runner/children, whose machines run `mst grade-shard` in child processes.
  */
 async function fixture() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-shards-'));
@@ -64,7 +64,7 @@ async function fixture() {
     JSON.stringify({
       name: 'grade-shards',
       plugins: [
-        mock('forkEnvPlugin.ts'),
+        mock('forkRunnerPlugin.ts'),
         mock('shardTestPlugin.ts'),
         mock('gradeTestPlugin.ts'),
       ],
@@ -121,7 +121,7 @@ function judgePids(result: Awaited<ReturnType<typeof gradeRun>>): Set<string> {
   return new Set(reasons.flatMap((r) => r.match(/pid (\d+)/)?.[1] ?? []));
 }
 
-describe('mst grade --env (ADR 0005)', () => {
+describe('mst grade --runner (ADR 0005)', () => {
   it("parses the run's results.json once for every shard's bundle, not once per shard", async () => {
     // It can be hundreds of MB: 20 shards parsing it at once ran a
     // coordinator out of memory.
@@ -133,8 +133,8 @@ describe('mst grade --env (ADR 0005)', () => {
         ...f.base,
         run: f.runId,
         secretsFile: f.secretsFile,
-        env: 'fork/env/children',
-        envOptions: { shards },
+        runner: 'fork/runner/children',
+        runnerOptions: { shards },
       });
       return resultsReads(f.runId) - before;
     };
@@ -156,8 +156,8 @@ describe('mst grade --env (ADR 0005)', () => {
       ...f.base,
       run: f.runId,
       secretsFile: f.secretsFile,
-      env: 'fork/env/children',
-      envOptions: { shards: '2' },
+      runner: 'fork/runner/children',
+      runnerOptions: { shards: '2' },
     });
     expect(decisions(sharded)).toEqual(decisions(local));
     expect(decisions(sharded).trials.every((t) => t.includes('true'))).toBe(
@@ -179,26 +179,25 @@ describe('mst grade --env (ADR 0005)', () => {
     expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
     expect(run.gradedFrom).toBe(f.runId);
     expect(run.grading).toMatchObject({
-      environment: { name: 'fork/env/children', shards: 2 },
+      runner: { name: 'fork/runner/children', shards: 2 },
     });
     const machines = (
       run.grading as {
-        environment: { machines: Array<Record<string, unknown>> };
+        runner: { machines: Array<Record<string, unknown>> };
       }
-    ).environment.machines;
+    ).runner.machines;
     // Two shards had cases; every trial and comparison came back.
     expect(machines.map((m) => m.ok)).toEqual([true, true]);
     expect(machines.reduce((n, m) => n + Number(m.graded), 0)).toBe(8 + 4);
     // The report says where the trials were graded; a local regrade's doesn't.
     const report = buildRunReport(await readRunDirectory(sharded.outputDir));
-    expect(report.run.gradingEnvironment).toEqual({
-      name: 'fork/env/children',
+    expect(report.run.gradingRunner).toEqual({
+      name: 'fork/runner/children',
       shards: 2,
       machines: [1, 2].map((shard) => ({ shard, mst: packageJson.version })),
     });
     expect(
-      buildRunReport(await readRunDirectory(local.outputDir)).run
-        .gradingEnvironment
+      buildRunReport(await readRunDirectory(local.outputDir)).run.gradingRunner
     ).toBeUndefined();
   }, 60_000);
 
@@ -211,8 +210,8 @@ describe('mst grade --env (ADR 0005)', () => {
       ...f.base,
       run: f.runId,
       secretsFile: f.secretsFile,
-      env: 'fork/env/children',
-      envOptions: { shards: '2', fail: '0' },
+      runner: 'fork/runner/children',
+      runnerOptions: { shards: '2', fail: '0' },
     });
     for (const result of sharded.summary.results)
       if (lost.has(result.id))
@@ -228,7 +227,7 @@ describe('mst grade --env (ADR 0005)', () => {
     expect(pairwise?.summary[0]).toMatchObject({ errors: lost.size });
   }, 60_000);
 
-  it('an environment that throws for one grade shard fails that shard only; the other shard grades', async () => {
+  it('a runner that throws for one grade shard fails that shard only; the other shard grades', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture();
     const lost = new Set(CASES.filter((id) => shardOf(id, 2) === 0));
@@ -238,13 +237,13 @@ describe('mst grade --env (ADR 0005)', () => {
       ...f.base,
       run: f.runId,
       secretsFile: f.secretsFile,
-      env: 'fork/env/children',
-      envOptions: { shards: '2', throw: '0' },
+      runner: 'fork/runner/children',
+      runnerOptions: { shards: '2', throw: '0' },
     });
     for (const result of sharded.summary.results)
       if (lost.has(result.id))
         expect(result.gradingError).toMatch(
-          /^error: Missing: grade shard 1 ended before this trial's grading came back \(Shard 1 failed: the environment threw for shard 1\)/
+          /^error: Missing: grade shard 1 ended before this trial's grading came back \(Shard 1 failed: the runner threw for shard 1\)/
         );
       else expect(result.gradingError).toBeUndefined();
     const run = await f.readJson<Record<string, unknown>>(
@@ -262,29 +261,29 @@ describe('mst grade --env (ADR 0005)', () => {
     const sharded = await gradeRun({
       ...f.base,
       run: f.runId,
-      env: 'fork/env/children',
-      envOptions: { shards: '1' },
+      runner: 'fork/runner/children',
+      runnerOptions: { shards: '1' },
     });
     expect(sharded.summary.results.every((r) => r.gradingError)).toBe(true);
     const run = await f.readJson<{
-      grading: { environment: { machines: Array<{ reason?: string }> } };
+      grading: { runner: { machines: Array<{ reason?: string }> } };
     }>(path.join(sharded.outputDir, 'run.json'));
-    expect(run.grading.environment.machines[0]?.reason).toContain(
+    expect(run.grading.runner.machines[0]?.reason).toContain(
       "GRADE_TEST_KEY isn't set"
     );
   }, 60_000);
 
-  it("refuses an environment that can't run grade shards, before any shard runs", async () => {
+  it("refuses a runner that can't run grade shards, before any shard runs", async () => {
     const f = await fixture();
     await expect(
       gradeRun({
         ...f.base,
         run: f.runId,
         secretsFile: f.secretsFile,
-        env: 'grade-test/env/collect-only',
+        runner: 'grade-test/runner/collect-only',
       })
     ).rejects.toThrow(
-      "The environment grade-test/env/collect-only can't run grade shards: it runs collect."
+      "The runner grade-test/runner/collect-only can't run grade shards: it runs collect."
     );
   }, 60_000);
 });

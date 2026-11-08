@@ -21,12 +21,12 @@ import {
   shardIsHeadless,
 } from './docker.js';
 import { writeShardBundle } from './protocol.js';
-import { resolveEnvironment } from './builtinEnvironments.js';
+import { resolveRunner } from './builtinRunners.js';
 import { gradeRun, runEval } from '../runEval.js';
 import { readRunDirectory } from '../runFormat.js';
 import { buildRunReport } from '../runReport.js';
 import packageJson from '../../../package.json' with { type: 'json' };
-import { setupEnvironment } from '../../cli/commands/env/index.js';
+import { setupRunner } from '../../cli/commands/runner/index.js';
 import { resetPluginsForTests } from '../../plugins/extensions.js';
 
 const mock = (name: string) =>
@@ -42,7 +42,7 @@ afterEach(async () => {
   );
 });
 
-describe('the docker environment', () => {
+describe('the docker runner', () => {
   it("forwards the coordinator's Cowork VM warm-up budget to the container", () => {
     const base = {
       name: 'mst-run-1',
@@ -200,23 +200,21 @@ describe('the docker environment', () => {
 
   it('checks its options', () => {
     expect(
-      resolveEnvironment('docker', { contexts: 'a,b', shards: '2' })
+      resolveRunner('docker', { contexts: 'a,b', shards: '2' })
     ).toMatchObject({
       name: 'docker',
       shards: 2,
       options: { contexts: 'a,b' },
     });
-    expect(() => resolveEnvironment('docker', { contxts: 'a' })).toThrow();
-    expect(() =>
-      resolveEnvironment('docker', { readyTimeout: 'soon' })
-    ).toThrow();
+    expect(() => resolveRunner('docker', { contxts: 'a' })).toThrow();
+    expect(() => resolveRunner('docker', { readyTimeout: 'soon' })).toThrow();
     expect(
-      resolveEnvironment('docker', { memory: '8g', cpus: '1.5' }).options
+      resolveRunner('docker', { memory: '8g', cpus: '1.5' }).options
     ).toEqual({ memory: '8g', cpus: '1.5' });
-    expect(() => resolveEnvironment('docker', { memory: 'lots' })).toThrow(
+    expect(() => resolveRunner('docker', { memory: 'lots' })).toThrow(
       'memory must be a size such as 8g or 512m'
     );
-    expect(() => resolveEnvironment('docker', { cpus: '0' })).toThrow(
+    expect(() => resolveRunner('docker', { cpus: '0' })).toThrow(
       'cpus must be more than 0'
     );
   });
@@ -240,7 +238,7 @@ describe('the docker environment', () => {
   });
 });
 
-describe('ChatGPT in the docker environment', () => {
+describe('ChatGPT in the docker runner', () => {
   it('picks the ChatGPT image only for a ChatGPT or Codex app eval', () => {
     for (const client of [
       'chatgpt',
@@ -301,10 +299,10 @@ describe('ChatGPT in the docker environment', () => {
 
   it('takes chatgptVersion as a setup option', () => {
     expect(() =>
-      resolveEnvironment('docker', { chatgptVersion: '26.1007.71326' })
+      resolveRunner('docker', { chatgptVersion: '26.1007.71326' })
     ).not.toThrow();
     expect(() =>
-      resolveEnvironment('docker', { chatgptVersion: 'latest; rm -rf' })
+      resolveRunner('docker', { chatgptVersion: 'latest; rm -rf' })
     ).toThrow();
   });
 });
@@ -501,9 +499,9 @@ describe('a run in docker (a fake Docker CLI)', () => {
       ['@acme/mst-dt']
     );
     await installPluginPackage(project, '1.2.3');
-    await setupEnvironment('docker', {
+    await setupRunner('docker', {
       config: configPath,
-      envOption: ['contexts=ctx-a,ctx-b', 'image=mst-test:1'],
+      runnerOption: ['contexts=ctx-a,ctx-b', 'image=mst-test:1'],
       rootDir: project,
     });
     const builds = (await fs.readFile(path.join(root, 'builds.jsonl'), 'utf8'))
@@ -540,9 +538,9 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       JSON.stringify({ ...config, extends: ['dt/config/chatgpt'] })
     );
-    await setupEnvironment('docker', {
+    await setupRunner('docker', {
       config: configPath,
-      envOption: ['contexts=ctx-a'],
+      runnerOption: ['contexts=ctx-a'],
       rootDir: project,
     });
     const builds = (await fs.readFile(path.join(root, 'builds.jsonl'), 'utf8'))
@@ -574,9 +572,9 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       JSON.stringify({ ...config, client: 'codex-app', model: 'gpt-test' })
     );
-    await setupEnvironment('docker', {
+    await setupRunner('docker', {
       config: configPath,
-      envOption: ['contexts=ctx-a', 'chatgptVersion=1.2.3'],
+      runnerOption: ['contexts=ctx-a', 'chatgptVersion=1.2.3'],
       rootDir: project,
     });
     const builds = (await fs.readFile(path.join(root, 'builds.jsonl'), 'utf8'))
@@ -610,9 +608,9 @@ describe('a run in docker (a fake Docker CLI)', () => {
     );
     await installPluginPackage(project, '1.2.3');
     await expect(
-      setupEnvironment('docker', {
+      setupRunner('docker', {
         config: configPath,
-        envOption: ['contexts=ctx-a', 'image=mst-test:1'],
+        runnerOption: ['contexts=ctx-a', 'image=mst-test:1'],
         rootDir: project,
       })
     ).rejects.toThrow(
@@ -623,7 +621,7 @@ describe('a run in docker (a fake Docker CLI)', () => {
   it('refuses to build with a plugin that is a file, not a package', async () => {
     const { project, configPath } = await fixture();
     await expect(
-      setupEnvironment('docker', { config: configPath, rootDir: project })
+      setupRunner('docker', { config: configPath, rootDir: project })
     ).rejects.toThrow('is a file, not a package');
   });
 
@@ -645,8 +643,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
         configPath,
         rootDir: project,
         outputDir: path.join(dir, 'out'),
-        env: 'docker',
-        envOptions: { image: 'mst-test:1' },
+        runner: 'docker',
+        runnerOptions: { image: 'mst-test:1' },
         report: false,
       });
     expect((await run()).summary.metrics).toMatchObject({ passed: 0 });
@@ -669,8 +667,12 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir: path.join(dir, 'out'),
-      env: 'docker',
-      envOptions: { shards: '2', contexts: 'ctx-a,ctx-b', image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: {
+        shards: '2',
+        contexts: 'ctx-a,ctx-b',
+        image: 'mst-test:1',
+      },
       report: false,
     });
 
@@ -726,8 +728,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       ok: true,
       collected: expect.any(Number),
     }));
-    expect(stored.run.environment.machines).toEqual(machines);
-    expect(buildRunReport(stored).run.environment).toEqual({
+    expect(stored.run.runner.machines).toEqual(machines);
+    expect(buildRunReport(stored).run.runner).toEqual({
       name: 'docker',
       shards: 2,
       machines: machines.map(({ shard, mst, image, platform }) => ({
@@ -774,8 +776,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir,
-      env: 'docker',
-      envOptions: { contexts: 'ctx-a', image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: { contexts: 'ctx-a', image: 'mst-test:1' },
       grade: false,
       report: false,
     });
@@ -787,8 +789,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       rootDir: dir,
       outputDir,
       run: path.basename(collected.outputDir),
-      env: 'docker',
-      envOptions: { shards: '2', contexts: 'ctx-a', image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: { shards: '2', contexts: 'ctx-a', image: 'mst-test:1' },
       report: false,
     });
     expect(graded.summary.metrics).toMatchObject({ passed: 3, total: 3 });
@@ -818,12 +820,12 @@ describe('a run in docker (a fake Docker CLI)', () => {
       .filter(Boolean);
     expect(workers).toEqual(['grade-shard', 'grade-shard']);
     const stored = await readRunDirectory(graded.outputDir);
-    expect(stored.run.grading?.environment).toMatchObject({
+    expect(stored.run.grading?.runner).toMatchObject({
       name: 'docker',
       shards: 2,
     });
     expect(
-      stored.run.grading?.environment.machines?.map((machine) => machine.ok)
+      stored.run.grading?.runner.machines?.map((machine) => machine.ok)
     ).toEqual([true, true]);
     expect(await fs.readdir(path.join(root, 'containers'))).toEqual([]);
   }, 120_000);
@@ -836,8 +838,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir,
-      env: 'docker',
-      envOptions: { contexts: 'ctx-a', image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: { contexts: 'ctx-a', image: 'mst-test:1' },
       grade: false,
       report: false,
     });
@@ -850,8 +852,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       rootDir: dir,
       outputDir,
       run: path.basename(collected.outputDir),
-      env: 'docker',
-      envOptions: {
+      runner: 'docker',
+      runnerOptions: {
         shards: '2',
         contexts: 'ctx-a',
         image: 'mst-test:1',
@@ -878,13 +880,13 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir: path.join(dir, 'out'),
-      env: 'docker',
-      envOptions: { image: 'mst-test:1', memory: '6g' },
+      runner: 'docker',
+      runnerOptions: { image: 'mst-test:1', memory: '6g' },
       report: false,
     });
     expect(result.summary.metrics).toMatchObject({ passed: 0 });
     expect(log.mock.calls.map((call) => String(call[0])).join('\n')).toMatch(
-      /Container mst-\S+-1 ran out of memory \(its limit: 6 GiB\): raise --env-option memory, or give the Docker context more memory\. The worker exited \(code 137\)/
+      /Container mst-\S+-1 ran out of memory \(its limit: 6 GiB\): raise --runner-option memory, or give the Docker context more memory\. The worker exited \(code 137\)/
     );
   }, 60_000);
 
@@ -898,8 +900,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir: path.join(dir, 'out'),
-      env: 'docker',
-      envOptions: { image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: { image: 'mst-test:1' },
       report: false,
     });
     expect(result.summary.metrics).toMatchObject({ passed: 0 });
@@ -924,8 +926,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir: path.join(dir, 'out'),
-      env: 'docker',
-      envOptions: { shards: '2', contexts: 'ctx-a', image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: { shards: '2', contexts: 'ctx-a', image: 'mst-test:1' },
       report: false,
     });
     expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
@@ -1031,8 +1033,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir: path.join(dir, 'out'),
-      env: 'docker',
-      envOptions: { shards: '1', image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: { shards: '1', image: 'mst-test:1' },
       report: false,
     });
     expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
@@ -1056,8 +1058,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir: path.join(dir, 'out'),
-      env: 'docker',
-      envOptions: { image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: { image: 'mst-test:1' },
       report: false,
     });
     expect(result.summary.metrics).toMatchObject({ passed: 3, total: 3 });
@@ -1072,8 +1074,8 @@ describe('a run in docker (a fake Docker CLI)', () => {
       configPath,
       rootDir: dir,
       outputDir: path.join(dir, 'out'),
-      env: 'docker',
-      envOptions: { image: 'mst-test:1' },
+      runner: 'docker',
+      runnerOptions: { image: 'mst-test:1' },
       report: false,
     });
     expect(result.summary.metrics).toMatchObject({ passed: 0 });

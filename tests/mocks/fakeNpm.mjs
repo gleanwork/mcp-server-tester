@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * An npm CLI for tests of `mst env setup docker` (MST_NPM): `pack` writes the
+ * An npm CLI for tests of `mst runner setup docker` (MST_NPM): `pack` writes the
  * tarball npm would name, without running the package's scripts (packing
  * this checkout for real would rebuild dist while other tests use it).
  */

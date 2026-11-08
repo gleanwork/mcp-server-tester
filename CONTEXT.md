@@ -165,7 +165,7 @@ Whether a case's trials met its pass threshold, decided by MST from the graders'
 _Avoid_: verdict, success
 
 **Metric**:
-An aggregate over a run's trials or cases, such as pass rate, pass^k, tool recall, tokens, cost or latency.
+An aggregate over a run's trials or cases, such as pass rate (Anthropic's pass@1), pass^k, tool recall, tokens, cost or latency.
 _Avoid_: KPI, stat
 
 **Likely range**:
@@ -227,7 +227,7 @@ A case that works today, which a variant must keep passing. Declared with the `r
 _Avoid_: keep-working case, guard case
 
 **Capability case**:
-Any case that isn't a regression case: one a variant should improve on.
+Any case that isn't a regression case: one a variant should improve on. Anthropic calls an eval of these a capability eval; MST keeps the split at case level, because one eval holds both. A capability case that passes reliably graduates by taking the `regression` tag.
 _Avoid_: should-work case, target case
 
 **Held-out case**:
@@ -253,15 +253,15 @@ _Avoid_: max candidates, cap
 ### Where a run happens
 
 **Coordinator**:
-The machine where `mst run` or `mst grade` was typed (your machine or a CI job). It loads, resolves, prepares, gathers, grades, compares and reports. Collecting can happen elsewhere, and with `mst grade --env` so can running the graders: the coordinator still resolves what they grade with and writes the regrade ([ADR 0005](docs/adr/0005-grading-runs-in-an-environment.md)).
+The machine where `mst run` or `mst grade` was typed (your machine or a CI job). It loads, resolves, prepares, gathers, grades, compares and reports. Collecting can happen elsewhere, and with `mst grade --runner` so can running the graders: the coordinator still resolves what they grade with and writes the regrade ([ADR 0005](docs/adr/0005-grading-runs-in-an-environment.md)).
 _Avoid_: controller, host, driver
 
-**Environment**:
-Where a run's trials are collected, chosen with `--env`: `local` (in the `mst run` process, the default), `docker` (containers from MST's Linux Cowork image), or an environment extension that creates machines, such as containers or VMs (`acme/env/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)). The OS of the machine that runs a trial decides how a desktop client runs: Computer Use on macOS, the accessibility automation on Linux ([ADR 0011](docs/adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md)); each shard's machine records its OS. At eval load, MST checks client OS requirements when the environment OS is known: the executing machine for `local`, Linux for built-in `docker`, or an environment definition's optional `os: 'macos' | 'linux'`. The check includes case clients. An undeclared OS stays unknown; validation never opens a machine to discover it.
-_Avoid_: sandbox, backend, runner, target
+**Runner**:
+Where a run's trials are collected, chosen with `--runner`: `local` (in the `mst run` process, the default), `docker` (containers from MST's Linux Cowork or ChatGPT image), or a runner extension that creates machines, such as containers or VMs (`acme/runner/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)). ADR 0004 and 0005 call it an environment; [ADR 0013](docs/adr/0013-mst-uses-anthropics-eval-vocabulary.md) renamed it, because Anthropic's environment is what the client acts on. The OS of the machine that runs a trial decides how a desktop client runs: Computer Use on macOS, the accessibility automation on Linux ([ADR 0011](docs/adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md)); each shard's machine records its OS. At eval load, MST checks client OS requirements when the runner's OS is known: the executing machine for `local`, Linux for built-in `docker`, or a runner definition's optional `os: 'macos' | 'linux'`. The check includes case clients. An undeclared OS stays unknown; validation never opens a machine to discover it.
+_Avoid_: environment (that is what the client acts on), sandbox, backend, target
 
 **Shard**:
-One machine's part of a run's trials, to collect, or to grade (a **grade shard**, `mst grade --env`). Trials are split by case, so a case's variants and trials all run on one shard.
+One machine's part of a run's trials, to collect, or to grade (a **grade shard**, `mst grade --runner`). Trials are split by case, so a case's variants and trials all run on one shard.
 _Avoid_: partition, worker (for the slice)
 
 **Worker**:
@@ -297,7 +297,7 @@ The first part of a plugin extension's name, `<namespace>/<kind>/<name>` (for ex
 _Avoid_: scope, prefix
 
 **Extension**:
-One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`), environment (`env`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
+One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`), runner (`runner`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
 _Avoid_: contribution, registration, capability
 
 **Built-in**:
@@ -329,7 +329,7 @@ Values a plugin takes from the repo that runs evals rather than from one extensi
 _Avoid_: plugin options, plugin config, factory options
 
 **Endpoint source**:
-(Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in source reads environment variables. Its name must not be `env`, which is the environment kind.
+(Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in source reads environment variables.
 _Avoid_: gateway config, LLM provider
 
 **Marketplace plugin**:

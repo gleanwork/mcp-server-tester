@@ -138,7 +138,7 @@ const RunSchema = z.looseObject({
   gradedFrom: z.string().optional(),
   supersededBy: z.string().optional(),
   gradings: z.array(z.string()).optional(),
-  environment: z.string().optional(),
+  runner: z.string().optional(),
   baseline: z.string(),
   datasets: z.array(
     z.looseObject({

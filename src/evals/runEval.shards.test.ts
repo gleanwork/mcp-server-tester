@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resumeRun, runEval } from './runEval.js';
-import { shardOf } from './environments/shardedCollect.js';
+import { shardOf } from './runners/shardedCollect.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 
 const mock = (name: string) =>
@@ -21,7 +21,7 @@ afterEach(async () => {
   );
 });
 
-/** Four cases, two variants, on the shard-test client, in fork/env/children. */
+/** Four cases, two variants, on the shard-test client, in fork/runner/children. */
 async function fixture({
   redact = true,
   extra = {},
@@ -49,7 +49,7 @@ async function fixture({
     configPath,
     JSON.stringify({
       name: 'shards',
-      plugins: [mock('forkEnvPlugin.ts'), mock('shardTestPlugin.ts')],
+      plugins: [mock('forkRunnerPlugin.ts'), mock('shardTestPlugin.ts')],
       client: 'shard-test/client/probe',
       datasets: ['./cases.json'],
       servers: {},
@@ -64,22 +64,26 @@ async function fixture({
   return {
     outputDir,
     readJson,
-    resume: (run: string, envOptions?: Record<string, string>, env?: string) =>
+    resume: (
+      run: string,
+      runnerOptions?: Record<string, string>,
+      runner?: string
+    ) =>
       resumeRun({
         configPath,
         rootDir: dir,
         outputDir,
         run,
-        ...(envOptions ? { envOptions } : {}),
-        ...(env ? { env } : {}),
+        ...(runnerOptions ? { runnerOptions } : {}),
+        ...(runner ? { runner } : {}),
       }),
-    run: (envOptions: Record<string, string>, grade = true) =>
+    run: (runnerOptions: Record<string, string>, grade = true) =>
       runEval({
         configPath,
         rootDir: dir,
         outputDir,
-        env: 'fork/env/children',
-        envOptions,
+        runner: 'fork/runner/children',
+        runnerOptions,
         ...(grade ? {} : { grade: false }),
       }),
   };
@@ -92,7 +96,7 @@ interface StoredCase {
   error?: string;
 }
 
-describe('a run in an environment with shards', () => {
+describe('a run in a runner with shards', () => {
   it('collects every variant on shards and gathers one run', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture();
@@ -100,11 +104,11 @@ describe('a run in an environment with shards', () => {
 
     expect(result.summary.metrics).toMatchObject({ passed: 8, total: 8 });
     const run = await f.readJson<{
-      environment: Record<string, unknown>;
+      runner: Record<string, unknown>;
       phases: unknown;
     }>(path.join(result.outputDir, 'run.json'));
-    expect(run.environment).toMatchObject({
-      name: 'fork/env/children',
+    expect(run.runner).toMatchObject({
+      name: 'fork/runner/children',
       shards: 2,
     });
     expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
@@ -164,7 +168,7 @@ describe('a run in an environment with shards', () => {
     const runId = path.basename(partial.outputDir);
     log.mockClear();
 
-    // The run's own environment and options, without the failure.
+    // The run's own runner and options, without the failure.
     const resumed = await f.resume(runId, { shards: '2' });
 
     expect(resumed.outputDir).toBe(partial.outputDir);
@@ -272,14 +276,14 @@ describe('a run in an environment with shards', () => {
     );
   }, 90_000);
 
-  it('--resume refuses to collect in the local environment', async () => {
+  it('--resume refuses to collect in the local runner', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture({ redact: false });
     const partial = await f.run({ shards: '2', fail: '1' });
     const runId = path.basename(partial.outputDir);
 
     await expect(f.resume(runId, undefined, 'local')).rejects.toThrow(
-      /^Run \S+ has \d+ trials? to collect, but a resume collects trials only in an environment, and this one would run locally\. Name one with --env, or run those cases again with mst run --case\.$/
+      /^Run \S+ has \d+ trials? to collect, but a resume collects trials only in a runner with machines, and this one would run locally\. Name one with --runner, or run those cases again with mst run --case\.$/
     );
     // The partial run is left as it was.
     const run = await f.readJson<{ phases: unknown }>(
@@ -300,7 +304,7 @@ describe('a run in an environment with shards', () => {
     const run = await f.readJson<{ phases: unknown }>(
       path.join(resumed.outputDir, 'run.json')
     );
-    // Graded later, with `mst grade` (and its --env), not by the resume.
+    // Graded later, with `mst grade` (and its --runner), not by the resume.
     expect(run.phases).toEqual({ collect: 'complete', grade: 'skipped' });
   }, 90_000);
 

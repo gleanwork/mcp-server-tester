@@ -62,16 +62,19 @@ import {
   type LabelImportCommandOptions,
 } from './commands/label/index.js';
 import {
-  setupEnvironment,
-  type EnvSetupOptions,
-} from './commands/env/index.js';
+  setupRunner,
+  type RunnerSetupOptions,
+} from './commands/runner/index.js';
 import type { DiscoveryOptions } from './commands/discoveryPlugins.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { inspect } from 'node:util';
 import { debugCli } from '../debug.js';
 import { describeError } from '../utils/describeError.js';
 
-/** Flags 2.0 renamed (ADR 0002), recognized only to say what replaced them. */
+/**
+ * Flags 2.0 renamed (ADR 0002, ADR 0013), recognized only to say what
+ * replaced them.
+ */
 const REMOVED_FLAGS: Record<string, string> = {};
 
 function removedFlag(flags: string, replacement: string): Option {
@@ -464,7 +467,7 @@ program
   )
   .option(
     '--resume <run>',
-    'Collect again only the trials a run is missing or lost to an infrastructure failure a retry can help, in its environment (not local; use --env), and grade it again'
+    'Collect again only the trials a run is missing or lost to an infrastructure failure a retry can help, in its runner (not local; use --runner), and grade it again'
   )
   .option(
     '--no-report',
@@ -480,7 +483,7 @@ program
   )
   .option(
     '--detach',
-    'Run the coordinator on a machine the environment creates, and return: this machine can then go offline (needs a remote --results and, for connectors, a shared --store)'
+    'Run the coordinator on a machine the runner creates, and return: this machine can then go offline (needs a remote --results and, for connectors, a shared --store)'
   )
   .addOption(
     new Option(
@@ -489,21 +492,24 @@ program
     ).hideHelp()
   )
   .option(
-    '--grade-env',
-    'After collecting, grade the run in its environment (mst grade --env), instead of on this machine'
+    '--grade-runner',
+    'After collecting, grade the run in its runner (mst grade --runner), instead of on this machine'
   )
   .option(
-    '--env <name>',
-    'Where to collect trials: local (the default), docker, or a plugin environment (<namespace>/env/<name>)'
+    '--runner <name>',
+    'Where to collect trials: local (the default), docker, or a plugin runner (<namespace>/runner/<name>)'
   )
   .option(
-    '--env-option <key=value>',
-    "An environment option; repeat for more: shards=N, keep=never|failed|always, or the environment's own",
+    '--runner-option <key=value>',
+    "A runner option; repeat for more: shards=N, keep=never|failed|always, or the runner's own",
     (value: string, previous: string[]) => [...previous, value],
     [] as string[]
   )
   .addOption(removedFlag('-m, --manifest <path>', '--config'))
   .addOption(removedFlag('--arm <name>', '--variant'))
+  .addOption(removedFlag('--env <name>', '--runner'))
+  .addOption(removedFlag('--env-option <key=value>', '--runner-option'))
+  .addOption(removedFlag('--grade-env', '--grade-runner'))
   .action((options: Record<string, unknown>) => {
     rejectRemovedFlags(options);
     if (typeof options.config !== 'string')
@@ -539,12 +545,12 @@ program
     "Also keep the regrade in a result store, instead of the eval config's: gs://<bucket>/<prefix>, file:<dir>, or <namespace>/result-store/<name>"
   )
   .option(
-    '--env <name>',
-    'Where to grade: local (the default), docker, or a plugin environment (<namespace>/env/<name>); judge keys go to its machines from --secrets-file'
+    '--runner <name>',
+    'Where to grade: local (the default), docker, or a plugin runner (<namespace>/runner/<name>); judge keys go to its machines from --secrets-file'
   )
   .option(
     '--detach',
-    'Grade from a coordinator machine the environment creates, and return (the run must be in the result store)'
+    'Grade from a coordinator machine the runner creates, and return (the run must be in the result store)'
   )
   .option(
     '--resume',
@@ -557,13 +563,17 @@ program
     ).hideHelp()
   )
   .option(
-    '--env-option <key=value>',
-    "An environment option; repeat for more: shards=N, keep=never|failed|always, or the environment's own",
+    '--runner-option <key=value>',
+    "A runner option; repeat for more: shards=N, keep=never|failed|always, or the runner's own",
     (value: string, previous: string[]) => [...previous, value],
     [] as string[]
   )
-  .action((runArg: string, options: Record<string, unknown>) =>
-    grade(runArg, options as unknown as Parameters<typeof grade>[1])
+  .addOption(removedFlag('--env <name>', '--runner'))
+  .addOption(removedFlag('--env-option <key=value>', '--runner-option'))
+  .action(
+    (runArg: string, options: Record<string, unknown>) =>
+      rejectRemovedFlags(options) ??
+      grade(runArg, options as unknown as Parameters<typeof grade>[1])
   );
 
 // Batch command
@@ -681,16 +691,22 @@ optimizeTarget(
   .option('--max-cases <n>', 'Cases per dataset, every run')
   .option('--trials <n>', 'Trials per case, every run')
   .option(
-    '--env <name>',
-    'Where every run collects trials: local (the default), docker, or <namespace>/env/<name>'
+    '--runner <name>',
+    'Where every run collects trials: local (the default), docker, or <namespace>/runner/<name>'
   )
   .option(
-    '--env-option <key=value>',
-    'An environment option; repeat for more',
+    '--runner-option <key=value>',
+    'A runner option; repeat for more',
     (value: string, previous: string[]) => [...previous, value],
     [] as string[]
   )
-  .action((options: OptimizeStartOptions) => optimizeStart(options));
+  .addOption(removedFlag('--env <name>', '--runner'))
+  .addOption(removedFlag('--env-option <key=value>', '--runner-option'))
+  .action(
+    (options: Record<string, unknown>) =>
+      rejectRemovedFlags(options) ??
+      optimizeStart(options as unknown as OptimizeStartOptions)
+  );
 optimizeTarget(
   optimizeCommand
     .command('evidence')
@@ -763,38 +779,47 @@ program
   .option('--root-dir <dir>', 'Fallback directory for relative paths', '.')
   .action(open);
 
-// Env command: prepare an environment once (ADR 0004)
+// Runner command: prepare a runner once (ADR 0004)
 program
-  .command('env')
-  .description('Prepare environments that runs collect trials in')
+  .command('runner')
+  .description('Prepare runners that runs collect trials in')
   .command('setup')
   .description(
-    "Prepare what runs in an environment need, once: docker builds MST's Linux Cowork image"
+    "Prepare what runs in a runner need, once: docker builds MST's Linux Cowork image"
   )
-  .argument('<environment>', 'docker, or <namespace>/env/<name>')
+  .argument('<runner>', 'docker, or <namespace>/runner/<name>')
   .option(
-    '--env-option <key=value>',
-    "An environment option; repeat for more: the environment's own (docker: image, contexts, claudeDesktopVersion)",
+    '--runner-option <key=value>',
+    "A runner option; repeat for more: the runner's own (docker: image, contexts, claudeDesktopVersion)",
     (value: string, previous: string[]) => [...previous, value],
     [] as string[]
   )
   .option(
     '--config <file>',
-    "An eval config whose plugins the environment's machines need (docker installs them in its image)"
+    "An eval config whose plugins the runner's machines need (docker installs them in its image)"
   )
-  .option(
-    '--plugins <modules...>',
-    "Plugin modules, for a plugin's environment"
-  )
+  .option('--plugins <modules...>', "Plugin modules, for a plugin's runner")
   .option('--root-dir <dir>', 'Where relative plugin paths resolve', '.')
-  .action((reference: string, options: EnvSetupOptions) =>
-    setupEnvironment(reference, options)
+  .addOption(removedFlag('--env-option <key=value>', '--runner-option'))
+  .action(
+    (reference: string, options: Record<string, unknown>) =>
+      rejectRemovedFlags(options) ??
+      setupRunner(reference, options as unknown as RunnerSetupOptions)
   );
 
-// Collect command: a shard's worker, started by environments (ADR 0004)
+// `mst env` became `mst runner` (ADR 0013): recognized only to say so.
+program
+  .command('env', { hidden: true })
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action(() => {
+    throw new Error('`mst env` is now `mst runner`');
+  });
+
+// Collect command: a shard's worker, started by runners (ADR 0004)
 program
   .command('collect', { hidden: true })
-  .description("Collect a shard's trials (environments run this)")
+  .description("Collect a shard's trials (runners run this)")
   .requiredOption('--bundle <dir>', "The shard's bundle directory")
   .requiredOption('--results <dir>', 'Where to write result files')
   .action(collect);
@@ -894,10 +919,10 @@ program
     history(directory, options)
   );
 
-// Grade shard command: a grade shard's worker, started by environments (ADR 0005)
+// Grade shard command: a grade shard's worker, started by runners (ADR 0005)
 program
   .command('grade-shard', { hidden: true })
-  .description("Grade a shard of a stored run's cases (environments run this)")
+  .description("Grade a shard of a stored run's cases (runners run this)")
   .requiredOption('--bundle <dir>', "The shard's grade bundle directory")
   .requiredOption('--results <dir>', 'Where to write result files')
   .action(gradeShardCommand);

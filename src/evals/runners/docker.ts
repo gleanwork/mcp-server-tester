@@ -1,5 +1,5 @@
 /**
- * The built-in `docker` environment (ADR 0004): each shard runs in a
+ * The built-in `docker` runner (ADR 0004): each shard runs in a
  * container from MST's Linux Cowork image (docker/cowork-linux), or, for a
  * ChatGPT or Codex app eval, its Linux ChatGPT image (docker/chatgpt-linux), on a Docker
  * context. The channel is the Docker CLI: `docker exec` runs `mst collect`
@@ -28,7 +28,7 @@ import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
 import { getClient } from '../builtinClients.js';
 import { bareClientName } from '../clientNames.js';
-import { machineEnvironment } from './channel.js';
+import { machineRunner } from './channel.js';
 import { readShardBundle } from './protocol.js';
 import {
   formatMemory,
@@ -51,16 +51,16 @@ import {
   sweepOrphanedContainers,
 } from './dockerContainers.js';
 import type {
-  EnvironmentContext,
-  EnvironmentDefinition,
+  RunnerContext,
+  RunnerDefinition,
   Machine,
   ShardWork,
   WorkerChannel,
 } from '../evalFrameworkTypes.js';
 
-/** The image `mst env setup docker` builds for this MST version. */
+/** The image `mst runner setup docker` builds for this MST version. */
 export const DEFAULT_COWORK_IMAGE = `mst-cowork-linux:${packageJson.version}`;
-/** The image `mst env setup docker` builds for a ChatGPT or Codex app eval. */
+/** The image `mst runner setup docker` builds for a ChatGPT or Codex app eval. */
 export const DEFAULT_CHATGPT_IMAGE = `mst-chatgpt-linux:${packageJson.version}`;
 
 /** Which desktop a container runs: the eval's client picks it. */
@@ -120,9 +120,9 @@ const DockerOptionsSchema = z
       .regex(/^\d+(\.\d+)?$/, 'cpus must be a number such as 2 or 1.5')
       .refine((value) => Number(value) > 0, 'cpus must be more than 0')
       .optional(),
-    /** `mst env setup docker` only: the Claude Desktop package to install. */
+    /** `mst runner setup docker` only: the Claude Desktop package to install. */
     claudeDesktopVersion: z.string().min(1).optional(),
-    /** `mst env setup docker` only, for ChatGPT: the app version to install. */
+    /** `mst runner setup docker` only, for ChatGPT: the app version to install. */
     chatgptVersion: z
       .string()
       .regex(/^[0-9][0-9.]*$/)
@@ -444,9 +444,9 @@ async function diagnoseContainer(
       : '';
   const fix =
     work === 'grade'
-      ? 'raise --env-option memory (fewer grade containers then share a context)'
+      ? 'raise --runner-option memory (fewer grade containers then share a context)'
       : memorySet
-        ? 'raise --env-option memory, or give the Docker context more memory'
+        ? 'raise --runner-option memory, or give the Docker context more memory'
         : 'give the Docker context more memory';
   return `Container ${name} ran out of memory${limit}: ${fix}.`;
 }
@@ -589,7 +589,7 @@ async function waitForDesktop(
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
   throw new Error(
-    `The desktop in container ${name} wasn't ready within ${timeoutS} s (--env-option readyTimeout).`
+    `The desktop in container ${name} wasn't ready within ${timeoutS} s (--runner-option readyTimeout).`
   );
 }
 
@@ -678,8 +678,8 @@ function contextsOf(options: DockerOptions): Array<string | undefined> {
 
 function openDocker(
   options: DockerOptions,
-  context: EnvironmentContext
-): ReturnType<typeof machineEnvironment> {
+  context: RunnerContext
+): ReturnType<typeof machineRunner> {
   const client = dockerClient(context.client);
   const image =
     options.image ??
@@ -782,173 +782,170 @@ function openDocker(
       );
     return swept.get(id)!;
   };
-  return machineEnvironment(
-    context,
-    async (shard, signal): Promise<Machine> => {
-      if (shard.work === 'grade') {
-        // No VM, so no host-wide vsock port: grade shards share contexts.
-        const dockerContext = await gradePool.acquire(signal);
-        const name = containerName(shard.runId, shard.index);
-        try {
-          const { limits } = await planOf('grade', dockerContext);
-          const machine = await headlessMachine(
-            dockerContext,
-            name,
-            image,
-            shard.runId,
-            limits,
-            sweep,
-            signal,
-            client
-          );
-          return {
-            ...machine,
-            diagnose: diagnose(dockerContext, name, 'grade', limits),
-            async dispose(options) {
-              try {
-                await machine.dispose(options);
-              } finally {
-                gradePool.release(dockerContext);
-              }
-            },
-          };
-        } catch (error) {
-          gradePool.release(dockerContext);
-          throw error;
-        }
-      }
-      if (await shardIsHeadless(shard.bundleDir))
-        return headlessMachine(
-          // No VM, so no host-wide vsock port: these shards share contexts.
-          contexts[shard.index % contexts.length],
-          containerName(shard.runId, shard.index),
+  return machineRunner(context, async (shard, signal): Promise<Machine> => {
+    if (shard.work === 'grade') {
+      // No VM, so no host-wide vsock port: grade shards share contexts.
+      const dockerContext = await gradePool.acquire(signal);
+      const name = containerName(shard.runId, shard.index);
+      try {
+        const { limits } = await planOf('grade', dockerContext);
+        const machine = await headlessMachine(
+          dockerContext,
+          name,
           image,
           shard.runId,
-          {},
+          limits,
           sweep,
           signal,
           client
         );
-      const dockerContext = await pool.acquire(signal);
-      const name = containerName(shard.runId, shard.index);
-      let refresh: NodeJS.Timeout | undefined;
-      // Aborted when the container goes, so a refresh in flight stops too.
-      const container = new AbortController();
-      const stopRefresh = () => {
-        clearInterval(refresh);
-        container.abort();
-      };
-      const remove = async () => {
-        stopRefresh();
-        await docker(dockerContext, ['rm', '--force', name]);
-        releaseContainer(dockerContext, name);
-      };
-      let limits: ContainerLimits | undefined;
-      try {
-        await sweep(dockerContext);
-        // A Cowork container is alone on its context and sized to it; ChatGPT
-        // containers share one, unlimited.
-        limits =
-          client === 'chatgpt'
-            ? {}
-            : (await planOf('collect', dockerContext)).limits;
-        const secret = await credential();
-        const digest = await dockerOk(
-          dockerContext,
-          ['image', 'inspect', '--format', '{{.Id}}', image],
-          `Finding image ${image} (build it with \`mst env setup docker\`)`
-        );
-        // Guarded from here: removed at exit even if this run never disposes it.
-        claimContainer(dockerContext, name);
-        await dockerOk(
-          dockerContext,
-          'cowork' in secret
-            ? dockerRunArgs({
-                name,
-                image,
-                runId: shard.runId,
-                seccompProfile,
-                inference: secret.cowork,
-                warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
-                limits,
-              })
-            : chatgptDockerRunArgs({
-                name,
-                image,
-                runId: shard.runId,
-                inference: secret.environment,
-              }),
-          `Starting container ${name}`,
-          { signal }
-        );
-        await deliverToken(
-          dockerContext,
-          name,
-          secret.token,
-          AbortSignal.any([signal, container.signal])
-        );
-        refresh = setInterval(() => {
-          void credential()
-            .then((fresh) =>
-              deliverToken(
-                dockerContext,
-                name,
-                fresh.token,
-                AbortSignal.any([signal, container.signal])
-              )
-            )
-            .catch(() => {
-              // The next refresh tries again; the token still has time.
-            });
-        }, TOKEN_REFRESH_MS);
-        refresh.unref();
-        await waitForDesktop(dockerContext, name, readyTimeoutS, signal);
-        await dockerOk(
-          dockerContext,
-          ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
-          'Creating the work directory'
-        );
         return {
-          id: name,
-          image: { ref: image, digest },
-          workDir: WORK_DIR,
-          channel: containerChannel(dockerContext, name),
-          diagnose: diagnose(dockerContext, name, 'collect', limits),
-          async dispose({ keep }) {
+          ...machine,
+          diagnose: diagnose(dockerContext, name, 'grade', limits),
+          async dispose(options) {
             try {
-              if (keep) {
-                stopRefresh();
-                // Renamed so no later run's sweep removes it.
-                const kept = `${name}${KEPT_SUFFIX}`;
-                const renamed =
-                  (await docker(dockerContext, ['rename', name, kept])).code ===
-                  0;
-                releaseContainer(dockerContext, name);
-                console.error(
-                  `[mst] kept container ${renamed ? kept : name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${renamed ? kept : name} bash`
-                );
-              } else await remove();
+              await machine.dispose(options);
             } finally {
-              pool.release(dockerContext);
+              gradePool.release(dockerContext);
             }
           },
         };
       } catch (error) {
-        // A desktop that didn't come up may have run out of memory.
-        const cause = limits
-          ? await diagnose(dockerContext, name, 'collect', limits)().catch(
-              () => undefined
-            )
-          : undefined;
-        await remove();
-        pool.release(dockerContext);
-        if (!cause) throw error;
-        throw new Error(
-          `${cause} ${error instanceof Error ? error.message : String(error)}`
-        );
+        gradePool.release(dockerContext);
+        throw error;
       }
     }
-  );
+    if (await shardIsHeadless(shard.bundleDir))
+      return headlessMachine(
+        // No VM, so no host-wide vsock port: these shards share contexts.
+        contexts[shard.index % contexts.length],
+        containerName(shard.runId, shard.index),
+        image,
+        shard.runId,
+        {},
+        sweep,
+        signal,
+        client
+      );
+    const dockerContext = await pool.acquire(signal);
+    const name = containerName(shard.runId, shard.index);
+    let refresh: NodeJS.Timeout | undefined;
+    // Aborted when the container goes, so a refresh in flight stops too.
+    const container = new AbortController();
+    const stopRefresh = () => {
+      clearInterval(refresh);
+      container.abort();
+    };
+    const remove = async () => {
+      stopRefresh();
+      await docker(dockerContext, ['rm', '--force', name]);
+      releaseContainer(dockerContext, name);
+    };
+    let limits: ContainerLimits | undefined;
+    try {
+      await sweep(dockerContext);
+      // A Cowork container is alone on its context and sized to it; ChatGPT
+      // containers share one, unlimited.
+      limits =
+        client === 'chatgpt'
+          ? {}
+          : (await planOf('collect', dockerContext)).limits;
+      const secret = await credential();
+      const digest = await dockerOk(
+        dockerContext,
+        ['image', 'inspect', '--format', '{{.Id}}', image],
+        `Finding image ${image} (build it with \`mst runner setup docker\`)`
+      );
+      // Guarded from here: removed at exit even if this run never disposes it.
+      claimContainer(dockerContext, name);
+      await dockerOk(
+        dockerContext,
+        'cowork' in secret
+          ? dockerRunArgs({
+              name,
+              image,
+              runId: shard.runId,
+              seccompProfile,
+              inference: secret.cowork,
+              warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
+              limits,
+            })
+          : chatgptDockerRunArgs({
+              name,
+              image,
+              runId: shard.runId,
+              inference: secret.environment,
+            }),
+        `Starting container ${name}`,
+        { signal }
+      );
+      await deliverToken(
+        dockerContext,
+        name,
+        secret.token,
+        AbortSignal.any([signal, container.signal])
+      );
+      refresh = setInterval(() => {
+        void credential()
+          .then((fresh) =>
+            deliverToken(
+              dockerContext,
+              name,
+              fresh.token,
+              AbortSignal.any([signal, container.signal])
+            )
+          )
+          .catch(() => {
+            // The next refresh tries again; the token still has time.
+          });
+      }, TOKEN_REFRESH_MS);
+      refresh.unref();
+      await waitForDesktop(dockerContext, name, readyTimeoutS, signal);
+      await dockerOk(
+        dockerContext,
+        ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
+        'Creating the work directory'
+      );
+      return {
+        id: name,
+        image: { ref: image, digest },
+        workDir: WORK_DIR,
+        channel: containerChannel(dockerContext, name),
+        diagnose: diagnose(dockerContext, name, 'collect', limits),
+        async dispose({ keep }) {
+          try {
+            if (keep) {
+              stopRefresh();
+              // Renamed so no later run's sweep removes it.
+              const kept = `${name}${KEPT_SUFFIX}`;
+              const renamed =
+                (await docker(dockerContext, ['rename', name, kept])).code ===
+                0;
+              releaseContainer(dockerContext, name);
+              console.error(
+                `[mst] kept container ${renamed ? kept : name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${renamed ? kept : name} bash`
+              );
+            } else await remove();
+          } finally {
+            pool.release(dockerContext);
+          }
+        },
+      };
+    } catch (error) {
+      // A desktop that didn't come up may have run out of memory.
+      const cause = limits
+        ? await diagnose(dockerContext, name, 'collect', limits)().catch(
+            () => undefined
+          )
+        : undefined;
+      await remove();
+      pool.release(dockerContext);
+      if (!cause) throw error;
+      throw new Error(
+        `${cause} ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  });
 }
 
 /**
@@ -999,7 +996,7 @@ async function headlessMachine(
     const digest = await dockerOk(
       dockerContext,
       ['image', 'inspect', '--format', '{{.Id}}', image],
-      `Finding image ${image} (build it with \`mst env setup docker\`)`
+      `Finding image ${image} (build it with \`mst runner setup docker\`)`
     );
     claimContainer(dockerContext, name);
     await dockerOk(
@@ -1147,13 +1144,13 @@ async function setupDocker(
         );
       }
     }
-    log(`Built ${image}. Run with --env docker.`);
+    log(`Built ${image}. Run with --runner docker.`);
   } finally {
     await fs.rm(build, { recursive: true, force: true });
   }
 }
 
-export const dockerEnvironment: EnvironmentDefinition = {
+export const dockerRunner: RunnerDefinition = {
   schema: DockerOptionsSchema,
   os: 'linux',
   description:

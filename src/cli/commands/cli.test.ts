@@ -211,29 +211,55 @@ describe('mst CLI', () => {
       expect(result.stderr).toMatch(/\n\s+at /);
     });
 
-    it('--env-option takes key=value', async () => {
+    it('--runner-option takes key=value', async () => {
       const result = await runBin(
         'run',
         '--config',
         'x.json',
-        '--env-option',
+        '--runner-option',
         'shards'
       );
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain(
-        'mst: --env-option takes key=value, got "shards"'
+        'mst: --runner-option takes key=value, got "shards"'
       );
       const twice = await runBin(
         'run',
         '--config',
         'x.json',
-        '--env-option',
+        '--runner-option',
         'keep=failed',
-        '--env-option',
+        '--runner-option',
         'keep=always'
       );
       expect(twice.exitCode).toBe(1);
-      expect(twice.stderr).toContain('mst: --env-option keep is given twice');
+      expect(twice.stderr).toContain(
+        'mst: --runner-option keep is given twice'
+      );
+    });
+
+    it.each([
+      [['run', '--config', 'x.json', '--env', 'docker'], '--env', '--runner'],
+      [
+        ['run', '--config', 'x.json', '--env-option', 'shards=2'],
+        '--env-option',
+        '--runner-option',
+      ],
+      [
+        ['run', '--config', 'x.json', '--grade-env'],
+        '--grade-env',
+        '--grade-runner',
+      ],
+      [
+        ['grade', 'r1', '--config', 'x.json', '--env', 'docker'],
+        '--env',
+        '--runner',
+      ],
+      [['env', 'setup', 'docker'], '`mst env`', '`mst runner`'],
+    ])('%j names the flag that replaced %s', async (args, old, replacement) => {
+      const result = await runBin(...args);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(`${old} is now ${replacement}`);
     });
 
     it('--resume refuses flags that would change the run', async () => {
@@ -270,28 +296,26 @@ describe('mst CLI', () => {
         '--config',
         'ok.json',
         '--dry-run',
-        '--env',
+        '--runner',
         'local',
-        '--env-option',
+        '--runner-option',
         'keep=failed'
       );
       expect(result.stderr).toBe('');
       expect(result.exitCode).toBe(0);
       expect(JSON.parse(String(result.stdout))).toMatchObject({
-        env: { name: 'local', shards: 1, keep: 'failed' },
+        runner: { name: 'local', shards: 1, keep: 'failed' },
       });
       const sharded = await runBin(
         'run',
         '--config',
         'ok.json',
         '--dry-run',
-        '--env-option',
+        '--runner-option',
         'shards=3'
       );
       expect(sharded.exitCode).toBe(1);
-      expect(sharded.stderr).toContain(
-        'mst: The local environment runs one shard'
-      );
+      expect(sharded.stderr).toContain('mst: The local runner runs one shard');
     });
 
     it('an unknown client lists the clients there are', async () => {

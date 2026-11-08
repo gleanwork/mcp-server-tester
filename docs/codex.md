@@ -16,7 +16,7 @@ It was the `codex` client; `codex` now fails validation, naming `codex-cli` ([mi
 }
 ```
 
-Install the SDK beside MST (`npm install @openai/codex-sdk`); it brings the Codex CLI for your platform. MST's Linux image has it, so `--env docker` and environments built on it run `codex-cli` too.
+Install the SDK beside MST (`npm install @openai/codex-sdk`); it brings the Codex CLI for your platform. MST's Linux image has it, so `--runner docker` and runners built on it run `codex-cli` too.
 
 ## Model access
 
@@ -26,7 +26,7 @@ Codex reaches its model as every OpenAI-shaped call in MST does, through `resolv
 - `OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`, for a gateway or proxy that serves the Responses API. MST gives Codex a provider of its own for it, over HTTPS only (Codex would otherwise try a WebSocket first).
 - `apiKeyEnvVar` reads the key from another variable.
 
-For `--env` and `--detach` runs, put these in the `--secrets-file`: workers get the run's secrets, not the coordinator's environment.
+For `--runner` and `--detach` runs, put these in the `--secrets-file`: workers get the run's secrets, not the coordinator's environment.
 
 ## Options (`clientOptions`)
 

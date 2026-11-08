@@ -297,7 +297,7 @@ export interface EvalRunnerOptions {
   /**
    * Where each trial is graded: called with the case, the trial's number from
    * 0, and `grade`, which grades it here. Without it, every trial is graded
-   * here. `mst grade --env` (ADR 0005) records what workers' grading
+   * here. `mst grade --runner` (ADR 0005) records what workers' grading
    * produced, and reads those records back on the coordinator.
    */
   gradeTrial?: TrialGrader;
@@ -470,7 +470,7 @@ export interface EvalCaseOptions {
   /**
    * Where each trial is graded: called with the case, the trial's number from
    * 0, and `grade`, which grades it here. Without it, every trial is graded
-   * here. `mst grade --env` (ADR 0005) records what workers' grading
+   * here. `mst grade --runner` (ADR 0005) records what workers' grading
    * produced, and reads those records back on the coordinator.
    */
   gradeTrial?: TrialGrader;

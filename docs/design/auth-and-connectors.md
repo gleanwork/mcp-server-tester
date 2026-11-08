@@ -192,7 +192,7 @@ MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester
 
 ## Out of scope
 
-- Token staging in environments: delivering connector tokens into VMs and containers. The environment contract must carry `tokenFile` renewal across the boundary. The `mst.shard/v1` protocol carries tokens ([ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md)), but today a run refuses connector servers in any environment other than `local`.
+- Token staging in runners: delivering connector tokens into VMs and containers. The runner contract must carry `tokenFile` renewal across the boundary. The `mst.shard/v1` protocol carries tokens ([ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md)), but today a run refuses connector servers in any runner other than `local`.
 - An MST-owned interceptor kind.
 
 ## Decisions

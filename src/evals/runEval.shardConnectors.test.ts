@@ -97,7 +97,7 @@ describe('connector tokens in a local run', () => {
   );
 });
 
-describe('connector servers and tool metadata in an environment', () => {
+describe('connector servers and tool metadata in a runner', () => {
   it("runs on a worker that expands the connector itself, gets its token from the coordinator, and applies the variant's tool metadata", async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-shard-conn-'));
@@ -134,7 +134,7 @@ describe('connector servers and tool metadata in an environment', () => {
       configPath,
       JSON.stringify({
         name: 'shard-connectors',
-        plugins: [mock('forkEnvPlugin.ts'), mock('shardConnectorPlugin.ts')],
+        plugins: [mock('forkRunnerPlugin.ts'), mock('shardConnectorPlugin.ts')],
         client: 'sc/client/caller',
         datasets: ['./cases.json'],
         servers: { notes: { connector: 'sc/connector/notes' } },
@@ -154,8 +154,8 @@ describe('connector servers and tool metadata in an environment', () => {
       configPath,
       rootDir: dir,
       outputDir: path.join(dir, 'out'),
-      env: 'fork/env/children',
-      envOptions: { shards: '1' },
+      runner: 'fork/runner/children',
+      runnerOptions: { shards: '1' },
       credentialStore: store,
       report: false,
     });
@@ -277,7 +277,7 @@ describe('connector servers and tool metadata in an environment', () => {
     const configPath = path.join(dir, 'eval.json');
     const config = {
       name: 'resume-writes',
-      plugins: [mock('forkEnvPlugin.ts'), mock('shardConnectorPlugin.ts')],
+      plugins: [mock('forkRunnerPlugin.ts'), mock('shardConnectorPlugin.ts')],
       client: 'sc/client/caller',
       datasets: ['./cases.json'],
       servers: { notes: { connector: 'sc/connector/notes' } },
@@ -299,8 +299,8 @@ describe('connector servers and tool metadata in an environment', () => {
     // One of two shards fails: the run is partial.
     const first = await runEval({
       ...options,
-      env: 'fork/env/children',
-      envOptions: { shards: '2', fail: '1' },
+      runner: 'fork/runner/children',
+      runnerOptions: { shards: '2', fail: '1' },
     });
     expect(await runJson(first.outputDir)).toMatchObject({
       simulateWrites: true,
@@ -318,7 +318,7 @@ describe('connector servers and tool metadata in an environment', () => {
     const resumed = await resumeRun({
       ...options,
       run: runId,
-      envOptions: { shards: '2' },
+      runnerOptions: { shards: '2' },
     });
     expect((await runJson(resumed.outputDir)).simulateWrites).toBe(true);
     for (const caseId of caseIds) {

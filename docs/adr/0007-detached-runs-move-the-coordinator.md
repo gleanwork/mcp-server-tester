@@ -4,6 +4,8 @@ status: accepted
 
 # Detached runs move the coordinator
 
+> **Current names.** [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed the environment to the **runner**: `--env` is `--runner`, `--env-option` is `--runner-option`, and `--grade-env` is `--grade-runner`. The decision itself stands.
+
 With `--env`, the trials and the grading run on an environment's machines, but the coordinator still runs where `mst run` was typed, usually a laptop ([ADR 0004](./0004-environments-run-shards-over-a-channel.md), [ADR 0005](./0005-grading-runs-in-an-environment.md)). The coordinator does the rest of the run:
 
 - It opens each shard's channel. A worker is a process started over that channel, so it ends when the channel does.

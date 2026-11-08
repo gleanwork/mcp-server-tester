@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import packageJson from '../../../package.json' with { type: 'json' };
-import { forkEnvironment } from '../../../tests/mocks/forkEnvironment.js';
+import { forkRunner } from '../../../tests/mocks/forkRunner.js';
 import { startReadinessHttpServer } from '../../../tests/mocks/readyServers.js';
-import { machineEnvironment, runShardOverChannel } from './channel.js';
+import { machineRunner, runShardOverChannel } from './channel.js';
 import { collectShard } from './collect.js';
 import {
   parseCoordinatorMessage,
@@ -17,7 +17,7 @@ import {
 import type { EvalConfig, EvalVariant } from '../evalConfig.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import type {
-  EnvironmentContext,
+  RunnerContext,
   Machine,
   ShardEvents,
   ShardProgress,
@@ -113,9 +113,11 @@ function recorder(tokens: Array<() => ShardTokens>) {
   return { events, progress, reasons };
 }
 
-const context = (
-  keep: EnvironmentContext['keep'] = 'never'
-): EnvironmentContext => ({ runId: 'run-1', shards: 1, keep });
+const context = (keep: RunnerContext['keep'] = 'never'): RunnerContext => ({
+  runId: 'run-1',
+  shards: 1,
+  keep,
+});
 
 describe('a shard in a child-process environment', () => {
   // The secrets file a coordinator sends: a short key, a credential, and a
@@ -200,7 +202,7 @@ describe('a shard in a child-process environment', () => {
         resultsDir: path.join(root, 'results'),
       };
       const { events } = recorder([() => ({ byServer: {} })]);
-      const env = forkEnvironment(context(), root, {
+      const env = forkRunner(context(), root, {
         MST_TOKENS_DIR: path.join(root, 'tokens'),
       });
       const outcome = await env.runShard(
@@ -305,7 +307,7 @@ describe('a shard in a child-process environment', () => {
       // No token or secret text, and no artifacts: redaction and save both
       // retain the live result unless the early cache takes snapshots.
       const { events, progress } = recorder([() => ({ byServer: {} })]);
-      const env = forkEnvironment(context(), root, {
+      const env = forkRunner(context(), root, {
         MST_TOKENS_DIR: path.join(root, 'tokens'),
       });
       const outcome = await env.runShard(
@@ -358,7 +360,7 @@ describe('a shard in a child-process environment', () => {
       }
     );
     const { events } = recorder([() => ({ byServer: {}, env: {} })]);
-    const outcome = await forkEnvironment(context(), root, {}).runShard(
+    const outcome = await forkRunner(context(), root, {}).runShard(
       shard,
       events,
       new AbortController().signal
@@ -400,14 +402,14 @@ describe('a shard in a child-process environment', () => {
         env: secretsFile,
       }),
     ]);
-    const environment = forkEnvironment(context(), root, {
+    const runner = forkRunner(context(), root, {
       MST_TOKENS_DIR: tokensDir,
       MST_HEARTBEAT_MS: '200',
       // Ask again 1.5 s before expiry: about 0.5 s into case a.
       MST_TOKEN_RENEW_MS: '1500',
     });
 
-    const outcome = await environment.runShard(
+    const outcome = await runner.runShard(
       shard,
       events,
       new AbortController().signal
@@ -479,7 +481,7 @@ describe('a shard in a child-process environment', () => {
     expect(
       await fs.readFile(path.join(shard.bundleDir, 'bundle.json'), 'utf8')
     ).not.toContain('leak');
-    expect(environment.disposed).toEqual([false]);
+    expect(runner.disposed).toEqual([false]);
   }, 30_000);
 
   it('stops after the trial in flight when cancelled, and keeps a failed machine', async () => {
@@ -501,15 +503,11 @@ describe('a shard in a child-process environment', () => {
         if (event.type === 'trial') controller.abort();
       },
     };
-    const environment = forkEnvironment(context('failed'), root, {
+    const runner = forkRunner(context('failed'), root, {
       MST_TOKENS_DIR: path.join(root, 'tokens'),
     });
 
-    const outcome = await environment.runShard(
-      shard,
-      wrapped,
-      controller.signal
-    );
+    const outcome = await runner.runShard(shard, wrapped, controller.signal);
 
     expect(outcome).toMatchObject({
       ok: false,
@@ -524,7 +522,7 @@ describe('a shard in a child-process environment', () => {
     await expect(
       fs.stat(path.join(shard.resultsDir, '0/3.json'))
     ).rejects.toThrow();
-    expect(environment.disposed).toEqual([true]);
+    expect(runner.disposed).toEqual([true]);
   }, 30_000);
 });
 
@@ -784,10 +782,10 @@ describe('runShardOverChannel failures before the worker speaks', () => {
   });
 });
 
-describe('machineEnvironment', () => {
+describe('machineRunner', () => {
   it("folds a machine it couldn't delete into the shard's outcome, keeping a good shard good", async () => {
     const finish = (stdout: string[], keep: 'never' | 'failed') =>
-      machineEnvironment(
+      machineRunner(
         { ...context(), keep },
         async () => ({
           id: 'machine-1',
@@ -822,11 +820,11 @@ describe('machineEnvironment', () => {
   });
 
   it("reports a machine it couldn't create as the shard's outcome", async () => {
-    const environment = machineEnvironment(context(), async () => {
+    const runner = machineRunner(context(), async () => {
       throw new Error('no capacity in us-west1-b');
     });
     expect(
-      await environment.runShard(spec, quiet, new AbortController().signal)
+      await runner.runShard(spec, quiet, new AbortController().signal)
     ).toEqual({
       ok: false,
       reason:
@@ -840,7 +838,7 @@ describe('machineEnvironment', () => {
   it("puts what a failed shard's machine knows before the shard's reason", async () => {
     const diagnosed: string[] = [];
     const run = (diagnose: () => Promise<string | undefined>) =>
-      machineEnvironment(
+      machineRunner(
         context(),
         async () => ({
           id: 'machine-1',
@@ -872,7 +870,7 @@ describe('machineEnvironment', () => {
   it('notes what the machine knows about a finished shard with infrastructure failures', async () => {
     let asked = 0;
     const finish = (infra: number) =>
-      machineEnvironment(
+      machineRunner(
         context(),
         async () => ({
           id: 'machine-1',
@@ -905,7 +903,7 @@ describe('machineEnvironment', () => {
 
   it("keeps the shard's outcome when a diagnosis throws before it returns a promise", async () => {
     const run = (stdout: string[]) =>
-      machineEnvironment(
+      machineRunner(
         context(),
         async () => ({
           id: 'machine-1',

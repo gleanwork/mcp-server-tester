@@ -10,8 +10,8 @@ Run a ChatGPT eval the way a Cowork eval runs in Docker: each shard gets a dispo
 export OPENAI_BASE_URL=https://llm-gateway.example.com/openai/v1   # your gateway's OpenAI base
 export MST_LLM_AUTH_COMMAND=…                                       # as for Cowork
 
-npx mst env setup docker --config chatgpt-eval.json                 # builds mst-chatgpt-linux:<MST version> (planned)
-npx mst run --config chatgpt-eval.json --env docker --env-option shards=3
+npx mst runner setup docker --config chatgpt-eval.json              # builds mst-chatgpt-linux:<MST version> (planned)
+npx mst run --config chatgpt-eval.json --runner docker --runner-option shards=3
 ```
 
 The eval config needs nothing Docker-specific. `"client": "chatgpt"` selects the ChatGPT image, and on Linux the client already uses the AT-SPI driver.
@@ -59,18 +59,18 @@ refresh_interval_ms = 60000
 
 ### 3. The image: `docker/chatgpt-linux`
 
-Built by `mst env setup docker` when the eval's client is `chatgpt`, next to the Cowork image and sharing its layout (`/opt/mst/bin`, `/opt/mst/plugins`, the `mst` user):
+Built by `mst runner setup docker` when the eval's client is `chatgpt`, next to the Cowork image and sharing its layout (`/opt/mst/bin`, `/opt/mst/plugins`, the `mst` user):
 
 - **Base:** `node:22-trixie-slim`, like the Cowork image.
-- **ChatGPT:** the `chatgpt` package for the build's architecture, from OpenAI's apt repository. The build reads `Filename` and `SHA256` from the repository's `Packages` index and checks the download against them. `--env-option chatgptVersion=<version>` pins a version; the default is the newest. The repository's `.list` entry is removed, so nothing updates the app inside a container.
+- **ChatGPT:** the `chatgpt` package for the build's architecture, from OpenAI's apt repository. The build reads `Filename` and `SHA256` from the repository's `Packages` index and checks the download against them. `--runner-option chatgptVersion=<version>` pins a version; the default is the newest. The repository's `.list` entry is removed, so nothing updates the app inside a container.
 - **Desktop:** `xvfb`, `dbus`, `at-spi2-core`, `python3-gi`, `gir1.2-atspi-2.0`, `gnome-keyring`, `libsecret-1-0`.
 - **Session script:** as the desktop user, start Xvfb, the session bus and AT-SPI, and unlock an empty-password login keyring. Then write `ready`. The app isn't started here: the Linux client starts it per session with its own fresh `HOME`.
 - **Fixed addresses**, so `docker exec` workers get them from the image's `ENV`: `DBUS_SESSION_BUS_ADDRESS`, `GNOME_KEYRING_CONTROL` (`--control-directory`), and `AT_SPI_BUS_ADDRESS` (read once, with `org.a11y.Bus.GetAddress`, into a file the worker's wrapper exports).
 - **MST and plugins:** installed as in the Cowork image, at the version the run uses.
 
-### 4. The environment: one `docker`, two images
+### 4. The runner: one `docker`, two images
 
-`docker` stays one environment. It picks a profile from the eval's `client`:
+`docker` stays one runner. It picks a profile from the eval's `client`:
 
 |                            | Cowork                             | ChatGPT                                |
 | -------------------------- | ---------------------------------- | -------------------------------------- |
@@ -80,17 +80,17 @@ Built by `mst env setup docker` when the eval's client is `chatgpt`, next to the
 | Containers per Docker host | one (fixed vsock port)             | several                                |
 | Per-shard setup            | restart Claude Desktop per variant | the client's fresh profile per session |
 
-- `--env-option image=` still overrides the image.
+- `--runner-option image=` still overrides the image.
 - The container lifecycle doesn't change: owner labels, sweeping orphans, `keep`, removal at exit.
 - **Sizing:** the app needs about 1.5 GB of memory per container (to confirm). A 12 GB Colima VM should fit about four shards.
 
 ### 5. Connectors
 
-They already work in environments. Each worker launches the connector servers itself, with tokens sent from this machine. For ChatGPT, a dry-run proxy entry is a plain stdio server with `minTools`, which ChatGPT rejected until now. With the `minTools` fix, MST's preflight checks it and `config.toml` never contains it. Vendor variants passed on macOS with that fix.
+They already work in runners. Each worker launches the connector servers itself, with tokens sent from this machine. For ChatGPT, a dry-run proxy entry is a plain stdio server with `minTools`, which ChatGPT rejected until now. With the `minTools` fix, MST's preflight checks it and `config.toml` never contains it. Vendor variants passed on macOS with that fix.
 
 ## Comparability
 
-A Docker run differs from a Mac run in more than the machine: the app is signed out, and inference goes through a gateway instead of an account. What's in the model's context may differ too. Treat the environment as part of the run, and compare variants within one environment. A run records `env` and `nativeReadiness.inference`, so reports can say which it was.
+A Docker run differs from a Mac run in more than the machine: the app is signed out, and inference goes through a gateway instead of an account. What's in the model's context may differ too. Treat the runner as part of the run, and compare variants within one runner. A run records `runner` and `nativeReadiness.inference`, so reports can say which it was.
 
 ## Security
 
@@ -109,4 +109,4 @@ A Docker run differs from a Mac run in more than the machine: the app is signed 
 
 1. The `minTools` fix, with its tests and docs (done on a branch).
 2. Linux client: gateway inference, a fresh profile per session, and the model announcement, tested with a fixture desktop as today.
-3. The ChatGPT image and the environment profile. Then a live run of three variants on Colima, compared with the same cases on macOS.
+3. The ChatGPT image and the runner profile. Then a live run of three variants on Colima, compared with the same cases on macOS.

@@ -7,7 +7,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { parseEnvOptions } from '../../../evals/environments/envOptions.js';
+import { parseRunnerOptions } from '../../../evals/runners/runnerOptions.js';
 import {
   buildEvidence,
   renderEvidence,
@@ -57,8 +57,8 @@ export interface OptimizeStartOptions extends Omit<
   filterTag?: string[];
   maxCases?: string | number;
   trials?: string | number;
-  env?: string;
-  envOption?: string[];
+  runner?: string;
+  runnerOption?: string[];
 }
 
 export interface OptimizeEvidenceOptions extends OptimizeTargetOptions {
@@ -84,8 +84,8 @@ function positiveInteger(flag: string, value: string | number): number {
 
 function targetOf(
   options: OptimizeTargetOptions & {
-    env?: string;
-    envOption?: string[];
+    runner?: string;
+    runnerOption?: string[];
   }
 ): StoredOptimizationTarget {
   return {
@@ -96,9 +96,9 @@ function targetOf(
     ...(options.secretsFile ? { secretsFile: options.secretsFile } : {}),
     ...(options.store ? { store: options.store } : {}),
     ...(options.results ? { results: options.results } : {}),
-    ...(options.env ? { env: options.env } : {}),
-    ...(options.envOption?.length
-      ? { envOptions: parseEnvOptions(options.envOption) }
+    ...(options.runner ? { runner: options.runner } : {}),
+    ...(options.runnerOption?.length
+      ? { runnerOptions: parseRunnerOptions(options.runnerOption) }
       : {}),
   };
 }

@@ -1,6 +1,6 @@
 /**
  * Where a run's grading happens (ADR 0005). A local run and a local
- * `mst grade` grade in this process. `mst grade --env` grades the same way on
+ * `mst grade` grade in this process. `mst grade --runner` grades the same way on
  * workers, which record what grading produced; the coordinator then runs the
  * regrade with the records, so every file it writes comes from the code a
  * local regrade runs.
@@ -106,7 +106,7 @@ export function recordingGrading(options: {
 }
 
 /**
- * The coordinator's side of `mst grade --env`: each trial's and case's
+ * The coordinator's side of `mst grade --runner`: each trial's and case's
  * grading as its worker recorded it. One a worker didn't bring back gets a
  * grading error that says why (`missing(key)`), so the regrade is
  * `phases.grade: partial` and the next regrade grades it.

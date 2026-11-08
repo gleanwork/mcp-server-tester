@@ -19,7 +19,7 @@ import type { RunStore } from './runStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
 import type { PairwiseComparisonResult } from './pairwiseComparison.js';
-import type { ShardTokens, TrialKey } from './environments/protocol.js';
+import type { ShardTokens, TrialKey } from './runners/protocol.js';
 import type { GradeKey } from './gradingSource.js';
 
 /** Which copy of a dataset with snapshots to read. */
@@ -482,7 +482,7 @@ export interface ClientDefinition {
   readonly maxConcurrency?: number;
   /**
    * The client is a process that needs no desktop session (a CLI or an
-   * SDK). An environment whose machines provide a desktop, such as MST's
+   * SDK). A runner whose machines provide a desktop, such as MST's
    * Linux image, then starts a shard whose clients are all headless
    * without one: no desktop, no desktop app, and none of its inference.
    * Without it, a client gets the desktop.
@@ -609,25 +609,25 @@ export interface ResultStoreDefinition {
 }
 
 /**
- * `--env-option keep`: which machines an environment leaves running after
+ * `--runner-option keep`: which machines a runner leaves running after
  * their shard, for inspection. Default `never`.
  */
-export type EnvironmentKeep = 'never' | 'failed' | 'always';
+export type RunnerKeep = 'never' | 'failed' | 'always';
 
-/** What an environment's `open` is given, beside its own options. */
-export interface EnvironmentContext extends SettingsContext {
+/** What a runner's `open` is given, beside its own options. */
+export interface RunnerContext extends SettingsContext {
   readonly runId: string;
-  /** How many shards the run has (`--env-option shards`). */
+  /** How many shards the run has (`--runner-option shards`). */
   readonly shards: number;
-  readonly keep: EnvironmentKeep;
-  /** The eval's client (`client` in its config), for environments that run one kind. */
+  readonly keep: RunnerKeep;
+  /** The eval's client (`client` in its config), for runners that run one kind. */
   readonly client?: string;
 }
 
-/** One shard of a run, as the coordinator hands it to an environment. */
+/** One shard of a run, as the coordinator hands it to a runner. */
 /**
  * What a shard runs: collecting trials (ADR 0004), or grading a stored run's
- * (`mst grade --env`, ADR 0005).
+ * (`mst grade --runner`, ADR 0005).
  */
 export type ShardWork = 'collect' | 'grade';
 
@@ -637,7 +637,7 @@ export interface ShardSpec {
   readonly count: number;
   /**
    * What the shard runs. Its worker command follows: `mst collect` or
-   * `mst grade-shard`. An environment built with `machineEnvironment` runs
+   * `mst grade-shard`. A runner built with `machineRunner` runs
    * either.
    */
   readonly work: ShardWork;
@@ -727,7 +727,7 @@ export interface WorkerChannel {
   forward?(remotePort: number): Promise<{ localPort: number; close(): void }>;
 }
 
-/** A machine an environment created for one shard. */
+/** A machine a runner created for one shard. */
 export interface Machine {
   readonly id: string;
   readonly image?: { ref: string; digest?: string };
@@ -742,7 +742,7 @@ export interface Machine {
    * to add.
    */
   diagnose?(): Promise<string | undefined>;
-  /** Deletes the machine, unless `keep` (`--env-option keep`). */
+  /** Deletes the machine, unless `keep` (`--runner-option keep`). */
   dispose(options: { keep: boolean }): Promise<void>;
 }
 
@@ -769,7 +769,7 @@ export interface CoordinatorMachine {
   dispose(options: { keep: boolean }): Promise<void>;
 }
 
-/** What an environment's `coordinator` is given, beside its own options. */
+/** What a runner's `coordinator` is given, beside its own options. */
 export interface CoordinatorContext extends SettingsContext {
   /** The detached run's id: `mst runs watch <id>`. */
   readonly id: string;
@@ -779,12 +779,12 @@ export interface CoordinatorContext extends SettingsContext {
 }
 
 /**
- * An environment, opened for one run. Most environments build it with
- * `machineEnvironment`, from a function that creates a machine.
+ * A runner, opened for one run. Most runners build it with
+ * `machineRunner`, from a function that creates a machine.
  */
-export interface Environment {
+export interface Runner {
   /**
-   * The work its shards can run. Default `['collect']`. `machineEnvironment`
+   * The work its shards can run. Default `['collect']`. `machineRunner`
    * runs both kinds, over the machine's channel.
    */
   readonly work?: readonly ShardWork[];
@@ -794,18 +794,18 @@ export interface Environment {
     events: ShardEvents,
     signal: AbortSignal
   ): Promise<ShardOutcome>;
-  /** Deletes what the environment created, as `keep` allows. Called once. */
+  /** Deletes what the runner created, as `keep` allows. Called once. */
   close(): Promise<void>;
 }
 
 /**
- * Where a run's trials are collected, chosen with `--env` (ADR 0004). An
- * environment creates machines and opens a channel to each; MST runs the
- * shards over it. The built-in `local` collects in the `mst run` process.
+ * Where a run's trials are collected, chosen with `--runner` (ADR 0004,
+ * ADR 0013). A runner creates machines and opens a channel to each; MST runs
+ * the shards over it. The built-in `local` collects in the `mst run` process.
  */
-export interface EnvironmentDefinition {
+export interface RunnerDefinition {
   /**
-   * Checks the environment's own `--env-option`s: all but `shards` and
+   * Checks the runner's own `--runner-option`s: all but `shards` and
    * `keep`, which MST owns. Values arrive as strings. Options are recorded in
    * run.json, so they must not hold secrets.
    */
@@ -821,12 +821,12 @@ export interface EnvironmentDefinition {
   readonly maxShards?: number;
   open(
     options: Record<string, unknown>,
-    context: EnvironmentContext
-  ): Promise<Environment>;
+    context: RunnerContext
+  ): Promise<Runner>;
   /**
    * Creates the machine a detached run's coordinator runs on, for
    * `mst run --detach` and `mst grade --detach` (ADR 0007). It takes the
-   * same `--env-option`s as `open`. Without it, the environment refuses
+   * same `--runner-option`s as `open`. Without it, the runner refuses
    * `--detach`.
    */
   coordinator?(
@@ -834,18 +834,18 @@ export interface EnvironmentDefinition {
     context: CoordinatorContext
   ): Promise<CoordinatorMachine>;
   /**
-   * Prepares what runs need, once (`mst env setup <environment>`): for
-   * example, builds an image. Takes the same `--env-option`s.
+   * Prepares what runs need, once (`mst runner setup <runner>`): for
+   * example, builds an image. Takes the same `--runner-option`s.
    */
   setup?(
     options: Record<string, unknown>,
     context: SettingsContext & {
       log: (line: string) => void;
-      /** The eval's client (`mst env setup --config`), when one was given. */
+      /** The eval's client (`mst runner setup --config`), when one was given. */
       client?: string;
       /**
-       * The plugin packages an eval loads (`mst env setup --config`), as this
-       * machine has them installed (`dir`): an environment that builds
+       * The plugin packages an eval loads (`mst runner setup --config`), as this
+       * machine has them installed (`dir`): a runner that builds
        * images installs them there, since workers must run the same versions.
        */
       plugins?: ReadonlyArray<{

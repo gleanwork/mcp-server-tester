@@ -105,7 +105,7 @@ export interface ComparePairwiseOptions {
    * Where each case is compared: called with the case's id, the pairwise
    * judges' names (one preference each, in order), and `judge`, which runs
    * every pairwise judge on it here, or only those `only` names. Without it,
-   * every case is compared here. `mst grade --env` (ADR 0005) records what
+   * every case is compared here. `mst grade --runner` (ADR 0005) records what
    * workers' judges preferred, and reads those records back on the
    * coordinator; `mst grade --resume` runs only judges without a preference.
    */

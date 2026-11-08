@@ -76,7 +76,7 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
     configPath,
     JSON.stringify({
       name: 'readiness',
-      plugins: [mock('forkEnvPlugin.ts'), mock('shardTestPlugin.ts')],
+      plugins: [mock('forkRunnerPlugin.ts'), mock('shardTestPlugin.ts')],
       client: options.client ?? 'shard-test/client/probe',
       datasets: options.secondDataset
         ? ['./cases.json', './more.json']
@@ -127,12 +127,14 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
         .split('\n')
         .filter(Boolean).length,
     trial,
-    run: (env?: string, envOptions: Record<string, string> = {}) =>
+    run: (runner?: string, runnerOptions: Record<string, string> = {}) =>
       runEval({
         configPath,
         rootDir: dir,
         outputDir,
-        ...(env ? { env, envOptions: { shards: '1', ...envOptions } } : {}),
+        ...(runner
+          ? { runner, runnerOptions: { shards: '1', ...runnerOptions } }
+          : {}),
       }),
     resume: (run: string) =>
       resumeRun({
@@ -140,7 +142,7 @@ async function fixture(failLaunches: number, options: FixtureOptions = {}) {
         rootDir: dir,
         outputDir,
         run,
-        envOptions: { shards: '1' },
+        runnerOptions: { shards: '1' },
       }),
   };
 }
@@ -184,7 +186,7 @@ describe('the retry setting', () => {
       // The client marks each trial it runs here.
       const marks = path.join(path.dirname(f.configPath), 'marks.log');
       vi.stubEnv('SHARD_TEST_LOG', marks);
-      const result = await f.run('fork/env/children', {
+      const result = await f.run('fork/runner/children', {
         workerEnv: JSON.stringify(workerEnv),
       });
       expect(result.summary.metrics).toMatchObject({
@@ -236,7 +238,7 @@ describe('a run whose server is not ready', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     // The worker's one check fails; the resume's passes.
     const f = await fixture(1);
-    const first = await f.run('fork/env/children');
+    const first = await f.run('fork/runner/children');
     expect(first.summary.metrics).toMatchObject({
       passed: 0,
       failed: 0,
@@ -383,7 +385,7 @@ describe('a proxied run whose server is not ready', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const f = await fixture(0, { proxied: true, failAfter: 1 });
-    const result = await f.run('fork/env/children');
+    const result = await f.run('fork/runner/children');
     expect(result.summary.metrics).toMatchObject({
       passed: 0,
       failed: 0,
@@ -398,12 +400,12 @@ describe('a proxied run whose server is not ready', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const down = await fixture(99, { proxied: true });
-    const first = await down.run('fork/env/children');
+    const first = await down.run('fork/runner/children');
     expect(first.summary.metrics).toMatchObject({ incomplete: 2 });
     await expectSetupEndings(down, first.outputDir, notReady);
 
     const degraded = await fixture(0, { proxied: true, minTools: 2 });
-    const second = await degraded.run('fork/env/children');
+    const second = await degraded.run('fork/runner/children');
     expect(second.summary.metrics).toMatchObject({ incomplete: 2 });
     await expectSetupEndings(
       degraded,

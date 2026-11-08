@@ -62,7 +62,7 @@
           "gradedFrom": { "type": "string" },
           "supersededBy": { "type": "string" },
           "gradings": { "type": "array", "items": { "type": "string" } },
-          "environment": { "type": "string" },
+          "runner": { "type": "string" },
           "baseline": { "type": "string" },
           "datasets": {
             "type": "array",
