@@ -29,11 +29,14 @@ The fastest way to get started is using the CLI:
 ```bash
 npx @gleanwork/mcp-server-tester@rc init
 
-# Follow the interactive prompts:
-? Project name: my-mcp-tests
-? MCP transport type: stdio (local server process)
-? Server command (for stdio): node server.js
-? Install dependencies now? Yes
+# In a terminal, answer the prompts:
+Project name (my-mcp-tests):
+MCP transport type:
+  1) stdio (local server process)
+  2) http (remote server)
+Choose 1-2 (1): 1
+Server command (node server.js):
+Install dependencies now? (Y/n)
 
 ✓ Project initialized successfully!
 
@@ -115,42 +118,20 @@ See the [API Reference](./api-reference.md) for complete fixture documentation.
 
 ## Recording Tool Tests
 
-The interactive generator calls your server's tools and writes each call as a Playwright test:
+The generator calls your server's tools and writes each call as a Playwright test, with assertions suggested from the response. In a terminal, it asks which tools to call:
 
 ```bash
-npx mst generate
+npx mst generate --command "node server.js"
+```
 
-# Interactive workflow:
-? MCP transport type: stdio
-? Server command: node server.js
-✓ Connected to MCP server
-✓ Found 3 tools
+With `--tool`, it records one call and asks nothing, so a script or an agent can run it:
 
-? Select tool to test: get_weather
-? Tool arguments (JSON): { "city": "London" }
-✓ Tool called successfully
-
-Response preview:
-{
-  "city": "London",
-  "temperature": 20,
-  "conditions": "Sunny"
-}
-
-Suggested assertions:
-  Text contains:
-    - "London"
-    - "temperature"
-  Regex patterns:
-    - \d+
-
-? Test name: weather-london
-? Add text contains assertions? Yes
-? Add regex assertions? Yes
-✓ Added test "weather-london"
-
-? Add another test? No
-✓ Spec saved to tests/generated.spec.ts
+```bash
+npx mst generate --command "node server.js" --tool get_weather --args '{"city":"London"}'
+✓ Connected! Found 3 tools
+Calling get_weather...
+✓ Spec generation complete!
+Tests added: 1
 ```
 
 See the [CLI Guide](./cli.md) for more details on the `generate` command.

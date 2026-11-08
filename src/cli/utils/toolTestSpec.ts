@@ -42,7 +42,13 @@ function indent(text: string, spaces: number): string {
 /** One `test()` block for a recorded call. */
 function renderToolCheck(check: ToolCheck): string {
   const lines: string[] = [];
-  if (check.description) lines.push(`// ${check.description}`);
+  // Every line of the description is commented, so none of it runs.
+  const description = check.description
+    ? check.description.split(/\r\n|[\n\r\u2028\u2029]/)
+    : [];
+  for (const line of description) {
+    lines.push(`// ${line}`.trimEnd());
+  }
   lines.push(`test(${literal(check.id)}, async ({ mcp }) => {`);
   lines.push(
     `  const result = await mcp.callTool(${literal(check.toolName)}, ${literal(check.args)});`

@@ -2,6 +2,7 @@
  * Template generators for project scaffolding
  */
 import packageJson from '../../../package.json' with { type: 'json' };
+import { splitCommandLine } from '../utils/commandLine.js';
 
 interface ProjectAnswers {
   projectName: string;
@@ -10,26 +11,32 @@ interface ProjectAnswers {
   serverUrl?: string;
 }
 
+/** A single-quoted TypeScript string literal holding `value`. */
+function tsString(value: string): string {
+  const escaped = JSON.stringify(value)
+    .slice(1, -1)
+    .replace(/\\"/g, '"')
+    .replace(/'/g, "\\'");
+  return `'${escaped}'`;
+}
+
 export function getPlaywrightConfigTemplate(answers: ProjectAnswers): string {
+  const [command, ...args] = answers.serverCommand
+    ? splitCommandLine(answers.serverCommand)
+    : ['node', 'server.js'];
   const mcpConfig =
     answers.transport === 'stdio'
       ? `{
           transport: 'stdio' as const,
-          command: '${answers.serverCommand?.split(' ')[0] || 'node'}',
-          args: [${
-            answers.serverCommand
-              ?.split(' ')
-              .slice(1)
-              .map((arg) => `'${arg}'`)
-              .join(', ') || "'server.js'"
-          }],
+          command: ${tsString(command!)},
+          args: [${args.map(tsString).join(', ')}],
           capabilities: {
             roots: { listChanged: true },
           },
         }`
       : `{
           transport: 'http' as const,
-          serverUrl: '${answers.serverUrl || 'http://localhost:3000/mcp'}',
+          serverUrl: ${tsString(answers.serverUrl || 'http://localhost:3000/mcp')},
           capabilities: {
             roots: { listChanged: true },
           },

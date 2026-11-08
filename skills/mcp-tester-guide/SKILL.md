@@ -112,25 +112,25 @@ An extension's name is `<namespace>/<kind>/<name>`, where the kind comes from th
 
 ## CLI
 
-| Command                                         | Does                                                                                                   |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `npx @gleanwork/mcp-server-tester@rc init`      | Scaffold a project: Playwright config, a tool test, a dataset. Interactive                             |
-| `mst generate`                                  | Call tools interactively and write the calls as a Playwright spec. Interactive                         |
-| `mst login <server-url>`                        | OAuth login in a browser; the `mcp` fixture uses the stored tokens. Interactive                        |
-| `mst token <server-url> --format env\|json\|gh` | Print stored tokens for CI                                                                             |
-| `mst run --config <path>`                       | Run an eval config (`run-mcp-eval`)                                                                    |
-| `mst grade <run> --config <path>`               | Grade a stored run's traces again, as a new run                                                        |
-| `mst open`                                      | Open a run's report: the newest run, or the run or eval directory named                                |
-| `mst batch --config-dir <dir>`                  | Run several eval configs                                                                               |
-| `mst label page <run> --judge <name>`           | Label a judge's trials on a local page (`calibrate-mcp-judge`); `export` and `import` for spreadsheets |
-| `mst judges check <run> --judge <name>`         | Measure a judge against labels; `mst judges` lists judges                                              |
-| `mst clients`, `mst datasets`                   | List clients and plugin datasets                                                                       |
-| `mst auth --config <path>`                      | Sign in to an eval config's connector servers (`status`, `revoke`)                                     |
-| `mst optimize start --config <path>`            | Improve tool metadata a round at a time (`optimize-mcp-tool-metadata`)                                 |
-| `mst env setup docker`, `mst runs list`         | Prepare Docker; follow detached runs                                                                   |
-| `mst cowork setup`                              | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                       |
+| Command                                         | Does                                                                                                                       |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `npx @gleanwork/mcp-server-tester@rc init`      | Scaffold a project: Playwright config, a tool test, a dataset. `--command` or `--url`, `--name`, `--no-install`, `--force` |
+| `mst generate --tool <name> --args <json>`      | Call a tool and write the call as a Playwright test. `--command`, `--url` or `--config`; `-o`, `--snapshot`, `--name`      |
+| `mst login <server-url>`                        | OAuth login in a browser; the `mcp` fixture uses the stored tokens. `--scopes a,b`, `--force`                              |
+| `mst token <server-url> --format env\|json\|gh` | Print stored tokens for CI                                                                                                 |
+| `mst run --config <path>`                       | Run an eval config (`run-mcp-eval`)                                                                                        |
+| `mst grade <run> --config <path>`               | Grade a stored run's traces again, as a new run                                                                            |
+| `mst open`                                      | Open a run's report: the newest run, or the run or eval directory named                                                    |
+| `mst batch --config-dir <dir>`                  | Run several eval configs                                                                                                   |
+| `mst label page <run> --judge <name>`           | Label a judge's trials on a local page (`calibrate-mcp-judge`); `export` and `import` for spreadsheets                     |
+| `mst judges check <run> --judge <name>`         | Measure a judge against labels; `mst judges` lists judges                                                                  |
+| `mst clients`, `mst datasets`                   | List clients and plugin datasets                                                                                           |
+| `mst auth --config <path>`                      | Sign in to an eval config's connector servers (`status`, `revoke`)                                                         |
+| `mst optimize start --config <path>`            | Improve tool metadata a round at a time (`optimize-mcp-tool-metadata`)                                                     |
+| `mst env setup docker`, `mst runs list`         | Prepare Docker; follow detached runs                                                                                       |
+| `mst cowork setup`                              | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                           |
 
-`init`, `generate` and `login` need a terminal. An agent's shell has none, so there they fail with `Raw mode is not supported on the current process.stdin` and write nothing. As an agent, write the Playwright config and specs yourself (the `write-mcp-test` skill), and ask the user to run `mst login` in their own terminal. Every other command runs without a terminal.
+No command needs a terminal. In one, `init` and `generate` ask for what the flags leave out; in an agent's shell they take every answer from flags and name the flag they need. `generate` without `--tool` asks which tools to call, so an agent passes `--tool`. Without a terminal, `mst login` prints the sign-in URL instead of opening a browser and waits: run it in the background and give the user the URL. `2.0.0-rc.0` and older fail in an agent's shell with `Raw mode is not supported on the current process.stdin`; upgrade it.
 
 Inside a project, `npx mst` and `npx mcp-server-tester` run the same binary. Before installing, use `npx @gleanwork/mcp-server-tester@rc`: `npx mst` alone downloads an unrelated package. Every flag: [CLI reference](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/cli.md).
 

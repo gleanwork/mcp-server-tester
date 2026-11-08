@@ -9,11 +9,17 @@
  */
 
 import { createBintastic, type BintasticProject } from 'bintastic';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { StoredTokens } from '../../auth/types.js';
 import { generateServerKey } from '../../auth/storage.js';
+import { READINESS_SERVER } from '../../../tests/mocks/readyServers.js';
+
+/** A stdio server with one tool, `tool_1`, that answers "ok". */
+const SERVER_COMMAND = `${process.execPath} ${READINESS_SERVER}`;
 
 const { setupProject, teardownProject, runBin } = createBintastic({
   binPath: fileURLToPath(
@@ -563,75 +569,231 @@ describe('mst CLI', () => {
   });
 
   /**
-   * The init and generate commands are interactive Ink/React UIs that call
-   * useInput(), which requires raw mode on stdin. In the non-TTY environment
-   * that bintastic (execaNode) provides, raw mode is unavailable, so both
-   * commands exit with code 1 and print "Raw mode is not supported" to stderr.
-   *
-   * These tests document the commands' actual non-TTY behaviour so that a
-   * regression (e.g. a silent crash or a wrong exit code) is caught. They
-   * also verify which initial UI text is rendered before the crash occurs.
+   * bintastic runs the binary without a terminal, as an agent's shell or CI
+   * does. init and generate then ask nothing: they take every answer from
+   * flags and name the flag they are missing.
    */
   describe('init command', () => {
-    it('exits with a non-zero code in non-TTY mode (raw mode unavailable)', async () => {
+    it('names the server flags when it has no terminal to ask', async () => {
       const result = await runBin('init');
 
       expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        'Pass --command <command> or --url <url>'
+      );
+      expect(result.stderr).not.toContain('Raw mode');
     });
 
-    it('reports a clear Ink raw-mode error rather than an unrelated crash', async () => {
-      const result = await runBin('init');
+    it('scaffolds a project from flags', async () => {
+      const result = await runBin(
+        'init',
+        '--name',
+        'demo',
+        '--url',
+        'http://localhost:3000/mcp',
+        '--no-install'
+      );
 
-      expect(result.stderr).toContain('Raw mode is not supported');
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('Project initialized successfully!');
+      const dir = path.join(project.baseDir, 'demo');
+      for (const file of [
+        'playwright.config.ts',
+        'tests/mcp.spec.ts',
+        'data/example-dataset.json',
+        'package.json',
+        'tsconfig.json',
+        '.gitignore',
+      ]) {
+        expect(existsSync(path.join(dir, file)), file).toBe(true);
+      }
+      expect(
+        readFileSync(path.join(dir, 'playwright.config.ts'), 'utf8')
+      ).toContain("serverUrl: 'http://localhost:3000/mcp'");
     });
 
-    it('exits with a non-zero code when --name is supplied in non-TTY mode', async () => {
-      // Even with --name supplied the app still crashes because useInput is
-      // unconditional inside InitApp.
-      const result = await runBin('init', '--name', 'my-project');
+    it('writes into an existing directory only with --force', async () => {
+      const args = [
+        'init',
+        '--name',
+        'demo',
+        '--command',
+        'node server.js',
+        '--no-install',
+      ];
+      expect((await runBin(...args)).exitCode).toBe(0);
+
+      const again = await runBin(...args);
+      expect(again.exitCode).toBe(1);
+      expect(again.stderr).toContain('Pass --force');
+
+      expect((await runBin(...args, '--force')).exitCode).toBe(0);
+    });
+
+    it('rejects --command with --url', async () => {
+      const result = await runBin(
+        'init',
+        '--command',
+        'node server.js',
+        '--url',
+        'http://localhost:3000/mcp'
+      );
 
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain('Raw mode is not supported');
-    });
-
-    it('exits with a non-zero code when --dir is supplied in non-TTY mode', async () => {
-      // --dir only controls where files land; it does not bypass the TTY check.
-      const result = await runBin('init', '--dir', project.baseDir);
-
-      expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain('Raw mode is not supported');
+      expect(result.stderr).toContain('Pass --command or --url, not both.');
     });
   });
 
   describe('generate command', () => {
-    it('exits with a non-zero code in non-TTY mode (raw mode unavailable)', async () => {
+    it('names --tool when it has no terminal to ask', async () => {
       const result = await runBin('generate');
 
       expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Pass --tool <name>');
+      expect(result.stderr).not.toContain('Raw mode');
     });
 
-    it('reports a clear Ink raw-mode error rather than an unrelated crash', async () => {
-      const result = await runBin('generate');
-
-      expect(result.stderr).toContain('Raw mode is not supported');
-    });
-
-    it('exits with a non-zero code when --config points to a nonexistent file', async () => {
-      // With --config, GenerateApp skips server selection and goes straight to
-      // 'connecting'; useInput still fires before the async load completes,
-      // so the process still crashes the same way.
-      const result = await runBin('generate', '--config', 'nonexistent.json');
+    it('reports a config file it cannot read', async () => {
+      const result = await runBin(
+        'generate',
+        '--config',
+        'nonexistent.json',
+        '--tool',
+        'tool_1'
+      );
 
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain('Raw mode is not supported');
+      expect(result.stderr).toContain('Failed to load config');
     });
 
-    it('does not produce an unhandled-rejection stack trace without --config', async () => {
-      // The crash must come from the known Ink raw-mode error, not from an
-      // unexpected code path. Guard against a different class of failure.
-      const result = await runBin('generate');
+    it('rejects --args that is not a JSON object before connecting', async () => {
+      const result = await runBin(
+        'generate',
+        '--command',
+        SERVER_COMMAND,
+        '--tool',
+        'tool_1',
+        '--args',
+        '[1]'
+      );
 
-      expect(result.stderr).not.toContain('UnhandledPromiseRejection');
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('--args must be a JSON object.');
+      expect(result.stdout).not.toContain('Connecting');
+    });
+
+    it('records one call with --tool, then adds the next to the same spec', async () => {
+      const spec = path.join(project.baseDir, 'tests/generated.spec.ts');
+      const first = await runBin(
+        'generate',
+        '--command',
+        SERVER_COMMAND,
+        '--tool',
+        'tool_1'
+      );
+      expect(first.exitCode).toBe(0);
+      expect(first.stdout).toContain('Tests added: 1');
+
+      const second = await runBin(
+        'generate',
+        '--command',
+        SERVER_COMMAND,
+        '--tool',
+        'tool_1',
+        '--snapshot'
+      );
+      expect(second.exitCode).toBe(0);
+
+      const source = readFileSync(spec, 'utf8');
+      expect(source).toContain('test("tool_1-1"');
+      expect(source).toContain('mcp.callTool("tool_1", {})');
+      // The next default title skips the one the spec has.
+      expect(source).toContain('toMatchToolSnapshot("tool_1-2")');
+    });
+
+    it('writes --name, --description, --suite and --exact into a new spec', async () => {
+      const result = await runBin(
+        'generate',
+        '--command',
+        SERVER_COMMAND,
+        '--tool',
+        'tool_1',
+        '--name',
+        'answers ok',
+        '--description',
+        'First line\nglobalThis.ran = true;',
+        '--suite',
+        'Readiness tools',
+        '--exact'
+      );
+      expect(result.exitCode).toBe(0);
+
+      const source = readFileSync(
+        path.join(project.baseDir, 'tests/generated.spec.ts'),
+        'utf8'
+      );
+      expect(source).toContain('test.describe("Readiness tools"');
+      expect(source).toContain('test("answers ok"');
+      expect(source).toContain('// First line\n  // globalThis.ran = true;');
+      expect(source).toContain('toMatchToolResponse(');
+    });
+
+    it('runs a --command whose quoted path has a space', async () => {
+      const dir = path.join(project.baseDir, 'My Server');
+      mkdirSync(dir);
+      copyFileSync(READINESS_SERVER, path.join(dir, 'server.mjs'));
+      const result = await runBin(
+        'generate',
+        '--command',
+        `"${process.execPath}" "${path.join(dir, 'server.mjs')}"`,
+        '--tool',
+        'tool_1'
+      );
+
+      expect(result.stderr).toBe('');
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('Tests added: 1');
+    });
+
+    it('names the tools a server has when --tool is not one of them', async () => {
+      const result = await runBin(
+        'generate',
+        '--command',
+        SERVER_COMMAND,
+        '--tool',
+        'nope'
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        'The server has no tool "nope". Its tools: tool_1.'
+      );
+    });
+  });
+
+  describe('login command', () => {
+    it('rejects an invalid URL without a terminal', async () => {
+      const result = await runBin('login', 'not-a-url');
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Invalid URL: not-a-url');
+      expect(result.stderr).not.toContain('Raw mode');
+    });
+
+    it('reports a server it cannot reach without a terminal', async () => {
+      const result = await runBin(
+        'login',
+        'http://127.0.0.1:9/mcp',
+        '--state-dir',
+        path.join(project.baseDir, 'state')
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toContain(
+        'Authenticating with http://127.0.0.1:9/mcp'
+      );
+      expect(result.stderr).toContain('Authentication failed');
+      expect(result.stderr).not.toContain('Raw mode');
     });
   });
 
@@ -653,9 +815,31 @@ describe('mst CLI', () => {
         project.baseDir
       );
 
-      // The token command renders an error message but does not currently
-      // set a non-zero exit code when tokens are missing.
-      expect(result.stdout).toContain('No tokens found');
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain('No tokens found');
+    });
+
+    it('writes a long token on one line when its output is piped', async () => {
+      // Ink wrapped output at 80 columns, so `>> $GITHUB_ENV` got a broken
+      // token.
+      const accessToken = 'a'.repeat(900);
+      await writeTokens(project, serverUrl, {
+        accessToken,
+        tokenType: 'Bearer',
+      });
+
+      const result = await runBin(
+        'token',
+        serverUrl,
+        '--state-dir',
+        project.baseDir
+      );
+
+      expect(String(result.stdout).split('\n')).toEqual([
+        `MCP_ACCESS_TOKEN=${accessToken}`,
+        'MCP_TOKEN_TYPE=Bearer',
+      ]);
     });
 
     it('outputs tokens in env format (default)', async () => {
@@ -753,7 +937,7 @@ describe('mst CLI', () => {
       expect(result.stdout).not.toContain('MCP_REFRESH_TOKEN=');
     });
 
-    it('falls back to env format for an unknown --format value', async () => {
+    it('rejects an unknown --format value', async () => {
       await writeTokens(project, serverUrl, validTokens);
 
       const result = await runBin(
@@ -765,11 +949,8 @@ describe('mst CLI', () => {
         'not-a-real-format'
       );
 
-      // Commander passes the value through; the Ink component does not
-      // currently validate it and silently outputs nothing for unknown formats.
-      // This test documents the current behaviour so a regression is caught
-      // if the command starts crashing instead.
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Allowed choices are env, json, gh.');
     });
 
     it('includes MCP_TOKEN_EXPIRES_AT when expiresAt is set', async () => {

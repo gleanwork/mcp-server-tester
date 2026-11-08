@@ -1,6 +1,8 @@
 /**
- * The CLI bundles its terminal UI (Ink and React), so it never loads the host
- * project's React (#424). Runs against the built CLI: `npm run build` first.
+ * The CLI has no terminal UI library and loads no React. When it used Ink, Ink
+ * resolved the host project's React, and a React 19 project crashed it on
+ * startup (#424). This keeps a UI package from coming back unbundled. Runs
+ * against the built CLI: `npm run build` first.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -41,8 +43,8 @@ describe('CLI bundle', () => {
     let dir: string;
     beforeAll(() => {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mst-cli-bundle-'));
-      // Fails the run if the CLI resolves a UI package from outside its
-      // bundle, as Ink did when it found a React 19 project's `react`.
+      // Fails the run if the CLI resolves a UI package from node_modules,
+      // as Ink did when it found a React 19 project's `react`.
       fs.writeFileSync(
         path.join(dir, 'hooks.mjs'),
         `import { registerHooks } from 'node:module';
