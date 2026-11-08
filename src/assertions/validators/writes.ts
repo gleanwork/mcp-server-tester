@@ -14,6 +14,7 @@ import type { ValidationResult } from './types.js';
 import { partialMatch } from './toolCalls.js';
 import type { ExpectedWrites } from '../../evals/datasetTypes.js';
 import type { WriteEvidence, WriteRecord } from '../../types/index.js';
+import { recordEvidence } from '../../evals/writeEvidence.js';
 
 /** A write grader's result, with what it rests on. */
 export interface WritesValidationResult extends ValidationResult {
@@ -103,7 +104,7 @@ export function validateWrites(
       unclassified: true,
     }));
   const calls = expected?.calls ?? [];
-  let evidence: WriteEvidence = 'requested';
+  let evidence: WriteEvidence = recordEvidence(record);
   const missing: ExpectedWrite[] = [];
 
   if ((expected?.order ?? 'any') === 'strict') {
@@ -162,12 +163,15 @@ export function validateWrites(
   return {
     pass: true,
     evidence,
-    message:
+    message: `${
+      calls.length > 0
+        ? 'Every expected write is in the write record'
+        : 'The write record agrees with the transcript'
+    }${
       evidence === 'called'
-        ? 'Every expected write is in the record, some only as unclassified calls (called, not requested).'
-        : calls.length > 0
-          ? 'Every expected write is in the write record.'
-          : 'The write record agrees with the transcript.',
+        ? ", but it has calls MST couldn't classify: called, not requested."
+        : '.'
+    }`,
     details,
   };
 }

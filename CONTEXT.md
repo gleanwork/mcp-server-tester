@@ -195,7 +195,7 @@ The writes the dry-run proxies in front of a trial's servers recorded during the
 _Avoid_: write log, audit log
 
 **Write mode**:
-How a server in a variant handles a write, known before the run starts: `planned` or `simulated` (the dry-run proxy stops it), `server-planned` (the server stops it and marks it), `live` (it reaches the service), `unguarded` (MST can't see it, and the eval config accepts that) or `read-only` (the server has no write tools).
+How a server in a variant handles a write, known before the run starts: `planned` or `simulated` (the dry-run proxy stops it), `server-planned` (the server stops it and marks it), `live` (it reaches the service), `unguarded` (MST can't see it, and the eval config accepts that) or `read-only` (the server listed no write tools when MST checked it; a trial that calls a tool it didn't list is a `setup` failure).
 _Avoid_: write policy, dry-run mode
 
 **Write evidence**:
@@ -209,7 +209,7 @@ A write in the record with no matching call in the trial's transcript: the clien
 A write call in the transcript, to a server whose writes MST records, with no entry in the record: the call never reached the server. Fails the trial's `writes` grader.
 
 **Unclassified call**:
-A call the proxy forwarded and can't classify as a read or a write: a dispatcher's call, or a write tool's call, whose result has no planned-write mark. Gives at most `called` evidence.
+A call the proxy forwarded and can't classify as a read or a write: a dispatcher's call, or a write tool's call, whose result has no planned-write mark. A write record with one gives at most `called` evidence.
 _Avoid_: unknown write
 
 **Outcome check**:

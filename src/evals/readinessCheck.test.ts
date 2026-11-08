@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import {
   batchNotReady,
+  checkReadOnlyCalls,
   checkServersReady,
   checksServersAfterPrepare,
   READINESS_RETRY_DELAYS_MS,
@@ -115,6 +116,23 @@ describe('checkServersReady', () => {
     await expect(checkServersReady([docs])).resolves.toMatchObject({
       ready: true,
     });
+  });
+
+  it('keeps the tools a read-only server listed, and stores none of them', async () => {
+    const readiness = await checkServersReady(
+      [
+        { ...readyStdioServer({ READINESS_TOOLS: '2' }), label: 'docs' },
+        { ...readyStdioServer(), label: 'wiki' },
+      ],
+      { log: () => {}, readOnly: new Set(['docs']) }
+    );
+    expect(readiness.ready).toBe(true);
+    if (!readiness.ready) return;
+    expect(readiness.readOnlyTools).toEqual(
+      new Map([['docs', new Set(['tool_1', 'tool_2'])]])
+    );
+    for (const server of readiness.servers)
+      expect(server).not.toHaveProperty('tools');
   });
 
   it('fails a server that lists no tools', async () => {
@@ -436,6 +454,44 @@ describe('readinessRetryDelaysMs', () => {
     expect(() => readinessRetryDelaysMs({})).toThrow(
       'Set MST_MCP_READINESS_RETRY_S instead.'
     );
+  });
+});
+
+describe('checkReadOnlyCalls', () => {
+  const listed = new Map([['docs', new Set(['search'])]]);
+  function calling(server: string, name: string): ClientRunResult {
+    return {
+      finalText: 'Done.',
+      events: [
+        { kind: 'tool_call', source: 'mcp', server, name, arguments: {} },
+      ],
+    };
+  }
+
+  it('passes a trial that calls only the tools a read-only server listed', () => {
+    for (const name of ['search', 'docs.search']) {
+      const result = calling('docs', name);
+      expect(checkReadOnlyCalls(result, listed)).toBe(result);
+    }
+  });
+
+  it("ends a trial that calls a tool its read-only server didn't list as setup, for good", () => {
+    const checked = checkReadOnlyCalls(calling('docs', 'docs.save'), listed);
+    expect(checked.error).toMatch(
+      /^The client called docs\.save, which its server didn't list when MST checked it: MST can't tell whether that call wrote\./
+    );
+    expect(checked.ending).toMatchObject({
+      kind: 'infrastructure',
+      broke: 'setup',
+      retryable: false,
+    });
+  });
+
+  it('leaves servers with a write mode, and trials no check covered, alone', () => {
+    const other = calling('slack', 'send_message');
+    expect(checkReadOnlyCalls(other, listed)).toBe(other);
+    const unchecked = calling('docs', 'save');
+    expect(checkReadOnlyCalls(unchecked, undefined)).toBe(unchecked);
   });
 });
 
@@ -919,6 +975,35 @@ describe('a case on its own client', () => {
     expect(await count(directServer.log)).toBe(1);
     expect(apiRun).not.toHaveBeenCalled();
     expect(claudeRun).not.toHaveBeenCalled();
+  });
+
+  it("fails a trial that called a tool its read-only server didn't list when MST checked it", async () => {
+    // The server lists more tools to the client than it did to MST's check.
+    vi.spyOn(getClient('claude-code'), 'run').mockResolvedValue({
+      finalText: 'Saved.',
+      events: [
+        {
+          kind: 'tool_call',
+          source: 'mcp',
+          server: 'docs',
+          name: 'save',
+          arguments: {},
+        },
+      ],
+    });
+    const { server } = await docs();
+    const execute = createEvalCaseExecutor({
+      servers: [server],
+      client: { type: 'claude-code' },
+      evalConfig,
+      env,
+    });
+    const execution = await execute({ id: 'one', input: 'one' });
+    expect(execution.error).toMatch(/^The client called docs\.save/);
+    expect(executionEnding(execution)).toMatchObject({
+      ...setupEnding,
+      retryable: false,
+    });
   });
 
   it('leaves a cowork case in an api variant to the check Cowork runs after prepare', async () => {

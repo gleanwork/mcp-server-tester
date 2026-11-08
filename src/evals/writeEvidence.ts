@@ -26,3 +26,14 @@ export function weakestWriteEvidence(
   }
   return weakest === undefined ? undefined : WRITE_EVIDENCE_LEVELS[weakest];
 }
+
+/**
+ * What a trial's write record shows by itself: `requested` when its
+ * proxies classified every call they forwarded, `called` when any of them is
+ * unclassified (MST saw the call, not whether it asked for a write).
+ */
+export function recordEvidence(record: {
+  unclassified: readonly unknown[];
+}): WriteEvidence {
+  return record.unclassified.length > 0 ? 'called' : 'requested';
+}

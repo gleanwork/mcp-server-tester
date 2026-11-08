@@ -43,6 +43,7 @@ import {
   matchToolCalls,
 } from '../assertions/validators/toolCalls.js';
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
+import { recordEvidence } from './writeEvidence.js';
 import {
   judgeIdentityOf,
   judgeNameOf,
@@ -500,7 +501,7 @@ function graderWriteEvidence(
     return 'called';
   if (grader === 'judge')
     return graded.writeRecord
-      ? 'requested'
+      ? recordEvidence(graded.writeRecord)
       : clientEvidenceProblem(graded.evidence) === undefined
         ? 'called'
         : 'claimed';

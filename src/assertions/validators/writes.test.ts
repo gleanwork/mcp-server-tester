@@ -89,6 +89,27 @@ describe('validateWrites', () => {
     expect(result).toMatchObject({ pass: true, evidence: 'called' });
   });
 
+  it('rates a record with unclassified calls as called, whatever the case expects', () => {
+    const unmarked = record({
+      writes: [write('create_note')],
+      unclassified: [
+        {
+          server: 'notes',
+          tool: 'archive_note',
+          arguments: {},
+          reason: 'unmarked',
+        },
+      ],
+    });
+    for (const expected of [undefined, { calls: [{ tool: 'create_note' }] }]) {
+      const result = validateWrites(unmarked, expected);
+      expect(result).toMatchObject({ pass: true, evidence: 'called' });
+      expect(result.message).toMatch(
+        /calls MST couldn't classify: called, not requested\.$/
+      );
+    }
+  });
+
   it('checks order when it is strict', () => {
     const writes = [write('delete_note'), write('create_note')];
     expect(

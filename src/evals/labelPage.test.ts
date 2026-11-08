@@ -28,7 +28,7 @@ import {
 // A server MST's readiness check reaches, in process: no spawn per batch.
 let docsServer: ReadinessHttpServer;
 beforeAll(async () => {
-  docsServer = await startReadinessHttpServer();
+  docsServer = await startReadinessHttpServer({ tools: ['search'] });
 });
 afterAll(() => docsServer.close());
 

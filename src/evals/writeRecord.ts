@@ -22,6 +22,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 import type { CaseExecution } from './caseExecution.js';
+import { thrownEnding } from './trialEnding.js';
 import type { EvalCase } from './datasetTypes.js';
 import type { ClientRunResult, TranscriptEvent } from './evalFrameworkTypes.js';
 import { redactedClientRun } from './clientSecrets.js';
@@ -126,7 +127,7 @@ export class WriteRecordLedger {
   ): Promise<WriteRecord | undefined> {
     await this.close(window);
     if (!this.recording) return undefined;
-    const candidates: Array<{ key: string; line: Line }> = [];
+    const inWindow: Array<{ key: string; line: Line }> = [];
     // The latest write-tool list of each recorded server.
     const writeTools = new Map<string, Set<string>>();
     for (const file of this.files) {
@@ -141,8 +142,8 @@ export class WriteRecordLedger {
           continue;
         }
         const key = `${file}\0${line}`;
-        if (line < from || line >= to || this.claimed.has(key)) continue;
-        candidates.push({
+        if (line < from || line >= to) continue;
+        inWindow.push({
           key,
           line: {
             ...record,
@@ -154,6 +155,9 @@ export class WriteRecordLedger {
         });
       }
     }
+    // From here to the claims below nothing awaits, so another trial's
+    // record can't claim a line between this check and this trial's claim.
+    const candidates = inWindow.filter(({ key }) => !this.claimed.has(key));
     if (writeTools.size === 0 && candidates.length === 0) return undefined;
 
     // Each call takes the first unclaimed line it matches.
@@ -256,9 +260,12 @@ function markSimulatedWrites(
 type Executor = (evalCase: EvalCase) => Promise<CaseExecution>;
 
 /**
- * `executor`, with each completed trial's write record attached
- * (`writeRecord`). `executor` returns redacted transcripts, so each line is
- * redacted with the same `secrets` before it is matched.
+ * `executor`, with each trial's write record attached (`writeRecord`).
+ * `executor` returns redacted transcripts, so each line is redacted with the
+ * same `secrets` before it is matched. A trial that failed, or threw, still
+ * gets its record: what the proxies stopped while it ran, matched to no
+ * transcript, so each of its writes is unreported. A thrown error becomes a
+ * failed execution.
  */
 export function withWriteRecords(
   executor: Executor,
@@ -273,12 +280,18 @@ export function withWriteRecords(
     try {
       execution = await executor(evalCase);
     } catch (error) {
-      await ledger.close(window);
-      throw error;
+      // As `failedExecution` makes it; caseExecution.ts imports this module.
+      execution = {
+        kind: 'failed',
+        response: undefined,
+        error: error instanceof Error ? error.message : String(error),
+        ending: thrownEnding(error),
+      };
     }
     if (execution.kind !== 'completed') {
-      await ledger.close(window);
-      return execution;
+      const record = await ledger.record(window, [], secrets());
+      const own = withoutWriteRecord(execution);
+      return record ? { ...own, writeRecord: record } : own;
     }
     const { toolCalls } = execution.response as { toolCalls?: unknown };
     const lists = [
@@ -296,11 +309,10 @@ export function withWriteRecords(
 }
 
 /** `execution` without a write record a client set itself: only MST's counts. */
-function withoutWriteRecord(execution: CaseExecution): CaseExecution {
-  if (execution.kind !== 'completed' || !('writeRecord' in execution))
-    return execution;
+function withoutWriteRecord<T extends CaseExecution>(execution: T): T {
+  if (!('writeRecord' in execution)) return execution;
   const { writeRecord: _own, ...rest } = execution;
-  return rest;
+  return rest as T;
 }
 
 /**

@@ -986,9 +986,13 @@ Every server in every variant has a write mode before the run starts, or the run
 | `server-planned` | The server stops it and marks its result with the connector's `plannedWriteKey`; the proxy forwards the call and records it. | A connector with `plannedWriteKey` whose proxy sets `forwardWrites`                     |
 | `unguarded`      | It reaches the server, and MST can't see it.                                                                                 | `"writes": { "<label>": "unguarded" }` in the eval config                               |
 | `live`           | It reaches the service.                                                                                                      | `"writes": { "<label>": "live" }`, and `mst run --allow-live-writes`                    |
-| `read-only`      | The server has no write tools.                                                                                               | None of the above                                                                       |
+| `read-only`      | The server lists no write tools when MST checks it.                                                                          | None of the above                                                                       |
 
-When the run loads, MST lists the tools of each `read-only` server it can launch. A tool that isn't read-only, by the proxy's rule (`readOnlyHint: true` and not `destructiveHint: true`), stops the run and names the server and its tools. A server MST can't list here is checked by the [readiness check](#server-readiness) before its first trial instead. The run also doesn't start when:
+When the run loads, MST lists the tools of each `read-only` server it can launch. A tool that isn't read-only, by the proxy's rule (`readOnlyHint: true` and not `destructiveHint: true`), stops the run and names the server and its tools. A server MST can't list here is checked by the [readiness check](#server-readiness) before its first trial instead.
+
+MST doesn't sit between a `read-only` server and its client, so it checks each trial's transcript instead: a call to a tool the server didn't list at the readiness check ends the trial as a `setup` failure that `--resume` doesn't retry, `The client called docs.save, which its server didn't list when MST checked it: ...`. The server listed more tools to its client than to MST, for example because its tools depend on who signs in. MST can't stop that call, so put a server like that behind a connector's dry-run proxy.
+
+The run also doesn't start when:
 
 - a server is `live` without `--allow-live-writes`, or a case lists writes on a run with a `live` server: a live write case needs an outcome check, which MST doesn't have yet;
 - compared variants' servers stop writes in different ways (`planned`, `simulated`, `server-planned`), so the same request gets different replies;

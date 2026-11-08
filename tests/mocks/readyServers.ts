@@ -13,7 +13,12 @@ export const READINESS_SERVER = fileURLToPath(
   new URL('./readinessServer.mjs', import.meta.url)
 );
 
-/** A stdio server that lists `READINESS_TOOLS` tools (default 1). */
+/**
+ * A stdio server that lists `READINESS_TOOLS` tools: a count (default 1) or
+ * their names, comma-separated. A test whose client reports calls lists
+ * the tools it calls: MST fails a trial that calls a tool its read-only
+ * server didn't list.
+ */
 export function readyStdioServer(
   env: Record<string, string> = {}
 ): StdioMCPConfig {
@@ -34,7 +39,8 @@ export interface ReadinessHttpServer {
 /** The HTTP server, on a free local port. */
 export function startReadinessHttpServer(
   options: {
-    tools?: number;
+    /** A count (`tool_1`, ...) or the tools' names. */
+    tools?: number | string[];
     failTimes?: number;
     log?: string;
     stallList?: boolean;

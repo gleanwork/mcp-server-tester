@@ -34,7 +34,11 @@ import {
   proxiedBatch,
   type ProxiedBatch,
 } from '../prepareClientBatch.js';
-import { readinessRetryDelaysMs, readyBatch } from '../readinessCheck.js';
+import {
+  checkReadOnlyCalls,
+  readinessRetryDelaysMs,
+  readyBatch,
+} from '../readinessCheck.js';
 import { resolveServerSecrets } from '../serverSecrets.js';
 import { BatchWriteRecords, WriteRecordLedger } from '../writeRecord.js';
 import { readOnlyServerLabels } from '../writeModes.js';
@@ -482,12 +486,18 @@ export async function collectShard(
           : undefined;
       const requests = proxied?.requests ?? declared;
       const context = proxied ? withoutToolVariant(baseContext) : baseContext;
-      // A transcript under the tools' original names (`final`: its request is over).
+      // A transcript under the tools' original names (`final`: its request
+      // is over), its calls on `read-only` servers checked against the tools
+      // they listed.
       const settled = (
         index: number,
         result: ClientRunResult,
         final: boolean
-      ) => (proxied ? proxied.settle(index, result, final) : result);
+      ) =>
+        checkReadOnlyCalls(
+          proxied ? proxied.settle(index, result, final) : result,
+          ready.readOnlyTools
+        );
       try {
         const reported = new Map<
           number,
