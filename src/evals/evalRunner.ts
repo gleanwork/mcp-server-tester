@@ -803,9 +803,7 @@ export function executedTrialResult(
     clientTelemetry: clientExecution?.telemetry,
     clientMetadata,
     ...(artifacts ? { artifacts } : {}),
-    ...(clientExecution?.writeRecord
-      ? { writeRecord: clientExecution.writeRecord }
-      : {}),
+    ...(execution.writeRecord ? { writeRecord: execution.writeRecord } : {}),
   };
 }
 

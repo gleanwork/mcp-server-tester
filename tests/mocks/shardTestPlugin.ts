@@ -86,6 +86,15 @@ async function probe(
       };
     }
   }
+  // Calls a tool its one server never listed, with no server named: MST
+  // attributes the call to that server, which is read-only.
+  if (input.prompt === 'unlisted-write')
+    return {
+      finalText: 'Saved.',
+      events: [
+        { kind: 'tool_call', source: 'mcp', name: 'save', arguments: {} },
+      ],
+    };
   // The desktop kept only the prompt's beginning: a retry gets the same.
   if (input.prompt === 'truncated')
     return {

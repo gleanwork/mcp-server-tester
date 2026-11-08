@@ -399,7 +399,7 @@ describe('toolCallEvents', () => {
     { transport: 'stdio' as const, command: 'node', label: 'tickets' },
   ];
 
-  it('keeps parser provenance over prefixes and strips only MCP server prefixes', () => {
+  it('keeps parser provenance over prefixes and strips a prefix only from a call with no server', () => {
     const calls: readonly LLMToolCall[] = [
       { name: 'docs.search', arguments: {} },
       { name: 'docs.Read', arguments: {}, source: 'builtin', server: 'docs' },
@@ -416,7 +416,8 @@ describe('toolCallEvents', () => {
     ).toEqual([
       { name: 'search', source: 'mcp', server: 'docs' },
       { name: 'docs.Read', source: 'builtin', server: undefined },
-      { name: 'search', source: 'mcp', server: 'tickets' },
+      // It names its server, so `docs.search` is that server's tool name.
+      { name: 'docs.search', source: 'mcp', server: 'tickets' },
       { name: 'search', source: 'mcp', server: 'external' },
       { name: 'unknown', source: 'builtin', server: undefined },
     ]);

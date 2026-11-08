@@ -13,6 +13,7 @@ import type { ClientResponse } from './caseExecution.js';
 import type { ClientMetadata } from './clientTelemetryTypes.js';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
+import type { WriteRecord } from '../types/index.js';
 
 afterEach(() => resetPluginsForTests());
 
@@ -200,6 +201,61 @@ describe('gradeTrial', () => {
       pass: true,
       judgeName: 'only/judge/j',
     });
+  });
+
+  it("rates a judge's write evidence by what the record shows", async () => {
+    installPlugins([
+      {
+        meta: { name: 'write-judges', namespace: 'wj' },
+        judges: {
+          j: {
+            schema: z.object({}).passthrough(),
+            evaluate: async () => ({ score: 1 }),
+          },
+        },
+      },
+    ]);
+    const writeRecord: WriteRecord = {
+      writes: [],
+      unreported: 0,
+      unrecorded: [],
+      unclassified: [],
+      attribution: 'exclusive',
+    };
+    const evidence = async (record: WriteRecord) =>
+      (
+        await gradeTrial(
+          { judges: ['wj/judge/j'] },
+          { response: 'x', writeRecord: record }
+        )
+      ).scores.judge?.writeEvidence;
+    expect(
+      await evidence({
+        ...writeRecord,
+        unclassified: [
+          {
+            server: 'notes',
+            tool: 'dispatch',
+            target: 'create_note',
+            arguments: {},
+            reason: 'dispatch',
+          },
+        ],
+      })
+    ).toBe('called');
+    expect(
+      await evidence({
+        ...writeRecord,
+        writes: [
+          {
+            server: 'notes',
+            tool: 'create_note',
+            arguments: {},
+            mode: 'planned',
+          },
+        ],
+      })
+    ).toBe('requested');
   });
 
   it('records the identity of the judge that gave each score, case judges included', async () => {

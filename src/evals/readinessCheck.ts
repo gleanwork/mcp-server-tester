@@ -34,6 +34,7 @@ import {
   type McpServerReadiness,
 } from './mcpReadiness.js';
 import { infrastructureEnding } from './trialEnding.js';
+import { eventServer } from './clientTranscript.js';
 import { ProxyUpstreamError } from './toolSurfaceProxy.js';
 import { formatMCPConnectionFailure } from '../mcp/connectionDiagnostics.js';
 
@@ -110,9 +111,20 @@ export interface ReadinessCheckOptions {
   readOnly?: ReadonlySet<string>;
 }
 
+/**
+ * The tools each `read-only` server listed when it was checked, by label
+ * (ADR 0014). A trial that calls another tool on one of them reached a tool
+ * MST never saw as read-only (`checkReadOnlyCalls`).
+ */
+export type ReadOnlyTools = ReadonlyMap<string, ReadonlySet<string>>;
+
 /** Whether a batch's servers are ready, and why not. */
 export type ServersReadiness =
-  | { ready: true; servers: McpServerReadiness[] }
+  | {
+      ready: true;
+      servers: McpServerReadiness[];
+      readOnlyTools: ReadOnlyTools;
+    }
   | { ready: false; servers: McpServerReadiness[]; reason: string };
 
 function logLine(options: ReadinessCheckOptions): (line: string) => void {
@@ -160,6 +172,15 @@ export async function checkServersReady(
       results[index] = again[k]!;
     });
   }
+  const readOnlyTools: ReadOnlyTools = new Map(
+    results.flatMap((result) =>
+      result.tools && options.readOnly?.has(result.label) === true
+        ? [[result.label, new Set(result.tools)] as const]
+        : []
+    )
+  );
+  // The tool names are for the check after each trial, not for results.
+  for (const result of results) delete result.tools;
   const notReady = results.filter((result) => !isMcpServerReady(result));
   const unguarded = results.filter(
     (result) =>
@@ -180,7 +201,8 @@ export async function checkServersReady(
           '; '
         )}. Put each behind a connector's dry-run proxy, or accept its writes in the eval config with \`"writes": { "<label>": "unguarded" }\` (ADR 0014).`,
     };
-  if (notReady.length === 0) return { ready: true, servers: results };
+  if (notReady.length === 0)
+    return { ready: true, servers: results, readOnlyTools };
   return {
     ready: false,
     servers: results,
@@ -242,6 +264,46 @@ export function readinessSetup(
 }
 
 /**
+ * `result`, failed when its transcript calls a tool on a `read-only` server
+ * that the server didn't list when MST checked it (ADR 0014). MST doesn't
+ * sit between a direct server and its client, so a server that lists more
+ * tools to the client than to MST's check (one whose tools depend on who
+ * signs in, say) could take a write MST never saw. The trial can't count:
+ * it ends as a `setup` failure that a retry can't fix. `servers` are the
+ * trial's, so a call with no server on a one-server run is that server's,
+ * as its transcript will say.
+ */
+export function checkReadOnlyCalls(
+  result: ClientRunResult,
+  readOnlyTools: ReadOnlyTools | undefined,
+  servers: readonly MCPConfig[]
+): ClientRunResult {
+  if (!readOnlyTools?.size) return result;
+  const unlisted = new Set<string>();
+  for (const event of result.events) {
+    if (event.kind !== 'tool_call' || event.source !== 'mcp') continue;
+    const server = eventServer(event, servers);
+    const listed = server === undefined ? undefined : readOnlyTools.get(server);
+    if (!server || !listed) continue;
+    if (!listed.has(event.name)) unlisted.add(`${server}.${event.name}`);
+  }
+  if (unlisted.size === 0) return result;
+  const reason = `The client called ${[...unlisted].join(', ')}, which ${unlisted.size === 1 ? 'its server' : 'their servers'} didn't list when MST checked ${unlisted.size === 1 ? 'it' : 'them'}: MST can't tell whether ${unlisted.size === 1 ? 'that call' : 'those calls'} wrote. Put the server behind a connector's dry-run proxy, or declare its write mode in the eval config's \`writes\` (ADR 0014).`;
+  return {
+    ...result,
+    error: reason,
+    ending: infrastructureEnding('setup', reason, false),
+  };
+}
+
+/** How a batch's servers stand before its first trial: see {@link batchNotReady}. */
+interface BatchServers {
+  notReady?: () => ClientRunResult;
+  /** The `read-only` servers' tools, when the batch was checked here. */
+  readOnlyTools?: ReadOnlyTools;
+}
+
+/**
  * Checks a batch's servers before its first trial. Returns the result for
  * each of its trials when they aren't ready, or `undefined` when the batch
  * can run: its servers are ready, it has none, or its client checks them
@@ -264,8 +326,16 @@ export async function batchNotReady(
     proxied?: boolean;
   } = {}
 ): Promise<(() => ClientRunResult) | undefined> {
+  return (await batchServers(definition, servers, options)).notReady;
+}
+
+async function batchServers(
+  definition: ClientDefinition,
+  servers: readonly MCPConfig[],
+  options: ReadinessCheckOptions & { proxied?: boolean }
+): Promise<BatchServers> {
   if (readinessSetup(definition, options.proxied === true) === 'after-prepare')
-    return undefined;
+    return {};
   // Labeled first, so each keeps the name its place in the set gives it.
   const checkable = servers
     .map((server, index) => ({
@@ -273,19 +343,33 @@ export async function batchNotReady(
       label: mcpServerLabel(server, index),
     }))
     .filter((server) => !usesClientResolvedFields(server));
-  if (!checkable.length) return undefined;
+  if (!checkable.length) return {};
   const readiness = await checkServersReady(checkable, options);
-  if (readiness.ready) return undefined;
+  if (readiness.ready)
+    return readiness.readOnlyTools.size > 0
+      ? { readOnlyTools: readiness.readOnlyTools }
+      : {};
   logLine(options)(
     `[mst] ${options.batch ?? 'The batch'} didn't run: ${readiness.reason}`
   );
-  return () => notReadyResult(readiness);
+  return { notReady: () => notReadyResult(readiness) };
 }
 
-/** A batch that can't run, or the proxy it runs through (when it has one). */
+/**
+ * A batch that can't run, or the proxy it runs through (when it has one)
+ * and the tools its `read-only` servers listed, for `checkReadOnlyCalls`.
+ */
 export type BatchReadiness<P> =
-  | { notReady: () => ClientRunResult; proxy?: undefined }
-  | { notReady?: undefined; proxy: P | undefined };
+  | {
+      notReady: () => ClientRunResult;
+      proxy?: undefined;
+      readOnlyTools?: undefined;
+    }
+  | {
+      notReady?: undefined;
+      proxy: P | undefined;
+      readOnlyTools?: ReadOnlyTools;
+    };
 
 /**
  * Readies a batch before its first trial: checks its declared servers
@@ -302,14 +386,15 @@ export async function readyBatch<P>(
   startProxy: (() => Promise<P>) | undefined,
   options: ReadinessCheckOptions = {}
 ): Promise<BatchReadiness<P>> {
-  const notReady = await batchNotReady(definition, servers, {
+  const { notReady, readOnlyTools } = await batchServers(definition, servers, {
     ...options,
     proxied: startProxy !== undefined,
   });
   if (notReady) return { notReady };
-  if (!startProxy) return { proxy: undefined };
+  const checked = readOnlyTools ? { readOnlyTools } : {};
+  if (!startProxy) return { proxy: undefined, ...checked };
   try {
-    return { proxy: await startProxy() };
+    return { proxy: await startProxy(), ...checked };
   } catch (error) {
     if (!(error instanceof ProxyUpstreamError)) throw error;
     // Recorded as the check records its own failures: one that connected

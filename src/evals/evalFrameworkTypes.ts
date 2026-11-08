@@ -139,7 +139,16 @@ export interface TranscriptEvent {
    */
   kind: 'tool_call' | 'skill' | 'command' | 'subagent' | 'tool_search';
   source: 'mcp' | 'builtin';
+  /**
+   * The tool's name. With `server`, exactly as that server lists it: MST
+   * never reads a `<server>.` prefix off it, so a tool named `docs.search`
+   * stays `docs.search`.
+   */
   name: string;
+  /**
+   * The label of the MCP server the call went to. A client that knows it
+   * sets it; on a one-server run MST fills it in.
+   */
   server?: string;
   arguments?: Record<string, unknown>;
   output?: string;

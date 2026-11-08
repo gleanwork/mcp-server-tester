@@ -47,7 +47,11 @@ import {
 } from './clientSecrets.js';
 import { ClientUnavailableError } from './clientUnavailable.js';
 import { stableJson } from '../skills/skillEntry.js';
-import { checkServersReady, notReadyResult } from './readinessCheck.js';
+import {
+  checkReadOnlyCalls,
+  checkServersReady,
+  notReadyResult,
+} from './readinessCheck.js';
 import { readOnlyServerLabels } from './writeModes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { failedAfterClient, thrownEnding } from './trialEnding.js';
@@ -653,11 +657,15 @@ async function runSessionBatch(
         input: { prompt: request.input.prompt },
       });
       resetBeforeCase = outcome.continuation === 'reset';
-      // Before the reset changes what the desktop shows.
-      const result =
+      // Before the reset changes what the desktop shows. Its calls on
+      // `read-only` servers are checked against the tools they listed.
+      const result = checkReadOnlyCalls(
         resetBeforeCase && outcome.result.error
           ? await withDiagnosis(session, outcome.result)
-          : outcome.result;
+          : outcome.result,
+        readiness?.ready ? readiness.readOnlyTools : undefined,
+        target?.servers ?? []
+      );
       results.push(result);
       // A copy: the batch adds to its results when it ends.
       await reportResult?.(index, redactedClientRun(result, secrets));

@@ -83,7 +83,7 @@ async function storedRun(): Promise<string> {
       datasets: ['./cases.json'],
       client: 'lps/client/scripted',
       redactStoredResponses: false,
-      servers: { docs: readyStdioServer() },
+      servers: { docs: readyStdioServer({ READINESS_TOOLS: 'search' }) },
       judges: ['lps/judge/keyword'],
       pairwiseJudges: ['lps/pairwise-judge/longer'],
       variants: [

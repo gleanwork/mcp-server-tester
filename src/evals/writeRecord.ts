@@ -22,9 +22,12 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 import type { CaseExecution } from './caseExecution.js';
+import { thrownEnding } from './trialEnding.js';
 import type { EvalCase } from './datasetTypes.js';
 import type { ClientRunResult, TranscriptEvent } from './evalFrameworkTypes.js';
 import { redactedClientRun } from './clientSecrets.js';
+import { withEventServers } from './clientTranscript.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import {
   readWriteRecordLines,
   writeRecordLength,
@@ -60,16 +63,12 @@ function redacted(value: unknown, secrets: readonly string[]): unknown {
   return event?.arguments;
 }
 
-function namesTool(event: TranscriptEvent, server: string, tool: string) {
-  return event.name === tool || event.name === `${server}.${tool}`;
-}
-
 function matches(event: TranscriptEvent, line: Line): boolean {
   return (
     event.kind === 'tool_call' &&
     event.source === 'mcp' &&
     event.server === line.server &&
-    namesTool(event, line.server, line.tool) &&
+    event.name === line.tool &&
     isDeepStrictEqual(line.arguments ?? {}, event.arguments ?? {})
   );
 }
@@ -126,7 +125,7 @@ export class WriteRecordLedger {
   ): Promise<WriteRecord | undefined> {
     await this.close(window);
     if (!this.recording) return undefined;
-    const candidates: Array<{ key: string; line: Line }> = [];
+    const inWindow: Array<{ key: string; line: Line }> = [];
     // The latest write-tool list of each recorded server.
     const writeTools = new Map<string, Set<string>>();
     for (const file of this.files) {
@@ -141,8 +140,8 @@ export class WriteRecordLedger {
           continue;
         }
         const key = `${file}\0${line}`;
-        if (line < from || line >= to || this.claimed.has(key)) continue;
-        candidates.push({
+        if (line < from || line >= to) continue;
+        inWindow.push({
           key,
           line: {
             ...record,
@@ -154,6 +153,9 @@ export class WriteRecordLedger {
         });
       }
     }
+    // From here to the claims below nothing awaits, so another trial's
+    // record can't claim a line between this check and this trial's claim.
+    const candidates = inWindow.filter(({ key }) => !this.claimed.has(key));
     if (writeTools.size === 0 && candidates.length === 0) return undefined;
 
     // Each call takes the first unclaimed line it matches.
@@ -171,13 +173,10 @@ export class WriteRecordLedger {
       const server = event.server;
       const tools = server === undefined ? undefined : writeTools.get(server);
       if (!server || !tools) continue;
-      const tool = event.name.startsWith(`${server}.`)
-        ? event.name.slice(server.length + 1)
-        : event.name;
-      if (tools.has(tool))
+      if (tools.has(event.name))
         unrecorded.push({
           server,
-          tool,
+          tool: event.name,
           ...(event.id !== undefined ? { eventId: event.id } : {}),
         });
     }
@@ -243,7 +242,7 @@ function markSimulatedWrites(
           !used.has(candidate) &&
           event.server === candidate.server &&
           (event.source === undefined || event.source === 'mcp') &&
-          namesTool(event, candidate.server, candidate.tool) &&
+          event.name === candidate.tool &&
           isDeepStrictEqual(candidate.arguments ?? {}, event.arguments ?? {})
       );
       if (!write) continue;
@@ -256,9 +255,12 @@ function markSimulatedWrites(
 type Executor = (evalCase: EvalCase) => Promise<CaseExecution>;
 
 /**
- * `executor`, with each completed trial's write record attached
- * (`writeRecord`). `executor` returns redacted transcripts, so each line is
- * redacted with the same `secrets` before it is matched.
+ * `executor`, with each trial's write record attached (`writeRecord`).
+ * `executor` returns redacted transcripts, so each line is redacted with the
+ * same `secrets` before it is matched. A trial that failed, or threw, still
+ * gets its record: what the proxies stopped while it ran, matched to no
+ * transcript, so each of its writes is unreported. A thrown error becomes a
+ * failed execution.
  */
 export function withWriteRecords(
   executor: Executor,
@@ -273,12 +275,18 @@ export function withWriteRecords(
     try {
       execution = await executor(evalCase);
     } catch (error) {
-      await ledger.close(window);
-      throw error;
+      // As `failedExecution` makes it; caseExecution.ts imports this module.
+      execution = {
+        kind: 'failed',
+        response: undefined,
+        error: error instanceof Error ? error.message : String(error),
+        ending: thrownEnding(error),
+      };
     }
     if (execution.kind !== 'completed') {
-      await ledger.close(window);
-      return execution;
+      const record = await ledger.record(window, [], secrets());
+      const own = withoutWriteRecord(execution);
+      return record ? { ...own, writeRecord: record } : own;
     }
     const { toolCalls } = execution.response as { toolCalls?: unknown };
     const lists = [
@@ -296,11 +304,10 @@ export function withWriteRecords(
 }
 
 /** `execution` without a write record a client set itself: only MST's counts. */
-function withoutWriteRecord(execution: CaseExecution): CaseExecution {
-  if (execution.kind !== 'completed' || !('writeRecord' in execution))
-    return execution;
+function withoutWriteRecord<T extends CaseExecution>(execution: T): T {
+  if (!('writeRecord' in execution)) return execution;
   const { writeRecord: _own, ...rest } = execution;
-  return rest;
+  return rest as T;
 }
 
 /**
@@ -334,11 +341,21 @@ export class BatchWriteRecords {
    * `result` redacted with the batch's secrets, without a record the client
    * set itself, and with its trial's write record and simulated writes
    * marked. A trial that never started (its servers weren't ready) has none.
+   * `servers` are the trial's: on a one-server run, an MCP call with no
+   * server is that server's, as its transcript will say.
    */
-  async attach(key: string, result: ClientRunResult): Promise<ClientRunResult> {
+  async attach(
+    key: string,
+    result: ClientRunResult,
+    servers: readonly MCPConfig[]
+  ): Promise<ClientRunResult> {
     const { writeRecord: _own, ...clientResult } = result;
     const secrets = this.secrets();
-    const redactedResult = redactedClientRun(clientResult, secrets);
+    const redacted = redactedClientRun(clientResult, secrets);
+    const redactedResult = {
+      ...redacted,
+      events: withEventServers(redacted.events, servers),
+    };
     const window = this.windows.get(key);
     if (!window) return redactedResult;
     let record = this.records.get(key);

@@ -20,13 +20,36 @@ function attributed(
     throw new Error(
       "A client returned a transcript event with `source: 'host'`; it is now `source: 'builtin'` (the client's built-in tools)."
     );
+  return withEventServers(events, servers);
+}
+
+/**
+ * `events` with each MCP event's server, as {@link eventServer} names it.
+ * Anything that matches events to a server before the runner boundary
+ * attributes them (the write ledger on a batch) uses this first.
+ */
+export function withEventServers(
+  events: TranscriptEvent[],
+  servers: readonly MCPConfig[]
+): TranscriptEvent[] {
   if (servers.length !== 1) return events;
-  const label = mcpServerLabel(servers[0]!, 0);
   return events.map((event) =>
     event.source === 'mcp' && event.server === undefined
-      ? { ...event, server: label }
+      ? { ...event, server: eventServer(event, servers) }
       : event
   );
+}
+
+/**
+ * The server an MCP event's call went to: its own `server`, or on a
+ * one-server run, that server's label.
+ */
+export function eventServer(
+  event: TranscriptEvent,
+  servers: readonly MCPConfig[]
+): string | undefined {
+  if (event.server !== undefined || servers.length !== 1) return event.server;
+  return mcpServerLabel(servers[0]!, 0);
 }
 
 /** Only built-in fixtures qualify tool names with their server label. */
@@ -176,9 +199,14 @@ export function toolCallEvents(
   servers: MCPConfig[] = []
 ): TranscriptEvent[] {
   return calls.map((call) => {
-    const server = servers.find(
-      (server) => server.label && call.name.startsWith(`${server.label}.`)
-    );
+    // Only a call with no server can carry MST's `<server>.` prefix; a
+    // call that names its server names the tool as that server lists it.
+    const server =
+      call.server === undefined
+        ? servers.find(
+            (server) => server.label && call.name.startsWith(`${server.label}.`)
+          )
+        : undefined;
     const source =
       call.source ?? (server || servers.length === 1 ? 'mcp' : 'builtin');
     return {

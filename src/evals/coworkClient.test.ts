@@ -974,7 +974,7 @@ describe('V2 Cowork client', () => {
         { id: 'request-1', model: 'native-model', durationMs: 150 },
       ];
       const call = {
-        name: 'primary.search',
+        name: 'search',
         source: 'mcp' as const,
         server: 'primary',
         rawName: 'mcp__primary__search',
@@ -2191,7 +2191,10 @@ describe('V2 Cowork client', () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-cowork-ready-'));
     dirs.push(dir);
     const log = path.join(dir, 'probes.log');
-    const docs = { ...readyStdioServer({ READINESS_LOG: log }), label: 'docs' };
+    const docs = {
+      ...readyStdioServer({ READINESS_LOG: log, READINESS_TOOLS: 'search' }),
+      label: 'docs',
+    };
     const queues = await prepareClientBatch(
       COWORK_CLIENT,
       [

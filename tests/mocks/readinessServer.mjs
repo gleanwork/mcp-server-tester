@@ -5,7 +5,8 @@
 //
 // Over stdio it reads its settings from the environment:
 //
-//   READINESS_TOOLS        how many tools it lists (default 1)
+//   READINESS_TOOLS        how many tools it lists (default 1), or their
+//                          names, comma-separated
 //   READINESS_FAIL_TIMES   the first N launches exit before answering...
 //   READINESS_FAIL_AFTER   ...or every launch after the first N does...
 //   READINESS_FAIL_LAUNCH  ...or only the launch at this index (from 0)...
@@ -25,21 +26,25 @@ import readline from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
 // Its tools are reads, so MST's load check needs no write mode for it (ADR
-// 0014), unless `writeTool` adds one that isn't.
-function toolList(count, writeTool) {
-  const tools = Array.from({ length: count }, (_, index) => ({
-    name: `tool_${index + 1}`,
-    description: `Test tool ${index + 1}`,
+// 0014), unless `writeTool` adds one that isn't. `tools` is a count
+// (`tool_1`, ...) or the tools' names.
+function toolList(tools, writeTool) {
+  const names = Array.isArray(tools)
+    ? tools
+    : Array.from({ length: tools }, (_, index) => `tool_${index + 1}`);
+  const listed = names.map((name) => ({
+    name,
+    description: `Test tool ${name}`,
     inputSchema: { type: 'object', properties: {} },
     annotations: { readOnlyHint: true },
   }));
   if (writeTool)
-    tools.push({
+    listed.push({
       name: 'save',
       description: 'Saves a note.',
       inputSchema: { type: 'object', properties: {} },
     });
-  return tools;
+  return listed;
 }
 
 /**
@@ -89,7 +94,10 @@ function respond(
  * Serves over HTTP on a free local port. `failTimes` answers the first N
  * `initialize` requests with a 503. `stallList` never answers `tools/list`
  * or a session DELETE, and logs `closed` when the client drops a stalled
- * request. Resolves to its URL and `close`.
+ * request. `tools` is a count or the tools' names. Resolves to its URL and
+ * `close`.
+ *
+ * @param {{ tools?: number | string[], failTimes?: number, log?: string, stallList?: boolean }} [options]
  */
 export function startReadinessHttpServer({
   tools = 1,
@@ -168,7 +176,9 @@ function serveStdio() {
       process.exit(1);
   }
   const settings = {
-    tools: Number(process.env.READINESS_TOOLS ?? 1),
+    tools: /^\d+$/.test(process.env.READINESS_TOOLS ?? '1')
+      ? Number(process.env.READINESS_TOOLS ?? 1)
+      : process.env.READINESS_TOOLS.split(','),
     log: process.env.READINESS_LOG,
     stallList: process.env.READINESS_STALL_LIST === '1',
     stallInitialize: process.env.READINESS_STALL_INITIALIZE === '1',

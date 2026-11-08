@@ -198,7 +198,7 @@ async function setup(
         ...(options.trials ? { trials: options.trials } : {}),
         redactStoredResponses: options.redact ?? false,
         servers: {
-          docs: readyStdioServer(),
+          docs: readyStdioServer({ READINESS_TOOLS: 'search' }),
         },
         judges: [{ type: 'gr/judge/keyword', keyword, threshold: 1 }],
         pairwiseJudges: ['gr/pairwise-judge/longer'],

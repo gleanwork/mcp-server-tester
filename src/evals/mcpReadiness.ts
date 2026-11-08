@@ -25,6 +25,11 @@ export interface McpServerReadiness {
    * (ADR 0014). Absent when there are none.
    */
   writeTools?: string[];
+  /**
+   * Every tool it lists, by name. For the read-only check after each trial
+   * (`readinessCheck.ts`); never stored.
+   */
+  tools?: string[];
   elapsedMs: number;
   error?: string;
 }
@@ -134,6 +139,7 @@ async function probe(
       status: 'connected',
       toolCount: tools.tools.length,
       ...(writeTools.length > 0 ? { writeTools } : {}),
+      tools: listed.map((tool) => tool.name),
       elapsedMs: Date.now() - started,
     };
   } catch (error) {

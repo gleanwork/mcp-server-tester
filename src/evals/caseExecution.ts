@@ -47,7 +47,12 @@ import {
 import { runApiClient } from './mstClient/run.js';
 import type { LLMToolCall } from './mstClient/types.js';
 import { endingOf, thrownEnding } from './trialEnding.js';
-import { readinessSetup, readyBatch } from './readinessCheck.js';
+import {
+  checkReadOnlyCalls,
+  readinessSetup,
+  readyBatch,
+  type ReadOnlyTools,
+} from './readinessCheck.js';
 import { readOnlyServerLabels } from './writeModes.js';
 import { batchName } from './prepareClientBatch.js';
 import { collectClientBatch } from './desktopBatch.js';
@@ -91,6 +96,11 @@ interface ExecutionBase {
    * `executionEnding` reads it from the execution's failure kinds and error.
    */
   ending?: TrialEnding;
+  /**
+   * The writes MST's dry-run proxies recorded while the attempt ran (ADR
+   * 0014), whether or not it completed. MST sets it.
+   */
+  writeRecord?: WriteRecord;
 }
 
 /** A client run with its assertion/report view. */
@@ -104,8 +114,6 @@ export interface ClientExecution extends ExecutionBase {
   transcript?: Transcript;
   /** Declared transcript evidence. Custom executors may omit it. */
   evidence?: TranscriptEvidence;
-  /** The writes MST's dry-run proxies recorded (ADR 0014). MST sets it. */
-  writeRecord?: WriteRecord;
   usage?: UsageMetrics;
   telemetry?: Record<string, unknown>;
   diagnostics?: ClientDiagnostics;
@@ -306,12 +314,16 @@ function clientExecutor(
   // proxied. It follows the client each case runs on, which a case can name
   // itself: one check per setup (proxied, direct, or left to a client that
   // checks after it prepares its app), shared by the cases with that setup.
-  // A batch client was checked before its batch ran.
+  // A batch client was checked before its batch ran. The tools the
+  // `read-only` servers listed are checked against each trial's calls.
   const readiness = new Map<
     string,
-    Promise<(() => ClientRunResult) | undefined>
+    Promise<{
+      notReady?: () => ClientRunResult;
+      readOnlyTools?: ReadOnlyTools;
+    }>
   >();
-  const notReady = (definition: ClientDefinition, client: string) => {
+  const checkBatch = (definition: ClientDefinition, client: string) => {
     const startProxy =
       options.toolVariant && usesToolSurfaceProxy(definition)
         ? options.toolVariant.proxy
@@ -323,7 +335,10 @@ function clientExecutor(
         ...(env ? { env } : {}),
         batch: batchName(client, { variant }),
         readOnly: readOnlyServerLabels(servers, evalConfig.writes),
-      }).then((result) => result.notReady);
+      }).then(({ notReady, readOnlyTools }) => ({
+        ...(notReady ? { notReady } : {}),
+        ...(readOnlyTools ? { readOnlyTools } : {}),
+      }));
       readiness.set(setup, ready);
     }
     return ready;
@@ -334,15 +349,17 @@ function clientExecutor(
     const declaration =
       (clientPatchOf(evalCase) as ClientConfig | undefined) ?? options.client;
     const definition = getClient(declaration.type);
-    const notReadyResult = batchTranscripts
-      ? undefined
-      : await notReady(definition, declaration.type);
-    if (notReadyResult)
+    const batch = batchTranscripts
+      ? {}
+      : await checkBatch(definition, declaration.type);
+    if (batch.notReady)
       return clientRunToExecution(
-        notReadyResult(),
+        batch.notReady(),
         definition.evidence ?? 'none',
         servers
       );
+    const checked = (result: ClientRunResult) =>
+      checkReadOnlyCalls(result, batch.readOnlyTools, servers);
     if (batchTranscripts) {
       const transcript = batchTranscripts.get(evalCase.id)?.shift();
       if (!transcript)
@@ -389,12 +406,14 @@ function clientExecutor(
       );
       proxy.endScope(checkScope);
       return clientRunToExecution(
-        settleProxiedTranscript(
-          transcript,
-          proxy,
-          proxy.endScope(scope).listedTools,
-          servers,
-          options.toolVariant.id
+        checked(
+          settleProxiedTranscript(
+            transcript,
+            proxy,
+            proxy.endScope(scope).listedTools,
+            servers,
+            options.toolVariant.id
+          )
         ),
         definition.evidence ?? 'none',
         servers
@@ -404,7 +423,7 @@ function clientExecutor(
       run({ prompt: evalCase.input ?? '', servers, env }, context)
     );
     return clientRunToExecution(
-      transcript,
+      checked(transcript),
       definition.evidence ?? 'none',
       servers
     );

@@ -12,7 +12,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { isClientUnavailable } from './clientUnavailable.js';
-import { readyBatch } from './readinessCheck.js';
+import { checkReadOnlyCalls, readyBatch } from './readinessCheck.js';
 import { collectClientBatch } from './desktopBatch.js';
 import { clientSecretValues, redactClientError } from './clientSecrets.js';
 import { BatchWriteRecords, WriteRecordLedger } from './writeRecord.js';
@@ -232,7 +232,11 @@ export async function prepareClientBatch(
     index: number | undefined,
     transcript: ClientRunResult
   ): Promise<ClientRunResult> =>
-    records.attach(index === undefined ? 'none' : String(index), transcript);
+    records.attach(
+      index === undefined ? 'none' : String(index),
+      transcript,
+      servers
+    );
   // MST's readiness check, before the batch's first trial and before the
   // proxy starts. Proxied clients connect to the variant's servers through
   // the proxy.
@@ -259,6 +263,18 @@ export async function prepareClientBatch(
     ? proxiedBatch(definition, declared, ready.proxy, servers, toolVariant!.id)
     : undefined;
   const requests = proxied?.requests ?? declared;
+  // A transcript under the tools' original names, its calls on `read-only`
+  // servers checked against the tools they listed.
+  const settled = (
+    index: number,
+    transcript: ClientRunResult,
+    final: boolean
+  ): ClientRunResult =>
+    checkReadOnlyCalls(
+      proxied ? proxied.settle(index, transcript, final) : transcript,
+      ready.readOnlyTools,
+      servers
+    );
   // A transcript reported early is settled with the proxy's traffic so far;
   // the batch's returned transcripts are settled again when it ends.
   const reportResult = onTranscript
@@ -267,10 +283,7 @@ export async function prepareClientBatch(
         if (!request) return;
         try {
           const transcript = await received(index, reported);
-          await onTranscript(
-            request,
-            proxied ? proxied.settle(index, transcript, false) : transcript
-          );
+          await onTranscript(request, settled(index, transcript, false));
         } catch (error) {
           console.warn(
             `[mst] Couldn't save the transcript of ${request.caseId} (trial ${request.trial}) before the batch ended: ${error instanceof Error ? error.message : String(error)}`
@@ -317,9 +330,7 @@ export async function prepareClientBatch(
     );
   for (const [index, request] of requests.entries()) {
     const transcript = await received(index, transcripts[index]!);
-    queues
-      .get(request.caseId)!
-      .push(proxied ? proxied.settle(index, transcript, true) : transcript);
+    queues.get(request.caseId)!.push(settled(index, transcript, true));
   }
   return queues;
 }
