@@ -365,6 +365,20 @@ describe('eval storage through public APIs', () => {
       runId: first.summary.runId,
       sameConfig: true,
     });
+    // The store's history has both runs; each machine's, its own.
+    const history = async (file: string) =>
+      (
+        JSON.parse(await fs.readFile(file, 'utf8')) as {
+          format: string;
+          runs: Array<{ runId: string }>;
+        }
+      ).runs.map((run) => run.runId);
+    expect(
+      await history(path.join(f.storeDir, 'storage-suite', 'history.json'))
+    ).toEqual([second.summary.runId, first.summary.runId]);
+    expect(
+      await history(path.join(f.rootDir, 'machine-2', 'history.json'))
+    ).toEqual([second.summary.runId]);
   });
 
   it('keeps the run in the store --results names, instead of the config store', async () => {

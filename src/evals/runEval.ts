@@ -165,6 +165,11 @@ import {
   type RunStore,
 } from './runStore.js';
 import { compareWithPrevious, findPreviousRun } from './runBaseline.js';
+import {
+  localHistoryLocation,
+  recordInHistory,
+  storeHistoryLocation,
+} from './runHistory.js';
 import { costSource, estimateCosts } from './pricing.js';
 import {
   pairwiseJudgeSpec,
@@ -1621,21 +1626,34 @@ async function evaluate(
   const identity = configIdentity(rawConfig);
   // Connector servers become the entries their connectors launch. Paths and
   // env names only; tokens arrive when the run starts.
-  // With `simulateWrites`, proxies record the writes they answer here.
-  const simulatedWritesDirectory =
-    (rawConfig as { simulateWrites?: unknown }).simulateWrites === true
-      ? path.join(
-          await fs.realpath(os.tmpdir()),
-          `mst-simulated-writes-${randomUUID()}`
-        )
-      : undefined;
+  // With `simulateWrites`, proxies record the writes they answer here. A
+  // resume collects the missing trials as its run collected the others.
+  const configSimulatesWrites =
+    (rawConfig as { simulateWrites?: unknown }).simulateWrites === true;
+  const simulateWrites = replay?.resume
+    ? replay.run.simulateWrites === true
+    : configSimulatesWrites;
+  if (replay?.resume && simulateWrites !== configSimulatesWrites)
+    console.warn(
+      `[mst] Run ${replay.run.runId} was collected with simulateWrites ${simulateWrites}; its missing trials are collected the same way, not as the eval config now says.`
+    );
+  const simulatedWritesDirectory = simulateWrites
+    ? path.join(
+        await fs.realpath(os.tmpdir()),
+        `mst-simulated-writes-${randomUUID()}`
+      )
+    : undefined;
   // The run's ID, known before connectors launch so they can tag requests with it.
   const executionId = replay?.runId ?? newRunId();
   const connectors = await expandConnectorServers(rawConfig, {
     runId: executionId,
     ...(simulatedWritesDirectory ? { simulatedWritesDirectory } : {}),
   });
-  let evalConfig = connectors.evalConfig;
+  // Workers read the mode from the eval config they're sent.
+  let evalConfig: EvalConfig =
+    simulateWrites === configSimulatesWrites
+      ? connectors.evalConfig
+      : { ...connectors.evalConfig, simulateWrites };
 
   // With the plugins loaded, so a plugin environment resolves too.
   const resolvedEnvironment = resolveEnvironment(
@@ -2804,6 +2822,10 @@ async function evaluate(
       // settings that shouldn't be stored.
       judges: judgeRecords(evalConfig, rawConfig),
       redactStoredResponses: redact,
+      // A regrade or a resume keeps the setting its traces were collected with.
+      ...((replay ? replay.run.simulateWrites : simulatedWritesDirectory)
+        ? { simulateWrites: true as const }
+        : {}),
       environment,
       ...(shardRecords?.length ? { machines: shardRecords } : {}),
       ...(gradedElsewhere
@@ -2885,6 +2907,10 @@ async function evaluate(
     }),
     storedSummary
   );
+  // The eval's history (history.json) has a row for this run. A tool
+  // optimization's runs aren't in it (ADR 0008).
+  if (!optimization)
+    await recordInHistory(localHistoryLocation(evalDirectory), evalConfig.name);
   // The report is rebuilt from the run's files, so it shows what was stored.
   // It must never cost the run its results.
   try {
@@ -2922,6 +2948,13 @@ async function evaluate(
         { cause: error }
       );
     }
+  // The store's history, from the store's runs: a CI machine's local runs
+  // are only its own.
+  if (resultStore && !optimization)
+    await recordInHistory(
+      storeHistoryLocation(resultStore, evalConfig.name),
+      evalConfig.name
+    );
   return {
     evalConfig,
     outputDir,

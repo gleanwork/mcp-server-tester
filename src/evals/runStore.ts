@@ -67,6 +67,9 @@ function isMissing(error: unknown): boolean {
   );
 }
 
+/** A file `put` is still writing, or one a crash left behind: never a key. */
+const STAGING_FILE = /\.mst-[0-9a-f]{8}\.tmp$/;
+
 /** A result store in a local directory (`--results file:<dir>`). */
 export function fileRunStore(dir: string): RunStore {
   const root = path.resolve(dir);
@@ -76,7 +79,16 @@ export function fileRunStore(dir: string): RunStore {
     async put(key, body) {
       const file = at(key);
       await fs.mkdir(path.dirname(file), { recursive: true });
-      await fs.writeFile(file, body);
+      // In one step, as a GCS object is: a reader sees the old file or the
+      // new one, never half of one (latest.json, history.json).
+      const temporary = `${file}.mst-${randomBytes(4).toString('hex')}.tmp`;
+      try {
+        await fs.writeFile(temporary, body);
+        await fs.rename(temporary, file);
+      } catch (error) {
+        await fs.rm(temporary, { force: true });
+        throw error;
+      }
     },
     async get(key) {
       try {
@@ -90,11 +102,16 @@ export function fileRunStore(dir: string): RunStore {
       const dir = at(prefix);
       try {
         if (options.shallow)
-          return (await fs.readdir(dir, { withFileTypes: true })).map(
-            (entry) => `${prefix}${entry.name}${entry.isDirectory() ? '/' : ''}`
-          );
+          return (await fs.readdir(dir, { withFileTypes: true }))
+            .filter(
+              (entry) => entry.isDirectory() || !STAGING_FILE.test(entry.name)
+            )
+            .map(
+              (entry) =>
+                `${prefix}${entry.name}${entry.isDirectory() ? '/' : ''}`
+            );
         return (await fs.readdir(dir, { recursive: true, withFileTypes: true }))
-          .filter((entry) => entry.isFile())
+          .filter((entry) => entry.isFile() && !STAGING_FILE.test(entry.name))
           .map(
             (entry) =>
               prefix +

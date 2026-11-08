@@ -33,6 +33,7 @@ import {
   runStatus,
   watchRun,
 } from './commands/runs/index.js';
+import { history, type HistoryOptions } from './commands/history/index.js';
 import { setupCowork } from './commands/cowork/index.js';
 import {
   auth,
@@ -850,6 +851,38 @@ runsFlags(
 ).action((id: string, options: Parameters<typeof cancelRun>[1]) =>
   cancelRun(id, options)
 );
+
+// History command: an eval's runs over time
+program
+  .command('history')
+  .description(
+    "An eval's runs over time, per variant, newest first: pass rates, judges, cost, tokens and time, with each run's change since the previous comparable run"
+  )
+  .argument(
+    '[eval directory]',
+    "An eval's directory (.mcp-test-results/<eval name>), instead of --config"
+  )
+  .option('-c, --config <path>', 'The eval config whose runs to show')
+  .option(
+    '--results <store>',
+    "Read the runs in this result store, instead of the eval config's"
+  )
+  .option(
+    '--output-dir <dir>',
+    "The eval's directory, if mst run was given one"
+  )
+  .option('--root-dir <dir>', 'Fallback directory for relative paths', '.')
+  .option('--variant <names...>', 'Only these variants')
+  .option('--since <date>', 'Only runs collected on or after this date')
+  .option('--limit <n>', 'Most runs per variant', '20')
+  .option('--json', 'Print the history as JSON (mst.history/v1)')
+  .option(
+    '--rebuild',
+    'Build every row again from the runs, and write history.json'
+  )
+  .action((directory: string | undefined, options: HistoryOptions) =>
+    history(directory, options)
+  );
 
 // Grade shard command: a grade shard's worker, started by environments (ADR 0005)
 program
