@@ -1,5 +1,6 @@
 # Build output
 dist/
+website/.docusaurus/
 .venv/
 .mcp-test-results/
 
