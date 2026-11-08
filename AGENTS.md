@@ -124,6 +124,10 @@ The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`),
 
 `skills/` holds the agent skills MST's users install: with `npx skills add gleanwork/mcp-server-tester`, from the npm package (`files` includes `skills`) with `npx skills experimental_sync`, or as a Claude Code plugin from `.claude-plugin/marketplace.json`. They are not covered by `docs:check`; `tests/shippedSkills.test.ts` validates every dataset, case and eval config they show, and fails on a renamed client name or a link to a repo file a consumer doesn't have. When you rename a key, client or command, update the skills too. Link to docs with `https://github.com/gleanwork/mcp-server-tester/blob/main/docs/...`, not `docs/...`.
 
+### Docs Site (`website/`)
+
+`website/` is a Docusaurus site with its own `package.json`. It renders the pages in `docs/` where they are (one copy, read the same on GitHub), and serves them and `skills/` to AI agents over MCP at `/mcp` through `docusaurus-plugin-mcp-server` (`website/api/mcp.mjs`). Write pages in `docs/` as GitHub Markdown: the site parses `.md` as CommonMark, not MDX. A page links to repo files outside `docs/` with relative paths as usual; `website/src/remark/repoLinks.mts` points them at GitHub and fails the build when the target is missing. A new page needs a place in `website/sidebars.ts`. `tests/site/` tests the MCP endpoint with MST (`npm run test:site`, after a site build); the main Playwright config ignores it. Vercel's Git integration deploys the site: production from `main`, a preview for each PR. The Vercel project's Root Directory is `website`, so Vercel reads `website/vercel.json` and runs `website/api/`; with the repo root as Root Directory, Vercel builds the library instead and fails. The site's URL, `https://mcp-server-tester-docs.vercel.app`, is set in `website/docusaurus.config.ts`; change it there if the production domain changes.
+
 ### Trials and Pass Rate
 
 Eval cases can run several trials to compute a pass rate:
@@ -288,6 +292,10 @@ npm run test:usecases       # Use cases through the CLI (tests/usecases)
 npm test                    # Unit tests (Vitest)
 npx playwright install --with-deps chromium
 npm run test:playwright     # Integration tests (Playwright)
+
+# The docs site (the CI website job)
+(cd website && npm ci && npm run typecheck && npm test && npm run build && npm run smoke)
+npm run test:site           # The site's MCP server, tested with MST
 ```
 
 If `format:check` or `lint` fails, run `npm run format` or `npm run lint:fix` to auto-fix, then re-check. If `docs:check` fails with "content-mismatch", update the snippet line range in the markdown file to match the current source. If `build:check` fails with `... is imported from external module ... but never used in "dist/..."`, a bundle uses part of a module whose other code needs that import: move that code into its own module (as `toolSurfaceProxyServer.ts` and `simulatedWriteRecords.ts` are) rather than silencing the warning.

@@ -49,3 +49,6 @@ EVAL-CHECKLIST.md
 DOCS-EVAL-CHECKLIST.md
 .worktrees/
 .omc/
+
+# Vercel CLI (project link and build output)
+.vercel/

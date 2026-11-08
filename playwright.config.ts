@@ -18,6 +18,8 @@ const dualEraSpecs = /(mcp-tests|protocol|skills)\.spec\.ts/;
  */
 export default defineConfig({
   testDir: './tests',
+  // The docs site's specs need a built site: playwright.site.config.ts runs them.
+  testIgnore: ['site/**'],
   // One snapshot per name, shared by every project and platform, so
   // snapshots committed on macOS match on Linux CI.
   snapshotPathTemplate: '{testDir}/__snapshots__/{testFilePath}/{arg}{ext}',

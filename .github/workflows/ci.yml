@@ -49,3 +49,42 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - run: npm run test:playwright
+
+  # The docs site in website/: it renders docs/ and serves it, with skills/,
+  # over MCP. Vercel deploys it: production from main, a preview for each PR.
+  website:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+
+      # The site's MCP tests run on MST from this checkout.
+      - run: npm ci
+
+      - name: Install site dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Typecheck the site
+        working-directory: website
+        run: npm run typecheck
+
+      - name: Unit tests for the site
+        working-directory: website
+        run: npm test
+
+      # Fails on a broken link or anchor, in docs/ or out of it. postbuild
+      # runs docusaurus-mcp-verify on the MCP bundle.
+      - name: Build the site
+        working-directory: website
+        run: npm run build
+
+      - name: Smoke-test the MCP endpoint
+        working-directory: website
+        run: npm run smoke
+
+      # Conformance, the docs tools and every skill, in both protocol eras,
+      # over the function Vercel deploys.
+      - name: Test the site's MCP server with MST
+        run: npm run test:site
