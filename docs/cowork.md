@@ -873,7 +873,10 @@ so. After each trial, MST marks the trial's tool calls the proxy answered
 and in the client response's `events` and `toolCalls`, so judges and reports
 know the write never happened; `output` is the reply.
 The files are deleted when the run ends. A write the proxy can't record gets
-the planned-write result instead.
+the planned-write result instead. The run's `run.json` has
+`"simulateWrites": true`, and a regrade or a resume keeps it. Turning the flag
+on or off starts a new era in the eval's history, since the client sees
+something else after a write.
 
 The model can't read back what it "wrote": a search for the message it sent
 won't find it.

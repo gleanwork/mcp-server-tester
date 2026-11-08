@@ -2809,6 +2809,10 @@ async function evaluate(
       // settings that shouldn't be stored.
       judges: judgeRecords(evalConfig, rawConfig),
       redactStoredResponses: redact,
+      // A regrade or a resume keeps the setting its traces were collected with.
+      ...((replay ? replay.run.simulateWrites : simulatedWritesDirectory)
+        ? { simulateWrites: true as const }
+        : {}),
       environment,
       ...(shardRecords?.length ? { machines: shardRecords } : {}),
       ...(gradedElsewhere

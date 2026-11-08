@@ -1,0 +1,386 @@
+{
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester/schema/history/v1/history.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "format": { "type": "string", "const": "mst.history/v1" },
+    "kind": { "type": "string", "const": "history" },
+    "evalName": { "type": "string" },
+    "updatedAt": { "type": "string" },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "pattern": "^\\d{8}T\\d{6}Z-[0-9a-f]{6}(\\.g\\d+)?$"
+          },
+          "collectedRunId": {
+            "type": "string",
+            "pattern": "^\\d{8}T\\d{6}Z-[0-9a-f]{6}(\\.g\\d+)?$"
+          },
+          "collectedAt": { "type": "string" },
+          "createdAt": { "type": "string" },
+          "finishedAt": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["complete", "incomplete", "ungraded", "failed"]
+          },
+          "phases": {
+            "type": "object",
+            "properties": {
+              "collect": {
+                "type": "string",
+                "enum": ["complete", "partial", "skipped", "failed"]
+              },
+              "grade": {
+                "type": "string",
+                "enum": ["complete", "partial", "skipped", "failed"]
+              }
+            },
+            "required": ["collect", "grade"],
+            "additionalProperties": {}
+          },
+          "partial": { "type": "boolean" },
+          "selection": {
+            "type": "object",
+            "properties": {
+              "variants": { "type": "array", "items": { "type": "string" } },
+              "cases": { "type": "array", "items": { "type": "string" } },
+              "filterTags": { "type": "array", "items": { "type": "string" } },
+              "maxCases": { "type": "number" },
+              "trials": { "type": "number" },
+              "shard": { "type": "string" }
+            },
+            "additionalProperties": {}
+          },
+          "selectionHash": { "type": "string" },
+          "configId": { "type": "string" },
+          "contentHash": { "type": "string" },
+          "mstVersion": { "type": "string" },
+          "gradedFrom": { "type": "string" },
+          "supersededBy": { "type": "string" },
+          "gradings": { "type": "array", "items": { "type": "string" } },
+          "environment": { "type": "string" },
+          "baseline": { "type": "string" },
+          "datasets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "caseCount": { "type": "number" },
+                "contentHash": { "type": "string" },
+                "type": { "type": "string" },
+                "source": { "type": "string", "enum": ["snapshot", "live"] },
+                "snapshot": { "type": "string" }
+              },
+              "required": ["name", "caseCount", "contentHash"],
+              "additionalProperties": {}
+            }
+          },
+          "caseIds": { "type": "array", "items": { "type": "string" } },
+          "caseIdsHash": { "type": "string" },
+          "regressionCases": { "type": "array", "items": { "type": "string" } },
+          "trialsPerCase": {
+            "type": "object",
+            "properties": {
+              "min": { "type": "number" },
+              "max": { "type": "number" }
+            },
+            "required": ["min", "max"],
+            "additionalProperties": {}
+          },
+          "judges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": { "type": "string" },
+                "level": { "type": "string" },
+                "identity": { "type": "string" },
+                "optionsHash": { "type": "string" }
+              },
+              "required": ["type", "level", "optionsHash"],
+              "additionalProperties": {}
+            }
+          },
+          "redacted": { "type": "boolean" },
+          "simulateWrites": { "type": "boolean", "const": true },
+          "variants": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "baseline": { "type": "boolean" },
+                "client": { "type": "string" },
+                "model": { "type": "string" },
+                "servers": { "type": "array", "items": { "type": "string" } },
+                "clientApps": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "setupHash": { "type": "string" },
+                "cases": { "type": "number" },
+                "incomplete": { "type": "number" },
+                "casePassRate": { "type": "number" },
+                "trialPassRate": { "type": "number" },
+                "headline": {
+                  "type": "object",
+                  "properties": {
+                    "group": {
+                      "type": "string",
+                      "enum": ["capability", "regression"]
+                    },
+                    "cases": { "type": "number" },
+                    "passRate": { "type": "number" },
+                    "low": { "type": "number" },
+                    "high": { "type": "number" }
+                  },
+                  "required": ["group", "cases", "passRate"],
+                  "additionalProperties": {}
+                },
+                "judges": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "trials": { "type": "number" },
+                      "passRate": { "type": "number" },
+                      "meanScore": { "type": "number" },
+                      "unknown": { "type": "number" }
+                    },
+                    "required": ["trials"],
+                    "additionalProperties": {}
+                  }
+                },
+                "pairwise": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "judge": { "type": "string" },
+                      "reference": {
+                        "type": "object",
+                        "properties": {
+                          "variant": { "type": "string" },
+                          "runId": { "type": "string" }
+                        },
+                        "required": ["variant"],
+                        "additionalProperties": {}
+                      },
+                      "compared": { "type": "number" },
+                      "wins": { "type": "number" },
+                      "ties": { "type": "number" },
+                      "losses": { "type": "number" },
+                      "errors": { "type": "number" },
+                      "winRate": { "type": "number" },
+                      "low": { "type": "number" },
+                      "high": { "type": "number" }
+                    },
+                    "required": [
+                      "judge",
+                      "reference",
+                      "compared",
+                      "wins",
+                      "ties",
+                      "losses",
+                      "errors"
+                    ],
+                    "additionalProperties": {}
+                  }
+                },
+                "costUsd": { "type": "number" },
+                "costSource": {
+                  "type": "string",
+                  "enum": ["client", "pricing", "mixed"]
+                },
+                "unpricedModels": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "tokens": {
+                  "type": "object",
+                  "properties": {
+                    "input": { "type": "number" },
+                    "output": { "type": "number" },
+                    "cacheRead": { "type": "number" },
+                    "cacheCreation": { "type": "number" }
+                  },
+                  "additionalProperties": {}
+                },
+                "durationMs": {
+                  "type": "object",
+                  "properties": {
+                    "p50": { "type": "number" },
+                    "p95": { "type": "number" },
+                    "mean": { "type": "number" }
+                  },
+                  "required": ["p50", "p95", "mean"],
+                  "additionalProperties": {}
+                },
+                "toolCalls": { "type": "number" },
+                "mcpCalls": { "type": "number" },
+                "attempts": { "type": "number" },
+                "infrastructureFailures": { "type": "number" },
+                "clientErrors": { "type": "number" },
+                "outcomes": {
+                  "type": "object",
+                  "propertyNames": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": [
+                      { "type": "number" },
+                      { "type": "number" },
+                      {
+                        "anyOf": [
+                          { "type": "number", "const": 0 },
+                          { "type": "number", "const": 1 }
+                        ]
+                      }
+                    ],
+                    "additionalItems": false,
+                    "minItems": 3,
+                    "maxItems": 3
+                  }
+                },
+                "era": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "sincePrevious": {
+                  "type": "object",
+                  "properties": {
+                    "runId": { "type": "string" },
+                    "passRateDelta": { "type": "number" },
+                    "trialPassRateDelta": { "type": "number" },
+                    "change": {
+                      "type": "object",
+                      "properties": {
+                        "mean": { "type": "number" },
+                        "lower": { "type": "number" },
+                        "upper": { "type": "number" },
+                        "cases": { "type": "number" },
+                        "pBetter": { "type": "number" },
+                        "pWorse": { "type": "number" },
+                        "assessment": {
+                          "type": "string",
+                          "enum": ["better", "worse", "unclear"]
+                        }
+                      },
+                      "required": [
+                        "mean",
+                        "lower",
+                        "upper",
+                        "cases",
+                        "pBetter",
+                        "pWorse",
+                        "assessment"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "regressed": { "type": "boolean" },
+                    "regressedCases": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "improvedCases": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  },
+                  "required": [
+                    "runId",
+                    "regressed",
+                    "regressedCases",
+                    "improvedCases"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "name",
+                "baseline",
+                "servers",
+                "setupHash",
+                "cases",
+                "judges",
+                "pairwise",
+                "attempts",
+                "infrastructureFailures",
+                "clientErrors",
+                "outcomes"
+              ],
+              "additionalProperties": {}
+            }
+          },
+          "era": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "reason": { "type": "string" },
+                "variant": { "type": "string" },
+                "breaks": { "type": "boolean" }
+              },
+              "required": ["reason", "breaks"],
+              "additionalProperties": {}
+            }
+          },
+          "builder": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "runId",
+          "collectedRunId",
+          "collectedAt",
+          "createdAt",
+          "finishedAt",
+          "status",
+          "phases",
+          "partial",
+          "configId",
+          "contentHash",
+          "mstVersion",
+          "baseline",
+          "datasets",
+          "caseIds",
+          "caseIdsHash",
+          "trialsPerCase",
+          "judges",
+          "redacted",
+          "variants",
+          "builder"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "runId": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["runId", "reason"],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": ["format", "kind", "evalName", "updatedAt", "runs", "skipped"],
+  "additionalProperties": {}
+}

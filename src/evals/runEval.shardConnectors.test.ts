@@ -161,6 +161,12 @@ describe('connector servers and tool metadata in an environment', () => {
     });
 
     expect(result.summary.metrics).toMatchObject({ passed: 4, total: 4 });
+    // run.json says how writes were answered, so the history can tell.
+    expect(
+      JSON.parse(
+        await fs.readFile(path.join(result.outputDir, 'run.json'), 'utf8')
+      ) as { simulateWrites?: boolean }
+    ).toMatchObject({ simulateWrites: true });
     // Every trial came back from the shard's worker.
     const lines = log.mock.calls.map((call) => String(call[0]));
     expect(lines).toContain('[mst] shard 1/1: done');

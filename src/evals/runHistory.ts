@@ -19,7 +19,6 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseChunked } from '@discoveryjs/json-ext';
-import { z } from 'zod';
 import type {
   EvaluationSummary,
   EvaluationVariantResult,
@@ -61,36 +60,24 @@ import {
   measureAgainstBaseline,
 } from './variantComparison.js';
 import { wilson } from './judgeCheck.js';
+import { HISTORY_FORMAT, HistoryIndexSchema } from './historyFormat.js';
 
-/** The history format. Readers ignore fields they don't know. */
-export const HISTORY_FORMAT = 'mst.history/v1' as const;
+export { HISTORY_FORMAT };
 
 /**
  * The version of the code that builds a row from a run. A cached row built
  * by another version is built again, so a row never mixes two definitions.
  */
-const ROW_BUILDER = 1;
+const ROW_BUILDER = 2;
 
-const HistoryIndexSchema = z.looseObject({
-  format: z.literal(HISTORY_FORMAT),
-  kind: z.literal('history'),
-  evalName: z.string(),
-  updatedAt: z.string(),
-  runs: z.array(
-    z.looseObject({
-      runId: z.string().regex(RUN_ID_PATTERN),
-      finishedAt: z.string(),
-      builder: z.number(),
-      variants: z.array(z.looseObject({ name: z.string() })),
-    })
-  ),
-  skipped: z.array(z.looseObject({ runId: z.string(), reason: z.string() })),
-});
-
-/** Parses `history.json`; undefined when it isn't one this MST reads. */
+/**
+ * Parses `history.json`; undefined when it isn't one this MST reads, and
+ * the history is then built again from the runs. Returned without a cast,
+ * so the schema can't drift from `HistoryIndex`.
+ */
 function parseHistoryIndex(value: unknown): HistoryIndex | undefined {
   const parsed = HistoryIndexSchema.safeParse(value);
-  return parsed.success ? (parsed.data as unknown as HistoryIndex) : undefined;
+  return parsed.success ? parsed.data : undefined;
 }
 
 type Trial =
@@ -492,6 +479,7 @@ function historyRunOf(run: RunRecord, summary: EvaluationSummary): HistoryRun {
       optionsHash: judge.optionsHash,
     })),
     redacted: run.redactStoredResponses,
+    ...(run.simulateWrites ? { simulateWrites: true as const } : {}),
     variants: summary.variants.map((variant) =>
       variantRow(
         variant,
@@ -639,6 +627,15 @@ function evalChanges(before: HistoryRun, after: HistoryRun): HistoryChange[] {
       reason: `${judge.level === 'pairwise' ? 'pairwise judge' : 'judge'} removed: ${judge.type}`,
       breaks: true,
     });
+  // A simulated success, not a planned-write result, changes what a client
+  // sees after a write.
+  const writes = (run: HistoryRun) =>
+    run.simulateWrites ? 'simulated' : 'planned';
+  if (writes(before) !== writes(after))
+    changes.push({
+      reason: `writes: ${writes(before)} → ${writes(after)}`,
+      breaks: true,
+    });
   // Noted, not breaks: they don't change what a verdict means.
   if (
     before.trialsPerCase.min !== after.trialsPerCase.min ||
@@ -778,6 +775,10 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
   let previous: HistoryRun | undefined;
   const variantEra = new Map<string, number>();
   const lastVariant = new Map<string, HistoryVariant>();
+  // The run each variant last ran in, and the eval-wide era it was in, so an
+  // eval-wide break between two of a variant's runs counts even when the
+  // variant skipped the run where it happened.
+  const lastRunOf = new Map<string, { run: HistoryRun; era: number }>();
   const lastComplete = new Map<
     string,
     { run: HistoryRun; variant: HistoryVariant; era: number }
@@ -785,6 +786,7 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
   for (const row of ordered) {
     if (!isHistoryPoint(row)) continue;
     const changes: HistoryChange[] = [];
+    const eraBefore = era;
     if (previous) {
       const evalWide = evalChanges(previous, row);
       changes.push(...evalWide);
@@ -793,9 +795,24 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
     for (const variant of row.variants) {
       const before = lastVariant.get(variant.name);
       const own = previous ? variantChanges(before, variant) : [];
+      const last = lastRunOf.get(variant.name);
+      // The eval-wide era moved on in a run this variant skipped: name what
+      // changed since the variant's own last run.
+      if (last && last.era < eraBefore) {
+        const missed = evalChanges(last.run, row).filter(
+          (change) => change.breaks
+        );
+        own.push(
+          ...(missed.length
+            ? missed
+            : [{ reason: 'the eval changed while not run', breaks: true }]
+          ).map((change) => ({ ...change, variant: variant.name }))
+        );
+      }
       changes.push(...own);
       const breaks =
         before === undefined ||
+        (last !== undefined && last.era !== era) ||
         own.some((change) => change.breaks) ||
         changes.some((change) => change.breaks && !change.variant);
       const number = breaks
@@ -804,6 +821,7 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
       variantEra.set(variant.name, number);
       variant.era = number;
       lastVariant.set(variant.name, variant);
+      lastRunOf.set(variant.name, { run: row, era });
       const reference = lastComplete.get(variant.name);
       if (reference && reference.era === number)
         variant.sincePrevious = changeBetween(
