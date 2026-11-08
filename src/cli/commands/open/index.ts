@@ -180,7 +180,14 @@ async function historySince(run: string): Promise<boolean> {
   const data = await fs
     .readFile(join(run, 'report', 'data.js'), 'utf8')
     .catch(() => '');
-  return !data.includes('"historyPath"');
+  try {
+    const report = JSON.parse(
+      data.replace(/^window\.MST_RUN_REPORT = /, '').replace(/;\s*$/, '')
+    ) as { run?: { historyPath?: unknown } };
+    return typeof report.run?.historyPath !== 'string';
+  } catch {
+    return true;
+  }
 }
 
 /**

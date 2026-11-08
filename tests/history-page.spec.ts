@@ -144,19 +144,29 @@ test('lists the cases whose verdict changed between two runs', async ({
 test('mst open gives a report from before the history page its link', async () => {
   const runs = (await fs.readdir(path.join(evalDirectory, 'runs'))).sort();
   const data = path.join(evalDirectory, 'runs', runs[1]!, 'report', 'data.js');
-  const written = await fs.readFile(data, 'utf8');
-  expect(written).toContain('"historyPath"');
-  // A report written before MST wrote history pages.
+  const read = async () =>
+    JSON.parse(
+      (await fs.readFile(data, 'utf8'))
+        .replace(/^window\.MST_RUN_REPORT = /, '')
+        .replace(/;\s*$/, '')
+    ) as { run: { historyPath?: string; datasets: Array<{ name: string }> } };
+  const report = await read();
+  expect(report.run.historyPath).toBe('../../../history/index.html');
+  // A report written before MST wrote history pages, of a dataset whose
+  // name happens to be the field's.
+  delete report.run.historyPath;
+  report.run.datasets[0]!.name = 'historyPath';
   await fs.writeFile(
     data,
-    written.replace(/,"historyPath":"[^"]*"/, ''),
+    `window.MST_RUN_REPORT = ${JSON.stringify(report)};\n`,
     'utf8'
   );
-  expect(await fs.readFile(data, 'utf8')).not.toContain('"historyPath"');
   await open(path.join(evalDirectory, 'runs', runs[1]!), { print: true });
-  expect(await fs.readFile(data, 'utf8')).toContain(
-    '"historyPath":"../../../history/index.html"'
-  );
+  expect((await read()).run.historyPath).toBe('../../../history/index.html');
+  // Once it has the link, opening it doesn't write it again.
+  const { mtimeMs } = await fs.stat(data);
+  await open(path.join(evalDirectory, 'runs', runs[1]!), { print: true });
+  expect((await fs.stat(data)).mtimeMs).toBe(mtimeMs);
 });
 
 test('hides a variant from every chart', async ({ page: tab }) => {

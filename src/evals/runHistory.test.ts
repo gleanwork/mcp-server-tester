@@ -788,6 +788,47 @@ describe('the history in a result store', () => {
     expect(JSON.parse(page)).toEqual(history);
   });
 
+  it('writes again when a run it has a row for changed while it was writing', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    await weekly(dir);
+    const location = localHistoryLocation(dir);
+    const newest = (await fs.readdir(path.join(dir, 'runs'))).sort().at(-1)!;
+    const runFile = path.join(dir, 'runs', newest, 'run.json');
+    const finished = await fs.readFile(runFile, 'utf8');
+    // The newest run is partial until it resumes.
+    const partial = JSON.parse(finished) as { phases: { collect: string } };
+    partial.phases.collect = 'partial';
+    await fs.writeFile(runFile, JSON.stringify(partial));
+    // This writer pauses between history.json and the page's data; the
+    // resume finishes and writes both meanwhile.
+    let raced = false;
+    const pausing = {
+      ...location,
+      store: {
+        ...location.store,
+        async put(key: string, body: string | Uint8Array) {
+          if (key.endsWith('/history/data.js') && !raced) {
+            raced = true;
+            await fs.writeFile(runFile, finished);
+            await updateHistory(location);
+          }
+          await location.store.put(key, body);
+        },
+      },
+    };
+    await updateHistory(pausing);
+    const stored = parseStored(
+      await fs.readFile(path.join(dir, 'history.json'))
+    );
+    const page = JSON.parse(
+      (await fs.readFile(path.join(dir, 'history', 'data.js'), 'utf8'))
+        .replace(/^window\.MST_HISTORY = /, '')
+        .replace(/;\s*$/, '')
+    ) as HistoryIndex;
+    expect(stored.runs[0]!.phases.collect).toBe('complete');
+    expect(page).toEqual(stored);
+  });
+
   it("still writes history.json, with a warning, when the page can't be written", async () => {
     const local = path.join(await tempDir(), 'weekly');
     await weekly(local);

@@ -1042,8 +1042,8 @@ async function writeHistoryIndex(
 /**
  * Brings the eval's `history.json` up to date with its runs and writes it.
  * Two processes can finish runs at once, and a store has no compare-and-
- * swap, so after writing it lists the runs again and writes once more when
- * one appeared meanwhile. A history that still misses a run is rebuilt by
+ * swap, so after writing it reads the runs again and writes once more when
+ * one appeared or changed meanwhile. A history that still misses a run is rebuilt by
  * the next write or read: the runs are the truth, the index a cache.
  *
  * The history page (`history/index.html`) gets its files first, and its
@@ -1081,10 +1081,10 @@ export async function updateHistory(
       cached: index,
       ...(options.evalName ? { evalName: options.evalName } : {}),
     });
-    const known = new Set(index.runs.map((row) => row.runId));
+    // The same rows, not just the same runs: a resume changes a run's row.
     if (
-      again.runs.length === index.runs.length &&
-      again.runs.every((row) => known.has(row.runId))
+      JSON.stringify([again.runs, again.skipped]) ===
+      JSON.stringify([index.runs, index.skipped])
     )
       break;
     index = again;
