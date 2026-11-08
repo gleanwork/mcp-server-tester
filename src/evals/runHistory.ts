@@ -802,9 +802,15 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
         const missed = evalChanges(last.run, row).filter(
           (change) => change.breaks
         );
+        // What this row already says for every variant isn't said again.
+        const said = new Set(
+          changes
+            .filter((change) => change.breaks && !change.variant)
+            .map((change) => change.reason)
+        );
         own.push(
           ...(missed.length
-            ? missed
+            ? missed.filter((change) => !said.has(change.reason))
             : [{ reason: 'the eval changed while not run', breaks: true }]
           ).map((change) => ({ ...change, variant: variant.name }))
         );

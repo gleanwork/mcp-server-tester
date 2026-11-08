@@ -489,6 +489,28 @@ describe('the history of an eval', () => {
     expect(official.sincePrevious?.runId).toBe('20261002T090000Z-000002');
   });
 
+  it('names a change once when a returning variant also sees it in the run it returns to', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    for (const [n, hash, variants] of [
+      [1, 'd1', { official: ids(2), glean: ids(2) }],
+      [2, 'd2', { official: ids(2) }],
+      [3, 'd3', { official: ids(2), glean: ids(2) }],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        datasetHash: hash,
+        variants,
+      });
+    const [third] = await buildHistory(localHistoryLocation(dir)).then(
+      (index) => index.runs
+    );
+    expect(third!.changes).toEqual([
+      { reason: 'dataset cases changed', breaks: true },
+    ]);
+    expect(third!.variants.find((v) => v.name === 'glean')!.era).toBe(1);
+  });
+
   it('starts an era when writes go from planned-write results to simulated successes', async () => {
     const dir = path.join(await tempDir(), 'weekly');
     await writeSpec(dir, {

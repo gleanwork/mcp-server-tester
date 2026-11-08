@@ -1,7 +1,7 @@
 ## Unreleased
 
 - Every run writes its eval's history, `history.json` (`mst.history/v1`, schema in `schema/history/v1/`), beside `latest.json`; `mst history` prints it. See [The eval's history](docs/evaluation-framework.md#the-evals-history).
-- `run.json` has `simulateWrites: true` when the run's dry-run proxies answered writes with a success reply. A regrade or a resume keeps its source run's value. Runs without it answered writes with a planned-write result, as before.
+- `run.json` has `simulateWrites: true` when the run's dry-run proxies answered writes with a success reply. A regrade keeps its source run's value, and a resume collects its missing trials with it, whatever the eval config now says. Runs without it answered writes with a planned-write result, as before.
 
 ## v2.0.0-rc.0 (2026-11-06)
 

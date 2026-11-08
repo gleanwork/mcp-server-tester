@@ -874,7 +874,8 @@ and in the client response's `events` and `toolCalls`, so judges and reports
 know the write never happened; `output` is the reply.
 The files are deleted when the run ends. A write the proxy can't record gets
 the planned-write result instead. The run's `run.json` has
-`"simulateWrites": true`, and a regrade or a resume keeps it. Turning the flag
+`"simulateWrites": true`. A regrade keeps it, and a resume collects the
+missing trials the same way, whatever the eval config now says. Turning the flag
 on or off starts a new era in the eval's history, since the client sees
 something else after a write.
 
