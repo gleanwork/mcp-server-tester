@@ -288,7 +288,7 @@ or empty. Stdio eval servers and blocked plugin servers follow the contract in
 [Client plugins](#client-plugins). Native sessions default to
 `$XDG_CONFIG_HOME/Claude-3p/local-agent-mode-sessions`, or
 `$HOME/.config/Claude-3p/local-agent-mode-sessions`; `clientOptions.dataDir` overrides it.
-Preparation is read-only. MST does not provision or authenticate the environment,
+Preparation is read-only. MST does not provision or authenticate the desktop,
 change its launch policy, or manage its lifecycle.
 
 **Owned-desktop mode.** A worker image that runs several variants on one desktop
@@ -603,8 +603,8 @@ API cost. A test assertion or judge failure is distinct from a driver failure.
 
 - `timeToFirstTokenMs` and `timeToFirstTokenStreamMs`: the trial's first turn,
   to its first token and to the first token of the response stream, with
-  `firstRequestAt`. Each model call's own TTFT is in the host's telemetry
-  (`telemetry.host`, docs/telemetry.md).
+  `firstRequestAt`. Each model call's own TTFT is in the client's own telemetry
+  ([`telemetry.host`](./telemetry.md#the-clients-own-telemetry)).
 - `permissionRequestCount`, `permissionDenialCount` and `approvalWaitMs`: the
   tool approvals Cowork asked for, the ones refused, and the time from each
   request to its answer. The wait is part of `durationMs`.

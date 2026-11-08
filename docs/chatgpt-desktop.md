@@ -125,7 +125,7 @@ permission the driver already uses.
 
 ## Linux runtime contract
 
-The caller (your eval harness) owns the VM/container, display, D-Bus, keyring,
+The caller (the automation that starts MST) owns the VM/container, display, D-Bus, keyring,
 AT-SPI bus, the fresh HOME and the inference credential file (creation and deletion), the package
 version check, the disposable no-new-privileges container, and uploading `MST_CHATGPT_EVIDENCE_DIR`. It runs MST as the
 unprivileged desktop user with this process environment. There is no controller
@@ -283,7 +283,7 @@ Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs
 bubblewrap, which cannot run inside the container, and nobody can answer an
 approval request in a headless run, so a sandboxed command would hang the turn.
-This relies on your harness's isolation: run the whole app in a
+This relies on the caller's isolation: run the whole app in a
 disposable no-new-privileges container with a fresh tmpfs profile. MST does not
 verify this. `nativeReadiness.executionPolicy` records the fixed values. macOS is
 unchanged.

@@ -6,7 +6,7 @@ MST measures its built-in judges on a small calibration set, the way [`mst judge
 
 ## The set
 
-The set has 128 transcripts. A scripted client (`scripts/calibration/plugin.ts`) makes real tool calls against MST's mock server and the filesystem reference server (`@modelcontextprotocol/server-filesystem@2.1.0`, over a small made-up project in `scripts/calibration/files/`). Then it gives an answer written to be right or wrong in one way. There are 16 tasks (settings and history of the project, arithmetic, weather), each in 8 kinds of transcript.
+The set has 128 transcripts. A scripted client (`scripts/calibration/plugin.ts`) makes real tool calls against MST's mock server and the filesystem reference server (`@modelcontextprotocol/server-filesystem@2.1.0`, over a small made-up project in `scripts/calibration/files/`). Then it gives an answer written to be right or wrong in one way. There are 16 cases (settings and history of the project, arithmetic, weather), each in 8 kinds of transcript.
 
 **No person reviewed these labels.** Each transcript's label comes from its kind, by the table below, so the labels are only as right as the table and the transcripts that `scripts/calibration/cases.ts` builds. The labels are stored with the labeler `constructed`. The answers are short and written to be clearly right or wrong, so the set is easier than real transcripts.
 

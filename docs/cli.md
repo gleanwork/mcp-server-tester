@@ -89,7 +89,7 @@ my-mcp-tests/
 ├── tests/
 │   └── mcp.spec.ts        # Example test file
 ├── data/
-│   └── example-dataset.json  # Sample eval cases, run on a model
+│   └── example-dataset.json  # Example eval cases, run on a model
 ├── package.json           # Dependencies and scripts
 └── tsconfig.json          # TypeScript configuration
 ```
@@ -982,7 +982,7 @@ A run narrowed by any of `--variant`, `--case`, `--filter-tag`, `--max-cases` or
 
 Every client's trials wait for MST's [server readiness check](./evaluation-framework.md#server-readiness): before a batch's first trial, each of the variant's servers must connect and list at least one tool (and its `minTools`). A server that isn't ready is checked again after 10 s and 30 s (`MST_MCP_READINESS_RETRY_S` sets other delays). When it still isn't, no trial of that batch is sent, `run` prints `[mst] The <client> batch for variant "<name>" didn't run: MCP server not ready, ...`, and each trial is a retryable `setup` infrastructure failure: its case is incomplete, and `--resume` collects it again.
 
-`run` prints a row per variant (cases passed, the report's pass rate and its likely range at 95% confidence, MCP calls, client events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant, from the report's paired test. A range wider than ±10 points is marked `!`, with the trials per case to run next. It writes the run's directory (`runs/<run-id>/` under the eval's output directory; see [What a run leaves behind](./evaluation-framework.md#what-a-run-leaves-behind)), prints its path, and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets, variants and environment (`env`: its name, shards, and any `keep` or options) as JSON.
+`run` prints a row per variant (cases passed, the report's pass rate and its likely range at 95% confidence, MCP calls, client events, tokens, cost, time) and, when there is one, the change since the previous run of the same eval config and variant, from the report's paired test. A range wider than ±10 points is marked `!`, with the trials per case to run next. It writes the run's directory (`runs/<run-id>/` under the eval's output directory; see [What a run leaves behind](./evaluation-framework.md#what-a-run-leaves-behind)), prints its path, and exits 1 when any case failed. `--dry-run` prints the eval config's name, output directory, datasets, variants and runner (`runner`: its name, shards, and any `keep` or options) as JSON.
 
 ## `grade` - Grade a Stored Run Again
 
@@ -1204,7 +1204,7 @@ npx mst batch --configs a.json b.json [options]
 | `--secrets-file <path>` | A JSON or dotenv-style file of environment values for the run, as for `run`.                                                                               |
 | `--dry-run`             | Validate every eval config without running anything.                                                                                                       |
 
-`batch` prints each eval config's outcome and a total, and exits 1 when any eval config failed.
+`batch` prints whether each eval config passed and a total, and exits 1 when any eval config failed.
 
 ## `open` - Open a Run's Report
 
