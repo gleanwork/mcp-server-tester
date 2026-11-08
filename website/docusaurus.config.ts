@@ -19,9 +19,12 @@ const repoUrl = 'https://github.com/gleanwork/mcp-server-tester';
 const npmUrl = 'https://www.npmjs.com/package/@gleanwork/mcp-server-tester';
 
 // The production URL. The MCP server builds every page URL it returns from
-// this, so it must match the domain the site is served from. Override with
-// SITE_URL, for example when serving the build locally.
-const siteUrl = process.env.SITE_URL ?? 'https://mcp-server-tester.vercel.app';
+// this, so it must match the Vercel project's production domain; change it
+// here if that domain changes. Preview builds use it too, so their links point
+// at production. Override with SITE_URL, for example when serving the build
+// locally.
+const siteUrl =
+  process.env.SITE_URL ?? 'https://mcp-server-tester-docs.vercel.app';
 
 const repoLinkOptions: RepoLinksOptions = {
   repoRoot,

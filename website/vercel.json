@@ -1,11 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "docusaurus-2",
+  "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "build",
   "cleanUrls": true,
-  "git": {
-    "deploymentEnabled": false
-  },
   "rewrites": [{ "source": "/mcp", "destination": "/api/mcp" }]
 }
