@@ -106,6 +106,7 @@
     "test:external-host:chat": "vitest run --config vitest.external-host.config.mts -t \"Claude Chat\"",
     "test:external-host:cowork": "vitest run --config vitest.external-host.config.mts -t \"Claude Cowork\"",
     "test:playwright": "playwright test",
+    "test:site": "playwright test -c playwright.site.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.ui.json",
     "knip": "knip",

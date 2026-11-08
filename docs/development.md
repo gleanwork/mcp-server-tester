@@ -352,6 +352,16 @@ When adding features:
 3. Include code examples
 4. Update `CHANGELOG.md` (if maintaining one)
 
+The docs site in `website/` renders the pages in `docs/`, and serves them and the skills in `skills/` over MCP at `/mcp`. To preview it:
+
+```bash
+cd website
+npm ci
+npm start        # http://localhost:3000, reloads as you edit docs/
+```
+
+A new page needs an entry in `website/sidebars.ts`. `npm run build` fails on a broken link, including a relative link to a repo file that doesn't exist. After a build, `npm run test:site` (at the repo root) tests the site's MCP server with MST.
+
 ## Release Process
 
 See [RELEASE.md](../RELEASE.md) for the release process using release-it.

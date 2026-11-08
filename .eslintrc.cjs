@@ -48,6 +48,9 @@ module.exports = {
     '*.cjs',
     '*.js',
     'playwright.config.ts',
+    'playwright.site.config.ts',
+    // The docs site has its own package and tsconfig (npm run typecheck there).
+    'website',
     'tsup.config.ts',
     'vitest.config.mts',
   ],
