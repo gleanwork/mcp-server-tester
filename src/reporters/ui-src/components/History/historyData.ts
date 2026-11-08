@@ -94,7 +94,8 @@ export interface MetricDef {
 
 /** The charts the history has data for, in page order. */
 export function metricsOf(index: HistoryIndex): MetricDef[] {
-  const variants = index.runs.flatMap((run) => run.variants);
+  // Only runs that are plotted: a chart of none of them would be empty.
+  const variants = index.runs.filter(isPoint).flatMap((run) => run.variants);
   const judges = [...new Set(variants.flatMap((v) => Object.keys(v.judges)))];
   const pairwise = new Map<string, string>();
   for (const variant of variants)

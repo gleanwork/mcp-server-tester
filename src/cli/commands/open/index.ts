@@ -101,7 +101,11 @@ export async function open(
     process.exit(1);
   }
   let reportPath = runReportPath(run);
-  if (!existsSync(reportPath) || (await calibratedSince(run)))
+  if (
+    !existsSync(reportPath) ||
+    (await calibratedSince(run)) ||
+    (await historySince(run))
+  )
     reportPath = await writeRunReport(run);
   await show(reportPath, options);
 }
@@ -109,16 +113,19 @@ export async function open(
 /**
  * The eval directory `mst open --history` means: the one a path names (an
  * eval's directory, or a run's), the eval config's, or the newest eval's.
+ * With an eval config, its name too: the history is named for it.
  */
 async function historyDirectory(
   path: string | undefined,
   options: OpenOptions
-): Promise<string | undefined> {
+): Promise<{ directory: string; evalName?: string } | undefined> {
   if (path !== undefined) {
     const target = resolve(path);
-    return existsSync(join(target, 'run.json'))
-      ? evalDirectoryOf(target)
-      : target;
+    return {
+      directory: existsSync(join(target, 'run.json'))
+        ? evalDirectoryOf(target)
+        : target,
+    };
   }
   if (options.config) {
     const rootDir = resolve(options.rootDir ?? '.');
@@ -126,12 +133,15 @@ async function historyDirectory(
       rootDir,
       skipDatasetValidation: true,
     });
-    return resolve(
-      options.outputDir ?? join(rootDir, '.mcp-test-results', name)
-    );
+    return {
+      directory: resolve(
+        options.outputDir ?? join(rootDir, '.mcp-test-results', name)
+      ),
+      evalName: name,
+    };
   }
   const run = await newestRun(resolve(options.dir ?? '.mcp-test-results'));
-  return run ? evalDirectoryOf(run) : undefined;
+  return run ? { directory: evalDirectoryOf(run) } : undefined;
 }
 
 /**
@@ -142,7 +152,8 @@ async function openHistory(
   path: string | undefined,
   options: OpenOptions
 ): Promise<void> {
-  const directory = await historyDirectory(path, options);
+  const target = await historyDirectory(path, options);
+  const directory = target?.directory;
   if (!directory || !(await hasLocalRuns(directory))) {
     console.error(
       directory
@@ -152,8 +163,24 @@ async function openHistory(
     process.exit(1);
   }
   const location = localHistoryLocation(directory);
-  await updateHistory(location);
+  await updateHistory(
+    location,
+    target?.evalName ? { evalName: target.evalName } : {}
+  );
   await show(join(directory, 'history', 'index.html'), options);
+}
+
+/**
+ * Whether the eval got its history page after the run's report was built,
+ * so the report has no link to it yet: a run from before MST wrote one.
+ */
+async function historySince(run: string): Promise<boolean> {
+  if (!existsSync(join(evalDirectoryOf(run), 'history', 'index.html')))
+    return false;
+  const data = await fs
+    .readFile(join(run, 'report', 'data.js'), 'utf8')
+    .catch(() => '');
+  return !data.includes('"historyPath"');
 }
 
 /**

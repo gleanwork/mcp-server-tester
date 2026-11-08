@@ -1045,15 +1045,38 @@ async function writeHistoryIndex(
  * swap, so after writing it lists the runs again and writes once more when
  * one appeared meanwhile. A history that still misses a run is rebuilt by
  * the next write or read: the runs are the truth, the index a cache.
- * The history page (`history/index.html`) is written from the index last.
+ *
+ * The history page (`history/index.html`) gets its files first, and its
+ * data with each write of `history.json`, so the two always hold the same
+ * index. The page is a view: failing to write it is a warning, and
+ * `history.json` is still written.
  */
 export async function updateHistory(
   location: HistoryLocation,
-  options: { rebuild?: boolean; evalName?: string } = {}
+  options: {
+    rebuild?: boolean;
+    evalName?: string;
+    warn?: (message: string) => void;
+  } = {}
 ): Promise<HistoryIndex> {
+  const warn = options.warn ?? ((message: string) => console.warn(message));
+  let page = true;
+  async function tryPage(write: () => Promise<void>): Promise<void> {
+    if (!page) return;
+    try {
+      await write();
+    } catch (error) {
+      page = false;
+      warn(
+        `[mst] The history page in ${location.store.location} wasn't written: ${error instanceof Error ? error.message : String(error)}. \`mst open --history\` writes it again.`
+      );
+    }
+  }
+  await tryPage(() => writeHistoryPageFiles(location));
   let index = await buildHistory(location, options);
   for (let attempt = 0; attempt < 3; attempt++) {
     await writeHistoryIndex(location, index);
+    await tryPage(() => writeHistoryPageData(location, index));
     const again = await buildHistory(location, {
       cached: index,
       ...(options.evalName ? { evalName: options.evalName } : {}),
@@ -1066,21 +1089,16 @@ export async function updateHistory(
       break;
     index = again;
   }
-  await writeHistoryPage(location, index);
   return index;
 }
 
 /**
- * Writes the history page into `<eval>/history/`: the reporter UI and the
- * history as `data.js`, so it opens from `file://` with nothing else. Its
- * links to runs' reports are relative (`../runs/<id>/report/index.html`).
- * The data holds no answers, tool outputs or reasoning: only IDs and
- * numbers, so a redacted run's history is as redacted as the run.
+ * Writes the history page's files into `<eval>/history/`: the reporter UI.
+ * With its `data.js` (`writeHistoryPageData`) it opens from `file://` with
+ * nothing else. Its links to runs' reports are relative
+ * (`../runs/<id>/report/index.html`).
  */
-async function writeHistoryPage(
-  location: HistoryLocation,
-  index: HistoryIndex
-): Promise<void> {
+async function writeHistoryPageFiles(location: HistoryLocation): Promise<void> {
   const ui = reporterUiDirectory();
   const prefix = `${location.evalKey}/history/`;
   const files = (await fs.readdir(ui, { recursive: true, withFileTypes: true }))
@@ -1091,8 +1109,19 @@ async function writeHistoryPage(
       prefix + path.relative(ui, file).split(path.sep).join('/'),
       await fs.readFile(file)
     );
+}
+
+/**
+ * Writes the history page's data, `<eval>/history/data.js`. It holds no
+ * answers, tool outputs or reasoning: only IDs and numbers, so a redacted
+ * run's history is as redacted as the run.
+ */
+async function writeHistoryPageData(
+  location: HistoryLocation,
+  index: HistoryIndex
+): Promise<void> {
   await location.store.put(
-    `${prefix}data.js`,
+    `${location.evalKey}/history/data.js`,
     `window.MST_HISTORY = ${JSON.stringify(index)};\n`
   );
 }
@@ -1108,7 +1137,7 @@ export async function recordInHistory(
   warn: (message: string) => void = (message) => console.warn(message)
 ): Promise<HistoryIndex | undefined> {
   try {
-    return await updateHistory(location, { evalName });
+    return await updateHistory(location, { evalName, warn });
   } catch (error) {
     warn(
       `[mst] The eval's history in ${location.store.location} wasn't updated: ${error instanceof Error ? error.message : String(error)}. \`mst history --rebuild\` builds it again from the runs.`

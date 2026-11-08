@@ -8,6 +8,12 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { weeklyRuns } from './mocks/weeklyHistory.js';
+import {
+  caseChanges,
+  isPoint,
+} from '../src/reporters/ui-src/components/History/historyData.js';
+import type { HistoryIndex } from '../src/types/history.js';
+import { open } from '../src/cli/commands/open/index.js';
 
 let evalDirectory: string;
 let root: string;
@@ -104,10 +110,68 @@ test('lists the cases whose verdict changed between two runs', async ({
   const options = await from.locator('option').allTextContents();
   await from.selectOption({ index: options.length - 1 });
   await expect(panel.getByText(/different eras/)).toBeVisible();
+  // The first run against the latest, each variant's changed cases listed.
+  const index = JSON.parse(
+    await fs.readFile(path.join(evalDirectory, 'history.json'), 'utf8')
+  ) as HistoryIndex;
+  const runs = index.runs.filter(isPoint);
+  const [latest, first] = [runs[0]!, runs[runs.length - 1]!];
+  await expect(from).toHaveValue(first.runId);
+  await expect(panel.getByLabel('To')).toHaveValue(latest.runId);
+  const changes = caseChanges(first, latest);
+  expect(
+    changes.flatMap((c) => [...c.nowFailing, ...c.nowPassing]).length
+  ).toBeGreaterThan(0);
+  for (const change of changes) {
+    const card = panel.locator('div.border', {
+      has: tab.locator('span.font-semibold', {
+        hasText: new RegExp(`^${change.variant}$`),
+      }),
+    });
+    await expect(card).toContainText(
+      `${change.nowFailing.length} now failing · ${change.nowPassing.length} now passing`
+    );
+    await expect(card.locator('li')).toHaveCount(
+      change.nowFailing.length + change.nowPassing.length
+    );
+    for (const row of [...change.nowFailing, ...change.nowPassing])
+      await expect(card.locator('li', { hasText: row.id })).toContainText(
+        `${row.before[0]}/${row.before[1]} → ${row.after[0]}/${row.after[1]} trials`
+      );
+  }
+});
+
+test('mst open gives a report from before the history page its link', async () => {
+  const runs = (await fs.readdir(path.join(evalDirectory, 'runs'))).sort();
+  const data = path.join(evalDirectory, 'runs', runs[1]!, 'report', 'data.js');
+  const written = await fs.readFile(data, 'utf8');
+  expect(written).toContain('"historyPath"');
+  // A report written before MST wrote history pages.
+  await fs.writeFile(
+    data,
+    written.replace(/,"historyPath":"[^"]*"/, ''),
+    'utf8'
+  );
+  expect(await fs.readFile(data, 'utf8')).not.toContain('"historyPath"');
+  await open(path.join(evalDirectory, 'runs', runs[1]!), { print: true });
+  expect(await fs.readFile(data, 'utf8')).toContain(
+    '"historyPath":"../../../history/index.html"'
+  );
 });
 
 test('hides a variant from every chart', async ({ page: tab }) => {
   await tab.goto(page());
+  const point = (name: string) => `a[aria-label^="${name}, run "]`;
+  const points = (name: string) => tab.locator(`figure ${point(name)}`);
+  await expect(tab.locator('figure').first().locator('a')).toHaveCount(15);
+  // It's on several charts, so hiding it from the first only would fail.
+  expect(
+    await tab
+      .locator('figure', { has: tab.locator(point('glean-plus')) })
+      .count()
+  ).toBeGreaterThan(1);
+  const others = await points('official').count();
   await tab.getByRole('button', { name: /glean-plus/ }).click();
-  await expect(tab.locator('figure').first().locator('a')).toHaveCount(10);
+  await expect(points('glean-plus')).toHaveCount(0);
+  await expect(points('official')).toHaveCount(others);
 });

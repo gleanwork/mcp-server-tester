@@ -571,6 +571,36 @@ describe('mst CLI', () => {
       expect(history.stdout).toContain('No runs of my-eval');
     });
 
+    it('open --history finds the eval by its config and --output-dir, and names the history for it', async () => {
+      await project.write({
+        'eval.json': JSON.stringify({
+          name: 'config-eval',
+          datasets: ['./cases.json'],
+          servers: { s: { transport: 'stdio', command: 'node' } },
+          client: 'claude-code',
+        }),
+        elsewhere: { runs: { notes: 'not a run' } },
+      });
+      const result = await runBin(
+        'open',
+        '--history',
+        '--print',
+        '--config',
+        'eval.json',
+        '--output-dir',
+        `${project.baseDir}/elsewhere`
+      );
+      expect(result.stderr).toBe('');
+      expect(result.exitCode).toBe(0);
+      expect(String(result.stdout).trim()).toMatch(
+        /elsewhere\/history\/index\.html$/
+      );
+      const index = JSON.parse(
+        readFileSync(`${project.baseDir}/elsewhere/history.json`, 'utf8')
+      ) as { evalName: string };
+      expect(index.evalName).toBe('config-eval');
+    });
+
     it('says what to give when the directory has no runs', async () => {
       const result = await runBin('history', project.baseDir);
       expect(result.exitCode).toBe(1);

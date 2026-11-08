@@ -39,7 +39,7 @@ A run with one variant opens on the cases that need attention, or on all cases w
 
 ## The history page
 
-Every run also writes its eval's history page, `<eval>/history/index.html`, from the eval's [history](./evaluation-framework.md#the-evals-history). It shows the eval's runs over time, one line for each variant, so you can follow a variant week over week and against the baseline. Each run report's header links to it (_History_).
+Every run also writes its eval's history page, `<eval>/history/index.html`, from the eval's [history](./evaluation-framework.md#the-evals-history). It shows the eval's runs over time, one line for each variant, so you can follow a variant week over week and against the baseline. Each run report's header links to it (_History_). `mst open` adds the link to a report written before the eval had a history page.
 
 ![The history page: pass rate, judge, win rate, cost, tokens, time and infrastructure failures over six weekly runs, with a new era where the judge changed](img/history-page.png)
 
@@ -65,6 +65,8 @@ npx mst open --history --config ./eval.json             # the eval config's
 - **Cases that changed:** pick two runs. By default these are the latest run and the run it was compared with. For each variant, the panel lists the cases that now fail or now pass, with their trials (`3/3 → 1/3`). When the two runs are in different eras, the panel says so.
 
 The page is static and self-contained, like a run's report. It opens from `file://`, makes no network requests and adds no chart library. It holds only IDs and numbers: no answers, tool outputs or reasoning, whatever the runs' redaction. With a result store, the store gets its own page at `<eval>/history/`, built from the store's runs. Its links are relative to the store's layout. `mst open --history` opens local runs only.
+
+The page is a view of `history.json`: when it can't be written, the run still writes `history.json` and warns, and `mst open --history` writes the page again.
 
 To try it without a model: `npm run build:ui && npm run preview-history` runs six scripted weekly runs and prints the page's path.
 

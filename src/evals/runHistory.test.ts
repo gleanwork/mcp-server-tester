@@ -20,6 +20,7 @@ import {
 } from './runHistory.js';
 import type { HistoryIndex } from '../types/history.js';
 import { formatHistory, history } from '../cli/commands/history/index.js';
+import { metricsOf } from '../reporters/ui-src/components/History/historyData.js';
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -263,6 +264,30 @@ async function weekly(evalDirectory: string): Promise<void> {
 }
 
 describe('the history of an eval', () => {
+  it('has no chart on the page for what only runs off the charts measured', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    await weekly(dir);
+    const index = await buildHistory(localHistoryLocation(dir));
+    // A judge only the newest run had.
+    const [newest, ...rest] = index.runs;
+    const judged = {
+      ...newest!,
+      variants: newest!.variants.map((variant) => ({
+        ...variant,
+        judges: {
+          ...variant.judges,
+          'x/judge/late': { trials: 2, passRate: 1 },
+        },
+      })),
+    };
+    const ids = (runs: HistoryIndex['runs']) =>
+      metricsOf({ ...index, runs }).map((metric) => metric.id);
+    expect(ids([judged, ...rest])).toContain('judge:x/judge/late');
+    expect(ids([{ ...judged, partial: true }, ...rest])).not.toContain(
+      'judge:x/judge/late'
+    );
+  });
+
   it('has a row per run, newest first, with eras where the judge or dataset changed', async () => {
     const dir = path.join(await tempDir(), 'weekly');
     await weekly(dir);
@@ -723,6 +748,74 @@ describe('the history in a result store', () => {
     expect(
       parseStored(store.files.get('weekly/history.json')!).runs
     ).toHaveLength(6);
+  });
+
+  it("shows on the page what history.json holds when another writer finishes while it's writing the page", async () => {
+    const local = path.join(await tempDir(), 'weekly');
+    await weekly(local);
+    const runIds = (await fs.readdir(path.join(local, 'runs'))).sort();
+    const store = memoryStore();
+    for (const runId of runIds.slice(0, 5))
+      await uploadRun(store, {
+        evalName: 'weekly',
+        runId,
+        runDirectory: path.join(local, 'runs', runId),
+      });
+    // While this writer copies the page's files, another uploads its run
+    // and writes the history and page all the way.
+    const put = store.put.bind(store);
+    let raced = false;
+    store.put = async (key, body) => {
+      await put(key, body);
+      if (key === 'weekly/history/index.html' && !raced) {
+        raced = true;
+        const other = { ...store, put };
+        await uploadRun(other, {
+          evalName: 'weekly',
+          runId: runIds[5]!,
+          runDirectory: path.join(local, 'runs', runIds[5]!),
+        });
+        await updateHistory(storeHistoryLocation(other, 'weekly'));
+      }
+    };
+    await updateHistory(storeHistoryLocation(store, 'weekly'));
+    const page = Buffer.from(store.files.get('weekly/history/data.js')!)
+      .toString('utf8')
+      .replace(/^window\.MST_HISTORY = /, '')
+      .replace(/;\s*$/, '');
+    const history = parseStored(store.files.get('weekly/history.json')!);
+    expect(history.runs).toHaveLength(6);
+    expect(JSON.parse(page)).toEqual(history);
+  });
+
+  it("still writes history.json, with a warning, when the page can't be written", async () => {
+    const local = path.join(await tempDir(), 'weekly');
+    await weekly(local);
+    const store = memoryStore();
+    for (const runId of (await fs.readdir(path.join(local, 'runs'))).sort())
+      await uploadRun(store, {
+        evalName: 'weekly',
+        runId,
+        runDirectory: path.join(local, 'runs', runId),
+      });
+    const put = store.put.bind(store);
+    store.put = async (key, body) => {
+      if (key.startsWith('weekly/history/')) throw new Error('disk full');
+      await put(key, body);
+    };
+    const warnings: string[] = [];
+    const index = await updateHistory(storeHistoryLocation(store, 'weekly'), {
+      warn: (message) => warnings.push(message),
+    });
+    expect(index.runs).toHaveLength(6);
+    expect(
+      parseStored(store.files.get('weekly/history.json')!).runs
+    ).toHaveLength(6);
+    expect(warnings).toEqual([
+      expect.stringMatching(
+        /^\[mst\] The history page in .* wasn't written: disk full\. `mst open --history` writes it again\.$/
+      ),
+    ]);
   });
 
   it('replaces a local history.json in one step', async () => {
