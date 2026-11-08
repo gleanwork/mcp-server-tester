@@ -13,6 +13,7 @@ import {
   writeTrial,
   type RunFacts,
   type JudgeRecord,
+  type PluginRecord,
   findRunDirectory,
   RUN_ID_PATTERN,
   type GradeShardRecord,
@@ -40,7 +41,7 @@ import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -125,6 +126,9 @@ import {
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import type { Plugin } from '../plugins/plugin.js';
+import type { SettingsSections } from '../plugins/settings.js';
+import { optionKey } from './optionKey.js';
+import { installedPlugin } from '../plugins/extensions.js';
 import { resolvePluginPackage } from '../plugins/loadPlugins.js';
 import { assertDatasetNamespaces, loadEvalPlugins } from './evalPlugins.js';
 import { loadDataset } from './builtinDatasetSources.js';
@@ -695,9 +699,9 @@ const SENSITIVE_VALUE = /:\/\/|=|^[A-Za-z0-9_\-.~+/]{24,}$/;
 /**
  * A variant's client options as run.json records them: numbers, booleans
  * and short strings whose name and value don't suggest a credential are
- * kept; everything else is replaced by an HMAC keyed for this run, so
- * variants of one run can be compared but values can't be guessed or
- * matched across runs.
+ * kept; everything else is replaced by an HMAC under the eval's option key
+ * (`optionKey`), so the eval's runs and variants can be compared but values
+ * can't be guessed without the key.
  */
 export function recordableOptions(
   options: Record<string, unknown>,
@@ -793,16 +797,25 @@ function assertResumable(
  * The identity of the judge an eval config entry runs, as its scores record
  * it (ADR 0009). Undefined when the judge's plugin isn't loaded here.
  */
-function entryIdentity(level: string, entry: unknown): string | undefined {
+function entryIdentity(
+  level: string,
+  entry: unknown,
+  settings: SettingsSections | undefined
+): string | undefined {
   const config = (typeof entry === 'string' ? { type: entry } : entry) as {
     type: string;
   } & Record<string, unknown>;
-  if (level !== 'pairwise') return judgeEntryIdentity(config as CaseJudge);
+  if (level !== 'pairwise')
+    return judgeEntryIdentity(config as CaseJudge, settings);
   try {
     const { type, options, reps } = pairwiseJudgeSpec(config);
-    return judgeIdentity(type, getPairwiseJudge(type), options, {
-      reps: Math.max(1, reps ?? 1),
-    });
+    return judgeIdentity(
+      type,
+      getPairwiseJudge(type),
+      options,
+      { reps: Math.max(1, reps ?? 1) },
+      settings
+    );
   } catch {
     return undefined;
   }
@@ -846,7 +859,11 @@ function judgeRecords(
         typeof entry === 'string'
           ? { type: entry }
           : (entry as { type: string } & Record<string, unknown>);
-      const identity = entryIdentity(level, raw?.[index] ?? entry);
+      const identity = entryIdentity(
+        level,
+        raw?.[index] ?? entry,
+        evalConfig.settings
+      );
       return {
         type,
         level,
@@ -882,6 +899,22 @@ function judgeRecords(
       record('pairwise', undefined)
     ),
   ];
+}
+
+/** The plugins run.json records: the eval's, by namespace, with their versions. */
+function pluginRecords(namespaces: readonly string[]): PluginRecord[] {
+  return namespaces.flatMap((namespace) => {
+    const meta = installedPlugin(namespace)?.meta;
+    return meta
+      ? [
+          {
+            namespace,
+            name: meta.name,
+            ...(meta.version !== undefined ? { version: meta.version } : {}),
+          },
+        ]
+      : [];
+  });
 }
 
 function redactServerForReport(server: MCPConfig): MCPConfig {
@@ -1855,8 +1888,11 @@ async function evaluate(
     };
   }
 
-  // Keys the hashes of client options in run.json: comparable within this run only.
-  const runKey = randomBytes(32);
+  // Keys the hashes of client options in run.json: the eval's, so its runs
+  // record an unchanged option alike and its history can say so. Saved
+  // with the run's first run.json.
+  const optionKeyOfEval = await optionKey(evalDirectory);
+  const runKey = optionKeyOfEval.key;
   const variantResults: EvaluationVariantResult[] = [];
   // Judge settings whose preflight passed, across variants.
   const checkedJudges = new Set<string>();
@@ -2682,6 +2718,7 @@ async function evaluate(
       const summary = buildSummary(undefined);
       const stored = storedSummaryOf(summary);
       await fs.mkdir(outputDir, { recursive: true });
+      await optionKeyOfEval.save();
       await writeRun(
         outputDir,
         executionId,
@@ -2936,6 +2973,7 @@ async function evaluate(
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
       judges: judgeRecords(evalConfig, rawConfig),
+      plugins: pluginRecords(namespaces),
       redactStoredResponses: redact,
       // A regrade or a resume keeps the setting its transcripts were collected
       // with.
@@ -2997,6 +3035,7 @@ async function evaluate(
 
   const storedSummary = storedSummaryOf(summary);
   await fs.mkdir(outputDir, { recursive: true });
+  await optionKeyOfEval.save();
   // A regrade or a resume is measured against its source run's labels.
   if (replay) await carryLabels(replay.directory, outputDir);
   await writeRun(

@@ -470,9 +470,13 @@ export async function comparePairwise(
       reps,
       context: { settings: settingsFor(options.settings, spec.type) },
       identity: {
-        judgeIdentity: judgeIdentity(spec.type, judge, spec.options ?? {}, {
-          reps,
-        }),
+        judgeIdentity: judgeIdentity(
+          spec.type,
+          judge,
+          spec.options ?? {},
+          { reps },
+          options.settings
+        ),
         ...(judgeIsVersioned(spec.type, judge)
           ? {}
           : { judgeUnversioned: true as const }),

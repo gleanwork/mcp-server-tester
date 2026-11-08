@@ -62,6 +62,7 @@ import {
 import { wilson } from './judgeCheck.js';
 import { reporterUiDirectory } from './runReport.js';
 import { HISTORY_FORMAT, HistoryIndexSchema } from './historyFormat.js';
+import { sortKeys } from '../judge/judgeIdentity.js';
 
 export { HISTORY_FORMAT };
 
@@ -69,7 +70,7 @@ export { HISTORY_FORMAT };
  * The version of the code that builds a row from a run. A cached row built
  * by another version is built again, so a row never mixes two definitions.
  */
-const ROW_BUILDER = 2;
+const ROW_BUILDER = 3;
 
 /**
  * Parses `history.json`; undefined when it isn't one this MST reads, and
@@ -154,7 +155,13 @@ function judgeVerdicts(
 function judgesOf(cases: EvalCaseResult[]): Record<string, HistoryJudge> {
   const tally = new Map<
     string,
-    { trials: number; passed: number; unknown: number; scores: number[] }
+    {
+      trials: number;
+      passed: number;
+      unknown: number;
+      scores: number[];
+      identities: Set<string>;
+    }
   >();
   for (const result of cases)
     for (const trial of trialsOf(result)) {
@@ -165,7 +172,9 @@ function judgesOf(cases: EvalCaseResult[]): Record<string, HistoryJudge> {
           passed: 0,
           unknown: 0,
           scores: [],
+          identities: new Set<string>(),
         };
+        if (score.judgeIdentity) entry.identities.add(score.judgeIdentity);
         if (score.unknown === true) entry.unknown++;
         else {
           entry.trials++;
@@ -185,6 +194,9 @@ function judgesOf(cases: EvalCaseResult[]): Record<string, HistoryJudge> {
           ...(entry.trials ? { passRate: entry.passed / entry.trials } : {}),
           ...(meanScore !== undefined ? { meanScore } : {}),
           ...(entry.unknown ? { unknown: entry.unknown } : {}),
+          ...(entry.identities.size
+            ? { identities: [...entry.identities].sort() }
+            : {}),
         },
       ];
     })
@@ -248,29 +260,45 @@ function serverName(server: Record<string, unknown>): string {
 }
 
 /**
- * A variant's setup, as comparable across runs: an option value a run
- * recorded only as a keyed hash (`hmac:…`) can't be matched with another
- * run's, so only its name counts.
+ * The parts of a variant's setup besides its client and model, each hashed,
+ * so a change can say which part changed: its client options, each server
+ * (by name: its endpoint or command, transport and connector, as run.json
+ * records them), tool metadata, input template, judges and write modes.
+ *
+ * An option value recorded as a keyed hash (`hmac:…`) counts as that hash.
+ * The key is the eval's (`optionKey`), so the same value hashes the same in
+ * its runs; under another key, from another machine or an older run, the
+ * hashes differ and the setup counts as changed, since nothing shows it
+ * stayed the same.
  */
-function setupHashOf(
+function setupPartsOf(
   record: RunRecord['variants'][number] | undefined
+): Record<string, string> {
+  const parts: Record<string, string> = {
+    'client options': sha(sortKeys(record?.clientOptions ?? {})),
+    'tool metadata': sha(sortKeys(record?.tools ?? null)),
+    'input template': sha(record?.inputTemplate ?? null),
+    judges: sha(record?.judges ?? null),
+    'write modes': sha(sortKeys(record?.writeModes ?? {})),
+  };
+  for (const server of record?.servers ?? []) {
+    const fields = server as Record<string, unknown>;
+    parts[`server ${serverName(fields)}`] = sha(sortKeys(fields));
+  }
+  return parts;
+}
+
+function setupHashOf(
+  record: RunRecord['variants'][number] | undefined,
+  parts: Record<string, string>
 ): string {
-  const options = Object.fromEntries(
-    Object.entries(record?.clientOptions ?? {}).map(([key, value]) => [
-      key,
-      typeof value === 'string' && value.startsWith('hmac:') ? 'hmac' : value,
-    ])
-  );
   return sha({
     client: record?.client,
     model: record?.model,
-    options,
     servers: (record?.servers ?? []).map((server) =>
       serverName(server as Record<string, unknown>)
     ),
-    tools: record?.tools,
-    inputTemplate: record?.inputTemplate,
-    judges: record?.judges,
+    parts: sortKeys(parts),
   });
 }
 
@@ -341,6 +369,7 @@ function variantRow(
   const mcpCalls = numberMetric(variant, 'mcp_call_count_mean');
   const trialPassRate = numberMetric(variant, 'trial_pass_rate');
   const apps = clientAppsOf(cases);
+  const setupParts = setupPartsOf(record);
   return {
     name: variant.name,
     baseline: variant.name === baseline,
@@ -350,7 +379,11 @@ function variantRow(
       serverName(server as unknown as Record<string, unknown>)
     ),
     ...(apps.length ? { clientApps: apps } : {}),
-    setupHash: setupHashOf(record),
+    setupHash: setupHashOf(record, setupParts),
+    setupParts,
+    ...(record?.writeModes && Object.keys(record.writeModes).length
+      ? { writeModes: record.writeModes }
+      : {}),
     cases: complete.length,
     ...(incomplete ? { incomplete } : {}),
     ...(graded && complete.length
@@ -479,6 +512,17 @@ function historyRunOf(run: RunRecord, summary: EvaluationSummary): HistoryRun {
       ...(judge.identity ? { identity: judge.identity } : {}),
       optionsHash: judge.optionsHash,
     })),
+    ...(run.plugins
+      ? {
+          plugins: run.plugins.map((plugin) => ({
+            namespace: plugin.namespace,
+            name: plugin.name,
+            ...(plugin.version !== undefined
+              ? { version: plugin.version }
+              : {}),
+          })),
+        }
+      : {}),
     redacted: run.redactStoredResponses,
     ...(run.simulateWrites ? { simulateWrites: true as const } : {}),
     variants: summary.variants.map((variant) =>
@@ -628,6 +672,27 @@ function evalChanges(before: HistoryRun, after: HistoryRun): HistoryChange[] {
       reason: `${judge.level === 'pairwise' ? 'pairwise judge' : 'judge'} removed: ${judge.type}`,
       breaks: true,
     });
+  // A plugin's version can change what its clients, judges and datasets do.
+  // Runs from before run.json recorded plugins have nothing to compare.
+  if (before.plugins && after.plugins) {
+    const plugins = new Map(before.plugins.map((p) => [p.namespace, p]));
+    for (const plugin of after.plugins) {
+      const old = plugins.get(plugin.namespace);
+      plugins.delete(plugin.namespace);
+      if (!old)
+        changes.push({
+          reason: `plugin added: ${plugin.namespace}`,
+          breaks: false,
+        });
+      else if (old.version !== plugin.version)
+        changes.push({
+          reason: `plugin ${plugin.namespace} ${old.version ?? 'unversioned'} → ${plugin.version ?? 'unversioned'}`,
+          breaks: true,
+        });
+    }
+    for (const namespace of plugins.keys())
+      changes.push({ reason: `plugin removed: ${namespace}`, breaks: false });
+  }
   // A simulated success, not a planned-write result, changes what a client
   // sees after a write.
   const writes = (run: HistoryRun) =>
@@ -681,11 +746,28 @@ function variantChanges(
       parts.push(
         `servers ${before.servers.join(', ') || 'none'} → ${after.servers.join(', ') || 'none'}`
       );
+    parts.push(...changedParts(before, after));
     changes.push({
       reason: parts.length ? parts.join('; ') : 'setup changed',
       variant: after.name,
       breaks: true,
     });
+  }
+  // A judge's identity covers its version, options and plugin settings, so
+  // one that changed grades differently. A judge whose scores recorded none
+  // has nothing to compare.
+  for (const [name, judge] of Object.entries(after.judges)) {
+    const old = before.judges[name]?.identities;
+    if (
+      old?.length &&
+      judge.identities?.length &&
+      old.join(',') !== judge.identities.join(',')
+    )
+      changes.push({
+        reason: `judge ${name} changed`,
+        variant: after.name,
+        breaks: true,
+      });
   }
   const apps = (v: HistoryVariant) => (v.clientApps ?? []).join(', ');
   if (apps(before) !== apps(after) && apps(before) && apps(after))
@@ -695,6 +777,29 @@ function variantChanges(
       breaks: false,
     });
   return changes;
+}
+
+/**
+ * What changed in a variant's setup parts (`setupPartsOf`), besides its
+ * client, model and server names: write modes with their values, and any
+ * other part by name. A server added or removed is in the server names.
+ */
+function changedParts(before: HistoryVariant, after: HistoryVariant): string[] {
+  const was = before.setupParts ?? {};
+  const now = after.setupParts ?? {};
+  const changed: string[] = [];
+  for (const [part, hash] of Object.entries(now)) {
+    if (was[part] === undefined || was[part] === hash) continue;
+    if (part === 'write modes') {
+      const modes = (variant: HistoryVariant) =>
+        Object.entries(variant.writeModes ?? {})
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([server, mode]) => `${server} ${mode}`)
+          .join(', ') || 'none';
+      changed.push(`write modes ${modes(before)} → ${modes(after)}`);
+    } else changed.push(`${part} changed`);
+  }
+  return changed;
 }
 
 /**

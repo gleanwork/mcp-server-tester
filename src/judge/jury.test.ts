@@ -283,31 +283,27 @@ describe('a jury', () => {
 
   it("has an identity that is its members', in any order", async () => {
     install({});
-    const ab = judgeRequestIdentity(request(['a', 'b'])).judgeIdentity;
-    expect(judgeRequestIdentity(request(['b', 'a'])).judgeIdentity).toBe(ab);
-    expect(judgeRequestIdentity(request(['a', 'c'])).judgeIdentity).not.toBe(
-      ab
-    );
+    const identity = (r: Parameters<typeof judgeRequestIdentity>[0]) =>
+      judgeRequestIdentity(r, undefined).judgeIdentity;
+    const ab = identity(request(['a', 'b']));
+    expect(identity(request(['b', 'a']))).toBe(ab);
+    expect(identity(request(['a', 'c']))).not.toBe(ab);
     expect(ab).not.toBe(
-      judgeRequestIdentity({
-        ...request(['a']),
-        jury: undefined,
-        options: { model: 'a' },
-      }).judgeIdentity
+      identity({ ...request(['a']), jury: undefined, options: { model: 'a' } })
     );
     // Grading policy reaches every member.
-    expect(
-      judgeRequestIdentity(request(['a', 'b'], { threshold: 0.9 }))
-        .judgeIdentity
-    ).not.toBe(ab);
+    expect(identity(request(['a', 'b'], { threshold: 0.9 }))).not.toBe(ab);
     expect((await grade(['a', 'b'])).judgeIdentity).toBe(ab);
     // A case or eval config judge records the same identity.
     expect(
-      judgeIdentityOf({
-        judge: 'acme/judge/votes',
-        threshold: 0.5,
-        jury: [{ model: 'a' }, { model: 'b' }],
-      })
+      judgeIdentityOf(
+        {
+          judge: 'acme/judge/votes',
+          threshold: 0.5,
+          jury: [{ model: 'a' }, { model: 'b' }],
+        },
+        undefined
+      )
     ).toBe(ab);
   });
 

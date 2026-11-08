@@ -10,6 +10,7 @@ import {
   BUILTIN_NAMESPACE,
   parseExtensionReference,
 } from '../plugins/plugin.js';
+import { settingsFor, type SettingsSections } from '../plugins/settings.js';
 
 /** What a judge or pairwise judge definition contributes to its identity. */
 interface IdentifiedJudge {
@@ -84,13 +85,17 @@ export function judgeIsVersioned(
  * - its options as its schema parses them, so a default counts the same as
  *   the value written out. Options the schema rejects are hashed as given;
  * - how MST turns its answers into a verdict (`policy`): a pointwise judge's
- *   pass threshold and repetitions, a pairwise judge's repetitions.
+ *   pass threshold and repetitions, a pairwise judge's repetitions;
+ * - its plugin's settings (ADR 0008), from the eval's `settings`, which a
+ *   judge receives and can grade by (a model, a project). Only when there
+ *   are some, so a judge whose plugin has none keeps the identity it had.
  */
 export function judgeIdentity(
   reference: string,
   definition: IdentifiedJudge,
   options: Record<string, unknown>,
-  policy: JudgeVerdictPolicy
+  policy: JudgeVerdictPolicy,
+  settings: SettingsSections | undefined
 ): string {
   const parsed = parseExtensionReference(reference);
   const builtin = isBuiltin(reference);
@@ -99,12 +104,16 @@ export function judgeIdentity(
       ? undefined
       : judgeVersion(reference, definition);
   const result = definition.schema.safeParse(options);
+  const pluginSettings = settingsFor(settings, reference);
   return contentHash({
     judge: builtin ? parsed.name : reference,
     version: definition.version ?? null,
     pluginVersion: plugin ?? null,
     options: result.success ? result.data : options,
     policy,
+    ...(pluginSettings && Object.keys(pluginSettings).length
+      ? { settings: pluginSettings }
+      : {}),
   });
 }
 

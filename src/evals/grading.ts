@@ -102,8 +102,11 @@ function caseJudgeConfig(entry: CaseJudge): CaseJudgeConfig {
  * The identity of the judge a case or eval config judge entry runs, as its
  * scores record it. Undefined when its plugin isn't loaded here.
  */
-export function judgeEntryIdentity(entry: CaseJudge): string | undefined {
-  return judgeIdentityOf(caseJudgeRequest(entry));
+export function judgeEntryIdentity(
+  entry: CaseJudge,
+  settings: SettingsSections | undefined
+): string | undefined {
+  return judgeIdentityOf(caseJudgeRequest(entry), settings);
 }
 
 /** The judge request a case judge means: `type` names the judge. */
@@ -201,9 +204,13 @@ export function mergeEvalJudges(
  * plugin isn't loaded here has no current identity (nor can it grade again):
  * both keep their verdict.
  */
-function sameJudge(verdict: GraderScore, judge: JudgeExpectConfig): boolean {
+function sameJudge(
+  verdict: GraderScore,
+  judge: JudgeExpectConfig,
+  settings: SettingsSections | undefined
+): boolean {
   if (verdict.judgeIdentity === undefined) return true;
-  const current = judgeIdentityOf(judge);
+  const current = judgeIdentityOf(judge, settings);
   return current === undefined || current === verdict.judgeIdentity;
 }
 
@@ -221,7 +228,7 @@ async function evaluateJudges(
     judges.map(async (judge): Promise<GraderScore> => {
       const name = judgeNameOf(judge);
       const verdict = name !== undefined ? verdicts.get(name) : undefined;
-      if (verdict && sameJudge(verdict, judge)) return verdict;
+      if (verdict && sameJudge(verdict, judge, run.settings)) return verdict;
       const validation = await validateJudge(response, judge, run);
       const details = validation.details ?? {};
       return {

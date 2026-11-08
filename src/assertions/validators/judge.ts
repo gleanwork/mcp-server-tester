@@ -136,16 +136,18 @@ export function judgeNameOf(config: JudgeValidatorConfig): string | undefined {
 
 /**
  * The identity of the judge an assertion runs, the same one its scores
- * record. Undefined when the assertion names no judge, or the judge isn't
- * available here (its plugin isn't loaded).
+ * record, with the eval's plugin `settings`. Undefined when the assertion
+ * names no judge, or the judge isn't available here (its plugin isn't
+ * loaded).
  */
 export function judgeIdentityOf(
-  config: JudgeValidatorConfig
+  config: JudgeValidatorConfig,
+  settings: SettingsSections | undefined
 ): string | undefined {
   const request = judgeRequest(config);
   if (typeof request === 'string') return undefined;
   try {
-    return judgeRequestIdentity(request).judgeIdentity;
+    return judgeRequestIdentity(request, settings).judgeIdentity;
   } catch {
     return undefined;
   }

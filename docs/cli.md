@@ -1177,7 +1177,7 @@ glean
 ```
 
 - **Where the runs are.** With an eval's directory, its runs. With `--config`, the result store's runs (`--results`, else the eval config's `results.store`), or with no store, the local runs under `--output-dir` (default `.mcp-test-results/<name>`).
-- **Since previous** is the paired test `mst run` reports against its previous run, on the headline cases, against the previous run of the variant's era that was complete for it. An era starts when the datasets, the eval config's judges, `simulateWrites` or the variant's setup change, even in a run the variant skipped; a run in a new era says `new era`. See [The eval's history](./evaluation-framework.md#the-evals-history).
+- **Since previous** is the paired test `mst run` reports against its previous run, on the headline cases, against the previous run of the variant's era that was complete for it. An era starts when the datasets, the eval config's judges, a plugin's version, `simulateWrites` or the variant's setup (including its servers' endpoints and write modes, and its judges' identities) change, even in a run the variant skipped; a run in a new era says `new era`. See [The eval's history](./evaluation-framework.md#the-evals-history).
 - **The runs are the truth.** `mst history` reads `history.json` and builds the rows of runs it doesn't have yet, so a run another machine just finished shows. It writes nothing; `--rebuild` builds every row again and writes `history.json` and the history page. `mst open --history` opens the page.
 - **Options:** `--variant <names...>`, `--since <date>` (runs collected on or after it), `--limit <n>` (most runs per variant, default 20), `--json`, `--rebuild`, `--output-dir`, `--root-dir`.
 

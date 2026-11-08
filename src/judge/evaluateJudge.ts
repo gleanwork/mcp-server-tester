@@ -123,18 +123,22 @@ function juryMembers(request: JudgeRequest): JudgeRequest[] {
  * with it counts, so a member that skips a trial doesn't change it, and a
  * member whose options don't have it is left out.
  */
-function criterionIdentity(request: JudgeRequest, criterion: string): string {
+function criterionIdentity(
+  request: JudgeRequest,
+  criterion: string,
+  settings: SettingsSections | undefined
+): string {
   if (request.jury !== undefined) {
     const ids = juryMembers(request).flatMap((member) => {
       try {
-        return [criterionIdentity(member, criterion)];
+        return [criterionIdentity(member, criterion, settings)];
       } catch {
         return [];
       }
     });
     return ids.length
       ? contentHash({ jury: ids.sort() })
-      : judgeRequestIdentity(request).judgeIdentity;
+      : judgeRequestIdentity(request, settings).judgeIdentity;
   }
   const judge = getJudge(request.judge);
   return judge.criterionOptions
@@ -142,20 +146,25 @@ function criterionIdentity(request: JudgeRequest, criterion: string): string {
         request.judge,
         judge,
         judge.criterionOptions(request.options, criterion),
-        { threshold: request.threshold, reps: request.reps }
+        { threshold: request.threshold, reps: request.reps },
+        settings
       )
-    : judgeRequestIdentity(request).judgeIdentity;
+    : judgeRequestIdentity(request, settings).judgeIdentity;
 }
 
 /**
- * The identity every score of `request` records (ADR 0009). A jury's is
- * the set of its members' identities, so the members' order doesn't count.
+ * The identity every score of `request` records (ADR 0009), with the eval's
+ * plugin `settings`. A jury's is the set of its members' identities, so the
+ * members' order doesn't count.
  */
 export function judgeRequestIdentity(
-  request: JudgeRequest
+  request: JudgeRequest,
+  settings: SettingsSections | undefined
 ): JudgeIdentityDetails {
   if (request.jury !== undefined) {
-    const members = juryMembers(request).map(judgeRequestIdentity);
+    const members = juryMembers(request).map((member) =>
+      judgeRequestIdentity(member, settings)
+    );
     const ids = members.map((m) => m.judgeIdentity);
     if (new Set(ids).size !== ids.length)
       throw new Error('Two jury members are the same judge.');
@@ -168,10 +177,13 @@ export function judgeRequestIdentity(
   }
   const judge = getJudge(request.judge);
   return {
-    judgeIdentity: judgeIdentity(request.judge, judge, request.options, {
-      threshold: request.threshold,
-      reps: request.reps,
-    }),
+    judgeIdentity: judgeIdentity(
+      request.judge,
+      judge,
+      request.options,
+      { threshold: request.threshold, reps: request.reps },
+      settings
+    ),
     ...(judgeIsVersioned(request.judge, judge)
       ? {}
       : { judgeUnversioned: true as const }),
@@ -189,7 +201,7 @@ export async function preflightJudgeRequest(
 ): Promise<void> {
   if (request.jury !== undefined) {
     try {
-      judgeRequestIdentity(request);
+      judgeRequestIdentity(request, settings);
     } catch (error) {
       throw new Error(
         `Judge "${request.label}" can't run: ${error instanceof Error ? error.message : String(error)}`
@@ -257,13 +269,13 @@ export async function evaluateJudge(
     };
     const context = { settings: settingsFor(run.settings, request.judge) };
     // What every score records about the judge that gave it (ADR 0009).
-    const identity = judgeRequestIdentity(request);
+    const identity = judgeRequestIdentity(request, run.settings);
     const missing = missingRequirement(input, judge.requires);
     if (missing !== undefined)
       return judgeSkipped(label, identity, `no ${missing}`, undefined);
 
     const identityOf = (criterion: string): string =>
-      criterionIdentity(request, criterion);
+      criterionIdentity(request, criterion, run.settings);
 
     const repScores: CheckedJudgeScore[] = [];
     for (let i = 0; i < reps; i++) {
@@ -424,7 +436,7 @@ async function evaluateJury(
   let identity: JudgeIdentityDetails;
   try {
     members = juryMembers(request);
-    identity = judgeRequestIdentity(request);
+    identity = judgeRequestIdentity(request, run.settings);
   } catch (err) {
     return judgeError(
       `Judge "${label}" error: ${err instanceof Error ? err.message : String(err)}`,
@@ -480,7 +492,7 @@ async function evaluateJury(
   let criteria: GraderCriterion[] | undefined;
   try {
     criteria = combineJuryCriteria(results, (id) =>
-      criterionIdentity(request, id)
+      criterionIdentity(request, id, run.settings)
     );
   } catch (err) {
     return judgeError(

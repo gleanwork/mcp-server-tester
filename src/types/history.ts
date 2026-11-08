@@ -5,6 +5,7 @@
  */
 import type { RunSelection } from '../evals/evalFrameworkTypes.js';
 import type { PairedChange } from './reporter.js';
+import type { WriteMode } from './index.js';
 
 /** How a run ended, as far as its history row is concerned. */
 export type HistoryRunStatus =
@@ -26,6 +27,12 @@ export interface HistoryJudge {
   meanScore?: number;
   /** Trials it answered `unknown`. */
   unknown?: number;
+  /**
+   * The judge identities its scores recorded (ADR 0009), sorted: a case
+   * judge's as well as the eval config's. A change means the judge could
+   * grade differently, so it starts a new era.
+   */
+  identities?: string[];
 }
 
 /**
@@ -62,10 +69,19 @@ export interface HistoryVariant {
   clientApps?: string[];
   /**
    * A hash of what the variant ran with besides the client app: client,
-   * model, options, servers, tool metadata, input template and judges.
-   * Option values a run records only as a keyed hash count as unknown.
+   * model and the hashes in `setupParts`.
    */
   setupHash: string;
+  /**
+   * Each part of the setup, hashed, so a change can name the part: `client
+   * options`, `server <name>` (its endpoint or command, transport and
+   * connector), `tool metadata`, `input template`, `judges` and `write
+   * modes`. An option recorded as a keyed hash counts as that hash, which
+   * matches only another run's under the same eval's key.
+   */
+  setupParts?: Record<string, string>;
+  /** Each server's write mode, by label (ADR 0014). */
+  writeModes?: Record<string, WriteMode>;
   /** Complete cases: the ones pass rates count. */
   cases: number;
   /** Cases short a trial or a verdict (ADR 0010). */
@@ -197,6 +213,12 @@ export interface HistoryRun {
     identity?: string;
     optionsHash: string;
   }>;
+  /**
+   * The plugins the run loaded, with their package versions. A version
+   * change starts a new era. Absent for runs from before run.json recorded
+   * them.
+   */
+  plugins?: Array<{ namespace: string; name: string; version?: string }>;
   redacted: boolean;
   /** The run's dry-run proxies answered writes with a success reply (`simulateWrites`). */
   simulateWrites?: true;

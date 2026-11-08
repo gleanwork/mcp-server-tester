@@ -86,7 +86,7 @@ const Envelope = <K extends string>(kind: K) => ({
 });
 
 /** How a server handles a write (ADR 0014). */
-const WriteModeSchema = z.enum([
+export const WriteModeSchema = z.enum([
   'planned',
   'simulated',
   'server-planned',
@@ -204,6 +204,19 @@ const RunRecordSchema = z.looseObject({
           .optional(),
         /** The judge has no version MST can see change (ADR 0009). */
         unversioned: z.literal(true).optional(),
+      })
+    )
+    .optional(),
+  /**
+   * The plugins the run loaded, by namespace, with their package versions:
+   * a plugin's version can change what its clients, judges and datasets do.
+   */
+  plugins: z
+    .array(
+      z.looseObject({
+        namespace: z.string(),
+        name: z.string(),
+        version: z.string().optional(),
       })
     )
     .optional(),
@@ -678,6 +691,14 @@ export interface JudgeRecord {
   unversioned?: true;
 }
 
+/** A plugin a run loaded. */
+export interface PluginRecord {
+  namespace: string;
+  name: string;
+  /** Its package version, when it has one. */
+  version?: string;
+}
+
 /** The facts `run.json` records, beyond what the summary has. */
 export interface RunFacts {
   evalName: string;
@@ -703,6 +724,8 @@ export interface RunFacts {
     snapshot?: string;
   }>;
   judges?: JudgeRecord[];
+  /** The plugins the run loaded, with their package versions. */
+  plugins?: PluginRecord[];
   redactStoredResponses: boolean;
   /** The run's dry-run proxies answered writes with a success reply. */
   simulateWrites?: true;
@@ -920,6 +943,7 @@ export async function writeRun(
     variants: facts.variants,
     datasets: facts.datasets,
     ...(facts.judges?.length ? { judges: facts.judges } : {}),
+    ...(facts.plugins?.length ? { plugins: facts.plugins } : {}),
     partial: summary.partial ?? false,
     ...(summary.selection ? { selection: summary.selection } : {}),
     redactStoredResponses: facts.redactStoredResponses,

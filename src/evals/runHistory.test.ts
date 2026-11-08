@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 import { RUN_FORMAT } from './resultFormat.js';
-import { writeRun, type RunFacts } from './runFormat.js';
+import { writeRun, type RunFacts, type RunRecord } from './runFormat.js';
 import { fileRunStore, uploadRun, type RunStore } from './runStore.js';
 import {
   HISTORY_FORMAT,
@@ -54,13 +54,23 @@ interface RunSpec {
   infra?: Record<string, string[]>;
   grade?: 'complete' | 'skipped';
   simulateWrites?: boolean;
+  /** Per-variant fields of its run.json record, over the defaults. */
+  setup?: Record<string, Partial<RunRecord['variants'][number]>>;
+  plugins?: RunFacts['plugins'];
+  /** The identity each judge score records (a case judge's, say). */
+  scoreIdentity?: string;
 }
 
 function caseResult(
   variant: string,
   id: string,
   [passed, trials]: [number, number],
-  options: { cost?: number; infra?: boolean; judge?: boolean }
+  options: {
+    cost?: number;
+    infra?: boolean;
+    judge?: boolean;
+    identity?: string;
+  }
 ): EvalCaseResult {
   const trialResults = Array.from({ length: trials }, (_, index) => ({
     pass: index < passed,
@@ -77,6 +87,7 @@ function caseResult(
             pass: index < passed,
             score: index < passed ? 1 : 0,
             judgeName: 'rubric',
+            ...(options.identity ? { judgeIdentity: options.identity } : {}),
           },
         }
       : {},
@@ -112,7 +123,8 @@ async function writeSpec(evalDirectory: string, spec: RunSpec): Promise<void> {
       caseResult(name, id, outcome, {
         ...(spec.cost?.[name] !== undefined ? { cost: spec.cost[name] } : {}),
         infra: spec.infra?.[name]?.includes(id) ?? false,
-        judge: spec.judge !== undefined,
+        judge: spec.judge !== undefined || spec.scoreIdentity !== undefined,
+        ...(spec.scoreIdentity ? { identity: spec.scoreIdentity } : {}),
       })
     );
     const complete = caseResults.filter(
@@ -185,7 +197,10 @@ async function writeSpec(evalDirectory: string, spec: RunSpec): Promise<void> {
       servers: [{ label: name }],
       client: 'claude-code',
       model: spec.model?.[name] ?? 'claude-sonnet-4-6',
+      // writeRun records every field a variant has, as runEval's do.
+      ...(spec.setup?.[name] as Partial<RunFacts['variants'][number]>),
     })),
+    ...(spec.plugins ? { plugins: spec.plugins } : {}),
     datasets: [
       {
         name: 'cases',
@@ -551,6 +566,139 @@ describe('the history of an eval', () => {
       { reason: 'dataset cases changed', breaks: true },
     ]);
     expect(third!.variants.find((v) => v.name === 'glean')!.era).toBe(1);
+  });
+
+  it("starts a variant's era when a server's endpoint, a write mode or a hashed option changes", async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    const docs = (serverUrl: string) => [
+      { label: 'docs', transport: 'http', serverUrl },
+    ];
+    const setups: Array<RunSpec['setup']> = [
+      {
+        glean: {
+          servers: docs('https://a.example/mcp'),
+          clientOptions: { url: 'hmac:1111' },
+          writeModes: { docs: 'planned' },
+        },
+      },
+      // The same: one era.
+      {
+        glean: {
+          servers: docs('https://a.example/mcp'),
+          clientOptions: { url: 'hmac:1111' },
+          writeModes: { docs: 'planned' },
+        },
+      },
+      {
+        glean: {
+          servers: docs('https://b.example/mcp'),
+          clientOptions: { url: 'hmac:1111' },
+          writeModes: { docs: 'planned' },
+        },
+      },
+      {
+        glean: {
+          servers: docs('https://b.example/mcp'),
+          clientOptions: { url: 'hmac:1111' },
+          writeModes: { docs: 'unguarded' },
+        },
+      },
+      // Hashed under another key, or another value: nothing shows it's the same.
+      {
+        glean: {
+          servers: docs('https://b.example/mcp'),
+          clientOptions: { url: 'hmac:2222' },
+          writeModes: { docs: 'unguarded' },
+        },
+      },
+    ];
+    for (const [index, setup] of setups.entries())
+      await writeSpec(dir, {
+        id: `2026100${index + 1}T090000Z-00000${index + 1}`,
+        at: `2026-10-0${index + 1}T09:00:00.000Z`,
+        variants: { official: ids(2), glean: ids(2) },
+        setup,
+      });
+    const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
+    const glean = runs.map(
+      (run) => run.variants.find((v) => v.name === 'glean')!
+    );
+    expect(glean.map((variant) => variant.era)).toEqual([0, 0, 1, 2, 3]);
+    expect(glean[1]!.sincePrevious?.runId).toBe(runs[0]!.runId);
+    expect(runs.map((run) => run.changes)).toEqual([
+      undefined,
+      undefined,
+      [{ reason: 'server docs changed', variant: 'glean', breaks: true }],
+      [
+        {
+          reason: 'write modes docs planned → docs unguarded',
+          variant: 'glean',
+          breaks: true,
+        },
+      ],
+      [{ reason: 'client options changed', variant: 'glean', breaks: true }],
+    ]);
+    expect(glean[3]!.writeModes).toEqual({ docs: 'unguarded' });
+    // The other variant's setup didn't change.
+    expect(
+      runs.map((run) => run.variants.find((v) => v.name === 'official')!.era)
+    ).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it("starts a variant's era when its scores' judge identity changes, a case judge's included", async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    const identity = (text: string) =>
+      createHash('sha256').update(text).digest('hex');
+    for (const [n, judge] of [
+      [1, 'prompt-1'],
+      [2, 'prompt-1'],
+      [3, 'prompt-2'],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        // No eval config judges: the identity is only on the scores.
+        scoreIdentity: identity(judge),
+      });
+    const [third, second, first] = (
+      await buildHistory(localHistoryLocation(dir))
+    ).runs;
+    expect(first!.variants[0]!.judges.rubric?.identities).toEqual([
+      identity('prompt-1'),
+    ]);
+    expect([first, second, third].map((run) => run!.variants[0]!.era)).toEqual([
+      0, 0, 1,
+    ]);
+    expect(third!.changes).toEqual([
+      { reason: 'judge rubric changed', variant: 'official', breaks: true },
+    ]);
+  });
+
+  it('starts an era when a plugin the eval loads changes version', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    const acme = (version: string) => [
+      { namespace: 'acme', name: '@acme/mst-plugin', version },
+    ];
+    for (const [n, plugins] of [
+      [1, undefined],
+      [2, acme('1.0.0')],
+      [3, acme('1.0.0')],
+      [4, acme('1.1.0')],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        ...(plugins ? { plugins } : {}),
+      });
+    const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
+    // A run from before run.json recorded plugins has nothing to compare.
+    expect(runs.map((run) => run.era)).toEqual([0, 0, 0, 1]);
+    expect(runs[3]!.changes).toEqual([
+      { reason: 'plugin acme 1.0.0 → 1.1.0', breaks: true },
+    ]);
+    expect(runs[3]!.plugins).toEqual(acme('1.1.0'));
   });
 
   it('starts an era when writes go from planned-write results to simulated successes', async () => {
