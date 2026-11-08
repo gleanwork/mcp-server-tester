@@ -6,7 +6,7 @@ No command needs a terminal. `init` and `generate` ask for what you leave out wh
 
 The package installs the CLI under two names: `mst` (short for MCP Server Tester) and `mcp-server-tester`. They are the same binary. Once the package is installed in your project, use `npx mst <command>`.
 
-Before the package is installed (for example, running `init` in a new directory), use the scoped package name: `npx @gleanwork/mcp-server-tester@beta init` for 2.0, which these docs describe (without `@beta`, npx fetches 1.x). A bare `npx mst` or `npx mcp-server-tester` with nothing installed fetches unrelated, unscoped npm packages of those names.
+Before the package is installed (for example, running `init` in a new directory), use the scoped package name: `npx @gleanwork/mcp-server-tester@rc init` for 2.0, which these docs describe (without `@rc`, npx fetches 1.x). A bare `npx mst` or `npx mcp-server-tester` with nothing installed fetches unrelated, unscoped npm packages of those names.
 
 ## Table of Contents
 
@@ -800,13 +800,13 @@ npx mst judges show rubric --json
 ```
 
 ```text
-acme/judge/completeness         judge     requires case.expected.answer  Did the answer cover every point of the expected answer?
-rubric                          judge                                    An LLM grades the answer against a rubric: ...
-acme/pairwise-judge/preference  pairwise                                 Which answer would the asker rather get?
-preference                      pairwise                                 Asks which run better did what the user asked: ...
+acme/judge/completeness         judge     1.4.0         requires case.expected.answer  Did the answer cover every point of the expected answer?
+rubric                          judge     d6fd641dc6c8                                 An LLM grades the answer against a rubric: ...
+acme/pairwise-judge/preference  pairwise  unversioned                                  Which answer would the asker rather get?
+preference                      pairwise  ff685f10a4f3                                 Asks which run better did what the user asked: ...
 ```
 
-A `judge` scores each trial; a `pairwise` judge compares each variant's trial with the baseline's. `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options as JSON Schema: what an eval config's `judges` entry may set besides `type`. Plugins add `description` to a judge or pairwise judge for these commands.
+A `judge` scores each trial; a `pairwise` judge compares each variant's trial with the baseline's. Each judge shows its version, the one its identity covers ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)): a built-in's covers its prompts and defaults (a content hash, cut to 12 characters in the table), a plugin judge's is the `version` it declares or else its plugin's package version, and a judge with neither is **unversioned** (with `--json`, `"unversioned": true` and no `version`). `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options as JSON Schema: what an eval config's `judges` entry may set besides `type`. Plugins add `description` to a judge or pairwise judge for these commands.
 
 Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
 

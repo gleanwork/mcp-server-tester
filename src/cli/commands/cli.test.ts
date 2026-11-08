@@ -383,14 +383,20 @@ describe('mst CLI', () => {
     it('lists and shows built-in judges without plugins', async () => {
       const list = await runBin('judges');
       expect(list.exitCode).toBe(0);
-      expect(list.stdout).toMatch(/^rubric +judge +An LLM grades/m);
-      expect(list.stdout).toMatch(/^task-completion +judge +Asks whether/m);
       expect(list.stdout).toMatch(
-        /^grounded-in-tools {2}judge +Asks whether every claim/m
+        /^rubric +judge +[0-9a-f]{12} +An LLM grades/m
       );
-      expect(list.stdout).toMatch(/^tool-use +judge +Asks whether the client/m);
       expect(list.stdout).toMatch(
-        /^preference +pairwise {2}Asks which run better/m
+        /^task-completion +judge +[0-9a-f]{12} +Asks whether/m
+      );
+      expect(list.stdout).toMatch(
+        /^grounded-in-tools {2}judge +[0-9a-f]{12} +Asks whether every claim/m
+      );
+      expect(list.stdout).toMatch(
+        /^tool-use +judge +[0-9a-f]{12} +Asks whether the client/m
+      );
+      expect(list.stdout).toMatch(
+        /^preference +pairwise {2}[0-9a-f]{12} +Asks which run better/m
       );
 
       const show = await runBin('judges', 'show', 'rubric', '--json');
@@ -398,8 +404,71 @@ describe('mst CLI', () => {
       expect(JSON.parse(String(show.stdout))).toMatchObject({
         ref: 'rubric',
         kind: 'judge',
+        version: expect.stringMatching(/^[0-9a-f]{64}$/),
         options: { type: 'object', required: ['rubric'] },
       });
+    });
+
+    it("lists each judge's version, or marks it unversioned", async () => {
+      const schema =
+        '{ safeParse: (value) => ({ success: true, data: value }) }';
+      await project.write({
+        'plugin.mjs': `export default {
+          meta: { name: 'acme-plugin', namespace: 'acme', version: '1.4.0' },
+          judges: {
+            declared: { version: 'declared-2', schema: ${schema}, async evaluate() { return { score: 1 }; } },
+            inherited: { schema: ${schema}, async evaluate() { return { score: 1 }; } },
+          },
+        };`,
+        'bare.mjs': `export default {
+          meta: { name: 'bare-plugin', namespace: 'bare' },
+          judges: {
+            loose: { schema: ${schema}, async evaluate() { return { score: 1 }; } },
+          },
+        };`,
+      });
+      const list = await runBin(
+        'judges',
+        '--plugins',
+        './plugin.mjs',
+        './bare.mjs',
+        '--json'
+      );
+      expect(list.exitCode).toBe(0);
+      const listed = JSON.parse(String(list.stdout)) as Array<{
+        ref: string;
+        version?: string;
+        unversioned?: true;
+      }>;
+      const byRef = Object.fromEntries(
+        listed.map((entry) => [entry.ref, entry])
+      );
+      for (const ref of [
+        'criteria',
+        'grounded-in-tools',
+        'rubric',
+        'task-completion',
+        'tool-use',
+        'preference',
+      ])
+        expect(byRef[ref]?.version).toMatch(/^[0-9a-f]{64}$/);
+      expect(byRef['acme/judge/declared']?.version).toBe('declared-2');
+      expect(byRef['acme/judge/inherited']?.version).toBe('1.4.0');
+      expect(byRef['bare/judge/loose']).toMatchObject({ unversioned: true });
+      expect(byRef['bare/judge/loose']).not.toHaveProperty('version');
+
+      const table = await runBin(
+        'judges',
+        '--plugins',
+        './plugin.mjs',
+        './bare.mjs'
+      );
+      expect(table.exitCode).toBe(0);
+      expect(table.stdout).toMatch(
+        /^acme\/judge\/declared +judge +declared-2$/m
+      );
+      expect(table.stdout).toMatch(/^acme\/judge\/inherited +judge +1\.4\.0$/m);
+      expect(table.stdout).toMatch(/^bare\/judge\/loose +judge +unversioned$/m);
     });
   });
 

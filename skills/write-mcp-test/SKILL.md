@@ -14,11 +14,11 @@ A test has no client and no model, so it can't tell you whether a model would pi
 
 ## Before you start
 
-1. Check that the project has `@gleanwork/mcp-server-tester` and `@playwright/test` (`npm install --save-dev @gleanwork/mcp-server-tester@beta @playwright/test`).
+1. Check that the project has `@gleanwork/mcp-server-tester` and `@playwright/test` (`npm install --save-dev @gleanwork/mcp-server-tester@rc @playwright/test`).
 2. Find the tools to test and their input schemas: the server source, or `await mcp.listTools()` in a test.
 3. Check `playwright.config.ts` for an `mcpConfig` (Step 1).
 
-`npx mst generate --command "node server.js" --tool get_weather --args '{"city":"London"}'` calls a tool and writes the call as a test (default `tests/generated.spec.ts`), with assertions suggested from the real response. Run it once per call, then edit the spec: it is a fast way to record what the server returns. `npx @gleanwork/mcp-server-tester@beta init --command "node server.js"` scaffolds a new project. Both run in an agent's shell when the flags give every answer (an older 2.0 beta fails there with `Raw mode is not supported`). For anything they don't cover, write `playwright.config.ts` (Step 1) and the specs (Step 2) yourself.
+`npx mst generate --command "node server.js" --tool get_weather --args '{"city":"London"}'` calls a tool and writes the call as a test (default `tests/generated.spec.ts`), with assertions suggested from the real response. Run it once per call, then edit the spec: it is a fast way to record what the server returns. `npx @gleanwork/mcp-server-tester@rc init --command "node server.js"` scaffolds a new project. Both run in an agent's shell when the flags give every answer (`2.0.0-rc.0` and older fail there with `Raw mode is not supported`). For anything they don't cover, write `playwright.config.ts` (Step 1) and the specs (Step 2) yourself.
 
 ## Step 1: Configure the server
 
@@ -326,7 +326,7 @@ test.describe('get_weather', () => {
 });
 ```
 
-Run with `npx playwright test`, and open the report with `npx mst open`.
+Run with `npx playwright test`. MST's reporter takes `{ outputDir, name, autoOpen, quiet, resultStore, runMetadata, redactStoredResponses }`, and writes a test run's eval results (`runEvalDataset`) as a run in `<outputDir>/<name>/runs/<run-id>/`: by default `.mcp-test-results/playwright/runs/`, one variant per project. Tests and conformance checks are in Playwright's own output: the `list` reporter prints them, and with `['html', { open: 'never' }]` added to `reporter`, `npx playwright show-report` opens them. MST's reporter and `npx mst open` show evals only.
 
 ## Checklist
 

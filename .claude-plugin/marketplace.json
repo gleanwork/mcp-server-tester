@@ -11,7 +11,7 @@
     {
       "name": "mcp-server-tester",
       "source": "./",
-      "description": "Skills for testing and evaluating MCP servers with @gleanwork/mcp-server-tester: the reference, writing tests, writing evals, and optimizing tool metadata.",
+      "description": "Skills for testing and evaluating MCP servers with @gleanwork/mcp-server-tester: the reference, writing tests, writing and running evals, calibrating judges, and optimizing tool metadata.",
       "homepage": "https://github.com/gleanwork/mcp-server-tester",
       "license": "MIT",
       "strict": false
