@@ -6,11 +6,11 @@ Common issues and how to fix them.
 
 ## "Raw mode is not supported"
 
-**Symptom:** Running `npx @gleanwork/mcp-server-tester init` or `npx mst generate` fails immediately with an error like `Error: Raw mode is not supported on the current process.stdin`.
+**Symptom:** Running `npx @gleanwork/mcp-server-tester init`, `npx mst generate` or `npx mst login` fails immediately with an error like `Error: Raw mode is not supported on the current process.stdin`.
 
-**Cause:** The CLI uses [Ink](https://github.com/vadimdemedes/ink) for interactive prompts. Ink requires a real TTY (interactive terminal). CI environments, piped shells, and non-interactive shells do not provide a TTY.
+**Cause:** An older 2.0 beta. Its prompts needed a real terminal, which CI, piped shells and agents' shells don't have.
 
-**Fix:** Run the command in an interactive terminal on your local machine, commit the generated files, and let CI consume them as static configuration. Do not invoke `init` or `generate` as part of a CI pipeline step.
+**Fix:** Upgrade. The CLI no longer needs a terminal: pass the answers as flags, such as `init --command "node server.js"` and `generate --tool <name> --args '<json>'`. See [CLI Commands](./cli.md).
 
 ---
 

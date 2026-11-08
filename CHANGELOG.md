@@ -1,37 +1,98 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## Unreleased
 
-- `run.json` has `simulateWrites: true` when the run's dry-run proxies answered writes with a success reply. A regrade or a resume keeps its source run's value. Runs without it answered writes with a planned-write result, as before.
 - Every run writes its eval's history, `history.json` (`mst.history/v1`, schema in `schema/history/v1/`), beside `latest.json`; `mst history` prints it. See [The eval's history](docs/evaluation-framework.md#the-evals-history).
-- The `codex-cli` client gives its model calls the request IDs the host's telemetry names them by, through the same helper Cowork and Claude Code use, so every built-in client's trace joins host events to model requests by one rule. A host event can now name a call by its response ID (`response_id`, `gen_ai.response.id`) as well as by one of its message entries (`message_uuid`); Codex's record has response IDs and no entries. Codex 0.160's own `codex.api_request` events carry neither a request nor a response ID, so for Codex today this changes the code path, not the trace.
-- A shard's failure before its worker speaks (the channel couldn't stage the bundle or start the worker) or after it finishes (its machine couldn't be deleted) is now the shard's outcome, as `Environment.runShard` promises; a machine left behind after a good shard is a `note`. Once the shards start, a shard whose bundle can't be written, or whose environment throws from `runShard` anyway, fails only its own shard, and room it was still waiting for under `limits` goes back to the run's other shards. Before, any of these rejected the whole collect or grade step, which closed the run's other shards mid-shard and lost what they had collected, and a shard that ended while waiting for room could keep that room from a sibling for good.
-- `run.json`'s `phases.grade` is `partial` whenever `mst grade --resume` would have something to grade: a pairwise judge that failed or whose comparison was lost, or a judge without a verdict on a case another assertion already failed. Before, the writer looked only at `gradingError`, so those runs were recorded as `grade: complete` while a resume would still retry them.
-- A failure after the client (its artifacts couldn't be copied, or a desktop session's cleanup failed) now ends the attempt as a retryable infrastructure failure whatever ending the client gave, and keeps an infrastructure ending the client already had. Before, a trial the client had typed `{ kind: 'trial' }` kept counting as a failed trial that a resume wouldn't collect again, and a local artifact-copy failure replaced the client's own ending. The local run, collect workers and the coordinator now apply the one rule.
-- Stored-response redaction now drops every judge's `metadata`: a combined score's `judgeResults` and pairwise preferences too, in `results.json`, `summary.json`, the per-judge score files and the stored report. Before, only a case's top-level scores lost their metadata, so a judge that quoted the answer in its notes kept it in the stored run.
-- `mst clients` and `mst clients show` now list every option and its default in text and JSON, from the same schemas as the generated docs. Runtime defaults and omission semantics are unchanged.
-- Eval loading checks client OS requirements for variants and cases against local, Docker or a plugin environment's declared OS. `EnvironmentDefinition.os` is optional (`macos` or `linux`); undeclared environments stay compatible. See [the migration guide](docs/migrations/2.0-prereleases.md#client-listings-include-defaults-known-environment-os-is-checked).
-- Desktop clients use concrete per-OS entry points. New Linux receipts omit the `driver` identity; old stored receipts remain readable. See [the migration guide](docs/migrations/2.0-prereleases.md#linux-desktop-receipts-omit-the-driver-identity).
-- Dataset loading rejects whitespace-only inputs for every client, including run-only plugins, before opening a client or submitting any trial. File, plugin and in-memory datasets use the same input rule. Valid prompts retain their exact text; the dataset editor schema matches the rule. Direct native-session blank-input guards remain. See [the migration guide](docs/migrations/2.0-prereleases.md#case-inputs-must-contain-non-whitespace-text).
-- Local and worker collection use `ClientDefinition.open` sessions for built-in and plugin clients. Removed the client extension's `runBatch`; definitions may implement `run`, `open`, or both. Run-only plugins keep their execution behavior and concurrency. Session types remain in `./evals`; stored results and run-format schemas are unchanged. See [the migration guide](docs/migrations/2.0-prereleases.md#client-collection-uses-sessions-runbatch-is-removed).
-- Built-in clients return `ClientRunResult` directly. Removed `MstClientSimulationResult`; Playwright evals use the same assertion response as `mst run`. See [the migration guide](docs/migrations/2.0-prereleases.md#built-in-clients-return-the-common-result).
+- `run.json` has `simulateWrites: true` when the run's dry-run proxies answered writes with a success reply. A regrade or a resume keeps its source run's value. Runs without it answered writes with a planned-write result, as before.
+
+## v2.0.0-rc.0 (2026-11-06)
+
+#### :boom: Breaking Change
+* [#539](https://github.com/gleanwork/mcp-server-tester/pull/539) refactor!: dispatch clients through sessions ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#536](https://github.com/gleanwork/mcp-server-tester/pull/536) refactor!: built-in clients return the common result ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#535](https://github.com/gleanwork/mcp-server-tester/pull/535) refactor!: ChatGPT runs as ordinary client code, without the capability pipeline ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#531](https://github.com/gleanwork/mcp-server-tester/pull/531) feat!: MST checks every client's servers before the first trial ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#532](https://github.com/gleanwork/mcp-server-tester/pull/532) feat!: the Codex CLI client is codex-cli ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#530](https://github.com/gleanwork/mcp-server-tester/pull/530) feat!: reject client options that have no effect ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#529](https://github.com/gleanwork/mcp-server-tester/pull/529) feat!: one name for each client option ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#527](https://github.com/gleanwork/mcp-server-tester/pull/527) feat!: the trial's OS decides how a desktop client runs ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#526](https://github.com/gleanwork/mcp-server-tester/pull/526) feat!: the Codex surface is the codex-app client ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#525](https://github.com/gleanwork/mcp-server-tester/pull/525) feat!: the mst client is now api ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#494](https://github.com/gleanwork/mcp-server-tester/pull/494) feat(clients): Codex and ChatGPT in the docker environment and on VMs, headless docker shards ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#487](https://github.com/gleanwork/mcp-server-tester/pull/487) feat(cowork): Cowork on MST's Linux desktop can reach public hosts (coworkSetup.egressAllowedHosts, default *) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :rocket: Enhancement
+* [#543](https://github.com/gleanwork/mcp-server-tester/pull/543) feat: list client defaults and validate environment OS ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#538](https://github.com/gleanwork/mcp-server-tester/pull/538) feat(evals): Cowork answers clarifying questions with their first option ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#533](https://github.com/gleanwork/mcp-server-tester/pull/533) feat(evals): Cowork has tool search on ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#532](https://github.com/gleanwork/mcp-server-tester/pull/532) feat!: the Codex CLI client is codex-cli ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#523](https://github.com/gleanwork/mcp-server-tester/pull/523) feat(cli): mst clients lists each client and what it needs ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#515](https://github.com/gleanwork/mcp-server-tester/pull/515) feat(judge): run a judge on several models as a jury ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#514](https://github.com/gleanwork/mcp-server-tester/pull/514) feat(judges): add the built-in preference pairwise judge ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#513](https://github.com/gleanwork/mcp-server-tester/pull/513) feat(judges): add the built-in criteria judge ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#512](https://github.com/gleanwork/mcp-server-tester/pull/512) feat(judges): the tool-use judge ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#510](https://github.com/gleanwork/mcp-server-tester/pull/510) feat(judges): the grounded-in-tools judge ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#509](https://github.com/gleanwork/mcp-server-tester/pull/509) feat(judges): the task-completion judge ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#507](https://github.com/gleanwork/mcp-server-tester/pull/507) feat(judges): calibration set, script and docs/judges.md ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#504](https://github.com/gleanwork/mcp-server-tester/pull/504) feat(judge): the yes-or-no judge core, and unknown verdicts ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#503](https://github.com/gleanwork/mcp-server-tester/pull/503) feat(label): mst label serves a page to label one trial at a time ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#501](https://github.com/gleanwork/mcp-server-tester/pull/501) feat(report): show each judge's calibration and corrected pass rate ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#500](https://github.com/gleanwork/mcp-server-tester/pull/500) feat(judges): mst judges check measures a judge against labels ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#499](https://github.com/gleanwork/mcp-server-tester/pull/499) feat(labels): store labels in a run; mst label import and export ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#485](https://github.com/gleanwork/mcp-server-tester/pull/485) feat(telemetry): build a stored run's traces for export after the run ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#475](https://github.com/gleanwork/mcp-server-tester/pull/475) feat(cli): mst optimize start, evidence, try and finish ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#474](https://github.com/gleanwork/mcp-server-tester/pull/474) feat(optimize): store tool optimizations on an eval ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#493](https://github.com/gleanwork/mcp-server-tester/pull/493) feat(judges): record each judge's identity in run.json and in every score ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#476](https://github.com/gleanwork/mcp-server-tester/pull/476) feat(docker): size containers to their Docker context, and say when one runs out of memory ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#494](https://github.com/gleanwork/mcp-server-tester/pull/494) feat(clients): Codex and ChatGPT in the docker environment and on VMs, headless docker shards ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#489](https://github.com/gleanwork/mcp-server-tester/pull/489) feat(connectors): a connector's launch gets the run's ID (runId) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#488](https://github.com/gleanwork/mcp-server-tester/pull/488) feat(cowork): an eval can turn off Cowork built-in tools on MST's Linux desktop (coworkSetup.disabledBuiltinTools) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#486](https://github.com/gleanwork/mcp-server-tester/pull/486) feat(cowork): trials record TTFT, tool approvals, final context and web searches; resume keeps model calls and host telemetry ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :bug: Bug Fix
+* [#552](https://github.com/gleanwork/mcp-server-tester/pull/552) fix(skills): keep the shipped skills true to the code, and ship them in the package ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#549](https://github.com/gleanwork/mcp-server-tester/pull/549) fix(evals): the codex-cli client gives its model calls the host's request IDs, as Cowork and Claude Code do ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#547](https://github.com/gleanwork/mcp-server-tester/pull/547) fix(evals): a failure after the client ends the attempt as infrastructure, whatever the client said ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#548](https://github.com/gleanwork/mcp-server-tester/pull/548) fix(evals): a shard's failures on its machine are its outcome, and never its siblings' ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#546](https://github.com/gleanwork/mcp-server-tester/pull/546) fix(evals): record grading as complete only when a resume has nothing to grade ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#545](https://github.com/gleanwork/mcp-server-tester/pull/545) fix(evals): stored redaction drops nested judge and pairwise metadata ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#542](https://github.com/gleanwork/mcp-server-tester/pull/542) fix(evals): a variant's coworkSetup applies in shard runs ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#524](https://github.com/gleanwork/mcp-server-tester/pull/524) fix(evals): redact the connector tokens workers ask for ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#522](https://github.com/gleanwork/mcp-server-tester/pull/522) fix(evals): MST redacts every client result, telemetry included ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#519](https://github.com/gleanwork/mcp-server-tester/pull/519) fix(evals): a client that runs out of the case time is a trial ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#511](https://github.com/gleanwork/mcp-server-tester/pull/511) fix(judges): ask a yes-or-no question again when its answer can't be read ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#508](https://github.com/gleanwork/mcp-server-tester/pull/508) fix(judge): read a yes-or-no answer whose reasoning has unescaped quotes ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#506](https://github.com/gleanwork/mcp-server-tester/pull/506) fix(label): export no row for a trial the judge failed on ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#505](https://github.com/gleanwork/mcp-server-tester/pull/505) fix(cli): mst judges check --json prints JSON ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#502](https://github.com/gleanwork/mcp-server-tester/pull/502) fix(grade): resume a run graded as it ran ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#498](https://github.com/gleanwork/mcp-server-tester/pull/498) fix(resume): refuse local resumes, and stop token retries on cancel ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#491](https://github.com/gleanwork/mcp-server-tester/pull/491) fix(deps): take the undici and zod security releases ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#497](https://github.com/gleanwork/mcp-server-tester/pull/497) fix(macos): say what to fix when a native helper does not build ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#495](https://github.com/gleanwork/mcp-server-tester/pull/495) fix(cowork-linux): recover trials lost to transient infra failures (token race, failed reset, resume) ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :memo: Documentation
+* [#544](https://github.com/gleanwork/mcp-server-tester/pull/544) docs: accept ADR 0011 and record deferred work ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#520](https://github.com/gleanwork/mcp-server-tester/pull/520) docs(adr): propose ADR 0011, a client is a product ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#518](https://github.com/gleanwork/mcp-server-tester/pull/518) docs(adr): accept ADR 0010 ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#492](https://github.com/gleanwork/mcp-server-tester/pull/492) docs(adr): propose ADR 0009, users calibrate judges against their own labels ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :house: Internal
+* [#553](https://github.com/gleanwork/mcp-server-tester/pull/553) ci(release): release from a workflow with npm trusted publishing ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#551](https://github.com/gleanwork/mcp-server-tester/pull/551) ci(release): publish to npm from CI with trusted publishing on a release tag ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#550](https://github.com/gleanwork/mcp-server-tester/pull/550) chore(deps): clear npm audit's high and critical findings and approve blocked install scripts ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#541](https://github.com/gleanwork/mcp-server-tester/pull/541) refactor: use product OS entry points ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#540](https://github.com/gleanwork/mcp-server-tester/pull/540) ci: install only the browser used by tests ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#537](https://github.com/gleanwork/mcp-server-tester/pull/537) refactor: expose desktop client sessions ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#534](https://github.com/gleanwork/mcp-server-tester/pull/534) refactor: native trace readers move to their clients ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#517](https://github.com/gleanwork/mcp-server-tester/pull/517) refactor(evals): clients decide how an attempt ended (ADR 0010) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#516](https://github.com/gleanwork/mcp-server-tester/pull/516) refactor(evals): record how each trial ended (ADR 0010) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#496](https://github.com/gleanwork/mcp-server-tester/pull/496) refactor(cowork): run the credential helpers on Node, not /usr/bin/python3 ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#473](https://github.com/gleanwork/mcp-server-tester/pull/473) chore(deps): bump @modelcontextprotocol/server from 2.2.0 to 2.3.0 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#465](https://github.com/gleanwork/mcp-server-tester/pull/465) chore(deps): bump @modelcontextprotocol/client from 2.2.0 to 2.3.0 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#467](https://github.com/gleanwork/mcp-server-tester/pull/467) chore(deps-dev): bump vite from 8.3.0 to 8.3.4 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#490](https://github.com/gleanwork/mcp-server-tester/pull/490) ci: run on ubuntu-24.04, where Playwright 1.57 installs its browsers ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### Committers: 2
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
 
 ## v2.0.0-beta.14 (2026-10-23)
 

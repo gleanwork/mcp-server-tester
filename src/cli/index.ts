@@ -6,7 +6,7 @@ import { Command, Option } from 'commander';
 import { init } from './commands/init/index.js';
 import { generate } from './commands/generate/index.js';
 import { login } from './commands/login/index.js';
-import { token } from './commands/token/index.js';
+import { TOKEN_FORMATS, token } from './commands/token/index.js';
 import { open } from './commands/open/index.js';
 import { run } from './commands/run/index.js';
 import { grade } from './commands/grade/index.js';
@@ -100,23 +100,52 @@ program
 // Init command
 program
   .command('init')
-  .description('Initialize a new MCP evaluation project')
-  .option('-n, --name <name>', 'Project name')
+  .description(
+    'Initialize a new MCP evaluation project (asks for what flags leave out, in a terminal)'
+  )
+  .option('-n, --name <name>', 'Project name (default: my-mcp-tests)')
   .option('-d, --dir <directory>', 'Target directory', '.')
+  .option(
+    '--command <command>',
+    'Command that starts a stdio MCP server, such as "node server.js"'
+  )
+  .option('--url <url>', 'URL of an HTTP MCP server')
+  .option('--install', 'Run npm install (default)')
+  .option('--no-install', "Don't run npm install")
+  .option('--force', 'Write into an existing project directory')
   .action(init);
 
 // Generate command
 program
   .command('generate')
   .alias('gen')
-  .description("Generate Playwright tests by calling your MCP server's tools")
+  .description(
+    "Generate Playwright tests by calling your MCP server's tools (with --tool, records one call without asking)"
+  )
   .option('-c, --config <path>', 'Path to MCP config')
+  .option('--url <url>', 'URL of an HTTP MCP server, instead of --config')
+  .option(
+    '--command <command>',
+    'Command that starts a stdio MCP server, instead of --config'
+  )
   .option(
     '-o, --output <path>',
     'Spec file to write or add to',
     'tests/generated.spec.ts'
   )
   .option('-s, --snapshot', 'Compare every response with a saved snapshot')
+  .option('--tool <name>', 'Record one call to this tool, without asking')
+  .option('--args <json>', 'Arguments for --tool, as a JSON object', '{}')
+  .option(
+    '--name <title>',
+    'Title of the test --tool writes (default: <tool>-<n>)'
+  )
+  .option('--description <text>', 'Comment above the test --tool writes')
+  .option(
+    '--suite <name>',
+    'describe() name of a new spec (default: MCP tools)'
+  )
+  .option('--exact', 'Also assert the exact response (with --tool)')
   .action(generate);
 
 // Login command
@@ -137,10 +166,10 @@ program
   .command('token')
   .description('Output stored OAuth tokens for CI/CD use')
   .argument('<server-url>', 'MCP server URL to get tokens for')
-  .option(
-    '-f, --format <format>',
-    'Output format: env, json, or gh (default: env)',
-    'env'
+  .addOption(
+    new Option('-f, --format <format>', 'Output format')
+      .choices(TOKEN_FORMATS)
+      .default('env')
   )
   .option('--state-dir <dir>', 'Custom directory for token storage')
   .action(token);

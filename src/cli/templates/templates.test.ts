@@ -1,3 +1,4 @@
+import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
 import { validateEvalDataset } from '../../evals/datasetTypes.js';
 import {
@@ -8,6 +9,21 @@ import {
   getPackageJsonTemplate,
   getTsconfigTemplate,
 } from './index.js';
+
+/** Syntax errors TypeScript reports for `source`. */
+function syntaxErrors(source: string): string[] {
+  const file = ts.createSourceFile(
+    'playwright.config.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  return (
+    (file as unknown as { parseDiagnostics: ts.Diagnostic[] })
+      .parseDiagnostics ?? []
+  ).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+}
 
 describe('CLI template generators', () => {
   describe('getPlaywrightConfigTemplate', () => {
@@ -57,6 +73,20 @@ describe('CLI template generators', () => {
         expect(config).toContain("command: 'npx'");
         expect(config).toContain("'ts-node'");
         expect(config).toContain("'src/server.ts'");
+      });
+
+      it('keeps quoted arguments together and escapes quotes in them', () => {
+        const config = getPlaywrightConfigTemplate({
+          projectName: 'my-tests',
+          transport: 'stdio',
+          serverCommand: `node "/tmp/o'brien/My Server/server.js" --flag`,
+        });
+
+        expect(config).toContain("command: 'node'");
+        expect(config).toContain(
+          "args: ['/tmp/o\\'brien/My Server/server.js', '--flag']"
+        );
+        expect(syntaxErrors(config)).toEqual([]);
       });
 
       it('is valid TypeScript (no obvious syntax errors)', () => {

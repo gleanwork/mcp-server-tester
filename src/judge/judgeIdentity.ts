@@ -39,6 +39,27 @@ export function sortKeys(value: unknown): unknown {
   return value;
 }
 
+/** Whether `reference` names a built-in judge, with or without `mst/judge/`. */
+function isBuiltin(reference: string): boolean {
+  const { namespace } = parseExtensionReference(reference);
+  return namespace === undefined || namespace === BUILTIN_NAMESPACE;
+}
+
+/**
+ * The version that stands for the judge in its identity: the one it
+ * declares or, for a plugin judge that declares none, its plugin's package
+ * version. Undefined when it has neither.
+ */
+export function judgeVersion(
+  reference: string,
+  definition: IdentifiedJudge
+): string | undefined {
+  if (definition.version !== undefined || isBuiltin(reference))
+    return definition.version;
+  return installedPlugin(parseExtensionReference(reference).namespace!)?.meta
+    .version;
+}
+
 /**
  * Whether MST can see the judge's version change: a built-in's, one the
  * judge declares, or its plugin's package version. Without one, the judge's
@@ -49,12 +70,8 @@ export function judgeIsVersioned(
   reference: string,
   definition: IdentifiedJudge
 ): boolean {
-  const parsed = parseExtensionReference(reference);
-  if (parsed.namespace === undefined || parsed.namespace === BUILTIN_NAMESPACE)
-    return true;
   return (
-    definition.version !== undefined ||
-    installedPlugin(parsed.namespace)?.meta.version !== undefined
+    isBuiltin(reference) || judgeVersion(reference, definition) !== undefined
   );
 }
 
@@ -76,12 +93,11 @@ export function judgeIdentity(
   policy: JudgeVerdictPolicy
 ): string {
   const parsed = parseExtensionReference(reference);
-  const builtin =
-    parsed.namespace === undefined || parsed.namespace === BUILTIN_NAMESPACE;
+  const builtin = isBuiltin(reference);
   const plugin =
-    builtin || definition.version !== undefined
+    definition.version !== undefined
       ? undefined
-      : installedPlugin(parsed.namespace!)?.meta.version;
+      : judgeVersion(reference, definition);
   const result = definition.schema.safeParse(options);
   return contentHash({
     judge: builtin ? parsed.name : reference,

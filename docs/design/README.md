@@ -21,7 +21,7 @@ Keep eval configs in your own repo, either a personal one or a team repo of use 
 ```bash
 mkdir cowork-evals && cd cowork-evals
 npm init -y
-npm i -D @gleanwork/mcp-server-tester@beta @acme/mst-plugin
+npm i -D @gleanwork/mcp-server-tester@rc @acme/mst-plugin
 
 # Once, on a Mac that will run Cowork locally
 npx mst cowork setup
@@ -96,7 +96,7 @@ Each case has an `input`, an `expected` answer, tags, and optional default judge
 
 ```json
 {
-  "$schema": "https://unpkg.com/@gleanwork/mcp-server-tester@beta/schema/eval-config.schema.json",
+  "$schema": "https://unpkg.com/@gleanwork/mcp-server-tester@rc/schema/eval-config.schema.json",
   "name": "cowork-tool-descriptions",
   "plugins": ["@acme/mst-plugin"],
   "extends": ["acme/config/cowork"],

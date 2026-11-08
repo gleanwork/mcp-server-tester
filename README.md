@@ -140,10 +140,10 @@ LLM client mode makes real API calls and produces non-deterministic results. Use
 
 ## Installation
 
-Requires Node.js 22+. These docs describe 2.0, which is in beta:
+Requires Node.js 22+. These docs describe 2.0, a release candidate published under the `rc` tag:
 
 ```bash
-npm install --save-dev @gleanwork/mcp-server-tester@beta @playwright/test
+npm install --save-dev @gleanwork/mcp-server-tester@rc @playwright/test
 ```
 
 `npm install @gleanwork/mcp-server-tester` installs 1.x, whose docs are at [v1.1.1](https://github.com/gleanwork/mcp-server-tester/tree/v1.1.1). Upgrading: [Migration guide (v1.x → v2.0)](./docs/migrations/migration-2.0.md).
@@ -159,7 +159,7 @@ The SDK client's packages (`ai` and the `@ai-sdk/*` providers) are optional depe
 ## Quick Start
 
 ```bash
-npx @gleanwork/mcp-server-tester@beta init
+npx @gleanwork/mcp-server-tester@rc init
 ```
 
 The CLI wizard creates a `playwright.config.ts`, example tests, and a sample eval dataset configured for your server. See the [CLI Guide](./docs/cli.md) for all options.
@@ -223,14 +223,16 @@ for client-specific fields, environment rules, and setup ownership.
 
 ## AI Skills
 
-MST ships agent skills that teach your coding assistant MST and help it write tests and evals, and improve tool metadata. Four skills are included:
+MST ships agent skills that teach your coding assistant MST and help it write, run and read tests and evals, check judges, and improve tool metadata. Six skills are included:
 
-| Skill                        | Description                                                                         |
-| ---------------------------- | ----------------------------------------------------------------------------------- |
-| `mcp-tester-guide`           | Reference: vocabulary, config, fixtures, matchers, eval configs, CLI, 1.x renames   |
-| `write-mcp-test`             | Write Playwright tests that call tools directly and check them with matchers        |
-| `write-mcp-eval`             | Write eval datasets and eval configs: cases a client and model act on, and variants |
-| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `mst optimize`                |
+| Skill                        | Description                                                                            |
+| ---------------------------- | -------------------------------------------------------------------------------------- |
+| `mcp-tester-guide`           | Reference: which skill to use, vocabulary, config, clients, judges, CLI, 1.x renames   |
+| `write-mcp-test`             | Write Playwright tests that call tools directly and check them with matchers           |
+| `write-mcp-eval`             | Write eval datasets and eval configs: cases a client and model act on, and variants    |
+| `run-mcp-eval`               | Run an eval and read its results: incomplete cases, resuming, regrading, Docker and CI |
+| `calibrate-mcp-judge`        | Measure a judge against your own labels with `mst label` and `mst judges check`        |
+| `optimize-mcp-tool-metadata` | Find tool-metadata changes that measurably help, with `mst optimize`                   |
 
 Install them with the [`skills` CLI](https://github.com/vercel-labs/skills), which supports Claude Code, Codex, Cursor, Copilot and many other agents:
 
