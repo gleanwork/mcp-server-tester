@@ -293,13 +293,14 @@ export async function collectShard(
     batch: number,
     index: number,
     key: TrialKey,
+    servers: readonly MCPConfig[],
     transcript: ClientRunResult,
     previous?: { transcript: ClientRunResult; stored: ClientRunResult }
   ): Promise<ClientRunResult> {
     // Redacted, with the writes this machine's proxies recorded for the
     // trial: the coordinator can't read these files.
     const redacted: ClientRunResult = writeRecords
-      ? await writeRecords.attach(`${batch}:${index}`, transcript)
+      ? await writeRecords.attach(`${batch}:${index}`, transcript, servers)
       : redactedClientRun(transcript, [...secrets]);
     // The client's artifacts (a Cowork session folder) are on this machine:
     // copy them beside the result, which the coordinator copies back, and
@@ -476,7 +477,13 @@ export async function collectShard(
       );
       if (ready.notReady) {
         for (const index of declared.keys())
-          await save(batchIndex, index, keyOf(index), ready.notReady());
+          await save(
+            batchIndex,
+            index,
+            keyOf(index),
+            servers,
+            ready.notReady()
+          );
         continue;
       }
       const proxy: ToolSurfaceProxy | undefined = ready.proxy;
@@ -522,6 +529,7 @@ export async function collectShard(
                 batchIndex,
                 index,
                 keyOf(index),
+                servers,
                 transcript
               );
               // Cleanup can mutate the live result after this early save.
@@ -543,7 +551,14 @@ export async function collectShard(
           if (
             JSON.stringify(transcript) !== JSON.stringify(previous?.transcript)
           )
-            await save(batchIndex, index, keyOf(index), transcript, previous);
+            await save(
+              batchIndex,
+              index,
+              keyOf(index),
+              servers,
+              transcript,
+              previous
+            );
         }
       } finally {
         proxied?.endChecks();

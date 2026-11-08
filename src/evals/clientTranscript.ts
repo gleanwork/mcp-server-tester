@@ -20,6 +20,18 @@ function attributed(
     throw new Error(
       "A client returned a transcript event with `source: 'host'`; it is now `source: 'builtin'` (the client's built-in tools)."
     );
+  return withEventServers(events, servers);
+}
+
+/**
+ * `events` with each MCP event's server, as {@link eventServer} names it.
+ * Anything that matches events to a server before the runner boundary
+ * attributes them (the write ledger on a batch) uses this first.
+ */
+export function withEventServers(
+  events: TranscriptEvent[],
+  servers: readonly MCPConfig[]
+): TranscriptEvent[] {
   if (servers.length !== 1) return events;
   return events.map((event) =>
     event.source === 'mcp' && event.server === undefined

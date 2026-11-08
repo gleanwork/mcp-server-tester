@@ -232,7 +232,11 @@ export async function prepareClientBatch(
     index: number | undefined,
     transcript: ClientRunResult
   ): Promise<ClientRunResult> =>
-    records.attach(index === undefined ? 'none' : String(index), transcript);
+    records.attach(
+      index === undefined ? 'none' : String(index),
+      transcript,
+      servers
+    );
   // MST's readiness check, before the batch's first trial and before the
   // proxy starts. Proxied clients connect to the variant's servers through
   // the proxy.

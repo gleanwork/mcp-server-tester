@@ -26,6 +26,8 @@ import { thrownEnding } from './trialEnding.js';
 import type { EvalCase } from './datasetTypes.js';
 import type { ClientRunResult, TranscriptEvent } from './evalFrameworkTypes.js';
 import { redactedClientRun } from './clientSecrets.js';
+import { withEventServers } from './clientTranscript.js';
+import type { MCPConfig } from '../config/mcpConfig.js';
 import {
   readWriteRecordLines,
   writeRecordLength,
@@ -339,11 +341,21 @@ export class BatchWriteRecords {
    * `result` redacted with the batch's secrets, without a record the client
    * set itself, and with its trial's write record and simulated writes
    * marked. A trial that never started (its servers weren't ready) has none.
+   * `servers` are the trial's: on a one-server run, an MCP call with no
+   * server is that server's, as its transcript will say.
    */
-  async attach(key: string, result: ClientRunResult): Promise<ClientRunResult> {
+  async attach(
+    key: string,
+    result: ClientRunResult,
+    servers: readonly MCPConfig[]
+  ): Promise<ClientRunResult> {
     const { writeRecord: _own, ...clientResult } = result;
     const secrets = this.secrets();
-    const redactedResult = redactedClientRun(clientResult, secrets);
+    const redacted = redactedClientRun(clientResult, secrets);
+    const redactedResult = {
+      ...redacted,
+      events: withEventServers(redacted.events, servers),
+    };
     const window = this.windows.get(key);
     if (!window) return redactedResult;
     let record = this.records.get(key);

@@ -37,6 +37,11 @@ afterEach(async () => {
 });
 
 const time = '2026-11-08T12:00:00.000Z';
+const slackServer = {
+  transport: 'stdio' as const,
+  command: 'node',
+  label: 'slack',
+};
 const evalCase: EvalCase = { id: 'post', input: 'Post hi' };
 
 async function stopWrite(file: string, server: string, text: string) {
@@ -124,15 +129,34 @@ describe('withWriteRecords', () => {
     await batch.begin('0:0');
     await stopWrite(slack, 'slack', 'hi');
     // As a one-shot session gives a client that threw.
-    const result = await batch.attach('0:0', {
-      finalText: '',
-      events: [],
-      error: 'client crashed',
-    });
+    const result = await batch.attach(
+      '0:0',
+      { finalText: '', events: [], error: 'client crashed' },
+      [slackServer]
+    );
     expect(result.writeRecord).toMatchObject({
       writes: [{ server: 'slack', tool: 'send_message' }],
       unreported: 1,
     });
+  });
+
+  it("matches a batch trial's call with no server to its one server's write", async () => {
+    const batch = new BatchWriteRecords(new WriteRecordLedger([slack]));
+    await batch.begin('0:0');
+    await stopWrite(slack, 'slack', 'hi');
+    // A plugin session that doesn't name the server it called.
+    const { server: _server, ...unnamed } = call('slack', 'hi');
+    const result = await batch.attach(
+      '0:0',
+      { finalText: 'Sent.', events: [unnamed] },
+      [slackServer]
+    );
+    expect(result.writeRecord).toMatchObject({
+      writes: [{ server: 'slack', tool: 'send_message' }],
+      unreported: 0,
+      attribution: 'exclusive',
+    });
+    expect(result.events).toMatchObject([{ server: 'slack' }]);
   });
 
   it("matches a call to a write by the tool's own name, never a `<server>.` form", async () => {
