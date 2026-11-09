@@ -14,10 +14,20 @@
  * and the session's rollout file for each model response's usage and the
  * tool searches it ran. Its model endpoint and credential come from
  * `resolveLLMEndpoint('openai')`: OPENAI_API_KEY, or OPENAI_BASE_URL with a
- * gateway token.
+ * gateway token. With `rolloutTrace`, Codex also writes its rollout trace
+ * (each model request as sent, each response, the tool calls), which the
+ * trial reports as its client artifacts.
  */
 import fs from 'node:fs';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { stringify } from 'smol-toml';
@@ -37,12 +47,14 @@ import {
   TRIAL_ENDING,
 } from './trialEnding.js';
 import type { ClientDiagnostics } from '../types/index.js';
+import { ARTIFACT_LIMITS } from './allArtifacts.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import {
   buildCodexTranscript,
   type TimedCodexEvent,
 } from './codexTranscript.js';
 import type {
+  ClientArtifacts,
   ClientDefinition,
   ClientRunContext,
   ClientRunInput,
@@ -139,6 +151,12 @@ export const CodexClientSchema = z
     env: z.record(z.string(), z.string().optional()).optional().meta({
       'x-defaultDescription': 'allowed inherited variables; no extra variables',
     }),
+    /**
+     * Have Codex write its rollout trace (`CODEX_ROLLOUT_TRACE_ROOT`): each
+     * model request exactly as Codex sent it, each response with its usage,
+     * and the tool calls. The trial reports it as its client artifacts.
+     */
+    rolloutTrace: z.boolean().optional().meta({ default: false }),
   })
   .strict();
 
@@ -372,6 +390,90 @@ async function findRollout(
   return file ? readFile(file, 'utf8').catch(() => undefined) : undefined;
 }
 
+/**
+ * Where a trial's rollout trace goes (`rolloutTrace`), in the directory the
+ * trial reports as its client artifacts. Codex writes a bundle there for the
+ * thread (`trace-<trace ID>-<thread ID>/`: `manifest.json`, `trace.jsonl`
+ * and `payloads/`).
+ */
+export const CODEX_ROLLOUT_TRACE_DIR = 'codex-rollout-trace';
+
+/**
+ * What a trial keeps of the rollout trace Codex wrote under `dir`: its
+ * bundles, as the trial's client artifacts, when they fit what a trial's
+ * artifacts may hold. A trace Codex didn't write, or one over a limit, is
+ * not kept, and `telemetry` says why: the trial is still graded, where a
+ * copy over a limit would make it an infrastructure failure.
+ */
+export async function codexRolloutTrace(
+  dir: string,
+  limits: {
+    readonly [K in keyof typeof ARTIFACT_LIMITS]: number;
+  } = ARTIFACT_LIMITS
+): Promise<{
+  artifacts?: ClientArtifacts;
+  telemetry: Record<string, unknown>;
+}> {
+  const root = path.join(dir, CODEX_ROLLOUT_TRACE_DIR);
+  const bundles = (
+    await readdir(root, { withFileTypes: true }).catch(() => [])
+  ).filter(
+    (entry) =>
+      entry.isDirectory() &&
+      fs.existsSync(path.join(root, entry.name, 'manifest.json'))
+  ).length;
+  if (bundles === 0)
+    return {
+      telemetry: {
+        bundles: 0,
+        notKept:
+          'Codex wrote no rollout trace. Codex CLI 0.124 or later writes one.',
+      },
+    };
+  // As the copy counts them (trialArtifacts.ts), so a trace kept here fits.
+  let entries = 0;
+  let files = 0;
+  let bytes = 0;
+  const walk = async (relative: string[]): Promise<void> => {
+    if (relative.length > limits.depth)
+      throw new Error(`it is more than ${limits.depth} directories deep`);
+    const from = path.join(dir, ...relative);
+    for (const entry of await readdir(from, { withFileTypes: true })) {
+      if (++entries > limits.entries)
+        throw new Error(`it has more than ${limits.entries} entries`);
+      const segments = [...relative, entry.name];
+      if (entry.isDirectory()) {
+        await walk(segments);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const { size } = await lstat(path.join(dir, ...segments));
+      if (size > limits.fileBytes)
+        throw new Error(
+          `${segments.join('/')} is larger than ${limits.fileBytes} bytes`
+        );
+      files += 1;
+      bytes += size;
+      if (bytes > limits.totalBytes)
+        throw new Error(`it holds more than ${limits.totalBytes} bytes`);
+    }
+  };
+  try {
+    await walk([]);
+  } catch (error) {
+    return {
+      telemetry: {
+        bundles,
+        notKept: `The rollout trace is larger than a trial's artifacts may be: ${error instanceof Error ? error.message : String(error)}.`,
+      },
+    };
+  }
+  return {
+    artifacts: { dir, include: [CODEX_ROLLOUT_TRACE_DIR], temporary: true },
+    telemetry: { bundles, files, bytes },
+  };
+}
+
 function pick(
   env: Record<string, string | undefined>,
   names: readonly string[]
@@ -427,6 +529,8 @@ async function runCodex(
 
   const home = await mkdtemp(path.join(os.tmpdir(), 'mst-codex-'));
   let workDir: string | undefined;
+  // The trial's rollout trace (`rolloutTrace`), until its result reports it.
+  let traceDir: string | undefined;
   let receiver: HostTelemetryReceiver | undefined;
   const controller = new AbortController();
   const timer = setTimeout(
@@ -459,12 +563,24 @@ async function runCodex(
       }),
       { mode: 0o600 }
     );
+    if (options.rolloutTrace) {
+      traceDir = await mkdtemp(path.join(os.tmpdir(), 'mst-codex-trace-'));
+      await mkdir(path.join(traceDir, CODEX_ROLLOUT_TRACE_DIR));
+    }
     const codex = new Codex({
       env: {
         ...pick(env, PASSTHROUGH_ENV),
         ...defined(options.env),
         HOME: home,
         CODEX_HOME: home,
+        ...(traceDir
+          ? {
+              CODEX_ROLLOUT_TRACE_ROOT: path.join(
+                traceDir,
+                CODEX_ROLLOUT_TRACE_DIR
+              ),
+            }
+          : {}),
         // The built-in OpenAI provider reads CODEX_API_KEY; MST's, its own.
         [endpoint.overridden ? API_KEY_ENV : 'CODEX_API_KEY']: endpoint.apiKey,
       },
@@ -539,6 +655,10 @@ async function runCodex(
             );
     const durationMs = Date.parse(endedAt) - Date.parse(startedAt);
     const toolMs = transcript.telemetry.toolWallDurationMs;
+    const trace = traceDir ? await codexRolloutTrace(traceDir) : undefined;
+    // Reported as artifacts, the directory is MST's: it copies the trace for
+    // the judges, then removes it (trialArtifacts.ts).
+    if (trace?.artifacts) traceDir = undefined;
     return {
       finalText: transcript.finalText,
       events: transcript.events,
@@ -550,8 +670,12 @@ async function runCodex(
       ...(typeof toolMs === 'number'
         ? { llmDurationMs: Math.max(0, durationMs - toolMs) }
         : {}),
-      telemetry: transcript.telemetry,
+      telemetry: {
+        ...transcript.telemetry,
+        ...(trace ? { rolloutTrace: trace.telemetry } : {}),
+      },
       ...(host ? { hostTelemetry: host } : {}),
+      ...(trace?.artifacts ? { artifacts: trace.artifacts } : {}),
       ...(error ? { error } : {}),
       ...(ending ? { ending } : {}),
       ...(failure ? { diagnostics: { failureKind: failure.kind } } : {}),
@@ -561,6 +685,8 @@ async function runCodex(
     await rm(home, { recursive: true, force: true, maxRetries: 3 });
     if (workDir)
       await rm(workDir, { recursive: true, force: true, maxRetries: 3 });
+    if (traceDir)
+      await rm(traceDir, { recursive: true, force: true, maxRetries: 3 });
   }
 }
 

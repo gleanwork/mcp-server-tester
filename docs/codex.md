@@ -41,6 +41,7 @@ For `--runner` and `--detach` runs, put these in the `--secrets-file`: workers g
 | `cwd`             | The directory Codex runs in. Default: an empty temporary directory, removed afterwards.                                                                                                                                      |
 | `apiKeyEnvVar`    | Read the model key from this variable only.                                                                                                                                                                                  |
 | `env`             | Extra environment variables for the Codex process.                                                                                                                                                                           |
+| `rolloutTrace`    | Have Codex write its rollout trace: each model request exactly as Codex sent it, each response, and the tool calls. Default `false`. See [The rollout trace](#the-rollout-trace).                                            |
 
 ## What each trial runs with
 
@@ -61,3 +62,29 @@ The transcript (`evidence: structured`) is Codex's own record:
 - **Its own telemetry.** With [`telemetry.host`](./telemetry.md#the-clients-own-telemetry), MST points Codex's OpenTelemetry exporter (`[otel]`) at its receiver, and keeps the trial's records (`codex.api_request`, `codex.tool_result`, `codex.sse_event`, ..., matched by `conversation.id`).
 
 A trial that times out, or whose Codex process fails, records what Codex reported until then, with the error.
+
+## The rollout trace
+
+The transcript has each model response, but not the request Codex sent for it. With `rolloutTrace`, MST sets `CODEX_ROLLOUT_TRACE_ROOT` for each trial, and Codex (0.124 or later) writes its rollout trace there: a local diagnostic record of the session, which Codex doesn't upload. It has each model request exactly as Codex sent it (instructions, input items, tool definitions, reasoning settings), each response with its usage and response ID, and the tool calls with their results, in order.
+
+```json
+{
+  "name": "codex-cli-traced",
+  "client": "codex-cli",
+  "clientOptions": { "rolloutTrace": true },
+  "redactStoredResponses": false,
+  "datasets": ["./cases.json"]
+}
+```
+
+The trial reports the trace as its [client artifacts](./evaluation-framework.md#client-artifacts), so judges read it with the trial (`trial.artifactsDir`). A run that keeps full transcripts (`"redactStoredResponses": false`) keeps it at `artifacts/<variant>/<case-id>/<trial>/codex-rollout-trace/`; otherwise it is removed once grading is done. Codex writes a bundle for the thread, `trace-<trace ID>-<thread ID>/`:
+
+- `manifest.json`: the trace's ID and the thread's.
+- `trace.jsonl`: Codex's events, in order. An `inference_started` event names the request's file (`request_payload.path`); `inference_completed`, the response's (`response_payload.path`).
+- `payloads/`: the requests, responses, tool calls, results and session events those events name.
+
+`codex debug trace-reduce <bundle>` replays a bundle into `state.json`: what the model saw in each request, and what ran.
+
+The trial's telemetry has `rolloutTrace`: how many bundles, files and bytes it kept. A trace that is larger than a trial's artifacts may be (16 MB per file, 64 MB in all, 4,096 entries), or that Codex didn't write, isn't kept, and `rolloutTrace.notKept` says why. The trial is graded either way: a missing trace doesn't make it an infrastructure failure.
+
+The trace holds everything the model saw, including what the servers returned, so keep the runs that store it where that data may go.

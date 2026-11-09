@@ -247,6 +247,7 @@ describe('mst clients', () => {
         'cwd',
         'apiKeyEnvVar',
         'env',
+        'rolloutTrace',
       ],
       cowork: [
         'maxActions',

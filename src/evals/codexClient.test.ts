@@ -7,11 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import {
   CODEX_CLIENT,
+  CODEX_ROLLOUT_TRACE_DIR,
   CodexClientSchema,
   codexConfigToml,
   codexMcpServers,
+  codexRolloutTrace,
   codexServerKey,
 } from './codexClient.js';
+import { ARTIFACT_LIMITS } from './allArtifacts.js';
 import { assertClientSupports, getClient } from './builtinClients.js';
 import type { ClientRunContext } from './evalFrameworkTypes.js';
 import type { EvalConfig } from './evalConfig.js';
@@ -42,7 +45,47 @@ const sdk = vi.hoisted(() => ({
   hostEvents: undefined as
     | Array<{ name: string; attributes: Record<string, string> }>
     | undefined,
+  /** Write no rollout trace, as a Codex older than 0.124 doesn't. */
+  noTrace: undefined as boolean | undefined,
 }));
+
+/** A rollout trace bundle as Codex writes one for a thread. */
+async function writeTraceBundle(root: string, threadId: string) {
+  const bundle = join(root, `trace-t1-${threadId}`);
+  await mkdir(join(bundle, 'payloads'), { recursive: true });
+  await writeFile(
+    join(bundle, 'manifest.json'),
+    JSON.stringify({
+      schema_version: 1,
+      trace_id: 't1',
+      rollout_id: threadId,
+      root_thread_id: threadId,
+      raw_event_log: 'trace.jsonl',
+      payloads_dir: 'payloads',
+    })
+  );
+  await writeFile(
+    join(bundle, 'trace.jsonl'),
+    `${JSON.stringify({
+      seq: 1,
+      payload: {
+        type: 'inference_started',
+        request_payload: {
+          kind: { type: 'inference_request' },
+          path: 'payloads/1.json',
+        },
+      },
+    })}\n`
+  );
+  await writeFile(
+    join(bundle, 'payloads', '1.json'),
+    JSON.stringify({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'x' }] }],
+    })
+  );
+  return bundle;
+}
 
 vi.mock('@openai/codex-sdk', () => ({
   Codex: class {
@@ -60,6 +103,8 @@ vi.mock('@openai/codex-sdk', () => ({
             'utf8'
           );
           sdk.homeMode = statSync(join(env.CODEX_HOME!, 'config.toml')).mode;
+          if (env.CODEX_ROLLOUT_TRACE_ROOT && !sdk.noTrace)
+            await writeTraceBundle(env.CODEX_ROLLOUT_TRACE_ROOT, 'thread-9');
           const sessions = join(
             env.CODEX_HOME!,
             'sessions',
@@ -264,6 +309,12 @@ describe('codex-cli client options', () => {
     expect(() =>
       CodexClientSchema.parse({ type: 'codex-cli', sandbox: 'none' })
     ).toThrow();
+    expect(
+      CodexClientSchema.parse({ type: 'codex-cli', rolloutTrace: true })
+    ).toMatchObject({ rolloutTrace: true });
+    expect(() =>
+      CodexClientSchema.parse({ type: 'codex-cli', rolloutTrace: 'yes' })
+    ).toThrow();
   });
 
   it("refuses connection settings it can't forward, before anything runs", () => {
@@ -463,6 +514,10 @@ describe('codex-cli client run', () => {
     // The trial's home and working directory are gone.
     expect(existsSync(env.CODEX_HOME!)).toBe(false);
     expect(existsSync(String(sdk.thread!.workingDirectory))).toBe(false);
+    // No rollout trace unless the client asks for one.
+    expect(env).not.toHaveProperty('CODEX_ROLLOUT_TRACE_ROOT');
+    expect(result).not.toHaveProperty('artifacts');
+    expect(result.telemetry).not.toHaveProperty('rolloutTrace');
   });
 
   it("gives its model calls the request IDs the host's events name them by, as Cowork and Claude Code do", async () => {
@@ -543,6 +598,90 @@ describe('codex-cli client run', () => {
     );
     expect(sdk.thread!.workingDirectory).toBe(cwd);
     expect(existsSync(cwd)).toBe(true);
+  });
+
+  it('reports the rollout trace Codex wrote as the trial artifacts, with rolloutTrace', async () => {
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      {
+        type: 'codex-cli',
+        rolloutTrace: true,
+        // MST's trace root wins over one the client's env sets.
+        env: { CODEX_ROLLOUT_TRACE_ROOT: join(cwd, 'elsewhere') },
+      },
+      context(GATEWAY)
+    );
+    try {
+      const env = sdk.options!.env as Record<string, string>;
+      expect(result.artifacts).toEqual({
+        dir: expect.any(String),
+        include: [CODEX_ROLLOUT_TRACE_DIR],
+        temporary: true,
+      });
+      const dir = result.artifacts!.dir;
+      expect(env.CODEX_ROLLOUT_TRACE_ROOT).toBe(
+        join(dir, CODEX_ROLLOUT_TRACE_DIR)
+      );
+      expect(existsSync(join(cwd, 'elsewhere'))).toBe(false);
+      // The trace outlives the trial's home: MST copies it, then removes it.
+      expect(existsSync(env.CODEX_HOME!)).toBe(false);
+      expect(
+        JSON.parse(
+          await readFile(
+            join(
+              dir,
+              CODEX_ROLLOUT_TRACE_DIR,
+              'trace-t1-thread-9',
+              'payloads',
+              '1.json'
+            ),
+            'utf8'
+          )
+        )
+      ).toMatchObject({ model: 'gpt-5.5' });
+      expect(result.telemetry!.rolloutTrace).toEqual({
+        bundles: 1,
+        files: 3,
+        bytes: expect.any(Number),
+      });
+    } finally {
+      if (result.artifacts)
+        await rm(result.artifacts.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('says why there is no trace when Codex wrote none, and removes its directory', async () => {
+    sdk.noTrace = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex-cli', rolloutTrace: true },
+      context(GATEWAY)
+    );
+    const env = sdk.options!.env as Record<string, string>;
+    expect(result.error).toBeUndefined();
+    expect(result).not.toHaveProperty('artifacts');
+    expect(result.telemetry!.rolloutTrace).toEqual({
+      bundles: 0,
+      notKept: expect.stringMatching(/no rollout trace.*0\.124/),
+    });
+    expect(existsSync(join(env.CODEX_ROLLOUT_TRACE_ROOT!, '..'))).toBe(false);
+  });
+
+  it('keeps the trace of a trial that timed out', async () => {
+    sdk.hang = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex-cli', rolloutTrace: true, timeout: 50 },
+      context(GATEWAY)
+    );
+    try {
+      expect(result.error).toMatch(/timed out/);
+      expect(result.artifacts?.include).toEqual([CODEX_ROLLOUT_TRACE_DIR]);
+      expect(result.telemetry!.rolloutTrace).toMatchObject({ bundles: 1 });
+    } finally {
+      if (result.artifacts)
+        await rm(result.artifacts.dir, { recursive: true, force: true });
+    }
   });
 
   it('uses the built-in OpenAI provider without a base URL', async () => {
@@ -682,4 +821,42 @@ describe('codex-cli client run', () => {
     expect(result.ending).toBeUndefined();
     expect(result.diagnostics).toEqual({ failureKind: 'process' });
   });
+});
+
+describe('codex-cli rollout trace', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mst-codex-trace-test-'));
+    await writeTraceBundle(join(dir, CODEX_ROLLOUT_TRACE_DIR), 'thread-9');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('keeps a trace that fits what the copy of a trial artifacts may hold', async () => {
+    expect(await codexRolloutTrace(dir)).toEqual({
+      artifacts: { dir, include: [CODEX_ROLLOUT_TRACE_DIR], temporary: true },
+      telemetry: { bundles: 1, files: 3, bytes: expect.any(Number) },
+    });
+  });
+
+  it.each([
+    [{ fileBytes: 5 }, /is larger than 5 bytes/],
+    [{ totalBytes: 100 }, /holds more than 100 bytes/],
+    [{ entries: 3 }, /more than 3 entries/],
+    [{ depth: 2 }, /more than 2 directories deep/],
+  ])(
+    'does not keep a trace over a limit (%o), and says which',
+    async (limit, reason) => {
+      const { artifacts, telemetry } = await codexRolloutTrace(dir, {
+        ...ARTIFACT_LIMITS,
+        ...limit,
+      });
+      expect(artifacts).toBeUndefined();
+      expect(telemetry).toEqual({
+        bundles: 1,
+        notKept: expect.stringMatching(reason),
+      });
+    }
+  );
 });

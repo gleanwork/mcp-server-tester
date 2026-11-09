@@ -11,21 +11,13 @@ import type { EvalCase } from './datasetTypes.js';
 import { executionEnding, type CaseExecution } from './caseExecution.js';
 import type { ClientArtifacts, ClientRunResult } from './evalFrameworkTypes.js';
 import { trialArtifactsPath } from './runFormat.js';
-import { ALL_ARTIFACTS, DIAGNOSIS_DIR } from './allArtifacts.js';
+import {
+  ALL_ARTIFACTS,
+  ARTIFACT_LIMITS,
+  DIAGNOSIS_DIR,
+} from './allArtifacts.js';
 import { failedAfterClient } from './trialEnding.js';
 import { jsonCopy } from '../utils/jsonFile.js';
-
-/** The most a trial's copy may hold. A copy over a limit fails. */
-export const ARTIFACT_LIMITS = {
-  /** Bytes in one file. */
-  fileBytes: 16 * 1024 * 1024,
-  /** Bytes in the whole copy. */
-  totalBytes: 64 * 1024 * 1024,
-  /** Files and directories visited, included or not. */
-  entries: 4096,
-  /** Directories below the root. */
-  depth: 16,
-} as const;
 
 type Match = 'included' | 'ancestor' | 'none';
 
