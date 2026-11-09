@@ -4,6 +4,10 @@ Releases are mostly automated using
 [release-it](https://github.com/release-it/release-it/) and
 [lerna-changelog](https://github.com/lerna/lerna-changelog/).
 
+## Who releases
+
+A maintainer, or an agent that a person asks to release in the conversation. The person names the version or the increment. An agent follows the steps below and shows the dry run's changelog. It starts the release only after the person confirms it. `gh workflow run release.yml` and `npx release-it` are in the "Ask first" rules in `.claude/settings.json`.
+
 ## Preparation
 
 Since the majority of the actual release process is automated, the primary
@@ -36,21 +40,22 @@ npm token and no one-time password.
 2. Do a dry run, and read the changelog in the run's log:
 
    ```sh
-   gh workflow run release.yml -f increment=prerelease -f pre_release=beta -f dry_run=true
+   gh workflow run release.yml -f increment=prerelease -f pre_release=rc -f dry_run=true
    ```
 
 3. Release:
 
    ```sh
-   gh workflow run release.yml -f increment=prerelease -f pre_release=beta
+   gh workflow run release.yml -f increment=prerelease -f pre_release=rc
    ```
 
    `increment` is `prerelease`, `patch`, `minor` or `major`; `pre_release` is
-   the prerelease identifier, empty for a final release. From `2.0.0-beta.14`:
-   `prerelease` + `beta` gives `2.0.0-beta.15`; `prerelease` + `rc` gives
-   `2.0.0-rc.0`; `major` alone gives `2.0.0`. A prerelease publishes under its
+   the prerelease identifier, empty for a final release. From `2.0.0-rc.0`:
+   `prerelease` + `rc` gives `2.0.0-rc.1`, and `major` alone gives `2.0.0`.
+   Don't go back to `beta`: `prerelease` + `beta` gives `2.0.0-beta.0`, a
+   version below the current one. A prerelease publishes under its
    identifier as the npm dist-tag (`beta`, `rc`); a final release becomes
-   `latest`.
+   `latest`. Check the version in the dry run's log before you release.
 
 4. Check the result: the run succeeded (`gh run watch`),
    `npm view @gleanwork/mcp-server-tester versions` lists the new version, and
