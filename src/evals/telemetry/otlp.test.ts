@@ -420,7 +420,7 @@ describe('gradingSpans', () => {
     const result = trial({
       pass: false,
       scores: {
-        textContains: { pass: true, score: 1 },
+        containsText: { pass: true, score: 1 },
         precision: {
           pass: false,
           score: 0.25,
@@ -441,7 +441,7 @@ describe('gradingSpans', () => {
     })[0]!;
     expect(spans.map((span) => span.name)).toEqual([
       'evaluate mst.trial',
-      'evaluate textContains',
+      'evaluate containsText',
       'evaluate citation-precision',
     ]);
     expect(spans.every((span) => span.traceId === root.traceId)).toBe(true);

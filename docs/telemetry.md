@@ -85,7 +85,7 @@ A client's record of a trial is its conversation: messages, tool calls and resul
 }
 ```
 
-The `telemetry.host` setting, the `hostTelemetry` field and the `mst.host.*` attributes still use "host", MST's word for a client before 2.0. They mean the client.
+The `telemetry.host` setting, the `hostTelemetry` field and the `mst.host.*` attributes keep "host" on purpose. The MCP specification calls the client application the host, and this is the application's own telemetry. The numbers MST reads from the client's own records are `clientTelemetry`.
 
 MST runs an OTLP/HTTP receiver beside the client (one per process, on a random port and secret path) and points the client's exporter at it, asking for OTLP/JSON. Each trial takes the records of its own session: Claude Code runs with a session ID MST chooses, and a Cowork task is matched by its session. The trial's record keeps them in `transcript.hostTelemetry`: the client's events, spans and metrics (each metric's latest value), with its resource attributes. `telemetry.otlp` isn't needed: without it, they're only in the run.
 

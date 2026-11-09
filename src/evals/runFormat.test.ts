@@ -113,7 +113,7 @@ describe('the mst.run/v1 layout', () => {
     const trial = (variant: string, id: string, n: number) =>
       `transcripts/${variant}/${encodeURIComponent(id)}/${n}.json`;
     const score = (variant: string, id: string, n: number) =>
-      `scores/textContains/${variant}/${encodeURIComponent(id)}/${n}.json`;
+      `scores/containsText/${variant}/${encodeURIComponent(id)}/${n}.json`;
     const expected = ['base', 'other'].flatMap((variant) =>
       ['a/one', 'b'].flatMap((id) =>
         [0, 1].flatMap((n) => [trial(variant, id, n), score(variant, id, n)])
@@ -148,7 +148,7 @@ describe('the mst.run/v1 layout', () => {
       path.join(result.outputDir, score('base', 'b', 1))
     );
     expect(failed).toMatchObject({
-      grader: 'textContains',
+      grader: 'containsText',
       variant: 'base',
       caseId: 'b',
       trial: 1,
@@ -369,6 +369,37 @@ describe('older and newer formats', () => {
     expect(() =>
       assertRunFormat({ format: RUN_FORMAT }, 'Run x')
     ).not.toThrow();
+  });
+
+  it('refuse a run a release candidate stored with the old score keys', async () => {
+    const result = await run();
+    await fs.rename(
+      path.join(result.outputDir, 'scores', 'containsText'),
+      path.join(result.outputDir, 'scores', 'textContains')
+    );
+    await expect(readRunDirectory(result.outputDir)).rejects.toThrow(
+      `${result.outputDir} was stored by an MST 2.0 prerelease, before its score keys took their assertions' names (textContains → containsText, regex → matchesPattern; see docs/migrations/2.0-prereleases.md#score-keys-are-assertion-keys). This MST can't read it: run the eval again.`
+    );
+  });
+
+  it('refuse an interrupted run whose results have the old score keys', async () => {
+    const result = await run();
+    // Stopped before its scores: results.json, but no scores/.
+    await fs.rm(path.join(result.outputDir, 'scores'), {
+      recursive: true,
+      force: true,
+    });
+    const file = path.join(result.outputDir, 'results.json');
+    await fs.writeFile(
+      file,
+      (await fs.readFile(file, 'utf8')).replaceAll(
+        '"containsText"',
+        '"textContains"'
+      )
+    );
+    await expect(readRunDirectory(result.outputDir)).rejects.toThrow(
+      `${file} was written by an MST 2.0 prerelease, before its score keys took their assertions' names`
+    );
   });
 
   it("refuse a run a release candidate stored before ADR 0013's renames", async () => {

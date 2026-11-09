@@ -75,3 +75,7 @@ The `docker` environment and the image are built ([Cowork in Docker](../cowork-d
 ## Update (2026-10-14)
 
 [ADR 0005](./0005-grading-runs-in-an-environment.md) lets `mst grade --env` grade a stored run on an environment's machines. "The worker never resolves a dataset or runs a judge" still holds for `mst collect`. A grade worker (`mst grade-shard`) runs judges, with their keys from the secrets file, but still loads no dataset. A shard says which it runs (`ShardSpec.work`), and `machineEnvironment` runs both.
+
+## Update (2026-11-09)
+
+Environments are now runners: `RunnerDefinition`, `Runner`, `machineRunner` and `dockerRunner`, as [the prerelease guide](../migrations/2.0-prereleases.md#environments-are-runners) lists. From `2.0.0-rc.1`, the runner interfaces and the `mst.shard/v1` messages are frozen. That includes the types [ADR 0005](./0005-grading-runs-in-an-environment.md) and [ADR 0007](./0007-detached-runs-move-the-coordinator.md) added. Until then, these interfaces could change between 2.0 prereleases. A change that breaks a runner plugin waits for a major version, or for a new shard format beside `mst.shard/v1`. A worker still runs the coordinator's MST version: `hello` refuses any other.

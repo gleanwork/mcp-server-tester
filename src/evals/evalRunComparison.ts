@@ -1,5 +1,6 @@
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { EvalRunnerResult } from './evalRunner.js';
+import { assertCurrentRunResult } from './resultFormat.js';
 import {
   createStoredEvalArtifact,
   resolveEvalResultStore,
@@ -236,6 +237,8 @@ export async function loadStoredEvalRunnerResult(
     throw new Error('No latest eval run artifact found');
   }
 
+  // Any store's, a plugin's included: old field names and score keys fail.
+  assertCurrentRunResult(artifact.data, `Stored eval result ${artifact.id}`);
   return artifact;
 }
 

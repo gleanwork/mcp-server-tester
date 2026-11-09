@@ -3,7 +3,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { RUN_FORMAT, assertRunFormat } from './resultFormat.js';
+import {
+  PRERELEASE_SCORE_KEYS,
+  RENAMED_SCORES_ANCHOR,
+  RUN_FORMAT,
+  assertCurrentRunResult,
+  assertRunFormat,
+  renamedScoreKeys,
+} from './resultFormat.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
@@ -1167,6 +1174,11 @@ async function assertCurrentRunLayout(
     throw new Error(
       `${directory} was stored by an MST 2.0 release candidate, before ADR 0013 renamed ${renamed.join(' and ')}. This MST can't read it: run the eval again.`
     );
+  for (const grader of Object.keys(PRERELEASE_SCORE_KEYS))
+    if (await isDirectory(path.join('scores', grader)))
+      throw new Error(
+        `${directory} was stored by an MST 2.0 prerelease, before its score keys took their assertions' names (${renamedScoreKeys()}; see ${RENAMED_SCORES_ANCHOR}). This MST can't read it: run the eval again.`
+      );
 }
 
 /**
@@ -1193,6 +1205,12 @@ export async function readRunDirectory(directory: string): Promise<StoredRun> {
   const run = RunRecordSchema.parse(record);
   const summary = (await read('summary.json')) as EvaluationSummary;
   const results = (await read('results.json')) as { cases?: EvalCaseResult[] };
+  // Old score keys in the results, too: a run stopped before its scores
+  // has `results.json` but no `scores/`.
+  assertCurrentRunResult(
+    { caseResults: results.cases },
+    path.join(directory, 'results.json')
+  );
   return {
     directory,
     run: runWithCurrentClients(run),

@@ -36,7 +36,11 @@ _Avoid_: canonical answer, golden, target, reference
 
 **Client**:
 The MCP client application an eval tests, named canonically: `claude-code`, `codex-cli` (the Codex CLI; it was `codex`), `cowork`, `chatgpt`, `codex-app` (the Codex surface of the ChatGPT desktop app; it was `chatgpt` with `surface: "codex"`), or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). One client is one product: no option changes which product it is. How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. Desktop execution uses the product's `macos.ts` or `linux.ts` entry point, selected on the machine running the trial. New results record no driver identity; old stored results keep theirs. A client returns a transcript, never a score. Built-in and plugin clients return the same `ClientRunResult`: a final answer, ordered events and optional usage, diagnostics and telemetry. MST derives the assertion/report view from it. `mst clients` lists each client's requirements, options and defaults from its definition and schema. It describes OS-dependent defaults without resolving them on the coordinator. A client with its model is an agent harness.
-_Avoid_: host, harness (unqualified), agent, runner, solver, provider
+_Avoid_: host, harness (unqualified), agent, runner, solver, provider. One exception: **host telemetry**.
+
+**Host telemetry**:
+The OpenTelemetry a client application sends about a trial. MST receives it when an eval config sets `telemetry.host`, and stores it in the trial's `transcript.hostTelemetry` (docs/telemetry.md). Its OpenTelemetry export uses `mst.host.*` attributes. The name keeps "host" on purpose: the MCP specification calls the application the host, and this is the application's own export. `clientTelemetry` is different: it holds numbers MST reads from the client's own records. 1.x used `hostTelemetry` for those, as a field of a case or trial result. 2.0 writes `hostTelemetry` only inside a transcript, so MST never mistakes it for the 1.x field.
+_Avoid_: client telemetry (that is `clientTelemetry`)
 
 **Client session**:
 One client kept open with fixed options, model, servers and environment. Each trial supplies its identity and prompt. The session returns a `ClientRunResult` and says whether MST can continue, must reset, or must stop. MST owns the readiness, reset and diagnosis policy. Shared timeout enforcement and reset retry timings remain deferred in [ADR 0011](docs/adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md). Built-in and plugin clients expose this through `open()`; local and worker dispatch use the same session loop. A client may supply `run`, `open`, or both. Run-only clients keep their concurrency and use one-shot sessions where needed. Different fixed settings get separate sessions.
@@ -109,7 +113,7 @@ _Avoid_: native (unqualified)
 ### Grading
 
 **Grader**:
-Logic that scores a trial. A code grader is deterministic: each key of a case's `assertions`, such as `toolsTriggered` or `containsText`, is one, and records its own score. A model grader is a judge. A person who gives labels is a human grader.
+Logic that scores a trial. A code grader is deterministic: each key of a case's `assertions`, such as `toolsTriggered` or `containsText`, is one, and records its own score under the same name (`scores.containsText`, `scores/containsText/`). A model grader is a judge. A person who gives labels is a human grader.
 _Avoid_: scorer, evaluator
 
 **Assertion**:

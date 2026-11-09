@@ -25,7 +25,11 @@ export function assertRunFormat(value: unknown, what: string): void {
     );
 }
 
-/** 1.x result field names and what 2.0 calls them. */
+/**
+ * 1.x result field names and what 2.0 calls them, as keys of a case or
+ * trial result. 2.0's own `hostTelemetry` (CONTEXT.md, host telemetry) is
+ * only ever in a trial's `transcript`, so it never matches.
+ */
 const RENAMED_RESULT_FIELDS: Record<string, string> = {
   mcpHostTrace: 'toolCallTranscript',
   hostUsage: 'clientUsage',
@@ -83,6 +87,40 @@ function hasPrereleaseFields(result: Record<string, unknown>): boolean {
   );
 }
 
+/**
+ * Score keys a 2.0 release candidate wrote, and the assertion keys that
+ * name them now. Shared with the run layout check (`scores/<grader>/`).
+ */
+export const PRERELEASE_SCORE_KEYS: Readonly<Record<string, string>> = {
+  textContains: 'containsText',
+  regex: 'matchesPattern',
+};
+
+export const RENAMED_SCORES_ANCHOR =
+  'docs/migrations/2.0-prereleases.md#score-keys-are-assertion-keys';
+
+function hasPrereleaseScores(result: Record<string, unknown>): boolean {
+  const renamed = (scores: unknown) =>
+    isObject(scores) &&
+    Object.keys(scores).some((key) =>
+      Object.hasOwn(PRERELEASE_SCORE_KEYS, key)
+    );
+  if (renamed(result.scores)) return true;
+  return (
+    Array.isArray(result.trialResults) &&
+    result.trialResults.some(
+      (trial) => isObject(trial) && renamed(trial.scores)
+    )
+  );
+}
+
+/** `textContains → containsText, regex → matchesPattern`. */
+export function renamedScoreKeys(): string {
+  return Object.entries(PRERELEASE_SCORE_KEYS)
+    .map(([from, to]) => `${from} → ${to}`)
+    .join(', ');
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -123,4 +161,11 @@ export function assertCurrentRunResult(value: unknown, what: string): void {
       `${what} was written by an MST 2.0 release candidate, before ADR 0013 renamed its result fields (${renames}; see docs/migrations/2.0-prereleases.md#traces-are-transcripts). Rerun to write it again.`
     );
   }
+  if (
+    Array.isArray(cases) &&
+    cases.some((result) => isObject(result) && hasPrereleaseScores(result))
+  )
+    throw new Error(
+      `${what} was written by an MST 2.0 prerelease, before its score keys took their assertions' names (${renamedScoreKeys()}; see ${RENAMED_SCORES_ANCHOR}). Rerun to write it again.`
+    );
 }

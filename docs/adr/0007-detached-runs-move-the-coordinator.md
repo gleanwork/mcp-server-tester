@@ -65,5 +65,5 @@ The workaround today is to run the coordinator on a machine of your own in the c
 
 - An environment that supports `--detach` defines `coordinator`, and documents the cloud identity its coordinator machine runs as and the roles it needs.
 - `--detach` needs a remote result store and, with connector servers, a shared credential store from a plugin.
-- The public types gain `EnvironmentDefinition.coordinator`, `CoordinatorMachine`, `CoordinatorContext`, `CredentialStoreDefinition` and `DetachStatus`. They can change between 2.0 prereleases.
+- The public types gain `EnvironmentDefinition.coordinator`, `CoordinatorMachine`, `CoordinatorContext`, `CredentialStoreDefinition` and `DetachStatus`. They could change between 2.0 prereleases, and are frozen from `2.0.0-rc.1` ([ADR 0004's update of 2026-11-09](./0004-environments-run-shards-over-a-channel.md#update-2026-11-09)).
 - A resumed run keeps how it was started: a run collected with `--no-grade` stays ungraded after `--resume`, and is graded with `mst grade`.

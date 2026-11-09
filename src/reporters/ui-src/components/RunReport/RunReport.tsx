@@ -16,7 +16,6 @@ import { TrialFailures } from '../Comparison/TrialFailures';
 import {
   TONE,
   direction,
-  graderName,
   likelyText,
   likelyTitle,
   pct,
@@ -408,13 +407,10 @@ function hasRegressionCases(data: MCPRunReportData): boolean {
 const GRADER_TEXT: Record<string, string> = {
   toolsTriggered: 'which tools were called',
   toolCallCount: 'how many tool calls',
-  textContains: 'the answer contains text',
-  regex: 'the answer matches a pattern',
-  exact: 'the response matches exactly',
-  schema: 'the response matches a schema',
-  snapshot: 'the response matches a snapshot',
-  error: 'whether the response is an error',
-  size: 'the response size',
+  containsText: 'the answer contains text',
+  matchesPattern: 'the answer matches a pattern',
+  writes: 'the writes it requested',
+  error: "grading that didn't come back",
 };
 
 /** Trials of a variant that ended in an infrastructure failure. */
@@ -480,7 +476,7 @@ function GradedOn({ data }: { data: MCPRunReportData }) {
         {graders.map((g, i) => (
           <span key={g.name}>
             {i > 0 && ' · '}
-            <span className="font-mono">{graderName(g.name)}</span>
+            <span className="font-mono">{g.name}</span>
             {g.judge
               ? ' (judge)'
               : GRADER_TEXT[g.name]

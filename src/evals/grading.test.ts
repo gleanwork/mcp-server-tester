@@ -115,7 +115,7 @@ describe('gradeTrial', () => {
       pass: false,
       details,
     });
-    expect(outcome.scores.textContains?.pass).toBe(true);
+    expect(outcome.scores.containsText?.pass).toBe(true);
     expect(outcome.toolPrecision).toBeUndefined();
     expect(outcome.toolRecall).toBeUndefined();
     expect(outcome.toolCallTranscript).toBeUndefined();
@@ -522,18 +522,18 @@ describe('mergeEvalJudges', () => {
 describe('gradingErrorOf', () => {
   const error = { pass: false, error: 'Judge "x" error: rate limited' };
   it('names the grader that failed to run', () => {
-    expect(gradingErrorOf({ judge: error, textContains: { pass: true } })).toBe(
+    expect(gradingErrorOf({ judge: error, containsText: { pass: true } })).toBe(
       'judge: Judge "x" error: rate limited'
     );
   });
   it('is nothing when every grader gave a verdict', () => {
     expect(
-      gradingErrorOf({ judge: { pass: false }, textContains: { pass: true } })
+      gradingErrorOf({ judge: { pass: false }, containsText: { pass: true } })
     ).toBeUndefined();
   });
   it('is nothing when another grader already failed the trial', () => {
     expect(
-      gradingErrorOf({ judge: error, textContains: { pass: false } })
+      gradingErrorOf({ judge: error, containsText: { pass: false } })
     ).toBeUndefined();
   });
   it('looks inside several judges: one fail settles it, else the error stands', () => {

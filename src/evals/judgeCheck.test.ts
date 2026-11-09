@@ -141,6 +141,8 @@ async function evalDirectory(
     odd?: number;
     keyword?: string;
     threshold?: number;
+    /** The plugin's settings, in the eval config's `settings.ck`. */
+    pluginSettings?: Record<string, unknown>;
   } = {}
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-check-'));
@@ -151,6 +153,9 @@ async function evalDirectory(
       namespace: 'ck',
       ...(options.version ? { version: options.version } : {}),
     },
+    ...(options.pluginSettings
+      ? { settings: { schema: z.object({ strictness: z.string() }).strict() } }
+      : {}),
     clients: {
       scripted: {
         schema: z.object({ type: z.string() }).passthrough(),
@@ -212,6 +217,9 @@ async function evalDirectory(
       name: 'check-test',
       datasets: ['./dataset.json'],
       client: 'ck/client/scripted',
+      ...(options.pluginSettings
+        ? { settings: { ck: options.pluginSettings } }
+        : {}),
       redactStoredResponses: false,
       servers: { docs: { transport: 'http', serverUrl: docsServer.url } },
       judges: [
@@ -562,6 +570,31 @@ describe('mst judges check', () => {
       // The regrade's verdicts replace the run's: they grade the same trials.
       runs: [path.basename(regraded)],
     });
+  });
+
+  it("applies a calibration until the judge's plugin settings change", async () => {
+    const { base, dir } = await evalDirectory({
+      pluginSettings: { strictness: 'a' },
+    });
+    const first = await run(base);
+    await label(first, 'ck/judge/keyword', () => undefined);
+    await check([first], { judge: 'ck/judge/keyword' });
+    const status = async (directory: string) =>
+      calibrationOf(await reportOf(directory), 'baseline')?.status;
+    expect(await status(first)).toBe('calibrated');
+    // The same settings: the calibration applies to the next run too.
+    expect(await status(await run(base))).toBe('calibrated');
+    // Other settings could change its verdicts: it needs checking again.
+    const config = path.join(dir, 'eval.json');
+    await fs.writeFile(
+      config,
+      (await fs.readFile(config, 'utf8')).replace(
+        '"strictness":"a"',
+        '"strictness":"b"'
+      )
+    );
+    resetPluginsForTests();
+    expect(await status(await run(base))).toBe('stale');
   });
 
   it('gives the identity run.json records, which changes with the pass threshold', async () => {

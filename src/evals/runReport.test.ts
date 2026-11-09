@@ -344,7 +344,7 @@ describe('the run report', () => {
     });
     expect(trials[0]!.scores).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ grader: 'textContains', pass: true }),
+        expect.objectContaining({ grader: 'containsText', pass: true }),
         expect.objectContaining({
           grader: 'rr/judge/length',
           judge: true,
@@ -604,7 +604,7 @@ describe('the run report', () => {
   it('says what graded the trials, and which graders read the answer', async () => {
     const report = await readReport((await run()).outputDir);
     expect(report.graders).toEqual([
-      { name: 'textContains', judge: false, readsAnswer: true },
+      { name: 'containsText', judge: false, readsAnswer: true },
       { name: 'rr/judge/length', judge: true, readsAnswer: true },
     ]);
     // A transcript-only grader never reads the answer.

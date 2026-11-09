@@ -50,7 +50,7 @@ function result(
     datasetName: 'weather',
     source: 'eval',
     pass,
-    scores: { textContains: { pass } },
+    scores: { containsText: { pass } },
     response: { content: [{ type: 'text', text: 'PRIVATE_RESPONSE' }] },
     durationMs: 10,
     ...extra,

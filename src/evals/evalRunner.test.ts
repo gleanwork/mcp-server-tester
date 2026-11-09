@@ -170,7 +170,7 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(true);
-      expect(result.scores.textContains?.pass).toBe(true);
+      expect(result.scores.containsText?.pass).toBe(true);
     });
 
     it('should fail when expect.containsText does not match', async () => {
@@ -185,7 +185,7 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.scores.textContains?.pass).toBe(false);
+      expect(result.scores.containsText?.pass).toBe(false);
     });
 
     it('should validate expect.matchesPattern', async () => {
@@ -200,7 +200,7 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(true);
-      expect(result.scores.regex?.pass).toBe(true);
+      expect(result.scores.matchesPattern?.pass).toBe(true);
     });
 
     it('should validate multiple assertions together', async () => {
@@ -218,8 +218,8 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(true);
-      expect(result.scores.textContains?.pass).toBe(true);
-      expect(result.scores.regex?.pass).toBe(true);
+      expect(result.scores.containsText?.pass).toBe(true);
+      expect(result.scores.matchesPattern?.pass).toBe(true);
     });
 
     it('should fail if any assertion fails', async () => {
@@ -237,8 +237,8 @@ describe('runEvalCase', () => {
       const result = await runEvalCase(evalCase, context);
 
       expect(result.pass).toBe(false);
-      expect(result.scores.textContains?.pass).toBe(true);
-      expect(result.scores.regex?.pass).toBe(false);
+      expect(result.scores.containsText?.pass).toBe(true);
+      expect(result.scores.matchesPattern?.pass).toBe(false);
     });
 
     it('should track duration', async () => {
@@ -286,7 +286,7 @@ describe('runEvalCase', () => {
       expect(result.error).toContain('Tool failed');
       expect(result.pass).toBe(false);
       // Scores should be empty since tool call failed
-      expect(result.scores.textContains).toBeUndefined();
+      expect(result.scores.containsText).toBeUndefined();
     });
   });
 
@@ -1215,6 +1215,56 @@ describe('saveResultsTo and baselineResultsFrom', () => {
       'stored-run'
     );
     expect(artifact.data.caseResults[0]).toHaveProperty('response');
+  });
+
+  it("refuses a store's baseline with a release candidate score key", async () => {
+    const store = new MemoryEvalResultStore();
+    const dataset = createDataset([
+      createEvalCase({ id: 'case-1', assertions: { containsText: 'hello' } }),
+    ]);
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-runner-result',
+        id: 'old-baseline',
+        data: {
+          total: 1,
+          passed: 1,
+          failed: 0,
+          durationMs: 10,
+          caseResults: [
+            {
+              id: 'case-1',
+              pass: true,
+              datasetName: dataset.name,
+              source: 'eval',
+              scores: { regex: { pass: true } },
+              durationMs: 1,
+            } as never,
+          ],
+        },
+      })
+    );
+    const mcp = createMockMCP({ content: [{ type: 'text', text: 'hello' }] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // Like a baseline file that can't be read: a warning, no comparison.
+      const result = await runEvalDataset(
+        {
+          dataset,
+          resultStore: store,
+          baselineResultsFrom: { store: true, ref: 'latest' },
+        },
+        createContext(mcp)
+      );
+      expect(result.deltaPassRate).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /Stored baseline old-baseline was written by an MST 2\.0 prerelease, before its score keys took their assertions' names \(textContains → containsText, regex → matchesPattern/
+        )
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('loads latest external baseline and computes regressions', async () => {
