@@ -50,12 +50,15 @@ npm token and no one-time password.
    ```
 
    `increment` is `prerelease`, `patch`, `minor` or `major`; `pre_release` is
-   the prerelease identifier, empty for a final release. From `2.0.0-rc.0`:
-   `prerelease` + `rc` gives `2.0.0-rc.1`, and `major` alone gives `2.0.0`.
-   Don't go back to `beta`: `prerelease` + `beta` gives `2.0.0-beta.0`, a
-   version below the current one. A prerelease publishes under its
-   identifier as the npm dist-tag (`beta`, `rc`); a final release becomes
-   `latest`. Check the version in the dry run's log before you release.
+   the prerelease identifier, empty for a final release. `prerelease` with the
+   current identifier gives the next number on that line (`2.0.0-beta.14` to
+   `2.0.0-beta.15`, `2.0.0-rc.0` to `2.0.0-rc.1`). A later identifier starts a
+   new line (`beta` to `rc` gives `2.0.0-rc.0`), and `major` alone gives
+   `2.0.0`. An earlier identifier goes backwards: `beta` from `2.0.0-rc.0`
+   gives `2.0.0-beta.0`, a version below the current one. A prerelease
+   publishes under its identifier as the npm dist-tag (`beta`, `rc`); a final
+   release becomes `latest`. Check the version in the dry run's log before you
+   release.
 
 4. Check the result: the run succeeded (`gh run watch`),
    `npm view @gleanwork/mcp-server-tester versions` lists the new version, and
