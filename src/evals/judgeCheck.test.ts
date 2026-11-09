@@ -595,7 +595,8 @@ describe('mst judges check', () => {
     );
     resetPluginsForTests();
     expect(await status(await run(base))).toBe('stale');
-  });
+    // Four eval runs: under 1 s alone, over the 5 s default in a full suite.
+  }, 20_000);
 
   it('gives the identity run.json records, which changes with the pass threshold', async () => {
     const identities = async (threshold?: number) => {

@@ -4,7 +4,11 @@ import path from 'node:path';
 import { parseChunked } from '@discoveryjs/json-ext';
 import { z } from 'zod';
 import { loadGCSStorage } from './gcsStorage.js';
-import { latestRecord, RUN_ID_PATTERN } from './runFormat.js';
+import {
+  latestRecord,
+  RUN_ID_PATTERN,
+  storedCaseResults,
+} from './runFormat.js';
 import type { RunHistory } from './runBaseline.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 
@@ -353,11 +357,10 @@ export function storeRunHistory(store: RunStore, evalName: string): RunHistory {
   return {
     runIds: () => storedRunIds(store, evalName),
     summary: (runId) => getJson(store, `${runs}${runId}/summary.json`),
-    async cases(runId) {
-      const results = (await getJson(store, `${runs}${runId}/results.json`)) as
-        | { cases?: EvalCaseResult[] }
-        | undefined;
-      return results?.cases ?? [];
+    async cases(runId): Promise<EvalCaseResult[]> {
+      const key = `${runs}${runId}/results.json`;
+      const results = await getJson(store, key);
+      return results === undefined ? [] : storedCaseResults(results, key);
     },
     run: (runId) => getJson(store, `${runs}${runId}/run.json`),
   };

@@ -64,6 +64,10 @@ describe('validateCliOutput', () => {
       { success: true, toolCalls: [{ name: 'tool', arguments: null }] },
       'toolCalls[0].arguments must be an object',
     ],
+    [
+      { success: true, toolCalls: [{ name: 'tool', arguments: ['x'] }] },
+      'toolCalls[0].arguments must be an object, got array',
+    ],
     [null, 'Expected object'],
     ['string', 'Expected object'],
   ])('rejects malformed wire fields %j', (value, error) => {

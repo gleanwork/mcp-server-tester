@@ -138,9 +138,21 @@ describe.each(stores)('the %s run store', (_name, makeStore) => {
       path.join(runDirectory, 'summary.json'),
       '{"runId":"r"}'
     );
+    const storedCase = {
+      id: 'case',
+      datasetName: 'd',
+      pass: true,
+      durationMs: 1,
+      scores: {},
+    };
     await fs.writeFile(
       path.join(runDirectory, 'results.json'),
-      '{"cases":[{"id":"case"}]}'
+      JSON.stringify({
+        format: 'mst.run/v1',
+        kind: 'results',
+        runId: 'r',
+        cases: [storedCase],
+      })
     );
     await fs.writeFile(
       path.join(runDirectory, 'transcripts', 'v', 'case', '0.json'),
@@ -182,7 +194,9 @@ describe.each(stores)('the %s run store', (_name, makeStore) => {
       '20261014T000000Z-def456',
     ]);
     expect(await history.summary(runId)).toEqual({ runId: 'r' });
-    expect(await history.cases(runId)).toEqual([{ id: 'case' }]);
+    expect(await history.cases(runId)).toEqual([storedCase]);
+    // A run with no results.json has no cases.
+    expect(await history.cases('20991231T000000Z-000000')).toEqual([]);
     expect(await history.summary('20991231T000000Z-000000')).toBeUndefined();
     expect(
       JSON.parse(

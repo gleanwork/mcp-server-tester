@@ -306,6 +306,66 @@ describe('mst run --no-grade and mst grade', () => {
     );
   });
 
+  it('keeps fields this MST does not know in a stored transcript and write record through a regrade', async () => {
+    const t = await setup();
+    const collected = await runEval({ ...t.base, grade: false });
+    const transcripts = path.join(collected.outputDir, 'transcripts');
+    const relative = (await fs.readdir(transcripts, { recursive: true })).find(
+      (file) => file.endsWith('.json')
+    )!;
+    const file = path.join(transcripts, relative);
+    const trial = await readJson(file);
+    // As a newer MST might write it: a field in a write, and in the record.
+    const writeRecord = {
+      writes: [
+        {
+          server: 'docs',
+          tool: 'create_page',
+          arguments: { title: 'x' },
+          mode: 'planned',
+          future: { kept: true },
+        },
+      ],
+      unreported: 0,
+      unrecorded: [{ server: 'docs', tool: 'delete_page', futureU: 1 }],
+      unclassified: [
+        {
+          server: 'docs',
+          tool: 'run',
+          arguments: {},
+          reason: 'dispatch',
+          futureC: 1,
+        },
+      ],
+      attribution: 'exclusive',
+      futureCount: 1,
+    };
+    const transcript = trial.transcript as Record<string, unknown>;
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        ...trial,
+        transcript: { ...transcript, futureTranscript: { kept: true } },
+        writeRecord,
+      })
+    );
+
+    const regrade = await gradeRun({ ...t.base, run: collected.outputDir });
+    const regraded = await readJson(
+      path.join(regrade.outputDir, 'transcripts', relative)
+    );
+    expect(regraded.writeRecord).toEqual(writeRecord);
+    expect(regraded.transcript).toMatchObject({
+      futureTranscript: { kept: true },
+    });
+    const results = await readJson(
+      path.join(regrade.outputDir, 'results.json')
+    );
+    const kept = JSON.stringify(results.cases);
+    expect(kept).toContain('"future":{"kept":true}');
+    expect(kept).toContain('"futureCount":1');
+  });
+
   it("a regrade of an older run doesn't take over latest.json, and compares with its own grading", async () => {
     const t = await setup();
     const a = await runEval(t.base);

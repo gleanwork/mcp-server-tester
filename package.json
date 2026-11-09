@@ -143,6 +143,7 @@
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
     "@vitest/ui": "^4.1.2",
+    "ajv": "^8.20.0",
     "bintastic": "^4.0.1",
     "esbuild": "^0.28.0",
     "eslint": "^8.57.1",
