@@ -9,6 +9,7 @@ export interface CoordinateOptions {
   /** The coordinator itself, as `mst coordinate` starts it. */
   daemon?: boolean;
   secrets?: string;
+  optionKey?: string;
 }
 
 /**
@@ -20,6 +21,7 @@ export async function coordinate(options: CoordinateOptions): Promise<void> {
     process.exitCode = await runCoordinatorDaemon({
       bundleDir: options.bundle,
       ...(options.secrets ? { secretsFile: options.secrets } : {}),
+      ...(options.optionKey ? { optionKeyFile: options.optionKey } : {}),
     });
     return;
   }

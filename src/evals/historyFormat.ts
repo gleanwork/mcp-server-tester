@@ -6,7 +6,7 @@
  * schema's output as a `HistoryIndex`, so the compiler keeps the two in step.
  */
 import { z } from 'zod';
-import { RUN_ID_PATTERN } from './runFormat.js';
+import { RUN_ID_PATTERN, WriteModeSchema } from './runFormat.js';
 
 /** The history format. Readers ignore fields they don't know. */
 export const HISTORY_FORMAT = 'mst.history/v1' as const;
@@ -18,6 +18,7 @@ const JudgeSchema = z.looseObject({
   passRate: z.number().optional(),
   meanScore: z.number().optional(),
   unknown: z.number().optional(),
+  caseIdentities: z.record(z.string(), z.string()).optional(),
 });
 
 const PairwiseSchema = z.looseObject({
@@ -64,6 +65,9 @@ const VariantSchema = z.looseObject({
   servers: z.array(z.string()),
   clientApps: z.array(z.string()).optional(),
   setupHash: z.string(),
+  setupParts: z.record(z.string(), z.string()).optional(),
+  writeModes: z.record(z.string(), WriteModeSchema).optional(),
+  optionKey: z.string().optional(),
   cases: z.number(),
   incomplete: z.number().optional(),
   casePassRate: z.number().optional(),
@@ -162,6 +166,16 @@ const RunSchema = z.looseObject({
       optionsHash: z.string(),
     })
   ),
+  plugins: z
+    .array(
+      z.looseObject({
+        namespace: z.string(),
+        name: z.string(),
+        version: z.string().optional(),
+        settings: z.string().optional(),
+      })
+    )
+    .optional(),
   redacted: z.boolean(),
   simulateWrites: z.literal(true).optional(),
   variants: z.array(VariantSchema),

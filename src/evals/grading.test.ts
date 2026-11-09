@@ -6,8 +6,10 @@ import {
   gradingErrorOf,
   mergeEvalJudges,
   resolveJudges,
+  storedJudgesCurrent,
   toolEvidenceGap,
   type GradedExecution,
+  type GradingOutcome,
 } from './grading.js';
 import type { ClientResponse } from './caseExecution.js';
 import type { ClientMetadata } from './clientTelemetryTypes.js';
@@ -330,6 +332,64 @@ describe('gradeTrial', () => {
       judgeName: 'test/judge/grading-test-judge',
     });
     expect(seen).toEqual([{ candidate: 'answer', reference: 'canonical' }]);
+  });
+
+  it("counts the judge's plugin settings in its identity, so a resumed grading judges again when they change", async () => {
+    const models: unknown[] = [];
+    installPlugins([
+      {
+        meta: { name: 'set-judges', namespace: 'set' },
+        settings: { schema: z.object({ model: z.string() }) },
+        judges: {
+          j: {
+            schema: z.object({}).passthrough(),
+            version: '1',
+            evaluate: async (_input, _options, context) => {
+              models.push(context?.settings?.model);
+              return { score: 1 };
+            },
+          },
+        },
+      },
+    ]);
+    const evalCase = { judges: ['set/judge/j'] };
+    const grade = (model: string, previous?: GradingOutcome) =>
+      gradeTrial(
+        evalCase,
+        { response: 'x', settings: { set: { model } } },
+        previous
+      );
+    const first = await grade('a');
+    const again = await grade('a', first);
+    expect(again.scores.judge?.judgeIdentity).toBe(
+      first.scores.judge?.judgeIdentity
+    );
+    const changed = await grade('b', first);
+    expect(changed.scores.judge?.judgeIdentity).not.toBe(
+      first.scores.judge?.judgeIdentity
+    );
+    // The same settings keep the verdict; new ones judge again.
+    expect(models).toEqual(['a', 'b']);
+    // What a resume schedules by: a trial whose verdict a changed judge gave.
+    expect(storedJudgesCurrent(evalCase, first, { set: { model: 'a' } })).toBe(
+      true
+    );
+    expect(storedJudgesCurrent(evalCase, first, { set: { model: 'b' } })).toBe(
+      false
+    );
+    // A case without judges, or a verdict without an identity, keeps it.
+    expect(storedJudgesCurrent({}, first, { set: { model: 'b' } })).toBe(true);
+    expect(
+      storedJudgesCurrent(
+        evalCase,
+        {
+          scores: {
+            judge: { ...first.scores.judge!, judgeIdentity: undefined },
+          },
+        },
+        { set: { model: 'b' } }
+      )
+    ).toBe(true);
   });
 });
 

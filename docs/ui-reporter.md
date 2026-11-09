@@ -147,11 +147,15 @@ Upload the eval's directory and open `runs/<run-id>/report/index.html` from the 
   if: always()
   with:
     name: mcp-eval-runs
-    path: .mcp-test-results/
+    # The directory's name starts with a dot.
+    include-hidden-files: true
+    path: |
+      .mcp-test-results/
+      !.mcp-test-results/**/option-key
     retention-days: 30
 ```
 
-Add `.mcp-test-results/` to `.gitignore`.
+Add `.mcp-test-results/` to `.gitignore`. The reporter writes no `option-key`. `mst run` writes one in each eval's directory, so when the job also runs `mst run` into `.mcp-test-results/`, leave it out of the artifact, as above: it is the key `run.json` hashes credential-like client options with (see [The eval's history](./evaluation-framework.md#the-evals-history)). On CI, `MST_OPTION_KEY` gives every run the same key.
 
 ## Troubleshooting
 

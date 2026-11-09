@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { recordableOptions, runEval } from './runEval.js';
+import { recordableOptions, recordedDeclaration, runEval } from './runEval.js';
 import { buildRunReport, runReportPath } from './runReport.js';
 import { readRunDirectory } from './runFormat.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
@@ -745,10 +745,31 @@ describe('client options in run.json', () => {
       'nested',
     ])
       expect(recorded[name]).toMatch(/^hmac:[0-9a-f]{16}$/);
-    // Keyed per run: the same value hashes differently in another run.
+    // Under another key, the same value hashes differently.
     expect(
       recordableOptions({ apiKey: 'abc' }, Buffer.alloc(32, 2)).apiKey
     ).not.toBe(recorded.apiKey);
+  });
+
+  it("record a connector server's URL without its credentials, query or fragment", () => {
+    expect(
+      recordedDeclaration({
+        connector: 'acme/connector/notes',
+        label: 'notes',
+        url: 'https://user:pass@notes.example/mcp?token=t1#frag',
+      })
+    ).toEqual({
+      connector: 'acme/connector/notes',
+      label: 'notes',
+      url: 'https://notes.example/mcp',
+    });
+    // A URL that doesn't parse isn't recorded at all.
+    expect(
+      recordedDeclaration({
+        connector: 'acme/connector/notes',
+        url: 'not a url token=t1',
+      })
+    ).toEqual({ connector: 'acme/connector/notes' });
   });
 });
 

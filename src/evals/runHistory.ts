@@ -62,6 +62,7 @@ import {
 import { wilson } from './judgeCheck.js';
 import { reporterUiDirectory } from './runReport.js';
 import { HISTORY_FORMAT, HistoryIndexSchema } from './historyFormat.js';
+import { sortKeys } from '../judge/judgeIdentity.js';
 
 export { HISTORY_FORMAT };
 
@@ -69,7 +70,7 @@ export { HISTORY_FORMAT };
  * The version of the code that builds a row from a run. A cached row built
  * by another version is built again, so a row never mixes two definitions.
  */
-const ROW_BUILDER = 2;
+const ROW_BUILDER = 4;
 
 /**
  * Parses `history.json`; undefined when it isn't one this MST reads, and
@@ -154,7 +155,13 @@ function judgeVerdicts(
 function judgesOf(cases: EvalCaseResult[]): Record<string, HistoryJudge> {
   const tally = new Map<
     string,
-    { trials: number; passed: number; unknown: number; scores: number[] }
+    {
+      trials: number;
+      passed: number;
+      unknown: number;
+      scores: number[];
+      identities: Map<string, Set<string>>;
+    }
   >();
   for (const result of cases)
     for (const trial of trialsOf(result)) {
@@ -165,7 +172,15 @@ function judgesOf(cases: EvalCaseResult[]): Record<string, HistoryJudge> {
           passed: 0,
           unknown: 0,
           scores: [],
+          identities: new Map<string, Set<string>>(),
         };
+        if (score.judgeIdentity)
+          entry.identities.set(
+            result.id,
+            (entry.identities.get(result.id) ?? new Set()).add(
+              score.judgeIdentity
+            )
+          );
         if (score.unknown === true) entry.unknown++;
         else {
           entry.trials++;
@@ -185,6 +200,18 @@ function judgesOf(cases: EvalCaseResult[]): Record<string, HistoryJudge> {
           ...(entry.trials ? { passRate: entry.passed / entry.trials } : {}),
           ...(meanScore !== undefined ? { meanScore } : {}),
           ...(entry.unknown ? { unknown: entry.unknown } : {}),
+          ...(entry.identities.size
+            ? {
+                caseIdentities: Object.fromEntries(
+                  [...entry.identities]
+                    .sort(([a], [b]) => a.localeCompare(b))
+                    .map(([caseId, identities]) => [
+                      caseId,
+                      sha([...identities].sort()).slice(0, 16),
+                    ])
+                ),
+              }
+            : {}),
         },
       ];
     })
@@ -248,29 +275,60 @@ function serverName(server: Record<string, unknown>): string {
 }
 
 /**
- * A variant's setup, as comparable across runs: an option value a run
- * recorded only as a keyed hash (`hmac:…`) can't be matched with another
- * run's, so only its name counts.
+ * The parts of a variant's setup besides its client and model, each hashed,
+ * so a change can say which part changed: its client options, each server
+ * (by name: its endpoint or command, transport and connector, as run.json
+ * records them), tool metadata, input template, judges and write modes.
+ *
+ * An option value recorded as a keyed hash (`hmac:…`) counts as that hash.
+ * The key is the eval's (`optionKey`), so the same value hashes the same in
+ * its runs; under another key, from another machine, the hashes differ and
+ * the setup counts as changed, since nothing shows it stayed the same. A run
+ * from before MST kept the eval's key (no `optionKey`) hashed each value
+ * under its own, so only the option's name counts, as it did then.
  */
+function setupPartsOf(
+  record: RunRecord['variants'][number] | undefined,
+  optionKey: string | undefined
+): Record<string, string> {
+  const options = optionKey
+    ? (record?.clientOptions ?? {})
+    : Object.fromEntries(
+        Object.entries(record?.clientOptions ?? {}).map(([key, value]) => [
+          key,
+          isHashedOption(value) ? 'hmac' : value,
+        ])
+      );
+  const parts: Record<string, string> = {
+    'client options': sha(sortKeys(options)),
+    'tool metadata': sha(sortKeys(record?.tools ?? null)),
+    'input template': sha(record?.inputTemplate ?? null),
+    judges: sha(record?.judges ?? null),
+    'write modes': sha(sortKeys(record?.writeModes ?? {})),
+  };
+  for (const server of record?.servers ?? []) {
+    const fields = server as Record<string, unknown>;
+    parts[`server ${serverName(fields)}`] = sha(sortKeys(fields));
+  }
+  return parts;
+}
+
+/** A client option run.json recorded as a keyed hash (`recordableOptions`). */
+function isHashedOption(value: unknown): boolean {
+  return typeof value === 'string' && value.startsWith('hmac:');
+}
+
 function setupHashOf(
-  record: RunRecord['variants'][number] | undefined
+  record: RunRecord['variants'][number] | undefined,
+  parts: Record<string, string>
 ): string {
-  const options = Object.fromEntries(
-    Object.entries(record?.clientOptions ?? {}).map(([key, value]) => [
-      key,
-      typeof value === 'string' && value.startsWith('hmac:') ? 'hmac' : value,
-    ])
-  );
   return sha({
     client: record?.client,
     model: record?.model,
-    options,
     servers: (record?.servers ?? []).map((server) =>
       serverName(server as Record<string, unknown>)
     ),
-    tools: record?.tools,
-    inputTemplate: record?.inputTemplate,
-    judges: record?.judges,
+    parts: sortKeys(parts),
   });
 }
 
@@ -294,7 +352,9 @@ function variantRow(
   variant: EvaluationVariantResult,
   record: RunRecord['variants'][number] | undefined,
   baseline: string,
-  graded: boolean
+  graded: boolean,
+  /** The fingerprint of the key the run hashed client options with. */
+  optionKey: string | undefined
 ): HistoryVariant {
   const cases = variant.result?.caseResults ?? [];
   const complete = cases.filter((result) => !isIncompleteCase(result));
@@ -341,6 +401,10 @@ function variantRow(
   const mcpCalls = numberMetric(variant, 'mcp_call_count_mean');
   const trialPassRate = numberMetric(variant, 'trial_pass_rate');
   const apps = clientAppsOf(cases);
+  const setupParts = setupPartsOf(record, optionKey);
+  const hashedOptions = Object.values(record?.clientOptions ?? {}).some(
+    isHashedOption
+  );
   return {
     name: variant.name,
     baseline: variant.name === baseline,
@@ -350,7 +414,12 @@ function variantRow(
       serverName(server as unknown as Record<string, unknown>)
     ),
     ...(apps.length ? { clientApps: apps } : {}),
-    setupHash: setupHashOf(record),
+    setupHash: setupHashOf(record, setupParts),
+    setupParts,
+    ...(hashedOptions && optionKey ? { optionKey } : {}),
+    ...(record?.writeModes && Object.keys(record.writeModes).length
+      ? { writeModes: record.writeModes }
+      : {}),
     cases: complete.length,
     ...(incomplete ? { incomplete } : {}),
     ...(graded && complete.length
@@ -479,6 +548,20 @@ function historyRunOf(run: RunRecord, summary: EvaluationSummary): HistoryRun {
       ...(judge.identity ? { identity: judge.identity } : {}),
       optionsHash: judge.optionsHash,
     })),
+    ...(run.plugins
+      ? {
+          plugins: run.plugins.map((plugin) => ({
+            namespace: plugin.namespace,
+            name: plugin.name,
+            ...(plugin.version !== undefined
+              ? { version: plugin.version }
+              : {}),
+            ...(plugin.settings !== undefined
+              ? { settings: plugin.settings }
+              : {}),
+          })),
+        }
+      : {}),
     redacted: run.redactStoredResponses,
     ...(run.simulateWrites ? { simulateWrites: true as const } : {}),
     variants: summary.variants.map((variant) =>
@@ -486,7 +569,8 @@ function historyRunOf(run: RunRecord, summary: EvaluationSummary): HistoryRun {
         variant,
         run.variants.find((record) => record.name === variant.name),
         baseline,
-        graded
+        graded,
+        run.optionKey
       )
     ),
     builder: ROW_BUILDER,
@@ -628,6 +712,37 @@ function evalChanges(before: HistoryRun, after: HistoryRun): HistoryChange[] {
       reason: `${judge.level === 'pairwise' ? 'pairwise judge' : 'judge'} removed: ${judge.type}`,
       breaks: true,
     });
+  // A plugin's version or settings can change what its clients, judges and
+  // datasets do. One added or removed only shows as a note: a client or
+  // judge it brings or takes away changes the setup too. Runs from before
+  // run.json recorded plugins have nothing to compare.
+  if (before.plugins && after.plugins) {
+    const plugins = new Map(before.plugins.map((p) => [p.namespace, p]));
+    for (const plugin of after.plugins) {
+      const old = plugins.get(plugin.namespace);
+      plugins.delete(plugin.namespace);
+      if (!old)
+        changes.push({
+          reason: `plugin added: ${plugin.namespace}`,
+          breaks: false,
+        });
+      else {
+        if (old.version !== plugin.version)
+          changes.push({
+            reason: `plugin ${plugin.namespace} ${old.version ?? 'unversioned'} → ${plugin.version ?? 'unversioned'}`,
+            breaks: true,
+          });
+        // Every extension of the plugin gets its settings (ADR 0008).
+        if (old.settings !== plugin.settings)
+          changes.push({
+            reason: `plugin ${plugin.namespace} settings changed`,
+            breaks: true,
+          });
+      }
+    }
+    for (const namespace of plugins.keys())
+      changes.push({ reason: `plugin removed: ${namespace}`, breaks: false });
+  }
   // A simulated success, not a planned-write result, changes what a client
   // sees after a write.
   const writes = (run: HistoryRun) =>
@@ -662,9 +777,39 @@ function rangeText(range: { min: number; max: number }): string {
     : `${range.min}–${range.max}`;
 }
 
+/** A variant's judge identities by judge, then case (`caseIdentities`). */
+type KnownIdentities = Record<string, Record<string, string>>;
+
+function identitiesOf(variant: HistoryVariant): KnownIdentities {
+  return Object.fromEntries(
+    Object.entries(variant.judges).map(([name, judge]) => [
+      name,
+      { ...(judge.caseIdentities ?? {}) },
+    ])
+  );
+}
+
+/** `known` with `variant`'s identities over it: what each case had last. */
+function mergeIdentities(
+  known: KnownIdentities,
+  variant: HistoryVariant
+): KnownIdentities {
+  const merged: KnownIdentities = { ...known };
+  for (const [name, cases] of Object.entries(identitiesOf(variant)))
+    merged[name] = { ...merged[name], ...cases };
+  return merged;
+}
+
 function variantChanges(
   before: HistoryVariant | undefined,
-  after: HistoryVariant
+  after: HistoryVariant,
+  /**
+   * Each judge's identity for each case, as the variant's era last had it:
+   * a case a run didn't grade keeps the identity from the run before.
+   */
+  known: KnownIdentities,
+  /** Judges whose change this row already says for the whole eval. */
+  saidJudges: ReadonlySet<string>
 ): HistoryChange[] {
   if (!before)
     return [{ reason: 'variant added', variant: after.name, breaks: true }];
@@ -681,11 +826,31 @@ function variantChanges(
       parts.push(
         `servers ${before.servers.join(', ') || 'none'} → ${after.servers.join(', ') || 'none'}`
       );
+    parts.push(...changedParts(before, after));
     changes.push({
       reason: parts.length ? parts.join('; ') : 'setup changed',
       variant: after.name,
       breaks: true,
     });
+  }
+  // A judge's identity covers its version, options and plugin settings, so
+  // one that changed grades differently. Compared case by case, with the
+  // identity each case last had in the era: a case whose client failed has
+  // no verdict to compare, and a judge whose scores recorded no identity has
+  // nothing to compare.
+  for (const [name, judge] of Object.entries(after.judges)) {
+    if (saidJudges.has(name)) continue;
+    const old = known[name] ?? {};
+    const changed = Object.entries(judge.caseIdentities ?? {}).some(
+      ([caseId, identity]) =>
+        old[caseId] !== undefined && old[caseId] !== identity
+    );
+    if (changed)
+      changes.push({
+        reason: `judge ${name} changed`,
+        variant: after.name,
+        breaks: true,
+      });
   }
   const apps = (v: HistoryVariant) => (v.clientApps ?? []).join(', ');
   if (apps(before) !== apps(after) && apps(before) && apps(after))
@@ -695,6 +860,34 @@ function variantChanges(
       breaks: false,
     });
   return changes;
+}
+
+/**
+ * What changed in a variant's setup parts (`setupPartsOf`), besides its
+ * client, model and server names: write modes with their values, and any
+ * other part by name. A server added or removed is in the server names.
+ */
+function changedParts(before: HistoryVariant, after: HistoryVariant): string[] {
+  const was = before.setupParts ?? {};
+  const now = after.setupParts ?? {};
+  const changed: string[] = [];
+  for (const [part, hash] of Object.entries(now)) {
+    if (was[part] === undefined || was[part] === hash) continue;
+    if (part === 'write modes') {
+      const modes = (variant: HistoryVariant) =>
+        Object.entries(variant.writeModes ?? {})
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([server, mode]) => `${server} ${mode}`)
+          .join(', ') || 'none';
+      changed.push(`write modes ${modes(before)} → ${modes(after)}`);
+    } else if (
+      part === 'client options' &&
+      before.optionKey !== after.optionKey
+    )
+      changed.push('client options hashed under another option key');
+    else changed.push(`${part} changed`);
+  }
+  return changed;
 }
 
 /**
@@ -784,6 +977,16 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
     string,
     { run: HistoryRun; variant: HistoryVariant; era: number }
   >();
+  const knownIdentities = new Map<string, KnownIdentities>();
+  // An eval config judge's change is said once for the eval, by its type,
+  // which is the name its scores carry unless it was given another.
+  const judgesSaid = (said: readonly HistoryChange[]) =>
+    new Set(
+      said.flatMap((change) => {
+        const match = /^judge (?:changed|added): (.+)$/.exec(change.reason);
+        return match && !change.variant ? [match[1]!] : [];
+      })
+    );
   for (const row of ordered) {
     if (!isHistoryPoint(row)) continue;
     const changes: HistoryChange[] = [];
@@ -795,14 +998,23 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
     }
     for (const variant of row.variants) {
       const before = lastVariant.get(variant.name);
-      const own = previous ? variantChanges(before, variant) : [];
       const last = lastRunOf.get(variant.name);
-      // The eval-wide era moved on in a run this variant skipped: name what
+      // The eval-wide era moved on in a run this variant skipped: what
       // changed since the variant's own last run.
+      const missed =
+        last && last.era < eraBefore
+          ? evalChanges(last.run, row).filter((change) => change.breaks)
+          : [];
+      const own = previous
+        ? variantChanges(
+            before,
+            variant,
+            knownIdentities.get(variant.name) ?? {},
+            judgesSaid([...changes, ...missed])
+          )
+        : [];
+      // Name what changed since the variant's own last run.
       if (last && last.era < eraBefore) {
-        const missed = evalChanges(last.run, row).filter(
-          (change) => change.breaks
-        );
         // What this row already says for every variant isn't said again.
         const said = new Set(
           changes
@@ -827,6 +1039,12 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
         : variantEra.get(variant.name)!;
       variantEra.set(variant.name, number);
       variant.era = number;
+      knownIdentities.set(
+        variant.name,
+        breaks
+          ? identitiesOf(variant)
+          : mergeIdentities(knownIdentities.get(variant.name) ?? {}, variant)
+      );
       lastVariant.set(variant.name, variant);
       lastRunOf.set(variant.name, { run: row, era });
       const reference = lastComplete.get(variant.name);

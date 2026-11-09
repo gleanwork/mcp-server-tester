@@ -198,6 +198,16 @@ export function previousGrades(
   return { runId, trials, pairwise, comparable };
 }
 
+/**
+ * Whether a stored trial's verdicts came from the judges its case runs now,
+ * so a resumed grading can keep them (`storedJudgesCurrent`).
+ */
+export type StoredJudgesCurrent = (
+  variant: string,
+  caseId: string,
+  stored: GradingOutcome
+) => boolean;
+
 /** What a resumed grading has to grade: the keys without a verdict, and their cases. */
 export interface GradingToResume {
   trials: number;
@@ -209,7 +219,9 @@ export interface GradingToResume {
  * The trials and comparisons of a stored run that `previous` has no verdict
  * for. `trials` are the run's trials by variant and case, each with whether
  * its client failed (then nothing grades it); `pairwise` names the baseline
- * and the pairwise judges, when the eval has any.
+ * and the pairwise judges, when the eval has any. `current`, when given,
+ * says whether a stored trial's verdicts came from the judges its case runs
+ * now: a trial with one that didn't is graded again too.
  */
 export function gradingToResume(
   previous: PreviousGrades,
@@ -217,7 +229,8 @@ export function gradingToResume(
     string,
     ReadonlyMap<string, ReadonlyArray<{ clientFailed: boolean }>>
   >,
-  pairwise?: { baseline: string; judges: readonly string[] }
+  pairwise?: { baseline: string; judges: readonly string[] },
+  current?: StoredJudgesCurrent
 ): GradingToResume {
   const todo: GradingToResume = { trials: 0, comparisons: 0, cases: new Set() };
   for (const [variant, byCase] of trials)
@@ -227,7 +240,12 @@ export function gradingToResume(
         const stored = previous.trials.get(
           gradeKeyString({ kind: 'trial', variant, caseId, trial })
         );
-        if (stored && trialGradeComplete(stored)) continue;
+        if (
+          stored &&
+          trialGradeComplete(stored) &&
+          (current?.(variant, caseId, stored) ?? true)
+        )
+          continue;
         todo.trials++;
         todo.cases.add(caseId);
       }
@@ -330,14 +348,16 @@ export interface ResumeCounts {
  * `mst grade --resume`: grading that keeps every verdict `previous` holds and
  * grades only what has none, through `inner` (here, or on grade shards).
  *
- * A trial whose judges all gave a verdict is graded here with them reused:
- * its assertions are cheap and run again, and no judge runs. Any other trial
- * goes to `inner`, whose grading reuses the judges that gave one. A case's
+ * A trial whose judges all gave a verdict, each from the judge its case runs
+ * now (`current`), is graded here with them reused: its assertions are cheap
+ * and run again, and no judge runs. Any other trial goes to `inner`, whose
+ * grading reuses the judges that gave one and haven't changed. A case's
  * pairwise preferences are reused judge by judge, and `inner` runs the rest.
  */
 export function resumedGrading(
   previous: PreviousGrades,
-  inner: GradingSource
+  inner: GradingSource,
+  current?: StoredJudgesCurrent
 ): GradingSource & { readonly counts: ResumeCounts } {
   const counts: ResumeCounts = {
     reusedTrials: 0,
@@ -350,7 +370,11 @@ export function resumedGrading(
     counts,
     async trial(key, grade) {
       const stored = previous.trials.get(gradeKeyString(key));
-      if (stored && trialGradeComplete(stored)) {
+      if (
+        stored &&
+        trialGradeComplete(stored) &&
+        (current?.(key.variant, key.caseId, stored) ?? true)
+      ) {
         counts.reusedTrials++;
         return grade(stored);
       }

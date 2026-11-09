@@ -139,6 +139,21 @@
         "additionalProperties": {}
       }
     },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "namespace": { "type": "string" },
+          "name": { "type": "string" },
+          "version": { "type": "string" },
+          "settings": { "type": "string" }
+        },
+        "required": ["namespace", "name"],
+        "additionalProperties": {}
+      }
+    },
+    "optionKey": { "type": "string" },
     "partial": { "type": "boolean" },
     "selection": {
       "type": "object",

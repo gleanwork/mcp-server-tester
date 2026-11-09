@@ -5,6 +5,7 @@
  */
 import type { RunSelection } from '../evals/evalFrameworkTypes.js';
 import type { PairedChange } from './reporter.js';
+import type { WriteMode } from './index.js';
 
 /** How a run ended, as far as its history row is concerned. */
 export type HistoryRunStatus =
@@ -26,6 +27,15 @@ export interface HistoryJudge {
   meanScore?: number;
   /** Trials it answered `unknown`. */
   unknown?: number;
+  /**
+   * By case, a hash of the judge identities its scores recorded there (ADR
+   * 0009): a case judge's as well as the eval config's. A case's hash that
+   * differs from the one it last had in the variant's era means the judge
+   * could grade differently, so it starts a new era. A run that didn't
+   * grade the case (its client failed) changes nothing, and the next run
+   * that does is compared with the hash from before it.
+   */
+  caseIdentities?: Record<string, string>;
 }
 
 /**
@@ -62,10 +72,25 @@ export interface HistoryVariant {
   clientApps?: string[];
   /**
    * A hash of what the variant ran with besides the client app: client,
-   * model, options, servers, tool metadata, input template and judges.
-   * Option values a run records only as a keyed hash count as unknown.
+   * model and the hashes in `setupParts`.
    */
   setupHash: string;
+  /**
+   * Each part of the setup, hashed, so a change can name the part: `client
+   * options`, `server <name>` (its endpoint or command, transport and
+   * connector), `tool metadata`, `input template`, `judges` and `write
+   * modes`. An option recorded as a keyed hash counts as that hash, which
+   * matches only another run's under the same eval's key.
+   */
+  setupParts?: Record<string, string>;
+  /** Each server's write mode, by label (ADR 0014). */
+  writeModes?: Record<string, WriteMode>;
+  /**
+   * The fingerprint of the key the variant's hashed client options were
+   * hashed with (run.json's `optionKey`), when it has some. Hashes under
+   * two keys can't be compared.
+   */
+  optionKey?: string;
   /** Complete cases: the ones pass rates count. */
   cases: number;
   /** Cases short a trial or a verdict (ADR 0010). */
@@ -196,6 +221,18 @@ export interface HistoryRun {
     level: string;
     identity?: string;
     optionsHash: string;
+  }>;
+  /**
+   * The plugins that collected the run, with their package versions and a
+   * hash of their settings. A change in either starts a new era. Absent for
+   * runs from before run.json recorded them, and for the Playwright
+   * reporter's.
+   */
+  plugins?: Array<{
+    namespace: string;
+    name: string;
+    version?: string;
+    settings?: string;
   }>;
   redacted: boolean;
   /** The run's dry-run proxies answered writes with a success reply (`simulateWrites`). */

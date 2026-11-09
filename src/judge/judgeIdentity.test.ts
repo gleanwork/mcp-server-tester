@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import {
-  judgeIdentity as identityWithPolicy,
+  contentHash,
+  judgeIdentity as identityWithSettings,
   judgeIsVersioned,
   type JudgeVerdictPolicy,
 } from './judgeIdentity.js';
@@ -23,6 +24,22 @@ afterEach(() => {
 const HEX64 = /^[0-9a-f]{64}$/;
 
 const POLICY: JudgeVerdictPolicy = { threshold: 0.7, reps: 1 };
+
+/** An identity in an eval with no plugin settings. */
+function identityWithPolicy(
+  reference: string,
+  definition: Parameters<typeof identityWithSettings>[1],
+  options: Record<string, unknown>,
+  policy: JudgeVerdictPolicy
+): string {
+  return identityWithSettings(
+    reference,
+    definition,
+    options,
+    policy,
+    undefined
+  );
+}
 
 /** An identity under the default verdict policy. */
 function judgeIdentity(
@@ -173,6 +190,53 @@ describe('judgeIdentity', () => {
     expect(
       judgeIdentity('rubric', RUBRIC_JUDGE, { rubric: 'no-such-rubric' })
     ).toMatch(HEX64);
+  });
+
+  it("changes with its plugin's settings, and only when the plugin has some", () => {
+    const definition = judge();
+    installPlugins([
+      {
+        meta: { name: 'acme-plugin', namespace: 'acme' },
+        settings: { schema: z.object({ model: z.string().optional() }) },
+        judges: { quality: definition },
+      },
+    ]);
+    const withSettings = (sections: Record<string, Record<string, unknown>>) =>
+      identityWithSettings(
+        'acme/judge/quality',
+        definition,
+        {},
+        POLICY,
+        sections
+      );
+    // What the identity was before settings counted: unchanged without any.
+    const before = contentHash({
+      judge: 'acme/judge/quality',
+      version: null,
+      pluginVersion: null,
+      options: { level: 'strict' },
+      policy: POLICY,
+    });
+    expect(
+      identityWithPolicy('acme/judge/quality', definition, {}, POLICY)
+    ).toBe(before);
+    expect(withSettings({})).toBe(before);
+    expect(withSettings({ acme: {} })).toBe(before);
+    expect(withSettings({ other: { model: 'x' } })).toBe(before);
+    const a = withSettings({ acme: { model: 'a' } });
+    expect(a).not.toBe(before);
+    expect(withSettings({ acme: { model: 'b' } })).not.toBe(a);
+    expect(withSettings({ acme: { model: 'a' } })).toBe(a);
+    // A built-in takes no settings.
+    expect(
+      identityWithSettings(
+        'rubric',
+        RUBRIC_JUDGE,
+        { rubric: 'correctness' },
+        POLICY,
+        { mst: { model: 'a' } }
+      )
+    ).toBe(judgeIdentity('rubric', RUBRIC_JUDGE, { rubric: 'correctness' }));
   });
 });
 

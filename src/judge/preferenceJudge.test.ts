@@ -105,7 +105,8 @@ describe('the preference judge', () => {
         'preference',
         PREFERENCE_JUDGE,
         PREFERENCE_JUDGE.schema.parse(options) as Record<string, unknown>,
-        { reps: 1 }
+        { reps: 1 },
+        undefined
       );
     expect(identity({})).toBe(identity({ reference: true }));
     expect(identity({})).not.toBe(identity({ reference: false }));

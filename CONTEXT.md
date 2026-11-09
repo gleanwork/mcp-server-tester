@@ -125,7 +125,7 @@ A judge's answer when the transcript can't support a verdict, for example when t
 _Avoid_: abstain, no verdict, indeterminate
 
 **Judge identity**:
-A hash of what decides a judge's verdict besides the trial: the judge's reference, its `version` (or its plugin's), its options as its schema parses them, and the threshold and repetitions that turn its answers into a verdict. Every score and pairwise preference records it, and `run.json` records it for each eval config judge, so two scores with the same identity came from a judge that grades the same way.
+A hash of what decides a judge's verdict besides the trial: the judge's reference, its `version` (or its plugin's), its options as its schema parses them, the threshold and repetitions that turn its answers into a verdict, and its plugin's settings when it has some. Every score and pairwise preference records it, and `run.json` records it for each eval config judge, so two scores with the same identity came from a judge that grades the same way.
 _Avoid_: judge hash, judge fingerprint, judge version (the version is one part of the identity)
 
 **Jury**:
@@ -255,7 +255,7 @@ An eval's runs over time: a row per run with what it ran with and what each vari
 _Avoid_: trend, timeline, dashboard, log
 
 **Era**:
-Consecutive full runs in an eval's history that measured the same way: the same datasets, the same eval config judges, the same `simulateWrites`, and for one variant the same setup. A change starts a new era, with the reasons; runs on either side of an era's start are never compared. A new client app build doesn't start one.
+Consecutive full runs in an eval's history that measured the same way: the same datasets, the same eval config judges, the same plugin versions and settings, the same `simulateWrites`, and for one variant the same setup (servers as recorded, write modes, client options under the same option key, and the judge identity its scores recorded in each case, against the one the case last had in the era). A change starts a new era, with the reasons; runs on either side of an era's start are never compared. A new client app build doesn't start one.
 _Avoid_: epoch, segment, baseline period
 
 **Result store**:

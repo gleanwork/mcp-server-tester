@@ -65,23 +65,31 @@ export function evalSettings(
 }
 
 const NO_SECTIONS: SettingsSections = {};
+// Parsed once per sections object and namespace, and again when another
+// plugin took the namespace (plugins reset between tests).
 const parsedSettings = new WeakMap<
   SettingsSections,
-  Map<string, Record<string, unknown> | undefined>
+  Map<string, { schema: unknown; parsed: Record<string, unknown> | undefined }>
 >();
 
-function settingsOfNamespace(
+/**
+ * The settings a plugin's extensions receive: its section of `sections`,
+ * parsed by the plugin's schema (with its defaults). Undefined for a plugin
+ * that takes no settings.
+ */
+export function settingsOfNamespace(
   sections: SettingsSections | undefined,
   namespace: string
 ): Record<string, unknown> | undefined {
   const key = sections ?? NO_SECTIONS;
   let byNamespace = parsedSettings.get(key);
   if (!byNamespace) {
-    byNamespace = new Map<string, Record<string, unknown> | undefined>();
+    byNamespace = new Map();
     parsedSettings.set(key, byNamespace);
   }
-  if (byNamespace.has(namespace)) return byNamespace.get(namespace);
   const schema = installedPlugin(namespace)?.settings?.schema;
+  const cached = byNamespace.get(namespace);
+  if (cached && cached.schema === schema) return cached.parsed;
   const parsed = schema
     ? parseExtensionOptions(
         schema,
@@ -89,7 +97,7 @@ function settingsOfNamespace(
         `settings "${namespace}"`
       )
     : undefined;
-  byNamespace.set(namespace, parsed);
+  byNamespace.set(namespace, { schema, parsed });
   return parsed;
 }
 

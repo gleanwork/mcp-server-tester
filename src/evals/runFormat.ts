@@ -86,7 +86,7 @@ const Envelope = <K extends string>(kind: K) => ({
 });
 
 /** How a server handles a write (ADR 0014). */
-const WriteModeSchema = z.enum([
+export const WriteModeSchema = z.enum([
   'planned',
   'simulated',
   'server-planned',
@@ -207,6 +207,31 @@ const RunRecordSchema = z.looseObject({
       })
     )
     .optional(),
+  /**
+   * The plugins that collected the run's transcripts, by namespace, with
+   * their package versions and a hash of their settings: either can change
+   * what the plugin's clients, judges and datasets do. A regrade records its
+   * source run's. Empty: the run loaded none. Absent: a run from before
+   * run.json recorded them, or one the Playwright reporter wrote.
+   */
+  plugins: z
+    .array(
+      z.looseObject({
+        namespace: z.string(),
+        name: z.string(),
+        version: z.string().optional(),
+        /** A hash of the plugin's settings section, when it has one. */
+        settings: z.string().optional(),
+      })
+    )
+    .optional(),
+  /**
+   * Which key hashed the run's client options (`hmac:…`): a fingerprint of
+   * it, which says nothing about the key. Two runs' hashes are comparable
+   * only under the same one. Absent: a run from before MST kept a key for
+   * the eval.
+   */
+  optionKey: z.string().optional(),
   partial: z.boolean(),
   selection: z.looseObject({}).optional(),
   redactStoredResponses: z.boolean(),
@@ -678,6 +703,16 @@ export interface JudgeRecord {
   unversioned?: true;
 }
 
+/** A plugin a run loaded. */
+export interface PluginRecord {
+  namespace: string;
+  name: string;
+  /** Its package version, when it has one. */
+  version?: string;
+  /** A hash of its settings section, when it has one. */
+  settings?: string;
+}
+
 /** The facts `run.json` records, beyond what the summary has. */
 export interface RunFacts {
   evalName: string;
@@ -703,6 +738,10 @@ export interface RunFacts {
     snapshot?: string;
   }>;
   judges?: JudgeRecord[];
+  /** The plugins that collected the run, with their versions and settings. */
+  plugins?: PluginRecord[];
+  /** Which key hashed the run's client options. */
+  optionKey?: string;
   redactStoredResponses: boolean;
   /** The run's dry-run proxies answered writes with a success reply. */
   simulateWrites?: true;
@@ -920,6 +959,8 @@ export async function writeRun(
     variants: facts.variants,
     datasets: facts.datasets,
     ...(facts.judges?.length ? { judges: facts.judges } : {}),
+    ...(facts.plugins ? { plugins: facts.plugins } : {}),
+    ...(facts.optionKey ? { optionKey: facts.optionKey } : {}),
     partial: summary.partial ?? false,
     ...(summary.selection ? { selection: summary.selection } : {}),
     redactStoredResponses: facts.redactStoredResponses,

@@ -120,6 +120,23 @@ The retry setting was `MST_COWORK_MCP_PREFLIGHT_RETRY_S`, for Cowork only. A run
 
 ---
 
+## Every CI run starts a new era: "client options hashed under another option key"
+
+**Symptom:** `mst history` shows a new era at every run, for each variant with a client option that looks like a credential (a token, a URL, a header).
+
+**Cause:** `run.json` records such an option only as a hash under the eval's option key, which MST keeps in `.mcp-test-results/<eval>/option-key`. A fresh CI checkout has no key, so each run makes its own, and two runs' hashes can't show the value stayed the same.
+
+**Fix:** Give every machine that collects the eval's runs the same key from a CI secret:
+
+```bash
+openssl rand -hex 32   # once; store it as a secret
+export MST_OPTION_KEY=…  # in the CI job, from the secret
+```
+
+The next run starts one more era (its key is new); later runs compare. Don't upload `option-key` or the whole results directory as a public artifact. See [The eval's history](./evaluation-framework.md#the-evals-history).
+
+---
+
 ## Windows: token files not secure
 
 **Symptom:** OAuth token files are written successfully, but on Windows the `0o600` POSIX permission mode applied by Node's `fs.writeFile` is silently ignored. Any local user account can read the file.

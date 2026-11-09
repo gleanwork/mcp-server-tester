@@ -93,6 +93,18 @@ describe('connector tokens in a local run', () => {
       const stored = await allText(result.outputDir);
       expect(stored).toContain('the token is [REDACTED]');
       expect(stored).not.toContain('notes-token-1');
+      // run.json records the connector as declared, as a runner's run does,
+      // not the local proxy's command (this machine's Node).
+      const run = JSON.parse(
+        await fs.readFile(path.join(result.outputDir, 'run.json'), 'utf8')
+      ) as { variants: Array<{ servers: Array<Record<string, unknown>> }> };
+      expect(run.variants[0]!.servers).toEqual([
+        expect.objectContaining({
+          connector: 'sc/connector/notes',
+          label: 'notes',
+        }),
+      ]);
+      expect(run.variants[0]!.servers[0]).not.toHaveProperty('command');
     }
   );
 });

@@ -12,7 +12,9 @@ import {
   writeRun,
   writeTrial,
   type RunFacts,
+  type RunRecord,
   type JudgeRecord,
+  type PluginRecord,
   findRunDirectory,
   RUN_ID_PATTERN,
   type GradeShardRecord,
@@ -40,7 +42,7 @@ import { configIdentity } from './configIdentity.js';
 import { resolveConfigExtends } from './configExtends.js';
 import { sumUsage } from '../utils/usageUtils.js';
 import { sumJudgeUsage } from '../judge/judgeContract.js';
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,6 +66,7 @@ import {
   type EvalConfig,
   type ClientConfig,
   type ModelPricing,
+  type ConnectorServerConfig,
   transportServers,
 } from './evalConfig.js';
 import {
@@ -97,9 +100,14 @@ import {
   judgeEntryIdentity,
   mergeEvalJudges,
   preflightCaseJudges,
+  storedJudgesCurrent,
 } from './grading.js';
 import type { CaseJudge } from './datasetTypes.js';
-import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
+import {
+  contentHash,
+  judgeIdentity,
+  judgeIsVersioned,
+} from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { WriteRecordLedger, withWriteRecords } from './writeRecord.js';
 import {
@@ -125,6 +133,12 @@ import {
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import type { Plugin } from '../plugins/plugin.js';
+import {
+  settingsOfNamespace,
+  type SettingsSections,
+} from '../plugins/settings.js';
+import { optionKey } from './optionKey.js';
+import { installedPlugin } from '../plugins/extensions.js';
 import { resolvePluginPackage } from '../plugins/loadPlugins.js';
 import { assertDatasetNamespaces, loadEvalPlugins } from './evalPlugins.js';
 import { loadDataset } from './builtinDatasetSources.js';
@@ -165,6 +179,7 @@ import {
   previousGrades,
   resumedGrading,
   type GradingSource,
+  type StoredJudgesCurrent,
   type PreviousGrades,
 } from './gradingSource.js';
 import {
@@ -685,6 +700,95 @@ function variantSetup(
   };
 }
 
+/** What collected a variant's transcripts, which a regrade keeps from its source run. */
+const COLLECTED_SETUP = [
+  'servers',
+  'client',
+  'model',
+  'clientOptions',
+  'tools',
+  'inputTemplate',
+] as const;
+
+/**
+ * A regrade's record of a variant: `setup` as the eval config has it now,
+ * with what collected the transcripts taken from the source run's record.
+ * Its hashed options stay as the source hashed them, under the source's key.
+ */
+function collectedSetup(
+  setup: Record<string, unknown>,
+  source: RunRecord['variants'][number]
+): Record<string, unknown> {
+  const collected: Record<string, unknown> = { ...setup };
+  for (const field of COLLECTED_SETUP) {
+    delete collected[field];
+    if (source[field] !== undefined) collected[field] = source[field];
+  }
+  // An rc.0 run on a runner recorded a connector's URL as declared, with
+  // any credentials in it: they aren't copied into a new run.
+  if (Array.isArray(collected.servers))
+    collected.servers = collected.servers.map((server: unknown) =>
+      server &&
+      typeof server === 'object' &&
+      'connector' in server &&
+      typeof (server as { url?: unknown }).url === 'string'
+        ? recordedDeclaration(server as ConnectorServerConfig)
+        : server
+    );
+  return collected;
+}
+
+/**
+ * A case's judges as its variant grades them: the case's and the variant's
+ * eval config judges (a variant's replace the config's), the case's
+ * settings winning for a judge in both. `rawJudges` are the config judges
+ * as written. Empty when the eval config has none: the case's stand.
+ */
+function variantCaseJudges(
+  evalCase: EvalCase,
+  configJudges: EvalConfig['judges'],
+  rawJudges: EvalConfig['judges']
+): Pick<EvalCase, 'judges'> {
+  return configJudges?.length
+    ? {
+        judges: mergeEvalJudges(
+          evalCase,
+          configJudges,
+          (rawJudges ?? []) as Array<Record<string, unknown>>
+        ),
+      }
+    : {};
+}
+
+/** A URL without its credentials, query and fragment; undefined when it isn't one. */
+function strippedUrl(text: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return undefined;
+  }
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+/**
+ * A connector server as run.json records it: its declaration, with the
+ * URL's credentials, query and fragment dropped (and a URL that doesn't
+ * parse left out).
+ */
+export function recordedDeclaration(
+  declaration: ConnectorServerConfig
+): ConnectorServerConfig {
+  if (!declaration.url) return declaration;
+  const { url: declared, ...rest } = declaration;
+  const url = strippedUrl(declared);
+  return url ? { ...rest, url } : rest;
+}
+
 /** Option names that suggest a credential, a location or a header. */
 const SENSITIVE_OPTION =
   /key|token|secret|password|passwd|auth|credential|cookie|bearer|session|jwt|sig|pat$|url|uri|header|env/i;
@@ -695,9 +799,9 @@ const SENSITIVE_VALUE = /:\/\/|=|^[A-Za-z0-9_\-.~+/]{24,}$/;
 /**
  * A variant's client options as run.json records them: numbers, booleans
  * and short strings whose name and value don't suggest a credential are
- * kept; everything else is replaced by an HMAC keyed for this run, so
- * variants of one run can be compared but values can't be guessed or
- * matched across runs.
+ * kept; everything else is replaced by an HMAC under the eval's option key
+ * (`optionKey`), so the eval's runs and variants can be compared but values
+ * can't be guessed without the key.
  */
 export function recordableOptions(
   options: Record<string, unknown>,
@@ -763,7 +867,7 @@ function assertResumable(
     )
   )
     throw new Error(
-      `A judge changed since run ${run.runId} was graded (its version, its plugin's version or its options' defaults), so its verdicts can't be kept. ${fullRegrade}`
+      `A judge changed since run ${run.runId} was graded (its version, its plugin's version or settings, or its options' defaults), so its verdicts can't be kept. ${fullRegrade}`
     );
   for (const dataset of datasets) {
     const recorded = run.datasets.find((item) => item.name === dataset.name);
@@ -793,16 +897,25 @@ function assertResumable(
  * The identity of the judge an eval config entry runs, as its scores record
  * it (ADR 0009). Undefined when the judge's plugin isn't loaded here.
  */
-function entryIdentity(level: string, entry: unknown): string | undefined {
+function entryIdentity(
+  level: string,
+  entry: unknown,
+  settings: SettingsSections | undefined
+): string | undefined {
   const config = (typeof entry === 'string' ? { type: entry } : entry) as {
     type: string;
   } & Record<string, unknown>;
-  if (level !== 'pairwise') return judgeEntryIdentity(config as CaseJudge);
+  if (level !== 'pairwise')
+    return judgeEntryIdentity(config as CaseJudge, settings);
   try {
     const { type, options, reps } = pairwiseJudgeSpec(config);
-    return judgeIdentity(type, getPairwiseJudge(type), options, {
-      reps: Math.max(1, reps ?? 1),
-    });
+    return judgeIdentity(
+      type,
+      getPairwiseJudge(type),
+      options,
+      { reps: Math.max(1, reps ?? 1) },
+      settings
+    );
   } catch {
     return undefined;
   }
@@ -846,7 +959,11 @@ function judgeRecords(
         typeof entry === 'string'
           ? { type: entry }
           : (entry as { type: string } & Record<string, unknown>);
-      const identity = entryIdentity(level, raw?.[index] ?? entry);
+      const identity = entryIdentity(
+        level,
+        raw?.[index] ?? entry,
+        evalConfig.settings
+      );
       return {
         type,
         level,
@@ -884,20 +1001,41 @@ function judgeRecords(
   ];
 }
 
+/** The plugins run.json records: the eval's, by namespace, with their versions. */
+function pluginRecords(
+  namespaces: readonly string[],
+  settings: SettingsSections | undefined
+): PluginRecord[] {
+  return namespaces.flatMap((namespace) => {
+    const meta = installedPlugin(namespace)?.meta;
+    // As the plugin's extensions get them, parsed with its defaults, so a
+    // default written out or left out is the same settings.
+    const section = settingsOfNamespace(settings, namespace);
+    return meta
+      ? [
+          {
+            namespace,
+            name: meta.name,
+            ...(meta.version !== undefined ? { version: meta.version } : {}),
+            // Settings aren't secrets (ADR 0008), but only their hash is kept.
+            ...(section && Object.keys(section).length
+              ? { settings: contentHash(section) }
+              : {}),
+          },
+        ]
+      : [];
+  });
+}
+
 function redactServerForReport(server: MCPConfig): MCPConfig {
   const label = server.label ? { label: server.label } : {};
   if (server.transport === 'stdio') {
     // Arguments and environment may both contain credentials.
     return { transport: 'stdio', command: server.command, ...label };
   }
-  const url = new URL(server.serverUrl);
-  url.username = '';
-  url.password = '';
-  url.search = '';
-  url.hash = '';
   return {
     transport: 'http',
-    serverUrl: url.toString(),
+    serverUrl: strippedUrl(server.serverUrl) ?? '',
     ...label,
     ...(server.auth?.accessTokenEnv
       ? { auth: { accessTokenEnv: server.auth.accessTokenEnv } }
@@ -1724,7 +1862,12 @@ async function evaluate(
     configDir,
     rootDir,
   });
-  const recordedDeclarations = connectorDeclarations(connectors);
+  // A variant's connector servers as declared, by label; none when
+  // `mcpConfig` replaces every variant's servers.
+  const declarationsOf = (variant: string) =>
+    options.mcpConfig
+      ? new Map<string, ConnectorServerConfig>()
+      : connectorDeclarations(connectors, variant);
   // What each shard ran on, for run.json.
   let shardRecords: ShardRecord[] | undefined;
   // What each variant's servers served, with `recordServedTools`: listed
@@ -1855,8 +1998,11 @@ async function evaluate(
     };
   }
 
-  // Keys the hashes of client options in run.json: comparable within this run only.
-  const runKey = randomBytes(32);
+  // Keys the hashes of client options in run.json: the eval's, so its runs
+  // record an unchanged option alike and its history can say so. Saved
+  // with the run's first run.json.
+  const optionKeyOfEval = await optionKey(evalDirectory);
+  const runKey = optionKeyOfEval.key;
   const variantResults: EvaluationVariantResult[] = [];
   // Judge settings whose preflight passed, across variants.
   const checkedJudges = new Set<string>();
@@ -1908,6 +2054,37 @@ async function evaluate(
   // `mst grade --resume`: what the run's grading has no verdict for.
   const previous = options.grading?.previous;
   let toResume: ReturnType<typeof gradingToResume> | undefined;
+  // A case judge that changed since (its version, options or plugin
+  // settings) judges again, so its trial is graded where the rest are: on a
+  // grade shard with --runner. The judges are the case's merged with its
+  // variant's eval config judges, as the trial is graded with; the eval
+  // config's are also checked whole.
+  const resumedCases = new Map(
+    canonicalDatasets.flatMap(({ dataset }) =>
+      dataset.cases.map((evalCase) => [evalCase.id, evalCase] as const)
+    )
+  );
+  const judgesCurrent: StoredJudgesCurrent = (variantName, caseId, stored) => {
+    const evalCase = resumedCases.get(caseId);
+    if (!evalCase) return true;
+    const variant = variants.find((v) => v.name === variantName);
+    const configJudges = variant
+      ? variantEvalConfig(evalConfig, variant).judges
+      : evalConfig.judges;
+    const rawVariant = rawConfig.variants?.find((v) => v.name === variantName);
+    return storedJudgesCurrent(
+      {
+        ...evalCase,
+        ...variantCaseJudges(
+          evalCase,
+          configJudges,
+          rawVariant?.judges ?? rawConfig.judges
+        ),
+      },
+      stored,
+      evalConfig.settings
+    );
+  };
   if (previous) {
     if (!regrade)
       throw new Error('Only a regrade of a stored run resumes its grading.');
@@ -1942,10 +2119,11 @@ async function evaluate(
       {
         baseline: evalConfig.variants?.[0]?.name ?? 'default',
         judges: pairwiseJudges,
-      }
+      },
+      judgesCurrent
     );
     console.error(
-      `[mst] Resuming the grading of ${previous.runId}: ${toResume.trials} trials and ${toResume.comparisons} pairwise comparisons have a judge without a verdict, in ${toResume.cases.size} cases. Every other verdict is kept.`
+      `[mst] Resuming the grading of ${previous.runId}: ${toResume.trials} trials and ${toResume.comparisons} pairwise comparisons have a judge without a verdict, or one that changed, in ${toResume.cases.size} cases. Every other verdict is kept.`
     );
   }
   // `mst grade --runner`: the shards grade with these datasets, and the regrade
@@ -1976,7 +2154,9 @@ async function evaluate(
     });
     grading = gradedElsewhere.source;
   }
-  const resumed = previous ? resumedGrading(previous, grading) : undefined;
+  const resumed = previous
+    ? resumedGrading(previous, grading, judgesCurrent)
+    : undefined;
   if (resumed) grading = resumed;
   const narrowing: CaseNarrowing = {
     cases: options.cases,
@@ -2115,19 +2295,11 @@ async function evaluate(
                 )
               )
             : {}),
-          // The case's judges and the eval config's (a variant's replace
-          // the config's); the case's settings win for a judge in both.
-          ...(effectiveConfig.judges?.length
-            ? {
-                judges: mergeEvalJudges(
-                  evalCase,
-                  effectiveConfig.judges,
-                  (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
-                    Record<string, unknown>
-                  >
-                ),
-              }
-            : {}),
+          ...variantCaseJudges(
+            evalCase,
+            effectiveConfig.judges,
+            rawVariant.judges ?? rawConfig.judges
+          ),
           ...(template && evalCase.input
             ? { input: template.replaceAll('{{input}}', evalCase.input) }
             : {}),
@@ -2144,13 +2316,17 @@ async function evaluate(
     const collectRunnerTrials = async (): Promise<GatheredResults> => {
       // A connector server goes to a worker as its declaration: the worker
       // expands it with its own paths, and asks for its tokens.
-      const declarations = connectorDeclarations(connectors);
-      const workerServers = (servers: MCPConfig[]): MCPConfig[] =>
-        servers.map(
+      const workerServers = (
+        variant: string,
+        servers: MCPConfig[]
+      ): MCPConfig[] => {
+        const declarations = declarationsOf(variant);
+        return servers.map(
           (server) =>
             (declarations.get(server.label ?? '') as MCPConfig | undefined) ??
             server
         );
+      };
       const groups: RequestGroup[] = [];
       const trialCases = new Map<
         string,
@@ -2180,7 +2356,7 @@ async function evaluate(
           const requests = batchRequests(
             prepared.effectiveDataset.cases,
             setup.clientConfig.declaration,
-            workerServers(setup.servers),
+            workerServers(variant.name, setup.servers),
             { evalConfig: setup.effectiveConfig }
           ).filter(
             (request) =>
@@ -2682,6 +2858,7 @@ async function evaluate(
       const summary = buildSummary(undefined);
       const stored = storedSummaryOf(summary);
       await fs.mkdir(outputDir, { recursive: true });
+      await optionKeyOfEval.save();
       await writeRun(
         outputDir,
         executionId,
@@ -2896,19 +3073,24 @@ async function evaluate(
         const declared = variants.find(
           (candidate) => candidate.name === variant.name
         );
+        const setup = variantSetup(evalConfig, declared, runKey);
+        const source = regrade?.run.variants.find(
+          (candidate) => candidate.name === variant.name
+        );
         return {
           name: variant.name,
-          // On a runner's machines, a connector server ran as each worker
-          // expanded it: record its declaration, not this machine's launch.
-          servers: onMachines
-            ? variant.servers.map(
-                (server) =>
-                  (recordedDeclarations.get(server.label ?? '') as
-                    | MCPConfig
-                    | undefined) ?? server
-              )
-            : variant.servers,
-          ...variantSetup(evalConfig, declared, runKey),
+          // A connector server is recorded as declared, not as launched: a
+          // worker expands it on its own machine, and a local launch is a
+          // proxy whose command is this machine's Node.
+          servers: variant.servers.map((server) => {
+            const declaration = declarationsOf(variant.name).get(
+              server.label ?? ''
+            );
+            return declaration ? recordedDeclaration(declaration) : server;
+          }),
+          // A regrade collected nothing: what collected its transcripts is
+          // what its source run recorded, hashes included.
+          ...(source ? collectedSetup(setup, source) : setup),
           ...(servedTools.has(variant.name)
             ? { servedTools: servedTools.get(variant.name) }
             : {}),
@@ -2936,6 +3118,19 @@ async function evaluate(
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
       judges: judgeRecords(evalConfig, rawConfig),
+      // A regrade's are its source's: the plugins that collected its
+      // transcripts. Its judges' plugins are in their identities.
+      ...(regrade
+        ? {
+            ...(regrade.run.plugins ? { plugins: regrade.run.plugins } : {}),
+            ...(regrade.run.optionKey
+              ? { optionKey: regrade.run.optionKey }
+              : {}),
+          }
+        : {
+            plugins: pluginRecords(namespaces, evalConfig.settings),
+            optionKey: optionKeyOfEval.id,
+          }),
       redactStoredResponses: redact,
       // A regrade or a resume keeps the setting its transcripts were collected
       // with.
@@ -2997,6 +3192,7 @@ async function evaluate(
 
   const storedSummary = storedSummaryOf(summary);
   await fs.mkdir(outputDir, { recursive: true });
+  await optionKeyOfEval.save();
   // A regrade or a resume is measured against its source run's labels.
   if (replay) await carryLabels(replay.directory, outputDir);
   await writeRun(
