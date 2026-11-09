@@ -25,7 +25,7 @@ A label is `pass` or `fail` for the judge's question. "No label" means the kind 
 
 ## Results
 
-Measured on 2026-11-08. TPR is the share of the failing transcripts the judge failed; TNR is the share of the passing transcripts it passed. Each has a 95% Wilson interval. A judge is usable when it gave a verdict on at least 15 failing and 15 passing labels, the lower bound of both TPR and TNR is at least 80%, and it answered `unknown` on at most 10% of them. The identity changes when the judge's prompt, version, model or settings do; a different identity needs measuring again. Each judge graded each transcript once, and its verdicts can vary from run to run, so a judge near the 80% bound can change from usable to not.
+Measured on 2026-11-08. TPR is the share of the failing transcripts the judge failed; TNR is the share of the passing transcripts it passed. Each has a 95% Wilson interval. A judge is usable when it gave a verdict on at least 15 failing and 15 passing labels, the lower bound of both TPR and TNR is at least 80%, and it answered `unknown` on at most 10% of them. The identity changes when the judge's prompt, version, model or options change, or its plugin's settings do; a different identity needs measuring again. Each judge graded each transcript once, and its verdicts can vary from run to run, so a judge near the 80% bound can change from usable to not.
 
 | Judge               | Model             | Identity       | Labels (fail / pass) | TPR             | TNR             | Kappa | Unknown | Usable                                  |
 | ------------------- | ----------------- | -------------- | -------------------- | --------------- | --------------- | ----- | ------- | --------------------------------------- |
