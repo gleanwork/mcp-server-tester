@@ -40,13 +40,13 @@ npm token and no one-time password.
 2. Do a dry run, and read the changelog in the run's log:
 
    ```sh
-   gh workflow run release.yml -f increment=prerelease -f pre_release=rc -f dry_run=true
+   gh workflow run release.yml -f increment=prerelease -f pre_release=(rc|beta) -f dry_run=true
    ```
 
 3. Release:
 
    ```sh
-   gh workflow run release.yml -f increment=prerelease -f pre_release=rc
+   gh workflow run release.yml -f increment=prerelease -f pre_release=(rc|beta)
    ```
 
    `increment` is `prerelease`, `patch`, `minor` or `major`; `pre_release` is
