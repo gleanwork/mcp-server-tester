@@ -71,13 +71,18 @@ jobs:
       # tests the package the release would publish.
       - name: Dry run
         run: |
+          if [ "$EVENT" = pull_request ]; then
+            # Rehearse the next prerelease with the current version's
+            # identifier. A final version rehearses the next patch's -0.
+            PRE_RELEASE=$(node -p "(require('./package.json').version.split('-')[1] ?? '').split('.')[0]")
+          fi
           args=("$INCREMENT" --ci --dry-run)
           if [ -n "$PRE_RELEASE" ]; then args+=("--preRelease=$PRE_RELEASE"); fi
           npx release-it "${args[@]}"
         env:
-          # A pull request's dry run rehearses the next beta.
+          EVENT: ${{ github.event_name }}
           INCREMENT: ${{ github.event_name == 'pull_request' && 'prerelease' || inputs.increment }}
-          PRE_RELEASE: ${{ github.event_name == 'pull_request' && 'beta' || inputs.pre_release }}
+          PRE_RELEASE: ${{ inputs.pre_release }}
           GITHUB_AUTH: ${{ github.token }}
 
   release:

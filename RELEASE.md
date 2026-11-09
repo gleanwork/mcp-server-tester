@@ -4,6 +4,10 @@ Releases are mostly automated using
 [release-it](https://github.com/release-it/release-it/) and
 [lerna-changelog](https://github.com/lerna/lerna-changelog/).
 
+## Who releases
+
+A maintainer, or an agent that a person asks to release in the conversation. The person names the version or the increment. An agent follows the steps below and shows the dry run's changelog. It starts the release only after the person confirms it. `gh workflow run release.yml` and `npx release-it` are in the "Ask first" rules in `.claude/settings.json`.
+
 ## Preparation
 
 Since the majority of the actual release process is automated, the primary

@@ -374,6 +374,8 @@ Agents ask a person in the current conversation before running these commands or
 - `Bash(gh issue comment *)`
 - `Bash(gh issue close *)`
 - `Bash(gh release *)`
+- `Bash(gh workflow run release.yml*)`
+- `Bash(npx release-it*)`
 - `Bash(npm publish *)`
 - `Bash(pnpm publish *)`
 - `Bash(yarn npm publish *)`
@@ -412,4 +414,4 @@ Follow [REVIEW.md](REVIEW.md) when reviewing changes in this repository.
 - Branch names: a short description of the change, such as `fix/report-columns`. No tool prefixes.
 - Commits: Conventional Commits, `type(scope): summary`, for example `fix(report): ...`.
 - Merge method: squash, the only method this repo enables.
-- Releases: `release-it` with `@release-it-plugins/lerna-changelog`. A maintainer runs it; agents do not.
+- Releases: the Release workflow runs `release-it` with `@release-it-plugins/lerna-changelog` ([RELEASE.md](RELEASE.md)). An agent releases only when a person asks it to in the conversation, and the person names the version or the increment. The agent follows RELEASE.md: it checks the labels and titles, runs a dry run, shows the changelog, and starts the release only after the person confirms. Then it checks the result. If a release fails after npm published, the agent doesn't rerun the workflow; it follows "If a release fails after publishing".
