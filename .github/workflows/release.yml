@@ -7,7 +7,7 @@ name: Release
 # and tag are pushed as the org's `gleanwork-ci` GitHub App, which main's
 # protection lets bypass pull requests. See RELEASE.md.
 #
-#   gh workflow run release.yml -f increment=prerelease -f pre_release=(rc|beta)
+#   gh workflow run release.yml -f increment=prerelease -f pre_release=beta
 #   gh workflow run release.yml -f increment=major -f dry_run=true
 #
 # A pull request that changes the release setup gets a dry run.
@@ -72,8 +72,8 @@ jobs:
       - name: Dry run
         run: |
           if [ "$EVENT" = pull_request ]; then
-            # Rehearse the next prerelease on the current line: rc.0 gives
-            # rc.1, not beta.0. A final version gives the next patch's -0.
+            # Rehearse the next prerelease with the current version's
+            # identifier. A final version rehearses the next patch's -0.
             PRE_RELEASE=$(node -p "(require('./package.json').version.split('-')[1] ?? '').split('.')[0]")
           fi
           args=("$INCREMENT" --ci --dry-run)
