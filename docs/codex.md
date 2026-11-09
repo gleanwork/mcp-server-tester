@@ -58,6 +58,6 @@ The transcript (`evidence: structured`) is Codex's own record:
 - **Model calls**, from the session's rollout file: one per model response, with its response ID, model, usage (uncached input, cached input, output, reasoning tokens), times, text and the calls it asked for (`toolCallIds`, Codex's native call IDs, which the events carry too).
 - **Usage**: the turn's total, with input uncached as elsewhere in MST. Codex reports no cost; the eval config's `pricing` estimates one.
 - **Telemetry**: the model, reasoning effort, Codex's thread ID, time to first token, and call counts.
-- **Its own telemetry.** With [`telemetry.host`](./telemetry.md#the-clients-own-telemetry), MST points Codex's OpenTelemetry exporter (`[otel]`) at its receiver, and keeps the trial's records (`codex.api_request`, `codex.tool_result`, `codex.sse_event`, ..., matched by `conversation.id`).
+- **Host telemetry.** With [`telemetry.host`](./telemetry.md#host-telemetry), MST points Codex's OpenTelemetry exporter (`[otel]`) at its receiver, and keeps the trial's records (`codex.api_request`, `codex.tool_result`, `codex.sse_event`, ..., matched by `conversation.id`).
 
 A trial that times out, or whose Codex process fails, records what Codex reported until then, with the error.
