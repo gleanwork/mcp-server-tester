@@ -5,10 +5,8 @@ name: Release
 # package's trusted publisher on npmjs.com names this file and the `npm`
 # environment, and the environment only deploys from main. The release commit
 # and tag are pushed as the org's `gleanwork-ci` GitHub App, which main's
-# protection lets bypass pull requests. See RELEASE.md.
-#
-#   gh workflow run release.yml -f increment=prerelease -f pre_release=beta
-#   gh workflow run release.yml -f increment=major -f dry_run=true
+# protection lets bypass pull requests. See RELEASE.md for which inputs to
+# choose.
 #
 # A pull request that changes the release setup gets a dry run.
 on:
@@ -24,7 +22,7 @@ on:
           - minor
           - major
       pre_release:
-        description: Prerelease identifier (beta, rc). Empty for a final release.
+        description: Prerelease identifier, only to start a new line (rc after beta). Empty keeps the current one.
         type: string
         default: ''
       dry_run:
@@ -68,19 +66,16 @@ jobs:
         run: npm ci
 
       # `npm publish --dry-run` runs prepublishOnly, so this also builds and
-      # tests the package the release would publish.
+      # tests the package the release would publish. A pull request rehearses
+      # the next prerelease. With no identifier, release-it keeps the current
+      # version's: the next version on the current line, or after a final
+      # version, the next patch's -0.
       - name: Dry run
         run: |
-          if [ "$EVENT" = pull_request ]; then
-            # Rehearse the next prerelease with the current version's
-            # identifier. A final version rehearses the next patch's -0.
-            PRE_RELEASE=$(node -p "(require('./package.json').version.split('-')[1] ?? '').split('.')[0]")
-          fi
           args=("$INCREMENT" --ci --dry-run)
           if [ -n "$PRE_RELEASE" ]; then args+=("--preRelease=$PRE_RELEASE"); fi
           npx release-it "${args[@]}"
         env:
-          EVENT: ${{ github.event_name }}
           INCREMENT: ${{ github.event_name == 'pull_request' && 'prerelease' || inputs.increment }}
           PRE_RELEASE: ${{ inputs.pre_release }}
           GITHUB_AUTH: ${{ github.token }}
