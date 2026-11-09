@@ -57,6 +57,9 @@ describe('optionKey', () => {
       // The fingerprint names the key, not its bytes.
       expect(key.id).toMatch(/^[0-9a-f]{16}$/);
       expect(hex).not.toContain(key.id);
+      // Hex in either case is the same key.
+      vi.stubEnv('MST_OPTION_KEY', hex.toUpperCase());
+      expect((await optionKey(dir)).id).toBe(key.id);
       vi.stubEnv('MST_OPTION_KEY', 'short');
       await expect(optionKey(dir)).rejects.toThrow(/64 hex digits/);
     } finally {

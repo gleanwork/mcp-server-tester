@@ -133,7 +133,10 @@ import {
 import type { EvalCaseResult } from '../types/reporter.js';
 import type { UsageMetrics } from '../types/index.js';
 import type { Plugin } from '../plugins/plugin.js';
-import type { SettingsSections } from '../plugins/settings.js';
+import {
+  settingsOfNamespace,
+  type SettingsSections,
+} from '../plugins/settings.js';
 import { optionKey } from './optionKey.js';
 import { installedPlugin } from '../plugins/extensions.js';
 import { resolvePluginPackage } from '../plugins/loadPlugins.js';
@@ -721,20 +724,47 @@ function collectedSetup(
     delete collected[field];
     if (source[field] !== undefined) collected[field] = source[field];
   }
+  // An rc.0 run on a runner recorded a connector's URL as declared, with
+  // any credentials in it: they aren't copied into a new run.
+  if (Array.isArray(collected.servers))
+    collected.servers = collected.servers.map((server: unknown) =>
+      server &&
+      typeof server === 'object' &&
+      'connector' in server &&
+      typeof (server as { url?: unknown }).url === 'string'
+        ? recordedDeclaration(server as ConnectorServerConfig)
+        : server
+    );
   return collected;
 }
 
-/** A connector server as run.json records it: its declaration, with the URL's credentials, query and fragment dropped. */
-function recordedDeclaration(
-  declaration: ConnectorServerConfig
-): ConnectorServerConfig {
-  if (!declaration.url) return declaration;
-  const url = new URL(declaration.url);
+/** A URL without its credentials, query and fragment; undefined when it isn't one. */
+function strippedUrl(text: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return undefined;
+  }
   url.username = '';
   url.password = '';
   url.search = '';
   url.hash = '';
-  return { ...declaration, url: url.toString() };
+  return url.toString();
+}
+
+/**
+ * A connector server as run.json records it: its declaration, with the
+ * URL's credentials, query and fragment dropped (and a URL that doesn't
+ * parse left out).
+ */
+export function recordedDeclaration(
+  declaration: ConnectorServerConfig
+): ConnectorServerConfig {
+  if (!declaration.url) return declaration;
+  const { url: declared, ...rest } = declaration;
+  const url = strippedUrl(declared);
+  return url ? { ...rest, url } : rest;
 }
 
 /** Option names that suggest a credential, a location or a header. */
@@ -815,7 +845,7 @@ function assertResumable(
     )
   )
     throw new Error(
-      `A judge changed since run ${run.runId} was graded (its version, its plugin's version or its options' defaults), so its verdicts can't be kept. ${fullRegrade}`
+      `A judge changed since run ${run.runId} was graded (its version, its plugin's version or settings, or its options' defaults), so its verdicts can't be kept. ${fullRegrade}`
     );
   for (const dataset of datasets) {
     const recorded = run.datasets.find((item) => item.name === dataset.name);
@@ -956,7 +986,9 @@ function pluginRecords(
 ): PluginRecord[] {
   return namespaces.flatMap((namespace) => {
     const meta = installedPlugin(namespace)?.meta;
-    const section = settings?.[namespace];
+    // As the plugin's extensions get them, parsed with its defaults, so a
+    // default written out or left out is the same settings.
+    const section = settingsOfNamespace(settings, namespace);
     return meta
       ? [
           {
@@ -979,14 +1011,9 @@ function redactServerForReport(server: MCPConfig): MCPConfig {
     // Arguments and environment may both contain credentials.
     return { transport: 'stdio', command: server.command, ...label };
   }
-  const url = new URL(server.serverUrl);
-  url.username = '';
-  url.password = '';
-  url.search = '';
-  url.hash = '';
   return {
     transport: 'http',
-    serverUrl: url.toString(),
+    serverUrl: strippedUrl(server.serverUrl) ?? '',
     ...label,
     ...(server.auth?.accessTokenEnv
       ? { auth: { accessTokenEnv: server.auth.accessTokenEnv } }
@@ -2002,17 +2029,35 @@ async function evaluate(
   let toResume: ReturnType<typeof gradingToResume> | undefined;
   // A case judge that changed since (its version, options or plugin
   // settings) judges again, so its trial is graded where the rest are: on a
-  // grade shard with --runner. The eval config's judges are checked whole.
+  // grade shard with --runner. The judges are the case's merged with its
+  // variant's eval config judges, as the trial is graded with; the eval
+  // config's are also checked whole.
   const resumedCases = new Map(
     canonicalDatasets.flatMap(({ dataset }) =>
       dataset.cases.map((evalCase) => [evalCase.id, evalCase] as const)
     )
   );
-  const judgesCurrent: StoredJudgesCurrent = (_variant, caseId, stored) => {
+  const judgesCurrent: StoredJudgesCurrent = (variantName, caseId, stored) => {
     const evalCase = resumedCases.get(caseId);
-    return (
-      !evalCase || storedJudgesCurrent(evalCase, stored, evalConfig.settings)
-    );
+    if (!evalCase) return true;
+    const variant = variants.find((v) => v.name === variantName);
+    const configJudges = variant
+      ? variantEvalConfig(evalConfig, variant).judges
+      : evalConfig.judges;
+    const rawVariant = rawConfig.variants?.find((v) => v.name === variantName);
+    const graded = configJudges?.length
+      ? {
+          ...evalCase,
+          judges: mergeEvalJudges(
+            evalCase,
+            configJudges,
+            (rawVariant?.judges ?? rawConfig.judges ?? []) as Array<
+              Record<string, unknown>
+            >
+          ),
+        }
+      : evalCase;
+    return storedJudgesCurrent(graded, stored, evalConfig.settings);
   };
   if (previous) {
     if (!regrade)

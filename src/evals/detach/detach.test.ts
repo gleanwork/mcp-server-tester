@@ -395,10 +395,19 @@ describe('--detach', () => {
       '--bundle',
       `/opt/mst/detached/${result.id}`,
     ]);
-    // Secrets go over stdin only: never in the bundle.
+    // Secrets go over stdin only: never in the bundle. So does the eval's
+    // option key, kept here for the eval's next runs.
+    const key = (
+      await fs.readFile(
+        path.join(f.dir, '.mcp-test-results', 'detached', 'option-key'),
+        'utf8'
+      )
+    ).trim();
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
     expect(state.stdin).toEqual([
-      `${JSON.stringify({ secrets: { JUDGE_KEY: 'k1' } })}\n`,
+      `${JSON.stringify({ secrets: { JUDGE_KEY: 'k1' }, optionKey: key })}\n`,
     ]);
+    for (const sent of state.sent.values()) expect(sent).not.toContain(key);
     expect([...state.sent.keys()].sort()).toEqual([
       'datasets.json',
       'detach.json',

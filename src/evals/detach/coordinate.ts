@@ -335,18 +335,36 @@ export async function startCoordinator(options: {
   const plan = await readPlan(options.bundleDir);
   const paths = coordinatorPaths(options.bundleDir, plan);
   let secretsFile: string | undefined;
-  for await (const line of options.input) {
-    const message = JSON.parse(line) as { secrets?: Record<string, string> };
-    if (plan.secrets && message.secrets) {
-      // /dev/shm is RAM: the secrets never reach a disk.
+  let optionKeyFile: string | undefined;
+  let privateDir: string | undefined;
+  // /dev/shm is RAM: the secrets never reach a disk.
+  const privateFile = async (name: string, content: string) => {
+    if (!privateDir) {
       const base = existsSync('/dev/shm') ? '/dev/shm' : os.tmpdir();
-      const dir = await fs.mkdtemp(path.join(base, 'mst-detach-'));
-      await fs.chmod(dir, 0o700);
-      secretsFile = path.join(dir, 'secrets.json');
-      await fs.writeFile(secretsFile, JSON.stringify(message.secrets), {
-        mode: 0o600,
-      });
+      privateDir = await fs.mkdtemp(path.join(base, 'mst-detach-'));
+      await fs.chmod(privateDir, 0o700);
     }
+    const file = path.join(privateDir, name);
+    await fs.writeFile(file, content, { mode: 0o600 });
+    return file;
+  };
+  for await (const line of options.input) {
+    const message = JSON.parse(line) as {
+      secrets?: Record<string, string>;
+      optionKey?: string;
+    };
+    if (plan.secrets && message.secrets)
+      secretsFile = await privateFile(
+        'secrets.json',
+        JSON.stringify(message.secrets)
+      );
+    // The key the run started with hashes its client options, so they
+    // compare with the eval's other runs. Not a secret the workers get.
+    if (
+      typeof message.optionKey === 'string' &&
+      /^[0-9a-f]{64}$/.test(message.optionKey)
+    )
+      optionKeyFile = await privateFile('option-key', message.optionKey);
     break;
   }
   const log = await fs.open(paths.log, 'a', 0o600);
@@ -359,6 +377,7 @@ export async function startCoordinator(options: {
       paths.bundle,
       '--daemon',
       ...(secretsFile ? ['--secrets', secretsFile] : []),
+      ...(optionKeyFile ? ['--option-key', optionKeyFile] : []),
     ],
     {
       cwd: paths.workDir,
@@ -375,6 +394,8 @@ export async function startCoordinator(options: {
 export async function runCoordinatorDaemon(options: {
   bundleDir: string;
   secretsFile?: string;
+  /** The option key the run started with (`startCoordinator`). */
+  optionKeyFile?: string;
 }): Promise<number> {
   const plan = await readPlan(options.bundleDir);
   const paths = coordinatorPaths(options.bundleDir, plan);
@@ -383,6 +404,14 @@ export async function runCoordinatorDaemon(options: {
         string,
         string
       >)
+    : {};
+  // Only this machine's mst gets it, not the secrets file its workers get.
+  const optionKeyEnv: Record<string, string> = options.optionKeyFile
+    ? {
+        MST_OPTION_KEY: (
+          await fs.readFile(options.optionKeyFile, 'utf8')
+        ).trim(),
+      }
     : {};
   const { store } = await evalResultStore({
     configPath: paths.config,
@@ -409,7 +438,7 @@ export async function runCoordinatorDaemon(options: {
         {
           cwd: paths.workDir,
           // The secrets file's values, as a laptop's environment would hold them.
-          env: { ...process.env, ...secrets },
+          env: { ...process.env, ...secrets, ...optionKeyEnv },
           stdio: ['ignore', 'pipe', 'pipe'],
         }
       );
@@ -433,9 +462,10 @@ export async function runCoordinatorDaemon(options: {
         );
       }),
   });
-  if (options.secretsFile)
-    await fs
-      .rm(path.dirname(options.secretsFile), { recursive: true, force: true })
-      .catch(() => {});
+  for (const file of [options.secretsFile, options.optionKeyFile])
+    if (file)
+      await fs
+        .rm(path.dirname(file), { recursive: true, force: true })
+        .catch(() => {});
   return status.state === 'done' ? 0 : 1;
 }

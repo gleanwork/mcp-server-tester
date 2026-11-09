@@ -794,6 +794,51 @@ describe('the history of an eval', () => {
     ]);
   });
 
+  it('compares a case with the identity it last had in the era, past a run that gave it no verdict', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    for (const [n, scoreIdentity] of [
+      [1, { 'case-0': 'identity-a', 'case-1': 'identity-b' }],
+      [2, { 'case-0': 'identity-a' }],
+      // case-1's judge changed since run 1, the last run that graded it.
+      [3, { 'case-0': 'identity-a', 'case-1': 'identity-c' }],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        scoreIdentity,
+      });
+    const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
+    expect(runs.map((run) => run.variants[0]!.era)).toEqual([0, 0, 1]);
+    expect(runs[2]!.changes).toEqual([
+      { reason: 'judge rubric changed', variant: 'official', breaks: true },
+    ]);
+  });
+
+  it("says a case judge's change in a run that changed the eval for another reason too", async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    for (const [n, datasetHash, scoreIdentity] of [
+      [1, 'd1', 'identity-a'],
+      [2, 'd2', 'identity-b'],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        datasetHash,
+        scoreIdentity,
+      });
+    const [second] = (await buildHistory(localHistoryLocation(dir))).runs;
+    expect(second!.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: expect.stringMatching(/^dataset .* changed$/),
+        }),
+        { reason: 'judge rubric changed', variant: 'official', breaks: true },
+      ])
+    );
+  });
+
   it("says an eval config judge's change once, not again for each variant", async () => {
     const dir = path.join(await tempDir(), 'weekly');
     for (const [n, judge] of [

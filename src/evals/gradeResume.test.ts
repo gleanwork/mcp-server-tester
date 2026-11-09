@@ -36,6 +36,8 @@ const PAIRWISE = [
 async function fixture(cases?: {
   judges?: string[];
   assertions?: Record<string, unknown>;
+  /** The eval config's judges, which each case's are merged with. */
+  configJudges?: Array<Record<string, unknown>>;
 }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-grade-resume-'));
   dirs.push(dir);
@@ -69,6 +71,7 @@ async function fixture(cases?: {
         servers: {},
         redactStoredResponses: false,
         pairwiseJudges,
+        ...(cases?.configJudges ? { judges: cases.configJudges } : {}),
         variants: [{ name: 'baseline' }, { name: 'candidate' }],
       })
     );
@@ -384,6 +387,35 @@ describe('mst grade --resume', () => {
     expect(run.grading).toMatchObject({ runner: { shards: 2 } });
   }, 60_000);
 
+  it("keeps a case judge's verdicts that an eval config judge's options are merged into", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Every case runs `where` with the eval config's option merged in: its
+    // identity isn't the one the case's own entry would give.
+    const f = await fixture({
+      configJudges: [{ type: 'grade-test/judge/where', note: 'merged' }],
+    });
+    vi.stubEnv('GRADE_TEST_KEY', KEY);
+    const graded = await gradeRun({ ...f.base, run: f.collectedId });
+    await f.takeCalls();
+    vi.stubEnv('GRADE_TEST_KEY', undefined);
+    const resumed = await gradeRun({
+      ...f.base,
+      secretsFile: f.secretsFile,
+      runner: 'fork/runner/children',
+      runnerOptions: { shards: '2', fail: '0' },
+      run: path.basename(graded.outputDir),
+      resume: true,
+    });
+    expect(await f.takeCalls()).toEqual({});
+    expect(verdicts(resumed)).toEqual(verdicts(graded));
+    // Nothing to grade: no shard started.
+    const run = await f.readRun(resumed.outputDir);
+    expect(
+      (run.grading as { runner: { machines?: unknown[] } }).runner.machines ??
+        []
+    ).toEqual([]);
+  }, 60_000);
+
   it('refuses when the judges or the cases changed since the grading, and for a run never graded', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture();
@@ -440,7 +472,7 @@ describe('mst grade --resume', () => {
     await expect(
       gradeRun({ ...f.base, run: path.basename(graded), resume: true })
     ).rejects.toThrow(
-      /A judge changed since run .* was graded \(its version, its plugin's version or its options' defaults\).*without --resume/
+      /A judge changed since run .* was graded \(its version, its plugin's version or settings, or its options' defaults\).*without --resume/
     );
   }, 60_000);
 

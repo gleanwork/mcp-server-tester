@@ -835,6 +835,7 @@ program
   .requiredOption('--bundle <dir>', "The detached run's bundle directory")
   .option('--daemon', 'Run the coordinator in this process')
   .option('--secrets <file>', "The run's secrets file")
+  .option('--option-key <file>', "The run's option key file")
   .action(coordinate);
 
 // Runs command: detached runs (ADR 0007)

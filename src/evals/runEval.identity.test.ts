@@ -107,4 +107,40 @@ describe("run.json's setup identity", () => {
     expect(regrade.plugins).toEqual(source.plugins);
     expect(regrade.optionKey).toBe(source.optionKey);
   });
+
+  it('hashes the settings a plugin gets, with its defaults, so a default written out is no change', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'run-identity-'));
+    dirs.push(dir);
+    const withSettings: Plugin = {
+      ...plugin,
+      settings: { schema: z.object({ mode: z.string().default('fast') }) },
+    };
+    const settingsHash = async (settings: Record<string, unknown> | null) => {
+      await writeEval(dir, 'secret-token-1');
+      const configPath = path.join(dir, 'eval.json');
+      const config = JSON.parse(
+        await fs.readFile(configPath, 'utf8')
+      ) as Record<string, unknown>;
+      await fs.writeFile(
+        configPath,
+        JSON.stringify(
+          settings ? { ...config, settings: { acme: settings } } : config
+        )
+      );
+      resetPluginsForTests();
+      const { outputDir } = await runEval({
+        configPath,
+        rootDir: dir,
+        plugins: [withSettings],
+      });
+      const record = JSON.parse(
+        await fs.readFile(path.join(outputDir, 'run.json'), 'utf8')
+      ) as RunRecord;
+      return record.plugins?.[0]?.settings;
+    };
+    const unset = await settingsHash(null);
+    expect(unset).toMatch(/^[0-9a-f]{64}$/);
+    expect(await settingsHash({ mode: 'fast' })).toBe(unset);
+    expect(await settingsHash({ mode: 'slow' })).not.toBe(unset);
+  });
 });

@@ -70,7 +70,7 @@ export { HISTORY_FORMAT };
  * The version of the code that builds a row from a run. A cached row built
  * by another version is built again, so a row never mixes two definitions.
  */
-const ROW_BUILDER = 3;
+const ROW_BUILDER = 4;
 
 /**
  * Parses `history.json`; undefined when it isn't one this MST reads, and
@@ -777,14 +777,39 @@ function rangeText(range: { min: number; max: number }): string {
     : `${range.min}–${range.max}`;
 }
 
+/** A variant's judge identities by judge, then case (`caseIdentities`). */
+type KnownIdentities = Record<string, Record<string, string>>;
+
+function identitiesOf(variant: HistoryVariant): KnownIdentities {
+  return Object.fromEntries(
+    Object.entries(variant.judges).map(([name, judge]) => [
+      name,
+      { ...(judge.caseIdentities ?? {}) },
+    ])
+  );
+}
+
+/** `known` with `variant`'s identities over it: what each case had last. */
+function mergeIdentities(
+  known: KnownIdentities,
+  variant: HistoryVariant
+): KnownIdentities {
+  const merged: KnownIdentities = { ...known };
+  for (const [name, cases] of Object.entries(identitiesOf(variant)))
+    merged[name] = { ...merged[name], ...cases };
+  return merged;
+}
+
 function variantChanges(
   before: HistoryVariant | undefined,
   after: HistoryVariant,
   /**
-   * An eval-wide change starts a new era for every variant since its last
-   * run: a judge identity it changed isn't said again for each variant.
+   * Each judge's identity for each case, as the variant's era last had it:
+   * a case a run didn't grade keeps the identity from the run before.
    */
-  evalWideBreak: boolean
+  known: KnownIdentities,
+  /** Judges whose change this row already says for the whole eval. */
+  saidJudges: ReadonlySet<string>
 ): HistoryChange[] {
   if (!before)
     return [{ reason: 'variant added', variant: after.name, breaks: true }];
@@ -809,23 +834,24 @@ function variantChanges(
     });
   }
   // A judge's identity covers its version, options and plugin settings, so
-  // one that changed grades differently. Compared case by case, over the
-  // cases both runs graded: a case whose client failed has no verdict, and
-  // a judge whose scores recorded no identity has nothing to compare.
-  if (!evalWideBreak)
-    for (const [name, judge] of Object.entries(after.judges)) {
-      const old = before.judges[name]?.caseIdentities ?? {};
-      const changed = Object.entries(judge.caseIdentities ?? {}).some(
-        ([caseId, identity]) =>
-          old[caseId] !== undefined && old[caseId] !== identity
-      );
-      if (changed)
-        changes.push({
-          reason: `judge ${name} changed`,
-          variant: after.name,
-          breaks: true,
-        });
-    }
+  // one that changed grades differently. Compared case by case, with the
+  // identity each case last had in the era: a case whose client failed has
+  // no verdict to compare, and a judge whose scores recorded no identity has
+  // nothing to compare.
+  for (const [name, judge] of Object.entries(after.judges)) {
+    if (saidJudges.has(name)) continue;
+    const old = known[name] ?? {};
+    const changed = Object.entries(judge.caseIdentities ?? {}).some(
+      ([caseId, identity]) =>
+        old[caseId] !== undefined && old[caseId] !== identity
+    );
+    if (changed)
+      changes.push({
+        reason: `judge ${name} changed`,
+        variant: after.name,
+        breaks: true,
+      });
+  }
   const apps = (v: HistoryVariant) => (v.clientApps ?? []).join(', ');
   if (apps(before) !== apps(after) && apps(before) && apps(after))
     changes.push({
@@ -951,6 +977,16 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
     string,
     { run: HistoryRun; variant: HistoryVariant; era: number }
   >();
+  const knownIdentities = new Map<string, KnownIdentities>();
+  // An eval config judge's change is said once for the eval, by its type,
+  // which is the name its scores carry unless it was given another.
+  const judgesSaid = (said: readonly HistoryChange[]) =>
+    new Set(
+      said.flatMap((change) => {
+        const match = /^judge (?:changed|added): (.+)$/.exec(change.reason);
+        return match && !change.variant ? [match[1]!] : [];
+      })
+    );
   for (const row of ordered) {
     if (!isHistoryPoint(row)) continue;
     const changes: HistoryChange[] = [];
@@ -963,19 +999,22 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
     for (const variant of row.variants) {
       const before = lastVariant.get(variant.name);
       const last = lastRunOf.get(variant.name);
+      // The eval-wide era moved on in a run this variant skipped: what
+      // changed since the variant's own last run.
+      const missed =
+        last && last.era < eraBefore
+          ? evalChanges(last.run, row).filter((change) => change.breaks)
+          : [];
       const own = previous
         ? variantChanges(
             before,
             variant,
-            era > eraBefore || (last !== undefined && last.era < eraBefore)
+            knownIdentities.get(variant.name) ?? {},
+            judgesSaid([...changes, ...missed])
           )
         : [];
-      // The eval-wide era moved on in a run this variant skipped: name what
-      // changed since the variant's own last run.
+      // Name what changed since the variant's own last run.
       if (last && last.era < eraBefore) {
-        const missed = evalChanges(last.run, row).filter(
-          (change) => change.breaks
-        );
         // What this row already says for every variant isn't said again.
         const said = new Set(
           changes
@@ -1000,6 +1039,12 @@ export function deriveHistory(rows: HistoryRun[]): HistoryRun[] {
         : variantEra.get(variant.name)!;
       variantEra.set(variant.name, number);
       variant.era = number;
+      knownIdentities.set(
+        variant.name,
+        breaks
+          ? identitiesOf(variant)
+          : mergeIdentities(knownIdentities.get(variant.name) ?? {}, variant)
+      );
       lastVariant.set(variant.name, variant);
       lastRunOf.set(variant.name, { run: row, era });
       const reference = lastComplete.get(variant.name);

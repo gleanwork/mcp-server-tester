@@ -27,6 +27,7 @@ import { newDetachId, writeStatus, type DetachPlan } from './status.js';
 import { parseRunnerOptions } from '../runners/runnerOptions.js';
 import { loadedNamespaces } from '../../plugins/extensions.js';
 import { settingsFor } from '../../plugins/settings.js';
+import { optionKey } from '../optionKey.js';
 
 export interface DetachOptions {
   command: 'run' | 'grade';
@@ -195,12 +196,21 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
     });
     const remote = `${machine.workDir ?? '/mst'}/detached/${id}`;
     await machine.channel.put(bundle, remote);
+    // The coordinator hashes client options with this eval's key, as a run
+    // here would, so a detached run's options compare with the eval's other
+    // runs. Sent over the channel, never in the bundle.
+    const key = await optionKey(
+      path.join(rootDir, '.mcp-test-results', evalName)
+    );
     const abort = new AbortController();
     const started = machine.channel.exec(
       [...(machine.mst ?? ['mst']), 'coordinate', '--bundle', remote],
       {
         stdin: (async function* () {
-          yield `${JSON.stringify(secrets ? { secrets } : {})}\n`;
+          yield `${JSON.stringify({
+            ...(secrets ? { secrets } : {}),
+            optionKey: key.key.toString('hex'),
+          })}\n`;
         })(),
         signal: abort.signal,
       }
@@ -222,6 +232,7 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
       throw new Error(
         `The coordinator didn't start on ${machine.id} (exit ${code}): ${errors.trim().split('\n').slice(-3).join(' ') || output.trim()}`
       );
+    await key.save();
   } catch (error) {
     await machine.dispose({ keep: false }).catch(() => {});
     throw error;

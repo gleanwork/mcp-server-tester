@@ -38,7 +38,7 @@ export interface OptionKey {
  * and never match these, unless each machine gets the same `MST_OPTION_KEY`.
  */
 export async function optionKey(evalDirectory: string): Promise<OptionKey> {
-  const fromEnv = process.env[OPTION_KEY_ENV]?.trim();
+  const fromEnv = process.env[OPTION_KEY_ENV]?.trim().toLowerCase();
   if (fromEnv) {
     if (!KEY_PATTERN.test(fromEnv))
       throw new Error(
