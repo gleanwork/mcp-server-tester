@@ -324,7 +324,7 @@ describe('a run that meets failures', () => {
     // The other graders' scores, and the judge's error, are kept.
     const graders = await fs.readdir(path.join(runDirectory, 'scores'));
     expect(graders.sort()).toEqual(
-      ['textContains', 'judge.test/judge/flaky'].map(encodeURIComponent).sort()
+      ['containsText', 'judge.test/judge/flaky'].map(encodeURIComponent).sort()
     );
     // No judge verdict to report; the trial pass rate leaves them out too.
     const baseline = result.summary.variants[0]!;

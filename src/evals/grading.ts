@@ -400,7 +400,7 @@ export async function gradeTrial(
 
   if (expectBlock.containsText !== undefined) {
     const validation = validateText(response, expectBlock.containsText);
-    results.textContains = {
+    results.containsText = {
       pass: validation.pass,
       details: validation.message,
     };
@@ -408,7 +408,10 @@ export async function gradeTrial(
 
   if (expectBlock.matchesPattern !== undefined) {
     const validation = validatePattern(response, expectBlock.matchesPattern);
-    results.regex = { pass: validation.pass, details: validation.message };
+    results.matchesPattern = {
+      pass: validation.pass,
+      details: validation.message,
+    };
   }
 
   const gap =

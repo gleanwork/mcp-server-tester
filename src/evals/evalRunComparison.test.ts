@@ -205,6 +205,27 @@ describe('compareEvalRuns', () => {
     ).toHaveLength(1);
   });
 
+  it('refuses a stored eval run with a release candidate score key', async () => {
+    const store = new FileEvalResultStore({ provider: 'file', dir: tmpDir });
+    const old = {
+      ...createCase('a', true),
+      scores: { textContains: { pass: true } },
+    } as unknown as EvalCaseResult;
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-runner-result',
+        id: 'run-old',
+        data: createRun([old]),
+        metadata: { timestamp: '2026-05-22T00:00:00.000Z' },
+      })
+    );
+    await expect(
+      loadStoredEvalRunnerResult(store, { id: 'run-old' })
+    ).rejects.toThrow(
+      /^Stored eval result run-old was written by an MST 2\.0 prerelease, before its score keys took their assertions' names \(textContains → containsText/
+    );
+  });
+
   it('saves eval run comparison artifacts with labels metadata', async () => {
     const store = new FileEvalResultStore({ provider: 'file', dir: tmpDir });
     const comparison = compareEvalRuns({

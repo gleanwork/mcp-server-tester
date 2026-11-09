@@ -63,5 +63,5 @@ This record decides how `mst grade` runs in an environment. It amends ADR 0004 a
 
 - Grade worker images must include the judge plugins and their runtimes. MST's default Linux Cowork image doesn't include any judge runtime.
 - Judge keys must be in the secrets file for `mst grade --env`. One that is only in the coordinator's environment fails the shard's judge preflight, before any case is graded.
-- The public environment types change: `ShardSpec.work` (`ShardWork`), `Environment.work`, `ShardOutcome`'s `graded` and `failed`, the `graded` progress event (`GradeKey`), and the grade bundle. They can change between 2.0 prereleases.
+- The public environment types change: `ShardSpec.work` (`ShardWork`), `Environment.work`, `ShardOutcome`'s `graded` and `failed`, the `graded` progress event (`GradeKey`), and the grade bundle. They could change between 2.0 prereleases, and are frozen from `2.0.0-rc.1` ([ADR 0004's update of 2026-11-09](./0004-environments-run-shards-over-a-channel.md#update-2026-11-09)).
 - A local `mst grade` and `mst grade --env` write the same regrade, apart from `grading.environment` and judge timings.

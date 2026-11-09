@@ -270,7 +270,7 @@ exports[`golden: client transcripts through executeCase > none evidence 1`] = `
     },
   },
   "scores": {
-    "textContains": {
+    "containsText": {
       "details": "Response contains expected text",
       "pass": true,
     },
@@ -415,7 +415,7 @@ exports[`golden: client transcripts through executeCase > observed evidence 1`] 
     },
   },
   "scores": {
-    "textContains": {
+    "containsText": {
       "details": "Response contains expected text",
       "pass": true,
     },
@@ -560,7 +560,7 @@ exports[`golden: client transcripts through executeCase > structured evidence 1`
     },
   },
   "scores": {
-    "textContains": {
+    "containsText": {
       "details": "Response contains expected text",
       "pass": true,
     },
@@ -702,7 +702,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
         },
       },
       "scores": {
-        "textContains": {
+        "containsText": {
           "details": "Response contains expected text",
           "pass": true,
         },
@@ -825,7 +825,7 @@ exports[`golden: dataset aggregation > two cases, one failing 1`] = `
         },
       },
       "scores": {
-        "textContains": {
+        "containsText": {
           "details": "Response contains expected text",
           "pass": true,
         },
@@ -3540,7 +3540,7 @@ exports[`golden: runEval clients > run client 1`] = `
       },
     },
     "scores": {
-      "textContains": {
+      "containsText": {
         "details": "Response contains expected text",
         "pass": true,
       },
@@ -3695,7 +3695,7 @@ exports[`golden: runEval clients > runBatch client 1`] = `
       },
     },
     "scores": {
-      "textContains": {
+      "containsText": {
         "details": "Response contains expected text",
         "pass": true,
       },
@@ -3849,7 +3849,7 @@ exports[`golden: the api client (dataset API) > maps native tool names through t
     },
   },
   "scores": {
-    "textContains": {
+    "containsText": {
       "details": "Response contains expected text",
       "pass": true,
     },
@@ -4044,7 +4044,7 @@ exports[`golden: the api client (dataset API) > succeeds with tool evidence and 
     },
   },
   "scores": {
-    "textContains": {
+    "containsText": {
       "details": "Response contains expected text",
       "pass": true,
     },
@@ -4209,7 +4209,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
     },
   },
   "scores": {
-    "textContains": {
+    "containsText": {
       "details": "Response does not contain expected text: "sunny"",
       "pass": false,
     },
@@ -4263,7 +4263,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
       "isInfrastructureError": false,
       "pass": false,
       "scores": {
-        "textContains": {
+        "containsText": {
           "details": "Response contains expected text",
           "pass": true,
         },
@@ -4355,7 +4355,7 @@ exports[`golden: the api client (dataset API) > trials exclude infrastructure er
       "isInfrastructureError": false,
       "pass": false,
       "scores": {
-        "textContains": {
+        "containsText": {
           "details": "Response does not contain expected text: "sunny"",
           "pass": false,
         },

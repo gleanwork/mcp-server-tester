@@ -250,8 +250,12 @@ function variantWrites(
   return Object.keys(writes).length > 0 ? writes : undefined;
 }
 
-/** Graders that read only the transcript (which tools were called, how often), never the answer. */
-const TRANSCRIPT_GRADERS = new Set(['toolsTriggered', 'toolCallCount']);
+/**
+ * The code graders that read the answer. The others read the transcript
+ * (`toolsTriggered`, `toolCallCount`) or the write record (`writes`), and
+ * `error` is grading that didn't come back. Every judge reads it.
+ */
+const ANSWER_GRADERS = new Set(['containsText', 'matchesPattern']);
 
 /** Every grader that scored a trial in the run, assertions first, then judges. */
 function gradersOf(
@@ -267,7 +271,7 @@ function gradersOf(
     .map(([name, judge]) => ({
       name,
       judge,
-      readsAnswer: judge || !TRANSCRIPT_GRADERS.has(name),
+      readsAnswer: judge || ANSWER_GRADERS.has(name),
     }))
     .sort((a, b) => Number(a.judge) - Number(b.judge));
 }

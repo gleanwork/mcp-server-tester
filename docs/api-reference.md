@@ -10,14 +10,14 @@ Complete API documentation for `@gleanwork/mcp-server-tester`.
 | `@gleanwork/mcp-server-tester/fixtures/mcp`          | `test` and `assertions` with the MCP fixtures and matchers                                                                                     | Stable                                          |
 | `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | Auth fixtures                                                                                                                                  | Stable                                          |
 | `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The MCP reporter                                                                                                                               | Stable                                          |
-| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: eval configs, evals and batches, extension definition types, metrics, result stores, comparisons, tool optimizations | Stable, except the runner interfaces (below)    |
+| `@gleanwork/mcp-server-tester/evals`                 | The evaluation framework: eval configs, evals and batches, extension definition types, metrics, result stores, comparisons, tool optimizations | Stable                                          |
 | `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                                  | Stable                                          |
 | `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop-run metadata types, Cowork settings and audit, client plugins                                                                          | Experimental: may change between minor versions |
 | `@gleanwork/mcp-server-tester/types`                 | The root's shared types on their own, without runtime code                                                                                     | Stable                                          |
 
 The `./evals`, `./auth` and `./experimental/clients` subpaths are ESM only, and CommonJS code cannot `require` them. The ESM root and those three subpaths share one copy of the library, so anything registered through one is visible through the others. The CommonJS root is a separate copy; don't mix it with ESM imports of the subpaths. Optional desktop-client fields on root result types (such as `EvalCaseResult.clientMetadata`) are typed from `./experimental/clients` and share its stability.
 
-The runner interfaces in `./evals` (`RunnerDefinition`, `Runner`, `RunnerContext`, `RunnerKeep`, `Machine`, `WorkerChannel`, the `Shard*` types, `ShardTokens`, `TrialKey`, `machineRunner` and `dockerRunner`) can change between 2.0 prereleases, until the `mst.shard/v1` contract is frozen ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)).
+The runner and detach interfaces in `./evals` (`RunnerDefinition`, `Runner`, `RunnerContext`, `RunnerKeep`, `Machine`, `WorkerChannel`, the `Shard*` types, `ShardTokens`, `TrialKey`, `GradeKey`, `CoordinatorMachine`, `CoordinatorContext`, `CredentialStoreDefinition`, `DetachStatus`, `machineRunner` and `dockerRunner`) and the `mst.shard/v1` messages are frozen from `2.0.0-rc.1`, like the rest of `./evals`. A change that breaks them waits for a major version, or for a new shard format beside `mst.shard/v1` ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)).
 
 ## Table of Contents
 
@@ -588,7 +588,7 @@ await saveEvalRunComparison({ store, comparison, id: 'candidate-comparison' });
 
 **Result Structure:**
 
-```typescript snippet=src/evals/evalRunner.ts#L140-L229
+```typescript snippet=src/evals/evalRunner.ts#L141-L230
 /**
  * Overall result of running an eval dataset
  */

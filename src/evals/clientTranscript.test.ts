@@ -358,7 +358,7 @@ describe('per-scenario client transcripts', () => {
           expect(trial.toolCallTranscript).toBeUndefined();
         }
       }
-      expect(result.caseResults[0]?.scores?.textContains?.pass).toBe(true);
+      expect(result.caseResults[0]?.scores?.containsText?.pass).toBe(true);
     }
   );
   it('retains server labels and non-tool events without requiring them in single-server assertions', () => {

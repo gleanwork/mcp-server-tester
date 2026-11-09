@@ -62,6 +62,57 @@ describe('baselines from an earlier MST', () => {
       );
     }
   );
+
+  it.each([
+    ['a case textContains score', { scores: { textContains: { pass: true } } }],
+    [
+      'a trial regex score',
+      { trialResults: [{ scores: { regex: { pass: true } } }] },
+    ],
+  ])(
+    'fails on a 2.0 release candidate score key, %s, naming its new name',
+    async (_label, fields) => {
+      const { writeFile } = await import('fs/promises');
+      const file = join(dir, 'baseline.json');
+      await writeFile(
+        file,
+        JSON.stringify({
+          total: 1,
+          passed: 1,
+          failed: 0,
+          caseResults: [{ id: 'a', pass: true, source: 'eval', ...fields }],
+        })
+      );
+      await expect(loadBaseline(file)).rejects.toThrow(
+        `Baseline ${file} was written by an MST 2.0 prerelease, before its score keys took their assertions' names (textContains → containsText, regex → matchesPattern; see docs/migrations/2.0-prereleases.md#score-keys-are-assertion-keys). Rerun to write it again.`
+      );
+    }
+  );
+
+  it("reads 2.0 host telemetry, in a trial's transcript, as 2.0", async () => {
+    const { writeFile } = await import('fs/promises');
+    const file = join(dir, 'baseline.json');
+    const transcript = { events: [], hostTelemetry: { events: [] } };
+    await writeFile(
+      file,
+      JSON.stringify({
+        total: 1,
+        passed: 1,
+        failed: 0,
+        caseResults: [
+          {
+            id: 'a',
+            pass: true,
+            source: 'eval',
+            transcript,
+            scores: { containsText: { pass: true } },
+            trialResults: [{ transcript }],
+          },
+        ],
+      })
+    );
+    await expect(loadBaseline(file)).resolves.toBeDefined();
+  });
 });
 
 const makeResult = (

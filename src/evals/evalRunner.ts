@@ -55,6 +55,7 @@ import type {
   EvalRunMetadata,
 } from '../types/reporter.js';
 import { saveBaseline, loadBaseline } from './baseline.js';
+import { assertCurrentRunResult } from './resultFormat.js';
 import {
   createStoredEvalArtifact,
   resolveEvalResultStore,
@@ -1462,6 +1463,11 @@ async function loadStoredBaseline(
     throw new Error('No latest eval run artifact found');
   }
 
+  // Any store's, a plugin's included: old field names and score keys fail.
+  assertCurrentRunResult(
+    artifact.data,
+    `Stored baseline ${String(artifact.id)}`
+  );
   return artifact.data;
 }
 

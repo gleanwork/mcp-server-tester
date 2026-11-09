@@ -101,20 +101,19 @@ export interface MCPProtocolInfo {
 export type ResultSource = 'eval' | 'test';
 
 /**
- * Grader types: the assertion types and `judge` (a case's judges)
+ * Grader types, a trial's score keys: each key of a case's `assertions`, by
+ * the same name, `writes` (its `expected.writes`, ADR 0014), `judge` (a
+ * case's judges), and `error` when a trial's grading didn't come back (a
+ * lost grade shard).
  */
 export type GraderType =
-  | 'exact'
-  | 'schema'
-  | 'textContains'
-  | 'regex'
-  | 'snapshot'
-  | 'judge'
-  | 'error'
-  | 'size'
+  | 'containsText'
+  | 'matchesPattern'
   | 'toolsTriggered'
   | 'toolCallCount'
-  | 'writes';
+  | 'writes'
+  | 'judge'
+  | 'error';
 
 /**
  * How a server handles a write (ADR 0014). `planned` and `simulated`: the
