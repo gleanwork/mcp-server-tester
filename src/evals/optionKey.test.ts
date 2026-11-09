@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { optionKey } from './optionKey.js';
 
 const dirs: string[] = [];
@@ -43,6 +43,36 @@ describe('optionKey', () => {
     await Promise.all(keys.map((key) => key.save()));
     expect((await optionKey(dir)).key).toEqual(keys[3]!.key);
     expect(await fs.readdir(dir)).toEqual(['option-key']);
+  });
+
+  it('takes MST_OPTION_KEY when set, and writes no file', async () => {
+    const dir = await evalDirectory();
+    const hex = 'ab'.repeat(32);
+    vi.stubEnv('MST_OPTION_KEY', hex);
+    try {
+      const key = await optionKey(dir);
+      expect(key.key.toString('hex')).toBe(hex);
+      await key.save();
+      await expect(fs.stat(dir)).rejects.toThrow();
+      // The fingerprint names the key, not its bytes.
+      expect(key.id).toMatch(/^[0-9a-f]{16}$/);
+      expect(hex).not.toContain(key.id);
+      vi.stubEnv('MST_OPTION_KEY', 'short');
+      await expect(optionKey(dir)).rejects.toThrow(/64 hex digits/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('saves again after a save that failed', async () => {
+    const root = await evalDirectory();
+    const key = await optionKey(path.join(root, 'eval'));
+    // The eval directory's place is a file, so the first save fails.
+    await fs.writeFile(root, 'in the way');
+    await expect(key.save()).rejects.toThrow();
+    await fs.rm(root);
+    await key.save();
+    expect((await optionKey(path.join(root, 'eval'))).key).toEqual(key.key);
   });
 
   it("refuses a file that isn't a key, saying to delete it", async () => {

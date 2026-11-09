@@ -486,4 +486,52 @@ describe('mst grade --resume', () => {
     expect(identityOf(resumed, 'where')).toEqual(where);
     expect(verdicts(resumed)).toEqual(verdicts(first));
   }, 60_000);
+
+  it("grades a changed case judge's trials on shards, with the workers' secrets", async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture();
+    vi.stubEnv('GRADE_TEST_KEY', KEY);
+    const first = await gradeRun({ ...f.base, run: f.collectedId });
+    vi.stubEnv('GRADE_TEST_KEY', undefined);
+    await f.takeCalls();
+    const stale = '0'.repeat(64);
+    const identity = first.summary.results
+      .flatMap((r) => r.scores?.judge?.judgeResults ?? [])
+      .find((j) => j.judgeName?.endsWith('where'))?.judgeIdentity;
+    expect(identity).toMatch(/^[0-9a-f]{64}$/);
+    for (const entry of (
+      await fs.readdir(first.outputDir, {
+        recursive: true,
+        withFileTypes: true,
+      })
+    ).filter((e) => e.isFile() && e.name.endsWith('.json'))) {
+      const file = path.join(entry.parentPath, entry.name);
+      const text = await fs.readFile(file, 'utf8');
+      await fs.writeFile(file, text.replaceAll(identity!, stale));
+    }
+
+    // The judge's key is only in the workers' secrets: graded here, it fails.
+    const resumed = await gradeRun({
+      ...f.base,
+      secretsFile: f.secretsFile,
+      runner: 'fork/runner/children',
+      run: path.basename(first.outputDir),
+      runnerOptions: { shards: '2' },
+      resume: true,
+    });
+    expect(
+      logged.mock.calls.some((call) =>
+        String(call[0]).includes(
+          '8 trials and 0 pairwise comparisons have a judge without a verdict, or one that changed'
+        )
+      )
+    ).toBe(true);
+    expect(await f.takeCalls()).toEqual({ where: 8 });
+    const run = await f.readRun(resumed.outputDir);
+    expect(run.phases).toEqual({ collect: 'complete', grade: 'complete' });
+    expect(
+      (run.grading as { runner: { machines: unknown[] } }).runner.machines
+    ).not.toHaveLength(0);
+    expect(verdicts(resumed)).toEqual(verdicts(first));
+  }, 90_000);
 });

@@ -113,7 +113,8 @@
               "properties": {
                 "namespace": { "type": "string" },
                 "name": { "type": "string" },
-                "version": { "type": "string" }
+                "version": { "type": "string" },
+                "settings": { "type": "string" }
               },
               "required": ["namespace", "name"],
               "additionalProperties": {}
@@ -156,6 +157,7 @@
                     ]
                   }
                 },
+                "optionKey": { "type": "string" },
                 "cases": { "type": "number" },
                 "incomplete": { "type": "number" },
                 "casePassRate": { "type": "number" },
@@ -185,9 +187,10 @@
                       "passRate": { "type": "number" },
                       "meanScore": { "type": "number" },
                       "unknown": { "type": "number" },
-                      "identities": {
-                        "type": "array",
-                        "items": { "type": "string" }
+                      "caseIdentities": {
+                        "type": "object",
+                        "propertyNames": { "type": "string" },
+                        "additionalProperties": { "type": "string" }
                       }
                     },
                     "required": ["trials"],

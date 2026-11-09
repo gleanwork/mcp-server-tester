@@ -357,9 +357,9 @@ rubric's text and the defaults it falls back on.
 
 `mst grade --resume` refuses a run whose eval config or pairwise judges'
 identities changed since it was graded. A case's own judges aren't in
-`run.json`, so each verdict's identity decides: a verdict whose judge
-changed is graded again. A run graded before MST recorded identities
-resumes as before.
+`run.json`, so each verdict's identity decides: a trial with a verdict
+whose judge changed is graded again, on a shard with `--runner`. A run
+graded before MST recorded identities resumes as before.
 
 ### Pairwise judges
 
@@ -1360,18 +1360,18 @@ Every run updates the eval's `history.json` (format `mst.history/v1`, schema in 
 - **Eras.** Consecutive full runs that measured the same way are one era. These start a new era for every variant, including one that skipped the run where it changed:
   - the datasets changing (cases added or removed, a case edited, another snapshot);
   - the eval config's judges changing (one added, removed, or with another judge identity);
-  - a plugin the eval loads changing version (`run.json`'s `plugins`);
+  - a plugin the eval loads changing version or settings (`run.json`'s `plugins`; one added or removed is noted, since a client or judge it brings or takes away changes the setup anyway);
   - `simulateWrites` changing (writes answered with a success reply instead of a planned-write result).
 
-  A variant's own setup changing starts one for it: its client, model, client options, a server (its endpoint or command, transport or connector, under the same label), tool metadata, input template, judges, a server's write mode, or the identity its judge scores record (a case judge's too, whose version, options or plugin settings changed). Each row lists what changed since the previous full run, and whether it ends the era. A client app's version, MST's version, the trials per case and the eval config's hash are noted but don't: a weekly run of the same eval on a new client build is what the history is for.
+  A variant's own setup changing starts one for it: its client, model, client options, a server under the same label, tool metadata, input template, judges, a server's write mode, or the identity its judge scores record in a case both runs graded (a case judge's too, whose version, options or plugin settings changed). A server counts as `run.json` records it: an HTTP server's URL without its credentials, query or fragment; a stdio server's command, without its arguments or environment, which can hold credentials; a connector server's connector and declared URL. A change to what isn't recorded doesn't show. Each row lists what changed since the previous full run, and whether it ends the era. A client app's version, MST's version, the trials per case and the eval config's hash are noted but don't: a weekly run of the same eval on a new client build is what the history is for.
 
-  A client option that looks like a credential is in `run.json` only as a keyed hash (`hmac:…`). The key is the eval's, kept in `option-key` in its results directory (beside `latest.json`, in no run), so the eval's runs on this machine record the same value as the same hash, and a changed value starts an era. Runs collected under another key, on another machine or by an MST before 2.0.0-rc.1, can't show the value stayed the same, so they count as changed. Delete `option-key` to start a new key.
+  A client option that looks like a credential is in `run.json` only as a keyed hash (`hmac:…`). The key is the eval's: `MST_OPTION_KEY` (64 hex digits, as `openssl rand -hex 32` prints) when set, else `option-key` in its results directory (beside `latest.json`, in no run or result store), made by the eval's first run that writes anything. So the eval's runs record the same value as the same hash, and a changed value starts an era. `run.json`'s `optionKey` is a fingerprint of the key, which says nothing about it. Hashes under another key can't show the value stayed the same, so they count as changed (`client options hashed under another option key`): on CI, or wherever runs are collected on several machines, give each the same `MST_OPTION_KEY` from a secret. Runs from MST 2.0.0-rc.0 and earlier have no `optionKey`: each hashed under its own key, so between them only an option's name counts, as it did then. Don't commit or upload `option-key`; delete it to start a new key.
 
 - **Since previous.** Each variant's change since the previous run of its era that was complete for it (collected and graded, none of its cases incomplete) is the paired test `mst run` reports against its previous run, on the headline cases, with the cases that regressed and improved. `regressed` is true when that test says worse. A run in a new era has none: old runs are never hidden, and never compared across an era's start.
 - **Partial runs** (`--variant`, `--case`, …) have rows, marked `partial` with their selection, but no era and no change: they're never compared with full runs. Ungraded and failed runs have rows without pass rates. A run with incomplete cases is on the line, but no later run is compared with it for the variants whose cases were incomplete. Tool optimization runs aren't in the history.
-- **Regrades.** A regrade (`<run-id>.g2`) is a row of its own, ordered by when its transcripts were collected. A collection's newest grading that finished grading is the one shown; the gradings it replaces have `supersededBy`. A regrade with a new judge belongs to the new judge's era.
+- **Regrades.** A regrade (`<run-id>.g2`) is a row of its own, ordered by when its transcripts were collected. A collection's newest grading that finished grading is the one shown; the gradings it replaces have `supersededBy`. A regrade with a new judge belongs to the new judge's era. A regrade records what collected its transcripts as its source run recorded it (servers, client, model, client options with their hashes and key, tool metadata, input template and plugins), so it compares like its source, whichever machine graded it.
 - **A cache of the runs.** Each row is built from the run's `run.json`, `summary.json` and `results.json`, and kept until the run's `run.json` changes (a resumed run) or a newer MST builds rows differently. `mst history --rebuild` builds every row again. The file is replaced in one step. Two runs can finish at once, and a store can't lock, so after writing it MST lists the runs again and writes once more if one appeared; a history that still misses a run gets it at the next write or `mst history`.
-- **Old runs.** A run in an older format is listed in `skipped` with why. Fields a run's MST didn't record (judge identities, client apps) are left out of its row.
+- **Old runs.** A run in an older format is listed in `skipped` with why. Fields a run's MST didn't record (judge identities, client apps, plugins) are left out of its row. The Playwright reporter's runs don't record plugins either: they run the `api` client, and their plugin judges' identities cover the plugin's version.
 
 ## CLI
 

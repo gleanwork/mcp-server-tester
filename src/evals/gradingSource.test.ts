@@ -4,6 +4,7 @@ import {
   gatheredGrading,
   gradeKeyString,
   gradingComplete,
+  gradingToResume,
   recordingGrading,
   resumedGrading,
   type GradeRecord,
@@ -122,6 +123,24 @@ describe('resumed grading (mst grade --resume)', () => {
     ]),
     comparable: new Map(),
   };
+
+  it('schedules a trial without a verdict, and one whose judge changed since', () => {
+    const trials = new Map([
+      [
+        'v',
+        new Map([['c', [{ clientFailed: false }, { clientFailed: false }]]]),
+      ],
+    ]);
+    // Trial 1 has a judge without a verdict; trial 0 is complete.
+    expect(gradingToResume(previous, trials).trials).toBe(1);
+    const current = vi.fn(() => false);
+    const todo = gradingToResume(previous, trials, undefined, current);
+    expect(todo.trials).toBe(2);
+    expect([...todo.cases]).toEqual(['c']);
+    // Asked only of a complete trial: one without a verdict grades anyway.
+    expect(current).toHaveBeenCalledTimes(1);
+    expect(current).toHaveBeenCalledWith('v', 'c', { scores: { judge: kept } });
+  });
 
   it('grades a complete trial here with its verdicts, and sends the rest on with theirs', async () => {
     const sent = vi.fn(async () => ({ scores: { judge: kept } }));

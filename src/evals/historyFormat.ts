@@ -18,7 +18,7 @@ const JudgeSchema = z.looseObject({
   passRate: z.number().optional(),
   meanScore: z.number().optional(),
   unknown: z.number().optional(),
-  identities: z.array(z.string()).optional(),
+  caseIdentities: z.record(z.string(), z.string()).optional(),
 });
 
 const PairwiseSchema = z.looseObject({
@@ -67,6 +67,7 @@ const VariantSchema = z.looseObject({
   setupHash: z.string(),
   setupParts: z.record(z.string(), z.string()).optional(),
   writeModes: z.record(z.string(), WriteModeSchema).optional(),
+  optionKey: z.string().optional(),
   cases: z.number(),
   incomplete: z.number().optional(),
   casePassRate: z.number().optional(),
@@ -171,6 +172,7 @@ const RunSchema = z.looseObject({
         namespace: z.string(),
         name: z.string(),
         version: z.string().optional(),
+        settings: z.string().optional(),
       })
     )
     .optional(),

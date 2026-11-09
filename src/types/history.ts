@@ -28,11 +28,13 @@ export interface HistoryJudge {
   /** Trials it answered `unknown`. */
   unknown?: number;
   /**
-   * The judge identities its scores recorded (ADR 0009), sorted: a case
-   * judge's as well as the eval config's. A change means the judge could
-   * grade differently, so it starts a new era.
+   * By case, a hash of the judge identities its scores recorded there (ADR
+   * 0009): a case judge's as well as the eval config's. A change in a case
+   * both runs graded means the judge could grade differently, so it starts
+   * a new era; a case one run didn't grade (its client failed) shows
+   * nothing.
    */
-  identities?: string[];
+  caseIdentities?: Record<string, string>;
 }
 
 /**
@@ -82,6 +84,12 @@ export interface HistoryVariant {
   setupParts?: Record<string, string>;
   /** Each server's write mode, by label (ADR 0014). */
   writeModes?: Record<string, WriteMode>;
+  /**
+   * The fingerprint of the key the variant's hashed client options were
+   * hashed with (run.json's `optionKey`), when it has some. Hashes under
+   * two keys can't be compared.
+   */
+  optionKey?: string;
   /** Complete cases: the ones pass rates count. */
   cases: number;
   /** Cases short a trial or a verdict (ADR 0010). */
@@ -214,11 +222,17 @@ export interface HistoryRun {
     optionsHash: string;
   }>;
   /**
-   * The plugins the run loaded, with their package versions. A version
-   * change starts a new era. Absent for runs from before run.json recorded
-   * them.
+   * The plugins that collected the run, with their package versions and a
+   * hash of their settings. A change in either starts a new era. Absent for
+   * runs from before run.json recorded them, and for the Playwright
+   * reporter's.
    */
-  plugins?: Array<{ namespace: string; name: string; version?: string }>;
+  plugins?: Array<{
+    namespace: string;
+    name: string;
+    version?: string;
+    settings?: string;
+  }>;
   redacted: boolean;
   /** The run's dry-run proxies answered writes with a success reply (`simulateWrites`). */
   simulateWrites?: true;

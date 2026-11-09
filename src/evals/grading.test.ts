@@ -6,6 +6,7 @@ import {
   gradingErrorOf,
   mergeEvalJudges,
   resolveJudges,
+  storedJudgesCurrent,
   toolEvidenceGap,
   type GradedExecution,
   type GradingOutcome,
@@ -369,6 +370,26 @@ describe('gradeTrial', () => {
     );
     // The same settings keep the verdict; new ones judge again.
     expect(models).toEqual(['a', 'b']);
+    // What a resume schedules by: a trial whose verdict a changed judge gave.
+    expect(storedJudgesCurrent(evalCase, first, { set: { model: 'a' } })).toBe(
+      true
+    );
+    expect(storedJudgesCurrent(evalCase, first, { set: { model: 'b' } })).toBe(
+      false
+    );
+    // A case without judges, or a verdict without an identity, keeps it.
+    expect(storedJudgesCurrent({}, first, { set: { model: 'b' } })).toBe(true);
+    expect(
+      storedJudgesCurrent(
+        evalCase,
+        {
+          scores: {
+            judge: { ...first.scores.judge!, judgeIdentity: undefined },
+          },
+        },
+        { set: { model: 'b' } }
+      )
+    ).toBe(true);
   });
 });
 

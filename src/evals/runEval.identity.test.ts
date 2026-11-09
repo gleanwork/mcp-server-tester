@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { runEval } from './runEval.js';
+import { gradeRun, runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { RunRecord } from './runFormat.js';
@@ -43,6 +43,8 @@ async function writeEval(dir: string, apiToken: string): Promise<void> {
       datasets: ['./cases.json'],
       client: 'acme/client/echo',
       clientOptions: { apiToken },
+      // So a run can be graded again.
+      redactStoredResponses: false,
     })
   );
 }
@@ -75,5 +77,34 @@ describe("run.json's setup identity", () => {
     expect(first.plugins).toEqual([
       { namespace: 'acme', name: '@acme/mst-plugin', version: '1.2.3' },
     ]);
+    expect(first.optionKey).toMatch(/^[0-9a-f]{16}$/);
+    expect(second.optionKey).toBe(first.optionKey);
+  });
+
+  it('keeps what collected the transcripts in a regrade: options, plugins and key', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'run-identity-'));
+    dirs.push(dir);
+    await writeEval(dir, 'secret-token-1');
+    const source = await runRecord(dir);
+    // Graded on another machine, with another key, a newer plugin and
+    // another token in the eval config.
+    await fs.rm(path.join(dir, '.mcp-test-results', 'identity', 'option-key'));
+    await writeEval(dir, 'secret-token-2');
+    resetPluginsForTests();
+    const { outputDir } = await gradeRun({
+      configPath: path.join(dir, 'eval.json'),
+      rootDir: dir,
+      plugins: [{ ...plugin, meta: { ...plugin.meta, version: '2.0.0' } }],
+      run: source.runId,
+    });
+    const regrade = JSON.parse(
+      await fs.readFile(path.join(outputDir, 'run.json'), 'utf8')
+    ) as RunRecord;
+    expect(regrade.gradedFrom).toBe(source.runId);
+    expect(regrade.variants[0]!.clientOptions).toEqual(
+      source.variants[0]!.clientOptions
+    );
+    expect(regrade.plugins).toEqual(source.plugins);
+    expect(regrade.optionKey).toBe(source.optionKey);
   });
 });

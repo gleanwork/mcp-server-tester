@@ -12,6 +12,7 @@ import {
   writeRun,
   writeTrial,
   type RunFacts,
+  type RunRecord,
   type JudgeRecord,
   type PluginRecord,
   findRunDirectory,
@@ -65,6 +66,7 @@ import {
   type EvalConfig,
   type ClientConfig,
   type ModelPricing,
+  type ConnectorServerConfig,
   transportServers,
 } from './evalConfig.js';
 import {
@@ -98,9 +100,14 @@ import {
   judgeEntryIdentity,
   mergeEvalJudges,
   preflightCaseJudges,
+  storedJudgesCurrent,
 } from './grading.js';
 import type { CaseJudge } from './datasetTypes.js';
-import { judgeIdentity, judgeIsVersioned } from '../judge/judgeIdentity.js';
+import {
+  contentHash,
+  judgeIdentity,
+  judgeIsVersioned,
+} from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { WriteRecordLedger, withWriteRecords } from './writeRecord.js';
 import {
@@ -169,6 +176,7 @@ import {
   previousGrades,
   resumedGrading,
   type GradingSource,
+  type StoredJudgesCurrent,
   type PreviousGrades,
 } from './gradingSource.js';
 import {
@@ -689,6 +697,46 @@ function variantSetup(
   };
 }
 
+/** What collected a variant's transcripts, which a regrade keeps from its source run. */
+const COLLECTED_SETUP = [
+  'servers',
+  'client',
+  'model',
+  'clientOptions',
+  'tools',
+  'inputTemplate',
+] as const;
+
+/**
+ * A regrade's record of a variant: `setup` as the eval config has it now,
+ * with what collected the transcripts taken from the source run's record.
+ * Its hashed options stay as the source hashed them, under the source's key.
+ */
+function collectedSetup(
+  setup: Record<string, unknown>,
+  source: RunRecord['variants'][number]
+): Record<string, unknown> {
+  const collected: Record<string, unknown> = { ...setup };
+  for (const field of COLLECTED_SETUP) {
+    delete collected[field];
+    if (source[field] !== undefined) collected[field] = source[field];
+  }
+  return collected;
+}
+
+/** A connector server as run.json records it: its declaration, with the URL's credentials, query and fragment dropped. */
+function recordedDeclaration(
+  declaration: ConnectorServerConfig
+): ConnectorServerConfig {
+  if (!declaration.url) return declaration;
+  const url = new URL(declaration.url);
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return { ...declaration, url: url.toString() };
+}
+
 /** Option names that suggest a credential, a location or a header. */
 const SENSITIVE_OPTION =
   /key|token|secret|password|passwd|auth|credential|cookie|bearer|session|jwt|sig|pat$|url|uri|header|env/i;
@@ -902,15 +950,23 @@ function judgeRecords(
 }
 
 /** The plugins run.json records: the eval's, by namespace, with their versions. */
-function pluginRecords(namespaces: readonly string[]): PluginRecord[] {
+function pluginRecords(
+  namespaces: readonly string[],
+  settings: SettingsSections | undefined
+): PluginRecord[] {
   return namespaces.flatMap((namespace) => {
     const meta = installedPlugin(namespace)?.meta;
+    const section = settings?.[namespace];
     return meta
       ? [
           {
             namespace,
             name: meta.name,
             ...(meta.version !== undefined ? { version: meta.version } : {}),
+            // Settings aren't secrets (ADR 0008), but only their hash is kept.
+            ...(section && Object.keys(section).length
+              ? { settings: contentHash(section) }
+              : {}),
           },
         ]
       : [];
@@ -1944,6 +2000,20 @@ async function evaluate(
   // `mst grade --resume`: what the run's grading has no verdict for.
   const previous = options.grading?.previous;
   let toResume: ReturnType<typeof gradingToResume> | undefined;
+  // A case judge that changed since (its version, options or plugin
+  // settings) judges again, so its trial is graded where the rest are: on a
+  // grade shard with --runner. The eval config's judges are checked whole.
+  const resumedCases = new Map(
+    canonicalDatasets.flatMap(({ dataset }) =>
+      dataset.cases.map((evalCase) => [evalCase.id, evalCase] as const)
+    )
+  );
+  const judgesCurrent: StoredJudgesCurrent = (_variant, caseId, stored) => {
+    const evalCase = resumedCases.get(caseId);
+    return (
+      !evalCase || storedJudgesCurrent(evalCase, stored, evalConfig.settings)
+    );
+  };
   if (previous) {
     if (!regrade)
       throw new Error('Only a regrade of a stored run resumes its grading.');
@@ -1978,10 +2048,11 @@ async function evaluate(
       {
         baseline: evalConfig.variants?.[0]?.name ?? 'default',
         judges: pairwiseJudges,
-      }
+      },
+      judgesCurrent
     );
     console.error(
-      `[mst] Resuming the grading of ${previous.runId}: ${toResume.trials} trials and ${toResume.comparisons} pairwise comparisons have a judge without a verdict, in ${toResume.cases.size} cases. Every other verdict is kept.`
+      `[mst] Resuming the grading of ${previous.runId}: ${toResume.trials} trials and ${toResume.comparisons} pairwise comparisons have a judge without a verdict, or one that changed, in ${toResume.cases.size} cases. Every other verdict is kept.`
     );
   }
   // `mst grade --runner`: the shards grade with these datasets, and the regrade
@@ -2012,7 +2083,9 @@ async function evaluate(
     });
     grading = gradedElsewhere.source;
   }
-  const resumed = previous ? resumedGrading(previous, grading) : undefined;
+  const resumed = previous
+    ? resumedGrading(previous, grading, judgesCurrent)
+    : undefined;
   if (resumed) grading = resumed;
   const narrowing: CaseNarrowing = {
     cases: options.cases,
@@ -2933,19 +3006,22 @@ async function evaluate(
         const declared = variants.find(
           (candidate) => candidate.name === variant.name
         );
+        const setup = variantSetup(evalConfig, declared, runKey);
+        const source = regrade?.run.variants.find(
+          (candidate) => candidate.name === variant.name
+        );
         return {
           name: variant.name,
-          // On a runner's machines, a connector server ran as each worker
-          // expanded it: record its declaration, not this machine's launch.
-          servers: onMachines
-            ? variant.servers.map(
-                (server) =>
-                  (recordedDeclarations.get(server.label ?? '') as
-                    | MCPConfig
-                    | undefined) ?? server
-              )
-            : variant.servers,
-          ...variantSetup(evalConfig, declared, runKey),
+          // A connector server is recorded as declared, not as launched: a
+          // worker expands it on its own machine, and a local launch is a
+          // proxy whose command is this machine's Node.
+          servers: variant.servers.map((server) => {
+            const declaration = recordedDeclarations.get(server.label ?? '');
+            return declaration ? recordedDeclaration(declaration) : server;
+          }),
+          // A regrade collected nothing: what collected its transcripts is
+          // what its source run recorded, hashes included.
+          ...(source ? collectedSetup(setup, source) : setup),
           ...(servedTools.has(variant.name)
             ? { servedTools: servedTools.get(variant.name) }
             : {}),
@@ -2973,7 +3049,19 @@ async function evaluate(
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
       judges: judgeRecords(evalConfig, rawConfig),
-      plugins: pluginRecords(namespaces),
+      // A regrade's are its source's: the plugins that collected its
+      // transcripts. Its judges' plugins are in their identities.
+      ...(regrade
+        ? {
+            ...(regrade.run.plugins ? { plugins: regrade.run.plugins } : {}),
+            ...(regrade.run.optionKey
+              ? { optionKey: regrade.run.optionKey }
+              : {}),
+          }
+        : {
+            plugins: pluginRecords(namespaces, evalConfig.settings),
+            optionKey: optionKeyOfEval.id,
+          }),
       redactStoredResponses: redact,
       // A regrade or a resume keeps the setting its transcripts were collected
       // with.

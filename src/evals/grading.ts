@@ -214,6 +214,25 @@ function sameJudge(
   return current === undefined || current === verdict.judgeIdentity;
 }
 
+/**
+ * Whether every judge verdict a stored trial has came from the judge its
+ * case runs now (`sameJudge`), so a resumed grading can keep them all. One
+ * that didn't is judged again, so a resume grades its trial.
+ */
+export function storedJudgesCurrent(
+  evalCase: Pick<EvalCase, 'judges' | 'judgeReps' | 'expected'>,
+  stored: GradingOutcome,
+  settings: SettingsSections | undefined
+): boolean {
+  if (!evalCase.judges?.length) return true;
+  const verdicts = judgeVerdicts(stored.scores.judge);
+  return resolveJudges(evalCase).every((judge) => {
+    const name = judgeNameOf(judge);
+    const verdict = name !== undefined ? verdicts.get(name) : undefined;
+    return !verdict || sameJudge(verdict, judge, settings);
+  });
+}
+
 async function evaluateJudges(
   response: unknown,
   judges: JudgeExpectConfig[],

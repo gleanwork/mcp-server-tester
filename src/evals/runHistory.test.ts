@@ -57,8 +57,13 @@ interface RunSpec {
   /** Per-variant fields of its run.json record, over the defaults. */
   setup?: Record<string, Partial<RunRecord['variants'][number]>>;
   plugins?: RunFacts['plugins'];
-  /** The identity each judge score records (a case judge's, say). */
-  scoreIdentity?: string;
+  /** The fingerprint of the key the run hashed client options with. */
+  optionKey?: string;
+  /**
+   * The identity each judge score records (a case judge's, say), or each
+   * case's, by case ID.
+   */
+  scoreIdentity?: string | Record<string, string>;
 }
 
 function caseResult(
@@ -124,7 +129,11 @@ async function writeSpec(evalDirectory: string, spec: RunSpec): Promise<void> {
         ...(spec.cost?.[name] !== undefined ? { cost: spec.cost[name] } : {}),
         infra: spec.infra?.[name]?.includes(id) ?? false,
         judge: spec.judge !== undefined || spec.scoreIdentity !== undefined,
-        ...(spec.scoreIdentity ? { identity: spec.scoreIdentity } : {}),
+        ...(typeof spec.scoreIdentity === 'string'
+          ? { identity: spec.scoreIdentity }
+          : spec.scoreIdentity?.[id]
+            ? { identity: spec.scoreIdentity[id] }
+            : {}),
       })
     );
     const complete = caseResults.filter(
@@ -201,6 +210,7 @@ async function writeSpec(evalDirectory: string, spec: RunSpec): Promise<void> {
       ...(spec.setup?.[name] as Partial<RunFacts['variants'][number]>),
     })),
     ...(spec.plugins ? { plugins: spec.plugins } : {}),
+    ...(spec.optionKey ? { optionKey: spec.optionKey } : {}),
     datasets: [
       {
         name: 'cases',
@@ -603,11 +613,19 @@ describe('the history of an eval', () => {
           writeModes: { docs: 'unguarded' },
         },
       },
-      // Hashed under another key, or another value: nothing shows it's the same.
+      // Another value.
       {
         glean: {
           servers: docs('https://b.example/mcp'),
           clientOptions: { url: 'hmac:2222' },
+          writeModes: { docs: 'unguarded' },
+        },
+      },
+      // Under another key (index 5): nothing shows it's the same.
+      {
+        glean: {
+          servers: docs('https://b.example/mcp'),
+          clientOptions: { url: 'hmac:3333' },
           writeModes: { docs: 'unguarded' },
         },
       },
@@ -618,12 +636,13 @@ describe('the history of an eval', () => {
         at: `2026-10-0${index + 1}T09:00:00.000Z`,
         variants: { official: ids(2), glean: ids(2) },
         setup,
+        optionKey: index < 5 ? 'key-1' : 'key-2',
       });
     const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
     const glean = runs.map(
       (run) => run.variants.find((v) => v.name === 'glean')!
     );
-    expect(glean.map((variant) => variant.era)).toEqual([0, 0, 1, 2, 3]);
+    expect(glean.map((variant) => variant.era)).toEqual([0, 0, 1, 2, 3, 4]);
     expect(glean[1]!.sincePrevious?.runId).toBe(runs[0]!.runId);
     expect(runs.map((run) => run.changes)).toEqual([
       undefined,
@@ -637,12 +656,87 @@ describe('the history of an eval', () => {
         },
       ],
       [{ reason: 'client options changed', variant: 'glean', breaks: true }],
+      [
+        {
+          reason: 'client options hashed under another option key',
+          variant: 'glean',
+          breaks: true,
+        },
+      ],
     ]);
     expect(glean[3]!.writeModes).toEqual({ docs: 'unguarded' });
-    // The other variant's setup didn't change.
+    expect(glean[5]!.optionKey).toBe('key-2');
+    // The other variant's setup didn't change, and has no hashed options.
     expect(
       runs.map((run) => run.variants.find((v) => v.name === 'official')!.era)
-    ).toEqual([0, 0, 0, 0, 0]);
+    ).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(
+      runs[5]!.variants.find((v) => v.name === 'official')!.optionKey
+    ).toBeUndefined();
+  });
+
+  it('compares hashed options by name in runs from before MST kept a key for the eval', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    // Each such run hashed under its own key, so its hashes never match.
+    for (const [n, url, optionKey] of [
+      [1, 'hmac:1111', undefined],
+      [2, 'hmac:2222', undefined],
+      // The first run with a key: its hashes compare with no earlier run's.
+      [3, 'hmac:3333', 'key-1'],
+      [4, 'hmac:3333', 'key-1'],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        setup: { official: { clientOptions: { url } } },
+        ...(optionKey ? { optionKey } : {}),
+      });
+    const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
+    expect(runs.map((run) => run.variants[0]!.era)).toEqual([0, 0, 1, 1]);
+    expect(runs[2]!.changes).toEqual([
+      {
+        reason: 'client options hashed under another option key',
+        variant: 'official',
+        breaks: true,
+      },
+    ]);
+  });
+
+  it('names each other part of the setup that changed', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    for (const [n, setup] of [
+      [1, {}],
+      [2, { tools: { search: { description: 'Find docs.' } } }],
+      [
+        3,
+        {
+          tools: { search: { description: 'Find docs.' } },
+          inputTemplate: 'Q: {{input}}',
+        },
+      ],
+      [
+        4,
+        {
+          tools: { search: { description: 'Find docs.' } },
+          inputTemplate: 'Q: {{input}}',
+          judges: ['rubric'],
+        },
+      ],
+    ] as Array<[number, Partial<RunRecord['variants'][number]>]>)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        setup: { official: setup },
+      });
+    const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
+    expect(runs.map((run) => run.changes?.map((c) => c.reason))).toEqual([
+      undefined,
+      ['tool metadata changed'],
+      ['input template changed'],
+      ['judges changed'],
+    ]);
   });
 
   it("starts a variant's era when its scores' judge identity changes, a case judge's included", async () => {
@@ -664,14 +758,59 @@ describe('the history of an eval', () => {
     const [third, second, first] = (
       await buildHistory(localHistoryLocation(dir))
     ).runs;
-    expect(first!.variants[0]!.judges.rubric?.identities).toEqual([
-      identity('prompt-1'),
-    ]);
+    expect(
+      Object.keys(first!.variants[0]!.judges.rubric?.caseIdentities ?? {})
+    ).toEqual(['case-0', 'case-1']);
     expect([first, second, third].map((run) => run!.variants[0]!.era)).toEqual([
       0, 0, 1,
     ]);
     expect(third!.changes).toEqual([
       { reason: 'judge rubric changed', variant: 'official', breaks: true },
+    ]);
+  });
+
+  it("compares judge identities over the cases both runs graded, so a client failure isn't a judge change", async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    // Two cases give the judge different options: two identities.
+    const both = { 'case-0': 'identity-a', 'case-1': 'identity-b' };
+    for (const [n, scoreIdentity] of [
+      [1, both],
+      // case-1 has no verdict from the judge, as when its client failed:
+      // nothing to compare.
+      [2, { 'case-0': 'identity-a' }],
+      [3, both],
+      [4, { 'case-0': 'identity-a', 'case-1': 'identity-c' }],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        scoreIdentity,
+      });
+    const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
+    expect(runs.map((run) => run.variants[0]!.era)).toEqual([0, 0, 0, 1]);
+    expect(runs[3]!.changes).toEqual([
+      { reason: 'judge rubric changed', variant: 'official', breaks: true },
+    ]);
+  });
+
+  it("says an eval config judge's change once, not again for each variant", async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    for (const [n, judge] of [
+      [1, 'prompt-1'],
+      [2, 'prompt-2'],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2), glean: ids(2) },
+        judge,
+        scoreIdentity: judge,
+      });
+    const [second] = (await buildHistory(localHistoryLocation(dir))).runs;
+    expect(second!.era).toBe(1);
+    expect(second!.changes).toEqual([
+      { reason: 'judge changed: rubric', breaks: true },
     ]);
   });
 
@@ -699,6 +838,40 @@ describe('the history of an eval', () => {
       { reason: 'plugin acme 1.0.0 → 1.1.0', breaks: true },
     ]);
     expect(runs[3]!.plugins).toEqual(acme('1.1.0'));
+  });
+
+  it("starts an era when a plugin's settings change, and notes one added or removed", async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    const acme = (settings?: string) => [
+      {
+        namespace: 'acme',
+        name: '@acme/mst-plugin',
+        version: '1.0.0',
+        ...(settings ? { settings } : {}),
+      },
+    ];
+    for (const [n, plugins] of [
+      [1, []],
+      [2, acme()],
+      [3, acme('settings-1')],
+      [4, acme('settings-1')],
+      [5, []],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        plugins: [...plugins],
+      });
+    const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
+    expect(runs.map((run) => run.era)).toEqual([0, 0, 1, 1, 1]);
+    expect(runs.map((run) => run.changes)).toEqual([
+      undefined,
+      [{ reason: 'plugin added: acme', breaks: false }],
+      [{ reason: 'plugin acme settings changed', breaks: true }],
+      undefined,
+      [{ reason: 'plugin removed: acme', breaks: false }],
+    ]);
   });
 
   it('starts an era when writes go from planned-write results to simulated successes', async () => {
