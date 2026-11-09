@@ -29,10 +29,11 @@ export interface HistoryJudge {
   unknown?: number;
   /**
    * By case, a hash of the judge identities its scores recorded there (ADR
-   * 0009): a case judge's as well as the eval config's. A change in a case
-   * both runs graded means the judge could grade differently, so it starts
-   * a new era; a case one run didn't grade (its client failed) shows
-   * nothing.
+   * 0009): a case judge's as well as the eval config's. A case's hash that
+   * differs from the one it last had in the variant's era means the judge
+   * could grade differently, so it starts a new era. A run that didn't
+   * grade the case (its client failed) changes nothing, and the next run
+   * that does is compared with the hash from before it.
    */
   caseIdentities?: Record<string, string>;
 }

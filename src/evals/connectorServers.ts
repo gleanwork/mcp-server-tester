@@ -84,6 +84,12 @@ export interface ConnectorExpansion {
   tokenDirectory?: string;
   /** Where the dry-run proxies record writes, one file per connector server. */
   writeRecordFiles: string[];
+  /**
+   * Each connector server as declared, by variant (`''`: the config's own
+   * servers), then label: two variants can each have a `notes` server at
+   * another URL.
+   */
+  declarations: Map<string, Map<string, ConnectorServerConfig>>;
 }
 
 /** Where a run's dry-run proxies record writes, and whether they simulate them. */
@@ -157,8 +163,10 @@ export async function expandConnectorServers(
       slots: [],
       grantsByVariant: new Map(),
       writeRecordFiles: [],
+      declarations: new Map(),
     };
   const writeRecordFiles = new Set<string>();
+  const declarations = new Map<string, Map<string, ConnectorServerConfig>>();
   // One file per connector server: label, connector and url.
   const fileByUse = new Map<string, string>();
   const writeFileFor = (use: ConnectorUse, directory: string): string => {
@@ -197,6 +205,14 @@ export async function expandConnectorServers(
   ): Promise<MCPConfig> {
     if (!isConnectorServer(server)) return server;
     const use = connectorUse(server, evalConfig.settings);
+    const declared =
+      declarations.get(variant) ?? new Map<string, ConnectorServerConfig>();
+    declared.set(use.label, {
+      connector: use.reference,
+      label: use.label,
+      url: use.url,
+    });
+    declarations.set(variant, declared);
     const slot = slotFor(use);
     if (slot) {
       const keys = grantsByVariant.get(variant) ?? new Set<string>();
@@ -254,10 +270,12 @@ export async function expandConnectorServers(
     };
   }
 
-  const expandAll = async (variant: string, servers?: EvalServerConfig[]) =>
-    servers === undefined
-      ? undefined
-      : Promise.all(servers.map((server) => expand(server, variant)));
+  const expandAll = async (variant: string, servers?: EvalServerConfig[]) => {
+    if (servers === undefined) return undefined;
+    // Its own servers, connectors or not: it runs none of the config's.
+    if (!declarations.has(variant)) declarations.set(variant, new Map());
+    return Promise.all(servers.map((server) => expand(server, variant)));
+  };
   const expanded: EvalConfig = {
     ...evalConfig,
     ...(evalConfig.servers
@@ -294,6 +312,7 @@ export async function expandConnectorServers(
     grantsByVariant,
     tokenDirectory,
     writeRecordFiles: [...writeRecordFiles],
+    declarations,
   };
 }
 
@@ -493,19 +512,20 @@ export async function startConnectorCredentials(
 }
 
 /**
- * Connector servers as a shard's worker gets them (ADR 0004), by label: the
- * declaration, not the entry it expands to on this machine, whose paths only
- * this machine has. The worker expands them itself
- * ({@link expandWorkerConnectors}).
+ * A variant's connector servers as a shard's worker gets them (ADR 0004),
+ * by label: the declaration, not the entry it expands to on this machine,
+ * whose paths only this machine has. The worker expands them itself
+ * ({@link expandWorkerConnectors}). A variant without servers of its own
+ * runs the config's.
  */
 export function connectorDeclarations(
-  expansion: ConnectorExpansion
-): Map<string, ConnectorServerConfig> {
-  return new Map(
-    expansion.uses.map((use) => [
-      use.label,
-      { connector: use.reference, label: use.label, url: use.url },
-    ])
+  expansion: ConnectorExpansion,
+  variant: string
+): ReadonlyMap<string, ConnectorServerConfig> {
+  return (
+    expansion.declarations.get(variant) ??
+    expansion.declarations.get('') ??
+    new Map()
   );
 }
 

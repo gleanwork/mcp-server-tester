@@ -108,6 +108,47 @@ describe("run.json's setup identity", () => {
     expect(regrade.optionKey).toBe(source.optionKey);
   });
 
+  it("doesn't copy the credentials an rc.0 run recorded in a connector URL into a regrade", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'run-identity-'));
+    dirs.push(dir);
+    await writeEval(dir, 'secret-token-1');
+    const source = await runRecord(dir);
+    // As an rc.0 run on a runner recorded a declared connector URL.
+    const runFile = path.join(
+      dir,
+      '.mcp-test-results',
+      'identity',
+      'runs',
+      source.runId,
+      'run.json'
+    );
+    const stored = JSON.parse(await fs.readFile(runFile, 'utf8')) as RunRecord;
+    stored.variants[0]!.servers = [
+      {
+        connector: 'acme/connector/notes',
+        label: 'notes',
+        url: 'https://user:pass@notes.example/mcp?token=t1',
+      },
+    ] as unknown as RunRecord['variants'][number]['servers'];
+    await fs.writeFile(runFile, JSON.stringify(stored));
+    const { outputDir } = await gradeRun({
+      configPath: path.join(dir, 'eval.json'),
+      rootDir: dir,
+      plugins: [plugin],
+      run: source.runId,
+    });
+    const text = await fs.readFile(path.join(outputDir, 'run.json'), 'utf8');
+    expect(text).not.toContain('pass@');
+    expect(text).not.toContain('token=t1');
+    expect((JSON.parse(text) as RunRecord).variants[0]!.servers).toEqual([
+      {
+        connector: 'acme/connector/notes',
+        label: 'notes',
+        url: 'https://notes.example/mcp',
+      },
+    ]);
+  });
+
   it('hashes the settings a plugin gets, with its defaults, so a default written out is no change', async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'run-identity-'));
     dirs.push(dir);

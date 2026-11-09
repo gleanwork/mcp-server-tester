@@ -386,7 +386,7 @@ describe('connector servers on a shard (ADR 0004)', () => {
       gmail: { connector: 'acme/connector/gmail' },
       drive: { connector: 'acme/connector/gdrive' },
     });
-    expect([...connectorDeclarations(expansion).values()]).toEqual([
+    expect([...connectorDeclarations(expansion, '').values()]).toEqual([
       {
         connector: 'acme/connector/acme',
         label: 'acme',
@@ -414,6 +414,54 @@ describe('connector servers on a shard (ADR 0004)', () => {
     expect(tokens.gmail!.accessToken).toBe('google-token');
     expect(tokens.drive!.accessToken).toBe('google-token');
     expect(tokens.gmail!.expiresAt).toBeGreaterThan(Date.now());
+  });
+
+  it("gives each variant its own servers' declarations, by label", async () => {
+    installPlugins([testPlugin()]);
+    const config = loadEvalConfigFromObject(
+      {
+        name: 'x',
+        datasets: [{ type: 'file', path: 'unused' }],
+        servers: { acme: { connector: 'acme/connector/acme' } },
+      },
+      { skipDatasetValidation: true }
+    );
+    // A programmatic eval config's variants can carry servers of their own.
+    const expansion = await expandConnectorServers(
+      {
+        ...config,
+        variants: [
+          { name: 'default' },
+          {
+            name: 'staging',
+            servers: [
+              {
+                connector: 'acme/connector/acme',
+                label: 'acme',
+                url: 'https://staging.acme.example/mcp',
+              },
+            ],
+          },
+          {
+            name: 'direct',
+            servers: [
+              {
+                transport: 'http',
+                label: 'acme',
+                serverUrl: 'https://direct.example',
+              },
+            ],
+          },
+        ],
+      },
+      { tokenDirectory: path.join(dir, 'tokens') }
+    );
+    const url = (variant: string) =>
+      connectorDeclarations(expansion, variant).get('acme')?.url;
+    expect(url('default')).toBe(acmeUrl);
+    expect(url('staging')).toBe('https://staging.acme.example/mcp');
+    // Its own `acme` isn't a connector: the config's isn't what it runs.
+    expect(url('direct')).toBeUndefined();
   });
 
   it('refreshes a grant once when several shards ask at the same time', async () => {

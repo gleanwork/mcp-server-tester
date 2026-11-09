@@ -348,46 +348,75 @@ export async function startCoordinator(options: {
     await fs.writeFile(file, content, { mode: 0o600 });
     return file;
   };
-  for await (const line of options.input) {
-    const message = JSON.parse(line) as {
-      secrets?: Record<string, string>;
-      optionKey?: string;
-    };
-    if (plan.secrets && message.secrets)
-      secretsFile = await privateFile(
-        'secrets.json',
-        JSON.stringify(message.secrets)
-      );
-    // The key the run started with hashes its client options, so they
-    // compare with the eval's other runs. Not a secret the workers get.
-    if (
-      typeof message.optionKey === 'string' &&
-      /^[0-9a-f]{64}$/.test(message.optionKey)
-    )
-      optionKeyFile = await privateFile('option-key', message.optionKey);
-    break;
-  }
-  const log = await fs.open(paths.log, 'a', 0o600);
-  const child = spawnProcess(
-    process.execPath,
-    [
-      process.argv[1]!,
-      'coordinate',
-      '--bundle',
-      paths.bundle,
-      '--daemon',
-      ...(secretsFile ? ['--secrets', secretsFile] : []),
-      ...(optionKeyFile ? ['--option-key', optionKeyFile] : []),
-    ],
-    {
-      cwd: paths.workDir,
-      detached: true,
-      stdio: ['ignore', log.fd, log.fd],
+  let badOptionKey = false;
+  let pid: number | undefined;
+  try {
+    for await (const line of options.input) {
+      const message = JSON.parse(line) as {
+        secrets?: Record<string, string>;
+        optionKey?: unknown;
+      };
+      if (plan.secrets && message.secrets)
+        secretsFile = await privateFile(
+          'secrets.json',
+          JSON.stringify(message.secrets)
+        );
+      // The key the run started with hashes its client options, so they
+      // compare with the eval's other runs. Not a secret the workers get.
+      if (
+        typeof message.optionKey === 'string' &&
+        OPTION_KEY_HEX.test(message.optionKey)
+      )
+        optionKeyFile = await privateFile('option-key', message.optionKey);
+      else if (message.optionKey !== undefined) badOptionKey = true;
+      break;
     }
-  );
-  child.unref();
-  await log.close();
-  options.write(`${JSON.stringify({ type: 'started', pid: child.pid })}\n`);
+    const log = await fs.open(paths.log, 'a', 0o600);
+    if (badOptionKey)
+      await log.write(
+        "[mst] The option key sent isn't one: this run hashes its client options under a key of its own, so its history starts a new era.\n"
+      );
+    const child = spawnProcess(
+      process.execPath,
+      [
+        process.argv[1]!,
+        'coordinate',
+        '--bundle',
+        paths.bundle,
+        '--daemon',
+        ...(secretsFile ? ['--secrets', secretsFile] : []),
+        ...(optionKeyFile ? ['--option-key', optionKeyFile] : []),
+      ],
+      {
+        cwd: paths.workDir,
+        detached: true,
+        stdio: ['ignore', log.fd, log.fd],
+      }
+    );
+    child.unref();
+    pid = child.pid;
+    await log.close();
+  } catch (error) {
+    // No coordinator started to remove them.
+    if (privateDir && pid === undefined)
+      await fs.rm(privateDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
+  options.write(`${JSON.stringify({ type: 'started', pid })}\n`);
+}
+
+const OPTION_KEY_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * Removes the private directory `startCoordinator` put a file in. Only one
+ * it made (`mst-detach-…`), so a path given by hand never takes its
+ * directory with it.
+ */
+async function removePrivateDir(file: string | undefined): Promise<void> {
+  if (!file) return;
+  const dir = path.dirname(file);
+  if (!path.basename(dir).startsWith('mst-detach-')) return;
+  await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
 }
 
 /** The coordinator itself (`mst coordinate --daemon`), started by `startCoordinator`. */
@@ -395,6 +424,20 @@ export async function runCoordinatorDaemon(options: {
   bundleDir: string;
   secretsFile?: string;
   /** The option key the run started with (`startCoordinator`). */
+  optionKeyFile?: string;
+}): Promise<number> {
+  try {
+    return await coordinate(options);
+  } finally {
+    // However it ends, the secrets and the key go with it.
+    await removePrivateDir(options.secretsFile);
+    await removePrivateDir(options.optionKeyFile);
+  }
+}
+
+async function coordinate(options: {
+  bundleDir: string;
+  secretsFile?: string;
   optionKeyFile?: string;
 }): Promise<number> {
   const plan = await readPlan(options.bundleDir);
@@ -462,10 +505,5 @@ export async function runCoordinatorDaemon(options: {
         );
       }),
   });
-  for (const file of [options.secretsFile, options.optionKeyFile])
-    if (file)
-      await fs
-        .rm(path.dirname(file), { recursive: true, force: true })
-        .catch(() => {});
   return status.state === 'done' ? 0 : 1;
 }

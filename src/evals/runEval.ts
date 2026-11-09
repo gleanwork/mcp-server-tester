@@ -738,6 +738,28 @@ function collectedSetup(
   return collected;
 }
 
+/**
+ * A case's judges as its variant grades them: the case's and the variant's
+ * eval config judges (a variant's replace the config's), the case's
+ * settings winning for a judge in both. `rawJudges` are the config judges
+ * as written. Empty when the eval config has none: the case's stand.
+ */
+function variantCaseJudges(
+  evalCase: EvalCase,
+  configJudges: EvalConfig['judges'],
+  rawJudges: EvalConfig['judges']
+): Pick<EvalCase, 'judges'> {
+  return configJudges?.length
+    ? {
+        judges: mergeEvalJudges(
+          evalCase,
+          configJudges,
+          (rawJudges ?? []) as Array<Record<string, unknown>>
+        ),
+      }
+    : {};
+}
+
 /** A URL without its credentials, query and fragment; undefined when it isn't one. */
 function strippedUrl(text: string): string | undefined {
   let url: URL;
@@ -1840,7 +1862,12 @@ async function evaluate(
     configDir,
     rootDir,
   });
-  const recordedDeclarations = connectorDeclarations(connectors);
+  // A variant's connector servers as declared, by label; none when
+  // `mcpConfig` replaces every variant's servers.
+  const declarationsOf = (variant: string) =>
+    options.mcpConfig
+      ? new Map<string, ConnectorServerConfig>()
+      : connectorDeclarations(connectors, variant);
   // What each shard ran on, for run.json.
   let shardRecords: ShardRecord[] | undefined;
   // What each variant's servers served, with `recordServedTools`: listed
@@ -2045,19 +2072,18 @@ async function evaluate(
       ? variantEvalConfig(evalConfig, variant).judges
       : evalConfig.judges;
     const rawVariant = rawConfig.variants?.find((v) => v.name === variantName);
-    const graded = configJudges?.length
-      ? {
-          ...evalCase,
-          judges: mergeEvalJudges(
-            evalCase,
-            configJudges,
-            (rawVariant?.judges ?? rawConfig.judges ?? []) as Array<
-              Record<string, unknown>
-            >
-          ),
-        }
-      : evalCase;
-    return storedJudgesCurrent(graded, stored, evalConfig.settings);
+    return storedJudgesCurrent(
+      {
+        ...evalCase,
+        ...variantCaseJudges(
+          evalCase,
+          configJudges,
+          rawVariant?.judges ?? rawConfig.judges
+        ),
+      },
+      stored,
+      evalConfig.settings
+    );
   };
   if (previous) {
     if (!regrade)
@@ -2269,19 +2295,11 @@ async function evaluate(
                 )
               )
             : {}),
-          // The case's judges and the eval config's (a variant's replace
-          // the config's); the case's settings win for a judge in both.
-          ...(effectiveConfig.judges?.length
-            ? {
-                judges: mergeEvalJudges(
-                  evalCase,
-                  effectiveConfig.judges,
-                  (rawVariant.judges ?? rawConfig.judges ?? []) as Array<
-                    Record<string, unknown>
-                  >
-                ),
-              }
-            : {}),
+          ...variantCaseJudges(
+            evalCase,
+            effectiveConfig.judges,
+            rawVariant.judges ?? rawConfig.judges
+          ),
           ...(template && evalCase.input
             ? { input: template.replaceAll('{{input}}', evalCase.input) }
             : {}),
@@ -2298,13 +2316,17 @@ async function evaluate(
     const collectRunnerTrials = async (): Promise<GatheredResults> => {
       // A connector server goes to a worker as its declaration: the worker
       // expands it with its own paths, and asks for its tokens.
-      const declarations = connectorDeclarations(connectors);
-      const workerServers = (servers: MCPConfig[]): MCPConfig[] =>
-        servers.map(
+      const workerServers = (
+        variant: string,
+        servers: MCPConfig[]
+      ): MCPConfig[] => {
+        const declarations = declarationsOf(variant);
+        return servers.map(
           (server) =>
             (declarations.get(server.label ?? '') as MCPConfig | undefined) ??
             server
         );
+      };
       const groups: RequestGroup[] = [];
       const trialCases = new Map<
         string,
@@ -2334,7 +2356,7 @@ async function evaluate(
           const requests = batchRequests(
             prepared.effectiveDataset.cases,
             setup.clientConfig.declaration,
-            workerServers(setup.servers),
+            workerServers(variant.name, setup.servers),
             { evalConfig: setup.effectiveConfig }
           ).filter(
             (request) =>
@@ -3061,7 +3083,9 @@ async function evaluate(
           // worker expands it on its own machine, and a local launch is a
           // proxy whose command is this machine's Node.
           servers: variant.servers.map((server) => {
-            const declaration = recordedDeclarations.get(server.label ?? '');
+            const declaration = declarationsOf(variant.name).get(
+              server.label ?? ''
+            );
             return declaration ? recordedDeclaration(declaration) : server;
           }),
           // A regrade collected nothing: what collected its transcripts is

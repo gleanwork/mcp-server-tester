@@ -794,10 +794,11 @@ describe('the history of an eval', () => {
     ]);
   });
 
-  it('compares a case with the identity it last had in the era, past a run that gave it no verdict', async () => {
+  it('compares a case with the identity it last had in the era, past a run that recorded none for it', async () => {
     const dir = path.join(await tempDir(), 'weekly');
     for (const [n, scoreIdentity] of [
       [1, { 'case-0': 'identity-a', 'case-1': 'identity-b' }],
+      // case-1's score records no identity, as when it has no verdict.
       [2, { 'case-0': 'identity-a' }],
       // case-1's judge changed since run 1, the last run that graded it.
       [3, { 'case-0': 'identity-a', 'case-1': 'identity-c' }],
@@ -813,6 +814,27 @@ describe('the history of an eval', () => {
     expect(runs[2]!.changes).toEqual([
       { reason: 'judge rubric changed', variant: 'official', breaks: true },
     ]);
+  });
+
+  it('forgets the identities of the era before, once a new era starts', async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    for (const [n, model, scoreIdentity] of [
+      [1, 'm1', { 'case-0': 'identity-a', 'case-1': 'identity-b' }],
+      // A new model starts an era, in which case-1 has no identity yet.
+      [2, 'm2', { 'case-0': 'identity-a' }],
+      // So case-1's first identity in the era is no change.
+      [3, 'm2', { 'case-0': 'identity-a', 'case-1': 'identity-c' }],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        model: { official: model },
+        scoreIdentity,
+      });
+    const runs = (await buildHistory(localHistoryLocation(dir))).runs.reverse();
+    expect(runs.map((run) => run.variants[0]!.era)).toEqual([0, 1, 1]);
+    expect(runs[2]!.changes ?? []).toEqual([]);
   });
 
   it("says a case judge's change in a run that changed the eval for another reason too", async () => {
