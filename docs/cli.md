@@ -1151,7 +1151,7 @@ npx mst runs cancel e33763 --config ./eval.json --results gs://my-bucket/evals
 - **Secrets go only in `--secrets-file`.** Its values reach the coordinator over its channel, and are kept in memory-backed storage there until the run ends. This machine's own environment isn't sent, so put what the run needs (a model key, judge keys) in the file.
 - **Connector servers need a shared credential store** (`--store <namespace>/credential-store/<name>`, one whose definition is `shared`), since the coordinator machine refreshes the grants. Sign in to it with `mst auth --store`, and use it for local runs too, or a provider that rotates refresh tokens invalidates the local copy.
 - **The run's status is in the result store**, at `<eval>/detached/<id>/`: `status.json` (rewritten every 30 seconds), `log.txt` and, after `cancel`, `cancel`. Each `mst runs` command takes the eval config and the `--results` the run was given, and an id or its last six characters.
-- **`runs cancel`** asks the coordinator to stop: within a minute it interrupts the command under way as Ctrl-C does, deleting its machines and keeping what was collected. A coordinator that stops reporting for five minutes shows as `lost`; finish its run with `mst run --resume <run> --detach`.
+- **`runs cancel`** asks the coordinator to stop: within a minute it interrupts the command under way as Ctrl-C does, deleting its machines and keeping what was collected, and starts no other. A coordinator that stops reporting for five minutes shows as `lost`; finish its run with `mst run --resume <run> --detach`.
 
 ## `history` - An Eval's Runs Over Time
 
