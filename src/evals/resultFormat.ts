@@ -140,8 +140,44 @@ function hasOlderFields(result: Record<string, unknown>): boolean {
 }
 
 /**
- * Throws when a saved run result (a baseline file has no schema version)
- * uses 1.x result field names.
+ * Throws when a stored run summary's case results (its `results`, and each
+ * variant's `result`) use older field names or score keys: a result store's
+ * summary carries them, and its envelope's format alone doesn't say which
+ * MST wrote them.
+ */
+export function assertCurrentSummaryResults(
+  value: unknown,
+  what: string
+): void {
+  if (!isObject(value)) return;
+  if (Array.isArray(value.results))
+    assertCurrentRunResult({ caseResults: value.results }, what);
+  if (Array.isArray(value.variants))
+    for (const variant of value.variants)
+      if (isObject(variant) && isObject(variant.result))
+        assertCurrentRunResult(variant.result, what);
+}
+
+/**
+ * Throws when a stored comparison's case results (each case's `baseline` and
+ * `candidate`) use older field names or score keys.
+ */
+export function assertCurrentComparisonResults(
+  value: unknown,
+  what: string
+): void {
+  if (!isObject(value) || !Array.isArray(value.cases)) return;
+  const caseResults = value.cases.flatMap((comparison) =>
+    isObject(comparison)
+      ? [comparison.baseline, comparison.candidate].filter(isObject)
+      : []
+  );
+  assertCurrentRunResult({ caseResults }, what);
+}
+
+/**
+ * Throws when a saved run result uses 1.x result field names, or a 2.0
+ * release candidate's.
  */
 export function assertCurrentRunResult(value: unknown, what: string): void {
   const cases = isObject(value) ? value.caseResults : undefined;

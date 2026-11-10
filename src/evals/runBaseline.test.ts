@@ -224,6 +224,70 @@ describe('findPreviousRun', () => {
     });
   });
 
+  it("skips a store's summary whose case results an rc.0 MST wrote", async () => {
+    const { findPreviousRun } = await import('./runBaseline.js');
+    const { FileEvalResultStore, createStoredEvalArtifact } =
+      await import('./resultStore.js');
+    const store = new FileEvalResultStore({
+      provider: 'file',
+      dir: await tempDir(),
+    });
+    const stored = async (
+      id: string,
+      createdAt: string,
+      result: Record<string, unknown>
+    ) =>
+      store.saveArtifact(
+        createStoredEvalArtifact({
+          kind: 'eval-run-summary',
+          id,
+          createdAt,
+          data: {
+            format: 'mst.run/v1',
+            configId: 'cfg',
+            runId: id,
+            timestamp: createdAt,
+            variants: [
+              {
+                name: 'a',
+                result: {
+                  total: 1,
+                  passed: 1,
+                  failed: 0,
+                  caseResults: [result],
+                },
+              },
+            ],
+          },
+          metadata: { labels: { configId: 'cfg' } },
+        })
+      );
+    const current = { id: 'c', pass: true, scores: {}, transcript: {} };
+    await stored('current', '2026-10-01T00:00:00.000Z', current);
+    // Newer, but its case's transcript is an rc.0 `trace`, at the case or a trial.
+    await stored('rc0-case', '2026-10-02T00:00:00.000Z', {
+      id: 'c',
+      pass: true,
+      scores: {},
+      trace: { finalText: 'answer' },
+    });
+    await stored('rc0-trial', '2026-10-03T00:00:00.000Z', {
+      id: 'c',
+      pass: true,
+      scores: {},
+      trialResults: [{ pass: true, scores: {}, trace: {} }],
+    });
+    await expect(
+      findPreviousRun({
+        configId: 'cfg',
+        runId: 'now',
+        variants: ['a'],
+        store,
+        outputRoot: await tempDir(),
+      })
+    ).resolves.toMatchObject({ runId: 'current' });
+  });
+
   it('skips a run with missing trials (a shard that ended early)', async () => {
     const { findPreviousRun } = await import('./runBaseline.js');
     const outputRoot = await tempDir();

@@ -142,6 +142,99 @@ describe('FileEvalResultStore', () => {
     ).toEqual(['current']);
   });
 
+  it('fails on a malformed or newer artifact, and leaves it out of listings', async () => {
+    const { mkdir, writeFile } = await import('fs/promises');
+    await mkdir(join(tmpDir, 'eval-runs'), { recursive: true });
+    const artifact = {
+      format: 'mst.run/v1',
+      kind: 'eval-runner-result',
+      id: 'x',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      metadata: {},
+      data: {},
+    };
+    const write = (id: string, value: unknown) =>
+      writeFile(join(tmpDir, 'eval-runs', `${id}.json`), JSON.stringify(value));
+    await write('no-id', { ...artifact, id: undefined });
+    await write('future-kind', { ...artifact, kind: 'eval-run-forecast' });
+    await write('newer', { ...artifact, format: 'mst.run/v2' });
+    await write('rc0', {
+      ...artifact,
+      data: { caseResults: [{ id: 'a', pass: true, scores: {}, trace: {} }] },
+    });
+    await expect(
+      store.loadArtifact('eval-runner-result', 'no-id')
+    ).rejects.toThrow(
+      "Stored eval-runner-result 'no-id' isn't a stored result artifact"
+    );
+    await expect(
+      store.loadArtifact('eval-runner-result', 'future-kind')
+    ).rejects.toThrow(
+      /a newer MST may have written it\. Upgrade MST to read it\./
+    );
+    await expect(
+      store.loadArtifact('eval-runner-result', 'newer')
+    ).rejects.toThrow('was written by a newer MST (mst.run/v2)');
+    await expect(
+      store.loadArtifact('eval-runner-result', 'rc0')
+    ).rejects.toThrow('written by an MST 2.0 release candidate');
+    // A summary stored where results are kept isn't a result.
+    await write('misplaced', { ...artifact, kind: 'eval-run-summary' });
+    await expect(
+      store.loadArtifact('eval-runner-result', 'misplaced')
+    ).rejects.toThrow(
+      "Stored eval-runner-result 'misplaced' is an eval-run-summary, not an eval-runner-result."
+    );
+    // A half-written or empty file.
+    await writeFile(join(tmpDir, 'eval-runs', 'cut.json'), '{"format":"mst.r');
+    await writeFile(join(tmpDir, 'eval-runs', 'empty.json'), '');
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-runner-result',
+        id: 'current',
+        data: { caseResults: [] },
+      })
+    );
+    expect(
+      (await store.listArtifacts('eval-runner-result')).map(({ id }) => id)
+    ).toEqual(['current']);
+  });
+
+  it('fails on a summary or comparison whose case results an rc.0 MST wrote, and leaves it out of listings', async () => {
+    const rc0 = { id: 'a', pass: true, scores: {}, trace: {} };
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-run-summary',
+        id: 'reporter',
+        // The Playwright reporter's summary: its case results under `results`.
+        data: { results: [rc0] },
+      })
+    );
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-run-summary',
+        id: 'variants',
+        data: { variants: [{ name: 'v', result: { caseResults: [rc0] } }] },
+      })
+    );
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-run-comparison',
+        id: 'comparison',
+        data: { cases: [{ id: 'a', outcome: 'unchanged', candidate: rc0 }] },
+      })
+    );
+    for (const id of ['reporter', 'variants'])
+      await expect(store.loadArtifact('eval-run-summary', id)).rejects.toThrow(
+        'written by an MST 2.0 release candidate'
+      );
+    await expect(
+      store.loadArtifact('eval-run-comparison', 'comparison')
+    ).rejects.toThrow('written by an MST 2.0 release candidate');
+    expect(await store.listArtifacts('eval-run-summary')).toEqual([]);
+    expect(await store.listArtifacts('eval-run-comparison')).toEqual([]);
+  });
+
   it('round-trips comparison artifacts', async () => {
     const artifact = createStoredEvalArtifact({
       kind: 'eval-run-comparison',
@@ -328,6 +421,48 @@ describe('GCSEvalResultStore', () => {
 
     expect(summaries.map((s) => s.id)).toEqual(['newer', 'older']);
   });
+
+  it('leaves out of listings an object that is half-written or of another kind', async () => {
+    const current = createStoredEvalArtifact({
+      kind: 'eval-runner-result',
+      id: 'current',
+      data: { total: 1 },
+    });
+    const summary = createStoredEvalArtifact({
+      kind: 'eval-run-summary',
+      id: 'summary',
+      data: {},
+    });
+    nock('http://storage.test')
+      .persist()
+      .get(/.*/)
+      .query(true)
+      .reply(function (uri) {
+        if (uri.includes('current.json')) return [200, current];
+        if (uri.includes('summary.json')) return [200, summary];
+        if (uri.includes('cut.json')) return [200, '{"format":"mst.r'];
+        if (uri.includes('?prefix=') || uri.includes('&prefix='))
+          return [
+            200,
+            {
+              items: [
+                { name: 'prefix/eval-runs/current.json' },
+                { name: 'prefix/eval-runs/summary.json' },
+                { name: 'prefix/eval-runs/cut.json' },
+              ],
+            },
+          ];
+        return [404, {}];
+      });
+    const store = new GCSEvalResultStore({
+      provider: 'gcs',
+      bucket: 'bucket',
+      prefix: 'prefix',
+    });
+    expect(
+      (await store.listArtifacts('eval-runner-result')).map(({ id }) => id)
+    ).toEqual(['current']);
+  });
 });
 
 describe('redactStoredResponses', () => {
@@ -408,6 +543,24 @@ describe('redactStoredResponses', () => {
     });
     // The input is not changed.
     expect(result.transcript.finalText).toBe('private answer');
+  });
+
+  it("strips an rc.0 `trace` as it does a transcript, so a hand-built comparison can't keep one's answer", () => {
+    const result = {
+      id: 'one',
+      pass: true,
+      scores: {},
+      trace: transcript(),
+      trialResults: [{ pass: true, durationMs: 1, trace: transcript() }],
+    };
+    const redacted = redactStoredResponses({ cases: [{ baseline: result }] });
+    expect(redacted.cases[0]!.baseline).toEqual({
+      id: 'one',
+      pass: true,
+      scores: {},
+      trace: redactedTranscript,
+      trialResults: [{ pass: true, durationMs: 1, trace: redactedTranscript }],
+    });
   });
 
   it("drops a client's telemetry content, keeping the rest of its telemetry", () => {

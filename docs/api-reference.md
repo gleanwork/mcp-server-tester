@@ -484,7 +484,7 @@ interface ToolOverrideVariant {
 
 ### `compareEvalRuns(options)`
 
-Compare two completed eval runs. This is a pure utility: it does not run evals, read or write baselines, call LLMs, or mutate datasets.
+Compare two completed eval runs. This is a pure utility: it does not run evals, read or write baselines, call LLMs, or mutate datasets. It throws when either run has case results an earlier MST wrote: 1.x field names, a 2.0 release candidate's `trace`, or prerelease score keys.
 
 **Parameters:**
 

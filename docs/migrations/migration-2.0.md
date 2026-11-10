@@ -607,7 +607,7 @@ The types follow:
 
 The `runEvalDataset`, `runEvalCase` and `runToolOptimization` options `mcpHostModel` and `toolOverrideVariantId` are now `model` and `toolVariantId`; the old names fail with the new ones.
 
-Stored results are `schemaVersion: 2`, for result store artifacts and an eval's `results.json`. Results written by an earlier MST aren't read as if they were current:
+Stored results are in the `mst.run/v1` format: result store artifacts, `saveBaseline` files and an eval's run files. Results written by an earlier MST aren't read as if they were current:
 
 - Loading one explicitly fails with the renames and "Rerun to write it again". That covers a stored artifact by ID, the latest stored baseline for a comparison, and a `loadBaseline()` file.
 - History (the previous run of an eval config, the reporter's trend) skips them.
