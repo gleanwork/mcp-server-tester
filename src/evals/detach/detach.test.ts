@@ -255,8 +255,21 @@ describe('the coordinator', () => {
         'Output: /opt/mst/results/runs/20261020T120100Z-aaaaaa.g1',
       ],
     ]);
+    // Every status it saves, in order.
+    const saved: DetachStatus[] = [];
+    const statusKey = detachKeys('cowork', plan().id).status;
+    const recording: RunStore = {
+      location: store.location,
+      get: (key) => store.get(key),
+      list: (prefix, options) => store.list(prefix, options),
+      put: async (key, body) => {
+        if (key === statusKey)
+          saved.push(JSON.parse(String(body)) as DetachStatus);
+        await store.put(key, body);
+      },
+    };
     const status = await runPlan(plan(), paths, undefined, {
-      store,
+      store: recording,
       machine: 'vm-1',
       mst: fake.mst,
       log: (line) => log.push(line),
@@ -270,6 +283,11 @@ describe('the coordinator', () => {
       ['run', '--resume'],
       ['grade', '20261020T120100Z-aaaaaa'],
     ]);
+    // While it resumes, the run is missing what the collect left out.
+    expect(saved.find((s) => s.phase === 'resume')).toMatchObject({
+      state: 'running',
+      missing: true,
+    });
     expect(status).toMatchObject({
       state: 'done',
       runId: '20261020T120100Z-aaaaaa',
