@@ -71,15 +71,29 @@ interface PermissionState {
 }
 interface PageArgument {
   action: string;
+  sessionId?: string;
   identity?: { accountId: string; organizationId: string };
   patch?: Record<string, boolean | null>;
   expected?: Record<string, boolean | null>;
 }
 
+interface CloudEvent {
+  source?: string;
+  created_at?: string;
+  payload: Record<string, unknown>;
+}
+
 /** A real loopback HTTP/WebSocket CDP endpoint; no browser or account exists. */
 async function fakeChrome(
   state: PermissionState,
-  observe: (action: PageArgument) => Promise<void> = async () => {}
+  {
+    observe = async () => {},
+    sessions = {},
+  }: {
+    observe?: (action: PageArgument) => Promise<void>;
+    /** The claude.ai session events the page program reads, by `cse_` ID. */
+    sessions?: Record<string, CloudEvent[]>;
+  } = {}
 ) {
   const actions: PageArgument[] = [];
   const sockets = new Set<Duplex>();
@@ -164,6 +178,11 @@ async function fakeChrome(
       let value: unknown;
       if (argument.action === 'permissions') {
         value = { status: 200, state };
+      } else if (argument.action === 'events') {
+        const id = argument.sessionId ?? '';
+        value = Object.hasOwn(sessions, id)
+          ? { status: 200, events: sessions[id] }
+          : { status: 404 };
       } else if (argument.action === 'patch-permissions') {
         expect(argument.identity).toMatchObject({
           accountId: state.accountId,
@@ -229,17 +248,105 @@ async function writeOwner(pid = DEAD_PID, path = paths().main) {
     { mode: 0o600 }
   );
 }
-async function writeJournal() {
+const ORIGINAL = { 'server:read': true, 'server:approval': null };
+const APPLIED = { 'server:read': false, 'server:approval': false };
+
+/**
+ * A version 2 journal as preparation writes it. With no `pendingWrite` and no
+ * `pendingTask` it is settled: every write's outcome is known and no task runs.
+ */
+async function writeJournal(fields: Record<string, unknown> = {}) {
   await mkdir(paths().lease.directory, { recursive: true });
   const text = JSON.stringify({
-    version: 1,
+    version: 2,
     accountId: 'account',
     organizationId: 'organization',
-    original: { 'server:read': true, 'server:approval': null },
-    applied: { 'server:read': false, 'server:approval': false },
+    original: ORIGINAL,
+    applied: APPLIED,
+    ...fields,
   });
   await writeFile(paths().journal, text, { mode: 0o600 });
   return text;
+}
+
+const STARTED_AT = '2026-11-09T00:00:00.000Z';
+
+/**
+ * A Cowork task's session events: a prewarm setup message with its zero-turn
+ * result, then the queried prompt. Only a result for the queried prompt ends
+ * the task.
+ */
+function taskEvents(ended: boolean): CloudEvent[] {
+  return [
+    {
+      source: 'client',
+      created_at: '2026-11-09T00:00:01.000Z',
+      payload: {
+        type: 'user',
+        uuid: 'message-setup',
+        shouldQuery: false,
+        message: { role: 'user', content: 'Prepare the workspace' },
+      },
+    },
+    {
+      created_at: '2026-11-09T00:00:02.000Z',
+      payload: {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        num_turns: 0,
+        result: '',
+        user_message_uuids: ['message-setup'],
+      },
+    },
+    {
+      source: 'client',
+      created_at: '2026-11-09T00:00:03.000Z',
+      payload: {
+        type: 'user',
+        uuid: 'message-query',
+        message: { role: 'user', content: 'Find the Acme roadmap' },
+      },
+    },
+    {
+      created_at: '2026-11-09T00:00:04.000Z',
+      payload: {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Searching the Acme docs.' }],
+        },
+      },
+    },
+    ...(ended
+      ? [
+          {
+            created_at: '2026-11-09T00:00:05.000Z',
+            payload: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              num_turns: 2,
+              result: 'The Acme roadmap is in the planning folder.',
+              user_message_uuids: ['message-query'],
+            },
+          },
+        ]
+      : []),
+  ];
+}
+
+/** The journal and both locks a refused restoration must leave behind. */
+async function expectRetained(journal: string) {
+  expect(await readFile(paths().journal, 'utf8')).toBe(journal);
+  expect(JSON.parse(await readFile(paths().main, 'utf8'))).toMatchObject({
+    pid: process.pid,
+  });
+  await expect(lstat(paths().guard)).rejects.toHaveProperty('code', 'ENOENT');
+  // An ordinary eval cannot take the desktop until someone inspects it.
+  await expect(
+    claimDesktopLease({ name: 'Cowork', lease: paths().lease })
+  ).rejects.toThrow('desktop is locked');
 }
 function state(): PermissionState {
   return {
@@ -454,12 +561,14 @@ describe('restore-only Cowork connector recovery', () => {
     await writeJournal();
     await writeOwner();
     const current = state();
-    chrome = await fakeChrome(current, async () => {
-      const owner = JSON.parse(await readFile(paths().main, 'utf8')) as {
-        pid: number;
-      };
-      expect(owner.pid).toBe(process.pid);
-      await expect(lstat(paths().guard)).resolves.toBeDefined();
+    chrome = await fakeChrome(current, {
+      async observe() {
+        const owner = JSON.parse(await readFile(paths().main, 'utf8')) as {
+          pid: number;
+        };
+        expect(owner.pid).toBe(process.pid);
+        await expect(lstat(paths().guard)).resolves.toBeDefined();
+      },
     });
     expect(
       await restoreCoworkConnectors({ recoverStaleLock: true }, chrome.env)
@@ -538,6 +647,137 @@ describe('restore-only Cowork connector recovery', () => {
     expect(await readFile(paths().journal, 'utf8')).toBe(journal);
     expect(current.permissions).toEqual({});
     await expect(lstat(paths().main)).resolves.toBeDefined();
+  });
+
+  it.each([
+    ['configure', false],
+    ['restore', true],
+  ] as const)(
+    'refuses an unresolved %s write even when permissions read as original (stale-lock recovery: %s)',
+    async (purpose, recoverStaleLock) => {
+      const journal = await writeJournal({
+        pendingWrite:
+          purpose === 'configure'
+            ? { purpose, patch: APPLIED, expected: ORIGINAL }
+            : { purpose, patch: ORIGINAL, expected: APPLIED },
+      });
+      if (recoverStaleLock) await writeOwner();
+      // The account already shows the original values; that does not prove
+      // the dispatched write will never commit.
+      const current = state();
+      current.permissions = { 'server:read': true };
+      chrome = await fakeChrome(current);
+      await expect(
+        restoreCoworkConnectors({ recoverStaleLock }, chrome.env)
+      ).rejects.toThrow(/retained for inspection.*unknown/is);
+      expect(chrome.actions).toEqual([]);
+      expect(current.permissions).toEqual({ 'server:read': true });
+      await expectRetained(journal);
+      // Retrying, even with the flag, cannot clear it: the retained lock's
+      // owner is this live process, not a provably stopped one.
+      await expect(
+        restoreCoworkConnectors({ recoverStaleLock: true }, chrome.env)
+      ).rejects.toThrow(`PID ${process.pid} is live or its status is unknown`);
+      expect(chrome.actions).toEqual([]);
+      await expectRetained(journal);
+    }
+  );
+
+  it('refuses a version 1 journal, which cannot prove write or task outcomes', async () => {
+    const journal = await writeJournal({ version: 1 });
+    const current = state();
+    chrome = await fakeChrome(current);
+    await expect(restoreCoworkConnectors({}, chrome.env)).rejects.toThrow(
+      /retained for inspection.*version 1/is
+    );
+    expect(chrome.actions).toEqual([]);
+    expect(current.permissions).toEqual(state().permissions);
+    await expectRetained(journal);
+  });
+
+  it('refuses a pending task that never bound a session', async () => {
+    const journal = await writeJournal({
+      pendingTask: { startedAt: STARTED_AT },
+    });
+    const current = state();
+    chrome = await fakeChrome(current);
+    await expect(restoreCoworkConnectors({}, chrome.env)).rejects.toThrow(
+      /retained for inspection.*unbound/is
+    );
+    expect(
+      chrome.actions.filter((action) => action.action !== 'permissions')
+    ).toEqual([]);
+    expect(current.permissions).toEqual(state().permissions);
+    await expectRetained(journal);
+  });
+
+  it.each([
+    [
+      'is still running after its prewarm result',
+      { cse_acme_trial: taskEvents(false) },
+    ],
+    ['has no session events', {}],
+  ])(
+    'refuses a bound task that %s',
+    async (_case, sessions: Record<string, CloudEvent[]>) => {
+      const journal = await writeJournal({
+        pendingTask: { startedAt: STARTED_AT, sessionId: 'cse_acme_trial' },
+      });
+      const current = state();
+      chrome = await fakeChrome(current, { sessions });
+      await expect(restoreCoworkConnectors({}, chrome.env)).rejects.toThrow(
+        'retained for inspection'
+      );
+      expect(chrome.actions).toContainEqual(
+        expect.objectContaining({
+          action: 'events',
+          sessionId: 'cse_acme_trial',
+        })
+      );
+      expect(chrome.actions.map((action) => action.action)).not.toContain(
+        'patch-permissions'
+      );
+      expect(current.permissions).toEqual(state().permissions);
+      await expectRetained(journal);
+    }
+  );
+
+  it('checks the account before reading a bound task', async () => {
+    const journal = await writeJournal({
+      pendingTask: { startedAt: STARTED_AT, sessionId: 'cse_acme_trial' },
+    });
+    chrome = await fakeChrome(
+      { ...state(), accountId: 'another-account' },
+      { sessions: { cse_acme_trial: taskEvents(true) } }
+    );
+    await expect(restoreCoworkConnectors({}, chrome.env)).rejects.toThrow(
+      'Claude account or organization changed'
+    );
+    expect(chrome.actions.map((action) => action.action)).toEqual([
+      'permissions',
+    ]);
+    await expectRetained(journal);
+  });
+
+  it('restores once claude.ai shows the bound task ended', async () => {
+    await writeJournal({
+      pendingTask: { startedAt: STARTED_AT, sessionId: 'cse_acme_trial' },
+    });
+    const current = state();
+    chrome = await fakeChrome(current, {
+      sessions: { cse_acme_trial: taskEvents(true) },
+    });
+    expect(await restoreCoworkConnectors({}, chrome.env)).toBe(true);
+    expect(current.permissions).toEqual({ 'server:read': true });
+    const actions = chrome.actions.map((action) => action.action);
+    expect(actions).toContain('events');
+    expect(actions.indexOf('events')).toBeLessThan(
+      actions.indexOf('patch-permissions')
+    );
+    expect(
+      chrome.actions.filter((action) => action.action === 'events')
+    ).toEqual([expect.objectContaining({ sessionId: 'cse_acme_trial' })]);
+    expect(await readdir(paths().lease.directory)).toEqual([]);
   });
 
   it('prints the actual missing-journal and restored outcomes in the CLI handler', async () => {

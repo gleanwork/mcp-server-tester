@@ -27,6 +27,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open a Run's Report](#open---open-a-runs-report)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
+- [cowork restore-connectors - Restore Cloud Connector Settings](#cowork-restore-connectors---restore-cloud-connector-settings)
 - [runner setup - Prepare a Runner](#runner-setup---prepare-a-runner)
 
 ## `init` - Initialize Project
@@ -1234,7 +1235,16 @@ The report has the same sections for every eval: **Result** (each variant clearl
 npx mst cowork setup
 ```
 
-Initialises or validates the empty Claude third-party profile that the Cowork client runs in, on macOS. See [Cowork](./cowork.md).
+Initialises or validates the empty Claude profile used by default third-party mode on macOS. Skip this command for first-party mode, which uses the existing signed-in app. See [Cowork](./cowork.md).
+
+## `cowork restore-connectors` - Restore Cloud Connector Settings
+
+```bash
+export MST_CLAUDE_AI_DEBUG_PORT=9222   # if the recorder port is not the default
+npx mst cowork restore-connectors [--recover-stale-lock]
+```
+
+Restores the account connector permissions that a killed first-party Cowork run left in its recovery journal, on macOS. It runs no eval and does not drive the app. It reads the recorder port from the shell, not from an eval config. It restores only after the account, concurrent-edit, write-outcome and task-completion checks pass, and otherwise keeps the journal and desktop lock. `--recover-stale-lock` removes a desktop lease only when its local owner is provably dead; it does not prove a cloud task finished or a write settled. See [Recover connector settings](./cowork.md#recover-connector-settings).
 
 ## `runner setup` - Prepare a Runner
 

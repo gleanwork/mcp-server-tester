@@ -1,6 +1,8 @@
 import { z } from 'zod';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { link, mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { describeError } from '../../utils/describeError.js';
 import { surfacedTools } from '../claudeCodeEvents.js';
 
 const ToolPolicySchema = z.enum(['allow', 'ask', 'block', 'inherit']);
@@ -193,6 +195,17 @@ export function planCloudConnectors(
   };
 }
 
+/** One submitted cloud task. An unbound task cannot be proved complete. */
+export interface CloudConnectorTask {
+  startedAt: string;
+  sessionId?: string;
+}
+
+/** Use only when the adapter proves rejection BEFORE permission PATCH dispatch. */
+export class CloudPermissionWriteNotSentError extends Error {
+  override name = 'CloudPermissionWriteNotSentError';
+}
+
 export interface CloudConnectorIO {
   inspect(): Promise<CloudConnectorSnapshot>;
   read(): Promise<CloudPermissionState>;
@@ -201,15 +214,178 @@ export interface CloudConnectorIO {
     patch: PermissionPatch,
     expected: PermissionPatch
   ): Promise<void>;
+  /** Provider evidence must prove this exact bound task is no longer running. */
+  assertTaskComplete?(task: CloudConnectorTask): Promise<void>;
 }
-const JournalSchema = z.object({
-  version: z.literal(1),
-  accountId: z.string(),
-  organizationId: z.string(),
-  original: z.record(z.string(), z.boolean().nullable()),
-  applied: z.record(z.string(), z.boolean().nullable()),
-});
+
+const PermissionPatchSchema = z.record(z.string(), z.boolean().nullable());
+const CloudSessionIdSchema = z.string().regex(/^cse_[0-9A-Za-z_]+$/);
+/** v2 retains immutable restoration facts alongside unresolved writes/tasks. */
+const JournalSchema = z
+  .object({
+    version: z.literal(2),
+    accountId: z.string().min(1),
+    organizationId: z.string().min(1),
+    original: PermissionPatchSchema,
+    applied: PermissionPatchSchema,
+    pendingWrite: z
+      .object({
+        purpose: z.enum(['configure', 'restore']),
+        patch: PermissionPatchSchema,
+        expected: PermissionPatchSchema,
+      })
+      .strict()
+      .optional(),
+    pendingTask: z
+      .object({
+        startedAt: z.string().datetime(),
+        sessionId: CloudSessionIdSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
 type Journal = z.infer<typeof JournalSchema>;
+
+async function syncJournalDirectory(path: string): Promise<void> {
+  const directory = await open(dirname(path), 'r');
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
+
+/** Publish complete, synced, owner-only replacements; never truncate the journal. */
+async function writeJournal(
+  path: string,
+  journal: Journal,
+  create = false
+): Promise<void> {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    const file = await open(temporary, 'wx', 0o600);
+    try {
+      await file.writeFile(JSON.stringify(journal));
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    // Exclusive publication prevents even an unexpected existing journal from
+    // becoming a fresh baseline. Later replacements are atomic under the lease.
+    if (create) await link(temporary, path);
+    else await rename(temporary, path);
+    await syncJournalDirectory(path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function readJournal(path: string): Promise<Journal | undefined> {
+  let text: string;
+  try {
+    text = await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  const value: unknown = JSON.parse(text);
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    'version' in value &&
+    value.version === 1
+  )
+    throw new Error(
+      `Connector journal version 1 cannot prove permission write outcomes or task completion. Journal retained at ${path}; manual resolution is required: establish provider-side write quiescence and task completion, then restore the recorded original permissions with account support. Do not delete the journal or start another run before resolution.`
+    );
+  return JournalSchema.parse(value);
+}
+
+function assertNoPendingWrite(journal: Journal, path: string): void {
+  if (journal.pendingWrite)
+    throw new Error(
+      `The ${journal.pendingWrite.purpose} permission write outcome is unknown. Journal retained at ${path}; automatic rollback, recovery and new configuration are refused even when a read matches the original permissions. Manual resolution is required: establish provider-side write quiescence and restore the recorded original permissions with account support. Do not delete the journal or start another run before resolution.`
+    );
+}
+
+async function requireJournal(path: string): Promise<Journal> {
+  const journal = await readJournal(path);
+  if (!journal)
+    throw new Error(
+      `Connector recovery journal is missing at ${path}; refusing task changes.`
+    );
+  assertNoPendingWrite(journal, path);
+  return journal;
+}
+
+/** A persisted marker survives every uncertain outcome, including failed reads. */
+async function writePermissions(
+  io: CloudConnectorIO,
+  path: string,
+  journal: Journal,
+  purpose: 'configure' | 'restore',
+  patch: PermissionPatch,
+  expected: PermissionPatch
+): Promise<void> {
+  assertNoPendingWrite(journal, path);
+  await writeJournal(path, {
+    ...journal,
+    pendingWrite: { purpose, patch, expected },
+  });
+  function unresolved(error: unknown): Error {
+    return new Error(
+      `The ${purpose} permission write failed (${describeError(error)}); its outcome is unknown. Journal retained at ${path}; automatic rollback and recovery are refused. Manual resolution requires provider-side write quiescence before restoring the recorded original permissions.`,
+      { cause: error }
+    );
+  }
+  try {
+    await io.patch(journal, patch, expected);
+  } catch (error) {
+    if (error instanceof CloudPermissionWriteNotSentError) {
+      try {
+        await writeJournal(path, journal);
+      } catch (journalError) {
+        throw new AggregateError(
+          [error, journalError],
+          `Permission write was not sent (${describeError(error)}), but recording that outcome failed (${describeError(journalError)}); journal retained at ${path}.`
+        );
+      }
+      throw error;
+    }
+    throw unresolved(error);
+  }
+  try {
+    await verifyPatch(io, journal, patch);
+    await writeJournal(path, journal);
+  } catch (error) {
+    throw unresolved(error);
+  }
+}
+
+async function completePendingTask(
+  io: CloudConnectorIO,
+  path: string,
+  journal: Journal
+): Promise<Journal> {
+  assertNoPendingWrite(journal, path);
+  if (!journal.pendingTask) return journal;
+  sameIdentity(await io.read(), journal);
+  if (!journal.pendingTask.sessionId)
+    throw new Error(
+      `The pending cloud task is unbound; completion cannot be proved. Journal retained at ${path}; manual resolution is required to identify the submitted task and establish completion before restoring permissions.`
+    );
+  if (!io.assertTaskComplete)
+    throw new Error(
+      `Cloud task completion proof is unavailable. Journal retained at ${path}; manual resolution is required to establish completion before restoring permissions.`
+    );
+  await io.assertTaskComplete({ ...journal.pendingTask });
+  sameIdentity(await io.read(), journal);
+  const completed = { ...journal };
+  delete completed.pendingTask;
+  await writeJournal(path, completed);
+  return completed;
+}
 function valueAt(state: CloudPermissionState, key: string): boolean | null {
   return Object.hasOwn(state.permissions, key) ? state.permissions[key]! : null;
 }
@@ -246,19 +422,19 @@ async function verifyPatch(
   );
 }
 
-/** Recover only our own values. Never overwrite a concurrent account edit. */
+/**
+ * Restore only our own values, after exact task-completion proof. Unknown
+ * writes and legacy journals require manual resolution, never compensating
+ * writes or a matching read. The caller holds the desktop/account lease.
+ */
 export async function recoverCloudConnectorSettings(
   io: CloudConnectorIO,
   journalPath: string
 ): Promise<boolean> {
-  let text: string;
-  try {
-    text = await readFile(journalPath, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-    throw error;
-  }
-  const journal: Journal = JournalSchema.parse(JSON.parse(text));
+  const saved = await readJournal(journalPath);
+  if (!saved) return false;
+  assertNoPendingWrite(saved, journalPath);
+  const journal = await completePendingTask(io, journalPath, saved);
   const current = await io.read();
   sameIdentity(current, journal);
   const patch: PermissionPatch = {};
@@ -274,16 +450,22 @@ export async function recoverCloudConnectorSettings(
     patch[key] = original;
     expected[key] = live;
   }
-  if (Object.keys(patch).length) {
-    await io.patch(journal, patch, expected);
-    await verifyPatch(io, journal, patch);
-  }
+  if (Object.keys(patch).length)
+    await writePermissions(
+      io,
+      journalPath,
+      journal,
+      'restore',
+      patch,
+      expected
+    );
   if (conflicts.length)
     throw new Error(
       `Connector restore found ${conflicts.length} concurrent edits. Recovery journal retained at ${journalPath}.`
     );
   await verifyPatch(io, journal, journal.original);
   await rm(journalPath);
+  await syncJournalDirectory(journalPath);
   return true;
 }
 
@@ -310,20 +492,24 @@ export async function configureCloudConnectors(
     original[key] = before;
   }
   const journal: Journal = {
-    version: 1,
+    version: 2,
     accountId: snapshot.accountId,
     organizationId: snapshot.organizationId,
     original,
     applied,
   };
   await mkdir(dirname(journalPath), { recursive: true, mode: 0o700 });
-  await writeFile(journalPath, JSON.stringify(journal), {
-    flag: 'wx',
-    mode: 0o600,
-  });
+  await writeJournal(journalPath, journal, true);
   try {
     if (Object.keys(applied).length)
-      await io.patch(snapshot, applied, original);
+      await writePermissions(
+        io,
+        journalPath,
+        journal,
+        'configure',
+        applied,
+        original
+      );
     await verifyPatch(io, snapshot, plan.patch);
   } catch (error) {
     try {
@@ -331,10 +517,21 @@ export async function configureCloudConnectors(
     } catch (restoreError) {
       throw new AggregateError(
         [error, restoreError],
-        `Configuration and rollback failed; inspect ${journalPath}.`
+        `Configuration failed (${describeError(error)}) and rollback failed (${describeError(restoreError)}); inspect ${journalPath}.`
       );
     }
     throw error;
+  }
+  // The desktop lease excludes other runs. Serialize this session's async
+  // mirror/task callbacks with restoration so no stale update loses task state.
+  let changes = Promise.resolve();
+  function exclusive<T>(change: () => Promise<T>): Promise<T> {
+    const result = changes.then(change);
+    changes = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
   }
   return {
     plan,
@@ -342,7 +539,57 @@ export async function configureCloudConnectors(
       await verifyPatch(io, snapshot, plan.patch);
     },
     async restore() {
-      await recoverCloudConnectorSettings(io, journalPath);
+      await exclusive(async () => {
+        await recoverCloudConnectorSettings(io, journalPath);
+      });
+    },
+    /** Durably record possible submission BEFORE invoking the UI. */
+    async beginTask(): Promise<void> {
+      await exclusive(async () => {
+        const current = await requireJournal(journalPath);
+        if (current.pendingTask)
+          throw new Error(
+            `A pending task already owns connector permissions; journal retained at ${journalPath}. Confirm its completion before submitting another task.`
+          );
+        sameIdentity(await io.read(), current);
+        await writeJournal(journalPath, {
+          ...current,
+          pendingTask: { startedAt: new Date().toISOString() },
+        });
+      });
+    },
+    /** Bind exactly once; an unbound or substituted session cannot prove completion. */
+    async bindTask(sessionId: string): Promise<void> {
+      await exclusive(async () => {
+        if (!CloudSessionIdSchema.safeParse(sessionId).success)
+          throw new Error(
+            'Invalid cloud session identity; expected an exact cse_ session ID.'
+          );
+        const current = await requireJournal(journalPath);
+        if (!current.pendingTask)
+          throw new Error(
+            'There is no pending task to bind; begin the task before submission.'
+          );
+        if (current.pendingTask.sessionId !== undefined)
+          throw new Error(
+            'The pending task is already bound; refusing to rebind its session identity.'
+          );
+        sameIdentity(await io.read(), current);
+        await writeJournal(journalPath, {
+          ...current,
+          pendingTask: { ...current.pendingTask, sessionId },
+        });
+      });
+    },
+    /** Clear ownership only after the adapter proves the exact task completed. */
+    async confirmTaskComplete(): Promise<void> {
+      await exclusive(async () => {
+        await completePendingTask(
+          io,
+          journalPath,
+          await requireJournal(journalPath)
+        );
+      });
     },
   };
 }

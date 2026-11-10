@@ -15,7 +15,10 @@ import { join } from 'node:path';
 import vm from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpMCPConfig } from '../../config/mcpConfig.js';
-import type { CloudConnectorConfig } from './claudeAiConnectors.js';
+import type {
+  CloudConnectorConfig,
+  CloudConnectorTask,
+} from './claudeAiConnectors.js';
 import {
   claudeAiDebugPort,
   cloudAuditLines,
@@ -244,7 +247,7 @@ describe('claude.ai session adapter', () => {
         subtype: 'error_during_execution',
       },
     };
-    expect(results([setup, prompt, failure])).toEqual([failure.payload]);
+    expect(results([setup, prompt, failure])).toEqual([]);
     const mixed = {
       payload: { ...warmup.payload, user_message_uuids: ['setup', 'prompt'] },
     };
@@ -353,12 +356,15 @@ class ClaudeAccount {
   accountId = 'account-acme';
   listStatus = 200;
   eventsStatus = 200;
+  eventsStatusBySession = new Map<string, number>();
+  bootstrapStatus = 200;
   /** Replaces fields of an event page: a server whose paging misbehaves. */
   eventPage?: (start: number, end: number) => Record<string, unknown>;
   patchStatus = 202;
   /** Runs after a PATCH is applied: another tab or person editing the account. */
   afterPatch?: () => void;
   requests: PageRequest[] = [];
+  beforeRequest?: (request: PageRequest) => void;
   sessions: CloudSession[] = [];
   eventPageSize = 2;
   permissions: Record<string, boolean> = {
@@ -435,6 +441,7 @@ class ClaudeAccount {
       credentials: init.credentials,
       ...(body === undefined ? {} : { body }),
     });
+    this.beforeRequest?.(this.requests.at(-1)!);
     const url = new URL(path, 'https://claude.ai');
     const json = (value: unknown, status = 200) =>
       new Response(JSON.stringify(value), { status });
@@ -462,7 +469,9 @@ class ClaudeAccount {
         (s) => s.id === decodeURIComponent(events[1]!)
       );
       if (!session) return json({}, 404);
-      if (this.eventsStatus !== 200) return json({}, this.eventsStatus);
+      const status =
+        this.eventsStatusBySession.get(session.id) ?? this.eventsStatus;
+      if (status !== 200) return json({}, status);
       const start = Number(url.searchParams.get('cursor') ?? 0);
       const end =
         start +
@@ -474,12 +483,15 @@ class ClaudeAccount {
       });
     }
     if (url.pathname === '/api/bootstrap')
-      return json({
-        account: {
-          uuid: this.accountId,
-          settings: { enabled_mcp_tools: structuredClone(this.permissions) },
+      return json(
+        {
+          account: {
+            uuid: this.accountId,
+            settings: { enabled_mcp_tools: structuredClone(this.permissions) },
+          },
         },
-      });
+        this.bootstrapStatus
+      );
     const org = '/api/organizations/org-acme/mcp/';
     if (url.pathname === `${org}remote_servers_with_connection`)
       return json(
@@ -976,6 +988,7 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     const transcript = await mirrored(desktop, startedAtMs);
     expect(transcript.candidate.id).toBe('local_cse_trial1');
     expect(transcript.binding).toEqual({ kind: 'exact-initial-prompt' });
+    await desktop.bindSession!(transcript);
     expect(transcript.toolCalls).toMatchObject([
       {
         name: 'search',
@@ -1319,7 +1332,76 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     expect(errors[0]).toContain('ENOSPC');
     expect(errors[1]).toContain('updating connector permissions failed (500)');
     expect((failure as Error).message).toContain(journal());
+    expect((failure as Error).message).toContain('ENOSPC');
+    expect((failure as Error).message).toContain(
+      'updating connector permissions failed (500)'
+    );
     await expect(stat(journal())).resolves.toBeDefined();
+  });
+
+  it.each(['identity', 'expected-value', 'bootstrap'] as const)(
+    'marks only a proven page preflight %s rejection as not dispatched',
+    async (rejection) => {
+      let bootstraps = 0;
+      account.beforeRequest = (request) => {
+        if (request.path !== '/api/bootstrap' || ++bootstraps !== 2) return;
+        // Inventory's bootstrap was first; this is PATCH's own preflight.
+        if (rejection === 'identity') account.accountId = 'account-other';
+        if (rejection === 'expected-value') {
+          // A concurrent value that is neither MST's plan nor the original.
+          account.permissions['srv-calendar:list_events'] = true;
+        }
+        if (rejection === 'bootstrap') account.bootstrapStatus = 503;
+      };
+      await expect(
+        drive(
+          adapter().prepare({
+            evalConfig: { name: 'preflight', datasets: [], servers: [SERVER] },
+            env,
+          })
+        )
+      ).rejects.toThrow(
+        rejection === 'identity'
+          ? 'account_changed'
+          : rejection === 'bootstrap'
+            ? '503'
+            : 'permissions_changed_concurrently'
+      );
+      // Recovery may retain a conflict/identity failure, but must not report an
+      // unknown write: the trusted page proved fetch(PATCH) never ran.
+      const retained = await readFile(journal(), 'utf8').catch(
+        (error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        }
+      );
+      if (retained) expect(JSON.parse(retained).pendingWrite).toBeUndefined();
+      expect(account.patches()).toEqual([]);
+    }
+  );
+
+  it('retains an unknown permission write after a generic post-dispatch abort instead of accepting matching readback', async () => {
+    account.afterPatch = () => {
+      throw new Error('AbortError: response lost after dispatch');
+    };
+    await expect(
+      drive(
+        adapter().prepare({
+          evalConfig: { name: 'unknown', datasets: [], servers: [SERVER] },
+          env,
+        })
+      )
+    ).rejects.toThrow('permission write outcome is unknown');
+    expect(account.patches()).toHaveLength(1);
+    expect(
+      JSON.parse(await readFile(journal(), 'utf8')).pendingWrite.purpose
+    ).toBe('configure');
+    // Even restoring the old values by hand does not waive a delayed write.
+    account.permissions = structuredClone(account.original);
+    await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+      'permission write outcome is unknown'
+    );
+    expect(account.patches()).toHaveLength(1);
   });
 
   it('undoes a crashed run from its journal before configuring the next one', async () => {
@@ -1328,7 +1410,7 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     await writeFile(
       journal(),
       JSON.stringify({
-        version: 1,
+        version: 2,
         accountId: 'account-acme',
         organizationId: 'org-acme',
         original: { 'srv-mail:send_mail': true },
@@ -1555,6 +1637,247 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     await unbound(desktop, startedAtMs);
   });
 
+  /** Submit once, then bind the real mirror's unique exact-prompt candidate. */
+  async function submitAndBind(desktop: CoworkDesktop, events: CloudEvent[]) {
+    const startedAtMs = Date.now();
+    await drive(desktop.submit(PROMPT, { deadlineAt: Date.now() + 60_000 }));
+    addTrial(events);
+    const transcript = await eventually(async () => {
+      const matches = await findMatchingClaudeSessions({
+        dataDir: desktop.dataDirectory({}),
+        snapshot: new Map(),
+        startedAtMs,
+        exactPrompt: PROMPT,
+      });
+      expect(matches).toHaveLength(1);
+      return matches[0]!;
+    });
+    await desktop.bindSession!(transcript);
+    return transcript;
+  }
+
+  it('retains an active task across timeout cleanup, reset and restart without restoring or submitting again', async () => {
+    base.reset = vi.fn(async () => {});
+    const desktop = adapter();
+    const session = await prepare(desktop);
+    const events = promptEvents({ tools: [SEARCH] });
+    const terminal = events.pop()!;
+    const bound = await submitAndBind(desktop, events);
+    expect(bound.isComplete).toBe(false);
+    expect(JSON.parse(await readFile(journal(), 'utf8'))).toMatchObject({
+      pendingTask: { sessionId: 'cse_trial1', startedAt: expect.any(String) },
+    });
+    const commands = host.commands.length;
+    const patches = account.patches().length;
+    await expect(drive(session.dispose())).rejects.toThrow(
+      'no terminal native result'
+    );
+    await expect(
+      drive(desktop.reset!({ deadlineAt: Date.now() + 1_000 }))
+    ).rejects.toThrow('no terminal native result');
+    await expect(drive(session.restart!())).rejects.toThrow(
+      'no terminal native result'
+    );
+    await expect(
+      drive(desktop.submit('another task', { deadlineAt: Date.now() + 1_000 }))
+    ).rejects.toThrow('no terminal native result');
+    expect(base.reset).not.toHaveBeenCalled();
+    expect(base.submit).toHaveBeenCalledOnce();
+    expect(host.commands).toHaveLength(commands);
+    expect(account.patches()).toHaveLength(patches);
+    expect(account.permissions).not.toEqual(account.original);
+    await expect(stat(journal())).resolves.toBeDefined();
+
+    // Neither disappearance from the list nor a supplied completion flag proves it.
+    account.listStatus = 500;
+    await expect(
+      drive(desktop.validateTranscript!({ ...bound, isComplete: true }))
+    ).rejects.toThrow('no terminal native result');
+    events.push(terminal);
+    // The exact bound event reader works independently of listing/app state.
+    await drive(session.dispose());
+    expect(account.permissions).toEqual(account.original);
+    await expect(stat(journal())).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('persists unbound intent before submit and never guesses an identity after a rejected submission', async () => {
+    base.reset = vi.fn(async () => {});
+    base.submit.mockImplementationOnce(async () => {
+      expect(JSON.parse(await readFile(journal(), 'utf8'))).toMatchObject({
+        pendingTask: { startedAt: expect.any(String) },
+      });
+      throw new Error(
+        'Computer Use permission rejected after possible dispatch'
+      );
+    });
+    const desktop = adapter();
+    const session = await prepare(desktop);
+    await expect(
+      drive(desktop.submit(PROMPT, { deadlineAt: Date.now() + 1_000 }))
+    ).rejects.toThrow('permission rejected');
+    addTrial(promptEvents({ tools: [SEARCH] }));
+    await pollMirror();
+    await expect(drive(session.dispose())).rejects.toThrow(/unbound/);
+    await expect(
+      drive(desktop.reset!({ deadlineAt: Date.now() + 1_000 }))
+    ).rejects.toThrow(/unbound/);
+    await expect(
+      drive(desktop.submit(PROMPT, { deadlineAt: Date.now() + 1_000 }))
+    ).rejects.toThrow(/unbound/);
+    await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+      /unbound/
+    );
+    expect(base.submit).toHaveBeenCalledOnce();
+    expect(base.reset).not.toHaveBeenCalled();
+    expect(account.patches()).toHaveLength(1);
+    expect(
+      JSON.parse(await readFile(journal(), 'utf8')).pendingTask.sessionId
+    ).toBeUndefined();
+  });
+
+  it('refuses a similar-prompt fallback instead of binding the wrong cloud task', async () => {
+    const desktop = adapter();
+    const session = await prepare(desktop);
+    await drive(desktop.submit(PROMPT, { deadlineAt: Date.now() + 60_000 }));
+    const events = promptEvents({ tools: [SEARCH] });
+    events[0]!.payload.message = { role: 'user', content: `${PROMPT}!` };
+    addTrial(events);
+    const candidate = await eventually(async () => {
+      const matches = await findMatchingClaudeSessions({
+        dataDir: desktop.dataDirectory({}),
+        snapshot: new Map(),
+        startedAtMs: Date.now() - 10_000,
+        exactPrompt: PROMPT,
+      });
+      expect(matches).toHaveLength(1);
+      return matches[0]!;
+    });
+    expect(candidate.binding?.kind).toBe('only-new-session');
+    await expect(desktop.bindSession!(candidate)).rejects.toThrow(
+      'refusing to guess'
+    );
+    await expect(drive(session.dispose())).rejects.toThrow(/unbound/);
+    expect(account.patches()).toHaveLength(1);
+  });
+
+  it.each(['success', 'cancelled'] as const)(
+    'accepts a native %s result, clears the task before policy rejection, and permits a reset',
+    async (terminal) => {
+      base.reset = vi.fn(async () => {});
+      const desktop = adapter();
+      const session = await prepare(desktop);
+      const events = promptEvents({ tools: [SEARCH, SEND] });
+      if (terminal === 'cancelled')
+        events.at(-1)!.payload = {
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          terminal_reason: 'cancelled',
+        };
+      const transcript = await submitAndBind(desktop, events);
+      await expect(
+        drive(desktop.validateTranscript!(transcript))
+      ).rejects.toThrow('Unexpected:');
+      expect(
+        JSON.parse(await readFile(journal(), 'utf8')).pendingTask
+      ).toBeUndefined();
+      await drive(desktop.reset!({ deadlineAt: Date.now() + 1_000 }));
+      expect(base.reset).toHaveBeenCalledOnce();
+      await drive(session.dispose());
+      expect(account.permissions).toEqual(account.original);
+    }
+  );
+
+  it.each([false, true])(
+    'does not accept a setup-only result (is_error: %s) as terminal evidence',
+    async (isError) => {
+      const desktop = adapter();
+      const session = await prepare(desktop);
+      const events = promptEvents({ tools: [SEARCH] });
+      events.pop();
+      events.unshift({
+        source: 'client',
+        created_at: now(),
+        payload: {
+          type: 'user',
+          uuid: 'setup',
+          shouldQuery: false,
+          message: { role: 'user', content: 'setup' },
+        },
+      });
+      events.push({
+        source: 'server',
+        created_at: now(),
+        payload: {
+          type: 'result',
+          subtype: isError ? 'error_during_execution' : 'success',
+          is_error: isError,
+          num_turns: 0,
+          result: '',
+          user_message_uuids: ['setup'],
+        },
+      });
+      await submitAndBind(desktop, events);
+      await expect(drive(session.dispose())).rejects.toThrow(
+        'no terminal native result'
+      );
+      expect(account.patches()).toHaveLength(1);
+    }
+  );
+
+  it.each(['http', 'cap'] as const)(
+    'isolates an unrelated pre-run %s failure from healthy recording and retains the actual trial error',
+    async (failure) => {
+      const desktop = adapter();
+      const session = await prepare(desktop);
+      const old = promptEvents({ tools: [] });
+      for (const event of old) event.created_at = now(-60_000);
+      if (failure === 'cap') {
+        account.eventPageSize = 200;
+        old.push(
+          ...Array.from({ length: 10_001 }, () => ({
+            source: 'server',
+            created_at: now(-1_000),
+            payload: { type: 'assistant' },
+          }))
+        );
+      } else account.eventsStatusBySession.set('cse_unrelated', 500);
+      const unrelated = {
+        id: 'cse_unrelated',
+        created_at: now(-60_000),
+        last_event_at: now(-1_000),
+        events: old,
+      };
+      account.sessions.push(unrelated);
+      await eventually(async () =>
+        expect(session.recordingError?.()).toContain('cse_unrelated')
+      );
+      const startedAtMs = Date.now();
+      await drive(desktop.submit(PROMPT, { deadlineAt: Date.now() + 60_000 }));
+      // Put the broken unrelated session first; it must not starve the trial.
+      account.sessions.push({
+        id: 'cse_trial1',
+        created_at: now(),
+        last_event_at: now(),
+        events: promptEvents({ tools: [SEARCH] }),
+      });
+      const transcript = await mirrored(desktop, startedAtMs);
+      await desktop.bindSession!(transcript);
+      expect(session.recordingError?.()).toBeUndefined();
+      await drive(desktop.validateTranscript!(transcript));
+      await pollMirror();
+      expect(session.recordingError?.()).toBeUndefined();
+      account.eventsStatusBySession.set('cse_trial1', 503);
+      await eventually(async () =>
+        expect(session.recordingError?.()).toContain('cse_trial1 failed (503)')
+      );
+      expect(session.recordingError?.()).not.toContain('cse_unrelated');
+      account.eventsStatusBySession.delete('cse_trial1');
+      await drive(session.dispose());
+      expect(account.permissions).toEqual(account.original);
+    }
+  );
+
   it('restarts by quitting Claude and opening the prepared app path', async () => {
     const session = await prepare(adapter());
     const quit = {
@@ -1567,8 +1890,9 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     };
     host.commands.length = 0;
     const restarting = session.restart!();
+    // The durable task check reads the journal before any app action.
+    await vi.waitFor(() => expect(host.commands).toEqual([quit]));
     // Claude gets time to quit before it is opened again.
-    await new Promise((resolve) => setImmediate(resolve));
     await vi.advanceTimersByTimeAsync(2_900);
     expect(host.commands).toEqual([quit]);
     await drive(restarting);
@@ -1610,7 +1934,8 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     /** What a run that never disposed left: MST's changes, still applied. */
     async function crashedRun(
       original: Record<string, boolean | null>,
-      applied: Record<string, boolean | null>
+      applied: Record<string, boolean | null>,
+      pendingTask?: CloudConnectorTask
     ) {
       for (const [key, value] of Object.entries(applied)) {
         if (value === null) delete account.permissions[key];
@@ -1620,14 +1945,128 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       await writeFile(
         journal(),
         JSON.stringify({
-          version: 1,
+          version: 2,
           accountId: 'account-acme',
           organizationId: 'org-acme',
           original,
           applied,
+          ...(pendingTask ? { pendingTask } : {}),
         })
       );
     }
+
+    it.each([
+      'active',
+      'unbound',
+      'unreadable',
+      'absent',
+      'setup-only',
+    ] as const)(
+      'refuses recovery and a new run for a persisted %s task',
+      async (state) => {
+        await crashedRun(
+          { 'srv-mail:send_mail': true },
+          { 'srv-mail:send_mail': false },
+          {
+            startedAt: now(),
+            ...(state === 'unbound' ? {} : { sessionId: 'cse_trial1' }),
+          }
+        );
+        if (state !== 'absent') {
+          const events = promptEvents({ tools: [SEARCH] });
+          if (state === 'active' || state === 'setup-only') events.pop();
+          if (state === 'setup-only') {
+            events.unshift({
+              source: 'client',
+              created_at: now(),
+              payload: {
+                type: 'user',
+                uuid: 'setup',
+                shouldQuery: false,
+                message: { role: 'user', content: 'setup' },
+              },
+            });
+            events.push({
+              source: 'server',
+              created_at: now(),
+              payload: {
+                type: 'result',
+                subtype: 'success',
+                is_error: false,
+                num_turns: 0,
+                result: '',
+                user_message_uuids: ['setup'],
+              },
+            });
+          }
+          addTrial(events);
+        }
+        if (state === 'unreadable') account.eventsStatus = 503;
+        const expected =
+          state === 'unbound'
+            ? /unbound/
+            : state === 'unreadable'
+              ? /cse_trial1 failed \(503\)/
+              : state === 'absent'
+                ? /cse_trial1 failed \(404\)/
+                : /no terminal native result/;
+        await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+          expected
+        );
+        await expect(
+          drive(
+            adapter().prepare({
+              evalConfig: { name: 'recovery', datasets: [], servers: [SERVER] },
+              env,
+            })
+          )
+        ).rejects.toThrow(expected);
+        expect(account.patches()).toEqual([]);
+        expect(account.permissions['srv-mail:send_mail']).toBe(false);
+        await expect(stat(journal())).resolves.toBeDefined();
+        expect(
+          account.requests.some((request) =>
+            request.path.includes('remote_servers')
+          )
+        ).toBe(false);
+        expect(host.commands.some(({ file }) => file === '/usr/bin/open')).toBe(
+          false
+        );
+      }
+    );
+
+    it.each(['success', 'cancelled'] as const)(
+      'rechecks the persisted exact task and restores only after a native %s result',
+      async (terminal) => {
+        await crashedRun(
+          { 'srv-mail:send_mail': true },
+          { 'srv-mail:send_mail': false },
+          { startedAt: now(), sessionId: 'cse_trial1' }
+        );
+        const events = promptEvents({ tools: [SEARCH] });
+        if (terminal === 'cancelled')
+          events.at(-1)!.payload = {
+            type: 'result',
+            subtype: 'error_during_execution',
+            is_error: true,
+            terminal_reason: 'cancelled',
+          };
+        addTrial(events);
+        account.listStatus = 500;
+        await expect(drive(restoreClaudeAiConnectors(env))).resolves.toBe(true);
+        expect(account.permissions).toEqual(account.original);
+        expect(
+          account.requests.some((request) =>
+            request.path.startsWith('/v1/code/sessions/cse_trial1/events')
+          )
+        ).toBe(true);
+        expect(
+          account.requests.some((request) => request.path.includes('tags='))
+        ).toBe(false);
+        expect(host.commands).toEqual([]);
+        await expect(stat(journal())).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    );
 
     it('returns false without contacting Chrome when no run left a journal', async () => {
       await expect(
@@ -1721,9 +2160,17 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       account.afterPatch = () => {
         account.permissions['srv-mail:send_mail'] = false;
       };
-      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+      const rejected = expect(restoreClaudeAiConnectors(env)).rejects.toThrow(
         'Claude did not persist the requested connector permissions.'
       );
+      // Wait for the real journal read before spending the fake-timer budget.
+      await vi.waitFor(() => expect(account.patches()).toHaveLength(1));
+      await drive(rejected);
+      // Two identity reads precede the ten persistence-verification reads.
+      expect(
+        account.requests.filter((request) => request.path === '/api/bootstrap')
+      ).toHaveLength(12);
+      expect(account.permissions['srv-mail:send_mail']).toBe(false);
       expect(account.patches()).toHaveLength(1);
       await expect(stat(journal())).resolves.toBeDefined();
     });

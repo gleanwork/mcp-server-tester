@@ -99,6 +99,10 @@ export function bindFirstPartyServers(
         `First-party server ${label} must match exactly one connected account connector by URL (found ${matches.length}). Complete its sign-in or remove the ambiguity first.`
       );
     const account = matches[0]!;
+    if (account.tools.length === 0)
+      throw new Error(
+        `First-party server ${label} listed no tools in the Claude account; check the connector and retry.`
+      );
     if (configured[account.id])
       throw new Error(
         `Two selected server labels resolve to the same account connector (${label}).`

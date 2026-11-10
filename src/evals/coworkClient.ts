@@ -550,7 +550,8 @@ async function desktopAdapter(
         }
       : {}),
     async dispose(session) {
-      await session?.dispose();
+      if (session) await session.dispose();
+      else await platform.dispose?.();
     },
     async runCase(session, request, index, ledger) {
       function recordingFailure(error: unknown): string {
@@ -655,6 +656,7 @@ async function desktopAdapter(
           throw new Error(
             'Native session matched more than one case; refusing duplicate attribution.'
           );
+        await platform.bindSession?.(bound);
       } catch (error) {
         if (computerUse.submission.status !== 'completed') {
           computerUse.submission = {

@@ -50,6 +50,10 @@ export interface CoworkDesktop {
     dispose(): Promise<void>;
   }>;
   recover(): Promise<unknown>;
+  /** Cleanup after prepare failed before returning a session; failure retains the lease. */
+  dispose?(): Promise<void>;
+  /** Persist the exact session claimed by the native-session ledger. */
+  bindSession?(transcript: ClaudeTranscript): Promise<void>;
   /** Verify host-specific evidence before accepting a completed native transcript. */
   validateTranscript?(transcript: ClaudeTranscript): Promise<void>;
   /** Account connector names that count as eval MCP calls, not client built-ins. */

@@ -133,4 +133,29 @@ describe('first-party server declarations', () => {
     });
     expect(bindFirstPartyServers(snapshot, []).config.servers).toEqual({});
   });
+  it('rejects a selected connector with an empty authenticated tool inventory', () => {
+    const empty = structuredClone(snapshot);
+    empty.servers[0]!.tools = [];
+    expect(() => bindFirstPartyServers(empty, [server])).toThrow(
+      'listed no tools'
+    );
+    expect(bindFirstPartyServers(empty, []).config.servers).toEqual({});
+  });
+  it('still accepts deliberately blocked tools on a nonempty inventory', () => {
+    expect(
+      bindFirstPartyServers(snapshot, [server], {
+        servers: { 'eval-search': { policy: 'block' } },
+      }).config.servers?.['remote-id']?.policy
+    ).toBe('block');
+    expect(
+      bindFirstPartyServers(snapshot, [server], {
+        servers: {
+          'eval-search': {
+            policy: 'read-only',
+            tools: { search: 'block', write: 'block' },
+          },
+        },
+      }).config.servers?.['remote-id']?.tools
+    ).toEqual({ search: 'block', write: 'block' });
+  });
 });

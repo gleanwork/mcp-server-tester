@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as files from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { describeError } from '../../utils/describeError.js';
+import { redactClientError } from '../clientSecrets.js';
 import {
+  CloudPermissionWriteNotSentError,
   configureCloudConnectors,
   planCloudConnectors,
   verifyCloudConnectorEvents,
@@ -11,6 +15,17 @@ import {
   type CloudConnectorIO,
   type PermissionPatch,
 } from './claudeAiConnectors.js';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof files>();
+  return {
+    ...actual,
+    rename: vi.fn(actual.rename),
+    open: vi.fn(actual.open),
+    link: vi.fn(actual.link),
+    rm: vi.fn(actual.rm),
+  };
+});
 
 const snapshot: CloudConnectorSnapshot = {
   accountId: 'account',
@@ -100,6 +115,731 @@ const policySnapshot: CloudConnectorSnapshot = {
     },
   ],
 };
+
+function permissionFixture() {
+  const state = structuredClone(policySnapshot);
+  const io: CloudConnectorIO = {
+    inspect: vi.fn(async () => structuredClone(state)),
+    read: vi.fn(async () => structuredClone(state)),
+    patch: vi.fn<CloudConnectorIO['patch']>(async (_identity, patch) => {
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === null) delete state.permissions[key];
+        else state.permissions[key] = value;
+      }
+    }),
+    assertTaskComplete: vi.fn(async () => undefined),
+  };
+  return { state, io };
+}
+
+const transactionConfig = {
+  servers: { docs: { policy: 'read-only' as const } },
+};
+
+async function withJournal(
+  test: (path: string) => Promise<void>
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), 'mst-connectors-transaction-'));
+  try {
+    await test(join(dir, 'journal.json'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function journalAt(path: string) {
+  return JSON.parse(await readFile(path, 'utf8')) as {
+    version: number;
+    accountId: string;
+    organizationId: string;
+    original: PermissionPatch;
+    applied: PermissionPatch;
+    pendingWrite?: {
+      purpose: 'configure' | 'restore';
+      patch: PermissionPatch;
+      expected: PermissionPatch;
+    };
+    pendingTask?: { startedAt: string; sessionId?: string };
+  };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetAllMocks();
+});
+
+describe('fail-closed cloud permission transactions', () => {
+  it('publishes an owner-only pre-dispatch marker for configuration and restoration', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const dispatch = io.patch;
+      const seen: Awaited<ReturnType<typeof journalAt>>[] = [];
+      io.patch = vi.fn<CloudConnectorIO['patch']>(
+        async (identity, patch, expected) => {
+          const journal = await journalAt(path);
+          expect(journal.pendingWrite).toEqual({
+            purpose: seen.length === 0 ? 'configure' : 'restore',
+            patch,
+            expected,
+          });
+          expect((await stat(path)).mode & 0o777).toBe(0o600);
+          seen.push(journal);
+          await dispatch(identity, patch, expected);
+        }
+      );
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      const configured = await journalAt(path);
+      expect(configured.version).toBe(2);
+      expect(configured.pendingWrite).toBeUndefined();
+      await session.restore();
+      expect(seen).toHaveLength(2);
+      expect(seen[1]!.original).toEqual(seen[0]!.original);
+      expect(seen[1]!.applied).toEqual(seen[0]!.applied);
+      expect(state.permissions).toEqual({});
+      await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+  });
+
+  it.each(['timeout', 'abort', 'transport disconnect', 'ambiguous HTTP 500'])(
+    'retains a %s outcome even while a deferred write still reads as original',
+    async (failure) => {
+      await withJournal(async (path) => {
+        const { state, io } = permissionFixture();
+        const apply = io.patch;
+        let commit: (() => Promise<void>) | undefined;
+        io.patch = vi.fn<CloudConnectorIO['patch']>(
+          async (identity, patch, expected) => {
+            commit = () => apply(identity, patch, expected);
+            throw new Error(failure);
+          }
+        );
+        await expect(
+          configureCloudConnectors(io, transactionConfig, path)
+        ).rejects.toThrow(new RegExp(`${failure}.*unknown`, 'is'));
+        const pending = await readFile(path, 'utf8');
+        expect(state.permissions).toEqual({});
+        expect((await journalAt(path)).pendingWrite?.purpose).toBe('configure');
+        vi.mocked(io.read).mockClear();
+        await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+          /unknown.*manual/is
+        );
+        await expect(
+          configureCloudConnectors(io, transactionConfig, path)
+        ).rejects.toThrow(/unknown/i);
+        expect(io.read).not.toHaveBeenCalled();
+        expect(io.inspect).toHaveBeenCalledTimes(1);
+        expect(io.patch).toHaveBeenCalledTimes(1);
+        await commit!();
+        expect(state.permissions['docs:search']).toBe(true);
+        await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+          /unknown/i
+        );
+        expect(await readFile(path, 'utf8')).toBe(pending);
+      });
+    }
+  );
+
+  it.each(['configure', 'restore'] as const)(
+    'fails closed after a crash with a persisted %s marker, even before dispatch',
+    async (purpose) => {
+      await withJournal(async (path) => {
+        const { io } = permissionFixture();
+        const saved = {
+          version: 2,
+          accountId: policySnapshot.accountId,
+          organizationId: policySnapshot.organizationId,
+          original: { 'docs:search': null },
+          applied: { 'docs:search': true },
+          pendingWrite: {
+            purpose,
+            patch: { 'docs:search': purpose === 'configure' ? true : null },
+            expected: { 'docs:search': purpose === 'configure' ? null : true },
+          },
+        };
+        await writeFile(path, JSON.stringify(saved), { mode: 0o600 });
+        await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+          /unknown/i
+        );
+        expect(io.patch).not.toHaveBeenCalled();
+        expect(io.read).not.toHaveBeenCalled();
+        expect(await journalAt(path)).toEqual(saved);
+      });
+    }
+  );
+
+  it('does not clear an acknowledged write when verification fails', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      vi.mocked(io.read).mockRejectedValueOnce(
+        new Error('verification disconnected')
+      );
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toThrow(/verification disconnected.*unknown/is);
+      expect(state.permissions['docs:search']).toBe(true);
+      expect((await journalAt(path)).pendingWrite?.purpose).toBe('configure');
+      await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+        /unknown/i
+      );
+      expect(io.patch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('can clean up only a proven not-sent configuration failure', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      io.patch = vi.fn(async () => {
+        throw new CloudPermissionWriteNotSentError('preflight account changed');
+      });
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toThrow('preflight account changed');
+      expect(state.permissions).toEqual({});
+      expect(io.patch).toHaveBeenCalledTimes(1);
+      await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+  });
+
+  it('does not infer a not-sent outcome from an error message or name', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      const generic = new Error('preflight rejection: PATCH was not sent');
+      generic.name = 'CloudPermissionWriteNotSentError';
+      io.patch = vi.fn(async () => {
+        throw generic;
+      });
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toThrow(/outcome is unknown/i);
+      expect((await journalAt(path)).pendingWrite?.purpose).toBe('configure');
+      await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+        /unknown/i
+      );
+      expect(io.patch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('retains the marker and both errors if recording a proven not-sent outcome fails', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      const { rename: realRename } =
+        await vi.importActual<typeof files>('node:fs/promises');
+      let updates = 0;
+      vi.mocked(files.rename).mockImplementation(async (...args) => {
+        if (++updates === 2) throw new Error('not-sent journal update failed');
+        await realRename(...args);
+      });
+      io.patch = vi.fn(async () => {
+        throw new CloudPermissionWriteNotSentError('preflight unavailable');
+      });
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toThrow(
+        /preflight unavailable.*not-sent journal update failed.*unknown/is
+      );
+      expect((await journalAt(path)).pendingWrite?.purpose).toBe('configure');
+      expect(io.patch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('retains an unknown restoration write even when it appears already restored', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      const apply = io.patch;
+      io.patch = vi.fn<CloudConnectorIO['patch']>(
+        async (identity, patch, expected) => {
+          await apply(identity, patch, expected);
+          throw new Error('restore acknowledgement lost');
+        }
+      );
+      await expect(session.restore()).rejects.toThrow(
+        'restore acknowledgement lost'
+      );
+      expect(state.permissions).toEqual({});
+      expect((await journalAt(path)).pendingWrite?.purpose).toBe('restore');
+      await expect(session.restore()).rejects.toThrow(/unknown/i);
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toThrow(/unknown/i);
+      expect(io.patch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('retains a settled journal for retry after a proven not-sent restoration', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      vi.mocked(io.patch).mockRejectedValueOnce(
+        new CloudPermissionWriteNotSentError('read-only preflight unavailable')
+      );
+      await expect(session.restore()).rejects.toThrow(
+        'read-only preflight unavailable'
+      );
+      expect((await journalAt(path)).pendingWrite).toBeUndefined();
+      expect(state.permissions['docs:search']).toBe(true);
+      await session.restore();
+      expect(state.permissions).toEqual({});
+    });
+  });
+
+  it('does not dispatch when atomically publishing a marker fails, preserving the previous journal', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      const previous = await readFile(path, 'utf8');
+      const rename = vi
+        .mocked(files.rename)
+        .mockRejectedValueOnce(new Error('atomic rename denied'));
+      await expect(session.restore()).rejects.toThrow('atomic rename denied');
+      expect(await readFile(path, 'utf8')).toBe(previous);
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      expect(io.patch).toHaveBeenCalledTimes(1);
+      expect(await files.readdir(join(path, '..'))).toEqual(['journal.json']);
+      rename.mockReset();
+      await session.restore();
+    });
+  });
+
+  it('retains the unresolved marker after an acknowledged verified write when clearing it fails', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const { rename: realRename } =
+        await vi.importActual<typeof files>('node:fs/promises');
+      let updates = 0;
+      vi.mocked(files.rename).mockImplementation(async (...args) => {
+        updates++;
+        if (updates === 2) throw new Error('cannot publish acknowledgement');
+        await realRename(...args);
+      });
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toThrow(/cannot publish acknowledgement.*unknown/is);
+      expect(state.permissions['docs:search']).toBe(true);
+      const unresolved = await journalAt(path);
+      expect(unresolved.pendingWrite?.purpose).toBe('configure');
+      expect(unresolved.original['docs:search']).toBeNull();
+      expect(unresolved.applied['docs:search']).toBe(true);
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+        /unknown/i
+      );
+      expect(io.patch).toHaveBeenCalledTimes(1);
+      expect(await files.readdir(join(path, '..'))).toEqual(['journal.json']);
+    });
+  });
+
+  it.each(['write', 'file sync'])(
+    'leaves the prior owner-only journal intact when temporary %s fails',
+    async (boundary) => {
+      await withJournal(async (path) => {
+        const { io } = permissionFixture();
+        const session = await configureCloudConnectors(
+          io,
+          transactionConfig,
+          path
+        );
+        const before = await readFile(path, 'utf8');
+        const { open: realOpen } =
+          await vi.importActual<typeof files>('node:fs/promises');
+        vi.mocked(files.open).mockImplementation(async (...args) => {
+          const file = await realOpen(...args);
+          if (String(args[0]).endsWith('.tmp')) {
+            expect((await file.stat()).mode & 0o777).toBe(0o600);
+            if (boundary === 'write') {
+              const write = file.writeFile.bind(file);
+              vi.spyOn(file, 'writeFile').mockImplementationOnce(async () => {
+                await write('{"partial":');
+                throw new Error('temporary write failed');
+              });
+            } else {
+              vi.spyOn(file, 'sync').mockRejectedValueOnce(
+                new Error('temporary file sync failed')
+              );
+            }
+          }
+          return file;
+        });
+        await expect(session.restore()).rejects.toThrow(/temporary .*failed/);
+        expect(await readFile(path, 'utf8')).toBe(before);
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
+        expect(io.patch).toHaveBeenCalledTimes(1);
+        expect(await files.readdir(join(path, '..'))).toEqual(['journal.json']);
+      });
+    }
+  );
+
+  it('fails closed without dispatch if directory sync fails after publishing the marker', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      const initial = await journalAt(path);
+      const { open: realOpen } =
+        await vi.importActual<typeof files>('node:fs/promises');
+      vi.mocked(files.open).mockImplementation(async (...args) => {
+        const file = await realOpen(...args);
+        if (String(args[0]) === join(path, '..'))
+          vi.spyOn(file, 'sync').mockRejectedValueOnce(
+            new Error('directory sync failed')
+          );
+        return file;
+      });
+      await expect(session.restore()).rejects.toThrow('directory sync failed');
+      const pending = await journalAt(path);
+      expect(pending.pendingWrite?.purpose).toBe('restore');
+      expect(pending.original).toEqual(initial.original);
+      expect(pending.applied).toEqual(initial.applied);
+      expect(io.patch).toHaveBeenCalledTimes(1);
+      await expect(session.restore()).rejects.toThrow(/unknown/i);
+    });
+  });
+
+  it('never replaces an unexpected journal during exclusive initial publication', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const other = '{"version":1,"original":{"keep":true}}';
+      io.inspect = vi.fn(async () => {
+        await writeFile(path, other, { mode: 0o600 });
+        return structuredClone(state);
+      });
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toMatchObject({ code: 'EEXIST' });
+      expect(await readFile(path, 'utf8')).toBe(other);
+      expect(io.patch).not.toHaveBeenCalled();
+      expect(await files.readdir(join(path, '..'))).toEqual(['journal.json']);
+    });
+  });
+
+  it('can finish recovery after a crash boundary between verified restoration and journal deletion', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      const { rm: realRm } =
+        await vi.importActual<typeof files>('node:fs/promises');
+      vi.mocked(files.rm).mockImplementation(async (...args) => {
+        if (String(args[0]) === path)
+          throw new Error('journal removal unavailable');
+        await realRm(...args);
+      });
+      await expect(session.restore()).rejects.toThrow(
+        'journal removal unavailable'
+      );
+      expect(state.permissions).toEqual({});
+      const settled = await journalAt(path);
+      expect(settled.pendingWrite).toBeUndefined();
+      expect(settled.pendingTask).toBeUndefined();
+      vi.mocked(files.rm).mockReset();
+      await expect(recoverCloudConnectorSettings(io, path)).resolves.toBe(true);
+      expect(io.patch).toHaveBeenCalledTimes(2);
+      await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+  });
+
+  it('retains legacy journals that cannot prove write outcomes or task completion', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      const saved = JSON.stringify({
+        version: 1,
+        accountId: 'acme-account',
+        organizationId: 'acme-org',
+        original: {},
+        applied: {},
+      });
+      await writeFile(path, saved, { mode: 0o600 });
+      await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+        /version 1.*manual/is
+      );
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toThrow(/version 1/i);
+      expect(await readFile(path, 'utf8')).toBe(saved);
+      expect(io.read).not.toHaveBeenCalled();
+      expect(io.inspect).not.toHaveBeenCalled();
+      expect(io.patch).not.toHaveBeenCalled();
+    });
+  });
+
+  it('exposes both configuration and rollback errors in the aggregate message', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      io.patch = vi.fn(async () => {
+        throw new CloudPermissionWriteNotSentError(
+          'preflight unavailable Bearer private-token'
+        );
+      });
+      vi.mocked(io.read).mockRejectedValueOnce(
+        new Error('rollback account read failed')
+      );
+      const error: unknown = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      ).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(AggregateError);
+      expect(describeError(error)).toMatch(
+        /preflight unavailable.*rollback account read failed/is
+      );
+      const redacted = redactClientError(error, ['private-token'], 'fallback');
+      expect(redacted).toMatch(
+        /preflight unavailable.*rollback account read failed/is
+      );
+      expect(redacted).not.toContain('private-token');
+      expect((await journalAt(path)).pendingWrite).toBeUndefined();
+    });
+  });
+});
+
+describe('durable cloud task ownership', () => {
+  it('persists the task before submit, binds once, and gates restoration on provider proof', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      const initial = await journalAt(path);
+      await session.beginTask();
+      const unbound = await journalAt(path);
+      expect(unbound.pendingTask).toEqual({ startedAt: expect.any(String) });
+      expect(Number.isFinite(Date.parse(unbound.pendingTask!.startedAt))).toBe(
+        true
+      );
+      await expect(session.restore()).rejects.toThrow(/unbound.*manual/is);
+      expect(io.patch).toHaveBeenCalledTimes(1);
+      expect(io.assertTaskComplete).not.toHaveBeenCalled();
+      await expect(session.beginTask()).rejects.toThrow(/pending task/i);
+      await session.bindTask('cse_trial_1');
+      await expect(session.bindTask('cse_trial_1')).rejects.toThrow(
+        /already bound/i
+      );
+      await expect(session.bindTask('cse_another')).rejects.toThrow(
+        /already bound/i
+      );
+      const bound = await journalAt(path);
+      expect(bound.pendingTask).toEqual({
+        ...unbound.pendingTask,
+        sessionId: 'cse_trial_1',
+      });
+      expect(bound.original).toEqual(initial.original);
+      expect(bound.applied).toEqual(initial.applied);
+      vi.mocked(io.assertTaskComplete!).mockRejectedValueOnce(
+        new Error('task still running')
+      );
+      await expect(session.restore()).rejects.toThrow('task still running');
+      expect(state.permissions['docs:search']).toBe(true);
+      expect((await journalAt(path)).pendingTask).toEqual(bound.pendingTask);
+      await session.confirmTaskComplete();
+      expect(io.assertTaskComplete).toHaveBeenCalledWith(bound.pendingTask);
+      expect((await journalAt(path)).pendingTask).toBeUndefined();
+      await session.beginTask();
+      await session.bindTask('cse_trial_2');
+      await session.restore();
+      expect(io.assertTaskComplete).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sessionId: 'cse_trial_2' })
+      );
+      expect(state.permissions).toEqual({});
+    });
+  });
+
+  it.each(['../cse_trial', 'local_cse_trial', 'cse_', 'cse_trial/other', ''])(
+    'does not bind invalid identity %s',
+    async (id) => {
+      await withJournal(async (path) => {
+        const { io } = permissionFixture();
+        const session = await configureCloudConnectors(
+          io,
+          transactionConfig,
+          path
+        );
+        await expect(session.bindTask('cse_no_task')).rejects.toThrow(
+          /no pending task/i
+        );
+        await session.beginTask();
+        const original = await readFile(path, 'utf8');
+        await expect(session.bindTask(id)).rejects.toThrow(/invalid.*session/i);
+        expect(await readFile(path, 'utf8')).toBe(original);
+        await expect(session.confirmTaskComplete()).rejects.toThrow(/unbound/i);
+      });
+    }
+  );
+
+  it('retains a bound task across recovery without provider completion evidence', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      delete io.assertTaskComplete;
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      await session.beginTask();
+      await session.bindTask('cse_unfinished');
+      const original = await readFile(path, 'utf8');
+      await expect(session.confirmTaskComplete()).rejects.toThrow(
+        /completion proof.*manual/is
+      );
+      await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+        /completion proof/i
+      );
+      await expect(
+        configureCloudConnectors(io, transactionConfig, path)
+      ).rejects.toThrow(/completion proof/i);
+      expect(io.patch).toHaveBeenCalledTimes(1);
+      expect(await readFile(path, 'utf8')).toBe(original);
+    });
+  });
+
+  it.each(['begin', 'bind', 'confirm'] as const)(
+    'retains the preceding task state when atomic %s publication fails',
+    async (boundary) => {
+      await withJournal(async (path) => {
+        const { io } = permissionFixture();
+        const session = await configureCloudConnectors(
+          io,
+          transactionConfig,
+          path
+        );
+        if (boundary !== 'begin') await session.beginTask();
+        if (boundary === 'confirm') await session.bindTask('cse_task');
+        const previous = await readFile(path, 'utf8');
+        vi.mocked(files.rename).mockRejectedValueOnce(
+          new Error('task journal publish failed')
+        );
+        const operation =
+          boundary === 'begin'
+            ? session.beginTask()
+            : boundary === 'bind'
+              ? session.bindTask('cse_task')
+              : session.confirmTaskComplete();
+        await expect(operation).rejects.toThrow('task journal publish failed');
+        expect(await readFile(path, 'utf8')).toBe(previous);
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
+        expect(io.patch).toHaveBeenCalledTimes(1);
+        if (boundary === 'bind')
+          await expect(session.restore()).rejects.toThrow(/unbound/i);
+        if (boundary === 'confirm') {
+          expect(io.assertTaskComplete).toHaveBeenCalledTimes(1);
+          expect((await journalAt(path)).pendingTask?.sessionId).toBe(
+            'cse_task'
+          );
+        }
+      });
+    }
+  );
+
+  it('requires completion proof even when configuration changed no permissions', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        { default: 'inherit' },
+        path
+      );
+      expect(io.patch).not.toHaveBeenCalled();
+      await session.beginTask();
+      await expect(recoverCloudConnectorSettings(io, path)).rejects.toThrow(
+        /unbound/i
+      );
+      expect((await journalAt(path)).original).toEqual({});
+      expect(io.patch).not.toHaveBeenCalled();
+      expect(io.assertTaskComplete).not.toHaveBeenCalled();
+    });
+  });
+
+  it('serializes task changes so concurrent begin calls cannot overwrite task ownership', async () => {
+    await withJournal(async (path) => {
+      const { io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      const results = await Promise.allSettled([
+        session.beginTask(),
+        session.beginTask(),
+      ]);
+      expect(results.map((result) => result.status)).toEqual([
+        'fulfilled',
+        'rejected',
+      ]);
+      expect((await journalAt(path)).pendingTask).toEqual({
+        startedAt: expect.any(String),
+      });
+      await expect(session.restore()).rejects.toThrow(/unbound/i);
+    });
+  });
+
+  it('rejects a provider proof if account identity changes during verification', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      await session.beginTask();
+      await session.bindTask('cse_task');
+      io.assertTaskComplete = vi.fn(async () => {
+        state.accountId = 'other-account';
+      });
+      await expect(session.confirmTaskComplete()).rejects.toThrow(
+        /account or organization changed/i
+      );
+      expect((await journalAt(path)).pendingTask?.sessionId).toBe('cse_task');
+      expect(io.patch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('checks account identity before asking for completion proof', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      await session.beginTask();
+      await session.bindTask('cse_unfinished');
+      state.organizationId = 'other-org';
+      await expect(session.confirmTaskComplete()).rejects.toThrow(
+        /account or organization changed/i
+      );
+      await expect(session.restore()).rejects.toThrow(
+        /account or organization changed/i
+      );
+      expect(io.assertTaskComplete).not.toHaveBeenCalled();
+      expect((await journalAt(path)).pendingTask?.sessionId).toBe(
+        'cse_unfinished'
+      );
+    });
+  });
+});
 
 describe('cloud connector configuration', () => {
   it.each([false, true])(
@@ -617,7 +1357,7 @@ describe('cloud connector configuration', () => {
       state.permissions['glean:search'] = true;
       await expect(session.restore()).rejects.toThrow('concurrent edits');
       expect(state.permissions).toEqual({ 'glean:search': true });
-      expect(JSON.parse(await readFile(journal, 'utf8')).version).toBe(1);
+      expect(JSON.parse(await readFile(journal, 'utf8')).version).toBe(2);
       delete state.permissions['glean:search'];
       await expect(recoverCloudConnectorSettings(io, journal)).resolves.toBe(
         true
@@ -698,7 +1438,7 @@ describe('cloud connector configuration', () => {
     }
   });
 
-  it('rolls back partial application failures', async () => {
+  it('retains unknown partial application failures without automatic rollback', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mst-connectors-failure-'));
     const state = structuredClone(snapshot);
     let fail = true;
@@ -720,7 +1460,10 @@ describe('cloud connector configuration', () => {
       await expect(
         configureCloudConnectors(io, { servers: {} }, join(dir, 'journal.json'))
       ).rejects.toThrow('connection dropped');
-      expect(state.permissions).toEqual({});
+      expect(state.permissions).toEqual({ 'glean:search': false });
+      expect(
+        JSON.parse(await readFile(join(dir, 'journal.json'), 'utf8'))
+      ).toHaveProperty('pendingWrite.purpose', 'configure');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

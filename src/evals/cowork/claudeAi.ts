@@ -11,21 +11,32 @@
  * through the app's own sign-in.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { CoworkDesktop } from './desktop.js';
+import { parseClaudeTranscript } from './transcript.js';
+import { describeError } from '../../utils/describeError.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import { bindFirstPartyServers } from './firstParty.js';
 import {
   CloudConnectorSnapshotSchema,
   CloudPermissionStateSchema,
+  CloudPermissionWriteNotSentError,
   configureCloudConnectors,
   recoverCloudConnectorSettings,
   verifyCloudConnectorEvents,
   type CloudConnectorConfig,
   type CloudConnectorIO,
+  type CloudConnectorTask,
   type CloudPermissionState,
   type PermissionPatch,
 } from './claudeAiConnectors.js';
@@ -73,6 +84,8 @@ interface PageResult {
   sessions?: CloudSessionSummary[];
   events?: CloudSessionEvent[];
   state?: unknown;
+  /** Set only by page preflight, before any permission PATCH is dispatched. */
+  permissionWrite?: 'not-sent';
 }
 
 /**
@@ -81,7 +94,8 @@ interface PageResult {
  * source text.
  */
 const PAGE_PROGRAM = `async ({ action, sessionId, limit, pageLimit, maxPages, patch, expected, identity }) => {
-  if (location.origin !== 'https://claude.ai') return { status: 'wrong_origin' };
+  const preflightRejection = (status) => ({status,...(action === 'patch-permissions' ? {permissionWrite:'not-sent'} : {})});
+  if (location.origin !== 'https://claude.ai') return preflightRejection('wrong_origin');
   const org = document.cookie.split(/;\\s*/).find((c) => c.startsWith('lastActiveOrg='))?.slice('lastActiveOrg='.length);
   const headers = {
     'anthropic-beta': 'ccr-byoc-2025-07-29',
@@ -101,17 +115,17 @@ const PAGE_PROGRAM = `async ({ action, sessionId, limit, pageLimit, maxPages, pa
     return { status: 200, sessions: Array.isArray(r.body?.data) ? r.body.data.map((s) => ({ id: s.id, created_at: s.created_at, last_event_at: s.last_event_at, title: s.title })) : [] };
   }
   if (['permissions', 'connectors', 'patch-permissions'].includes(action)) {
-    if (!org) return {status:'no_active_organization'};
+    if (!org) return preflightRejection('no_active_organization');
     const bootstrap = await get('/api/bootstrap');
-    if (bootstrap.status !== 200) return {status:bootstrap.status};
+    if (bootstrap.status !== 200) return preflightRejection(bootstrap.status);
     const account = bootstrap.body?.account;
     const state = {accountId:account?.uuid, organizationId:decodeURIComponent(org), permissions:account?.settings?.enabled_mcp_tools ?? {}};
     if (action === 'permissions') return {status:200,state};
     if (action === 'patch-permissions') {
-      if (identity.accountId !== state.accountId || identity.organizationId !== state.organizationId) return {status:'account_changed'};
+      if (identity.accountId !== state.accountId || identity.organizationId !== state.organizationId) return preflightRejection('account_changed');
       for (const key of Object.keys(patch)) {
         const current = Object.hasOwn(state.permissions,key) ? state.permissions[key] : null;
-        if (current !== expected[key]) return {status:'permissions_changed_concurrently'};
+        if (current !== expected[key]) return preflightRejection('permissions_changed_concurrently');
       }
       const response = await fetch('/api/account/settings', {method:'PATCH',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({enabled_mcp_tools:patch}),signal:AbortSignal.timeout(15000)});
       return {status:response.status === 202 ? 200 : response.status};
@@ -332,7 +346,13 @@ async function patchCloudPermissions(
     patch,
     expected,
   });
-  requireOk(result, 'updating connector permissions');
+  try {
+    requireOk(result, 'updating connector permissions');
+  } catch (error) {
+    if (result.permissionWrite === 'not-sent')
+      throw new CloudPermissionWriteNotSentError(describeError(error));
+    throw error;
+  }
 }
 
 function cloudInitialEvent(
@@ -409,14 +429,10 @@ export function cloudAuditLines(events: readonly CloudSessionEvent[]): string {
         : typeof payload.user_message_uuid === 'string'
           ? [payload.user_message_uuid]
           : [];
-      // Prewarming emits a successful zero-turn result for setup messages.
-      // It is not completion of the queried prompt, which may still be running.
+      // Results for setup messages (including failed warmup) do not complete
+      // the queried prompt, which may still be running.
       if (
         payload.type === 'result' &&
-        payload.subtype === 'success' &&
-        payload.is_error === false &&
-        payload.num_turns === 0 &&
-        payload.result === '' &&
         messageIds.length > 0 &&
         messageIds.every(
           (id) => typeof id === 'string' && setupMessages.has(id)
@@ -431,6 +447,54 @@ export function cloudAuditLines(events: readonly CloudSessionEvent[]): string {
     })
     .map((line) => `${line}\n`)
     .join('');
+}
+
+/** Re-read the persisted exact cloud task, never infer completion from app state. */
+async function assertCloudTaskComplete(
+  port: number,
+  task: CloudConnectorTask
+): Promise<void> {
+  const sessionId = task.sessionId;
+  if (!sessionId || !/^cse_[0-9A-Za-z_]+$/.test(sessionId))
+    throw new Error(
+      'Cloud task submission is unbound; refusing reset, permission restoration or another task.'
+    );
+  const events = await fetchCloudEvents(port, sessionId);
+  const initial = cloudInitialEvent(events);
+  const submittedAt = Date.parse(initial?.created_at ?? '');
+  if (
+    !initial ||
+    !Number.isFinite(submittedAt) ||
+    submittedAt < Date.parse(task.startedAt) - 5_000
+  )
+    throw new Error(
+      `Cloud task ${sessionId} has no readable submitted prompt for this attempt; refusing restoration or another task.`
+    );
+  // A VM's result before submission is not the task's result. Keep setup
+  // messages so cloudAuditLines also excludes their later warmup results.
+  const first = events.indexOf(initial);
+  const taskEvents = events.filter(
+    (event, index) => event.payload?.type !== 'result' || index > first
+  );
+  const dir = await mkdtemp(join(tmpdir(), 'mst-cloud-task-'));
+  try {
+    await writeFile(join(dir, 'audit.jsonl'), cloudAuditLines(taskEvents), {
+      mode: 0o600,
+    });
+    const transcript = await parseClaudeTranscript({
+      id: sessionId,
+      sessionDir: dir,
+      metadataPath: join(dir, 'metadata.json'),
+      metadata: { sessionId },
+      statMtimeMs: 0,
+    });
+    if (!transcript.auditParsed || !transcript.isComplete)
+      throw new Error(
+        `Cloud task ${sessionId} has no terminal native result; it may still be running. Refusing reset, permission restoration or another task.`
+      );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 async function writeAtomic(path: string, content: string): Promise<void> {
@@ -449,44 +513,74 @@ function mirrorCloudSessions(options: {
   dir: string;
   sinceMs: number;
   intervalMs?: number;
-}): { stop(): Promise<void>; lastError(): string | undefined } {
+}): {
+  stop(): Promise<void>;
+  bindSession(sessionId?: string): void;
+  lastError(): string | undefined;
+} {
   const written = new Map<string, number>();
   let stopped = false;
-  let error: string | undefined;
+  let listError: string | undefined;
+  let sessionErrors = new Map<string, string>();
+  let boundSession: string | undefined;
   const sync = async () => {
-    const sessions = await listCloudSessions(options.port, 10);
+    let sessions: CloudSessionSummary[] = [];
+    try {
+      sessions = await listCloudSessions(options.port, 10);
+      listError = undefined;
+    } catch (error) {
+      listError = describeError(error);
+    }
+    // The bound task is read directly even when absent from the list. Listing
+    // at most ten others keeps polls bounded; one failed fetch cannot starve
+    // a later healthy trial or contaminate the bound task's diagnostics.
+    if (boundSession)
+      sessions = [
+        sessions.find((session) => session.id === boundSession) ?? {
+          id: boundSession,
+        },
+        ...sessions.filter((session) => session.id !== boundSession),
+      ];
+    const errors = new Map<string, string>();
     for (const session of sessions) {
       const activity = Date.parse(
         session.last_event_at ?? session.created_at ?? ''
       );
-      if (!Number.isFinite(activity) || activity < options.sinceMs - 5_000)
+      if (
+        session.id !== boundSession &&
+        (!Number.isFinite(activity) || activity < options.sinceMs - 5_000)
+      )
         continue;
       if (!/^cse_[0-9A-Za-z_]+$/.test(session.id)) continue;
-      const events = await fetchCloudEvents(options.port, session.id);
-      if (written.get(session.id) === events.length) continue;
-      const metadata = cloudTrialMetadata(session, events, options.sinceMs);
-      if (!metadata) continue;
-      const id = `local_${session.id}`;
-      await mkdir(join(options.dir, id), { recursive: true, mode: 0o700 });
-      await writeAtomic(
-        join(options.dir, id, 'audit.jsonl'),
-        cloudAuditLines(events)
-      );
-      await writeAtomic(
-        join(options.dir, `${id}.json`),
-        JSON.stringify(metadata)
-      );
-      written.set(session.id, events.length);
+      try {
+        const events = await fetchCloudEvents(options.port, session.id);
+        if (written.get(session.id) === events.length) continue;
+        const metadata = cloudTrialMetadata(session, events, options.sinceMs);
+        if (!metadata) continue;
+        const id = `local_${session.id}`;
+        await mkdir(join(options.dir, id), { recursive: true, mode: 0o700 });
+        await writeAtomic(
+          join(options.dir, id, 'audit.jsonl'),
+          cloudAuditLines(events)
+        );
+        await writeAtomic(
+          join(options.dir, `${id}.json`),
+          JSON.stringify(metadata)
+        );
+        written.set(session.id, events.length);
+      } catch (error) {
+        const message = describeError(error);
+        errors.set(
+          session.id,
+          message.includes(session.id) ? message : `${session.id}: ${message}`
+        );
+      }
     }
+    sessionErrors = errors;
   };
   const loop = (async () => {
     while (!stopped) {
-      try {
-        await sync();
-        error = undefined;
-      } catch (err) {
-        error = err instanceof Error ? err.message : String(err);
-      }
+      await sync();
       await new Promise((resolve) =>
         setTimeout(resolve, options.intervalMs ?? 2_000)
       );
@@ -497,7 +591,14 @@ function mirrorCloudSessions(options: {
       stopped = true;
       await loop;
     },
-    lastError: () => error,
+    bindSession(sessionId) {
+      boundSession = sessionId;
+    },
+    lastError() {
+      if (boundSession) return sessionErrors.get(boundSession);
+      const errors = [listError, ...sessionErrors.values()].filter(Boolean);
+      return errors.length ? errors.join('; ') : undefined;
+    },
   };
 }
 
@@ -525,6 +626,7 @@ function cloudConnectorIO(port: () => number): CloudConnectorIO {
     read: () => readCloudPermissions(port()),
     patch: (identity, patch, expected) =>
       patchCloudPermissions(port(), identity, patch, expected),
+    assertTaskComplete: (task) => assertCloudTaskComplete(port(), task),
   };
 }
 
@@ -591,8 +693,32 @@ export function coworkClaudeAi(
   let remoteServerNames: string[] = [];
   let serverLabels: Record<string, string> = {};
   let effectiveConnectors = connectors;
+  let mirror: ReturnType<typeof mirrorCloudSessions> | undefined;
+  let submittedPrompt: string | undefined;
+  async function dispose(): Promise<void> {
+    await mirror?.stop();
+    if (configuration) {
+      // restore re-reads the persisted task and refuses unfinished/unbound work.
+      await configuration.restore();
+      configuration = undefined;
+      submittedPrompt = undefined;
+      return;
+    }
+    // prepare can fail before it returns a session, including a transaction
+    // whose rollback failed. Its journal still requires the shared lease.
+    try {
+      await readFile(journal, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    throw new Error(
+      `Cowork preparation left connector recovery state at ${journal}; refusing to release the desktop lease. Restore connector settings before another run.`
+    );
+  }
   return {
     dataDirectory: () => dir,
+    dispose,
     mcpServerNames: () => remoteServerNames,
     mcpServerLabels: () => serverLabels,
     async prepare({ env }) {
@@ -642,20 +768,22 @@ export function coworkClaudeAi(
         } catch (restoreError) {
           throw new AggregateError(
             [error, restoreError],
-            `Preparing ${dir} failed and restoring connector permissions failed; inspect ${journal}.`
+            `Preparing ${dir} failed (${describeError(error)}) and restoring connector permissions failed (${describeError(restoreError)}); inspect ${journal}.`
           );
         }
         throw error;
       }
-      const mirror = mirrorCloudSessions({ port, dir, sinceMs: Date.now() });
+      mirror = mirrorCloudSessions({ port, dir, sinceMs: Date.now() });
+      const recorder = mirror;
       process.stderr.write(
         `[mst:cowork] claude.ai mode: Claude ${version}, reading Cowork sessions through Chrome on port ${port}\n`
       );
       return {
         appPath,
         app: { name: 'Claude', version, source: 'installed' as const },
-        recordingError: () => mirror.lastError(),
+        recordingError: () => recorder.lastError(),
         async restart() {
+          await configuration?.confirmTaskComplete();
           await run('/usr/bin/osascript', [
             '-e',
             'tell application "Claude" to quit',
@@ -664,30 +792,59 @@ export function coworkClaudeAi(
           await run('/usr/bin/open', ['-a', appPath]);
           await new Promise((resolve) => setTimeout(resolve, 8_000));
         },
-        async dispose() {
-          try {
-            await mirror.stop();
-          } finally {
-            await configuration?.restore();
-            configuration = undefined;
-          }
-        },
+        dispose,
       };
     },
     async recover() {
       return undefined;
     },
-    ...(base.reset ? { reset: (options) => base.reset!(options) } : {}),
+    ...(base.reset
+      ? {
+          async reset(options) {
+            await configuration?.confirmTaskComplete();
+            await base.reset!(options);
+          },
+        }
+      : {}),
     // Signed in to claude.ai, Claude Desktop opens on Chat with Cowork one
     // tab away, so the planner can spend its actions looking for the
     // composer. Claude's own deep link opens a fresh Cowork task first.
     async submit(query, options) {
+      if (!configuration)
+        throw new Error(
+          'Prepare the cloud connector transaction before submitting.'
+        );
+      await configuration.confirmTaskComplete();
+      // Record intent before any UI action that might create a cloud task.
+      // Even a rejected/timed-out submit stays unbound until proven otherwise.
+      await configuration.beginTask();
+      submittedPrompt = query;
+      mirror?.bindSession(undefined);
       await run('/usr/bin/open', [NEW_COWORK_TASK_URL]);
       await new Promise((resolve) => setTimeout(resolve, 3_000));
       return base.submit(query, options);
     },
+    async bindSession(transcript) {
+      const sessionId = transcript.candidate.metadata.sessionId;
+      if (
+        !configuration ||
+        submittedPrompt === undefined ||
+        transcript.binding?.kind !== 'exact-initial-prompt' ||
+        transcript.candidate.metadata.initialMessage !== submittedPrompt ||
+        !sessionId ||
+        !/^cse_[0-9A-Za-z_]+$/.test(sessionId)
+      )
+        throw new Error(
+          'Cloud task did not bind an exact submitted prompt and session ID; refusing to guess its identity.'
+        );
+      await configuration.bindTask(sessionId);
+      mirror?.bindSession(sessionId);
+    },
     async validateTranscript(transcript) {
       if (!configuration) return;
+      // Task liveness and policy validity are independent. Clear a proven
+      // terminal task before policy checks that may reject its evidence.
+      await configuration.confirmTaskComplete();
       const receipt = {
         requested: connectors,
         mode: 'first-party',

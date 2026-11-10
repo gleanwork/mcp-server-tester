@@ -167,9 +167,21 @@ events through a separate Chrome recorder profile signed in to the same account
 and mirrors them into MST's native transcript layout. It does not copy cookies,
 provision VMs, or submit tasks through an undocumented API.
 
-Start the Chrome profile with a loopback DevTools port, then set
-`clientOptions.env.MST_CLAUDE_AI_DEBUG_PORT` to the port (default `9222`). Keep
-the port private to the local machine. First-party mode does not install developer
+Start a dedicated Chrome recorder profile with a loopback DevTools port. Use a
+`--user-data-dir` that no other Chrome uses, and sign in to the same claude.ai
+account as Claude Desktop in that window. Do not copy cookies or reuse another
+profile's session.
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --user-data-dir="$HOME/.mcp-server-tester/claude-ai-recorder" \
+  --remote-debugging-port=9222 \
+  --remote-debugging-address=127.0.0.1 \
+  https://claude.ai
+```
+
+Set `clientOptions.env.MST_CLAUDE_AI_DEBUG_PORT` to the port (default `9222`).
+Keep the port private to the local machine. First-party mode does not install developer
 MCP servers, marketplace plugins, or an inference gateway profile. It does not
 register new connectors or sign in to them. Authenticate each connector in the
 Claude account first.
@@ -277,31 +289,68 @@ Cowork run drives the app at a time. MST reads at most 10,000 events from a
 session. A longer session fails with an error that names the cap; MST does not
 truncate it.
 
-The permission API is undocumented and may change. MST records the original
-values before applying settings, verifies each write, and restores changed keys
-on close. Keys absent originally are removed, not replaced with explicit allows.
+The permission API is undocumented and may change. Use the account exclusively
+during a run or recovery: do not run tasks or edit connector settings in another
+Claude session. MST's checks detect observed conflicts; they are not an atomic
+lock against other applications. MST records the original values before
+applying settings, verifies each write, and restores changed keys on close.
+Keys absent originally are removed, not replaced with explicit allows. A normal
+completed run restores automatically.
+
 A private recovery journal at
-`~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash. The next
-configured run recovers it under the desktop lock. Concurrent edits are not
-overwritten; conflicting values retain the journal and stop the run. If an
-excluded connector cannot list its tools, preparation aborts. Checking a task
-afterward is not a security boundary against a connector that changes its tool
-inventory while the task runs.
+`~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash. MST
+writes it before the first permission write and before it submits the first
+task. A journal from an older MST version (v1) has no write-outcome or task
+record, so MST does not trust it silently.
+
+MST keeps the journal and the desktop lock, and blocks both automatic recovery
+and a new configured run, in any of these cases:
+
+- A permission write has an unknown or in-flight outcome. This holds even if a
+  later read matches the original value. There is no force option.
+- MST persisted the intent to submit a task, but no session is bound to it, or
+  the bound session cannot be read.
+- The bound session has no authoritative terminal state. Quitting Claude Desktop
+  does not prove that a cloud task stopped.
+- The account or organization differs, or a concurrent edit changed a value.
+
+If an excluded connector cannot list its tools, preparation aborts. Checking a
+task afterward is not a security boundary against a connector that changes its
+tool inventory while the task runs.
 
 #### Recover connector settings
 
-If a run was killed, restore from the journal without starting an eval:
+If a run was killed, restore from the journal without starting an eval. The
+command reads the port only from its own shell, not from the eval config. Export
+the same port the run used:
 
 ```bash
+export MST_CLAUDE_AI_DEBUG_PORT=9222   # omit if the recorder uses the default
 npx mst cowork restore-connectors [--recover-stale-lock]
 ```
 
-This macOS command uses the existing Chrome recorder profile sign-in, takes the
-shared lease, and checks the journal's account and organization and for
-concurrent permission edits before it restores. It runs no eval, changes no
-policy plan, and does not drive the app. Without the flag, any existing lease
-fails the command. `--recover-stale-lock` removes a lease only when its owner is
-provably dead; a live or unknown owner is always rejected.
+This macOS command uses the existing Chrome recorder profile sign-in. It runs no
+eval, changes no policy plan, and does not drive the app. It restores only after
+all of these checks pass: account and organization identity, no concurrent
+permission edits, every write outcome known, and the bound task finished with
+authoritative terminal evidence.
+
+Recovery takes two files under `~/.mcp-server-tester`: the shared desktop lease
+and a separate recovery guard (`cowork-desktop-macos.lock.recovery`). The guard
+stops two recoveries from racing. An interrupted recovery can leave it behind.
+If restoration fails, MST releases the guard but keeps the desktop lease and the
+journal. A kept lease blocks both new runs and later recovery.
+
+Without the flag, any existing lease fails the command.
+`--recover-stale-lock` removes a desktop lease only when its local owner process
+is provably dead. It does not prove that a cloud task finished or that a
+permission write settled, and it never reclaims the recovery guard. A live or
+unknown owner is always rejected.
+
+An unknown write or an unbound task may need manual investigation in the Claude
+account, such as its connector permissions and recent Cowork tasks. Do not
+delete the journal or a lock to retry: that discards the only record of the
+original permissions.
 
 ## Run on macOS from a source checkout
 
