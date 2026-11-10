@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/gleanwork/mcp-server-tester/schema/eval-config.schema.json",
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester@2/schema/eval-config.schema.json",
   "title": "MCP eval config",
   "description": "An eval config: what to evaluate and how. Pluggable blocks resolve through the tester's extensions.",
   "type": "object",

@@ -61,6 +61,51 @@ async function runRecord(dir: string): Promise<RunRecord> {
 }
 
 describe("run.json's setup identity", () => {
+  it("records each judge's version beside its identity", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'run-identity-'));
+    dirs.push(dir);
+    await writeEval(dir, 'token');
+    const config = JSON.parse(
+      await fs.readFile(path.join(dir, 'eval.json'), 'utf8')
+    ) as Record<string, unknown>;
+    await fs.writeFile(
+      path.join(dir, 'eval.json'),
+      JSON.stringify({
+        ...config,
+        judges: ['acme/judge/plain', 'acme/judge/pinned'],
+      })
+    );
+    const judge = (version?: string) => ({
+      schema: z.object({}),
+      ...(version !== undefined ? { version } : {}),
+      evaluate: async () => ({ score: 1 }),
+    });
+    const { outputDir } = await runEval({
+      configPath: path.join(dir, 'eval.json'),
+      rootDir: dir,
+      plugins: [
+        { ...plugin, judges: { plain: judge(), pinned: judge('2026-11') } },
+      ],
+    });
+    const record = JSON.parse(
+      await fs.readFile(path.join(outputDir, 'run.json'), 'utf8')
+    ) as RunRecord;
+    expect(
+      record.judges?.map(({ type, version, unversioned }) => ({
+        type,
+        version,
+        unversioned,
+      }))
+    ).toEqual([
+      // No version of its own: its plugin's package version stands for it.
+      { type: 'acme/judge/plain', version: '1.2.3', unversioned: undefined },
+      { type: 'acme/judge/pinned', version: '2026-11', unversioned: undefined },
+    ]);
+    expect(
+      record.judges?.every((j) => /^[0-9a-f]{64}$/.test(j.identity!))
+    ).toBe(true);
+  });
+
   it("hashes a secret option the same in the eval's runs, and records the plugins", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'run-identity-'));
     dirs.push(dir);

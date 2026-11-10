@@ -548,6 +548,7 @@ function historyRunOf(run: RunRecord, summary: EvaluationSummary): HistoryRun {
       type: judge.type,
       level: judge.level,
       ...(judge.identity ? { identity: judge.identity } : {}),
+      ...(judge.version !== undefined ? { version: judge.version } : {}),
       optionsHash: judge.optionsHash,
     })),
     ...(run.plugins

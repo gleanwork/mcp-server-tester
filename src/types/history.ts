@@ -220,6 +220,8 @@ export interface HistoryRun {
     type: string;
     level: string;
     identity?: string;
+    /** The judge's version as run.json recorded it, for a person to read. */
+    version?: string;
     optionsHash: string;
   }>;
   /**

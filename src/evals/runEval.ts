@@ -106,7 +106,7 @@ import type { CaseJudge } from './datasetTypes.js';
 import {
   contentHash,
   judgeIdentity,
-  judgeIsVersioned,
+  judgeVersionFields,
 } from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { WriteRecordLedger, withWriteRecords } from './writeRecord.js';
@@ -847,9 +847,15 @@ function assertResumable(
   const recorded = run.judges ?? [];
   const withoutIdentity = (records: readonly JudgeRecord[]) =>
     // What older runs don't record: a run graded before MST recorded them
-    // can still be resumed.
+    // can still be resumed. A judge's version is only for reading: its
+    // identity, compared below, covers it.
     records.map(
-      ({ identity: _identity, unversioned: _unversioned, ...record }) => record
+      ({
+        identity: _identity,
+        unversioned: _unversioned,
+        version: _version,
+        ...record
+      }) => record
     );
   if (
     JSON.stringify(withoutIdentity(recorded)) !==
@@ -922,22 +928,27 @@ function entryIdentity(
 }
 
 /**
- * Whether an eval config entry's judge has no version MST can see change.
- * Scores record it for pointwise judges; run.json records it for every
- * level, so a pairwise judge's calibration can say so too.
+ * An eval config entry's judge version, which a person reads beside its
+ * identity, and whether it has no version MST can see change. Scores record
+ * `unversioned` for pointwise judges; run.json records both for every level,
+ * so a pairwise judge's calibration can say so too. Nothing when the judge
+ * isn't loaded.
  */
-function entryUnversioned(level: string, entry: unknown): boolean {
+function entryVersion(
+  level: string,
+  entry: unknown
+): { version?: string; unversioned?: true } {
   const config = (typeof entry === 'string' ? { type: entry } : entry) as {
     type: string;
   } & Record<string, unknown>;
   try {
     if (level === 'pairwise') {
       const { type } = pairwiseJudgeSpec(config);
-      return !judgeIsVersioned(type, getPairwiseJudge(type));
+      return judgeVersionFields(type, getPairwiseJudge(type));
     }
-    return !judgeIsVersioned(config.type, getJudge(config.type));
+    return judgeVersionFields(config.type, getJudge(config.type));
   } catch {
-    return false;
+    return {};
   }
 }
 
@@ -971,9 +982,7 @@ function judgeRecords(
           .update(JSON.stringify(options))
           .digest('hex'),
         ...(identity !== undefined ? { identity } : {}),
-        ...(entryUnversioned(level, entry)
-          ? { unversioned: true as const }
-          : {}),
+        ...entryVersion(level, entry),
       };
     };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);

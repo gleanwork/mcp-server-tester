@@ -32,6 +32,7 @@ vi.mock('./chatgptSetup/session.js', () => ({
     restart = lifecycle.restart;
     dispose = lifecycle.dispose;
     telemetry = { scope: 'batch', id: 'test-batch' };
+    app = { name: 'ChatGPT', version: '1.2026.300', source: 'installed' };
   },
 }));
 vi.mock('node:os', async (original) => ({
@@ -445,6 +446,11 @@ describe('ChatGPT V2 batch client', () => {
       scope: 'batch',
       id: 'test-batch',
     });
+    // Every trial records the app the batch's session ran.
+    expect(transcripts.map((r) => r.telemetry?.clientApp)).toEqual([
+      { name: 'ChatGPT', version: '1.2026.300', source: 'installed' },
+      { name: 'ChatGPT', version: '1.2026.300', source: 'installed' },
+    ]);
   });
   it.each(['servers', 'credentials', 'environment'])(
     'opens separate sessions for different %s',

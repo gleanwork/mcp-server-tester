@@ -349,7 +349,9 @@ async function check(
   return { checks, text: out.join('') };
 }
 
-describe('mst judges check', () => {
+// These run, grade and resume real evals: about 1 s each alone, over the 5 s
+// default when the full suite loads the machine.
+describe('mst judges check', { timeout: 20_000 }, () => {
   it('prints JSON with --json from the command line', async () => {
     // `judges` has a --json of its own: check must still get it.
     const { base } = await evalDirectory();
@@ -595,8 +597,7 @@ describe('mst judges check', () => {
     );
     resetPluginsForTests();
     expect(await status(await run(base))).toBe('stale');
-    // Four eval runs: under 1 s alone, over the 5 s default in a full suite.
-  }, 20_000);
+  });
 
   it('gives the identity run.json records, which changes with the pass threshold', async () => {
     const identities = async (threshold?: number) => {

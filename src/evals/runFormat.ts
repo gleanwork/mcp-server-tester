@@ -307,6 +307,8 @@ const RunRecordSchema = z.looseObject({
           .string()
           .regex(/^[0-9a-f]{64}$/)
           .optional(),
+        /** The judge's version, or its plugin's (ADR 0009). */
+        version: z.string().optional(),
         /** The judge has no version MST can see change (ADR 0009). */
         unversioned: z.literal(true).optional(),
       })
@@ -774,6 +776,36 @@ const LatestRecordSchema = z.looseObject({
   path: z.string(),
 });
 
+/**
+ * A stored run's `manifest.json`, which its upload writes last: each file's
+ * size and SHA-256 (`runStore.ts`). It has its own `format: 1`, which
+ * predates `mst.run/v1`; `kind` names its schema, and manifests from before
+ * rc.1 have none.
+ */
+const RunManifestSchema = z.looseObject({
+  format: z.literal(1),
+  kind: z.literal('manifest').optional(),
+  runId: z.string(),
+  files: z.array(
+    z.looseObject({
+      path: z.string(),
+      bytes: z.number().int().nonnegative(),
+      sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+  ),
+});
+
+/** A stored run's `manifest.json`. */
+export type RunManifest = z.infer<typeof RunManifestSchema>;
+
+/**
+ * Parse a stored run's `manifest.json`. Throws with the file's name, and
+ * says to upgrade MST for a format it doesn't know.
+ */
+export function parseRunManifest(value: unknown, file: string): RunManifest {
+  return parseRunFile(RunManifestSchema, value, file, "a run's manifest");
+}
+
 /** The schemas `schema/run/v1/` is generated from, by file kind. */
 export const RUN_SCHEMAS = {
   run: RunRecordSchema,
@@ -785,6 +817,7 @@ export const RUN_SCHEMAS = {
   results: ResultsRecordSchema,
   summary: SummaryRecordSchema,
   latest: LatestRecordSchema,
+  manifest: RunManifestSchema,
 } as const;
 
 /** A dataset's content hash: the cases a run took from it, as they ran. */
@@ -838,6 +871,13 @@ export interface JudgeRecord {
   level: string;
   optionsHash: string;
   identity?: string;
+  /**
+   * The version a person reads beside the identity: the one the judge
+   * declares or, for a plugin judge that declares none, its plugin's package
+   * version. Absent for an unversioned judge, a built-in that declares none
+   * (MST's version stands for it), and runs from before MST recorded it.
+   */
+  version?: string;
   /** The judge has no version MST can see change (ADR 0009). */
   unversioned?: true;
 }

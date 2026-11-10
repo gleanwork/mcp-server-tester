@@ -110,7 +110,11 @@ const ROLLOUT = [
   line({
     timestamp: at(0),
     type: 'session_meta',
-    payload: { id: 'thread-1', originator: 'codex_sdk_ts' },
+    payload: {
+      id: 'thread-1',
+      originator: 'codex_sdk_ts',
+      cli_version: '0.160.1',
+    },
   }),
   line({
     timestamp: at(0),
@@ -333,6 +337,8 @@ describe('buildCodexTranscript', () => {
     ]);
     expect(transcript.usage?.durationMs).toBe(8000);
     expect(transcript.telemetry).toMatchObject({
+      // The version the Codex CLI that ran wrote into its own rollout.
+      clientApp: { name: 'Codex CLI', version: '0.160.1', source: 'installed' },
       models: ['gpt-5.5'],
       reasoningEffort: 'medium',
       apiCallCount: 3,

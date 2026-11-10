@@ -72,6 +72,32 @@ export async function runCLIClient(
   signal?: AbortSignal,
   systemPrompt?: string
 ): Promise<ClientRunResult> {
+  // Claude Code's init event says which version runs, with or without MCP
+  // servers to check; every trial records it, however it ended.
+  const observer =
+    cliConfig.claudeMcpServers !== undefined
+      ? new ClaudeStartup(cliConfig.claudeMcpServers)
+      : undefined;
+  const result = await runCLIProcess(
+    cliConfig,
+    input,
+    observer,
+    signal,
+    systemPrompt
+  );
+  const app = observer?.app;
+  return app
+    ? { ...result, telemetry: { ...result.telemetry, clientApp: app } }
+    : result;
+}
+
+async function runCLIProcess(
+  cliConfig: CLIConfig,
+  input: string,
+  observer: ClaudeStartup | undefined,
+  signal?: AbortSignal,
+  systemPrompt?: string
+): Promise<ClientRunResult> {
   const timeout = cliConfig.timeout ?? DEFAULT_TIMEOUT;
   const args = interpolateArgs(cliConfig.args, input, systemPrompt);
 
@@ -85,9 +111,8 @@ export async function runCLIClient(
       diagnostics: { failureKind: 'output' },
     };
   }
-  const startup = cliConfig.claudeMcpServers?.length
-    ? new ClaudeStartup(cliConfig.claudeMcpServers)
-    : undefined;
+  // It checks the servers' startup only when there are servers to check.
+  const startup = cliConfig.claudeMcpServers?.length ? observer : undefined;
 
   // When each line arrived: stream-json events carry no times of their own.
   const clock =
@@ -112,10 +137,11 @@ export async function runCLIClient(
       isClaude,
       cwd: cliConfig.cwd,
       onStdout:
-        startup || clock
+        observer || clock
           ? (chunk) => {
               clock?.push(chunk);
-              return startup?.push(chunk);
+              const error = observer?.push(chunk);
+              return startup ? error : undefined;
             }
           : undefined,
     });

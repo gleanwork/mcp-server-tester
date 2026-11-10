@@ -4,6 +4,7 @@ import { CHATGPT_PRODUCT } from './product.js';
 import { chatgptDesktopEnvironment } from './driver.js';
 import { runLinuxChatgptDesktop } from './linuxDesktop.js';
 import { submitNatively } from './turn.js';
+import { installedDebApp } from '../installedApp.js';
 import {
   createLinuxChatgptProfile,
   readLinuxChatgptEnvironment,
@@ -43,6 +44,10 @@ export const chatgptLinux: ChatgptDesktop = {
     return prepared.telemetry;
   },
   validate: validateLinuxChatgptConfig,
+  /** The image installs ChatGPT as the `chatgpt` package (docker/chatgpt-linux). */
+  async app() {
+    return installedDebApp('chatgpt', 'ChatGPT');
+  },
   /** Cold Linux first turns need time to flush. */
   bindingWindowMs: 120_000,
   nativeMarkdownEscapes: true,

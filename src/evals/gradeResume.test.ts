@@ -441,6 +441,28 @@ describe('mst grade --resume', () => {
     ).rejects.toThrow(/Dataset "cases" changed since run .* was graded/);
   }, 60_000);
 
+  it('resumes an rc.0 run, whose judges record no version', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const f = await fixture();
+    vi.stubEnv('GRADE_TEST_KEY', KEY);
+    const graded = (await gradeRun({ ...f.base, run: f.collectedId }))
+      .outputDir;
+    const runFile = path.join(graded, 'run.json');
+    const run = JSON.parse(await fs.readFile(runFile, 'utf8'));
+    const judges = run.judges as Array<Record<string, unknown>>;
+    expect(judges.some((judge) => typeof judge.version === 'string')).toBe(
+      true
+    );
+    await fs.writeFile(
+      runFile,
+      JSON.stringify({
+        ...run,
+        judges: judges.map(({ version: _version, ...rest }) => rest),
+      })
+    );
+    await gradeRun({ ...f.base, run: path.basename(graded), resume: true });
+  }, 60_000);
+
   it("resumes a run graded before judges had an identity, and refuses when a judge's identity changed", async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const f = await fixture();
