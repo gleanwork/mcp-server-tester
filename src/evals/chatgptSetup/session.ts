@@ -91,6 +91,7 @@ function sessionSettings(
     pluginCredentials: config.pluginCredentials ?? {},
     model: config.model,
     reasoningEffort: config.reasoningEffort,
+    rolloutTrace: config.rolloutTrace === true,
     surface: chatgptSurface(config),
     environment: readLaunchEnvironment(config.options?.environment),
     sessionsRoot: stringOption(config.options, 'chatgptSessionRoot'),
@@ -161,6 +162,8 @@ export class ChatgptAppSession {
     platform: ChatgptDesktop;
   };
   sessionsRoot?: string;
+  /** Private batch root, never itself reported as a trial's artifacts. */
+  rolloutTraceRoot?: string;
   /** Linux: where native evidence is copied before profile teardown. */
   evidenceDir?: string;
   /**
@@ -248,6 +251,14 @@ export class ChatgptAppSession {
       }
       lifecycle.stopped = true;
       const environment = { ...settings.environment };
+      // The trace root belongs to MST, not an inherited/operator path.
+      delete environment.CODEX_ROLLOUT_TRACE_ROOT;
+      if (settings.rolloutTrace) {
+        this.rolloutTraceRoot = await realpath(
+          await mkdtemp(join(tmpdir(), 'mst-chatgpt-trace-'))
+        );
+        environment.CODEX_ROLLOUT_TRACE_ROOT = this.rolloutTraceRoot;
+      }
       if (settings.codexSetup) {
         if (!this.#profile && chatgptSurface(config) === 'codex')
           this.workspace = await realpath(
@@ -464,6 +475,10 @@ export class ChatgptAppSession {
       if (this.#profile && (!lifecycle || lifecycle.stopped)) {
         await this.#profile.dispose();
         this.record('cleanup', 'dispose_profile');
+      }
+      if (this.rolloutTraceRoot) {
+        await rm(this.rolloutTraceRoot, { recursive: true, force: true });
+        this.record('cleanup', 'remove_rollout_trace');
       }
       if (this.workspace) {
         await rm(this.workspace, { recursive: true, force: true });

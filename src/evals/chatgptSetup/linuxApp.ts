@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isAbsolute, resolve } from 'node:path';
 import type { ChatgptApplicationController } from '../chatgpt/driver.js';
 import {
   CodexSetupError,
@@ -113,6 +114,13 @@ export function createLinuxChatgptApp(
       if (key === 'CODEX_HOME') {
         if (value !== baseEnvironment.CODEX_HOME)
           throw new CodexSetupError('environment_invalid', 'CODEX_HOME');
+        continue;
+      }
+      // The batch owns this private trace root; no evaluator credentials.
+      if (key === 'CODEX_ROLLOUT_TRACE_ROOT') {
+        if (!isAbsolute(value) || resolve(value) !== value || value === '/')
+          throw new CodexSetupError('environment_invalid', key);
+        environment[key] = value;
         continue;
       }
       // Only MCP bearer variables reach the app; no other evaluator values.
