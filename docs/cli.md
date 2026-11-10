@@ -1135,6 +1135,14 @@ A candidate is clearly better when its metric went up and a paired sign-flip tes
 
 `mst run --detach` and `mst grade --detach` run the coordinator on a machine the runner creates, so the machine you typed them on can go offline ([ADR 0007](./adr/0007-detached-runs-move-the-coordinator.md)). The coordinator runs `mst run`, then `mst run --resume` once if the run is partial, then `mst grade --runner` with `--grade-runner`, and keeps the run in the result store.
 
+First-party Cowork cannot detach: its account control requires an attached
+macOS source host, including when the app runs on Linux. MST resolves plugin
+shared configs and effective variant clients before refusing, without opening
+result stores, reading secrets, validating/loading datasets or creating a
+coordinator. Omitting account runner configuration does not bypass this check.
+It applies to run, resume and grade detach; default third-party Cowork detach
+is unchanged. See [Cloud sessions](./cowork.md#cloud-sessions).
+
 ```bash
 npx mst run --config ./eval.json --runner acme/runner/cloud-vm --runner-option shards=20 --grade-runner \
   --results gs://my-bucket/evals --store acme/credential-store/secret-manager \

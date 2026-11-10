@@ -14,6 +14,14 @@ Grade shards run in the eval client's image, without a desktop.
 
 MST provides the image as a Dockerfile that you build yourself (`mst runner setup docker`). It installs Claude Desktop from Anthropic's Linux package repository at build time; MST doesn't publish an image with Claude Desktop in it.
 
+This page describes default third-party mode. First-party Linux mode attaches
+to a separately prepared plugin account image; stock `--runner docker` does not
+stage an account. It requires one attached shard, a dedicated account, one
+designated macOS source host and a private source-control relay, with no
+MST-managed inference credential. Its native Linux behavior has only offline
+fixture validation. See [Linux account runtime and source control](./cowork.md#linux-account-runtime-and-source-control)
+for the implemented boundary and remaining live-validation requirements.
+
 ## What you need
 
 - A Docker host with KVM, and `/dev/vhost-vsock`, `/dev/vhost-net` and `/dev/net/tun`. Cowork runs its agent in a VM, so the container needs hardware virtualization:

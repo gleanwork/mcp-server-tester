@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { resetPluginsForTests } from '../../plugins/extensions.js';
 import { fileRunStore } from '../runStore.js';
 import { evalResultStore } from '../runEval.js';
+import * as runEvalIO from '../runEval.js';
+import { run as runCommand } from '../../cli/commands/run/index.js';
 import { detach } from './launch.js';
 import {
   coordinatorPaths,
@@ -486,6 +488,36 @@ describe('--detach', () => {
     return { dir, configPath, secrets };
   }
 
+  async function accountEvalConfig(extra: Record<string, unknown>) {
+    const f = await evalConfig(extra);
+    const plugin = path.join(f.dir, 'account-plugin.mjs');
+    await fs.writeFile(
+      plugin,
+      `export default {
+        meta: { name: 'account-config-test', namespace: 'account' },
+        configs: {
+          'first-party': {
+            client: 'cowork', clientOptions: { mode: 'first-party' }
+          },
+          'third-party': {
+            client: 'cowork', clientOptions: { mode: 'third-party' }
+          }
+        }
+      };`
+    );
+    const written = JSON.parse(
+      await fs.readFile(f.configPath, 'utf8')
+    ) as Record<string, unknown>;
+    await fs.writeFile(
+      f.configPath,
+      JSON.stringify({
+        ...written,
+        plugins: [mock('detachPlugin.ts'), plugin],
+      })
+    );
+    return f;
+  }
+
   const base = {
     command: 'run' as const,
     runner: 'detach/runner/remote',
@@ -562,6 +594,198 @@ describe('--detach', () => {
       machine: result.machine,
     });
   });
+
+  it.each([
+    {
+      name: 'direct mode without account runner configuration',
+      config: { client: 'cowork', clientOptions: { mode: 'first-party' } },
+    },
+    {
+      name: 'fully qualified built-in client',
+      config: {
+        client: 'mst/client/cowork',
+        clientOptions: { mode: 'first-party' },
+      },
+    },
+    {
+      name: 'variant replacing third-party mode',
+      config: {
+        client: 'cowork',
+        clientOptions: { mode: 'third-party' },
+        variants: [
+          { name: 'managed' },
+          { name: 'account', clientOptions: { mode: 'first-party' } },
+        ],
+      },
+    },
+    {
+      name: 'variant replacing another client',
+      config: {
+        client: 'api',
+        variants: [
+          {
+            name: 'account',
+            client: 'cowork',
+            clientOptions: { mode: 'first-party' },
+          },
+        ],
+      },
+    },
+    {
+      name: 'variant inheriting account mode',
+      config: {
+        client: 'cowork',
+        clientOptions: { mode: 'first-party' },
+        variants: [{ name: 'inherited', model: 'claude-opus-4-6' }],
+      },
+    },
+    {
+      name: 'plugin shared account config',
+      config: {
+        client: undefined,
+        extends: ['account/config/first-party'],
+      },
+    },
+    {
+      name: 'variant replacing a plugin shared third-party default',
+      config: {
+        client: undefined,
+        extends: ['account/config/third-party'],
+        variants: [{ name: 'account', clientOptions: { mode: 'first-party' } }],
+      },
+    },
+  ])(
+    'refuses $name before result, secret, dataset or coordinator I/O',
+    async ({ config }) => {
+      const f = await accountEvalConfig({
+        ...config,
+        // This path deliberately does not exist. Refusal must precede even
+        // dataset path validation, not just dataset source loading.
+        datasets: ['./unread-dataset.json'],
+      });
+      const resultStore = vi
+        .spyOn(runEvalIO, 'evalResultStore')
+        .mockRejectedValue(new Error('Unexpected result store I/O'));
+      const secrets = vi
+        .spyOn(runEvalIO, 'loadSecretsFile')
+        .mockRejectedValue(new Error('Unexpected secrets I/O'));
+      const datasets = vi
+        .spyOn(runEvalIO, 'loadEvalDatasets')
+        .mockRejectedValue(new Error('Unexpected dataset I/O'));
+      const log = vi.fn();
+      await expect(
+        detach({
+          ...base,
+          configPath: f.configPath,
+          rootDir: f.dir,
+          secretsFile: path.join(f.dir, 'unread-secrets.env'),
+          log,
+        })
+      ).rejects.toThrow(/--detach.*first-party Cowork.*attached/);
+      // Exercise the CLI's public detach entry too, not only the launcher.
+      await expect(
+        runCommand({
+          config: f.configPath,
+          rootDir: f.dir,
+          detach: true,
+          runner: base.runner,
+          runnerOption: base.runnerOptions,
+          results: base.results,
+          secretsFile: path.join(f.dir, 'unread-secrets.env'),
+        })
+      ).rejects.toThrow(/--detach.*first-party Cowork.*attached/);
+      expect(resultStore).not.toHaveBeenCalled();
+      expect(secrets).not.toHaveBeenCalled();
+      expect(datasets).not.toHaveBeenCalled();
+      expect(detachTestState().coordinatorOptions).toBeUndefined();
+      expect(detachTestState().objects.size).toBe(0);
+      expect(detachTestState().sent.size).toBe(0);
+      expect(log).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['run', 'resume', 'grade'] as const)(
+    'refuses account-mode %s with valid datasets before external I/O',
+    async (operation) => {
+      const f = await evalConfig({
+        client: 'cowork',
+        clientOptions: { mode: 'first-party' },
+        concurrency: 1,
+      });
+      const resultStore = vi
+        .spyOn(runEvalIO, 'evalResultStore')
+        .mockRejectedValue(new Error('Unexpected result store I/O'));
+      const secrets = vi
+        .spyOn(runEvalIO, 'loadSecretsFile')
+        .mockRejectedValue(new Error('Unexpected secrets I/O'));
+      const datasets = vi
+        .spyOn(runEvalIO, 'loadEvalDatasets')
+        .mockRejectedValue(new Error('Unexpected dataset I/O'));
+      await expect(
+        detach({
+          ...base,
+          command: operation === 'grade' ? 'grade' : 'run',
+          ...(operation === 'resume'
+            ? { resume: true, run: 'existing-run' }
+            : {}),
+          configPath: f.configPath,
+          rootDir: f.dir,
+          secretsFile: f.secrets,
+        })
+      ).rejects.toThrow(/--detach.*first-party Cowork.*attached/);
+      expect(resultStore).not.toHaveBeenCalled();
+      expect(secrets).not.toHaveBeenCalled();
+      expect(datasets).not.toHaveBeenCalled();
+      expect(detachTestState().coordinatorOptions).toBeUndefined();
+    }
+  );
+
+  it.each([
+    { name: 'default third-party mode', config: { client: 'cowork' } },
+    {
+      name: 'explicit third-party mode',
+      config: { client: 'cowork', clientOptions: { mode: 'third-party' } },
+    },
+    {
+      name: 'third-party override of a shared account config',
+      config: {
+        extends: ['account/config/first-party'],
+        client: 'cowork',
+        clientOptions: { mode: 'third-party' },
+      },
+    },
+    {
+      name: 'another client replacing a shared account config',
+      config: {
+        extends: ['account/config/first-party'],
+        client: 'api',
+      },
+    },
+    {
+      name: 'variants replacing every account-mode default',
+      config: {
+        client: 'cowork',
+        clientOptions: { mode: 'first-party' },
+        variants: [
+          { name: 'managed', clientOptions: { mode: 'third-party' } },
+          { name: 'api', client: 'api' },
+        ],
+      },
+    },
+  ])(
+    'still detaches $name through the fake coordinator',
+    async ({ config }) => {
+      const f = await accountEvalConfig({ concurrency: 1, ...config });
+      const result = await detach({
+        ...base,
+        configPath: f.configPath,
+        rootDir: f.dir,
+      });
+      expect(result.machine).toBe(`coordinator-${result.id}`);
+      expect(detachTestState().argv).toContain('coordinate');
+      expect(detachTestState().sent.has('datasets.json')).toBe(true);
+    }
+  );
 
   it("finds a coordinator's result store though a file dataset's relative path isn't on its machine", async () => {
     const f = await evalConfig();

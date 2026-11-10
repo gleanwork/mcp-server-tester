@@ -12,9 +12,25 @@ import {
 import type * as Os from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import type { Socket } from 'node:net';
 import vm from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HttpMCPConfig } from '../../config/mcpConfig.js';
+import { claimDesktopLease } from '../desktopBatch.js';
+import { variantEvalConfig } from '../evalConfig.js';
+import type { WorkerChannel } from '../evalFrameworkTypes.js';
+import type { ShardBundle } from '../runners/protocol.js';
+import { coworkDesktopLease } from './desktopLease.js';
+import {
+  createCoworkAccountControl,
+  type CoworkAccountControl,
+} from './cloudControl.js';
+import {
+  COWORK_CLOUD_CONTROL_PROTOCOL,
+  type CoworkCloudControlCommand,
+  type CoworkCloudControlResponse,
+} from './cloudControlProtocol.js';
 import type {
   CloudConnectorConfig,
   CloudConnectorTask,
@@ -59,7 +75,7 @@ vi.mock('node:os', async (original) => {
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof FsPromises>();
   const faulty =
-    (operation: 'rm' | 'mkdir' | 'writeFile') =>
+    (operation: 'rm' | 'mkdir' | 'writeFile' | 'readFile') =>
     (path: unknown, ...rest: unknown[]) => {
       const fault = host.faults.get(`${operation} ${String(path)}`);
       if (fault) return Promise.reject(fault);
@@ -73,6 +89,7 @@ vi.mock('node:fs/promises', async (original) => {
     rm: faulty('rm'),
     mkdir: faulty('mkdir'),
     writeFile: faulty('writeFile'),
+    readFile: faulty('readFile'),
   };
 });
 
@@ -2005,6 +2022,595 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     expect(base.submit).not.toHaveBeenCalled();
   });
 
+  describe('source-host account control (offline, real durable transaction)', () => {
+    const authorization = {
+      attached: true,
+      dedicatedAccount: true,
+      designatedSourceHost: true,
+    } as const;
+    function bundle(): ShardBundle {
+      return {
+        runId: 'source-owned-run',
+        shard: { index: 0, count: 1 },
+        mst: 'test',
+        plugins: [],
+        tokenServers: [],
+        evalConfig: { name: 'account', datasets: [] },
+        batches: [
+          {
+            variant: { name: 'read-only' },
+            requests: [
+              {
+                caseId: 'search',
+                trial: 0,
+                config: { type: 'cowork', mode: 'first-party' },
+                input: { prompt: PROMPT, servers: [SERVER] },
+              },
+            ],
+          },
+        ],
+      };
+    }
+    async function controller(input = bundle()) {
+      const control = await drive(
+        createCoworkAccountControl({
+          bundle: input,
+          sourceIdentity: {
+            accountId: 'account-acme',
+            organizationId: 'org-acme',
+          },
+          authorization,
+          env,
+        })
+      );
+      open.push(() => control.disconnect());
+      let id = 0;
+      async function call(command: CoworkCloudControlCommand) {
+        return drive(
+          control.dispatch({
+            protocol: COWORK_CLOUD_CONTROL_PROTOCOL,
+            id: ++id,
+            ...command,
+          })
+        );
+      }
+      return { control, call };
+    }
+    const leasePath = () =>
+      join(host.home, '.mcp-server-tester', 'cowork-desktop-macos.lock');
+    async function saved() {
+      return JSON.parse(await readFile(journal(), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+    }
+
+    it.each(['base', 'variant', 'empty variant'] as const)(
+      'rejects actual %s tool metadata on the effective worker config before leasing',
+      async (location) => {
+        const input = bundle();
+        const variant = input.batches[0]!.variant;
+        if (location === 'base') input.evalConfig.tools = {};
+        else
+          variant.tools =
+            location === 'variant'
+              ? { search: { description: 'changed description' } }
+              : {};
+        const effective = variantEvalConfig(input.evalConfig, variant);
+        // This is the exact guard used by the worker's desktop adapter.
+        expect(
+          Boolean(effective.simulateWrites || effective.tools || variant.tools)
+        ).toBe(true);
+        await expect(controller(input)).rejects.toThrow(/tool metadata/);
+        expect(account.requests).toEqual([]);
+        await expect(stat(leasePath())).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      }
+    );
+
+    it('releases an unused lease after disconnect and a failed pre-journal prepare', async () => {
+      for (const prepareFirst of [false, true]) {
+        const { control, call } = await controller();
+        if (prepareFirst) {
+          account.servers[0]!.url = 'https://wrong.example/mcp';
+          expect((await call({ method: 'prepare' })).ok).toBe(false);
+        }
+        expect(account.patches()).toEqual([]);
+        await expect(stat(journal())).rejects.toMatchObject({ code: 'ENOENT' });
+        await drive(control.disconnect());
+        await drive(control.close());
+        await expect(stat(leasePath())).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+        expect((await call({ method: 'prepare' })).ok).toBe(false);
+      }
+      const next = await controller();
+      await drive(next.control.close());
+    });
+
+    it.each(['disconnect', 'prepare'] as const)(
+      'retains an unused lease when journal absence cannot be proved during %s',
+      async (operation) => {
+        const { control, call } = await controller();
+        host.faults.set(
+          `readFile ${journal()}`,
+          Object.assign(new Error('unreadable journal'), { code: 'EACCES' })
+        );
+        if (operation === 'prepare') {
+          expect((await call({ method: 'prepare' })).ok).toBe(false);
+          // Restored access must not erase a previously unknown journal state.
+          host.faults.clear();
+        }
+        await drive(control.disconnect());
+        host.faults.clear();
+        await expect(stat(leasePath())).resolves.toBeDefined();
+        await expect(drive(control.close())).rejects.toThrow(/relay was lost/);
+        await expect(controller()).rejects.toThrow(/locked/);
+        expect(account.patches()).toEqual([]);
+      }
+    );
+
+    it('serializes disconnect behind an in-flight PATCH and never restores on transport loss', async () => {
+      const { control, call } = await controller();
+      let disconnecting: Promise<void> | undefined;
+      account.beforeRequest = (request) => {
+        if (request.method === 'PATCH') disconnecting = control.disconnect();
+      };
+      expect((await call({ method: 'prepare' })).ok).toBe(true);
+      expect(disconnecting).toBeDefined();
+      await drive(disconnecting!);
+      expect(account.patches()).toHaveLength(1);
+      expect(account.permissions).not.toEqual(account.original);
+      await expect(stat(journal())).resolves.toBeDefined();
+      await expect(controller()).rejects.toThrow(/locked/);
+    });
+
+    it('retains transaction ownership even if its pending journal is later removed', async () => {
+      const { control, call } = await controller();
+      account.patchStatus = 500;
+      expect((await call({ method: 'prepare' })).ok).toBe(false);
+      expect(await saved()).toHaveProperty('pendingWrite');
+      await rm(journal());
+      await drive(control.disconnect());
+      await expect(stat(leasePath())).resolves.toBeDefined();
+      await expect(controller()).rejects.toThrow(/locked/);
+    });
+
+    // Opt-in cross-repo integration. Run with MST_TEST_COWORK_RELAY_ROOT set to
+    // the plugin checkout; the controller, transaction, source relay and worker
+    // bridge are real. Only Chrome/account responses and Docker transport are fixtures.
+    const relayRoot = process.env.MST_TEST_COWORK_RELAY_ROOT;
+    async function relayFixture(control: CoworkAccountControl) {
+      type Relay = { readonly lost: boolean; stop(): Promise<void> };
+      const { startCoworkRelay } = (await import(
+        /* @vite-ignore */ pathToFileURL(
+          join(relayRoot!, 'src/coworkRelay/source.mjs')
+        ).href
+      )) as {
+        startCoworkRelay(options: {
+          channel: Pick<WorkerChannel, 'exec'>;
+          socketPath: string;
+          controller: CoworkAccountControl;
+        }): Promise<Relay>;
+      };
+      const { attachedBridgeChannel, socketClient } = (await import(
+        /* @vite-ignore */ pathToFileURL(
+          join(relayRoot!, 'test/fixtures/cowork-relay-offline.mjs')
+        ).href
+      )) as {
+        attachedBridgeChannel(): Pick<WorkerChannel, 'exec'>;
+        socketClient(path: string): Promise<{
+          socket: Socket;
+          call(
+            method: string,
+            extra?: Record<string, unknown>,
+            id?: number
+          ): Promise<CoworkCloudControlResponse>;
+          close(): Promise<void>;
+        }>;
+      };
+      const directory = await mkdtemp(
+        join(tmpdir(), 'mst-real-control-relay-')
+      );
+      const socketPath = join(directory, 'control.sock');
+      const relay = await drive(
+        startCoworkRelay({
+          channel: attachedBridgeChannel(),
+          socketPath,
+          controller: control,
+        })
+      );
+      open.push(async () => {
+        await relay.stop();
+        await rm(directory, { recursive: true, force: true });
+      });
+      const worker = await drive(socketClient(socketPath));
+      return { relay, worker };
+    }
+
+    it.skipIf(!relayRoot)(
+      'real relay releases a failed pre-journal prepare so a new source run can start',
+      async () => {
+        const { control } = await controller();
+        const { relay, worker } = await relayFixture(control);
+        account.servers[0]!.url = 'https://wrong.example/mcp';
+        expect((await drive(worker.call('prepare'))).ok).toBe(false);
+        await drive(worker.close());
+        await eventually(async () => {
+          expect(relay.lost).toBe(true);
+          await expect(stat(leasePath())).rejects.toMatchObject({
+            code: 'ENOENT',
+          });
+        });
+        expect(account.patches()).toEqual([]);
+        await expect(stat(journal())).rejects.toMatchObject({ code: 'ENOENT' });
+        const next = await controller();
+        await drive(next.control.close());
+      }
+    );
+
+    it.skipIf(!relayRoot)(
+      'real relay releases a zero-dispatch bridge failure without implying restoration',
+      async () => {
+        const { control } = await controller();
+        const dispatch = vi.spyOn(control, 'dispatch');
+        const { startCoworkRelay } = (await import(
+          /* @vite-ignore */ pathToFileURL(
+            join(relayRoot!, 'src/coworkRelay/source.mjs')
+          ).href
+        )) as {
+          startCoworkRelay(options: {
+            channel: Pick<WorkerChannel, 'exec'>;
+            socketPath: string;
+            controller: CoworkAccountControl;
+          }): Promise<unknown>;
+        };
+        await expect(
+          drive(
+            startCoworkRelay({
+              controller: control,
+              socketPath: '/unused',
+              channel: {
+                exec() {
+                  return {
+                    stdout: (async function* () {})(),
+                    stderr: (async function* () {})(),
+                    exit: Promise.resolve(1),
+                  };
+                },
+              },
+            })
+          )
+        ).rejects.toThrow(/relay was lost/);
+        await eventually(async () => {
+          await expect(stat(leasePath())).rejects.toMatchObject({
+            code: 'ENOENT',
+          });
+        });
+        expect(dispatch).not.toHaveBeenCalled();
+        expect(account.patches()).toEqual([]);
+        const next = await controller();
+        await drive(next.control.close());
+      }
+    );
+
+    it
+      .skipIf(!relayRoot)
+      .each([
+        'pending write',
+        'pending task',
+        'lost task acknowledgment',
+      ] as const)(
+      'real relay retains %s and blocks the next run',
+      async (state) => {
+        const { control } = await controller();
+        let acknowledgmentReady = false;
+        let releaseAcknowledgment!: () => void;
+        const acknowledgment = new Promise<void>((resolve) => {
+          releaseAcknowledgment = resolve;
+        });
+        const transportControl =
+          state === 'lost task acknowledgment'
+            ? {
+                ...control,
+                async dispatch(request: unknown) {
+                  const response = await control.dispatch(request);
+                  if ((request as { method: string }).method === 'beginTask') {
+                    acknowledgmentReady = true;
+                    await acknowledgment;
+                  }
+                  return response;
+                },
+              }
+            : control;
+        const { relay, worker } = await relayFixture(transportControl);
+        if (state === 'pending write') account.patchStatus = 500;
+        expect((await drive(worker.call('prepare'))).ok).toBe(
+          state !== 'pending write'
+        );
+        if (state === 'pending task')
+          expect(
+            (await drive(worker.call('beginTask', { prompt: PROMPT }, 2))).ok
+          ).toBe(true);
+        if (state === 'lost task acknowledgment') {
+          worker.socket.write(
+            `${JSON.stringify({ protocol: COWORK_CLOUD_CONTROL_PROTOCOL, id: 2, method: 'beginTask', prompt: PROMPT })}\n`
+          );
+          await eventually(async () => {
+            expect(acknowledgmentReady).toBe(true);
+          });
+        }
+        const pending = await readFile(journal(), 'utf8');
+        expect(JSON.parse(pending)).toHaveProperty(
+          state === 'pending write' ? 'pendingWrite' : 'pendingTask'
+        );
+        await drive(worker.close());
+        releaseAcknowledgment();
+        await eventually(async () => {
+          expect(relay.lost).toBe(true);
+          await expect(drive(control.close())).rejects.toThrow(
+            /relay was lost/
+          );
+        });
+        expect(await readFile(journal(), 'utf8')).toBe(pending);
+        await expect(stat(leasePath())).resolves.toBeDefined();
+        await expect(controller()).rejects.toThrow(/locked/);
+        expect(account.patches()).toHaveLength(1);
+      }
+    );
+
+    it('uses the existing Mac lease, immutable host policies, and synced journal before each acknowledgment', async () => {
+      const input = bundle();
+      const { control, call } = await controller(input);
+      input.batches[0]!.requests[0]!.config.connectors = {
+        servers: { acme: { policy: 'allow-all' } },
+      };
+      await expect(
+        claimDesktopLease({
+          name: 'cowork',
+          lease: coworkDesktopLease('', 'darwin'),
+        })
+      ).rejects.toThrow(/locked/);
+      expect(await call({ method: 'prepare' })).toMatchObject({
+        ok: true,
+        result: { plan: { allowedTools: [SEARCH], failOnApproval: true } },
+      });
+      expect(account.permissions['srv-search:create_doc']).toBe(false);
+      expect(await saved()).toMatchObject({
+        version: 2,
+        accountId: 'account-acme',
+        original: { 'srv-search:search': false },
+      });
+      expect((await stat(journal())).mode & 0o777).toBe(0o600);
+      expect((await stat(leasePath())).mode & 0o777).toBe(0o600);
+      expect(
+        await call({ method: 'beginTask', prompt: 'worker-invented prompt' })
+      ).toMatchObject({ ok: false });
+      expect(await saved()).not.toHaveProperty('pendingTask');
+      expect(await call({ method: 'beginTask', prompt: PROMPT })).toMatchObject(
+        { ok: true }
+      );
+      expect(await saved()).toMatchObject({
+        pendingTask: { startedAt: expect.any(String) },
+      });
+      const duplicate = await call({ method: 'beginTask', prompt: PROMPT });
+      expect(duplicate.ok).toBe(false);
+      expect(host.commands).toEqual([]);
+      await control.disconnect();
+    });
+
+    it('retains pending-task journal and source lease after lost relay and deletion of the synthetic VM', async () => {
+      const vm = await mkdtemp(join(tmpdir(), 'mst-disposable-vm-'));
+      const { control, call } = await controller();
+      expect((await call({ method: 'prepare' })).ok).toBe(true);
+      const baseline = await saved();
+      expect((await call({ method: 'beginTask', prompt: PROMPT })).ok).toBe(
+        true
+      );
+      const pending = await readFile(journal(), 'utf8');
+      await control.disconnect();
+      await rm(vm, { recursive: true, force: true });
+      expect(await readFile(journal(), 'utf8')).toBe(pending);
+      expect(await saved()).toMatchObject({
+        original: baseline.original,
+        applied: baseline.applied,
+        pendingTask: { startedAt: expect.any(String) },
+      });
+      await expect(stat(leasePath())).resolves.toBeDefined();
+      await expect(controller()).rejects.toThrow(/locked/);
+      await expect(drive(control.close())).rejects.toThrow(/relay was lost/);
+      expect((await call({ method: 'restore' })).ok).toBe(false);
+      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+        /unbound/
+      );
+      expect(account.permissions).not.toEqual(account.original);
+    });
+
+    it('keeps ownership even if no permission values changed before the lost submission', async () => {
+      const initial = await controller();
+      expect((await initial.call({ method: 'prepare' })).ok).toBe(true);
+      const alreadyApplied = { ...account.permissions };
+      await drive(initial.control.close());
+      account.permissions = alreadyApplied;
+      account.requests.length = 0;
+      const { control, call } = await controller();
+      expect((await call({ method: 'prepare' })).ok).toBe(true);
+      expect(await saved()).toMatchObject({ original: {}, applied: {} });
+      expect(account.patches()).toEqual([]);
+      expect((await call({ method: 'beginTask', prompt: PROMPT })).ok).toBe(
+        true
+      );
+      await control.disconnect();
+      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+        /unbound/
+      );
+      expect(await saved()).toHaveProperty('pendingTask');
+      await expect(stat(leasePath())).resolves.toBeDefined();
+    });
+
+    it('binds only source-observed exact prompt/time and restores only after provider terminal evidence', async () => {
+      const { control, call } = await controller();
+      await call({ method: 'prepare' });
+      await call({ method: 'beginTask', prompt: PROMPT });
+      const events = promptEvents({ tools: [SEARCH] });
+      const first = events[0]!;
+      const session = addTrial(events);
+      first.payload.message = { role: 'user', content: 'a different prompt' };
+      expect(
+        (await call({ method: 'bindTask', sessionId: session.id })).ok
+      ).toBe(false);
+      first.payload.message = { role: 'user', content: PROMPT };
+      first.created_at = now(-60_000);
+      expect(
+        (await call({ method: 'bindTask', sessionId: session.id })).ok
+      ).toBe(false);
+      expect(await saved()).toMatchObject({
+        pendingTask: { startedAt: expect.any(String) },
+      });
+      expect((await saved()).pendingTask).not.toHaveProperty('sessionId');
+      first.created_at = now();
+      expect(
+        (await call({ method: 'bindTask', sessionId: session.id })).ok
+      ).toBe(true);
+      expect(await saved()).toMatchObject({
+        pendingTask: { sessionId: session.id },
+      });
+      const terminal = events.pop()!;
+      expect((await call({ method: 'restore' })).ok).toBe(false);
+      expect(await saved()).toHaveProperty('pendingTask');
+      await control.disconnect();
+      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+        /no terminal native result/
+      );
+      events.push(terminal);
+      expect(await drive(restoreClaudeAiConnectors(env))).toBe(true);
+      expect(account.permissions).toEqual(account.original);
+      await expect(stat(journal())).rejects.toMatchObject({ code: 'ENOENT' });
+      // Recovery of permissions is not silent stale-lock removal.
+      await expect(stat(leasePath())).resolves.toBeDefined();
+    });
+
+    it('rejects prior submitted sessions even with the same prompt inside the timestamp tolerance', async () => {
+      const input = bundle();
+      input.batches[0]!.requests.push({
+        ...input.batches[0]!.requests[0]!,
+        trial: 1,
+      });
+      const { control, call } = await controller(input);
+      await call({ method: 'prepare' });
+      const previous = addTrial(promptEvents({ tools: [SEARCH] }));
+      previous.id = 'cse_previous';
+      await call({ method: 'beginTask', prompt: PROMPT });
+      expect(
+        (await call({ method: 'bindTask', sessionId: previous.id })).ok
+      ).toBe(false);
+      addTrial(promptEvents({ tools: [SEARCH] }));
+      expect(
+        (await call({ method: 'bindTask', sessionId: 'cse_trial1' })).ok
+      ).toBe(true);
+      expect((await call({ method: 'confirmTaskComplete' })).ok).toBe(true);
+      expect((await call({ method: 'beginTask', prompt: PROMPT })).ok).toBe(
+        true
+      );
+      expect(
+        (await call({ method: 'bindTask', sessionId: 'cse_trial1' })).ok
+      ).toBe(false);
+      expect((await saved()).pendingTask).not.toHaveProperty('sessionId');
+      await control.disconnect();
+    });
+
+    it('uses source settings and events for verification, and releases only after verified restoration', async () => {
+      const { control, call } = await controller();
+      await call({ method: 'prepare' });
+      await call({ method: 'beginTask', prompt: PROMPT });
+      addTrial(promptEvents({ tools: [SEARCH, SEND] }));
+      await call({ method: 'bindTask', sessionId: 'cse_trial1' });
+      expect((await call({ method: 'verify' })).ok).toBe(false);
+      account.sessions[0]!.events = promptEvents({ tools: [SEARCH] });
+      expect(await call({ method: 'verify' })).toMatchObject({
+        ok: true,
+        result: { allowedTools: [SEARCH] },
+      });
+      expect((await call({ method: 'restore' })).ok).toBe(true);
+      await expect(stat(leasePath())).resolves.toBeDefined();
+      await drive(control.close());
+      expect(account.permissions).toEqual(account.original);
+      await expect(stat(journal())).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(stat(leasePath())).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('rejects source identity mismatch, mixed/multishard bundles and worker policy widening before mutations', async () => {
+      await expect(
+        drive(
+          createCoworkAccountControl({
+            bundle: bundle(),
+            sourceIdentity: { accountId: 'wrong', organizationId: 'org-acme' },
+            authorization,
+            env,
+          })
+        )
+      ).rejects.toThrow(/does not match/);
+      expect(account.patches()).toEqual([]);
+      await expect(stat(leasePath())).rejects.toMatchObject({ code: 'ENOENT' });
+      const multishard = bundle();
+      multishard.shard.count = 2;
+      await expect(controller(multishard)).rejects.toThrow(
+        /one attached shard/
+      );
+      const mixed = bundle();
+      mixed.batches[0]!.requests[0]!.config.mode = 'third-party';
+      await expect(controller(mixed)).rejects.toThrow(
+        /homogeneous first-party/
+      );
+      const { control } = await controller();
+      const wide = await drive(
+        control.dispatch({
+          protocol: COWORK_CLOUD_CONTROL_PROTOCOL,
+          id: 1,
+          method: 'prepare',
+          connectors: { default: 'inherit' },
+        })
+      );
+      expect(wide.ok).toBe(false);
+      expect(account.patches()).toEqual([]);
+      await drive(control.close());
+    });
+
+    it('preserves the existing pending-write journal on an uncertain provider PATCH and relay loss', async () => {
+      const { control, call } = await controller();
+      account.patchStatus = 500;
+      expect((await call({ method: 'prepare' })).ok).toBe(false);
+      const pending = await saved();
+      expect(pending).toMatchObject({
+        version: 2,
+        original: { 'srv-mail:send_mail': true },
+        pendingWrite: { purpose: 'configure' },
+      });
+      await control.disconnect();
+      expect(await saved()).toEqual(pending);
+      await expect(stat(leasePath())).resolves.toBeDefined();
+      account.patchStatus = 202;
+      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+        /outcome is unknown/
+      );
+      await expect(controller()).rejects.toThrow(/locked/);
+    });
+
+    it('serializes concurrent begin/restore and retains unresolved task state', async () => {
+      const { control, call } = await controller();
+      await call({ method: 'prepare' });
+      const [begin, restore] = await Promise.all([
+        call({ method: 'beginTask', prompt: PROMPT }),
+        call({ method: 'restore' }),
+      ]);
+      expect(begin.ok).toBe(true);
+      expect(restore.ok).toBe(false);
+      expect(await saved()).toHaveProperty('pendingTask');
+      await control.disconnect();
+    });
+  });
+
   describe('restoreClaudeAiConnectors', () => {
     /** What a run that never disposed left: MST's changes, still applied. */
     async function crashedRun(
@@ -2295,14 +2901,14 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     });
   });
 
-  it('runs on macOS only', async () => {
+  it('rejects Linux without a source cloud-control socket before app or account activity', async () => {
     Object.defineProperty(process, 'platform', { ...platform, value: 'linux' });
     await expect(
       adapter().prepare({
         evalConfig: { name: 'acme-1p', datasets: [], servers: [SERVER] },
         env,
       })
-    ).rejects.toThrow('runs on macOS only');
+    ).rejects.toThrow('requires private MST_COWORK_CLOUD_CONTROL_SOCKET');
     expect(devtools.sockets).toEqual([]);
   });
 });

@@ -12,6 +12,9 @@ import {
   isCredentialStoreReference,
 } from '../../auth/grants/stores.js';
 import { resolveConfigExtends } from '../configExtends.js';
+import { clientOf, clientPatchOf } from '../clientFields.js';
+import { inheritClient } from '../configValidation.js';
+import { isFirstPartyCowork } from '../cowork/firstParty.js';
 import { connectorUses } from '../connectorServers.js';
 import { loadEvalConfig } from '../evalConfig.js';
 import { loadEvalPlugins } from '../evalPlugins.js';
@@ -69,13 +72,26 @@ async function refusal(
     return "--detach needs --runner: a runner whose machines run the shards, and that creates the coordinator's machine.";
   if (options.results?.startsWith('file:'))
     return `--detach needs a result store other machines reach, not ${options.results}.`;
-  const loaded = loadEvalConfig(options.configPath, { rootDir });
+  // Resolve only configuration here. Account work must be refused before
+  // even validating dataset paths, opening stores or reading secrets.
+  const loaded = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation: true,
+  });
   const namespaces = await loadEvalPlugins({
     configPath: options.configPath,
     evalConfig: loaded,
     rootDir,
   });
   const config = resolveConfigExtends(loaded, namespaces);
+  const base = clientOf(config);
+  const variants = config.variants?.length ? config.variants : [{}];
+  if (
+    variants.some((variant) =>
+      isFirstPartyCowork(inheritClient(base, clientPatchOf(variant) ?? {}))
+    )
+  )
+    return '--detach cannot run first-party Cowork: account control requires an attached run with one designated source host.';
   if (!options.results) {
     const store = config.results?.store;
     if (!store)

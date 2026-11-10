@@ -157,15 +157,28 @@ existing connectors instead of MST-managed servers. The default, `third-party`
 (also the result of omitting `mode`), is unchanged: it supports stdio servers
 and proxies through MST's gateway setup. First-party mode only selects existing
 HTTPS account connectors through MST's normal server labels and records those
-sessions. It supports the local macOS runner only, with `concurrency: 1` and no
-sharding.
+sessions. MST implements two paths: the existing local macOS app, and a prepared
+Linux account runtime supplied by a plugin. Both require `concurrency: 1`, an
+attached run, one shard, a dedicated account and one designated source host.
+macOS first-party execution still requires the local runner. Setting `mode`
+alone does not prepare a Linux account runtime, and stock `--runner docker`
+does not provision one. Third-party mode and its detach behavior are unchanged.
 
-First-party mode uses the Claude account that is already signed in to Claude
-Desktop. MST still submits prompts through visible Desktop Computer Use, using
-the Computer Use planner credentials you already configure. It reads session
-events through a separate Chrome recorder profile signed in to the same account
-and mirrors them into MST's native transcript layout. It does not copy cookies,
-provision VMs, or submit tasks through an undocumented API.
+On macOS, first-party mode uses the Claude account already signed in to Claude
+Desktop and submits prompts through visible Desktop Computer Use, using the
+configured planner credentials. On Linux, MST attaches to the plugin-prepared
+signed-in app and submits through accessibility automation, without a planner
+or MST inference credentials. A macOS source host reads account settings and
+session events through its separate Chrome recorder profile signed in to the
+same account. MST mirrors those events into its native transcript layout. Core
+does not import account credentials, provision VMs or submit tasks through an
+undocumented API.
+
+The Linux account path has only been validated offline with fixtures and fake
+infrastructure. A reviewed Linux package/ASAR pin and an authorized live check
+of sign-in, accessibility, model selection, same-profile URL opening and native
+model/task evidence are still required. This implementation does not establish
+live Linux app or account compatibility.
 
 Start a dedicated Chrome recorder profile with a loopback DevTools port. Use a
 `--user-data-dir` that no other Chrome uses, and sign in to the same claude.ai
@@ -186,12 +199,66 @@ MCP servers, marketplace plugins, or an inference gateway profile. It does not
 register new connectors or sign in to them. Authenticate each connector in the
 Claude account first.
 
+#### Linux account runtime and source control
+
+A plugin supplies the account image, credential acquisition and renewal,
+versioned profile contract, isolated tmpfs staging, profile-preserving launcher,
+private relay and credential cleanup. MST has no account credential fields or
+login API. Keep credentials out of eval configs, runner options, shard bundles,
+command arguments, logs and result files. This path uses
+`createDockerRunner({ inference: 'plugin', prepareRuntime })`; it must not
+receive MST-managed inference tokens or generic connector credentials. The
+plugin must bind staging to the exact owned container and the same account and
+organization the source controller verifies. Use a rebuilt image with runtime
+preparation protocol 1 and the plugin's reviewed app contract.
+
+MST's public `readShardBundle` (from `./evals`) reads the actual collect bundle.
+The plugin passes that bundle to `createCoworkAccountControl` (from
+`./experimental/clients`) on the macOS source host, along with the expected
+nonsecret `sourceIdentity` (`accountId` and `organizationId`) and explicit
+`authorization` acknowledgements: `attached`, `dedicatedAccount` and
+`designatedSourceHost`, all `true`. The controller snapshots the bundle, checks
+its first-party batches and one-shard restriction, claims the source desktop
+lease and verifies Chrome identity before authorizing preparation. A top-level
+client hint or the presence of credential configuration is not enough: the
+plugin must classify the effective requests, including variants, and refuse
+mixed first-party/third-party work before acquiring credentials or cloud
+resources.
+
+The plugin relays only the fixed `mst.cowork-cloud-control/v1` protocol over its
+existing worker channel and a same-UID private Unix socket. The Linux worker
+uses `MST_COWORK_CLOUD_CONTROL_SOCKET`. This relay exposes no Chrome cookies,
+DevTools access or general HTTP access; the separate credential plugin owns
+explicitly authorized account-session staging. `dispatch` permits only preparation,
+exact authorized prompt/task binding, completion proof, verification,
+restoration and bounded session/event reads. The source owns the server labels,
+connector policies, write declarations, model and prompt sequence from the
+bundle. A worker cannot widen them. The relay must reject unknown properties,
+bound UTF-8 frames to 16 MiB including the newline, and serialize requests.
+
+Keep the source and relay attached through verified restoration and final
+`close()`. Normal worker socket closure after acknowledged restoration allows
+the next sequential batch; it does not end source control. On relay loss, call
+`disconnect()`, not `close()`: retain the source journal and lease. Container or
+credential cleanup never proves a cloud task finished or account permissions
+were restored. Clean up worker credentials independently even if source
+restoration fails. Recovery runs on the designated macOS source host, using its
+journal and Chrome sign-in, not on the worker.
+
+`--detach` refuses any effective first-party Cowork configuration, including
+variants and plugin shared configs, before result stores, secrets, dataset
+validation/loading or coordinator creation. Omitting account runner
+configuration does not bypass this guard. Do not use detach or multiple shards
+for the Linux account path.
+
 #### Configure remote connectors
 
-These settings are **account-wide**, not per-task. Run variants sequentially.
-Set `concurrency: 1`, and do not edit the same account's permissions during a run.
-The local desktop lock does not coordinate other machines. Authentication
-provisioning and parallel cloud workers are not implemented.
+These settings are **account-wide**, not per-task. Use a dedicated account, run
+variants sequentially and keep one designated macOS source host for that
+account. Set `concurrency: 1`, and do not edit the same account's permissions
+during a run. The source desktop lock does not coordinate other machines.
+Core does not provision authentication; a Linux plugin owns its credential
+lifecycle. Parallel account workers are unsupported.
 
 ```json
 {
@@ -279,13 +346,17 @@ changes its catalog during a task, MST fails the check instead of silently
 accepting new tools. Start a new run to prepare against the changed catalog.
 
 The Chrome recorder profile and Claude Desktop must be on the same account and
-the same active organization. You must make sure they are; MST does not
-verify Desktop's identity automatically. Before changing permissions it checks
+the same active organization. On local macOS, you must make sure they are; MST
+does not verify Desktop's identity automatically. For Linux, the plugin binds
+its staged account identity to the source identity, and MST checks the private
+runtime marker and source authorization before submission. These checks do not
+replace a live app sign-in check. Before changing permissions the source checks
 the Chrome session's account and organization, and it checks them again against
 the recovery journal before restoring. This is not a sandbox guarantee.
 
-One macOS Cowork lease is shared by both modes and every `dataDir`, so only one
-Cowork run drives the app at a time. MST reads at most 10,000 events from a
+One macOS Cowork lease is shared by both modes, every `dataDir` and Linux source
+control, so a local app run cannot overlap account control from that source
+host. MST reads at most 10,000 events from a
 session. A longer session fails with an error that names the cap; MST does not
 truncate it.
 
@@ -297,8 +368,9 @@ applying settings, verifies each write, and restores changed keys on close.
 Keys absent originally are removed, not replaced with explicit allows. A normal
 completed run restores automatically.
 
-A private recovery journal at
-`~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash. MST
+A private recovery journal on the macOS source host at
+`~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash or loss
+of the Linux worker. It never belongs in the container or result bundle. MST
 writes it before the first permission write and before it submits the first
 task. A journal from an earlier development format (`version: 1`, the journal's
 own schema version, not an MST package or `mst.run/v1` version) is unpublished.
@@ -322,8 +394,9 @@ tool inventory while the task runs.
 
 #### Recover connector settings
 
-If a run was killed, restore from the journal without starting an eval. The
-command reads the port only from its own shell, not from the eval config. Export
+If a run was killed or its Linux relay was lost, restore from the journal on
+the designated macOS source host without starting an eval. The command reads
+the port only from its own shell, not from the eval config. Export
 the same port the run used:
 
 ```bash

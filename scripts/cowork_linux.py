@@ -206,11 +206,19 @@ class Desktop:
             clipboard.kill()
 
     def open_prompt(self, prompt: str, timeout: float) -> None:
+        self.open_url("claude://claude.ai/new?q=" + quote(prompt, safe=""), timeout)
+
+    def open_cowork(self, timeout: float) -> None:
+        # Reuse Linux's known empty-draft link; select_cowork then proves the
+        # mode visibly. No prompt in the URL or macOS-specific URI assumption.
+        self.open_prompt("", timeout)
+
+    def open_url(self, url: str, timeout: float) -> None:
         configured_opener = os.environ.get("MST_COWORK_URL_OPENER")
         if configured_opener is not None and not os.path.isabs(configured_opener):
             raise DriverFailure("invalid_url_opener")
         subprocess.run(
-            [configured_opener or "xdg-open", "claude://claude.ai/new?q=" + quote(prompt, safe="")],
+            [configured_opener or "xdg-open", url],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(timeout, 15),
         )
 
@@ -309,6 +317,28 @@ def normalized(text: str) -> str:
     return " ".join(text.split())
 
 
+# Conservative visible-model vocabulary. Never infer a version from a bare
+# family ("Opus"), an alias ("latest"), a description, or a dated revision.
+# Unknown labels fail closed; these mappings are fixture-tested, not a claim
+# that any particular first-party Linux app build exposes them.
+MODEL_CONTROL = re.compile(
+    r"(?:claude-(?:opus|sonnet|haiku)-[0-9]+-[0-9]+(?:-[0-9]{8})?|"
+    r"(?:Claude )?(?:Opus|Sonnet|Haiku) [0-9]+\.[0-9]+)")
+MODEL_OPTION_ROLES = {"menu item", "radio menu item", "check menu item", "radio button"}
+
+
+def model_labels(target: str) -> set[str]:
+    if not isinstance(target, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,127}", target):
+        raise DriverFailure("invalid_target_model")
+    labels = {target}
+    match = re.fullmatch(r"claude-(opus|sonnet|haiku)-([0-9]+)-([0-9]+)", target)
+    if match:
+        family, major, minor = match.groups()
+        display = f"{family.title()} {major}.{minor}"
+        labels |= {display, "Claude " + display}
+    return labels
+
+
 def first_option_owner(labels: list[str], name: str) -> bool:
     """Whether a control named `name` is the first option's: its exact label,
     or the label then a description, unless a longer label it also starts
@@ -385,7 +415,7 @@ class Driver:
             time.sleep(min(0.1, left))
         return True
 
-    def reset(self) -> dict:
+    def reset(self, first_party: bool = False) -> dict:
         # After a failed case: stop its task if it still runs, leave its view
         # with one empty new-task deep link, then wait read-only for an empty
         # Cowork start surface. Never types or sends. An empty composer
@@ -393,7 +423,10 @@ class Driver:
         # clear, which the next case's link would not replace either (a long
         # prompt's draft did, on Linux).
         stopped = self.stop_running_task()
-        self.action(lambda: self.desktop.open_prompt("", self.remaining()))
+        if first_party:
+            self.action(lambda: self.desktop.open_cowork(self.remaining()))
+        else:
+            self.action(lambda: self.desktop.open_prompt("", self.remaining()))
         draft = False
         while True:
             try:
@@ -461,18 +494,61 @@ class Driver:
                 return
             time.sleep(min(0.1, left))
 
-    def submit(self, prompt: str) -> dict:
+    def select_model(self, target: str) -> None:
+        labels = model_labels(target)
+        triggers = self.desktop.controls(
+            lambda name: name in labels or bool(MODEL_CONTROL.fullmatch(name)), {"button", "combo box"})
+        if len(triggers) != 1:
+            raise DriverFailure("model_control_missing_or_ambiguous")
+        if self.desktop.label(triggers[0]) in labels:
+            return
+        # One picker-open attempt and one selection attempt. Never pick by
+        # position, substring, family alone, or an unrelated control.
+        self.action(lambda: self.desktop.activate(triggers[0]))
+        while True:
+            self.remaining()
+            choices = self.desktop.controls(lambda name: name in labels, MODEL_OPTION_ROLES)
+            if len(choices) > 1:
+                raise DriverFailure("model_unavailable_or_ambiguous")
+            if choices:
+                self.action(lambda: self.desktop.activate(choices[0]))
+                break
+            if self.desktop.controls(lambda name: bool(MODEL_CONTROL.fullmatch(name)), MODEL_OPTION_ROLES):
+                raise DriverFailure("model_unavailable_or_ambiguous")
+            time.sleep(min(0.1, self.remaining()))
+        while True:
+            self.remaining()
+            selected = self.desktop.controls(
+                lambda name: name in labels or bool(MODEL_CONTROL.fullmatch(name)), {"button", "combo box"})
+            if len(selected) > 1:
+                raise DriverFailure("model_control_missing_or_ambiguous")
+            if len(selected) == 1 and self.desktop.label(selected[0]) in labels:
+                return
+            time.sleep(min(0.1, self.remaining()))
+
+    def submit(self, prompt: str, target_model: str | None = None, first_party: bool = False) -> dict:
         if not isinstance(prompt, str) or not prompt.strip():
             raise DriverFailure("invalid_prompt")
-        self.select_cowork()
-        if len(prompt) <= DEEP_LINK_PROMPT_CHARS:
-            self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
-        else:
-            # Too long for the link: an empty task, then the prompt pasted.
-            self.action(lambda: self.desktop.open_prompt("", self.remaining()))
+        if target_model is not None:
+            model_labels(target_model)  # Reject invalid requests before any action.
+        if first_party:
+            self.action(lambda: self.desktop.open_cowork(self.remaining()))
+            self.select_cowork()
             self.wait_for_empty_composer()
+            if target_model is not None:
+                self.select_model(target_model)
             self.action(lambda: self.desktop.paste_prompt(
                 prompt, min(self.remaining(), PASTE_TIMEOUT_SECONDS)))
+        else:
+            self.select_cowork()
+            if len(prompt) <= DEEP_LINK_PROMPT_CHARS:
+                self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
+            else:
+                # Too long for the link: an empty task, then the prompt pasted.
+                self.action(lambda: self.desktop.open_prompt("", self.remaining()))
+                self.wait_for_empty_composer()
+                self.action(lambda: self.desktop.paste_prompt(
+                    prompt, min(self.remaining(), PASTE_TIMEOUT_SECONDS)))
         revealed = False
         while True:
             self.remaining()
@@ -530,9 +606,9 @@ class Driver:
         self.action(lambda: self.desktop.activate(target))
         return {**self.receipt("hitl_checked"), "answered": answered}
 
-    def hitl(self, approve_writes: bool) -> dict:
-        names = {"Allow once", "Allow"}
-        if approve_writes:
+    def hitl(self, approve_writes: bool, one_time_only: bool = False) -> dict:
+        names = {"Allow once"} if one_time_only else {"Allow once", "Allow"}
+        if approve_writes and not one_time_only:
             names |= {"Always allow", "Allow always", "Full access", "Allow full access"}
         try:
             # The task asked for a folder of the user's computer
@@ -595,13 +671,15 @@ def main() -> int:
             return 0
         driver = Driver(Desktop(), args.timeout_ms, args.max_actions)
         if args.mode == "submit":
-            result = driver.submit(payload.get("prompt"))
+            result = driver.submit(payload.get("prompt"), payload.get("targetModel"),
+                                   payload.get("firstParty") is True)
         elif args.mode == "hitl":
-            result = driver.hitl(payload.get("approveWriteTools") is True)
+            result = driver.hitl(payload.get("approveWriteTools") is True,
+                                 payload.get("oneTimeApprovalsOnly") is True)
         elif args.mode == "answer":
             result = driver.answer(payload.get("questions"))
         elif args.mode == "reset":
-            result = driver.reset()
+            result = driver.reset(payload.get("firstParty") is True)
         else:
             result = driver.probe()
         print(json.dumps(result))
