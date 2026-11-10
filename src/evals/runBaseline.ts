@@ -1,4 +1,4 @@
-import { RUN_FORMAT } from './resultFormat.js';
+import { RUN_FORMAT, assertCurrentSummaryResults } from './resultFormat.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -170,6 +170,8 @@ export async function findPreviousRun(options: {
           'eval-run-summary',
           candidate.id
         );
+        // A summary an earlier MST stored, with older case results, isn't one.
+        assertCurrentSummaryResults(artifact.data, candidate.id);
         if (
           isComparable(
             artifact.data,

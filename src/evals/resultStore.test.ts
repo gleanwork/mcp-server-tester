@@ -142,6 +142,45 @@ describe('FileEvalResultStore', () => {
     ).toEqual(['current']);
   });
 
+  it('fails on a malformed or newer artifact, and leaves it out of listings', async () => {
+    const { mkdir, writeFile } = await import('fs/promises');
+    await mkdir(join(tmpDir, 'eval-runs'), { recursive: true });
+    const artifact = {
+      format: 'mst.run/v1',
+      kind: 'eval-runner-result',
+      id: 'x',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      metadata: {},
+      data: {},
+    };
+    const write = (id: string, value: unknown) =>
+      writeFile(join(tmpDir, 'eval-runs', `${id}.json`), JSON.stringify(value));
+    await write('no-id', { ...artifact, id: undefined });
+    await write('future-kind', { ...artifact, kind: 'eval-run-forecast' });
+    await write('newer', { ...artifact, format: 'mst.run/v2' });
+    await write('rc0', {
+      ...artifact,
+      data: { caseResults: [{ id: 'a', pass: true, scores: {}, trace: {} }] },
+    });
+    await expect(
+      store.loadArtifact('eval-runner-result', 'no-id')
+    ).rejects.toThrow(
+      "Stored eval-runner-result 'no-id' isn't a stored result artifact"
+    );
+    await expect(
+      store.loadArtifact('eval-runner-result', 'future-kind')
+    ).rejects.toThrow(
+      /a newer MST may have written it\. Upgrade MST to read it\./
+    );
+    await expect(
+      store.loadArtifact('eval-runner-result', 'newer')
+    ).rejects.toThrow('was written by a newer MST (mst.run/v2)');
+    await expect(
+      store.loadArtifact('eval-runner-result', 'rc0')
+    ).rejects.toThrow('written by an MST 2.0 release candidate');
+    expect(await store.listArtifacts('eval-runner-result')).toEqual([]);
+  });
+
   it('round-trips comparison artifacts', async () => {
     const artifact = createStoredEvalArtifact({
       kind: 'eval-run-comparison',
@@ -408,6 +447,24 @@ describe('redactStoredResponses', () => {
     });
     // The input is not changed.
     expect(result.transcript.finalText).toBe('private answer');
+  });
+
+  it("strips an rc.0 `trace` as it does a transcript, so a hand-built comparison can't keep one's answer", () => {
+    const result = {
+      id: 'one',
+      pass: true,
+      scores: {},
+      trace: transcript(),
+      trialResults: [{ pass: true, durationMs: 1, trace: transcript() }],
+    };
+    const redacted = redactStoredResponses({ cases: [{ baseline: result }] });
+    expect(redacted.cases[0]!.baseline).toEqual({
+      id: 'one',
+      pass: true,
+      scores: {},
+      trace: redactedTranscript,
+      trialResults: [{ pass: true, durationMs: 1, trace: redactedTranscript }],
+    });
   });
 
   it("drops a client's telemetry content, keeping the rest of its telemetry", () => {

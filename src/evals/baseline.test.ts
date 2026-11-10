@@ -5,6 +5,66 @@ import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
+describe('a baseline file', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'baseline-file-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const result: EvalRunnerResult = {
+    total: 1,
+    passed: 1,
+    failed: 0,
+    caseResults: [
+      {
+        id: 'a',
+        datasetName: 'd',
+        source: 'eval',
+        pass: true,
+        durationMs: 1,
+        scores: {},
+      },
+    ],
+    durationMs: 1,
+  };
+
+  it('is the result in the run format, and reads back without its envelope', async () => {
+    const { readFile } = await import('fs/promises');
+    const file = join(dir, 'baseline.json');
+    await saveBaseline(result, file);
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    expect(saved).toMatchObject({ format: 'mst.run/v1', kind: 'baseline' });
+    expect(await loadBaseline(file)).toEqual(result);
+  });
+
+  it('fails on a file saved without a format, a newer one, or another kind', async () => {
+    const { writeFile } = await import('fs/promises');
+    const file = join(dir, 'baseline.json');
+    await writeFile(file, JSON.stringify(result));
+    await expect(loadBaseline(file)).rejects.toThrow(
+      /has no format: MST saved baselines without one before 2\.0\.0-rc\.1\. Save it again with saveBaseline/
+    );
+    await writeFile(
+      file,
+      JSON.stringify({ format: 'mst.run/v2', kind: 'baseline', ...result })
+    );
+    await expect(loadBaseline(file)).rejects.toThrow(
+      'was written by a newer MST (mst.run/v2)'
+    );
+    await writeFile(
+      file,
+      JSON.stringify({ format: 'mst.run/v1', kind: 'summary', ...result })
+    );
+    await expect(loadBaseline(file)).rejects.toThrow("isn't a baseline");
+  });
+});
+
 describe('baselines from an earlier MST', () => {
   let dir: string;
   beforeEach(async () => {
@@ -96,17 +156,23 @@ describe('baselines from an earlier MST', () => {
     await writeFile(
       file,
       JSON.stringify({
+        format: 'mst.run/v1',
+        kind: 'baseline',
         total: 1,
         passed: 1,
         failed: 0,
         caseResults: [
           {
             id: 'a',
+            datasetName: 'd',
             pass: true,
+            durationMs: 1,
             source: 'eval',
             transcript,
             scores: { containsText: { pass: true } },
-            trialResults: [{ transcript }],
+            trialResults: [
+              { trial: 1, pass: true, durationMs: 1, scores: {}, transcript },
+            ],
           },
         ],
       })

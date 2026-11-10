@@ -222,7 +222,28 @@ describe('compareEvalRuns', () => {
     await expect(
       loadStoredEvalRunnerResult(store, { id: 'run-old' })
     ).rejects.toThrow(
-      /^Stored eval result run-old was written by an MST 2\.0 prerelease, before its score keys took their assertions' names \(textContains → containsText/
+      /^Stored eval-runner-result 'run-old' was written by an MST 2\.0 prerelease, before its score keys took their assertions' names \(textContains → containsText/
+    );
+  });
+
+  it('refuses results an rc.0 MST wrote, however they were read', () => {
+    const rc0 = {
+      ...createCase('a', true),
+      trace: { finalText: 'answer', events: [] },
+    } as unknown as EvalCaseResult;
+    expect(() =>
+      compareEvalRuns({
+        baseline: createRun([rc0]),
+        candidate: createRun([createCase('a', true)]),
+      })
+    ).toThrow(/^The baseline run was written by an MST 2\.0 release candidate/);
+    expect(() =>
+      compareEvalRuns({
+        baseline: createRun([createCase('a', true)]),
+        candidate: createRun([rc0]),
+      })
+    ).toThrow(
+      /^The candidate run was written by an MST 2\.0 release candidate/
     );
   });
 

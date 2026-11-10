@@ -15,16 +15,22 @@ import type { EvaluationSummary } from './evalFrameworkTypes.js';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
 import type { EvalDataset } from './datasetTypes.js';
-import {
-  INFRASTRUCTURE_BREAKS,
-  endingOf,
-  isInfrastructure,
-} from './trialEnding.js';
+import { endingOf, isInfrastructure } from './trialEnding.js';
 import type { RecordedRunner } from './runners/builtinRunners.js';
 import type { ShardRecord } from './runners/shardedCollect.js';
 import type { ListedServerTools } from './toolSurface.js';
 import { storedClientName, storedClientSetup } from './clientNames.js';
 import { TranscriptSchema } from './transcriptFormat.js';
+import {
+  BaselineRecordSchema,
+  CaseResultSchema,
+  Envelope,
+  StoredArtifactSchema,
+  TrialEndingSchema,
+  WriteModeSchema,
+  WriteRecordSchema,
+  parseRunFile,
+} from './runFileSchemas.js';
 
 /**
  * The run format, `mst.run/v1`: what a run leaves behind, one directory per
@@ -99,140 +105,6 @@ function segment(name: string): string {
   const hash = createHash('sha256').update(name).digest('hex').slice(0, 16);
   return `${encoded.slice(0, MAX_SEGMENT_BYTES - 17).replace(/%[0-9A-F]?$/, '')}~${hash}`;
 }
-
-/**
- * A Zod error's issues with each union replaced by its closest branch, the
- * one with the fewest issues, and every path made absolute. Without this a
- * union says only "Invalid input", and a branch the file was never meant to
- * be (a pairwise calibration's `judgeKind` against the pointwise branch)
- * looks like an unknown value.
- */
-function closestIssues(
-  issues: readonly z.core.$ZodIssue[],
-  prefix: readonly PropertyKey[] = []
-): z.core.$ZodIssue[] {
-  return issues.flatMap((issue) => {
-    const at = [...prefix, ...issue.path];
-    if (issue.code === 'invalid_union' && issue.errors.length) {
-      const closest = issue.errors.reduce((best, branch) =>
-        branch.length < best.length ? branch : best
-      );
-      return closestIssues(closest, at);
-    }
-    return [{ ...issue, path: at }];
-  });
-}
-
-/** `writeRecord.writes[0].mode`, as Zod prints a path. */
-function issuePath(path: readonly PropertyKey[]): string {
-  return (
-    path
-      .map((key, i) =>
-        typeof key === 'number' ? `[${key}]` : `${i ? '.' : ''}${String(key)}`
-      )
-      .join('') || '(root)'
-  );
-}
-
-/** The value at a Zod issue's path in what was parsed. */
-function valueAt(value: unknown, path: readonly PropertyKey[]): unknown {
-  let at = value;
-  for (const key of path) {
-    if (at === null || typeof at !== 'object') return undefined;
-    at = (at as Record<PropertyKey, unknown>)[key];
-  }
-  return at;
-}
-
-/**
- * Where a file has a value in a closed field this MST doesn't know: an enum
- * or literal value, or a discriminator no branch has. A field that is
- * missing is a malformed file, not a newer one.
- */
-function unknownValues(
-  value: unknown,
-  issues: readonly z.core.$ZodIssue[]
-): string[] {
-  return issues.flatMap((issue) =>
-    (issue.code === 'invalid_value' ||
-      (issue.code === 'invalid_union' && 'discriminator' in issue)) &&
-    valueAt(value, issue.path) !== undefined
-      ? [issuePath(issue.path)]
-      : []
-  );
-}
-
-/**
- * Parse one run-format file with its schema. Throws with the file's name, and
- * says to upgrade MST when the file has a value in a closed field that this
- * MST doesn't know: a newer MST may have written it.
- */
-function parseRunFile<T extends z.ZodType>(
-  schema: T,
-  value: unknown,
-  file: string,
-  what: string
-): z.infer<T> {
-  const parsed = schema.safeParse(value);
-  if (parsed.success) return parsed.data;
-  const issues = closestIssues(parsed.error.issues);
-  const unknown = [...new Set(unknownValues(value, issues))];
-  const hint = unknown.length
-    ? ` It has a value this MST doesn't know at ${unknown.join(', ')}: a newer MST may have written it. Upgrade MST to read it.`
-    : '';
-  throw new Error(
-    `${file} isn't ${what}: ${z.prettifyError(new z.ZodError(issues))}${hint}`
-  );
-}
-
-const Envelope = <K extends string>(kind: K) => ({
-  format: z.literal(RUN_FORMAT),
-  kind: z.literal(kind),
-});
-
-/** How a server handles a write (ADR 0014). */
-export const WriteModeSchema = z.enum([
-  'planned',
-  'simulated',
-  'server-planned',
-  'live',
-  'unguarded',
-  'read-only',
-]);
-
-/** A trial's write record (ADR 0014): what its dry-run proxies recorded. */
-const WriteRecordSchema = z.looseObject({
-  writes: z.array(
-    z.looseObject({
-      server: z.string(),
-      tool: z.string(),
-      arguments: z.unknown(),
-      /** What the client was told. Not in a run that redacts responses. */
-      reply: z.unknown().optional(),
-      mode: z.enum(['planned', 'simulated', 'server-planned']),
-      target: z.string().optional(),
-      eventId: z.string().optional(),
-    })
-  ),
-  unreported: z.number().int().nonnegative(),
-  unrecorded: z.array(
-    z.looseObject({
-      server: z.string(),
-      tool: z.string(),
-      eventId: z.string().optional(),
-    })
-  ),
-  unclassified: z.array(
-    z.looseObject({
-      server: z.string(),
-      tool: z.string(),
-      arguments: z.unknown(),
-      target: z.string().optional(),
-      reason: z.enum(['dispatch', 'unmarked']),
-    })
-  ),
-  attribution: z.enum(['exclusive', 'matched']),
-});
 
 /** `run.json`: what ran, with what, and how far it got. */
 const RunRecordSchema = z.looseObject({
@@ -470,19 +342,6 @@ export function trialArtifactsPath(
   );
 }
 
-/** How a trial's attempt ended (ADR 0010): a trial, or an infrastructure failure. */
-const TrialEndingSchema = z.discriminatedUnion('kind', [
-  z.looseObject({ kind: z.literal('trial') }),
-  z.looseObject({
-    kind: z.literal('infrastructure'),
-    /** What broke around the client. */
-    broke: z.enum(INFRASTRUCTURE_BREAKS),
-    /** Whether collecting the attempt again can end differently: `mst run --resume` collects it. */
-    retryable: z.boolean(),
-    reason: z.string(),
-  }),
-]);
-
 /** `transcripts/<variant>/<case-id>/<trial>.json`: what the client did in one trial. */
 const TrialRecordSchema = z.looseObject({
   ...Envelope('trial'),
@@ -709,46 +568,6 @@ export function parseCalibrationRecord(
   return parseRunFile(CalibrationRecordSchema, value, file, 'a calibration');
 }
 
-/** One grader's score in a case or trial result, by its grader's name. */
-const ScoresSchema = z.record(
-  z.string(),
-  z.looseObject({
-    pass: z.boolean(),
-    score: z.number().optional(),
-    reasoning: z.string().optional(),
-  })
-);
-
-/** One trial of a case that ran several. */
-const TrialResultSchema = z.looseObject({
-  pass: z.boolean(),
-  durationMs: z.number(),
-  scores: ScoresSchema.optional(),
-  error: z.string().optional(),
-  gradingError: z.string().optional(),
-  ending: TrialEndingSchema.optional(),
-  transcript: TranscriptSchema.optional(),
-  writeRecord: WriteRecordSchema.optional(),
-});
-
-/** A case's result: its trials, scores and transcript joined. */
-const CaseResultSchema = z.looseObject({
-  id: z.string(),
-  datasetName: z.string(),
-  variant: z.string().optional(),
-  pass: z.boolean(),
-  durationMs: z.number(),
-  ending: TrialEndingSchema.optional(),
-  scores: ScoresSchema,
-  error: z.string().optional(),
-  gradingError: z.string().optional(),
-  passRate: z.number().optional(),
-  trialResults: z.array(TrialResultSchema).optional(),
-  transcript: TranscriptSchema.optional(),
-  writeRecord: WriteRecordSchema.optional(),
-  tags: z.array(z.string()).optional(),
-});
-
 /** `results.json`: every case result, transcripts and scores joined. */
 const ResultsRecordSchema = z.looseObject({
   ...Envelope('results'),
@@ -818,6 +637,8 @@ export const RUN_SCHEMAS = {
   summary: SummaryRecordSchema,
   latest: LatestRecordSchema,
   manifest: RunManifestSchema,
+  baseline: BaselineRecordSchema,
+  artifact: StoredArtifactSchema,
 } as const;
 
 /** A dataset's content hash: the cases a run took from it, as they ran. */
