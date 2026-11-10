@@ -300,8 +300,10 @@ completed run restores automatically.
 A private recovery journal at
 `~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash. MST
 writes it before the first permission write and before it submits the first
-task. A journal from an older MST version (v1) has no write-outcome or task
-record, so MST does not trust it silently.
+task. A journal from an earlier development format (`version: 1`, the journal's
+own schema version, not an MST package or `mst.run/v1` version) is unpublished.
+It has no write-outcome or task record, so restore and configure reject it. MST
+does not migrate it; it needs manual resolution (see below).
 
 MST keeps the journal and the desktop lock, and blocks both automatic recovery
 and a new configured run, in any of these cases:
@@ -347,10 +349,37 @@ is provably dead. It does not prove that a cloud task finished or that a
 permission write settled, and it never reclaims the recovery guard. A live or
 unknown owner is always rejected.
 
-An unknown write or an unbound task may need manual investigation in the Claude
-account, such as its connector permissions and recent Cowork tasks. Do not
-delete the journal or a lock to retry: that discards the only record of the
-original permissions.
+#### Stale recovery guard
+
+An interrupted recovery can leave `~/.mcp-server-tester/cowork-desktop-macos.lock.recovery`.
+`--recover-stale-lock` cannot reclaim it. Before you remove this guard alone,
+inspect its owner and confirm that no recovery is running. A live, unknown, or
+unverified owner is not a reason to remove it. Removing the guard only lets
+another attempt acquire the desktop lease. It does not restore permissions or
+show that cloud work has stopped. Leave the journal and the main desktop lease
+in place until you have established that doing otherwise is safe.
+
+#### Resolve a blocked journal manually
+
+Repeating `restore-connectors` or using `--recover-stale-lock` does not attest
+that a write or task has ended, and neither clears these markers. Do not delete
+or edit the journal or the desktop lease to retry: the journal is the only record
+of the original permissions, and no current command performs or verifies manual
+retirement. There is no force option and no supported delete or marker-edit recipe.
+
+1. Keep the journal and the lease unchanged. Keep a protected copy of their
+   account, organization, and original-permission facts.
+2. Ask qualified Claude account or provider support to identify the exact task,
+   to establish that every outstanding write has ended and cannot commit later and
+   every task has finished, and to restore and verify the recorded original
+   permissions, including removing keys that were originally absent.
+3. Once those facts are established and no local run or recovery owns the files,
+   ask an MST maintainer for help. Maintainer assistance retires or securely
+   archives the resolved local state and retains the evidence. A retry is not
+   promised to succeed.
+
+The same steps apply to an earlier-format journal that restore and configure
+reject.
 
 ## Run on macOS from a source checkout
 

@@ -1656,6 +1656,81 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     return transcript;
   }
 
+  it.each(['list-error', 'omitted'] as const)(
+    'keeps mirroring the bound task when the session list is %s, with task-specific diagnostics',
+    async (mode) => {
+      const desktop = adapter();
+      const startedAtMs = Date.now();
+      const session = await prepare(desktop);
+      const events = promptEvents({ tools: [SEARCH] });
+      const terminal = events.pop()!;
+      const bound = await submitAndBind(desktop, events);
+      expect(bound.isComplete).toBe(false);
+      // A listed bound task remains readable even with stale list activity.
+      account.sessions.find(
+        (trial) => trial.id === 'cse_trial1'
+      )!.last_event_at = now(-60_000);
+      events.push({
+        source: 'server',
+        created_at: now(),
+        payload: {
+          type: 'assistant',
+          message: { role: 'assistant', content: 'Bound task still running' },
+        },
+      });
+      await eventually(async () =>
+        expect(
+          await readFile(
+            join(bound.candidate.sessionDir, 'audit.jsonl'),
+            'utf8'
+          )
+        ).toContain('Bound task still running')
+      );
+      if (mode === 'list-error') account.listStatus = 500;
+      else {
+        account.sessions.unshift(
+          ...Array.from({ length: 10 }, (_, index) => ({
+            id: `cse_newer_${index}`,
+            created_at: now(),
+            last_event_at: now(),
+            events: [],
+          }))
+        );
+        account.eventsStatusBySession.set('cse_newer_0', 502);
+      }
+      // Let the list lose the task before its result arrives. The synthetic
+      // bound summary has no activity timestamp and must still be read.
+      const requests = account.requests.length;
+      await pollMirror();
+      expect(
+        account.requests
+          .slice(requests)
+          .some((request) =>
+            request.path.startsWith('/v1/code/sessions/cse_trial1/events?')
+          )
+      ).toBe(true);
+      events.push(terminal);
+      const completed = await mirrored(desktop, startedAtMs);
+      expect(completed.candidate.id).toBe('local_cse_trial1');
+      expect(session.recordingError?.()).toBeUndefined();
+
+      // A bound-task fetch failure must win over list/unrelated errors, and
+      // clearing it must return to a clean diagnostic without fixing the list.
+      account.eventsStatusBySession.set('cse_trial1', 503);
+      await eventually(async () =>
+        expect(session.recordingError?.()).toBe(
+          'claude.ai session cse_trial1 failed (503).'
+        )
+      );
+      account.eventsStatusBySession.delete('cse_trial1');
+      await eventually(async () =>
+        expect(session.recordingError?.()).toBeUndefined()
+      );
+      await drive(session.dispose());
+      expect(account.permissions).toEqual(account.original);
+    }
+  );
+
   it('retains an active task across timeout cleanup, reset and restart without restoring or submitting again', async () => {
     base.reset = vi.fn(async () => {});
     const desktop = adapter();
@@ -1954,6 +2029,50 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
         })
       );
     }
+
+    it.each(['pre-submission-result', 'stale-prompt'] as const)(
+      'refuses persisted task completion proof with a %s',
+      async (state) => {
+        await crashedRun(
+          { 'srv-mail:send_mail': true },
+          { 'srv-mail:send_mail': false },
+          { startedAt: now(), sessionId: 'cse_trial1' }
+        );
+        const events = promptEvents({ tools: [SEARCH] });
+        if (state === 'pre-submission-result') {
+          events.pop();
+          // An uncorrelated terminal result is not a setup/warmup result:
+          // only its position before the submitted prompt disqualifies it.
+          events.unshift({
+            source: 'server',
+            created_at: now(-1_000),
+            payload: {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              result: 'Earlier task finished',
+            },
+          });
+        } else events[0]!.created_at = now(-60_000);
+        addTrial(events);
+        await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+          state === 'stale-prompt'
+            ? /no readable submitted prompt/
+            : /no terminal native result/
+        );
+        expect(account.patches()).toEqual([]);
+        expect(account.permissions).toEqual({
+          ...account.original,
+          'srv-mail:send_mail': false,
+        });
+        expect(JSON.parse(await readFile(journal(), 'utf8'))).toMatchObject({
+          pendingTask: {
+            sessionId: 'cse_trial1',
+            startedAt: expect.any(String),
+          },
+        });
+      }
+    );
 
     it.each([
       'active',
