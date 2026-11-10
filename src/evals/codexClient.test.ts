@@ -87,6 +87,12 @@ async function writeTraceBundle(root: string, threadId: string) {
   return bundle;
 }
 
+/**
+ * The trace directories trials left. A trial's trace is temporary: MST removes
+ * it after copying, so a test that runs the client alone removes it here.
+ */
+const clientTraceDirs: string[] = [];
+
 vi.mock('@openai/codex-sdk', () => ({
   Codex: class {
     constructor(options: Record<string, unknown>) {
@@ -103,8 +109,10 @@ vi.mock('@openai/codex-sdk', () => ({
             'utf8'
           );
           sdk.homeMode = statSync(join(env.CODEX_HOME!, 'config.toml')).mode;
-          if (env.CODEX_ROLLOUT_TRACE_ROOT && !sdk.noTrace)
+          if (env.CODEX_ROLLOUT_TRACE_ROOT && !sdk.noTrace) {
+            clientTraceDirs.push(join(env.CODEX_ROLLOUT_TRACE_ROOT, '..'));
             await writeTraceBundle(env.CODEX_ROLLOUT_TRACE_ROOT, 'thread-9');
+          }
           const sessions = join(
             env.CODEX_HOME!,
             'sessions',
@@ -279,6 +287,11 @@ beforeEach(() => {
     (sdk as Record<string, unknown>)[key] = key === 'hang' ? false : undefined;
 });
 
+afterEach(async () => {
+  for (const dir of clientTraceDirs.splice(0))
+    await rm(dir, { recursive: true, force: true });
+});
+
 describe('codex-cli client options', () => {
   it('is a built-in, headless client with a structured transcript', () => {
     expect(getClient('codex-cli')).toBe(CODEX_CLIENT);
@@ -310,8 +323,8 @@ describe('codex-cli client options', () => {
       CodexClientSchema.parse({ type: 'codex-cli', sandbox: 'none' })
     ).toThrow();
     expect(
-      CodexClientSchema.parse({ type: 'codex-cli', rolloutTrace: true })
-    ).toMatchObject({ rolloutTrace: true });
+      CodexClientSchema.parse({ type: 'codex-cli', rolloutTrace: false })
+    ).toMatchObject({ rolloutTrace: false });
     expect(() =>
       CodexClientSchema.parse({ type: 'codex-cli', rolloutTrace: 'yes' })
     ).toThrow();
@@ -514,7 +527,20 @@ describe('codex-cli client run', () => {
     // The trial's home and working directory are gone.
     expect(existsSync(env.CODEX_HOME!)).toBe(false);
     expect(existsSync(String(sdk.thread!.workingDirectory))).toBe(false);
-    // No rollout trace unless the client asks for one.
+    // The rollout trace is kept by default.
+    expect(env.CODEX_ROLLOUT_TRACE_ROOT).toBe(
+      join(result.artifacts!.dir, CODEX_ROLLOUT_TRACE_DIR)
+    );
+    expect(result.telemetry!.rolloutTrace).toMatchObject({ bundles: 1 });
+  });
+
+  it('keeps no rollout trace with rolloutTrace false', async () => {
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex-cli', rolloutTrace: false },
+      context(GATEWAY)
+    );
+    const env = sdk.options!.env as Record<string, string>;
     expect(env).not.toHaveProperty('CODEX_ROLLOUT_TRACE_ROOT');
     expect(result).not.toHaveProperty('artifacts');
     expect(result.telemetry).not.toHaveProperty('rolloutTrace');
@@ -600,12 +626,11 @@ describe('codex-cli client run', () => {
     expect(existsSync(cwd)).toBe(true);
   });
 
-  it('reports the rollout trace Codex wrote as the trial artifacts, with rolloutTrace', async () => {
+  it('reports the rollout trace Codex wrote as the trial artifacts', async () => {
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
       {
         type: 'codex-cli',
-        rolloutTrace: true,
         // MST's trace root wins over one the client's env sets.
         env: { CODEX_ROLLOUT_TRACE_ROOT: join(cwd, 'elsewhere') },
       },
@@ -654,7 +679,7 @@ describe('codex-cli client run', () => {
     sdk.noTrace = true;
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex-cli', rolloutTrace: true },
+      { type: 'codex-cli' },
       context(GATEWAY)
     );
     const env = sdk.options!.env as Record<string, string>;
@@ -671,7 +696,7 @@ describe('codex-cli client run', () => {
     sdk.hang = true;
     const result = await CODEX_CLIENT.run!(
       { prompt: 'x', servers: [] },
-      { type: 'codex-cli', rolloutTrace: true, timeout: 50 },
+      { type: 'codex-cli', timeout: 50 },
       context(GATEWAY)
     );
     try {

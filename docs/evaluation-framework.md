@@ -637,9 +637,9 @@ must name: Cowork's `outputs/` is its working directory, and its
 `outputs/.claude/settings.local.json` isn't copied. Symbolic links and other
 non-regular files are never copied. Judges and
 pairwise judges get the copy as `trial.artifactsDir`; no result holds its path.
-The `codex-cli` client reports Codex's rollout trace with `rolloutTrace`
-([codex.md](./codex.md#the-rollout-trace)): each model request as Codex sent
-it.
+The `codex-cli` client reports Codex's rollout trace unless `rolloutTrace` is
+false ([codex.md](./codex.md#the-rollout-trace)): each model request as Codex
+sent it.
 
 A copy has limits: 16 MB per file, 64 MB in all, 4,096 entries and 16
 directories deep. A copy that fails (over a limit, or a directory that's gone)
@@ -845,7 +845,7 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 | `cwd`             | empty temporary directory, removed after the trial             |
 | `apiKeyEnvVar`    | OPENAI_API_KEY or LLM gateway                                  |
 | `env`             | allowed inherited variables; no extra variables                |
-| `rolloutTrace`    | false                                                          |
+| `rolloutTrace`    | true                                                           |
 
 #### `cowork` options
 

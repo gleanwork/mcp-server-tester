@@ -14,9 +14,9 @@
  * and the session's rollout file for each model response's usage and the
  * tool searches it ran. Its model endpoint and credential come from
  * `resolveLLMEndpoint('openai')`: OPENAI_API_KEY, or OPENAI_BASE_URL with a
- * gateway token. With `rolloutTrace`, Codex also writes its rollout trace
- * (each model request as sent, each response, the tool calls), which the
- * trial reports as its client artifacts.
+ * gateway token. Codex also writes its rollout trace (each model request as
+ * sent, each response, the tool calls), which the trial reports as its client
+ * artifacts, unless `rolloutTrace` is false.
  */
 import fs from 'node:fs';
 import {
@@ -78,6 +78,9 @@ import {
 /** How long a trial may run when the eval sets no `timeout`. */
 const DEFAULT_TIMEOUT_MS = 300_000;
 const DEFAULT_WEB_SEARCH = false;
+// The rollout trace is the only record of each request the model got, and a
+// trial that didn't keep it can't get it back, so it's kept unless turned off.
+const DEFAULT_ROLLOUT_TRACE = true;
 /** How long Codex waits for an MCP server to start and list its tools. */
 const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
 /** The environment variable Codex reads the model credential from. */
@@ -156,7 +159,10 @@ export const CodexClientSchema = z
      * model request exactly as Codex sent it, each response with its usage,
      * and the tool calls. The trial reports it as its client artifacts.
      */
-    rolloutTrace: z.boolean().optional().meta({ default: false }),
+    rolloutTrace: z
+      .boolean()
+      .optional()
+      .meta({ default: DEFAULT_ROLLOUT_TRACE }),
   })
   .strict();
 
@@ -563,7 +569,7 @@ async function runCodex(
       }),
       { mode: 0o600 }
     );
-    if (options.rolloutTrace) {
+    if (options.rolloutTrace ?? DEFAULT_ROLLOUT_TRACE) {
       traceDir = await mkdtemp(path.join(os.tmpdir(), 'mst-codex-trace-'));
       await mkdir(path.join(traceDir, CODEX_ROLLOUT_TRACE_DIR));
     }
