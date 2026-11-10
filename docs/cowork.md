@@ -9,7 +9,11 @@ it does not provision or authenticate that runtime.
 
 ## First-time macOS setup
 
-Run this once on a new Mac before the first Cowork evaluation:
+This section is for the default `third-party` mode. In `first-party` mode, do
+not run `mst cowork setup`: it uses the signed-in installed app and no MST
+profile (see [Cloud sessions](#cloud-sessions)).
+
+Run this once on a new Mac before the first default-mode Cowork evaluation:
 
 ```bash
 node --import tsx src/cli/index.ts cowork setup
@@ -224,8 +228,10 @@ the same labels; `rawName` preserves Claude's original name.
 This mode accepts only `transport`, `serverUrl`, and `label` (from the map key).
 It rejects stdio, auth/headers, TLS/proxy overrides, protocol options, and
 transport timeouts because those settings cannot configure an account connector.
-It also rejects marketplace plugins, app-version selection, simulated writes,
-and tool-metadata proxies. Readiness and read-only checks use the account's
+It also rejects the options `appVersion`, `dataDir`, `plugins`, `pluginRoots`
+and `mcpDataRoot`, simulated writes, tool-metadata proxies, and
+`recordServedTools` (the run records the account's tool inventory in
+`connector-policy.json` instead). Readiness and read-only checks use the account's
 actual tools during preparation, not a separate unauthenticated HTTP probe.
 
 Server policies are `read-only`, `allow-all`, `ask`, and `block`; tool overrides
@@ -248,7 +254,10 @@ not a dry-run proxy; planned/simulated-write assertions are unsupported.
 `failOnApproval` defaults to `true`, which disables automatic human-in-the-loop
 handling: MST performs no automatic approval clicks and rejects recorded
 approval requests. Set it to `false` for an `ask` policy; MST then delegates to
-the existing one-time approval handling. It is not a manual-only ask mode. MST verifies saved permission keys and checks the session's initial
+the existing one-time approval handling. It is not a manual-only ask mode.
+`coworkSetup.approveWriteTools` enables one-time approval of writable tools only
+with an explicit `writes` declaration and `failOnApproval: false`; with
+`failOnApproval: true` nothing is handled automatically. MST verifies saved permission keys and checks the session's initial
 catalog, discovered tool references, and actual calls against the policy. Cowork
 can load connectors after reporting them as pending in its initial catalog.
 MST records that catalog as incomplete rather than claiming it proves every
@@ -256,6 +265,17 @@ tool's availability. It saves the check as `connector-policy.json` beside the
 audit log, including the prepared tool list when validation fails. If the server
 changes its catalog during a task, MST fails the check instead of silently
 accepting new tools. Start a new run to prepare against the changed catalog.
+
+The Chrome recorder profile and Claude Desktop must be on the same account and
+the same active organization. You must make sure they are; MST does not
+verify Desktop's identity automatically. Before changing permissions it checks
+the Chrome session's account and organization, and it checks them again against
+the recovery journal before restoring. This is not a sandbox guarantee.
+
+One macOS Cowork lease is shared by both modes and every `dataDir`, so only one
+Cowork run drives the app at a time. MST reads at most 10,000 events from a
+session. A longer session fails with an error that names the cap; MST does not
+truncate it.
 
 The permission API is undocumented and may change. MST records the original
 values before applying settings, verifies each write, and restores changed keys
@@ -267,6 +287,21 @@ overwritten; conflicting values retain the journal and stop the run. If an
 excluded connector cannot list its tools, preparation aborts. Checking a task
 afterward is not a security boundary against a connector that changes its tool
 inventory while the task runs.
+
+#### Recover connector settings
+
+If a run was killed, restore from the journal without starting an eval:
+
+```bash
+npx mst cowork restore-connectors [--recover-stale-lock]
+```
+
+This macOS command uses the existing Chrome recorder profile sign-in, takes the
+shared lease, and checks the journal's account and organization and for
+concurrent permission edits before it restores. It runs no eval, changes no
+policy plan, and does not drive the app. Without the flag, any existing lease
+fails the command. `--recover-stale-lock` removes a lease only when its owner is
+provably dead; a live or unknown owner is always rejected.
 
 ## Run on macOS from a source checkout
 
@@ -344,9 +379,11 @@ approval inspections within the original per-case action budget; prompts are
 never resubmitted. Follow-up usage is recorded under
 `clientTelemetry.computerUse.hitlFollowups`.
 
-MST does not configure or observe connectors added from Cowork's own connector
-directory (the client's own connectors), so disconnect any that could write to real accounts before a run, or
-use test accounts.
+In `third-party` mode, MST does not configure or observe connectors added from
+Cowork's own connector directory (the client's own connectors), so disconnect any
+that could write to real accounts before a run, or use test accounts.
+`first-party` mode does configure and observe the account connectors it selects
+(see [Cloud sessions](#cloud-sessions)).
 
 ## Run an installed release
 

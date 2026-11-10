@@ -34,7 +34,10 @@ import {
   watchRun,
 } from './commands/runs/index.js';
 import { history, type HistoryOptions } from './commands/history/index.js';
-import { setupCowork } from './commands/cowork/index.js';
+import {
+  restoreCoworkConnectorsCommand,
+  setupCowork,
+} from './commands/cowork/index.js';
 import {
   auth,
   authRevoke,
@@ -747,13 +750,24 @@ optimizeTarget(
     )
 ).action((options: OptimizeTargetOptions) => optimizeFinish(options));
 
-// Cowork setup command
-program
+// Cowork setup and recovery commands
+const coworkCommand = program
   .command('cowork')
-  .description('Prepare the local macOS Claude 3P profile for Cowork')
+  .description('Prepare or recover the local macOS Cowork desktop');
+coworkCommand
   .command('setup')
   .description('Initialize or validate the empty Claude 3P profile')
   .action(setupCowork);
+coworkCommand
+  .command('restore-connectors')
+  .description(
+    'Restore Claude account connector settings from an existing journal only'
+  )
+  .option(
+    '--recover-stale-lock',
+    'Reclaim a desktop lock only when its local owner is provably stopped'
+  )
+  .action(restoreCoworkConnectorsCommand);
 
 // Open command
 program

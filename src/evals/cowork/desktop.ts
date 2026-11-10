@@ -40,6 +40,13 @@ export interface CoworkDesktop {
      * that needs no planner. macOS only.
      */
     restart?(): Promise<void>;
+    /**
+     * Why the session recorder last failed to record the app's sessions, or
+     * undefined when its latest attempt succeeded. A desktop that records
+     * sessions itself (first-party Cowork mirrors them from claude.ai) returns
+     * it, so a trial that finds no session can name the cause. Optional.
+     */
+    recordingError?(): string | undefined;
     dispose(): Promise<void>;
   }>;
   recover(): Promise<unknown>;

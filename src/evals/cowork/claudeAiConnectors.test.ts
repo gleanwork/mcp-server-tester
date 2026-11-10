@@ -388,6 +388,138 @@ describe('cloud connector configuration', () => {
       verifyCloudConnectorEvents(plan, [init, search, references])
     ).toThrow('unexpected');
   });
+  it.each(['text', 'text-blocks'] as const)(
+    'verifies allowed, blocked and newly surfaced managed tools in ToolSearch %s results',
+    (format) => {
+      const plan = planCloudConnectors(policySnapshot, {
+        servers: { docs: { policy: 'read-only' } },
+      });
+      const init = {
+        payload: { type: 'system', subtype: 'init', tools: ['ToolSearch'] },
+      };
+      const search = {
+        payload: {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'tool_use', id: 'lookup', name: 'ToolSearch' }],
+          },
+        },
+      };
+      const result = (tools: string[]) => {
+        const text = `Available: ${tools.join(', ')}.`;
+        return {
+          payload: {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'lookup',
+                  content: format === 'text' ? text : [{ type: 'text', text }],
+                },
+              ],
+            },
+          },
+        };
+      };
+      expect(
+        verifyCloudConnectorEvents(plan, [
+          init,
+          search,
+          result(['mcp__Acme_Documents__search']),
+        ])
+      ).toMatchObject({
+        observedAllowedTools: ['mcp__Acme_Documents__search'],
+        unobservedAllowedTools: [],
+        catalogComplete: true,
+      });
+      for (const tool of [
+        'mcp__Acme_Documents__send',
+        'mcp__Acme_Documents__new_tool',
+        'mcp__Task_Board__read',
+        'mcp__Task_Board__new_tool',
+      ]) {
+        expect(() =>
+          verifyCloudConnectorEvents(plan, [
+            init,
+            search,
+            result(['mcp__Acme_Documents__search', tool]),
+          ])
+        ).toThrow(`Unexpected: ${tool}. Missing: none.`);
+      }
+    }
+  );
+
+  it.each(['text', 'text-blocks', 'references'] as const)(
+    'does not treat unrelated MCP %s results as ToolSearch catalog evidence',
+    (format) => {
+      const plan = planCloudConnectors(policySnapshot, {
+        default: 'inherit',
+        servers: { docs: { policy: 'read-only' } },
+      });
+      const tools = [
+        'mcp__Acme_Documents__search',
+        'mcp__Acme_Documents__send',
+        'mcp__Acme_Documents__new_tool',
+      ];
+      const text = `The document mentions ${tools.join(', ')}.`;
+      const content =
+        format === 'text'
+          ? text
+          : format === 'text-blocks'
+            ? [{ type: 'text', text }]
+            : tools.map((tool_name) => ({ type: 'tool_reference', tool_name }));
+      expect(
+        verifyCloudConnectorEvents(plan, [
+          {
+            payload: {
+              type: 'system',
+              subtype: 'init',
+              tools: ['ToolSearch'],
+              mcp_servers: [{ name: 'Acme Documents', status: 'pending' }],
+            },
+          },
+          {
+            payload: {
+              type: 'assistant',
+              message: {
+                content: [
+                  { type: 'tool_use', id: 'lookup', name: 'ToolSearch' },
+                  {
+                    type: 'tool_use',
+                    id: 'read',
+                    name: 'mcp__Task_Board__read',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            payload: {
+              type: 'user',
+              message: {
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'lookup',
+                    content: 'No matching tools.',
+                  },
+                  { type: 'tool_result', tool_use_id: 'read', content },
+                  { type: 'tool_result', tool_use_id: 'unknown', content },
+                ],
+              },
+            },
+          },
+        ])
+      ).toMatchObject({
+        observedToolCount: 2,
+        observedAllowedTools: [],
+        unobservedAllowedTools: ['mcp__Acme_Documents__search'],
+        catalogComplete: false,
+      });
+    }
+  );
+
   it('verifies actual tool exposure and refuses approval prompts', () => {
     const plan = planCloudConnectors(snapshot, {
       servers: { Glean: { policy: 'read-only' } },

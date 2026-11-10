@@ -22,6 +22,7 @@ import {
   cloudInitialMessage,
   cloudTrialMetadata,
   coworkClaudeAi,
+  restoreClaudeAiConnectors,
 } from './claudeAi.js';
 import type { CoworkDesktop } from './desktop.js';
 import { findMatchingClaudeSessions } from './sessions.js';
@@ -39,6 +40,8 @@ const host = vi.hoisted(() => ({
   commands: [] as Array<{ file: string; args: string[] }>,
   /** `<operation> <absolute path>`: the error that operation fails with. */
   faults: new Map<string, NodeJS.ErrnoException>(),
+  /** `<file> <args joined by spaces>`: the error that command fails with. */
+  commandFaults: new Map<string, Error>(),
 }));
 
 vi.mock('node:os', async (original) => {
@@ -81,7 +84,10 @@ vi.mock('node:child_process', async (original) => {
       ) => void;
       host.commands.push({ file, args });
       const stdout = file === '/usr/bin/plutil' ? '1.2.3\n' : '';
-      setImmediate(() => callback(null, { stdout, stderr: '' }));
+      const fault = host.commandFaults.get(`${file} ${args.join(' ')}`);
+      setImmediate(() =>
+        fault ? callback(fault) : callback(null, { stdout, stderr: '' })
+      );
       return {};
     }),
   };
@@ -346,6 +352,9 @@ class ClaudeAccount {
   cookie = 'theme=dark; lastActiveOrg=org-acme';
   accountId = 'account-acme';
   listStatus = 200;
+  eventsStatus = 200;
+  /** Replaces fields of an event page: a server whose paging misbehaves. */
+  eventPage?: (start: number, end: number) => Record<string, unknown>;
   patchStatus = 202;
   /** Runs after a PATCH is applied: another tab or person editing the account. */
   afterPatch?: () => void;
@@ -453,11 +462,15 @@ class ClaudeAccount {
         (s) => s.id === decodeURIComponent(events[1]!)
       );
       if (!session) return json({}, 404);
+      if (this.eventsStatus !== 200) return json({}, this.eventsStatus);
       const start = Number(url.searchParams.get('cursor') ?? 0);
-      const end = start + this.eventPageSize;
+      const end =
+        start +
+        Math.min(this.eventPageSize, Number(url.searchParams.get('limit')));
       return json({
         data: session.events.slice(start, end),
         resume_cursor: end < session.events.length ? end : null,
+        ...this.eventPage?.(start, end),
       });
     }
     if (url.pathname === '/api/bootstrap')
@@ -697,6 +710,7 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     host.home = await mkdtemp(join(tmpdir(), 'mst-claude-ai-'));
     host.commands.length = 0;
     host.faults.clear();
+    host.commandFaults.clear();
     account = new ClaudeAccount();
     devtools.account = account;
     devtools.listening = true;
@@ -741,6 +755,7 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     for (const dispose of open) await drive(dispose()).catch(() => undefined);
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     Object.defineProperty(process, 'platform', platform);
     await rm(host.home, { recursive: true, force: true });
@@ -1368,6 +1383,350 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       )
     ).toEqual([]);
     expect(host.commands).toEqual([]);
+  });
+
+  /** The trial's cloud task, already finished, on the account. */
+  function addTrial(events: CloudEvent[]): CloudSession {
+    const session = {
+      id: 'cse_trial1',
+      created_at: now(-60_000),
+      last_event_at: now(),
+      events,
+    };
+    account.sessions.unshift(session);
+    return session;
+  }
+
+  async function unbound(desktop: CoworkDesktop, startedAtMs: number) {
+    expect(await readdir(desktop.dataDirectory({}))).toEqual([]);
+    expect(
+      await findMatchingClaudeSessions({
+        dataDir: desktop.dataDirectory({}),
+        snapshot: new Map(),
+        startedAtMs,
+        exactPrompt: PROMPT,
+      })
+    ).toEqual([]);
+  }
+
+  it.each([
+    {
+      failure: 'Chrome closes',
+      fail: () => {
+        devtools.listening = false;
+      },
+      heal: () => {
+        devtools.listening = true;
+      },
+      cause: `No Chrome is listening on DevTools port ${PORT}`,
+    },
+    {
+      failure: 'claude.ai signs out',
+      fail: () => {
+        account.listStatus = 401;
+      },
+      heal: () => {
+        account.listStatus = 200;
+      },
+      cause:
+        'claude.ai refused the Cowork session list (HTTP 401): sign in again',
+    },
+    {
+      failure: 'the event fetch fails',
+      fail: () => {
+        account.eventsStatus = 500;
+      },
+      heal: () => {
+        account.eventsStatus = 200;
+      },
+      cause: 'claude.ai session cse_trial1 failed (500).',
+    },
+  ])(
+    'names why it records nothing when $failure after prepare, and records once it recovers',
+    async ({ fail, heal, cause }) => {
+      const desktop = adapter();
+      const startedAtMs = Date.now();
+      const session = await prepare(desktop);
+      expect(session.recordingError?.()).toBeUndefined();
+      fail();
+      addTrial(promptEvents({ tools: [SEARCH] }));
+      await eventually(async () =>
+        expect(session.recordingError?.()).toContain(cause)
+      );
+      await pollMirror();
+      expect(session.recordingError?.()).toContain(cause);
+      await unbound(desktop, startedAtMs);
+
+      heal();
+      const transcript = await mirrored(desktop, startedAtMs);
+      expect(transcript.candidate.id).toBe('local_cse_trial1');
+      await eventually(async () =>
+        expect(session.recordingError?.()).toBeUndefined()
+      );
+      await drive(session.dispose());
+      expect(account.permissions).toEqual(account.original);
+    }
+  );
+
+  it('fails instead of recording part of a session past the 10,000-event cap', async () => {
+    account.eventPageSize = 500;
+    const desktop = adapter();
+    const startedAtMs = Date.now();
+    const session = await prepare(desktop);
+    const steps = Array.from({ length: 9_998 }, (_, step) => ({
+      type: 'assistant',
+      message: { role: 'assistant', content: `step ${step}` },
+    }));
+    const events = promptEvents({ tools: [SEARCH] }, steps);
+    expect(events).toHaveLength(10_001);
+    addTrial(events);
+    await eventually(async () =>
+      expect(session.recordingError?.()).toBe(
+        'claude.ai session cse_trial1 has more events than MST reads (50 pages of 200, 10,000 events). ' +
+          'MST does not record part of a session. Shorten the case so the task stays under the limit.'
+      )
+    );
+    await unbound(desktop, startedAtMs);
+    // 50 pages of 200, and never the 51st.
+    const pages = account.requests.filter((r) =>
+      r.path.startsWith('/v1/code/sessions/cse_trial1/events?')
+    );
+    expect(pages.every((r) => r.path.includes('limit=200'))).toBe(true);
+    expect(pages.some((r) => r.path.includes('cursor=9800'))).toBe(true);
+    expect(pages.some((r) => r.path.includes('cursor=10000'))).toBe(false);
+
+    // At the cap exactly, the whole session is recorded.
+    events.splice(5, 1);
+    const transcript = await mirrored(desktop, startedAtMs);
+    const audit = await readFile(
+      join(transcript.candidate.sessionDir, 'audit.jsonl'),
+      'utf8'
+    );
+    expect(audit.trim().split('\n')).toHaveLength(10_000);
+    await eventually(async () =>
+      expect(session.recordingError?.()).toBeUndefined()
+    );
+  });
+
+  it.each([
+    {
+      paging: 'repeats a cursor',
+      page: (start: number, end: number) => ({
+        resume_cursor: start === 0 ? end : start,
+      }),
+      cause:
+        'claude.ai returned a repeated event page cursor for session cse_trial1.',
+    },
+    {
+      paging: 'cycles back to an earlier cursor',
+      page: (start: number, end: number) => ({
+        resume_cursor: start === 0 ? end : 0,
+      }),
+      cause:
+        'claude.ai returned a repeated event page cursor for session cse_trial1.',
+    },
+    {
+      paging: 'returns a cursor that is not a string or number',
+      page: (_start: number, end: number) => ({
+        resume_cursor: { offset: end },
+      }),
+      cause:
+        'claude.ai returned a malformed event page cursor for session cse_trial1.',
+    },
+    {
+      paging: 'returns a page without a data array',
+      page: () => ({ data: { events: [] } }),
+      cause:
+        'claude.ai returned an event page without a data array for session cse_trial1.',
+    },
+  ])('records nothing when claude.ai $paging', async ({ page, cause }) => {
+    const desktop = adapter();
+    const startedAtMs = Date.now();
+    const session = await prepare(desktop);
+    account.eventPage = page;
+    addTrial(promptEvents({ tools: [SEARCH] }));
+    await eventually(async () =>
+      expect(session.recordingError?.()).toContain(cause)
+    );
+    expect(session.recordingError?.()).toContain(
+      'MST does not record part of a session.'
+    );
+    await pollMirror();
+    await unbound(desktop, startedAtMs);
+  });
+
+  it('restarts by quitting Claude and opening the prepared app path', async () => {
+    const session = await prepare(adapter());
+    const quit = {
+      file: '/usr/bin/osascript',
+      args: ['-e', 'tell application "Claude" to quit'],
+    };
+    const relaunch = {
+      file: '/usr/bin/open',
+      args: ['-a', '/Applications/Acme Claude.app'],
+    };
+    host.commands.length = 0;
+    const restarting = session.restart!();
+    // Claude gets time to quit before it is opened again.
+    await new Promise((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(2_900);
+    expect(host.commands).toEqual([quit]);
+    await drive(restarting);
+    expect(host.commands).toEqual([quit, relaunch]);
+
+    // A Claude that is not running cannot quit; it is still opened.
+    host.commands.length = 0;
+    host.commandFaults.set(
+      `${quit.file} ${quit.args.join(' ')}`,
+      new Error('Claude is not running')
+    );
+    await drive(session.restart!());
+    expect(host.commands).toEqual([quit, relaunch]);
+
+    // A failed relaunch fails the restart.
+    host.commandFaults.set(
+      `${relaunch.file} ${relaunch.args.join(' ')}`,
+      new Error('Unable to find application named Acme Claude')
+    );
+    await expect(drive(session.restart!())).rejects.toThrow(
+      'Unable to find application named Acme Claude'
+    );
+  });
+
+  it('does not hand the prompt to the planner when the Cowork deep link fails', async () => {
+    const desktop = adapter();
+    await prepare(desktop);
+    host.commandFaults.set(
+      '/usr/bin/open claude://cowork/new',
+      new Error('No application knows how to open claude://cowork/new')
+    );
+    await expect(
+      drive(desktop.submit(PROMPT, { deadlineAt: Date.now() + 60_000 }))
+    ).rejects.toThrow('No application knows how to open claude://cowork/new');
+    expect(base.submit).not.toHaveBeenCalled();
+  });
+
+  describe('restoreClaudeAiConnectors', () => {
+    /** What a run that never disposed left: MST's changes, still applied. */
+    async function crashedRun(
+      original: Record<string, boolean | null>,
+      applied: Record<string, boolean | null>
+    ) {
+      for (const [key, value] of Object.entries(applied)) {
+        if (value === null) delete account.permissions[key];
+        else account.permissions[key] = value;
+      }
+      await mkdir(join(host.home, '.mcp-server-tester'), { recursive: true });
+      await writeFile(
+        journal(),
+        JSON.stringify({
+          version: 1,
+          accountId: 'account-acme',
+          organizationId: 'org-acme',
+          original,
+          applied,
+        })
+      );
+    }
+
+    it('returns false without contacting Chrome when no run left a journal', async () => {
+      await expect(
+        drive(restoreClaudeAiConnectors({ MST_CLAUDE_AI_DEBUG_PORT: 'none' }))
+      ).resolves.toBe(false);
+      expect(devtools.sockets).toEqual([]);
+      expect(account.requests).toEqual([]);
+    });
+
+    it('puts back only the journal values and removes the journal, touching nothing else', async () => {
+      await crashedRun(
+        {
+          'srv-mail:send_mail': true,
+          'srv-search:search': false,
+          'srv-search:search:always': null,
+        },
+        {
+          'srv-mail:send_mail': false,
+          'srv-search:search': true,
+          'srv-search:search:always': true,
+        }
+      );
+      vi.stubEnv('MST_CLAUDE_AI_DEBUG_PORT', String(PORT));
+      await expect(drive(restoreClaudeAiConnectors())).resolves.toBe(true);
+      expect(account.permissions).toEqual(account.original);
+      await expect(stat(journal())).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(account.patches()).toEqual([
+        {
+          enabled_mcp_tools: {
+            'srv-mail:send_mail': true,
+            'srv-search:search': false,
+            'srv-search:search:always': null,
+          },
+        },
+      ]);
+      // Only the account's permissions: no inventory, no session list, no app.
+      expect(
+        new Set(account.requests.map((r) => `${r.method} ${r.path}`))
+      ).toEqual(new Set(['GET /api/bootstrap', 'PATCH /api/account/settings']));
+      expect(host.commands).toEqual([]);
+      const requests = account.requests.length;
+      await pollMirror();
+      expect(account.requests).toHaveLength(requests);
+      await expect(stat(sessionsDir())).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    });
+
+    it('refuses another signed-in account or organization and keeps the journal', async () => {
+      await crashedRun(
+        { 'srv-mail:send_mail': true },
+        { 'srv-mail:send_mail': false }
+      );
+      account.accountId = 'account-other';
+      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+        'Claude account or organization changed; refusing a permission write.'
+      );
+      account.accountId = 'account-acme';
+      account.cookie = 'lastActiveOrg=org-other';
+      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+        'Claude account or organization changed; refusing a permission write.'
+      );
+      expect(account.patches()).toEqual([]);
+      expect(account.permissions['srv-mail:send_mail']).toBe(false);
+      await expect(stat(journal())).resolves.toBeDefined();
+    });
+
+    it('keeps a value someone changed since the run, restores the rest, and keeps the journal', async () => {
+      await crashedRun(
+        { 'srv-mail:send_mail': true, 'srv-calendar:list_events': null },
+        { 'srv-mail:send_mail': false, 'srv-calendar:list_events': false }
+      );
+      // Someone enabled the calendar tool by hand after the crash.
+      account.permissions['srv-calendar:list_events'] = true;
+      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+        `Connector restore found 1 concurrent edits. Recovery journal retained at ${journal()}.`
+      );
+      expect(account.permissions).toEqual({
+        ...account.original,
+        'srv-calendar:list_events': true,
+      });
+      await expect(stat(journal())).resolves.toBeDefined();
+    });
+
+    it('keeps the journal when claude.ai does not keep the restored values', async () => {
+      await crashedRun(
+        { 'srv-mail:send_mail': true },
+        { 'srv-mail:send_mail': false }
+      );
+      // claude.ai accepts the write, then the old value comes back.
+      account.afterPatch = () => {
+        account.permissions['srv-mail:send_mail'] = false;
+      };
+      await expect(drive(restoreClaudeAiConnectors(env))).rejects.toThrow(
+        'Claude did not persist the requested connector permissions.'
+      );
+      expect(account.patches()).toHaveLength(1);
+      await expect(stat(journal())).resolves.toBeDefined();
+    });
   });
 
   it('runs on macOS only', async () => {

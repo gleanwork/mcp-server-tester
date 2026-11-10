@@ -19,9 +19,7 @@ import {
   type DesktopClientAdapter,
   type DesktopContinuation,
 } from './desktopBatch.js';
-import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { coworkDesktopLease } from './cowork/desktopLease.js';
 import { validateMacLocalServers } from './coworkSetup/macLocalMcp.js';
 import {
   findMatchingClaudeSessions,
@@ -488,14 +486,9 @@ async function desktopAdapter(
     redactClientError(error, secrets, 'Cowork operation failed.');
   return {
     name: 'Cowork',
-    // One desktop per run, across processes.
-    // One run per desktop, across processes. The desktop is identified by
-    // the native data directory it runs from, so separate desktops (e.g.
-    // several Linux displays) don't block each other.
-    lease: {
-      directory: join(homedir(), '.mcp-server-tester'),
-      file: `cowork-desktop-${createHash('sha256').update(dataDir).digest('hex').slice(0, 12)}.lock`,
-    },
+    // Both macOS modes drive the same app, even with a custom session path.
+    // Separate Linux data directories identify independently prepared desktops.
+    lease: coworkDesktopLease(dataDir, os),
     secrets,
     resetVerb: 'reset',
     // On Linux, a reset that fails once (accessibility_scan_timeout on a
@@ -560,6 +553,15 @@ async function desktopAdapter(
       await session?.dispose();
     },
     async runCase(session, request, index, ledger) {
+      function recordingFailure(error: unknown): string {
+        const message = safeError(error);
+        const cause = session?.recordingError?.();
+        return cause
+          ? safeError(
+              new Error(`${message} Session recording failed: ${cause}`)
+            )
+          : message;
+      }
       const caseStartedAt = Date.now();
       const computerUse: Record<
         'submission' | 'hitl',
@@ -666,7 +668,10 @@ async function desktopAdapter(
         // to the case: not the model. Computer Use types why it stopped
         // (a permission, the planner's provider, the deadline); anything
         // else is the client app.
-        const message = safeError(error);
+        const message =
+          computerUse.submission.status === 'completed'
+            ? recordingFailure(error)
+            : safeError(error);
         result = {
           ...failure(message),
           ending: computerUseEnding(error, message),
@@ -695,8 +700,8 @@ async function desktopAdapter(
           process.stderr.write(
             `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
           );
-        } else if (mac && coworkSetup.approveWriteTools) {
-          // Staged connector defaults must work without a click-through fallback.
+        } else if (mac && coworkSetup.approveWriteTools && !firstParty) {
+          // Only third-party mode stages connector defaults without a click-through fallback.
           computerUse.hitl = { status: 'not-attempted' };
         } else {
           const hitl = await platform.handleHitl({
@@ -816,7 +821,7 @@ async function desktopAdapter(
           ...match,
           sessionPath,
           timeoutMs: remaining,
-          ...(mac && !coworkSetup.approveWriteTools
+          ...(mac && (!coworkSetup.approveWriteTools || firstParty)
             ? {
                 onPending: async (pending) => {
                   // A tool request can arrive after the initial visual check. Revisit
@@ -966,7 +971,7 @@ async function desktopAdapter(
         }
       } catch (error) {
         // Transcript collection or attribution failed: the app state is unknown.
-        const message = safeError(error);
+        const message = recordingFailure(error);
         // The bound session never finished or went away: the client app
         // failed, not the model. Any other error here is the trial's.
         const lostSession =

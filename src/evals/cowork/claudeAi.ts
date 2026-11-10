@@ -22,8 +22,10 @@ import {
   CloudConnectorSnapshotSchema,
   CloudPermissionStateSchema,
   configureCloudConnectors,
+  recoverCloudConnectorSettings,
   verifyCloudConnectorEvents,
   type CloudConnectorConfig,
+  type CloudConnectorIO,
   type CloudPermissionState,
   type PermissionPatch,
 } from './claudeAiConnectors.js';
@@ -134,6 +136,7 @@ const PAGE_PROGRAM = `async ({ action, sessionId, limit, pageLimit, maxPages, pa
   }
   const base = '/v1/code/sessions/' + encodeURIComponent(sessionId);
   const events = [];
+  const seen = new Set();
   let cursor = null;
   for (let page = 0; page < maxPages; page++) {
     const query = new URLSearchParams({ limit: String(pageLimit), sort_order: 'asc' });
@@ -144,10 +147,13 @@ const PAGE_PROGRAM = `async ({ action, sessionId, limit, pageLimit, maxPages, pa
     if (!Array.isArray(data)) return { status: 'malformed' };
     events.push(...data);
     const next = batch.body.resume_cursor;
-    if (!data.length || next === undefined || next === null || String(next) === cursor) break;
+    if (!data.length || next === undefined || next === null) return { status: 200, events };
+    if (typeof next !== 'string' && typeof next !== 'number') return { status: 'malformed_cursor' };
+    if (seen.has(String(next))) return { status: 'cursor_not_advancing' };
+    seen.add(String(next));
     cursor = String(next);
   }
-  return { status: 200, events };
+  return { status: 'truncated' };
 }`;
 
 interface DevtoolsTarget {
@@ -257,6 +263,16 @@ async function listCloudSessions(
   return result.sessions ?? [];
 }
 
+/** Events per page MST asks claude.ai for. */
+const EVENT_PAGE_SIZE = 200;
+/** Pages MST reads per session: with the page size, a 10,000-event cap. */
+const MAX_EVENT_PAGES = 50;
+
+/**
+ * Every event of the session, or an error. A session longer than the cap, or
+ * a page cursor that is malformed or repeats, fails instead of returning a
+ * prefix: a prefix would be recorded as an unfinished task.
+ */
 async function fetchCloudEvents(
   port: number,
   sessionId: string
@@ -264,9 +280,28 @@ async function fetchCloudEvents(
   const result = await inClaudePage(port, {
     action: 'events',
     sessionId,
-    pageLimit: 200,
-    maxPages: 50,
+    pageLimit: EVENT_PAGE_SIZE,
+    maxPages: MAX_EVENT_PAGES,
   });
+  const cap = (EVENT_PAGE_SIZE * MAX_EVENT_PAGES).toLocaleString('en-US');
+  if (result.status === 'truncated')
+    throw new Error(
+      `claude.ai session ${sessionId} has more events than MST reads (${MAX_EVENT_PAGES} pages of ${EVENT_PAGE_SIZE}, ${cap} events). ` +
+        'MST does not record part of a session. Shorten the case so the task stays under the limit.'
+    );
+  if (
+    result.status === 'malformed_cursor' ||
+    result.status === 'cursor_not_advancing'
+  )
+    throw new Error(
+      `claude.ai returned a ${result.status === 'malformed_cursor' ? 'malformed' : 'repeated'} event page cursor for session ${sessionId}. ` +
+        'MST does not record part of a session. Retry the trial; if it happens again, the claude.ai events API may have changed.'
+    );
+  if (result.status === 'malformed')
+    throw new Error(
+      `claude.ai returned an event page without a data array for session ${sessionId}. ` +
+        'MST does not record part of a session. Retry the trial; if it happens again, the claude.ai events API may have changed.'
+    );
   requireOk(result, `session ${sessionId}`);
   return result.events ?? [];
 }
@@ -468,6 +503,63 @@ function mirrorCloudSessions(options: {
 
 const APP_PATH = '/Applications/Claude.app';
 
+/**
+ * Where 1P keeps its mirrored sessions and its connector-permission journal.
+ * Preparation and `restoreClaudeAiConnectors` use the same journal.
+ */
+function claudeAiPaths(): { dir: string; journal: string } {
+  const root = join(homedir(), '.mcp-server-tester');
+  return {
+    dir: join(root, 'cowork-claude-ai'),
+    journal: join(root, 'cowork-claude-ai-connectors.json'),
+  };
+}
+
+/**
+ * The account connector permissions a run reads and writes, through the
+ * signed-in claude.ai page of the Chrome on `port`.
+ */
+function cloudConnectorIO(port: () => number): CloudConnectorIO {
+  return {
+    inspect: () => inspectCloudConnectors(port()),
+    read: () => readCloudPermissions(port()),
+    patch: (identity, patch, expected) =>
+      patchCloudPermissions(port(), identity, patch, expected),
+  };
+}
+
+/**
+ * Undoes the connector permission changes an interrupted 1P run left on the
+ * claude.ai account, from the run's journal. Returns false when there is no
+ * journal, without contacting Chrome.
+ *
+ * It only puts back MST's own values: it refuses when the signed-in account or
+ * organization is not the journal's, keeps any value someone else changed
+ * since (and the journal, with an error), and checks that claude.ai kept the
+ * restored values before removing the journal. It never sets new permissions,
+ * reads connector tool inventories, submits, restarts the app or mirrors
+ * sessions.
+ *
+ * Precondition: the caller holds the shared macOS Cowork desktop lease, the
+ * same one a run holds, so no run on this machine is changing the account.
+ * The lease does not cover another machine signed in to the same account.
+ */
+export async function restoreClaudeAiConnectors(
+  env: NodeJS.ProcessEnv = process.env
+): Promise<boolean> {
+  const io = cloudConnectorIO(() => claudeAiDebugPort(env));
+  return recoverCloudConnectorSettings(
+    {
+      ...io,
+      inspect: () =>
+        Promise.reject(
+          new Error('Restoring connector permissions reads no inventory.')
+        ),
+    },
+    claudeAiPaths().journal
+  );
+}
+
 async function installedVersion(appPath: string): Promise<string> {
   const { stdout } = await run('/usr/bin/plutil', [
     '-extract',
@@ -492,12 +584,7 @@ export function coworkClaudeAi(
   }
 ): CoworkDesktop {
   const connectors = firstParty.connectors;
-  const dir = join(homedir(), '.mcp-server-tester', 'cowork-claude-ai');
-  const journal = join(
-    homedir(),
-    '.mcp-server-tester',
-    'cowork-claude-ai-connectors.json'
-  );
+  const { dir, journal } = claudeAiPaths();
   let configuration:
     | Awaited<ReturnType<typeof configureCloudConnectors>>
     | undefined;
@@ -518,17 +605,17 @@ export function coworkClaudeAi(
       const version = await installedVersion(appPath);
       // The desktop lease also serializes connector changes on this machine.
       // A shared account must not run on another machine at the same time.
-      const inspect = async () => {
-        const snapshot = await inspectCloudConnectors(port);
-        remoteServerNames = snapshot.servers.map((server) => server.nativeName);
-        return snapshot;
-      };
+      const io = cloudConnectorIO(() => port);
       configuration = await configureCloudConnectors(
         {
-          inspect,
-          read: () => readCloudPermissions(port),
-          patch: (identity, patch, expected) =>
-            patchCloudPermissions(port, identity, patch, expected),
+          ...io,
+          async inspect() {
+            const snapshot = await io.inspect();
+            remoteServerNames = snapshot.servers.map(
+              (server) => server.nativeName
+            );
+            return snapshot;
+          },
         },
         (snapshot) => {
           const binding = bindFirstPartyServers(
@@ -567,6 +654,7 @@ export function coworkClaudeAi(
       return {
         appPath,
         app: { name: 'Claude', version, source: 'installed' as const },
+        recordingError: () => mirror.lastError(),
         async restart() {
           await run('/usr/bin/osascript', [
             '-e',

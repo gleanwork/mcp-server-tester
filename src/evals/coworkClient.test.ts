@@ -1121,7 +1121,8 @@ describe('V2 Cowork client', () => {
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(mocks.setup).toHaveBeenCalledOnce();
   });
-  it('lets batches on different desktops run at the same time', async () => {
+  it('lets batches on different Linux desktops run at the same time', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     mocks.submit.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       return { status: 'submitted' };
@@ -1129,7 +1130,7 @@ describe('V2 Cowork client', () => {
     const batch = requests()
       .slice(0, 1)
       .map((r) => ({ ...r, input: { ...r.input, servers: [] } }));
-    // The lease is per native data directory, i.e. per desktop.
+    // Separate Linux data directories identify independently prepared desktops.
     const desktop = (dataDir: string) =>
       createCoworkClient({
         dataDirectory: () => dataDir,
@@ -1972,6 +1973,42 @@ describe('V2 Cowork client', () => {
     expect(result[0]!.error).toContain('Ambiguous');
     expect(result[1]!.error).toBeUndefined();
   });
+  it.each(['binding', 'transcript'] as const)(
+    'keeps and redacts the recorder cause when native %s fails',
+    async (stage) => {
+      mocks.setup.mockResolvedValueOnce({
+        dispose: mocks.dispose,
+        recordingError: () =>
+          'claude.ai event polling HTTP 500 for test-secret-token and test-secret-key',
+      });
+      const error = new NativeTranscriptError(
+        stage === 'binding' ? 'no_matching_session' : 'timeout',
+        stage === 'binding'
+          ? 'No matching Claude session found'
+          : 'Timed out waiting for Claude session local_1 to complete'
+      );
+      if (stage === 'binding') mocks.bind.mockRejectedValueOnce(error);
+      else mocks.transcript.mockRejectedValueOnce(error);
+      const [result] = await collectClientBatch(
+        COWORK_CLIENT,
+        [requests()[0]!],
+        context
+      );
+      expect(result!.error).toContain(error.message);
+      expect(result!.error).toContain(
+        'Session recording failed: claude.ai event polling HTTP 500 for [REDACTED] and [REDACTED]'
+      );
+      expect(result!.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke: 'client-app',
+        reason: result!.error,
+      });
+      expect(JSON.stringify(result)).not.toContain('test-secret-token');
+      expect(JSON.stringify(result)).not.toContain('test-secret-key');
+      expect(mocks.submit).toHaveBeenCalledOnce();
+    }
+  );
+
   // How a case ended when its transcript couldn't be collected (ADR 0010).
   it.each([
     [
@@ -2393,11 +2430,8 @@ describe('V2 Cowork client', () => {
       collectClientBatch(COWORK_CLIENT, requests(), context)
     ).rejects.toThrow('Cowork desktop is locked by another run');
     const leases = path.join(lockHome.value, '.mcp-server-tester');
-    const [lock] = (await fs.readdir(leases)).filter((name) =>
-      /^cowork-desktop-[0-9a-f]{12}\.lock$/.test(name)
-    );
-    expect(lock).toBeDefined();
-    await fs.rm(path.join(leases, lock!));
+    expect(await fs.readdir(leases)).toEqual(['cowork-desktop-macos.lock']);
+    await fs.rm(path.join(leases, 'cowork-desktop-macos.lock'));
     await expect(
       collectClientBatch(COWORK_CLIENT, requests(), context)
     ).resolves.toHaveLength(2);
@@ -2591,7 +2625,12 @@ describe('first-party Cowork through client sessions', () => {
     vi.resetModules();
   });
 
-  function accountBoundary(options: { unexpectedTool?: boolean } = {}) {
+  function accountBoundary(
+    options: {
+      unexpectedTool?: boolean;
+      pendingWrite?: 'initial' | 'late';
+    } = {}
+  ) {
     const commands: Array<{ file: string; args: string[] }> = [];
     vi.doMock('node:child_process', async (original) => ({
       ...(await original<typeof ChildProcessModule>()),
@@ -2615,6 +2654,7 @@ describe('first-party Cowork through client sessions', () => {
       'account-server:write:approved': false,
     };
     const originalPermissions = { ...permissions };
+    let recordingFailure: 'list' | 'events' | 'chrome' | undefined;
     const patches: Array<Record<string, unknown>> = [];
     const state = () => ({
       accountId: 'account',
@@ -2627,12 +2667,37 @@ describe('first-party Cowork through client sessions', () => {
       created_at?: string;
       payload: Record<string, unknown>;
     }> = [];
+    let completedEvents: typeof events = [];
+    function pendingWriteEvents(): typeof events {
+      return [
+        ...completedEvents.slice(0, 2),
+        {
+          payload: {
+            type: 'assistant',
+            timestamp: submittedAt,
+            message: {
+              id: 'msg-write',
+              model: 'native-model',
+              content: [
+                {
+                  type: 'tool_use',
+                  name: writeName,
+                  id: 'write',
+                  input: { value: 'approved' },
+                },
+              ],
+            },
+          },
+        },
+      ];
+    }
     const actions: string[] = [];
     function reply(argument: Record<string, unknown>) {
       const action = String(argument.action);
       actions.push(action);
       switch (action) {
         case 'list':
+          if (recordingFailure === 'list') return { status: 401 };
           return {
             status: 200,
             sessions: submittedAt
@@ -2646,7 +2711,7 @@ describe('first-party Cowork through client sessions', () => {
               : [],
           };
         case 'events':
-          return { status: 200, events };
+          return { status: recordingFailure === 'events' ? 500 : 200, events };
         case 'permissions':
           return { status: 200, state: state() };
         case 'connectors':
@@ -2698,6 +2763,7 @@ describe('first-party Cowork through client sessions', () => {
       vi.fn(async (url: string) => {
         // Any direct readiness probe or vendor transport is a test failure.
         expect(url).toBe('http://127.0.0.1:9222/json/list');
+        if (recordingFailure === 'chrome') throw new Error('Chrome closed');
         return new Response(
           JSON.stringify([
             {
@@ -2742,10 +2808,38 @@ describe('first-party Cowork through client sessions', () => {
         'First-party must not install a developer profile or servers.'
       );
     });
-    const hitl = vi.fn(async () => ({
-      status: 'hitl_checked' as const,
-      action_count: 0,
-    }));
+    let approvalInspections = 0;
+    const hitl = vi.fn(
+      async (_options: Parameters<CoworkPlatform['handleHitl']>[0]) => {
+        if (options.pendingWrite) {
+          approvalInspections++;
+          events =
+            options.pendingWrite === 'late' && approvalInspections === 1
+              ? pendingWriteEvents()
+              : [
+                  ...pendingWriteEvents(),
+                  {
+                    payload: {
+                      type: 'user',
+                      timestamp: submittedAt,
+                      message: {
+                        content: [
+                          {
+                            type: 'tool_result',
+                            tool_use_id: 'write',
+                            content: 'updated',
+                            is_error: false,
+                          },
+                        ],
+                      },
+                    },
+                  },
+                  ...completedEvents.slice(2),
+                ];
+        }
+        return { status: 'hitl_checked' as const, action_count: 1 };
+      }
+    );
     const desktop: CoworkPlatform = {
       dataDirectory: () => '/unused/developer-profile',
       prepare,
@@ -2846,6 +2940,12 @@ describe('first-party Cowork through client sessions', () => {
             },
           },
         ];
+        completedEvents = events;
+        if (options.pendingWrite)
+          events =
+            options.pendingWrite === 'initial'
+              ? pendingWriteEvents()
+              : completedEvents.slice(0, 2);
         return { status: 'submitted', action_count: 1 };
       },
       handleHitl: hitl,
@@ -2859,6 +2959,9 @@ describe('first-party Cowork through client sessions', () => {
       originalPermissions,
       patches,
       actions,
+      failRecording(failure?: typeof recordingFailure) {
+        recordingFailure = failure;
+      },
     };
   }
   const accountServer: MCPConfig = {
@@ -2872,28 +2975,278 @@ describe('first-party Cowork through client sessions', () => {
     evalConfig: { ...context.evalConfig, servers: [accountServer] },
   };
 
-  it('checks account write declarations before any submission or developer-server install', async () => {
-    const boundary = accountBoundary();
-    const { createCoworkClient: realClient } =
-      await import('./coworkClient.js');
-    await expect(
-      realClient(boundary.desktop).open!(
+  it.each([
+    ['first-party', undefined],
+    ['first-party', '/custom/cowork-sessions'],
+    ['third-party', undefined],
+    ['third-party', '/custom/cowork-sessions'],
+  ] as const)(
+    'blocks the other macOS mode while %s holds the desktop (third-party dataDir: %s)',
+    async (holderMode, dataDir) => {
+      const boundary = accountBoundary();
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const firstParty = realClient(boundary.desktop);
+      const thirdParty = realClient({
+        ...boundary.desktop,
+        dataDirectory: (options) => options.dataDir ?? '/profile/third-party',
+        async prepare() {
+          return { async dispose() {} };
+        },
+      });
+      const firstPartyOptions = {
+        config: firstPartyConfig,
+        input: { servers: [accountServer] },
+      };
+      const thirdPartyOptions = {
+        config: { ...clientConfig, ...(dataDir ? { dataDir } : {}) },
+        input: { servers: [accountServer] },
+      };
+      const holder = await (holderMode === 'first-party'
+        ? firstParty.open!(firstPartyOptions, firstPartyContext)
+        : thirdParty.open!(thirdPartyOptions, context));
+      const contender =
+        holderMode === 'first-party'
+          ? thirdParty.open!(thirdPartyOptions, context)
+          : firstParty.open!(firstPartyOptions, firstPartyContext);
+      try {
+        await expect(contender).rejects.toThrow(
+          'Cowork desktop is locked by another run'
+        );
+        expect(
+          boundary.commands.some(({ file }) => file === '/usr/bin/open')
+        ).toBe(false);
+      } finally {
+        // Also close an unexpected successful contender when the regression fails.
+        await contender.then(
+          (session) => session.close(),
+          () => {}
+        );
+        await holder.close();
+      }
+    }
+  );
+
+  it.each([
+    ['list', '401'],
+    ['events', '500'],
+    ['chrome', 'No Chrome is listening on DevTools port'],
+  ] as const)(
+    'reports a post-prepare %s recording failure when the first-party session cannot bind',
+    async (failure, cause) => {
+      const boundary = accountBoundary();
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const session = await realClient(boundary.desktop).open!(
         {
-          config: {
-            ...firstPartyConfig,
-            connectors: { servers: { primary: { policy: 'allow-all' } } },
-          },
+          config: { ...firstPartyConfig, timeout: 6_000 },
           input: { servers: [accountServer] },
         },
         firstPartyContext
-      )
-    ).rejects.toThrow('Declare writes.primary: unguarded');
-    expect(boundary.prepare).not.toHaveBeenCalled();
-    expect(boundary.commands.some(({ file }) => file === '/usr/bin/open')).toBe(
-      false
+      );
+      boundary.failRecording(failure);
+      try {
+        const { result } = await session.run({
+          caseId: 'recording-failure',
+          trial: 0,
+          input: { prompt: 'Find the report' },
+        });
+        expect(result.error).toContain('No matching Claude session found');
+        expect(result.error).toContain('Session recording failed:');
+        expect(result.error).toContain(cause);
+        expect(result.ending).toMatchObject({
+          kind: 'infrastructure',
+          broke: 'client-app',
+          reason: result.error,
+        });
+        expect(boundary.hitl).not.toHaveBeenCalled();
+        expect(
+          boundary.commands.filter(({ file }) => file === '/usr/bin/open')
+        ).toHaveLength(1);
+      } finally {
+        boundary.failRecording();
+        await session.close();
+      }
+      expect(boundary.permissions).toEqual(boundary.originalPermissions);
+    },
+    15_000
+  );
+
+  it('reports an event polling failure after first-party binding while retaining the pending native call', async () => {
+    const boundary = accountBoundary({ pendingWrite: 'initial' });
+    const { createCoworkClient: realClient } =
+      await import('./coworkClient.js');
+    boundary.hitl.mockImplementation(async () => {
+      // The client reached HITL only after binding the actual mirrored session.
+      boundary.failRecording('events');
+      return { status: 'hitl_checked', action_count: 0 };
+    });
+    const session = await realClient(boundary.desktop).open!(
+      {
+        config: {
+          ...firstPartyConfig,
+          timeout: 8_000,
+          connectors: {
+            failOnApproval: false,
+            servers: {
+              primary: { policy: 'read-only', tools: { update: 'ask' } },
+            },
+          },
+        },
+        input: { servers: [accountServer] },
+      },
+      {
+        ...firstPartyContext,
+        evalConfig: {
+          ...firstPartyContext.evalConfig,
+          writes: { primary: 'unguarded' },
+        },
+      }
     );
-    expect(boundary.patches).toEqual([]);
-  });
+    try {
+      const { result } = await session.run({
+        caseId: 'recording-stopped',
+        trial: 0,
+        input: { prompt: 'Update the report' },
+      });
+      expect(result.error).toContain('Timed out waiting for Claude session');
+      expect(result.error).toContain('Session recording failed:');
+      expect(result.error).toContain('500');
+      expect(result.events).toContainEqual(
+        expect.objectContaining({ name: 'update', server: 'primary' })
+      );
+      expect(result.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke: 'client-app',
+        reason: expect.stringContaining('500'),
+      });
+      expect(boundary.hitl).toHaveBeenCalled();
+      expect(
+        boundary.commands.filter(({ file }) => file === '/usr/bin/open')
+      ).toHaveLength(1);
+    } finally {
+      boundary.failRecording();
+      await session.close();
+    }
+    expect(boundary.permissions).toEqual(boundary.originalPermissions);
+  }, 15_000);
+
+  it.each(['initial', 'late'] as const)(
+    'approves a first-party ask write during %s HITL with approveWriteTools enabled, without resubmitting',
+    async (pendingWrite) => {
+      const boundary = accountBoundary({ pendingWrite });
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const result = await realClient(boundary.desktop).run!(
+        { prompt: 'Update the report', servers: [accountServer] },
+        {
+          ...firstPartyConfig,
+          timeout: 14_000,
+          connectors: {
+            failOnApproval: false,
+            servers: {
+              primary: { policy: 'read-only', tools: { update: 'ask' } },
+            },
+          },
+        },
+        {
+          ...firstPartyContext,
+          evalConfig: {
+            ...firstPartyContext.evalConfig,
+            writes: { primary: 'unguarded' },
+          },
+        }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.finalText).toBe('account answer');
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          name: 'update',
+          server: 'primary',
+          output: 'updated',
+          isError: false,
+        })
+      );
+      expect(boundary.hitl).toHaveBeenCalled();
+      if (pendingWrite === 'late')
+        expect(boundary.hitl).toHaveBeenCalledTimes(2);
+      for (const [options] of boundary.hitl.mock.calls) {
+        expect(options).toMatchObject({
+          approveWriteTools: true,
+          task: expect.stringContaining('Approve read and write calls only'),
+        });
+        expect(options.task).toContain('one-time or current-task approval');
+      }
+      expect(
+        boundary.commands.filter(({ file }) => file === '/usr/bin/open')
+      ).toHaveLength(1);
+      expect(boundary.permissions).toEqual(boundary.originalPermissions);
+      expect(result.telemetry?.computerUse).toMatchObject({
+        hitl: { status: 'completed' },
+        ...(pendingWrite === 'late'
+          ? { hitlFollowups: [{ status: 'completed' }] }
+          : {}),
+      });
+    },
+    20_000
+  );
+
+  it('does not click an unexpected first-party write approval when failOnApproval is true', async () => {
+    const boundary = accountBoundary({ pendingWrite: 'initial' });
+    const { createCoworkClient: realClient } =
+      await import('./coworkClient.js');
+    const result = await realClient(boundary.desktop).run!(
+      { prompt: 'Update the report', servers: [accountServer] },
+      {
+        ...firstPartyConfig,
+        timeout: 6_000,
+        connectors: {
+          failOnApproval: true,
+          servers: { primary: { policy: 'allow-all' } },
+        },
+      },
+      {
+        ...firstPartyContext,
+        evalConfig: {
+          ...firstPartyContext.evalConfig,
+          writes: { primary: 'unguarded' },
+        },
+      }
+    );
+    expect(result.error).toContain('Timed out waiting for Claude session');
+    expect(result.error).toContain('mcp__Acme__Search__update');
+    expect(boundary.hitl).not.toHaveBeenCalled();
+    expect(boundary.permissions).toEqual(boundary.originalPermissions);
+  }, 15_000);
+
+  it.each(['allow-all', 'ask'] as const)(
+    'checks account write declarations for %s before any submission or developer-server install',
+    async (policy) => {
+      const boundary = accountBoundary();
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      await expect(
+        realClient(boundary.desktop).open!(
+          {
+            config: {
+              ...firstPartyConfig,
+              connectors: {
+                failOnApproval: false,
+                servers: { primary: { policy } },
+              },
+            },
+            input: { servers: [accountServer] },
+          },
+          firstPartyContext
+        )
+      ).rejects.toThrow('Declare writes.primary: unguarded');
+      expect(boundary.prepare).not.toHaveBeenCalled();
+      expect(
+        boundary.commands.some(({ file }) => file === '/usr/bin/open')
+      ).toBe(false);
+      expect(boundary.patches).toEqual([]);
+    }
+  );
 
   it.each([undefined, 'unguarded', 'live'] as const)(
     'accepts verified account evidence with write declaration %s, without probing or installing servers',

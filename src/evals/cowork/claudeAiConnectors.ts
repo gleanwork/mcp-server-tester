@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { surfacedTools } from '../claudeCodeEvents.js';
 
 const ToolPolicySchema = z.enum(['allow', 'ask', 'block', 'inherit']);
 export const CloudConnectorsSchema = z
@@ -392,15 +393,20 @@ export function verifyCloudConnectorEvents(
         payload?.type === 'user' &&
         block.type === 'tool_result' &&
         typeof block.tool_use_id === 'string' &&
-        searchIds.has(block.tool_use_id) &&
-        Array.isArray(block.content)
+        searchIds.has(block.tool_use_id)
       ) {
-        for (const reference of records(block.content)) {
-          if (
-            reference.type === 'tool_reference' &&
-            typeof reference.tool_name === 'string'
-          )
-            observed.add(reference.tool_name);
+        // Only a matched ToolSearch result is catalog evidence; ordinary MCP
+        // results can mention tool names without exposing those tools.
+        const output =
+          typeof block.content === 'string'
+            ? block.content
+            : JSON.stringify(block.content);
+        for (const tool of surfacedTools(output)) {
+          observed.add(
+            tool.server === undefined
+              ? tool.name
+              : `mcp__${tool.server}__${tool.name}`
+          );
         }
       }
     }

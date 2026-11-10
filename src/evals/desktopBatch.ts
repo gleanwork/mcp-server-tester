@@ -136,7 +136,7 @@ export interface DesktopClientAdapter<Session> {
   batchTelemetry?(session: Session | undefined): Record<string, unknown>;
 }
 
-async function claimLease(
+export async function claimDesktopLease(
   adapter: Pick<DesktopClientAdapter<unknown>, 'name' | 'lease'>
 ) {
   await mkdir(adapter.lease.directory, { recursive: true, mode: 0o700 });
@@ -290,7 +290,7 @@ export async function openDesktopSession<Session>(
   adapter: DesktopClientAdapter<Session>
 ): Promise<ClientSession> {
   const secrets = [...adapter.secrets];
-  const lease = await claimLease(adapter);
+  const lease = await claimDesktopLease(adapter);
   let state: Session | undefined;
   let closed = false;
   let closing: Promise<void> | undefined;
