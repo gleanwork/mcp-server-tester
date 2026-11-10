@@ -44,7 +44,7 @@ export function claudeAiDebugPort(
   return port;
 }
 
-export const CLAUDE_AI_SIGN_IN_HELP =
+const CLAUDE_AI_SIGN_IN_HELP =
   'Start Chrome with a profile signed in to the claude.ai account Claude Desktop uses: ' +
   '`"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --user-data-dir=<dir> ' +
   '--remote-debugging-port=<port> --remote-debugging-address=127.0.0.1 https://claude.ai`, sign in, ' +
@@ -248,7 +248,7 @@ function requireOk(result: PageResult, what: string): void {
   throw new Error(`claude.ai ${what} failed (${result.status}).`);
 }
 
-export async function listCloudSessions(
+async function listCloudSessions(
   port: number,
   limit = 10
 ): Promise<CloudSessionSummary[]> {
@@ -257,7 +257,7 @@ export async function listCloudSessions(
   return result.sessions ?? [];
 }
 
-export async function fetchCloudEvents(
+async function fetchCloudEvents(
   port: number,
   sessionId: string
 ): Promise<CloudSessionEvent[]> {
@@ -271,7 +271,7 @@ export async function fetchCloudEvents(
   return result.events ?? [];
 }
 
-export async function readCloudPermissions(
+async function readCloudPermissions(
   port: number
 ): Promise<CloudPermissionState> {
   const result = await inClaudePage(port, { action: 'permissions' });
@@ -279,13 +279,13 @@ export async function readCloudPermissions(
   return CloudPermissionStateSchema.parse(result.state);
 }
 
-export async function inspectCloudConnectors(port: number) {
+async function inspectCloudConnectors(port: number) {
   const result = await inClaudePage(port, { action: 'connectors' }, 90_000);
   requireOk(result, 'enumerating connectors');
   return CloudConnectorSnapshotSchema.parse(result.state);
 }
 
-export async function patchCloudPermissions(
+async function patchCloudPermissions(
   port: number,
   identity: Pick<CloudPermissionState, 'accountId' | 'organizationId'>,
   patch: PermissionPatch,
@@ -409,7 +409,7 @@ async function writeAtomic(path: string, content: string): Promise<void> {
  * into `dir`, every `intervalMs`, until stopped. Cloud VM creation can
  * precede the prompt. Only submitted tasks are mirrored and bound.
  */
-export function mirrorCloudSessions(options: {
+function mirrorCloudSessions(options: {
   port: number;
   dir: string;
   sinceMs: number;
