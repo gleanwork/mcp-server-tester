@@ -917,6 +917,9 @@ describe('the history of an eval', () => {
     await fs.writeFile(file, JSON.stringify(cached));
     const rebuilt = await updateHistory(localHistoryLocation(dir));
     expect(rebuilt.runs[0]!.judges?.[0]?.version).toBe('1.2.3');
+    // And history.json holds it.
+    const written = JSON.parse(await fs.readFile(file, 'utf8')) as HistoryIndex;
+    expect(written.runs[0]!.judges?.[0]?.version).toBe('1.2.3');
   });
 
   it('starts an era when a plugin the eval loads changes version', async () => {

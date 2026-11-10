@@ -728,6 +728,14 @@ async function systemState(dataDir: string): Promise<object> {
 }
 
 /** Attach to caller-owned resources. Never create, authenticate, or stop a desktop. */
+/**
+ * The Claude desktop app the image installs as the `claude-desktop` package
+ * (docker/cowork-linux). Not a Debian system, or no dpkg: nothing to record.
+ */
+export async function installedCoworkApp() {
+  return installedDebApp('claude-desktop', 'Claude');
+}
+
 export const coworkLinux: CoworkDesktop = {
   dataDirectory: (options) =>
     options.dataDir ??
@@ -835,8 +843,7 @@ export const coworkLinux: CoworkDesktop = {
       await restore().catch(() => {});
       throw error;
     }
-    // Not a Debian system, or no dpkg: nothing to record.
-    const app = await installedDebApp('claude-desktop', 'Claude');
+    const app = await installedCoworkApp();
     return { dispose: restore, ...(app ? { app } : {}) };
 
     async function checkAndProbe(): Promise<void> {
