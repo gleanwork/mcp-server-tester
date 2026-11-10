@@ -1,5 +1,6 @@
 import { StringDecoder } from 'node:string_decoder';
 import type { ClientDiagnostics } from '../../../../types/clientDiagnostics.js';
+import { clientApp, type ClientApp } from '../../../installedApp.js';
 
 const MAX_STARTUP_BYTES = 4 * 1024 * 1024;
 type Startup = NonNullable<ClientDiagnostics['claudeStartup']>;
@@ -26,6 +27,11 @@ export class ClaudeStartup {
         })),
       },
     };
+  }
+
+  /** The Claude Code version its init event reported. */
+  get app(): ClientApp | undefined {
+    return clientApp('Claude Code', this.result?.version);
   }
 
   get error(): string | undefined {

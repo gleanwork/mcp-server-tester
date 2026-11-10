@@ -80,7 +80,11 @@ const DetachStatusSchema = z.object({
   /** Trials collected and results graded so far. */
   collected: z.number().int().nonnegative(),
   graded: z.number().int().nonnegative(),
-  /** Trials the run was still missing when it ended. */
+  /**
+   * Trials the run was missing after its last command that finished: while
+   * it resumes, what that resume is filling in; once it ends, what it never
+   * collected.
+   */
   missing: z.boolean().optional(),
   /** Why it failed. */
   error: z.string().optional(),

@@ -72,7 +72,7 @@ export { HISTORY_FORMAT };
  * The version of the code that builds a row from a run. A cached row built
  * by another version is built again, so a row never mixes two definitions.
  */
-const ROW_BUILDER = 4;
+const ROW_BUILDER = 5;
 
 /**
  * Parses `history.json`; undefined when it isn't one this MST reads, and
@@ -548,6 +548,7 @@ function historyRunOf(run: RunRecord, summary: EvaluationSummary): HistoryRun {
       type: judge.type,
       level: judge.level,
       ...(judge.identity ? { identity: judge.identity } : {}),
+      ...(judge.version !== undefined ? { version: judge.version } : {}),
       optionsHash: judge.optionsHash,
     })),
     ...(run.plugins

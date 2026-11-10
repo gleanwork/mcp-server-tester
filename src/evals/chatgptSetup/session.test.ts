@@ -344,6 +344,29 @@ async function turnOf(
 }
 
 describe('ChatGPT batch app lifecycle', () => {
+  it('reads the app it runs once the app has started', async () => {
+    const app = vi.fn(async () => ({
+      name: 'ChatGPT',
+      version: '1.2026.300',
+      source: 'installed' as const,
+    }));
+    const session = new ChatgptAppSession({ ...chatgptMacos, app });
+    try {
+      await session.prepare(testConfig());
+      expect(app).toHaveBeenCalledTimes(1);
+      expect(app.mock.invocationCallOrder[0]).toBeGreaterThan(
+        controller.start.mock.invocationCallOrder[0]!
+      );
+      expect(session.app).toEqual({
+        name: 'ChatGPT',
+        version: '1.2026.300',
+        source: 'installed',
+      });
+    } finally {
+      await session.dispose();
+    }
+  });
+
   it('performs one app/config cycle around three isolated native submissions', async () => {
     const session = new ChatgptAppSession(chatgptMacos);
     const markers = new Set<string>();

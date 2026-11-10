@@ -6,14 +6,7 @@ import type {
   CoworkSubmissionReceipt,
   CoworkHitlReceipt,
 } from './interaction.js';
-
-/** The desktop application a session runs, recorded with each case result. */
-interface CoworkClientApp {
-  name: string;
-  version: string;
-  /** `pinned`: the eval config's `clientOptions.appVersion`; else the installed app. */
-  source: 'installed' | 'pinned';
-}
+import type { ClientApp } from '../installedApp.js';
 
 /** The shared batch lifecycle does not choose OS paths or control an application.
  * Implementations must retain the existing bounded, no-resubmission contract. */
@@ -38,7 +31,8 @@ export interface CoworkDesktop {
     /** macOS returns the installed, caller-owned or pinned application path. */
     appPath?: string;
     /** macOS returns the application it runs. */
-    app?: CoworkClientApp;
+    /** `pinned`: the eval config's `clientOptions.appVersion`; else the installed app. */
+    app?: ClientApp;
     /** macOS returns transaction-owned paths after installing its private profile. */
     stdioPaths?: ClientStdioPaths;
     /**

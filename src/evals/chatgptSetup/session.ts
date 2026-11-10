@@ -26,6 +26,7 @@ import {
 import { NativeChatgptDriverError } from '../chatgpt/linuxDesktop.js';
 import { saveStallScreenshot } from '../chatgpt/stallScreenshot.js';
 import type { ChatgptDesktop } from '../chatgpt/desktop.js';
+import type { ClientApp } from '../installedApp.js';
 import type {
   ChatgptPlatformProfile,
   LinuxChatgptReadiness,
@@ -167,6 +168,8 @@ export class ChatgptAppSession {
    * task needs one). ChatGPT Work makes its own. Linux's profile owns its own.
    */
   workspace?: string;
+  /** The app this session runs and its version, which each trial records. */
+  app?: ClientApp;
   /** Queries MST submitted, to tell its chats from any others. */
   readonly #submitted = new Set<string>();
   /** When MST last launched the app. */
@@ -300,6 +303,7 @@ export class ChatgptAppSession {
       lifecycle.launchAttempted = true;
       this.#launch = { config, environment, platform };
       await this.#start('setup');
+      this.app = await platform.app(settings.application);
       this.#ready = true;
       this.telemetry.setupStatus = 'completed';
     } catch (error) {

@@ -40,7 +40,12 @@ async function timesOut(): Promise<void> {
 }
 
 export default {
-  meta: { name: 'grade-test-plugin', namespace: 'grade-test' },
+  // A version, so run.json records one for its judges.
+  meta: {
+    name: 'grade-test-plugin',
+    namespace: 'grade-test',
+    version: '1.0.0',
+  },
   judges: {
     where: {
       schema: z.object({}).passthrough(),

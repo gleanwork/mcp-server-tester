@@ -53,6 +53,7 @@ import {
 } from './desktopOS.js';
 import { removedClientOptions } from './renamedKeys.js';
 import { DEFAULT_COMPUTER_USE_MODEL } from './cowork/computerUseLoop.js';
+import { withClientApp } from './installedApp.js';
 
 /**
  * Why `clientOptions.surface` fails: the surface is the client now (ADR
@@ -441,6 +442,7 @@ function desktopAdapter(
             unexpectedServers,
             ...(measurementError ? { error: measurementError } : {}),
           },
+          ...withClientApp(appSession.app),
           clientMetadata: result.clientMetadata,
           computerUse: result.clientMetadata.computerUse,
           nativeController: result.clientMetadata.nativeController,

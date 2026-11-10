@@ -42,7 +42,7 @@ The workaround today is to run the coordinator on a machine of your own in the c
 - **`mst runs` reads the store, not the machines.** Each takes the eval config (`-c`) and `--results` as the run was given.
   - `mst runs list` lists the eval's detached runs, newest first, with their state and counts. `mst runs status <id>` shows one, and `mst runs watch <id>` follows it until it ends. An id's last six characters name it.
   - `mst runs logs <id>` prints the coordinator's log.
-  - `mst runs cancel <id>` writes `<eval>/detached/<id>/cancel`. The coordinator checks for it with each heartbeat and interrupts the command under way as Ctrl-C does: its shards end, their machines are deleted, and what was collected is kept.
+  - `mst runs cancel <id>` writes `<eval>/detached/<id>/cancel`. The coordinator checks for it with each heartbeat and before each command, interrupts the command under way as Ctrl-C does, and starts no other: its shards end, their machines are deleted, and what was collected is kept.
   - A running coordinator whose heartbeat is older than five minutes shows as `lost`. `mst run --resume <run> --detach` finishes its run.
 - **The coordinator machine has a deadline.** It runs its `finish` command when the run ends, on failure too. The environment also gives it a deadline of its own, so a coordinator that dies leaves nothing behind for long.
 
