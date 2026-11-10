@@ -66,6 +66,38 @@ export const DEFAULT_CHATGPT_IMAGE = `mst-chatgpt-linux:${packageJson.version}`;
 /** Which desktop a container runs: the eval's client picks it. */
 export type DockerClient = 'cowork' | 'chatgpt';
 
+/** A desktop shard's identity and channel, before the desktop starts. */
+export interface DockerRuntimeContext {
+  readonly channel: WorkerChannel;
+  readonly signal: AbortSignal;
+  readonly runId: string;
+  /** Zero-based shard index. */
+  readonly shardIndex: number;
+  readonly shardCount: number;
+  /** The eval's client, not its options or credentials. */
+  readonly client?: string;
+  readonly desktop: DockerClient;
+}
+
+/** Runs before keeping or removing a prepared container, with a fresh signal. */
+export type DockerRuntimeCleanup = (
+  context: DockerRuntimeContext
+) => Promise<void>;
+
+/** In-process only: these options are never serialized into runner metadata. */
+export interface DockerRunnerOptions {
+  /** Default `mst`: deliver and refresh MST's inference token. */
+  readonly inference?: 'mst' | 'plugin';
+  /**
+   * Runs once after private directories exist, before desktop startup.
+   * Send opaque data over channel stdin, never argv. Return cleanup even if
+   * cancelled; if preparation throws, undo partial work before throwing.
+   */
+  readonly prepareRuntime?: (
+    context: DockerRuntimeContext
+  ) => Promise<DockerRuntimeCleanup>;
+}
+
 /** Clients that run in the ChatGPT image: its app's products (ADR 0011). */
 const CHATGPT_IMAGE_CLIENTS = new Set(['chatgpt', 'codex-app']);
 
@@ -82,8 +114,8 @@ export function dockerClient(client: string | undefined): DockerClient {
 
 /** Inside the image (docker/cowork-linux/Dockerfile). */
 const USER = 'mst';
-/** docker/chatgpt-linux's entrypoint; `--dirs-only` makes its tmpfs directories. */
-const CHATGPT_SESSION = '/opt/mst/bin/desktop-session';
+/** Both images' entrypoint; `--dirs-only` makes only runtime directories. */
+const DESKTOP_SESSION = '/opt/mst/bin/desktop-session';
 const WORK_DIR = '/home/mst/work';
 /** The container's tmpfs, and the worker's tokens directory on it (MST_TOKENS_DIR). */
 const RUN_DIR = '/run/mst';
@@ -93,6 +125,8 @@ const TOKEN_FILE = '/run/mst/inference-token';
 const DEFAULT_READY_TIMEOUT_S = 1200;
 /** Shorter than the gateway token's life, and than MST's token cache. */
 const TOKEN_REFRESH_MS = 4 * 60 * 1000;
+/** Cleanup must finish even when the shard was cancelled. */
+const RUNTIME_CLEANUP_TIMEOUT_MS = 30_000;
 
 const DockerOptionsSchema = z
   .object({
@@ -245,7 +279,7 @@ export function dockerRunArgs(options: {
   image: string;
   runId: string;
   seccompProfile: string;
-  inference: { baseURL: string; authScheme: 'bearer' | 'x-api-key' };
+  inference?: { baseURL: string; authScheme: 'bearer' | 'x-api-key' };
   /** Forwarded to the container's desktop-ready helper when set. */
   warmVmTimeoutS?: string;
   /** The container's memory and CPUs. Default: no limits. */
@@ -278,10 +312,14 @@ export function dockerRunArgs(options: {
     '/run/mst:mode=0755',
     '--shm-size',
     '1g',
-    '--env',
-    `MST_INFERENCE_GATEWAY_URL=${options.inference.baseURL}`,
-    '--env',
-    `MST_INFERENCE_AUTH_SCHEME=${options.inference.authScheme}`,
+    ...(options.inference
+      ? [
+          '--env',
+          `MST_INFERENCE_GATEWAY_URL=${options.inference.baseURL}`,
+          '--env',
+          `MST_INFERENCE_AUTH_SCHEME=${options.inference.authScheme}`,
+        ]
+      : []),
     // The coordinator's Cowork VM warm-up budget; without it the container
     // falls back to its own default.
     ...(warm !== undefined && /^[1-9][0-9]*$/.test(warm)
@@ -340,7 +378,7 @@ export function gradeContainerPrepareArgs(
   client: DockerClient
 ): string[] {
   return client === 'chatgpt'
-    ? ['exec', '-u', 'root', name, CHATGPT_SESSION, '--dirs-only']
+    ? ['exec', '-u', 'root', name, DESKTOP_SESSION, '--dirs-only']
     : [
         'exec',
         '-u',
@@ -558,13 +596,18 @@ async function waitForDesktop(
   const deadline = Date.now() + timeoutS * 1000;
   while (Date.now() < deadline) {
     if (signal.aborted) throw new Error('The run was cancelled.');
-    const state = await docker(context, [
-      'exec',
-      name,
-      'sh',
-      '-c',
-      `if [ -e ${SESSION_DIR}/ready ]; then echo ready; elif [ -e ${SESSION_DIR}/failed ]; then echo failed; else echo starting; fi`,
-    ]);
+    const state = await docker(
+      context,
+      [
+        'exec',
+        name,
+        'sh',
+        '-c',
+        `if [ -e ${SESSION_DIR}/ready ]; then echo ready; elif [ -e ${SESSION_DIR}/failed ]; then echo failed; else echo starting; fi`,
+      ],
+      { signal }
+    );
+    signal.throwIfAborted();
     const status = state.stdout.trim();
     if (status === 'ready') return;
     if (status === 'failed' || state.code !== 0) {
@@ -586,7 +629,7 @@ async function waitForDesktop(
         `The desktop in container ${name} didn't come up: ${why.trim().replace(/\s+/g, ' ')}`
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await sleep(3000, undefined, { signal });
   }
   throw new Error(
     `The desktop in container ${name} wasn't ready within ${timeoutS} s (--runner-option readyTimeout).`
@@ -626,6 +669,9 @@ function containerChannel(
       void (async () => {
         try {
           for await (const line of stdin) child.stdin.write(line);
+        } catch {
+          // Input belongs to the caller; never log opaque runtime data.
+          child.kill('SIGKILL');
         } finally {
           child.stdin.end();
         }
@@ -633,9 +679,13 @@ function containerChannel(
       return {
         stdout: child.stdout,
         stderr: child.stderr,
-        exit: new Promise<number>((resolve) =>
-          child.on('close', (code) => resolve(code ?? -1))
-        ),
+        exit: new Promise<number>((resolve) => {
+          child.on('error', () => resolve(-1));
+          child.on('close', (code) => {
+            signal.removeEventListener('abort', kill);
+            resolve(code ?? -1);
+          });
+        }),
       };
     },
     async put(localDir, remoteDir) {
@@ -668,6 +718,61 @@ function containerChannel(
   };
 }
 
+/** Keep both failures visible; never report a failed removal as success. */
+function combinedFailure(first: unknown, second: unknown): Error {
+  const message = (error: unknown) =>
+    error instanceof Error ? error.message : String(error);
+  return new AggregateError(
+    [first, second],
+    `${message(first)} ${message(second)}`
+  );
+}
+
+async function removeAfterFailure(
+  remove: () => Promise<void>,
+  failure: unknown
+): Promise<never> {
+  try {
+    await remove();
+  } catch (error) {
+    throw combinedFailure(failure, error);
+  }
+  throw failure;
+}
+
+/** Cleanup has its own deadline, never the already-aborted shard signal. */
+async function cleanupRuntime(
+  cleanup: DockerRuntimeCleanup,
+  context: (signal: AbortSignal) => DockerRuntimeContext,
+  name: string
+): Promise<void> {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  let timedOut = false;
+  try {
+    await Promise.race([
+      Promise.resolve().then(() => cleanup(context(controller.signal))),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(new Error('Runtime cleanup timed out.'));
+          controller.abort();
+        }, RUNTIME_CLEANUP_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (cause) {
+    // Do not expose opaque plugin data in run metadata or logs.
+    throw new Error(
+      `Runtime cleanup ${timedOut ? 'timed out after 30 s' : 'failed'} for container ${name}; it cannot be kept.`,
+      {
+        cause,
+      }
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function contextsOf(options: DockerOptions): Array<string | undefined> {
   const named = (options.contexts ?? '')
     .split(',')
@@ -678,8 +783,11 @@ function contextsOf(options: DockerOptions): Array<string | undefined> {
 
 function openDocker(
   options: DockerOptions,
-  context: RunnerContext
+  context: RunnerContext,
+  runtime: DockerRunnerOptions = {}
 ): ReturnType<typeof machineRunner> {
+  const deferredDesktop =
+    runtime.prepareRuntime !== undefined || runtime.inference === 'plugin';
   const client = dockerClient(context.client);
   const image =
     options.image ??
@@ -836,11 +944,37 @@ function openDocker(
       clearInterval(refresh);
       container.abort();
     };
+    let claimed = false;
     const remove = async () => {
       stopRefresh();
-      await docker(dockerContext, ['rm', '--force', name]);
+      if (deferredDesktop && !claimed) return;
+      if (deferredDesktop)
+        await dockerOk(
+          dockerContext,
+          ['rm', '--force', name],
+          `Removing container ${name}`
+        );
+      else await docker(dockerContext, ['rm', '--force', name]);
+      // A failed removal stays guarded for exit cleanup and the next sweep.
       releaseContainer(dockerContext, name);
     };
+    const channel = containerChannel(dockerContext, name);
+    const runtimeContext = (signal: AbortSignal): DockerRuntimeContext => ({
+      channel,
+      signal,
+      runId: shard.runId,
+      shardIndex: shard.index,
+      shardCount: shard.count,
+      ...(context.client ? { client: context.client } : {}),
+      desktop: client,
+    });
+    let cleanup: DockerRuntimeCleanup | undefined;
+    let cleaning: Promise<void> | undefined;
+    const cleanRuntime = () =>
+      (cleaning ??= cleanup
+        ? cleanupRuntime(cleanup, runtimeContext, name)
+        : Promise.resolve());
+    let disposing: Promise<void> | undefined;
     let limits: ContainerLimits | undefined;
     try {
       await sweep(dockerContext);
@@ -850,7 +984,8 @@ function openDocker(
         client === 'chatgpt'
           ? {}
           : (await planOf('collect', dockerContext)).limits;
-      const secret = await credential();
+      const secret =
+        runtime.inference === 'plugin' ? undefined : await credential();
       const digest = await dockerOk(
         dockerContext,
         ['image', 'inspect', '--format', '{{.Id}}', image],
@@ -858,15 +993,16 @@ function openDocker(
       );
       // Guarded from here: removed at exit even if this run never disposes it.
       claimContainer(dockerContext, name);
-      await dockerOk(
-        dockerContext,
-        'cowork' in secret
+      claimed = true;
+      const runArgs =
+        client === 'cowork'
           ? dockerRunArgs({
               name,
               image,
               runId: shard.runId,
               seccompProfile,
-              inference: secret.cowork,
+              inference:
+                secret && 'cowork' in secret ? secret.cowork : undefined,
               warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
               limits,
             })
@@ -874,76 +1010,146 @@ function openDocker(
               name,
               image,
               runId: shard.runId,
-              inference: secret.environment,
-            }),
-        `Starting container ${name}`,
-        { signal }
-      );
-      await deliverToken(
-        dockerContext,
-        name,
-        secret.token,
-        AbortSignal.any([signal, container.signal])
-      );
-      refresh = setInterval(() => {
-        void credential()
-          .then((fresh) =>
-            deliverToken(
-              dockerContext,
-              name,
-              fresh.token,
-              AbortSignal.any([signal, container.signal])
+              inference:
+                secret && 'environment' in secret ? secret.environment : {},
+            });
+      if (deferredDesktop) {
+        // Retain the normal labels, devices and limits, but do not start X,
+        // the app, or a VM until the plugin has prepared the runtime.
+        runArgs.splice(runArgs.length - 1, 0, '--entrypoint', '/usr/bin/tini');
+        runArgs.push('--', 'sleep', 'infinity');
+      }
+      await dockerOk(dockerContext, runArgs, `Starting container ${name}`, {
+        signal,
+      });
+      if (deferredDesktop) {
+        await dockerOk(
+          dockerContext,
+          ['exec', '-u', 'root', name, DESKTOP_SESSION, '--dirs-only'],
+          'Creating the private directories',
+          { signal }
+        );
+        await dockerOk(
+          dockerContext,
+          ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
+          'Creating the work directory',
+          { signal }
+        );
+      }
+      if (secret) {
+        await deliverToken(
+          dockerContext,
+          name,
+          secret.token,
+          AbortSignal.any([signal, container.signal])
+        );
+        refresh = setInterval(() => {
+          void credential()
+            .then((fresh) =>
+              deliverToken(
+                dockerContext,
+                name,
+                fresh.token,
+                AbortSignal.any([signal, container.signal])
+              )
             )
-          )
-          .catch(() => {
-            // The next refresh tries again; the token still has time.
+            .catch(() => {
+              // The next refresh tries again; the token still has time.
+            });
+        }, TOKEN_REFRESH_MS);
+        refresh.unref();
+      }
+      if (runtime.prepareRuntime) {
+        signal.throwIfAborted();
+        try {
+          cleanup = await runtime.prepareRuntime(runtimeContext(signal));
+        } catch (cause) {
+          // Opaque plugin data may be in its error; do not log it.
+          throw new Error(`Runtime preparation failed for container ${name}.`, {
+            cause,
           });
-      }, TOKEN_REFRESH_MS);
-      refresh.unref();
+        }
+      }
+      if (deferredDesktop) {
+        signal.throwIfAborted();
+        await dockerOk(
+          dockerContext,
+          ['exec', '--detach', '-u', 'root', name, DESKTOP_SESSION],
+          `Starting the desktop in container ${name}`,
+          { signal }
+        );
+      }
       await waitForDesktop(dockerContext, name, readyTimeoutS, signal);
-      await dockerOk(
-        dockerContext,
-        ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
-        'Creating the work directory'
-      );
+      if (!deferredDesktop)
+        await dockerOk(
+          dockerContext,
+          ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
+          'Creating the work directory'
+        );
       return {
         id: name,
         image: { ref: image, digest },
         workDir: WORK_DIR,
-        channel: containerChannel(dockerContext, name),
+        channel,
         diagnose: diagnose(dockerContext, name, 'collect', limits),
         async dispose({ keep }) {
-          try {
-            if (keep) {
+          return (disposing ??= (async () => {
+            try {
               stopRefresh();
-              // Renamed so no later run's sweep removes it.
-              const kept = `${name}${KEPT_SUFFIX}`;
-              const renamed =
-                (await docker(dockerContext, ['rename', name, kept])).code ===
-                0;
-              releaseContainer(dockerContext, name);
-              console.error(
-                `[mst] kept container ${renamed ? kept : name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${renamed ? kept : name} bash`
-              );
-            } else await remove();
-          } finally {
-            pool.release(dockerContext);
-          }
+              try {
+                await cleanRuntime();
+              } catch (error) {
+                // A container whose cleanup failed is never kept.
+                await removeAfterFailure(remove, error);
+              }
+              if (keep) {
+                // Renamed so no later run's sweep removes it.
+                const kept = `${name}${KEPT_SUFFIX}`;
+                const renamed =
+                  (await docker(dockerContext, ['rename', name, kept])).code ===
+                  0;
+                if (deferredDesktop && !renamed)
+                  await removeAfterFailure(
+                    remove,
+                    new Error(
+                      `Couldn't keep container ${name}: renaming failed.`
+                    )
+                  );
+                releaseContainer(dockerContext, name);
+                console.error(
+                  `[mst] kept container ${renamed ? kept : name}: docker ${dockerContext ? `--context ${dockerContext} ` : ''}exec -it -u ${USER} ${renamed ? kept : name} bash`
+                );
+              } else await remove();
+            } finally {
+              pool.release(dockerContext);
+            }
+          })());
         },
       };
     } catch (error) {
-      // A desktop that didn't come up may have run out of memory.
-      const cause = limits
-        ? await diagnose(dockerContext, name, 'collect', limits)().catch(
-            () => undefined
-          )
-        : undefined;
-      await remove();
-      pool.release(dockerContext);
-      if (!cause) throw error;
-      throw new Error(
-        `${cause} ${error instanceof Error ? error.message : String(error)}`
-      );
+      stopRefresh();
+      let failure = error;
+      try {
+        await cleanRuntime();
+      } catch (cleanupError) {
+        failure = combinedFailure(failure, cleanupError);
+      }
+      // Diagnose after cleanup, never hold a cancelled runtime for a probe.
+      const cause =
+        limits && !signal.aborted
+          ? await diagnose(dockerContext, name, 'collect', limits)().catch(
+              () => undefined
+            )
+          : undefined;
+      if (cause)
+        failure = new Error(
+          `${cause} ${failure instanceof Error ? failure.message : String(failure)}`
+        );
+      try {
+        return await removeAfterFailure(remove, failure);
+      } finally {
+        pool.release(dockerContext);
+      }
     }
   });
 }
@@ -1150,20 +1356,31 @@ async function setupDocker(
   }
 }
 
-export const dockerRunner: RunnerDefinition = {
-  schema: DockerOptionsSchema,
-  os: 'linux',
-  description:
-    "Run shards in containers from MST's Linux Cowork image (one Cowork container per Docker context at a time, grade containers as many as fit) or, for a ChatGPT or Codex app eval, its Linux ChatGPT image.",
-  async open(options, context) {
-    return openDocker(options as DockerOptions, context);
-  },
-  async setup(options, { log, plugins = [], client }) {
-    await setupDocker(
-      options as DockerOptions,
-      log,
-      plugins,
-      dockerClient(client)
-    );
-  },
-};
+/**
+ * A Docker runner with optional in-process desktop runtime preparation.
+ * Grade and headless shards never invoke runtime hooks or deliver inference.
+ */
+export function createDockerRunner(
+  runtime: DockerRunnerOptions = {}
+): RunnerDefinition {
+  return {
+    schema: DockerOptionsSchema,
+    os: 'linux',
+    description:
+      "Run shards in containers from MST's Linux Cowork image (one Cowork container per Docker context at a time, grade containers as many as fit) or, for a ChatGPT or Codex app eval, its Linux ChatGPT image.",
+    async open(options, context) {
+      return openDocker(options as DockerOptions, context, runtime);
+    },
+    async setup(options, { log, plugins = [], client }) {
+      await setupDocker(
+        options as DockerOptions,
+        log,
+        plugins,
+        dockerClient(client)
+      );
+    },
+  };
+}
+
+/** The default runner keeps its existing immediate desktop startup. */
+export const dockerRunner: RunnerDefinition = createDockerRunner();

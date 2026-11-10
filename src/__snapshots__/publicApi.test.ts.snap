@@ -35,6 +35,7 @@ exports[`public API > ./evals 1`] = `
   "comparePairwise",
   "computeMetrics",
   "createDefaultArtifactId",
+  "createDockerRunner",
   "createEvalResultStore",
   "createStoredEvalArtifact",
   "defaultEnvironmentMetadata",

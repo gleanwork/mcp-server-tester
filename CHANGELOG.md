@@ -1,5 +1,7 @@
 ## Unreleased
 
+- `createDockerRunner` (from `./evals`) lets plugins prepare a desktop runtime over the existing worker channel before desktop startup, return bounded cleanup, and opt out of MST-managed inference. Default Docker, grade and headless startup are unchanged. See [Runners](docs/evaluation-framework.md#plugins).
+
 - Cowork `clientOptions.mode: "first-party"` runs on existing HTTPS connectors in the signed-in Claude account (local macOS, `concurrency: 1`, no sharding). The default `third-party` mode is unchanged. See [Cloud sessions](docs/cowork.md#cloud-sessions).
 - On macOS, both Cowork modes and every `dataDir` share one desktop lease. A first-party session over 10,000 events fails with an error instead of being truncated. `mst cowork restore-connectors [--recover-stale-lock]` restores account connector settings from the journal without running an eval, and only after identity, concurrent-edit, write-outcome and task-completion checks pass. An unknown write or an unfinished or unbound task keeps the journal and desktop lock.
 - Every run writes its eval's history, `history.json` (`mst.history/v1`, schema in `schema/history/v1/`), beside `latest.json`; `mst history` prints it. See [The eval's history](docs/evaluation-framework.md#the-evals-history).

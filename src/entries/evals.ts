@@ -123,7 +123,12 @@ export {
 } from '../evals/configValidation.js';
 export { machineRunner } from '../evals/runners/channel.js';
 export type { ShardChannelOptions } from '../evals/runners/channel.js';
-export { dockerRunner } from '../evals/runners/docker.js';
+export { dockerRunner, createDockerRunner } from '../evals/runners/docker.js';
+export type {
+  DockerRunnerOptions,
+  DockerRuntimeContext,
+  DockerRuntimeCleanup,
+} from '../evals/runners/docker.js';
 export type { ShardTokens, TrialKey } from '../evals/runners/protocol.js';
 export { resolveConfigExtends } from '../evals/configExtends.js';
 export type { ValidateEvalConfigOptions } from '../evals/configValidation.js';
