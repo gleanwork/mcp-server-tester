@@ -66,6 +66,8 @@ import {
   osName,
 } from './desktopOS.js';
 import { removedClientOptions } from './renamedKeys.js';
+import { CloudConnectorsSchema } from './cowork/claudeAiConnectors.js';
+import { assertFirstPartyServers } from './cowork/firstParty.js';
 
 const CoworkSchema = z
   .object({
@@ -128,6 +130,19 @@ const CoworkSchema = z
       'x-defaultDescription':
         'not set (caller provides a private root on Linux)',
     }),
+    /** Select existing account connectors by the normal HTTP server labels. */
+    mode: z.enum(['third-party', 'first-party']).optional().meta({
+      'x-defaultDescription': 'third-party (MST-managed profile)',
+    }),
+    /** Legacy prototype selector; prefer mode: first-party and standard servers. */
+    account: z.enum(['claude-ai']).optional().meta({
+      'x-defaultDescription': 'MST-managed third-party profile',
+    }),
+    /** Account-wide 1P remote connector policies, restored when the session closes. */
+    connectors: CloudConnectorsSchema.optional().meta({
+      'x-defaultDescription':
+        'first-party: selected servers read-only; legacy account mode: unchanged',
+    }),
     /** The trial's time limit in ms (default 900000). */
     timeout: z.number().int().positive().default(900_000),
     model: z
@@ -153,7 +168,36 @@ const CoworkSchema = z
       })
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (options) =>
+      !options.connectors ||
+      options.account === 'claude-ai' ||
+      options.mode === 'first-party',
+    {
+      message:
+        'clientOptions.connectors requires account: claude-ai or mode: first-party.',
+      path: ['connectors'],
+    }
+  )
+  .refine((options) => !options.mode || !options.account, {
+    message: 'Choose mode or the legacy account selector, not both.',
+    path: ['mode'],
+  })
+  .refine(
+    (options) =>
+      options.mode !== 'first-party' ||
+      (!options.appVersion &&
+        !options.dataDir &&
+        !options.pluginRoots &&
+        !options.mcpDataRoot &&
+        !options.plugins?.length),
+    {
+      message:
+        'First-party mode uses the signed-in installed app; appVersion, dataDir, plugins, pluginRoots and mcpDataRoot are unsupported.',
+      path: ['mode'],
+    }
+  );
 
 /**
  * The Cowork options that the OS a trial runs on can't use: `pluginRoots`
@@ -167,11 +211,20 @@ export function coworkOptionIssues(
     mcpDataRoot?: unknown;
     computerUseModel?: unknown;
     appVersion?: unknown;
+    mode?: unknown;
+    account?: unknown;
   },
   os: NodeJS.Platform
 ): string[] {
   const issues: string[] = [];
   const on = osName(os);
+  if (
+    (options.mode === 'first-party' || options.account === 'claude-ai') &&
+    os !== 'darwin'
+  )
+    issues.push(
+      'First-party Cowork requires macOS and a signed-in Claude account.'
+    );
   if (
     os !== 'linux' &&
     (options.pluginRoots !== undefined || options.mcpDataRoot !== undefined)
@@ -197,6 +250,7 @@ export function coworkOptionIssues(
  */
 const COWORK_SESSION_EVIDENCE = [
   'audit.jsonl',
+  'connector-policy.json',
   'outputs',
   '.claude/projects/*/*.jsonl',
   '.claude/projects/*/*/tool-results',
@@ -343,13 +397,43 @@ async function desktopAdapter(
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkClientPlugins(plugins);
   const servers = requests[0]!.input.servers;
+  const firstParty = config.mode === 'first-party';
+  const claudeAi = firstParty || config.account === 'claude-ai';
+  if (firstParty) {
+    assertFirstPartyServers(servers, config.connectors);
+    if (
+      context.evalConfig.simulateWrites ||
+      context.evalConfig.tools ||
+      context.variant?.tools
+    )
+      throw new Error(
+        'First-party mode cannot use simulated writes or tool-metadata proxies.'
+      );
+  }
+  if (claudeAi) {
+    if (!mac)
+      throw new Error(
+        'Cowork signed in to claude.ai (`account: "claude-ai"`) runs on macOS only.'
+      );
+    if ((!firstParty && servers.length) || plugins.length)
+      throw new Error(
+        "Cowork signed in to claude.ai uses the account's own connectors: declare no MCP servers or plugins for its variant."
+      );
+    if (config.appVersion)
+      throw new Error(
+        'claude.ai mode uses the installed app; omit appVersion.'
+      );
+  }
   // A request carries `checkServers` only when its servers are proxied. MST
   // then checked them as declared before the proxy started, so Cowork's
   // check after prepare has nothing left to check.
-  const readinessServers = requests[0]!.input.checkServers ? [] : servers;
+  // Account-backed preparation checks tools and permissions using Claude's auth.
+  const readinessServers =
+    claudeAi || requests[0]!.input.checkServers ? [] : servers;
+  const managedServers = firstParty ? [] : servers;
   // Validate declarations before desktop actions. macOS resolves client-resolved
   // paths inside its leased setup transaction; Linux uses prepared runtime paths.
-  const stdioServers = clientStdioServers(servers, plugins);
+  const stdioServers = clientStdioServers(managedServers, plugins);
   let stdioPaths = {
     ...(config.pluginRoots ? { pluginRoots: config.pluginRoots } : {}),
     ...(config.mcpDataRoot ? { dataRoot: config.mcpDataRoot } : {}),
@@ -371,7 +455,7 @@ async function desktopAdapter(
       'mcp_server_invalid',
       unknownRoot ?? 'dataRoot'
     );
-  const httpServers = servers
+  const httpServers = managedServers
     .map((server, index) => ({
       ...server,
       label: mcpServerLabel(server, index),
@@ -379,8 +463,8 @@ async function desktopAdapter(
     .filter((server) => server.transport === 'http');
   if (mac) validateMacLocalServers(httpServers);
   coworkManagedPluginSettings({
-    servers: mac ? httpServers : servers,
-    declaredServers: servers,
+    servers: mac ? httpServers : managedServers,
+    declaredServers: managedServers,
     plugins,
     paths: stdioPaths,
   });
@@ -391,6 +475,14 @@ async function desktopAdapter(
     );
   // Select the concrete entry point here, on the machine running this batch.
   let platform = selectedDesktop;
+  if (!platform && claudeAi) {
+    const { coworkClaudeAi } = await import('./cowork/claudeAi.js');
+    platform = coworkClaudeAi(
+      (await import('./cowork/macos.js')).coworkMacos,
+      config.connectors,
+      firstParty ? { servers, writes: context.evalConfig.writes } : undefined
+    );
+  }
   if (!platform) {
     if (os === 'darwin')
       platform = (await import('./cowork/macos.js')).coworkMacos;
@@ -811,6 +903,7 @@ async function desktopAdapter(
             'Native session identity changed; refusing attribution.'
           );
         hostSessions = sessionIdsOf(transcript);
+        await platform.validateTranscript?.(transcript);
         process.stderr.write(
           `[mst:cowork] case ${index + 1}: native completion found (${transcript.toolCalls.length} tool calls)\n`
         );
@@ -825,7 +918,12 @@ async function desktopAdapter(
         const nativeResult: ClientRunResult = {
           finalText: transcript.finalAnswer ?? '',
           events: toolCallEvents(
-            coworkOwnToolCalls(transcript.toolCalls, servers),
+            coworkOwnToolCalls(
+              transcript.toolCalls,
+              servers,
+              platform.mcpServerNames?.(),
+              platform.mcpServerLabels?.()
+            ),
             servers
           ),
           ...(transcript.modelCalls?.length
@@ -926,7 +1024,12 @@ async function desktopAdapter(
             result = {
               finalText: partial.finalAnswer ?? '',
               events: toolCallEvents(
-                coworkOwnToolCalls(partial.toolCalls, servers),
+                coworkOwnToolCalls(
+                  partial.toolCalls,
+                  servers,
+                  platform.mcpServerNames?.(),
+                  platform.mcpServerLabels?.()
+                ),
                 servers
               ),
               ...(partial.modelCalls?.length
@@ -971,18 +1074,39 @@ async function desktopAdapter(
  */
 export function coworkOwnToolCalls(
   calls: readonly LLMToolCall[],
-  servers: readonly MCPConfig[]
+  servers: readonly MCPConfig[],
+  accountServerNames: readonly string[] = [],
+  accountLabels: Readonly<Record<string, string>> = {}
 ): LLMToolCall[] {
-  const labels = new Set(
-    servers.map((server, index) => mcpServerLabel(server, index))
-  );
-  return calls.map((call) =>
-    call.source === 'mcp' &&
-    call.server !== undefined &&
-    !labels.has(call.server)
-      ? { ...call, source: 'builtin' }
-      : call
-  );
+  const labels = new Set([
+    ...servers.map((server, index) => mcpServerLabel(server, index)),
+    ...accountServerNames,
+  ]);
+  return calls.map((call) => {
+    const server =
+      call.server === undefined
+        ? undefined
+        : (accountLabels[call.server] ?? call.server);
+    const source =
+      call.source === 'mcp' && server !== undefined && !labels.has(server)
+        ? 'builtin'
+        : call.source;
+    return {
+      ...call,
+      ...(server !== undefined ? { server } : {}),
+      ...(source !== undefined ? { source } : {}),
+      ...(call.results
+        ? {
+            results: call.results.map((result) => ({
+              ...result,
+              ...(result.server
+                ? { server: accountLabels[result.server] ?? result.server }
+                : {}),
+            })),
+          }
+        : {}),
+    };
+  });
 }
 
 /**

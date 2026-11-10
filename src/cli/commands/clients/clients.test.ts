@@ -249,6 +249,9 @@ describe('mst clients', () => {
         'env',
       ],
       cowork: [
+        'mode',
+        'account',
+        'connectors',
         'maxActions',
         'hitlMaxActions',
         'computerUseModel',

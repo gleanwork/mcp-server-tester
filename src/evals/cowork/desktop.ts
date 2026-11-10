@@ -1,4 +1,5 @@
 import type { EvalConfig } from '../evalConfig.js';
+import type { ClaudeTranscript } from './transcript.js';
 import type { MarketplacePlugin, ClientStdioPaths } from '../clientPlugins.js';
 import type {
   CoworkDriverOptions,
@@ -48,6 +49,12 @@ export interface CoworkDesktop {
     dispose(): Promise<void>;
   }>;
   recover(): Promise<unknown>;
+  /** Verify host-specific evidence before accepting a completed native transcript. */
+  validateTranscript?(transcript: ClaudeTranscript): Promise<void>;
+  /** Account connector names that count as eval MCP calls, not client built-ins. */
+  mcpServerNames?(): readonly string[];
+  /** Native account connector name to the eval's stable server label. */
+  mcpServerLabels?(): Readonly<Record<string, string>>;
   /**
    * After a failed case, leave the app with no task running and no prompt
    * open, so the next case is independent. Never types or submits.

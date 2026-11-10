@@ -491,6 +491,101 @@ describe('V2 Cowork client', () => {
     );
     expect(result!.telemetry?.clientApp).toEqual(app);
   });
+  it('attributes native first-party calls and tool-search results to normal server labels', () => {
+    const calls = [
+      {
+        name: 'search',
+        rawName: 'mcp__Account_Search__search',
+        source: 'mcp' as const,
+        server: 'Account_Search',
+        arguments: {},
+      },
+      {
+        name: 'ToolSearch',
+        kind: 'tool_search' as const,
+        source: 'builtin' as const,
+        arguments: {},
+        results: [{ server: 'Account_Search', name: 'search' }],
+      },
+    ];
+    const mapped = coworkOwnToolCalls(
+      calls,
+      [
+        {
+          transport: 'http',
+          label: 'glean',
+          serverUrl: 'https://example.com/mcp',
+        },
+      ],
+      ['Account_Search'],
+      { Account_Search: 'glean' }
+    );
+    expect(mapped[0]).toMatchObject({
+      server: 'glean',
+      source: 'mcp',
+      rawName: 'mcp__Account_Search__search',
+    });
+    expect(mapped[1]?.results).toEqual([{ server: 'glean', name: 'search' }]);
+    expect(
+      COWORK_CLIENT.schema.parse({ type: 'cowork', mode: 'first-party' })
+    ).toMatchObject({ mode: 'first-party' });
+    expect(() =>
+      COWORK_CLIENT.schema.parse({
+        type: 'cowork',
+        mode: 'first-party',
+        account: 'claude-ai',
+      })
+    ).toThrow('not both');
+  });
+  it('counts account connectors as MCP calls without counting Cowork built-ins', () => {
+    const calls = [
+      {
+        name: 'search',
+        source: 'mcp' as const,
+        server: 'Glean_-_Claude_Custom',
+        arguments: {},
+      },
+      {
+        name: 'search',
+        source: 'mcp' as const,
+        server: 'Claude_Docs',
+        arguments: {},
+      },
+    ];
+    expect(
+      coworkOwnToolCalls(calls, [], ['Glean_-_Claude_Custom']).map(
+        (call) => call.source
+      )
+    ).toEqual(['mcp', 'builtin']);
+  });
+  it('accepts declarative connectors only for the first-party account', () => {
+    expect(
+      COWORK_CLIENT.schema.parse({
+        type: 'cowork',
+        account: 'claude-ai',
+        connectors: { servers: { Glean: { policy: 'read-only' } } },
+      })
+    ).toMatchObject({
+      connectors: {
+        default: 'block',
+        failOnApproval: true,
+        servers: { Glean: { policy: 'read-only', tools: {} } },
+      },
+    });
+    expect(() =>
+      COWORK_CLIENT.schema.parse({
+        type: 'cowork',
+        connectors: { servers: {} },
+      })
+    ).toThrow('requires account');
+    expect(() =>
+      COWORK_CLIENT.schema.parse({
+        type: 'cowork',
+        account: 'claude-ai',
+        connectors: { servers: { Glean: { policy: 'all' } } },
+      })
+    ).toThrow();
+  });
   it('takes its options directly, not nested under options', () => {
     expect(
       COWORK_CLIENT.schema.parse({ type: 'cowork', appVersion: '1.52386.6' })

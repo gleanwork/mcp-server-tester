@@ -45,6 +45,11 @@ import { osName } from './desktopOS.js';
 import { attributeBuiltinEvents } from './clientTranscript.js';
 import type { MstClientConfig } from './mstClient/types.js';
 import { COWORK_CLIENT, coworkOptionIssues } from './coworkClient.js';
+import {
+  assertFirstPartyServers,
+  isFirstPartyCowork,
+} from './cowork/firstParty.js';
+import type { CloudConnectorConfig } from './cowork/claudeAiConnectors.js';
 import { CHATGPT_APP_CLIENTS, chatgptOptionIssues } from './chatgptClient.js';
 import { CODEX_CLIENT, assertCodexServers } from './codexClient.js';
 import {
@@ -697,6 +702,27 @@ export function assertClientSupports(
     throw new Error(
       `${options.context}: client "${clientConfig.type}" can't run as configured. ${osIssues.join(' ')}`
     );
+  if (isFirstPartyCowork(configured)) {
+    assertFirstPartyServers(
+      options.servers,
+      configured.connectors as CloudConnectorConfig | undefined
+    );
+    if (options.tools !== undefined)
+      throw new Error(
+        `${options.context}: first-party mode cannot apply tool-metadata proxies.`
+      );
+    if ((options.concurrency ?? 1) > 1)
+      throw new Error(
+        `${options.context}: first-party account settings require concurrency: 1.`
+      );
+    if (
+      options.runner &&
+      !['local', 'mst/runner/local'].includes(options.runner)
+    )
+      throw new Error(
+        `${options.context}: first-party mode currently supports only the local runner with a signed-in account.`
+      );
+  }
   const showsToolMetadata =
     definition.toolMetadata === true || usesToolSurfaceProxy(definition);
   if (options.tools !== undefined && !showsToolMetadata) {
