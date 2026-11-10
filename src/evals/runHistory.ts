@@ -40,8 +40,10 @@ import type { GraderScore } from '../types/index.js';
 import { assertRunFormat } from './resultFormat.js';
 import {
   RUN_ID_PATTERN,
-  RUN_SCHEMAS,
   joinCaseResults,
+  parseResultsRecord,
+  parseRunRecord,
+  parseSummaryRecord,
   runWithCurrentClients,
   summaryWithCurrentClients,
   type RunRecord,
@@ -1164,11 +1166,16 @@ async function readRow(
     if (summary === undefined)
       return { runId, reason: 'it has no summary.json' };
     assertRunFormat(summary, `${prefix}summary.json`);
-    const results = (await getJson(location.store, `${prefix}results.json`)) as
-      | { cases?: EvalCaseResult[] }
-      | undefined;
+    const results = await getJson(location.store, `${prefix}results.json`);
+    if (results !== undefined)
+      assertRunFormat(results, `${prefix}results.json`);
     const joined = summaryWithCurrentClients(
-      joinCaseResults(summary as EvaluationSummary, results?.cases ?? []),
+      joinCaseResults(
+        parseSummaryRecord(summary, `${prefix}summary.json`),
+        results === undefined
+          ? []
+          : parseResultsRecord(results, `${prefix}results.json`).cases
+      ),
       run
     );
     return historyRunOf(run, joined);
@@ -1209,7 +1216,7 @@ export async function buildHistory(
         const value = await getJson(location.store, key);
         if (value === undefined) return undefined;
         assertRunFormat(value, key);
-        run = runWithCurrentClients(RUN_SCHEMAS.run.parse(value));
+        run = runWithCurrentClients(parseRunRecord(value, key));
       } catch (error) {
         return {
           runId,
