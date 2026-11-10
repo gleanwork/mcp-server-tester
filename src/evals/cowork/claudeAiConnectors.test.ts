@@ -59,7 +59,266 @@ const snapshot: CloudConnectorSnapshot = {
   ],
 };
 
+const policySnapshot: CloudConnectorSnapshot = {
+  accountId: 'acme-account',
+  organizationId: 'acme-org',
+  permissions: {},
+  servers: [
+    {
+      id: 'docs',
+      name: 'Acme Documents',
+      nativeName: 'Acme_Documents',
+      connectionState: 'connected',
+      tools: [
+        {
+          name: 'search',
+          enabledKey: 'docs:search',
+          approvalKey: 'docs:search-hash',
+          readOnly: true,
+        },
+        {
+          name: 'send',
+          enabledKey: 'docs:send',
+          approvalKey: 'docs:send-hash',
+          readOnly: false,
+        },
+      ],
+    },
+    {
+      id: 'tasks',
+      name: 'Task Board',
+      nativeName: 'Task_Board',
+      connectionState: 'connected',
+      tools: [
+        {
+          name: 'read',
+          enabledKey: 'tasks:read',
+          approvalKey: 'tasks:read-hash',
+          readOnly: true,
+        },
+      ],
+    },
+  ],
+};
+
 describe('cloud connector configuration', () => {
+  it.each([false, true])(
+    'refuses preparation when an excluded connected inventory fails (saved keys: %s)',
+    async (savedKeys) => {
+      const dir = await mkdtemp(join(tmpdir(), 'mst-connectors-inventory-'));
+      const state = structuredClone(policySnapshot);
+      state.servers[1]!.tools = [];
+      state.servers[1]!.toolDiscoveryError = 'Tool inventory HTTP 503';
+      if (savedKeys) state.permissions['tasks:old-tool'] = true;
+      const original = structuredClone(state.permissions);
+      const io: CloudConnectorIO = {
+        inspect: async () => structuredClone(state),
+        read: async () => structuredClone(state),
+        async patch(_identity, patch) {
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === null) delete state.permissions[key];
+            else state.permissions[key] = value;
+          }
+        },
+      };
+      try {
+        const journal = join(dir, 'journal.json');
+        await expect(
+          configureCloudConnectors(
+            io,
+            { servers: { docs: { policy: 'read-only' } } },
+            journal
+          )
+        ).rejects.toThrow(/Task Board.*Tool inventory HTTP 503/);
+        expect(state.permissions).toEqual(original);
+        await expect(readFile(journal)).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('recovers an earlier transaction before refusing an excluded inventory gap', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mst-connectors-recovery-'));
+    const state = structuredClone(policySnapshot);
+    const io: CloudConnectorIO = {
+      inspect: async () => structuredClone(state),
+      read: async () => structuredClone(state),
+      async patch(_identity, patch, expected) {
+        for (const [key, value] of Object.entries(patch)) {
+          expect(state.permissions[key] ?? null).toEqual(expected[key]);
+          if (value === null) delete state.permissions[key];
+          else state.permissions[key] = value;
+        }
+      },
+    };
+    try {
+      const journal = join(dir, 'journal.json');
+      const config = { servers: { docs: { policy: 'read-only' as const } } };
+      await configureCloudConnectors(io, config, journal);
+      expect(state.permissions['docs:search']).toBe(true);
+      state.servers[1]!.tools = [];
+      state.servers[1]!.toolDiscoveryError = 'Tool inventory HTTP 503';
+      await expect(
+        configureCloudConnectors(io, config, journal)
+      ).rejects.toThrow(/Task Board.*Tool inventory HTTP 503/);
+      expect(state.permissions).toEqual({});
+      await expect(readFile(journal)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+  it.each(['Acme_Documents', 'Acme Documents'])(
+    'recognizes the pending server name %s without widening allowed tools',
+    (pendingName) => {
+      const plan = planCloudConnectors(policySnapshot, {
+        servers: { docs: { policy: 'read-only' } },
+      });
+      const init = {
+        payload: {
+          type: 'system',
+          subtype: 'init',
+          tools: ['ToolSearch'],
+          mcp_servers: [{ name: pendingName, status: 'pending' }],
+        },
+      };
+      const result = verifyCloudConnectorEvents(plan, [init]);
+      expect(result).toMatchObject({
+        allowedTools: ['mcp__Acme_Documents__search'],
+        observedAllowedTools: [],
+        unobservedAllowedTools: ['mcp__Acme_Documents__search'],
+        pendingServers: [pendingName],
+        catalogComplete: false,
+      });
+      const search = {
+        payload: {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'tool_use', id: 'lookup', name: 'ToolSearch' }],
+          },
+        },
+      };
+      const reference = (tool: string) => ({
+        payload: {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'lookup',
+                content: [{ type: 'tool_reference', tool_name: tool }],
+              },
+            ],
+          },
+        },
+      });
+      expect(
+        verifyCloudConnectorEvents(plan, [
+          init,
+          search,
+          reference('mcp__Acme_Documents__search'),
+        ]).observedAllowedTools
+      ).toEqual(['mcp__Acme_Documents__search']);
+      for (const tool of [
+        'mcp__Acme_Documents__send',
+        'mcp__Acme_Documents__new_tool',
+        'mcp__Task_Board__read',
+        'mcp__Task_Board__new_tool',
+      ]) {
+        expect(() =>
+          verifyCloudConnectorEvents(plan, [init, search, reference(tool)])
+        ).toThrow('1 unexpected tools');
+      }
+    }
+  );
+
+  it.each(['Acme_Documents', 'Acme Documents'])(
+    'recognizes pending name %s for an inherited connector with a tool override',
+    (name) => {
+      const plan = planCloudConnectors(policySnapshot, {
+        default: 'inherit',
+        servers: { docs: { policy: 'inherit', tools: { search: 'allow' } } },
+      });
+      expect(
+        verifyCloudConnectorEvents(plan, [
+          {
+            payload: {
+              type: 'system',
+              subtype: 'init',
+              tools: ['ToolSearch'],
+              mcp_servers: [{ name, status: 'pending' }],
+            },
+          },
+        ])
+      ).toMatchObject({
+        allowedTools: ['mcp__Acme_Documents__search'],
+        unobservedAllowedTools: ['mcp__Acme_Documents__search'],
+        catalogComplete: false,
+      });
+    }
+  );
+
+  it('refuses an explicit block with an unavailable connected inventory but permits inheritance', () => {
+    const unavailable = structuredClone(policySnapshot);
+    unavailable.servers[1]!.tools = [];
+    unavailable.servers[1]!.toolDiscoveryError = 'Tool inventory HTTP 503';
+    expect(() =>
+      planCloudConnectors(unavailable, {
+        default: 'inherit',
+        servers: { tasks: { policy: 'block' } },
+      })
+    ).toThrow(/Task Board.*Tool inventory HTTP 503/);
+    expect(
+      planCloudConnectors(unavailable, { default: 'inherit' }).patch
+    ).toEqual({});
+  });
+
+  it.each(['Task_Board', 'Task Board', 'Acme.Documents'])(
+    'does not excuse missing allowed tools for unrelated pending name %s',
+    (pendingName) => {
+      const plan = planCloudConnectors(policySnapshot, {
+        servers: { docs: { policy: 'read-only' } },
+      });
+      expect(() =>
+        verifyCloudConnectorEvents(plan, [
+          {
+            payload: {
+              type: 'system',
+              subtype: 'init',
+              tools: ['ToolSearch'],
+              mcp_servers: [{ name: pendingName, status: 'pending' }],
+            },
+          },
+        ])
+      ).toThrow('Missing: mcp__Acme_Documents__search');
+    }
+  );
+
+  it.each(['Acme_Documents', 'Acme Documents'])(
+    'still requires allowed tools when server %s is no longer pending',
+    (name) => {
+      const plan = planCloudConnectors(policySnapshot, {
+        servers: { docs: { policy: 'read-only' } },
+      });
+      expect(() =>
+        verifyCloudConnectorEvents(plan, [
+          {
+            payload: {
+              type: 'system',
+              subtype: 'init',
+              tools: ['ToolSearch'],
+              mcp_servers: [{ name, status: 'connected' }],
+            },
+          },
+        ])
+      ).toThrow('Missing: mcp__Acme_Documents__search');
+    }
+  );
+
   it('verifies lazy-loaded tools without treating a pending init catalog as complete', () => {
     const plan = planCloudConnectors(snapshot, {
       servers: { Glean: { policy: 'read-only' } },
@@ -181,15 +440,18 @@ describe('cloud connector configuration', () => {
     unavailable.servers[0]!.toolDiscoveryError = 'HTTP 401';
     unavailable.servers[0]!.tools = [];
     unavailable.permissions['glean:old-tool'] = true;
-    expect(
-      planCloudConnectors(unavailable, { servers: {} }).patch['glean:old-tool']
-    ).toBe(false);
+    expect(() => planCloudConnectors(unavailable, { servers: {} })).toThrow(
+      'Cannot configure'
+    );
     expect(() =>
       planCloudConnectors(unavailable, {
         servers: { glean: { policy: 'allow-all' } },
       })
     ).toThrow('Cannot configure');
     unavailable.servers[0]!.connectionState = 'initiated';
+    expect(
+      planCloudConnectors(unavailable, { servers: {} }).patch['glean:old-tool']
+    ).toBe(false);
     expect(() =>
       planCloudConnectors(unavailable, {
         servers: { glean: { policy: 'allow-all' } },

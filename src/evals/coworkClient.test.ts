@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { collectClientBatch } from './desktopBatch.js';
 import type { CoworkDesktop as CoworkPlatform } from './cowork/desktop.js';
@@ -21,7 +22,10 @@ import { prepareClientBatch } from './prepareClientBatch.js';
 import { CoworkHitlError } from './cowork/interaction.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import type { ClaudeTranscript } from './cowork/transcript.js';
+import {
+  parseClaudeTranscript,
+  type ClaudeTranscript,
+} from './cowork/transcript.js';
 import type * as ClaudeNative from './cowork/sessions.js';
 import {
   ComputerUseDriverError,
@@ -33,6 +37,7 @@ import type {
   ClientRunContext,
 } from './evalFrameworkTypes.js';
 import type * as OsModule from 'node:os';
+import type * as ChildProcessModule from 'node:child_process';
 import type * as ReadinessCheck from './readinessCheck.js';
 import type * as ReadinessServer from './cowork/readinessServer.js';
 import { readyStdioServer } from '../../tests/mocks/readyServers.js';
@@ -535,8 +540,136 @@ describe('V2 Cowork client', () => {
         mode: 'first-party',
         account: 'claude-ai',
       })
-    ).toThrow('not both');
+    ).toThrow(/Unrecognized key.*account/);
   });
+  it.each(['references', 'text'] as const)(
+    'attributes account names containing __ in calls and ToolSearch %s results',
+    async (format) => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-native-name-'));
+      dirs.push(dir);
+      const rawName = 'mcp__Account__Search__search__documents';
+      await fs.writeFile(
+        path.join(dir, 'audit.jsonl'),
+        [
+          {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'search',
+                  name: 'ToolSearch',
+                  input: {},
+                },
+                {
+                  type: 'tool_use',
+                  id: 'call',
+                  name: rawName,
+                  input: { query: 'report' },
+                },
+              ],
+            },
+          },
+          {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'search',
+                  content:
+                    format === 'references'
+                      ? [{ type: 'tool_reference', tool_name: rawName }]
+                      : `Available: ${rawName}`,
+                },
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'call',
+                  content: 'found',
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        ]
+          .map((event) => JSON.stringify(event))
+          .join('\n')
+      );
+      const transcript = await parseClaudeTranscript({
+        id: 'local_native',
+        metadataPath: path.join(dir, 'local_native.json'),
+        sessionDir: dir,
+        statMtimeMs: Date.now(),
+        metadata: {},
+      });
+      const original = structuredClone(transcript.toolCalls);
+      const mapped = coworkOwnToolCalls(
+        transcript.toolCalls,
+        [
+          {
+            transport: 'http',
+            label: 'primary',
+            serverUrl: 'https://example.com/mcp',
+          },
+        ],
+        ['Account__Search'],
+        { Account__Search: 'primary' }
+      );
+      expect(mapped[0]?.results).toEqual([
+        { server: 'primary', name: 'search__documents' },
+      ]);
+      expect(mapped[1]).toMatchObject({
+        server: 'primary',
+        name: 'search__documents',
+        rawName,
+        source: 'mcp',
+        arguments: { query: 'report' },
+        output: 'found',
+        isError: false,
+        id: 'call',
+      });
+      expect(transcript.toolCalls).toEqual(original);
+    }
+  );
+  it.each(['call', 'tool-search'] as const)(
+    'refuses ambiguous account prefixes in a %s instead of choosing the longest name',
+    (kind) => {
+      const call =
+        kind === 'call'
+          ? {
+              name: 'Search__find',
+              server: 'Account',
+              rawName: 'mcp__Account__Search__find',
+              source: 'mcp' as const,
+              arguments: {},
+            }
+          : {
+              name: 'ToolSearch',
+              source: 'builtin' as const,
+              kind: 'tool_search' as const,
+              arguments: {},
+              results: [{ server: 'Account', name: 'Search__find' }],
+            };
+      expect(() =>
+        coworkOwnToolCalls([call], [], ['Account', 'Account__Search'], {
+          Account: 'short',
+          Account__Search: 'long',
+        })
+      ).toThrow(/Ambiguous native MCP identity.*Account.*Account__Search/);
+    }
+  );
+  it.each([undefined, 'first-party', 'third-party'])(
+    'rejects the unpublished legacy account selector with mode %s',
+    (mode) => {
+      expect(() =>
+        COWORK_CLIENT.schema.parse({
+          type: 'cowork',
+          account: 'claude-ai',
+          ...(mode ? { mode } : {}),
+        })
+      ).toThrow(/Unrecognized key.*account/);
+    }
+  );
   it('counts account connectors as MCP calls without counting Cowork built-ins', () => {
     const calls = [
       {
@@ -558,18 +691,18 @@ describe('V2 Cowork client', () => {
       )
     ).toEqual(['mcp', 'builtin']);
   });
-  it('accepts declarative connectors only for the first-party account', () => {
+  it('accepts declarative connectors only for first-party mode', () => {
     expect(
       COWORK_CLIENT.schema.parse({
         type: 'cowork',
-        account: 'claude-ai',
-        connectors: { servers: { Glean: { policy: 'read-only' } } },
+        mode: 'first-party',
+        connectors: { servers: { search: { policy: 'read-only' } } },
       })
     ).toMatchObject({
       connectors: {
         default: 'block',
         failOnApproval: true,
-        servers: { Glean: { policy: 'read-only', tools: {} } },
+        servers: { search: { policy: 'read-only', tools: {} } },
       },
     });
     expect(() =>
@@ -577,12 +710,12 @@ describe('V2 Cowork client', () => {
         type: 'cowork',
         connectors: { servers: {} },
       })
-    ).toThrow('requires account');
+    ).toThrow('requires mode: first-party');
     expect(() =>
       COWORK_CLIENT.schema.parse({
         type: 'cowork',
-        account: 'claude-ai',
-        connectors: { servers: { Glean: { policy: 'all' } } },
+        mode: 'first-party',
+        connectors: { servers: { search: { policy: 'all' } } },
       })
     ).toThrow();
   });
@@ -2441,6 +2574,508 @@ describe("Cowork's workspace unavailable", () => {
       ])
     ).toBeUndefined();
   });
+});
+
+describe('first-party Cowork through client sessions', () => {
+  beforeEach(() => {
+    // These sessions exercise the real adapter, policy transaction, native
+    // mirror, parser and readiness loop. Only OS and DevTools I/O are faked.
+    vi.resetModules();
+    vi.doUnmock('./cowork/sessions.js');
+    vi.doUnmock('./readinessCheck.js');
+    vi.doUnmock('./cowork/readinessServer.js');
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.doUnmock('node:child_process');
+    vi.resetModules();
+  });
+
+  function accountBoundary(options: { unexpectedTool?: boolean } = {}) {
+    const commands: Array<{ file: string; args: string[] }> = [];
+    vi.doMock('node:child_process', async (original) => ({
+      ...(await original<typeof ChildProcessModule>()),
+      execFile: Object.assign(vi.fn(), {
+        [promisify.custom]: async (file: string, args: string[]) => {
+          commands.push({ file, args });
+          if (file === '/usr/bin/plutil')
+            return { stdout: '1.2.3\n', stderr: '' };
+          if (file === '/usr/bin/open') return { stdout: '', stderr: '' };
+          throw new Error(`Unexpected OS command: ${file}`);
+        },
+      }),
+    }));
+    const nativeName = 'Acme__Search';
+    const readName = `mcp__${nativeName}__search__documents`;
+    const writeName = `mcp__${nativeName}__update`;
+    const permissions: Record<string, boolean> = {
+      'account-server:read:enabled': false,
+      'account-server:read:approved': false,
+      'account-server:write:enabled': false,
+      'account-server:write:approved': false,
+    };
+    const originalPermissions = { ...permissions };
+    const patches: Array<Record<string, unknown>> = [];
+    const state = () => ({
+      accountId: 'account',
+      organizationId: 'org',
+      permissions,
+    });
+    let submittedAt: string | undefined;
+    let events: Array<{
+      source?: string;
+      created_at?: string;
+      payload: Record<string, unknown>;
+    }> = [];
+    const actions: string[] = [];
+    function reply(argument: Record<string, unknown>) {
+      const action = String(argument.action);
+      actions.push(action);
+      switch (action) {
+        case 'list':
+          return {
+            status: 200,
+            sessions: submittedAt
+              ? [
+                  {
+                    id: 'cse_test',
+                    created_at: submittedAt,
+                    last_event_at: submittedAt,
+                  },
+                ]
+              : [],
+          };
+        case 'events':
+          return { status: 200, events };
+        case 'permissions':
+          return { status: 200, state: state() };
+        case 'connectors':
+          return {
+            status: 200,
+            state: {
+              ...state(),
+              servers: [
+                {
+                  id: 'account-server',
+                  name: 'Acme  Search',
+                  nativeName,
+                  url: 'https://example.com/mcp',
+                  connectionState: 'connected',
+                  tools: [
+                    {
+                      name: 'search__documents',
+                      enabledKey: 'account-server:read:enabled',
+                      approvalKey: 'account-server:read:approved',
+                      readOnly: true,
+                    },
+                    {
+                      name: 'update',
+                      enabledKey: 'account-server:write:enabled',
+                      approvalKey: 'account-server:write:approved',
+                      readOnly: false,
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+        case 'patch-permissions': {
+          patches.push(argument);
+          for (const [key, value] of Object.entries(
+            argument.patch as Record<string, boolean | null>
+          )) {
+            if (value === null) delete permissions[key];
+            else permissions[key] = value;
+          }
+          return { status: 200 };
+        }
+        default:
+          throw new Error(`Unexpected DevTools action: ${action}`);
+      }
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        // Any direct readiness probe or vendor transport is a test failure.
+        expect(url).toBe('http://127.0.0.1:9222/json/list');
+        return new Response(
+          JSON.stringify([
+            {
+              type: 'page',
+              url: 'https://claude.ai/',
+              webSocketDebuggerUrl: 'ws://127.0.0.1:9222/fake',
+            },
+          ])
+        );
+      })
+    );
+    vi.stubGlobal(
+      'WebSocket',
+      class extends EventTarget {
+        constructor(url: string) {
+          super();
+          expect(url).toBe('ws://127.0.0.1:9222/fake');
+          queueMicrotask(() => this.dispatchEvent(new Event('open')));
+        }
+        send(data: string) {
+          const request = JSON.parse(data) as {
+            params: { expression: string };
+          };
+          const expression = request.params.expression;
+          const argument = JSON.parse(
+            expression.slice(expression.lastIndexOf(')(') + 2, -1)
+          ) as Record<string, unknown>;
+          const value = reply(argument);
+          queueMicrotask(() =>
+            this.dispatchEvent(
+              Object.assign(new Event('message'), {
+                data: JSON.stringify({ id: 1, result: { result: { value } } }),
+              })
+            )
+          );
+        }
+        close() {}
+      }
+    );
+    const prepare = vi.fn(async () => {
+      throw new Error(
+        'First-party must not install a developer profile or servers.'
+      );
+    });
+    const hitl = vi.fn(async () => ({
+      status: 'hitl_checked' as const,
+      action_count: 0,
+    }));
+    const desktop: CoworkPlatform = {
+      dataDirectory: () => '/unused/developer-profile',
+      prepare,
+      async recover() {},
+      async submit(prompt) {
+        submittedAt = new Date().toISOString();
+        events = [
+          {
+            source: 'client',
+            created_at: submittedAt,
+            payload: {
+              type: 'user',
+              message: { role: 'user', content: prompt },
+            },
+          },
+          {
+            payload: {
+              type: 'system',
+              subtype: 'init',
+              tools: [
+                'ToolSearch',
+                readName,
+                ...(permissions['account-server:write:enabled'] ||
+                options.unexpectedTool
+                  ? [writeName]
+                  : []),
+              ],
+            },
+          },
+          {
+            payload: {
+              type: 'assistant',
+              timestamp: submittedAt,
+              message: {
+                id: 'msg-first-party',
+                model: 'native-model',
+                content: [
+                  {
+                    type: 'tool_use',
+                    name: 'ToolSearch',
+                    id: 'catalog',
+                    input: { query: 'report' },
+                  },
+                  {
+                    type: 'tool_use',
+                    name: readName,
+                    id: 'read',
+                    input: { query: 'report' },
+                  },
+                  {
+                    type: 'tool_use',
+                    name: 'Bash',
+                    id: 'shell',
+                    input: { command: 'pwd' },
+                  },
+                  { type: 'text', text: 'account answer' },
+                ],
+              },
+            },
+          },
+          {
+            payload: {
+              type: 'user',
+              timestamp: submittedAt,
+              message: {
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'catalog',
+                    content: [{ type: 'tool_reference', tool_name: readName }],
+                  },
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'read',
+                    content: 'found',
+                    is_error: false,
+                  },
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'shell',
+                    content: '/workspace',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            payload: {
+              type: 'result',
+              timestamp: submittedAt,
+              subtype: 'success',
+              result: 'account answer',
+              is_error: false,
+              usage: { input_tokens: 10, output_tokens: 4 },
+              total_cost_usd: 0.01,
+              duration_ms: 200,
+              duration_api_ms: 150,
+            },
+          },
+        ];
+        return { status: 'submitted', action_count: 1 };
+      },
+      handleHitl: hitl,
+    };
+    return {
+      desktop,
+      commands,
+      prepare,
+      hitl,
+      permissions,
+      originalPermissions,
+      patches,
+      actions,
+    };
+  }
+  const accountServer: MCPConfig = {
+    transport: 'http',
+    label: 'primary',
+    serverUrl: 'https://example.com/mcp',
+  };
+  const firstPartyConfig = { ...clientConfig, mode: 'first-party' };
+  const firstPartyContext: ClientRunContext = {
+    ...context,
+    evalConfig: { ...context.evalConfig, servers: [accountServer] },
+  };
+
+  it('checks account write declarations before any submission or developer-server install', async () => {
+    const boundary = accountBoundary();
+    const { createCoworkClient: realClient } =
+      await import('./coworkClient.js');
+    await expect(
+      realClient(boundary.desktop).open!(
+        {
+          config: {
+            ...firstPartyConfig,
+            connectors: { servers: { primary: { policy: 'allow-all' } } },
+          },
+          input: { servers: [accountServer] },
+        },
+        firstPartyContext
+      )
+    ).rejects.toThrow('Declare writes.primary: unguarded');
+    expect(boundary.prepare).not.toHaveBeenCalled();
+    expect(boundary.commands.some(({ file }) => file === '/usr/bin/open')).toBe(
+      false
+    );
+    expect(boundary.patches).toEqual([]);
+  });
+
+  it.each([undefined, 'unguarded', 'live'] as const)(
+    'accepts verified account evidence with write declaration %s, without probing or installing servers',
+    async (writeMode) => {
+      const boundary = accountBoundary();
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const result = await realClient(boundary.desktop).run!(
+        { prompt: 'Find the report', servers: [accountServer] },
+        {
+          ...firstPartyConfig,
+          ...(writeMode
+            ? { connectors: { servers: { primary: { policy: 'allow-all' } } } }
+            : {}),
+        },
+        {
+          ...firstPartyContext,
+          evalConfig: {
+            ...firstPartyContext.evalConfig,
+            ...(writeMode ? { writes: { primary: writeMode } } : {}),
+          },
+        }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.finalText).toBe('account answer');
+      expect(result.events[0]?.results).toEqual([
+        { server: 'primary', name: 'search__documents' },
+      ]);
+      expect(result.events[1]).toMatchObject({
+        source: 'mcp',
+        server: 'primary',
+        name: 'search__documents',
+        rawName: 'mcp__Acme__Search__search__documents',
+      });
+      expect(result.artifacts?.include).toContain('connector-policy.json');
+      const policy = JSON.parse(
+        await fs.readFile(
+          path.join(result.artifacts!.dir, 'connector-policy.json'),
+          'utf8'
+        )
+      ) as Record<string, unknown>;
+      expect(policy).toMatchObject({
+        verification: 'passed',
+        settingsVerified: true,
+        mode: 'first-party',
+        serverLabels: { Acme__Search: 'primary' },
+        automaticHitlEnabled: false,
+      });
+      expect(policy.expectedAllowedTools).toEqual(
+        writeMode
+          ? [
+              'mcp__Acme__Search__search__documents',
+              'mcp__Acme__Search__update',
+            ]
+          : ['mcp__Acme__Search__search__documents']
+      );
+      expect(boundary.patches).toHaveLength(2);
+      expect(boundary.permissions).toEqual(boundary.originalPermissions);
+      expect(boundary.prepare).not.toHaveBeenCalled();
+      expect(boundary.hitl).not.toHaveBeenCalled();
+      expect(boundary.commands).toEqual([
+        {
+          file: '/usr/bin/plutil',
+          args: [
+            '-extract',
+            'CFBundleShortVersionString',
+            'raw',
+            '/Applications/Claude.app/Contents/Info.plist',
+          ],
+        },
+        { file: '/usr/bin/open', args: ['claude://cowork/new'] },
+      ]);
+    },
+    15_000
+  );
+
+  it('describes account inference and sign-ins separately from third-party setup and planner credentials', () => {
+    const requirements = COWORK_CLIENT.requirements!;
+    expect(requirements.credentials?.join('\n')).toMatch(
+      /first-party:.*inference.*signed-in Claude account/
+    );
+    expect(requirements.credentials?.join('\n')).toMatch(
+      /both modes:.*Computer Use planner/
+    );
+    expect(requirements.setup?.join('\n')).toMatch(
+      /third-party:.*mst cowork setup/
+    );
+    expect(requirements.setup?.join('\n')).toMatch(
+      /first-party:.*Chrome.*same.*account/
+    );
+  });
+
+  it('retains all native evidence when account validation rejects a completed transcript before its deadline', async () => {
+    const boundary = accountBoundary({ unexpectedTool: true });
+    const { createCoworkClient: realClient } =
+      await import('./coworkClient.js');
+    const session = await realClient(boundary.desktop).open!(
+      {
+        config: firstPartyConfig,
+        input: { servers: [accountServer] },
+      },
+      firstPartyContext
+    );
+    try {
+      expect(session.readiness?.servers).toEqual([]);
+      const { result } = await session.run({
+        caseId: 'invalid-inventory',
+        trial: 0,
+        input: { prompt: 'Find the report' },
+      });
+      expect(result.error).toContain(
+        'Cloud connector configuration mismatch: 1 unexpected tools'
+      );
+      expect(result.finalText).toBe('account answer');
+      expect(result.events).toMatchObject([
+        {
+          kind: 'tool_search',
+          name: 'ToolSearch',
+          source: 'builtin',
+          results: [{ server: 'primary', name: 'search__documents' }],
+        },
+        {
+          kind: 'tool_call',
+          name: 'search__documents',
+          source: 'mcp',
+          server: 'primary',
+          rawName: 'mcp__Acme__Search__search__documents',
+          arguments: { query: 'report' },
+          output: 'found',
+          isError: false,
+        },
+        {
+          kind: 'tool_call',
+          name: 'Bash',
+          source: 'builtin',
+          output: '/workspace',
+        },
+      ]);
+      expect(result.usage).toMatchObject({
+        inputTokens: 10,
+        outputTokens: 4,
+        totalCostUsd: 0.01,
+      });
+      expect(result.modelCalls).toMatchObject([
+        {
+          id: 'msg-first-party',
+          model: 'native-model',
+          toolCallIds: ['catalog', 'read', 'shell'],
+        },
+      ]);
+      expect(result.startedAt).toEqual(expect.any(String));
+      expect(result.completedAt).toEqual(expect.any(String));
+      expect(result.llmDurationMs).toBe(150);
+      expect(result.telemetry).toMatchObject({
+        nativeSessionId: 'local_cse_test',
+        toolCallCount: 3,
+        source: 'claude-native',
+        costScope: 'native-inference-only',
+      });
+      expect(result.telemetry).not.toHaveProperty('deadlineExceeded');
+      expect(result.artifacts?.include).toContain('audit.jsonl');
+      expect(result.artifacts?.include).toContain('connector-policy.json');
+      const dir = result.artifacts!.dir;
+      expect(
+        await fs.readFile(path.join(dir, 'audit.jsonl'), 'utf8')
+      ).toContain('mcp__Acme__Search__search__documents');
+      expect(
+        JSON.parse(
+          await fs.readFile(path.join(dir, 'connector-policy.json'), 'utf8')
+        )
+      ).toMatchObject({
+        verification: 'failed',
+        settingsVerified: true,
+        serverLabels: { Acme__Search: 'primary' },
+      });
+    } finally {
+      await session.close();
+    }
+    expect(boundary.permissions).toEqual(boundary.originalPermissions);
+    expect(boundary.prepare).not.toHaveBeenCalled();
+    expect(boundary.hitl).not.toHaveBeenCalled();
+  }, 15_000);
 });
 
 describe('what a task past its deadline was waiting on', () => {

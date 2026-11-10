@@ -62,6 +62,7 @@ export interface CloudConnectorPlan {
   allowedTools: string[];
   blockedTools: string[];
   managedServers: string[];
+  serverDisplayNames: Record<string, string>;
   failOnApproval: boolean;
 }
 
@@ -121,6 +122,14 @@ export function planCloudConnectors(
     }
     const selected = selections.get(server.id);
     const policy = selected?.policy ?? config.default;
+    if (
+      policy === 'block' &&
+      server.connectionState === 'connected' &&
+      server.toolDiscoveryError !== undefined
+    )
+      throw new Error(
+        `Cannot configure ${server.name}: ${server.toolDiscoveryError}. Cannot safely block this connected connector without its tool inventory; restore connector access and retry.`
+      );
     if (policy !== 'inherit') managedServers.push(server.nativeName);
     // Also block stale keys for excluded servers, including old tool versions.
     if (policy === 'block') {
@@ -176,6 +185,9 @@ export function planCloudConnectors(
     allowedTools: allowedTools.sort(),
     blockedTools: blockedTools.sort(),
     managedServers,
+    serverDisplayNames: Object.fromEntries(
+      snapshot.servers.map((server) => [server.nativeName, server.name])
+    ),
     failOnApproval: config.failOnApproval,
   };
 }
@@ -407,11 +419,20 @@ export function verifyCloudConnectorEvents(
   const unobservedAllowedTools = plan.allowedTools.filter(
     (tool) => !observed.has(tool)
   );
+  // Init can name a pending server by its display or canonical native name.
+  // Resolve only catalogued aliases; tool permissions stay canonical.
+  const pendingNativeNames = Object.entries(plan.serverDisplayNames)
+    .filter(
+      ([nativeName, displayName]) =>
+        pendingServers.includes(nativeName) ||
+        pendingServers.includes(displayName)
+    )
+    .map(([nativeName]) => nativeName);
   // Cowork can leave init's MCP servers pending even after ToolSearch loads them.
   // Do not claim that this partial snapshot proves the full exposed inventory.
   const missing = unobservedAllowedTools.filter(
     (tool) =>
-      !pendingServers.some((server) => tool.startsWith(`mcp__${server}__`))
+      !pendingNativeNames.some((server) => tool.startsWith(`mcp__${server}__`))
   );
   const approvals = events.filter(
     (e) =>

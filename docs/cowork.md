@@ -148,15 +148,22 @@ an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 ### Cloud sessions
 
 Claude Desktop signed in to claude.ai runs Cowork tasks as remote `cse_…`
-sessions. Set `clientOptions.mode` to `"first-party"` to select existing account
-connectors through MST's normal server labels and record those sessions. This
-mode currently supports the local macOS runner only. MST still submits prompts through visible Desktop Computer Use. It
-reads session events through a separate, signed-in Chrome profile and mirrors
-them into MST's native transcript layout. It does not submit tasks through an
-undocumented API or export sign-in cookies.
+sessions. Set `clientOptions.mode` to `"first-party"` to run on the account's
+existing connectors instead of MST-managed servers. The default, `third-party`
+(also the result of omitting `mode`), is unchanged: it supports stdio servers
+and proxies through MST's gateway setup. First-party mode only selects existing
+HTTPS account connectors through MST's normal server labels and records those
+sessions. It supports the local macOS runner only, with `concurrency: 1` and no
+sharding.
 
-Sign in to the same account in Claude Desktop and a dedicated Chrome profile.
-Start that profile with a loopback DevTools port, then set
+First-party mode uses the Claude account that is already signed in to Claude
+Desktop. MST still submits prompts through visible Desktop Computer Use, using
+the Computer Use planner credentials you already configure. It reads session
+events through a separate Chrome recorder profile signed in to the same account
+and mirrors them into MST's native transcript layout. It does not copy cookies,
+provision VMs, or submit tasks through an undocumented API.
+
+Start the Chrome profile with a loopback DevTools port, then set
 `clientOptions.env.MST_CLAUDE_AI_DEBUG_PORT` to the port (default `9222`). Keep
 the port private to the local machine. First-party mode does not install developer
 MCP servers, marketplace plugins, or an inference gateway profile. It does not
@@ -230,7 +237,7 @@ tools are outside this option's scope.
 `read-only` explicitly enables and always-approves only tools whose MCP
 `readOnlyHint` is `true`. It blocks write tools and tools with unknown annotations.
 The hint is supplied by the server; it is not a sandbox or proof that a tool
-cannot write. `allow-all` explicitly enables and always-approves all tools of the
+cannot write, so MST does not sandbox on annotations. `allow-all` explicitly enables and always-approves all tools of the
 selected server, including writes. An explicit per-tool override takes precedence
 over its server's policy. Neither policy authorizes an eval to perform writes
 that the caller has not approved. If a policy permits any write or unknown tool,
@@ -238,9 +245,10 @@ the server also needs the normal `writes` declaration: `"writes": { "search":
 "unguarded" }`, or `live` with `--allow-live-writes`. These are real account tools,
 not a dry-run proxy; planned/simulated-write assertions are unsupported.
 
-`failOnApproval` defaults to `true`. MST performs no automatic approval clicks
-in this mode and rejects recorded approval requests. Set it to `false` for an
-`ask` policy. MST verifies saved permission keys and checks the session's initial
+`failOnApproval` defaults to `true`, which disables automatic human-in-the-loop
+handling: MST performs no automatic approval clicks and rejects recorded
+approval requests. Set it to `false` for an `ask` policy; MST then delegates to
+the existing one-time approval handling. It is not a manual-only ask mode. MST verifies saved permission keys and checks the session's initial
 catalog, discovered tool references, and actual calls against the policy. Cowork
 can load connectors after reporting them as pending in its initial catalog.
 MST records that catalog as incomplete rather than claiming it proves every
@@ -256,15 +264,9 @@ A private recovery journal at
 `~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash. The next
 configured run recovers it under the desktop lock. Concurrent edits are not
 overwritten; conflicting values retain the journal and stop the run. If an
-excluded connector cannot list its tools, MST blocks its saved keys and requires
-that none of its tools appear in the recorded session. Verification after a task
-is not a security boundary against a connector that changes its tool inventory
-while the task runs.
-
-The earlier prototype selector, `clientOptions.account: "claude-ai"`, remains
-compatible with its empty top-level `servers` map and name/UUID-keyed connector
-policies. Do not combine it with `mode`. New evals should use `mode: "first-party"`.
-Omit `mode` (or set `third-party`) for the existing MST-managed gateway setup.
+excluded connector cannot list its tools, preparation aborts. Checking a task
+afterward is not a security boundary against a connector that changes its tool
+inventory while the task runs.
 
 ## Run on macOS from a source checkout
 

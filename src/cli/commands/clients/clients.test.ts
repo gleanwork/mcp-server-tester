@@ -250,7 +250,6 @@ describe('mst clients', () => {
       ],
       cowork: [
         'mode',
-        'account',
         'connectors',
         'maxActions',
         'hitlMaxActions',

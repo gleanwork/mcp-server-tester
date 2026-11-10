@@ -66,6 +66,10 @@ _Avoid_: native server, first-party server
 A connector a user adds inside the client, such as one from Cowork's connector directory, hosted by the client's maker. MST doesn't configure or observe it. Unrelated to an MST connector.
 _Avoid_: native connector, built-in connector
 
+**First-party mode**:
+A Cowork option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). Local macOS only, one trial at a time. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
+_Avoid_: claude-ai mode, account mode
+
 **Variant**:
 One setup an eval tests: the client, its model and options (such as a system prompt), the MCP servers, and the tool metadata the client sees. Every variant runs the same cases.
 _Avoid_: arm, treatment, experiment, configuration

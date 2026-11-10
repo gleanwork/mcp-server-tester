@@ -140,6 +140,49 @@ describe('first-party Cowork configuration', () => {
       )
     ).toThrow('requires macOS');
   });
+
+  it('rejects tool-metadata proxies on the eval config and on a variant', () => {
+    const tools = { search: { description: 'Search the account.' } };
+    expect(() => validate({ tools })).toThrow(
+      'The eval config: first-party mode cannot apply tool-metadata proxies.'
+    );
+    expect(() =>
+      validate({ variants: [{ name: 'described', tools }] })
+    ).toThrow(
+      'Variant "described": first-party mode cannot apply tool-metadata proxies.'
+    );
+    // The same declarations pass without the tool metadata.
+    expect(() => validate({ variants: [{ name: 'plain' }] })).not.toThrow();
+  });
+
+  it('rejects a runner other than local on macOS, with a reason distinct from the OS rule', () => {
+    const run = (runner: string, os: NodeJS.Platform) => () =>
+      validateEvalConfig(
+        loadEvalConfigFromObject(input, { skipDatasetValidation: true }),
+        { os, runner }
+      );
+    // macOS, so the OS rule is satisfied: only the runner rule can fire.
+    for (const runner of ['docker', 'mst/runner/docker', 'test/runner/mac']) {
+      const error = (() => {
+        try {
+          run(runner, 'darwin')();
+        } catch (caught) {
+          return caught as Error;
+        }
+        return undefined;
+      })();
+      expect(error?.message, runner).toContain(
+        'first-party mode currently supports only the local runner'
+      );
+      expect(error?.message, runner).not.toContain('requires macOS');
+    }
+    // Local runners on macOS pass.
+    expect(run('local', 'darwin')).not.toThrow();
+    expect(run('mst/runner/local', 'darwin')).not.toThrow();
+    // A Linux runner fails the OS rule first, with its own reason.
+    expect(run('docker', 'linux')).toThrow('requires macOS');
+    expect(run('docker', 'linux')).not.toThrow(/only the local runner/);
+  });
 });
 
 describe('eval config validation', () => {

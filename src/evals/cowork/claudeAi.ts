@@ -485,12 +485,13 @@ async function installedVersion(appPath: string): Promise<string> {
  */
 export function coworkClaudeAi(
   base: CoworkDesktop,
-  connectors?: CloudConnectorConfig,
-  firstParty?: {
+  firstParty: {
     servers: readonly MCPConfig[];
+    connectors?: CloudConnectorConfig;
     writes?: Readonly<Record<string, 'unguarded' | 'live'>>;
   }
 ): CoworkDesktop {
+  const connectors = firstParty.connectors;
   const dir = join(homedir(), '.mcp-server-tester', 'cowork-claude-ai');
   const journal = join(
     homedir(),
@@ -522,35 +523,41 @@ export function coworkClaudeAi(
         remoteServerNames = snapshot.servers.map((server) => server.nativeName);
         return snapshot;
       };
-      if (!connectors && !firstParty) await inspect();
-      if (connectors || firstParty)
-        configuration = await configureCloudConnectors(
-          {
-            inspect,
-            read: () => readCloudPermissions(port),
-            patch: (identity, patch, expected) =>
-              patchCloudPermissions(port, identity, patch, expected),
-          },
-          (snapshot) => {
-            if (firstParty) {
-              const binding = bindFirstPartyServers(
-                snapshot,
-                firstParty.servers,
-                connectors,
-                firstParty.writes
-              );
-              serverLabels = binding.labels;
-              effectiveConnectors = binding.config;
-            }
-            return effectiveConnectors ?? {};
-          },
-          journal
-        );
+      configuration = await configureCloudConnectors(
+        {
+          inspect,
+          read: () => readCloudPermissions(port),
+          patch: (identity, patch, expected) =>
+            patchCloudPermissions(port, identity, patch, expected),
+        },
+        (snapshot) => {
+          const binding = bindFirstPartyServers(
+            snapshot,
+            firstParty.servers,
+            connectors,
+            firstParty.writes
+          );
+          serverLabels = binding.labels;
+          effectiveConnectors = binding.config;
+          return binding.config;
+        },
+        journal
+      );
       try {
         await rm(dir, { recursive: true, force: true });
         await mkdir(dir, { recursive: true, mode: 0o700 });
       } catch (error) {
-        await configuration?.restore();
+        // The session never started: drop its plan, and keep both errors.
+        const prepared = configuration;
+        configuration = undefined;
+        try {
+          await prepared.restore();
+        } catch (restoreError) {
+          throw new AggregateError(
+            [error, restoreError],
+            `Preparing ${dir} failed and restoring connector permissions failed; inspect ${journal}.`
+          );
+        }
         throw error;
       }
       const mirror = mirrorCloudSessions({ port, dir, sinceMs: Date.now() });
@@ -595,13 +602,9 @@ export function coworkClaudeAi(
       if (!configuration) return;
       const receipt = {
         requested: connectors,
-        ...(firstParty
-          ? {
-              mode: 'first-party',
-              serverLabels,
-              effective: effectiveConnectors,
-            }
-          : {}),
+        mode: 'first-party',
+        serverLabels,
+        effective: effectiveConnectors,
         expectedAllowedTools: configuration.plan.allowedTools,
         expectedBlockedTools: configuration.plan.blockedTools,
         automaticHitlEnabled: !configuration.plan.failOnApproval,
@@ -637,8 +640,10 @@ export function coworkClaudeAi(
         throw error;
       }
     },
+    // Approvals go to automatic HITL only inside a prepared session whose
+    // policy asks for them; anything else fails closed.
     handleHitl: (options) =>
-      configuration?.plan.failOnApproval
+      !configuration || configuration.plan.failOnApproval
         ? Promise.resolve({ status: 'hitl_checked' as const, action_count: 0 })
         : base.handleHitl(options),
   };
