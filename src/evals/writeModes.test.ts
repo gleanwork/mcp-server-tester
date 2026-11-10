@@ -86,6 +86,38 @@ describe('readOnlyServerLabels', () => {
 });
 
 describe('assertWriteModes', () => {
+  it('defers account tool checks without skipping direct variants or live-write authorization', async () => {
+    const listTools = vi.fn(async () => [read]);
+    const deferred = {
+      variant: 'account',
+      modes: { docs: 'read-only' as const },
+      servers: [server('docs')],
+      toolsCheckedAfterPrepare: true,
+    };
+    await assertWriteModes(check({}, { variants: [deferred], listTools }));
+    expect(listTools).not.toHaveBeenCalled();
+    await assertWriteModes(
+      check(
+        {},
+        {
+          variants: [
+            deferred,
+            { ...deferred, variant: 'direct', toolsCheckedAfterPrepare: false },
+          ],
+          listTools,
+        }
+      )
+    );
+    expect(listTools).toHaveBeenCalledOnce();
+    await expect(
+      assertWriteModes(
+        check(
+          {},
+          { variants: [{ ...deferred, modes: { docs: 'live' } }], listTools }
+        )
+      )
+    ).rejects.toThrow('--allow-live-writes');
+  });
   it('passes read-only servers that list only reads', async () => {
     await expect(
       assertWriteModes(check({ docs: 'read-only' }))

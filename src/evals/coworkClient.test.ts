@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { collectClientBatch } from './desktopBatch.js';
 import type { CoworkDesktop as CoworkPlatform } from './cowork/desktop.js';
@@ -21,7 +22,10 @@ import { prepareClientBatch } from './prepareClientBatch.js';
 import { CoworkHitlError } from './cowork/interaction.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
-import type { ClaudeTranscript } from './cowork/transcript.js';
+import {
+  parseClaudeTranscript,
+  type ClaudeTranscript,
+} from './cowork/transcript.js';
 import type * as ClaudeNative from './cowork/sessions.js';
 import {
   ComputerUseDriverError,
@@ -33,6 +37,7 @@ import type {
   ClientRunContext,
 } from './evalFrameworkTypes.js';
 import type * as OsModule from 'node:os';
+import type * as ChildProcessModule from 'node:child_process';
 import type * as ReadinessCheck from './readinessCheck.js';
 import type * as ReadinessServer from './cowork/readinessServer.js';
 import { readyStdioServer } from '../../tests/mocks/readyServers.js';
@@ -491,6 +496,229 @@ describe('V2 Cowork client', () => {
     );
     expect(result!.telemetry?.clientApp).toEqual(app);
   });
+  it('attributes native first-party calls and tool-search results to normal server labels', () => {
+    const calls = [
+      {
+        name: 'search',
+        rawName: 'mcp__Account_Search__search',
+        source: 'mcp' as const,
+        server: 'Account_Search',
+        arguments: {},
+      },
+      {
+        name: 'ToolSearch',
+        kind: 'tool_search' as const,
+        source: 'builtin' as const,
+        arguments: {},
+        results: [{ server: 'Account_Search', name: 'search' }],
+      },
+    ];
+    const mapped = coworkOwnToolCalls(
+      calls,
+      [
+        {
+          transport: 'http',
+          label: 'glean',
+          serverUrl: 'https://example.com/mcp',
+        },
+      ],
+      ['Account_Search'],
+      { Account_Search: 'glean' }
+    );
+    expect(mapped[0]).toMatchObject({
+      server: 'glean',
+      source: 'mcp',
+      rawName: 'mcp__Account_Search__search',
+    });
+    expect(mapped[1]?.results).toEqual([{ server: 'glean', name: 'search' }]);
+    expect(
+      COWORK_CLIENT.schema.parse({ type: 'cowork', mode: 'first-party' })
+    ).toMatchObject({ mode: 'first-party' });
+    expect(() =>
+      COWORK_CLIENT.schema.parse({
+        type: 'cowork',
+        mode: 'first-party',
+        account: 'claude-ai',
+      })
+    ).toThrow(/Unrecognized key.*account/);
+  });
+  it.each(['references', 'text'] as const)(
+    'attributes account names containing __ in calls and ToolSearch %s results',
+    async (format) => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-native-name-'));
+      dirs.push(dir);
+      const rawName = 'mcp__Account__Search__search__documents';
+      await fs.writeFile(
+        path.join(dir, 'audit.jsonl'),
+        [
+          {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'search',
+                  name: 'ToolSearch',
+                  input: {},
+                },
+                {
+                  type: 'tool_use',
+                  id: 'call',
+                  name: rawName,
+                  input: { query: 'report' },
+                },
+              ],
+            },
+          },
+          {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'search',
+                  content:
+                    format === 'references'
+                      ? [{ type: 'tool_reference', tool_name: rawName }]
+                      : `Available: ${rawName}`,
+                },
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'call',
+                  content: 'found',
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        ]
+          .map((event) => JSON.stringify(event))
+          .join('\n')
+      );
+      const transcript = await parseClaudeTranscript({
+        id: 'local_native',
+        metadataPath: path.join(dir, 'local_native.json'),
+        sessionDir: dir,
+        statMtimeMs: Date.now(),
+        metadata: {},
+      });
+      const original = structuredClone(transcript.toolCalls);
+      const mapped = coworkOwnToolCalls(
+        transcript.toolCalls,
+        [
+          {
+            transport: 'http',
+            label: 'primary',
+            serverUrl: 'https://example.com/mcp',
+          },
+        ],
+        ['Account__Search'],
+        { Account__Search: 'primary' }
+      );
+      expect(mapped[0]?.results).toEqual([
+        { server: 'primary', name: 'search__documents' },
+      ]);
+      expect(mapped[1]).toMatchObject({
+        server: 'primary',
+        name: 'search__documents',
+        rawName,
+        source: 'mcp',
+        arguments: { query: 'report' },
+        output: 'found',
+        isError: false,
+        id: 'call',
+      });
+      expect(transcript.toolCalls).toEqual(original);
+    }
+  );
+  it.each(['call', 'tool-search'] as const)(
+    'refuses ambiguous account prefixes in a %s instead of choosing the longest name',
+    (kind) => {
+      const call =
+        kind === 'call'
+          ? {
+              name: 'Search__find',
+              server: 'Account',
+              rawName: 'mcp__Account__Search__find',
+              source: 'mcp' as const,
+              arguments: {},
+            }
+          : {
+              name: 'ToolSearch',
+              source: 'builtin' as const,
+              kind: 'tool_search' as const,
+              arguments: {},
+              results: [{ server: 'Account', name: 'Search__find' }],
+            };
+      expect(() =>
+        coworkOwnToolCalls([call], [], ['Account', 'Account__Search'], {
+          Account: 'short',
+          Account__Search: 'long',
+        })
+      ).toThrow(/Ambiguous native MCP identity.*Account.*Account__Search/);
+    }
+  );
+  it.each([undefined, 'first-party', 'third-party'])(
+    'rejects the unpublished legacy account selector with mode %s',
+    (mode) => {
+      expect(() =>
+        COWORK_CLIENT.schema.parse({
+          type: 'cowork',
+          account: 'claude-ai',
+          ...(mode ? { mode } : {}),
+        })
+      ).toThrow(/Unrecognized key.*account/);
+    }
+  );
+  it('counts account connectors as MCP calls without counting Cowork built-ins', () => {
+    const calls = [
+      {
+        name: 'search',
+        source: 'mcp' as const,
+        server: 'Glean_-_Claude_Custom',
+        arguments: {},
+      },
+      {
+        name: 'search',
+        source: 'mcp' as const,
+        server: 'Claude_Docs',
+        arguments: {},
+      },
+    ];
+    expect(
+      coworkOwnToolCalls(calls, [], ['Glean_-_Claude_Custom']).map(
+        (call) => call.source
+      )
+    ).toEqual(['mcp', 'builtin']);
+  });
+  it('accepts declarative connectors only for first-party mode', () => {
+    expect(
+      COWORK_CLIENT.schema.parse({
+        type: 'cowork',
+        mode: 'first-party',
+        connectors: { servers: { search: { policy: 'read-only' } } },
+      })
+    ).toMatchObject({
+      connectors: {
+        default: 'block',
+        failOnApproval: true,
+        servers: { search: { policy: 'read-only', tools: {} } },
+      },
+    });
+    expect(() =>
+      COWORK_CLIENT.schema.parse({
+        type: 'cowork',
+        connectors: { servers: {} },
+      })
+    ).toThrow('requires mode: first-party');
+    expect(() =>
+      COWORK_CLIENT.schema.parse({
+        type: 'cowork',
+        mode: 'first-party',
+        connectors: { servers: { search: { policy: 'all' } } },
+      })
+    ).toThrow();
+  });
   it('takes its options directly, not nested under options', () => {
     expect(
       COWORK_CLIENT.schema.parse({ type: 'cowork', appVersion: '1.52386.6' })
@@ -893,7 +1121,8 @@ describe('V2 Cowork client', () => {
     expect(mocks.submit).toHaveBeenCalledOnce();
     expect(mocks.setup).toHaveBeenCalledOnce();
   });
-  it('lets batches on different desktops run at the same time', async () => {
+  it('lets batches on different Linux desktops run at the same time', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     mocks.submit.mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       return { status: 'submitted' };
@@ -901,7 +1130,7 @@ describe('V2 Cowork client', () => {
     const batch = requests()
       .slice(0, 1)
       .map((r) => ({ ...r, input: { ...r.input, servers: [] } }));
-    // The lease is per native data directory, i.e. per desktop.
+    // Separate Linux data directories identify independently prepared desktops.
     const desktop = (dataDir: string) =>
       createCoworkClient({
         dataDirectory: () => dataDir,
@@ -1744,6 +1973,42 @@ describe('V2 Cowork client', () => {
     expect(result[0]!.error).toContain('Ambiguous');
     expect(result[1]!.error).toBeUndefined();
   });
+  it.each(['binding', 'transcript'] as const)(
+    'keeps and redacts the recorder cause when native %s fails',
+    async (stage) => {
+      mocks.setup.mockResolvedValueOnce({
+        dispose: mocks.dispose,
+        recordingError: () =>
+          'claude.ai event polling HTTP 500 for test-secret-token and test-secret-key',
+      });
+      const error = new NativeTranscriptError(
+        stage === 'binding' ? 'no_matching_session' : 'timeout',
+        stage === 'binding'
+          ? 'No matching Claude session found'
+          : 'Timed out waiting for Claude session local_1 to complete'
+      );
+      if (stage === 'binding') mocks.bind.mockRejectedValueOnce(error);
+      else mocks.transcript.mockRejectedValueOnce(error);
+      const [result] = await collectClientBatch(
+        COWORK_CLIENT,
+        [requests()[0]!],
+        context
+      );
+      expect(result!.error).toContain(error.message);
+      expect(result!.error).toContain(
+        'Session recording failed: claude.ai event polling HTTP 500 for [REDACTED] and [REDACTED]'
+      );
+      expect(result!.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke: 'client-app',
+        reason: result!.error,
+      });
+      expect(JSON.stringify(result)).not.toContain('test-secret-token');
+      expect(JSON.stringify(result)).not.toContain('test-secret-key');
+      expect(mocks.submit).toHaveBeenCalledOnce();
+    }
+  );
+
   // How a case ended when its transcript couldn't be collected (ADR 0010).
   it.each([
     [
@@ -2165,11 +2430,8 @@ describe('V2 Cowork client', () => {
       collectClientBatch(COWORK_CLIENT, requests(), context)
     ).rejects.toThrow('Cowork desktop is locked by another run');
     const leases = path.join(lockHome.value, '.mcp-server-tester');
-    const [lock] = (await fs.readdir(leases)).filter((name) =>
-      /^cowork-desktop-[0-9a-f]{12}\.lock$/.test(name)
-    );
-    expect(lock).toBeDefined();
-    await fs.rm(path.join(leases, lock!));
+    expect(await fs.readdir(leases)).toEqual(['cowork-desktop-macos.lock']);
+    await fs.rm(path.join(leases, 'cowork-desktop-macos.lock'));
     await expect(
       collectClientBatch(COWORK_CLIENT, requests(), context)
     ).resolves.toHaveLength(2);
@@ -2346,6 +2608,1043 @@ describe("Cowork's workspace unavailable", () => {
       ])
     ).toBeUndefined();
   });
+});
+
+describe('first-party Cowork through client sessions', () => {
+  beforeEach(() => {
+    // These sessions exercise the real adapter, policy transaction, native
+    // mirror, parser and readiness loop. Only OS and DevTools I/O are faked.
+    vi.resetModules();
+    vi.doUnmock('./cowork/sessions.js');
+    vi.doUnmock('./readinessCheck.js');
+    vi.doUnmock('./cowork/readinessServer.js');
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.doUnmock('node:child_process');
+    vi.resetModules();
+  });
+
+  function accountBoundary(
+    options: {
+      unexpectedTool?: boolean;
+      pendingWrite?: 'initial' | 'late';
+      submitFailure?: boolean;
+      storedPrompt?: string;
+      patchFailure?: boolean;
+      unrelatedFailure?: 'http' | 'cap';
+    } = {}
+  ) {
+    const commands: Array<{ file: string; args: string[] }> = [];
+    vi.doMock('node:child_process', async (original) => ({
+      ...(await original<typeof ChildProcessModule>()),
+      execFile: Object.assign(vi.fn(), {
+        [promisify.custom]: async (file: string, args: string[]) => {
+          commands.push({ file, args });
+          if (file === '/usr/bin/plutil')
+            return { stdout: '1.2.3\n', stderr: '' };
+          if (file === '/usr/bin/open') return { stdout: '', stderr: '' };
+          throw new Error(`Unexpected OS command: ${file}`);
+        },
+      }),
+    }));
+    const nativeName = 'Acme__Search';
+    const readName = `mcp__${nativeName}__search__documents`;
+    const writeName = `mcp__${nativeName}__update`;
+    const permissions: Record<string, boolean> = {
+      'account-server:read:enabled': false,
+      'account-server:read:approved': false,
+      'account-server:write:enabled': false,
+      'account-server:write:approved': false,
+    };
+    const originalPermissions = { ...permissions };
+    let recordingFailure: 'list' | 'events' | 'chrome' | undefined;
+    const patches: Array<Record<string, unknown>> = [];
+    const state = () => ({
+      accountId: 'account',
+      organizationId: 'org',
+      permissions,
+    });
+    let submittedAt: string | undefined;
+    let submissions = 0;
+    let resets = 0;
+    let events: Array<{
+      source?: string;
+      created_at?: string;
+      payload: Record<string, unknown>;
+    }> = [];
+    let completedEvents: typeof events = [];
+    function pendingWriteEvents(): typeof events {
+      return [
+        ...completedEvents.slice(0, 2),
+        {
+          payload: {
+            type: 'assistant',
+            timestamp: submittedAt,
+            message: {
+              id: 'msg-write',
+              model: 'native-model',
+              content: [
+                {
+                  type: 'tool_use',
+                  name: writeName,
+                  id: 'write',
+                  input: { value: 'approved' },
+                },
+              ],
+            },
+          },
+        },
+      ];
+    }
+    const actions: string[] = [];
+    const unrelated = {
+      id: 'cse_unrelated',
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      last_event_at: new Date(Date.now() - 1_000).toISOString(),
+    };
+    function reply(argument: Record<string, unknown>) {
+      const action = String(argument.action);
+      actions.push(action);
+      switch (action) {
+        case 'list':
+          if (recordingFailure === 'list') return { status: 401 };
+          return {
+            status: 200,
+            sessions: [
+              ...(options.unrelatedFailure ? [unrelated] : []),
+              ...(submittedAt
+                ? [
+                    {
+                      id: 'cse_test',
+                      created_at: submittedAt,
+                      last_event_at: submittedAt,
+                    },
+                  ]
+                : []),
+            ],
+          };
+        case 'events':
+          if (argument.sessionId === 'cse_unrelated')
+            return {
+              status: options.unrelatedFailure === 'cap' ? 'truncated' : 500,
+            };
+          expect(argument.sessionId).toBe('cse_test');
+          return { status: recordingFailure === 'events' ? 500 : 200, events };
+        case 'permissions':
+          return { status: 200, state: state() };
+        case 'connectors':
+          return {
+            status: 200,
+            state: {
+              ...state(),
+              servers: [
+                {
+                  id: 'account-server',
+                  name: 'Acme  Search',
+                  nativeName,
+                  url: 'https://example.com/mcp',
+                  connectionState: 'connected',
+                  tools: [
+                    {
+                      name: 'search__documents',
+                      enabledKey: 'account-server:read:enabled',
+                      approvalKey: 'account-server:read:approved',
+                      readOnly: true,
+                    },
+                    {
+                      name: 'update',
+                      enabledKey: 'account-server:write:enabled',
+                      approvalKey: 'account-server:write:approved',
+                      readOnly: false,
+                    },
+                  ],
+                },
+              ],
+            },
+          };
+        case 'patch-permissions': {
+          patches.push(argument);
+          for (const [key, value] of Object.entries(
+            argument.patch as Record<string, boolean | null>
+          )) {
+            if (value === null) delete permissions[key];
+            else permissions[key] = value;
+          }
+          return { status: options.patchFailure ? 500 : 200 };
+        }
+        default:
+          throw new Error(`Unexpected DevTools action: ${action}`);
+      }
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        // Any direct readiness probe or vendor transport is a test failure.
+        expect(url).toBe('http://127.0.0.1:9222/json/list');
+        if (recordingFailure === 'chrome') throw new Error('Chrome closed');
+        return new Response(
+          JSON.stringify([
+            {
+              type: 'page',
+              url: 'https://claude.ai/',
+              webSocketDebuggerUrl: 'ws://127.0.0.1:9222/fake',
+            },
+          ])
+        );
+      })
+    );
+    vi.stubGlobal(
+      'WebSocket',
+      class extends EventTarget {
+        constructor(url: string) {
+          super();
+          expect(url).toBe('ws://127.0.0.1:9222/fake');
+          queueMicrotask(() => this.dispatchEvent(new Event('open')));
+        }
+        send(data: string) {
+          const request = JSON.parse(data) as {
+            params: { expression: string };
+          };
+          const expression = request.params.expression;
+          const argument = JSON.parse(
+            expression.slice(expression.lastIndexOf(')(') + 2, -1)
+          ) as Record<string, unknown>;
+          const value = reply(argument);
+          queueMicrotask(() =>
+            this.dispatchEvent(
+              Object.assign(new Event('message'), {
+                data: JSON.stringify({ id: 1, result: { result: { value } } }),
+              })
+            )
+          );
+        }
+        close() {}
+      }
+    );
+    const prepare = vi.fn(async () => {
+      throw new Error(
+        'First-party must not install a developer profile or servers.'
+      );
+    });
+    let approvalInspections = 0;
+    const hitl = vi.fn(
+      async (_options: Parameters<CoworkPlatform['handleHitl']>[0]) => {
+        if (options.pendingWrite) {
+          approvalInspections++;
+          events =
+            options.pendingWrite === 'late' && approvalInspections === 1
+              ? pendingWriteEvents()
+              : [
+                  ...pendingWriteEvents(),
+                  {
+                    payload: {
+                      type: 'user',
+                      timestamp: submittedAt,
+                      message: {
+                        content: [
+                          {
+                            type: 'tool_result',
+                            tool_use_id: 'write',
+                            content: 'updated',
+                            is_error: false,
+                          },
+                        ],
+                      },
+                    },
+                  },
+                  ...completedEvents.slice(2),
+                ];
+        }
+        return { status: 'hitl_checked' as const, action_count: 1 };
+      }
+    );
+    const desktop: CoworkPlatform = {
+      dataDirectory: () => '/unused/developer-profile',
+      prepare,
+      async recover() {},
+      async reset() {
+        resets++;
+      },
+      async submit(prompt) {
+        submissions++;
+        submittedAt = new Date().toISOString();
+        events = [
+          {
+            source: 'client',
+            created_at: submittedAt,
+            payload: {
+              type: 'user',
+              message: {
+                role: 'user',
+                content: options.storedPrompt ?? prompt,
+              },
+            },
+          },
+          {
+            payload: {
+              type: 'system',
+              subtype: 'init',
+              tools: [
+                'ToolSearch',
+                readName,
+                ...(permissions['account-server:write:enabled'] ||
+                options.unexpectedTool
+                  ? [writeName]
+                  : []),
+              ],
+            },
+          },
+          {
+            payload: {
+              type: 'assistant',
+              timestamp: submittedAt,
+              message: {
+                id: 'msg-first-party',
+                model: 'native-model',
+                content: [
+                  {
+                    type: 'tool_use',
+                    name: 'ToolSearch',
+                    id: 'catalog',
+                    input: { query: 'report' },
+                  },
+                  {
+                    type: 'tool_use',
+                    name: readName,
+                    id: 'read',
+                    input: { query: 'report' },
+                  },
+                  {
+                    type: 'tool_use',
+                    name: 'Bash',
+                    id: 'shell',
+                    input: { command: 'pwd' },
+                  },
+                  { type: 'text', text: 'account answer' },
+                ],
+              },
+            },
+          },
+          {
+            payload: {
+              type: 'user',
+              timestamp: submittedAt,
+              message: {
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'catalog',
+                    content: [{ type: 'tool_reference', tool_name: readName }],
+                  },
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'read',
+                    content: 'found',
+                    is_error: false,
+                  },
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'shell',
+                    content: '/workspace',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            payload: {
+              type: 'result',
+              timestamp: submittedAt,
+              subtype: 'success',
+              result: 'account answer',
+              is_error: false,
+              usage: { input_tokens: 10, output_tokens: 4 },
+              total_cost_usd: 0.01,
+              duration_ms: 200,
+              duration_api_ms: 150,
+            },
+          },
+        ];
+        completedEvents = events;
+        if (options.pendingWrite)
+          events =
+            options.pendingWrite === 'initial'
+              ? pendingWriteEvents()
+              : completedEvents.slice(0, 2);
+        if (options.submitFailure)
+          throw new Error(
+            'Submission permission rejected after possible dispatch'
+          );
+        return { status: 'submitted', action_count: 1 };
+      },
+      handleHitl: hitl,
+    };
+    return {
+      desktop,
+      commands,
+      prepare,
+      hitl,
+      permissions,
+      originalPermissions,
+      patches,
+      actions,
+      failRecording(failure?: typeof recordingFailure) {
+        recordingFailure = failure;
+      },
+      completeTask() {
+        events = completedEvents;
+      },
+      get submissions() {
+        return submissions;
+      },
+      get resets() {
+        return resets;
+      },
+    };
+  }
+  const accountServer: MCPConfig = {
+    transport: 'http',
+    label: 'primary',
+    serverUrl: 'https://example.com/mcp',
+  };
+  const firstPartyConfig = { ...clientConfig, mode: 'first-party' };
+  const firstPartyContext: ClientRunContext = {
+    ...context,
+    evalConfig: { ...context.evalConfig, servers: [accountServer] },
+  };
+
+  it.each([
+    ['first-party', undefined],
+    ['first-party', '/custom/cowork-sessions'],
+    ['third-party', undefined],
+    ['third-party', '/custom/cowork-sessions'],
+  ] as const)(
+    'blocks the other macOS mode while %s holds the desktop (third-party dataDir: %s)',
+    async (holderMode, dataDir) => {
+      const boundary = accountBoundary();
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const firstParty = realClient(boundary.desktop);
+      const thirdParty = realClient({
+        ...boundary.desktop,
+        dataDirectory: (options) => options.dataDir ?? '/profile/third-party',
+        async prepare() {
+          return { async dispose() {} };
+        },
+      });
+      const firstPartyOptions = {
+        config: firstPartyConfig,
+        input: { servers: [accountServer] },
+      };
+      const thirdPartyOptions = {
+        config: { ...clientConfig, ...(dataDir ? { dataDir } : {}) },
+        input: { servers: [accountServer] },
+      };
+      const holder = await (holderMode === 'first-party'
+        ? firstParty.open!(firstPartyOptions, firstPartyContext)
+        : thirdParty.open!(thirdPartyOptions, context));
+      const contender =
+        holderMode === 'first-party'
+          ? thirdParty.open!(thirdPartyOptions, context)
+          : firstParty.open!(firstPartyOptions, firstPartyContext);
+      try {
+        await expect(contender).rejects.toThrow(
+          'Cowork desktop is locked by another run'
+        );
+        expect(
+          boundary.commands.some(({ file }) => file === '/usr/bin/open')
+        ).toBe(false);
+      } finally {
+        // Also close an unexpected successful contender when the regression fails.
+        await contender.then(
+          (session) => session.close(),
+          () => {}
+        );
+        await holder.close();
+      }
+    }
+  );
+
+  it.each([
+    ['list', '401'],
+    ['events', '500'],
+    ['chrome', 'No Chrome is listening on DevTools port'],
+  ] as const)(
+    'reports a post-prepare %s failure and retains ownership only after possible submission',
+    async (failure, cause) => {
+      const boundary = accountBoundary();
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const session = await realClient(boundary.desktop).open!(
+        {
+          config: { ...firstPartyConfig, timeout: 6_000 },
+          input: { servers: [accountServer] },
+        },
+        firstPartyContext
+      );
+      boundary.failRecording(failure);
+      try {
+        const { result } = await session.run({
+          caseId: 'recording-failure',
+          trial: 0,
+          input: { prompt: 'Find the report' },
+        });
+        if (failure !== 'chrome') {
+          expect(result.error).toContain('No matching Claude session found');
+          expect(result.error).toContain('Session recording failed:');
+        }
+        expect(result.error).toContain(cause);
+        expect(result.ending).toMatchObject({
+          kind: 'infrastructure',
+          broke: 'client-app',
+          reason: result.error,
+        });
+        expect(boundary.hitl).not.toHaveBeenCalled();
+        expect(
+          boundary.commands.filter(({ file }) => file === '/usr/bin/open')
+        ).toHaveLength(failure === 'chrome' ? 0 : 1);
+      } finally {
+        boundary.failRecording();
+        if (failure === 'chrome') await session.close();
+        else await expect(session.close()).rejects.toThrow('unbound');
+      }
+      if (failure === 'chrome') {
+        // beginTask checks identity before persisting intent or touching the UI.
+        expect(boundary.submissions).toBe(0);
+        expect(boundary.permissions).toEqual(boundary.originalPermissions);
+        return;
+      }
+      expect(boundary.permissions).not.toEqual(boundary.originalPermissions);
+      const root = path.join(lockHome.value, '.mcp-server-tester');
+      expect(await fs.readdir(root)).toContain('cowork-desktop-macos.lock');
+      const journal = JSON.parse(
+        await fs.readFile(
+          path.join(root, 'cowork-claude-ai-connectors.json'),
+          'utf8'
+        )
+      );
+      expect(journal.pendingTask).toEqual({ startedAt: expect.any(String) });
+    },
+    15_000
+  );
+
+  it.each([undefined, 'http', 'cap'] as const)(
+    'reports the actual bound trial polling failure despite an unrelated %s failure, retaining the pending native call',
+    async (unrelatedFailure) => {
+      const boundary = accountBoundary({
+        pendingWrite: 'initial',
+        unrelatedFailure,
+      });
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      boundary.hitl.mockImplementation(async () => {
+        // The client reached HITL only after the ledger claimed the real mirror,
+        // and the exact cloud ID (not local_cse_test) was durably bound.
+        const journal = JSON.parse(
+          await fs.readFile(
+            path.join(
+              lockHome.value,
+              '.mcp-server-tester',
+              'cowork-claude-ai-connectors.json'
+            ),
+            'utf8'
+          )
+        );
+        expect(journal.pendingTask.sessionId).toBe('cse_test');
+        boundary.failRecording('events');
+        return { status: 'hitl_checked', action_count: 0 };
+      });
+      const session = await realClient(boundary.desktop).open!(
+        {
+          config: {
+            ...firstPartyConfig,
+            timeout: 8_000,
+            connectors: {
+              failOnApproval: false,
+              servers: {
+                primary: { policy: 'read-only', tools: { update: 'ask' } },
+              },
+            },
+          },
+          input: { servers: [accountServer] },
+        },
+        {
+          ...firstPartyContext,
+          evalConfig: {
+            ...firstPartyContext.evalConfig,
+            writes: { primary: 'unguarded' },
+          },
+        }
+      );
+      try {
+        const { result } = await session.run({
+          caseId: 'recording-stopped',
+          trial: 0,
+          input: { prompt: 'Update the report' },
+        });
+        expect(result.error).toContain('Timed out waiting for Claude session');
+        expect(result.error).toContain('Session recording failed:');
+        expect(result.error).toContain('cse_test failed (500)');
+        expect(result.error).not.toContain('cse_unrelated');
+        expect(result.events).toContainEqual(
+          expect.objectContaining({ name: 'update', server: 'primary' })
+        );
+        expect(result.ending).toMatchObject({
+          kind: 'infrastructure',
+          broke: 'client-app',
+          reason: expect.stringContaining('500'),
+        });
+        expect(boundary.hitl).toHaveBeenCalled();
+        expect(
+          boundary.commands.filter(({ file }) => file === '/usr/bin/open')
+        ).toHaveLength(1);
+      } finally {
+        boundary.failRecording();
+        await expect(session.close()).rejects.toThrow(
+          'no terminal native result'
+        );
+      }
+      expect(boundary.permissions).not.toEqual(boundary.originalPermissions);
+      const root = path.join(lockHome.value, '.mcp-server-tester');
+      expect(await fs.readdir(root)).toContain('cowork-desktop-macos.lock');
+      expect(
+        JSON.parse(
+          await fs.readFile(
+            path.join(root, 'cowork-claude-ai-connectors.json'),
+            'utf8'
+          )
+        ).pendingTask.sessionId
+      ).toBe('cse_test');
+    },
+    15_000
+  );
+
+  it('retains the shared desktop lease when prepare fails with a recovery journal but no returned session', async () => {
+    const boundary = accountBoundary({ patchFailure: true });
+    const { createCoworkClient: realClient } =
+      await import('./coworkClient.js');
+    const client = realClient(boundary.desktop);
+    const open = () =>
+      client.open!(
+        { config: firstPartyConfig, input: { servers: [accountServer] } },
+        firstPartyContext
+      );
+    const error = await open().catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(String((error as AggregateError).errors[0])).toContain(
+      'permission write outcome is unknown'
+    );
+    expect(String((error as AggregateError).errors[1])).toContain(
+      'desktop lock retained'
+    );
+    const root = path.join(lockHome.value, '.mcp-server-tester');
+    expect(await fs.readdir(root)).toContain('cowork-desktop-macos.lock');
+    const journal = JSON.parse(
+      await fs.readFile(
+        path.join(root, 'cowork-claude-ai-connectors.json'),
+        'utf8'
+      )
+    );
+    expect(journal.pendingWrite.purpose).toBe('configure');
+    await expect(open()).rejects.toThrow(
+      'Cowork desktop is locked by another run'
+    );
+    expect(boundary.submissions).toBe(0);
+    expect(boundary.patches).toHaveLength(1);
+  });
+
+  it('refuses reset, another task and cleanup after an active bound task times out', async () => {
+    const boundary = accountBoundary({ pendingWrite: 'initial' });
+    const { createCoworkClient: realClient } =
+      await import('./coworkClient.js');
+    const client = realClient(boundary.desktop);
+    const options = {
+      config: { ...firstPartyConfig, timeout: 6_000 },
+      input: { servers: [accountServer] },
+    };
+    const session = await client.open!(options, firstPartyContext);
+    const { result, continuation } = await session.run({
+      caseId: 'active',
+      trial: 0,
+      input: { prompt: 'Update the report' },
+    });
+    expect(result.error).toContain('Timed out waiting for Claude session');
+    expect(continuation).toBe('reset');
+    await expect(session.reset()).rejects.toThrow('no terminal native result');
+    await expect(
+      session.run({
+        caseId: 'second',
+        trial: 0,
+        input: { prompt: 'Another task' },
+      })
+    ).rejects.toThrow('requires reset');
+    await expect(session.close()).rejects.toThrow('no terminal native result');
+    await expect(client.open!(options, firstPartyContext)).rejects.toThrow(
+      'Cowork desktop is locked by another run'
+    );
+    expect(boundary.submissions).toBe(1);
+    expect(boundary.resets).toBe(0);
+    expect(boundary.patches).toHaveLength(1);
+    const journal = JSON.parse(
+      await fs.readFile(
+        path.join(
+          lockHome.value,
+          '.mcp-server-tester',
+          'cowork-claude-ai-connectors.json'
+        ),
+        'utf8'
+      )
+    );
+    expect(journal.pendingTask.sessionId).toBe('cse_test');
+    // Cloud completion, not app reset or a local timeout, permits recovery.
+    boundary.completeTask();
+    const { restoreClaudeAiConnectors } = await import('./cowork/claudeAi.js');
+    await expect(restoreClaudeAiConnectors()).resolves.toBe(true);
+    expect(boundary.permissions).toEqual(boundary.originalPermissions);
+  }, 15_000);
+
+  it.each([{ submitFailure: true }, { storedPrompt: 'Find the report!' }])(
+    'retains unbound submission uncertainty instead of guessing or resetting ($submitFailure, $storedPrompt)',
+    async (failure) => {
+      const boundary = accountBoundary(failure);
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const session = await realClient(boundary.desktop).open!(
+        {
+          config: { ...firstPartyConfig, timeout: 6_000 },
+          input: { servers: [accountServer] },
+        },
+        firstPartyContext
+      );
+      const { result } = await session.run({
+        caseId: 'unbound',
+        trial: 0,
+        input: { prompt: 'Find the report' },
+      });
+      expect(result.error).toMatch(/permission rejected|refusing to guess/);
+      await expect(session.reset()).rejects.toThrow('unbound');
+      await expect(session.close()).rejects.toThrow('unbound');
+      const journal = JSON.parse(
+        await fs.readFile(
+          path.join(
+            lockHome.value,
+            '.mcp-server-tester',
+            'cowork-claude-ai-connectors.json'
+          ),
+          'utf8'
+        )
+      );
+      expect(journal.pendingTask).toEqual({ startedAt: expect.any(String) });
+      expect(boundary.submissions).toBe(1);
+      expect(boundary.resets).toBe(0);
+      expect(boundary.patches).toHaveLength(1);
+    },
+    15_000
+  );
+
+  it.each(['initial', 'late'] as const)(
+    'approves a first-party ask write during %s HITL with approveWriteTools enabled, without resubmitting',
+    async (pendingWrite) => {
+      const boundary = accountBoundary({ pendingWrite });
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const result = await realClient(boundary.desktop).run!(
+        { prompt: 'Update the report', servers: [accountServer] },
+        {
+          ...firstPartyConfig,
+          timeout: 14_000,
+          connectors: {
+            failOnApproval: false,
+            servers: {
+              primary: { policy: 'read-only', tools: { update: 'ask' } },
+            },
+          },
+        },
+        {
+          ...firstPartyContext,
+          evalConfig: {
+            ...firstPartyContext.evalConfig,
+            writes: { primary: 'unguarded' },
+          },
+        }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.finalText).toBe('account answer');
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          name: 'update',
+          server: 'primary',
+          output: 'updated',
+          isError: false,
+        })
+      );
+      expect(boundary.hitl).toHaveBeenCalled();
+      if (pendingWrite === 'late')
+        expect(boundary.hitl).toHaveBeenCalledTimes(2);
+      for (const [options] of boundary.hitl.mock.calls) {
+        expect(options).toMatchObject({
+          approveWriteTools: true,
+          task: expect.stringContaining('Approve read and write calls only'),
+        });
+        expect(options.task).toContain('one-time or current-task approval');
+      }
+      expect(
+        boundary.commands.filter(({ file }) => file === '/usr/bin/open')
+      ).toHaveLength(1);
+      expect(boundary.permissions).toEqual(boundary.originalPermissions);
+      expect(result.telemetry?.computerUse).toMatchObject({
+        hitl: { status: 'completed' },
+        ...(pendingWrite === 'late'
+          ? { hitlFollowups: [{ status: 'completed' }] }
+          : {}),
+      });
+    },
+    20_000
+  );
+
+  it('does not click an unexpected first-party write approval when failOnApproval is true', async () => {
+    const boundary = accountBoundary({ pendingWrite: 'initial' });
+    const { createCoworkClient: realClient } =
+      await import('./coworkClient.js');
+    const result = await realClient(boundary.desktop).run!(
+      { prompt: 'Update the report', servers: [accountServer] },
+      {
+        ...firstPartyConfig,
+        timeout: 6_000,
+        connectors: {
+          failOnApproval: true,
+          servers: { primary: { policy: 'allow-all' } },
+        },
+      },
+      {
+        ...firstPartyContext,
+        evalConfig: {
+          ...firstPartyContext.evalConfig,
+          writes: { primary: 'unguarded' },
+        },
+      }
+    );
+    expect(result.error).toContain('Timed out waiting for Claude session');
+    expect(result.error).toContain('mcp__Acme__Search__update');
+    expect(boundary.hitl).not.toHaveBeenCalled();
+    expect(result.error).toContain('no terminal native result');
+    expect(result.telemetry?.batchFailure).toMatchObject({
+      kind: 'cleanup_failed',
+    });
+    expect(boundary.permissions).not.toEqual(boundary.originalPermissions);
+  }, 15_000);
+
+  it.each(['allow-all', 'ask'] as const)(
+    'checks account write declarations for %s before any submission or developer-server install',
+    async (policy) => {
+      const boundary = accountBoundary();
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      await expect(
+        realClient(boundary.desktop).open!(
+          {
+            config: {
+              ...firstPartyConfig,
+              connectors: {
+                failOnApproval: false,
+                servers: { primary: { policy } },
+              },
+            },
+            input: { servers: [accountServer] },
+          },
+          firstPartyContext
+        )
+      ).rejects.toThrow('Declare writes.primary: unguarded');
+      expect(boundary.prepare).not.toHaveBeenCalled();
+      expect(
+        boundary.commands.some(({ file }) => file === '/usr/bin/open')
+      ).toBe(false);
+      expect(boundary.patches).toEqual([]);
+    }
+  );
+
+  it.each([undefined, 'unguarded', 'live'] as const)(
+    'accepts verified account evidence with write declaration %s, without probing or installing servers',
+    async (writeMode) => {
+      const boundary = accountBoundary();
+      const { createCoworkClient: realClient } =
+        await import('./coworkClient.js');
+      const result = await realClient(boundary.desktop).run!(
+        { prompt: 'Find the report', servers: [accountServer] },
+        {
+          ...firstPartyConfig,
+          ...(writeMode
+            ? { connectors: { servers: { primary: { policy: 'allow-all' } } } }
+            : {}),
+        },
+        {
+          ...firstPartyContext,
+          evalConfig: {
+            ...firstPartyContext.evalConfig,
+            ...(writeMode ? { writes: { primary: writeMode } } : {}),
+          },
+        }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.finalText).toBe('account answer');
+      expect(result.events[0]?.results).toEqual([
+        { server: 'primary', name: 'search__documents' },
+      ]);
+      expect(result.events[1]).toMatchObject({
+        source: 'mcp',
+        server: 'primary',
+        name: 'search__documents',
+        rawName: 'mcp__Acme__Search__search__documents',
+      });
+      expect(result.artifacts?.include).toContain('connector-policy.json');
+      const policy = JSON.parse(
+        await fs.readFile(
+          path.join(result.artifacts!.dir, 'connector-policy.json'),
+          'utf8'
+        )
+      ) as Record<string, unknown>;
+      expect(policy).toMatchObject({
+        verification: 'passed',
+        settingsVerified: true,
+        mode: 'first-party',
+        serverLabels: { Acme__Search: 'primary' },
+        automaticHitlEnabled: false,
+      });
+      expect(policy.expectedAllowedTools).toEqual(
+        writeMode
+          ? [
+              'mcp__Acme__Search__search__documents',
+              'mcp__Acme__Search__update',
+            ]
+          : ['mcp__Acme__Search__search__documents']
+      );
+      expect(boundary.patches).toHaveLength(2);
+      expect(boundary.permissions).toEqual(boundary.originalPermissions);
+      expect(boundary.prepare).not.toHaveBeenCalled();
+      expect(boundary.hitl).not.toHaveBeenCalled();
+      expect(boundary.commands).toEqual([
+        {
+          file: '/usr/bin/plutil',
+          args: [
+            '-extract',
+            'CFBundleShortVersionString',
+            'raw',
+            '/Applications/Claude.app/Contents/Info.plist',
+          ],
+        },
+        { file: '/usr/bin/open', args: ['claude://cowork/new'] },
+      ]);
+    },
+    15_000
+  );
+
+  it('describes account inference and sign-ins separately from third-party setup and planner credentials', () => {
+    const requirements = COWORK_CLIENT.requirements!;
+    expect(requirements.credentials?.join('\n')).toMatch(
+      /first-party:.*inference.*signed-in Claude account/
+    );
+    expect(requirements.credentials?.join('\n')).toMatch(
+      /both modes:.*Computer Use planner/
+    );
+    expect(requirements.setup?.join('\n')).toMatch(
+      /third-party:.*mst cowork setup/
+    );
+    expect(requirements.setup?.join('\n')).toMatch(
+      /first-party:.*Chrome.*same.*account/
+    );
+  });
+
+  it('retains all native evidence when account validation rejects a completed transcript before its deadline', async () => {
+    const boundary = accountBoundary({ unexpectedTool: true });
+    const { createCoworkClient: realClient } =
+      await import('./coworkClient.js');
+    const session = await realClient(boundary.desktop).open!(
+      {
+        config: firstPartyConfig,
+        input: { servers: [accountServer] },
+      },
+      firstPartyContext
+    );
+    try {
+      expect(session.readiness?.servers).toEqual([]);
+      const { result } = await session.run({
+        caseId: 'invalid-inventory',
+        trial: 0,
+        input: { prompt: 'Find the report' },
+      });
+      expect(result.error).toContain(
+        'Cloud connector configuration mismatch: 1 unexpected tools'
+      );
+      expect(result.finalText).toBe('account answer');
+      expect(result.events).toMatchObject([
+        {
+          kind: 'tool_search',
+          name: 'ToolSearch',
+          source: 'builtin',
+          results: [{ server: 'primary', name: 'search__documents' }],
+        },
+        {
+          kind: 'tool_call',
+          name: 'search__documents',
+          source: 'mcp',
+          server: 'primary',
+          rawName: 'mcp__Acme__Search__search__documents',
+          arguments: { query: 'report' },
+          output: 'found',
+          isError: false,
+        },
+        {
+          kind: 'tool_call',
+          name: 'Bash',
+          source: 'builtin',
+          output: '/workspace',
+        },
+      ]);
+      expect(result.usage).toMatchObject({
+        inputTokens: 10,
+        outputTokens: 4,
+        totalCostUsd: 0.01,
+      });
+      expect(result.modelCalls).toMatchObject([
+        {
+          id: 'msg-first-party',
+          model: 'native-model',
+          toolCallIds: ['catalog', 'read', 'shell'],
+        },
+      ]);
+      expect(result.startedAt).toEqual(expect.any(String));
+      expect(result.completedAt).toEqual(expect.any(String));
+      expect(result.llmDurationMs).toBe(150);
+      expect(result.telemetry).toMatchObject({
+        nativeSessionId: 'local_cse_test',
+        toolCallCount: 3,
+        source: 'claude-native',
+        costScope: 'native-inference-only',
+      });
+      expect(result.telemetry).not.toHaveProperty('deadlineExceeded');
+      expect(result.artifacts?.include).toContain('audit.jsonl');
+      expect(result.artifacts?.include).toContain('connector-policy.json');
+      const dir = result.artifacts!.dir;
+      expect(
+        await fs.readFile(path.join(dir, 'audit.jsonl'), 'utf8')
+      ).toContain('mcp__Acme__Search__search__documents');
+      expect(
+        JSON.parse(
+          await fs.readFile(path.join(dir, 'connector-policy.json'), 'utf8')
+        )
+      ).toMatchObject({
+        verification: 'failed',
+        settingsVerified: true,
+        serverLabels: { Acme__Search: 'primary' },
+      });
+    } finally {
+      await session.close();
+    }
+    expect(boundary.permissions).toEqual(boundary.originalPermissions);
+    expect(boundary.prepare).not.toHaveBeenCalled();
+    expect(boundary.hitl).not.toHaveBeenCalled();
+  }, 15_000);
 });
 
 describe('what a task past its deadline was waiting on', () => {

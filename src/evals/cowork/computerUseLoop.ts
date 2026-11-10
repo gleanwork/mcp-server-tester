@@ -648,6 +648,17 @@ async function loop(
       'submission. Do not approve permissions or change account settings.';
   }
 
+  if (application === 'cowork' && mode === 'submit') {
+    instruction +=
+      ' Claude Desktop may show a Cowork chip inside the composer beside Chat, rather than a separate Cowork tab. ' +
+      'A highlighted Cowork chip means the correct mode is already selected. Leave it selected. ' +
+      'An empty composer on the welcome screen is already a fresh task: do not create another or repeat navigation. ' +
+      'Click once in its text area, then call fill_query immediately. Do not wait for placeholder text to disappear; ' +
+      'the placeholder stays visible until text is entered. Do not repeatedly click Cowork or the text area to prove focus. ' +
+      'After fill_query, inspect a screenshot to confirm the query is visible, then press Enter once. ' +
+      'Never submit from an empty composer or treat an input action receipt as proof that text appeared.';
+  }
+
   const requireModelConfirmation =
     application === 'cowork' && mode === 'submit' && Boolean(targetModel);
   if (requireModelConfirmation) {

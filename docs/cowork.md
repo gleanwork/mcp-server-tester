@@ -9,7 +9,11 @@ it does not provision or authenticate that runtime.
 
 ## First-time macOS setup
 
-Run this once on a new Mac before the first Cowork evaluation:
+This section is for the default `third-party` mode. In `first-party` mode, do
+not run `mst cowork setup`: it uses the signed-in installed app and no MST
+profile (see [Cloud sessions](#cloud-sessions)).
+
+Run this once on a new Mac before the first default-mode Cowork evaluation:
 
 ```bash
 node --import tsx src/cli/index.ts cowork setup
@@ -147,11 +151,235 @@ an eval-endpoint search tool and a login-backed GitHub `get_me` call.
 
 ### Cloud sessions
 
-Claude Desktop builds signed in to claude.ai (not an `inferenceProvider`
-gateway) run Cowork tasks as remote `cse_…` sessions that write no session
-folder on the host. MST does not read them: on such a macOS desktop it finds
-no session to bind. The prepared Linux desktop runs Desktop through a gateway,
-which runs local sessions, so it is unaffected.
+Claude Desktop signed in to claude.ai runs Cowork tasks as remote `cse_…`
+sessions. Set `clientOptions.mode` to `"first-party"` to run on the account's
+existing connectors instead of MST-managed servers. The default, `third-party`
+(also the result of omitting `mode`), is unchanged: it supports stdio servers
+and proxies through MST's gateway setup. First-party mode only selects existing
+HTTPS account connectors through MST's normal server labels and records those
+sessions. It supports the local macOS runner only, with `concurrency: 1` and no
+sharding.
+
+First-party mode uses the Claude account that is already signed in to Claude
+Desktop. MST still submits prompts through visible Desktop Computer Use, using
+the Computer Use planner credentials you already configure. It reads session
+events through a separate Chrome recorder profile signed in to the same account
+and mirrors them into MST's native transcript layout. It does not copy cookies,
+provision VMs, or submit tasks through an undocumented API.
+
+Start a dedicated Chrome recorder profile with a loopback DevTools port. Use a
+`--user-data-dir` that no other Chrome uses, and sign in to the same claude.ai
+account as Claude Desktop in that window. Do not copy cookies or reuse another
+profile's session.
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --user-data-dir="$HOME/.mcp-server-tester/claude-ai-recorder" \
+  --remote-debugging-port=9222 \
+  --remote-debugging-address=127.0.0.1 \
+  https://claude.ai
+```
+
+Set `clientOptions.env.MST_CLAUDE_AI_DEBUG_PORT` to the port (default `9222`).
+Keep the port private to the local machine. First-party mode does not install developer
+MCP servers, marketplace plugins, or an inference gateway profile. It does not
+register new connectors or sign in to them. Authenticate each connector in the
+Claude account first.
+
+#### Configure remote connectors
+
+These settings are **account-wide**, not per-task. Run variants sequentially.
+Set `concurrency: 1`, and do not edit the same account's permissions during a run.
+The local desktop lock does not coordinate other machines. Authentication
+provisioning and parallel cloud workers are not implemented.
+
+```json
+{
+  "name": "account-connectors",
+  "datasets": ["cases.json"],
+  "client": "cowork",
+  "clientOptions": { "mode": "first-party" },
+  "concurrency": 1,
+  "servers": {
+    "search": {
+      "transport": "http",
+      "serverUrl": "https://mcp.example.com/mcp"
+    }
+  },
+  "variants": [
+    { "name": "no-connectors", "servers": [] },
+    { "name": "read-only", "servers": ["search"] },
+    {
+      "name": "filtered",
+      "servers": ["search"],
+      "clientOptions": {
+        "connectors": {
+          "servers": {
+            "search": { "policy": "read-only", "tools": { "search": "block" } }
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+Replace the example URL with the exact HTTPS endpoint of an existing connected
+account connector. Each selected URL must match exactly one connected connector.
+Missing, ambiguous, or disconnected matches fail before permission changes.
+MST does not infer a match from a display name or silently create one.
+
+Selection follows the normal contract: an omitted variant `servers` list selects
+all declarations; `servers: []` selects none. Unselected account connectors are
+blocked. Selected connectors default to `read-only`. Policies in
+`clientOptions.connectors.servers` are keyed by the selected **MST server label**,
+not an account name or UUID. Put variant-specific policies on that variant;
+a policy for an unselected label is an error. Reports and tool assertions use
+the same labels; `rawName` preserves Claude's original name.
+
+This mode accepts only `transport`, `serverUrl`, and `label` (from the map key).
+It rejects stdio, auth/headers, TLS/proxy overrides, protocol options, and
+transport timeouts because those settings cannot configure an account connector.
+It also rejects the options `appVersion`, `dataDir`, `plugins`, `pluginRoots`
+and `mcpDataRoot`, simulated writes, tool-metadata proxies, and
+`recordServedTools` (the run records the account's tool inventory in
+`connector-policy.json` instead). Readiness and read-only checks use the account's
+actual tools during preparation, not a separate unauthenticated HTTP probe.
+
+Server policies are `read-only`, `allow-all`, `ask`, and `block`; tool overrides
+are `allow`, `ask`, and `block`. First-party mode requires `default: "block"`
+and rejects `inherit`, so omitted connectors cannot leak into a variant.
+Configuration cannot override organization permission limits. Claude's built-in
+tools are outside this option's scope.
+
+`read-only` explicitly enables and always-approves only tools whose MCP
+`readOnlyHint` is `true`. It blocks write tools and tools with unknown annotations.
+The hint is supplied by the server; it is not a sandbox or proof that a tool
+cannot write, so MST does not sandbox on annotations. `allow-all` explicitly enables and always-approves all tools of the
+selected server, including writes. An explicit per-tool override takes precedence
+over its server's policy. Neither policy authorizes an eval to perform writes
+that the caller has not approved. If a policy permits any write or unknown tool,
+the server also needs the normal `writes` declaration: `"writes": { "search":
+"unguarded" }`, or `live` with `--allow-live-writes`. These are real account tools,
+not a dry-run proxy; planned/simulated-write assertions are unsupported.
+
+`failOnApproval` defaults to `true`, which disables automatic human-in-the-loop
+handling: MST performs no automatic approval clicks and rejects recorded
+approval requests. Set it to `false` for an `ask` policy; MST then delegates to
+the existing one-time approval handling. It is not a manual-only ask mode.
+`coworkSetup.approveWriteTools` enables one-time approval of writable tools only
+with an explicit `writes` declaration and `failOnApproval: false`; with
+`failOnApproval: true` nothing is handled automatically. MST verifies saved permission keys and checks the session's initial
+catalog, discovered tool references, and actual calls against the policy. Cowork
+can load connectors after reporting them as pending in its initial catalog.
+MST records that catalog as incomplete rather than claiming it proves every
+tool's availability. It saves the check as `connector-policy.json` beside the
+audit log, including the prepared tool list when validation fails. If the server
+changes its catalog during a task, MST fails the check instead of silently
+accepting new tools. Start a new run to prepare against the changed catalog.
+
+The Chrome recorder profile and Claude Desktop must be on the same account and
+the same active organization. You must make sure they are; MST does not
+verify Desktop's identity automatically. Before changing permissions it checks
+the Chrome session's account and organization, and it checks them again against
+the recovery journal before restoring. This is not a sandbox guarantee.
+
+One macOS Cowork lease is shared by both modes and every `dataDir`, so only one
+Cowork run drives the app at a time. MST reads at most 10,000 events from a
+session. A longer session fails with an error that names the cap; MST does not
+truncate it.
+
+The permission API is undocumented and may change. Use the account exclusively
+during a run or recovery: do not run tasks or edit connector settings in another
+Claude session. MST's checks detect observed conflicts; they are not an atomic
+lock against other applications. MST records the original values before
+applying settings, verifies each write, and restores changed keys on close.
+Keys absent originally are removed, not replaced with explicit allows. A normal
+completed run restores automatically.
+
+A private recovery journal at
+`~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash. MST
+writes it before the first permission write and before it submits the first
+task. A journal from an earlier development format (`version: 1`, the journal's
+own schema version, not an MST package or `mst.run/v1` version) is unpublished.
+It has no write-outcome or task record, so restore and configure reject it. MST
+does not migrate it; it needs manual resolution (see below).
+
+MST keeps the journal and the desktop lock, and blocks both automatic recovery
+and a new configured run, in any of these cases:
+
+- A permission write has an unknown or in-flight outcome. This holds even if a
+  later read matches the original value. There is no force option.
+- MST persisted the intent to submit a task, but no session is bound to it, or
+  the bound session cannot be read.
+- The bound session has no authoritative terminal state. Quitting Claude Desktop
+  does not prove that a cloud task stopped.
+- The account or organization differs, or a concurrent edit changed a value.
+
+If an excluded connector cannot list its tools, preparation aborts. Checking a
+task afterward is not a security boundary against a connector that changes its
+tool inventory while the task runs.
+
+#### Recover connector settings
+
+If a run was killed, restore from the journal without starting an eval. The
+command reads the port only from its own shell, not from the eval config. Export
+the same port the run used:
+
+```bash
+export MST_CLAUDE_AI_DEBUG_PORT=9222   # omit if the recorder uses the default
+npx mst cowork restore-connectors [--recover-stale-lock]
+```
+
+This macOS command uses the existing Chrome recorder profile sign-in. It runs no
+eval, changes no policy plan, and does not drive the app. It restores only after
+all of these checks pass: account and organization identity, no concurrent
+permission edits, every write outcome known, and the bound task finished with
+authoritative terminal evidence.
+
+Recovery takes two files under `~/.mcp-server-tester`: the shared desktop lease
+and a separate recovery guard (`cowork-desktop-macos.lock.recovery`). The guard
+stops two recoveries from racing. An interrupted recovery can leave it behind.
+If restoration fails, MST releases the guard but keeps the desktop lease and the
+journal. A kept lease blocks both new runs and later recovery.
+
+Without the flag, any existing lease fails the command.
+`--recover-stale-lock` removes a desktop lease only when its local owner process
+is provably dead. It does not prove that a cloud task finished or that a
+permission write settled, and it never reclaims the recovery guard. A live or
+unknown owner is always rejected.
+
+#### Stale recovery guard
+
+An interrupted recovery can leave `~/.mcp-server-tester/cowork-desktop-macos.lock.recovery`.
+`--recover-stale-lock` cannot reclaim it. Before you remove this guard alone,
+inspect its owner and confirm that no recovery is running. A live, unknown, or
+unverified owner is not a reason to remove it. Removing the guard only lets
+another attempt acquire the desktop lease. It does not restore permissions or
+show that cloud work has stopped. Leave the journal and the main desktop lease
+in place until you have established that doing otherwise is safe.
+
+#### Resolve a blocked journal manually
+
+Repeating `restore-connectors` or using `--recover-stale-lock` does not attest
+that a write or task has ended, and neither clears these markers. Do not delete
+or edit the journal or the desktop lease to retry: the journal is the only record
+of the original permissions, and no current command performs or verifies manual
+retirement. There is no force option and no supported delete or marker-edit recipe.
+
+1. Keep the journal and the lease unchanged. Keep a protected copy of their
+   account, organization, and original-permission facts.
+2. Ask qualified Claude account or provider support to identify the exact task,
+   to establish that every outstanding write has ended and cannot commit later and
+   every task has finished, and to restore and verify the recorded original
+   permissions, including removing keys that were originally absent.
+3. Once those facts are established and no local run or recovery owns the files,
+   ask an MST maintainer for help. Maintainer assistance retires or securely
+   archives the resolved local state and retains the evidence. A retry is not
+   promised to succeed.
+
+The same steps apply to an earlier-format journal that restore and configure
+reject.
 
 ## Run on macOS from a source checkout
 
@@ -229,9 +457,11 @@ approval inspections within the original per-case action budget; prompts are
 never resubmitted. Follow-up usage is recorded under
 `clientTelemetry.computerUse.hitlFollowups`.
 
-MST does not configure or observe connectors added from Cowork's own connector
-directory (the client's own connectors), so disconnect any that could write to real accounts before a run, or
-use test accounts.
+In `third-party` mode, MST does not configure or observe connectors added from
+Cowork's own connector directory (the client's own connectors), so disconnect any
+that could write to real accounts before a run, or use test accounts.
+`first-party` mode does configure and observe the account connectors it selects
+(see [Cloud sessions](#cloud-sessions)).
 
 ## Run an installed release
 

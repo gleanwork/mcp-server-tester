@@ -196,6 +196,7 @@ Cowork evaluation clients, including Cowork on macOS and Linux. Cowork also
 supports private file-backed native proxies and mixed HTTP/stdio server sets.
 See [evaluation client transport support](./docs/transports.md#evaluation-client-support)
 for client-specific fields, environment rules, and setup ownership.
+Cowork's `mode: "first-party"` is separate: it runs on existing HTTPS connectors in a signed-in Claude account (local macOS only) rather than on servers MST configures. See [Cowork cloud sessions](./docs/cowork.md#cloud-sessions).
 
 ## Documentation
 

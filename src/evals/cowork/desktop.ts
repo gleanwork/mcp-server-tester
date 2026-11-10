@@ -1,4 +1,5 @@
 import type { EvalConfig } from '../evalConfig.js';
+import type { ClaudeTranscript } from './transcript.js';
 import type { MarketplacePlugin, ClientStdioPaths } from '../clientPlugins.js';
 import type {
   CoworkDriverOptions,
@@ -39,9 +40,26 @@ export interface CoworkDesktop {
      * that needs no planner. macOS only.
      */
     restart?(): Promise<void>;
+    /**
+     * Why the session recorder last failed to record the app's sessions, or
+     * undefined when its latest attempt succeeded. A desktop that records
+     * sessions itself (first-party Cowork mirrors them from claude.ai) returns
+     * it, so a trial that finds no session can name the cause. Optional.
+     */
+    recordingError?(): string | undefined;
     dispose(): Promise<void>;
   }>;
   recover(): Promise<unknown>;
+  /** Cleanup after prepare failed before returning a session; failure retains the lease. */
+  dispose?(): Promise<void>;
+  /** Persist the exact session claimed by the native-session ledger. */
+  bindSession?(transcript: ClaudeTranscript): Promise<void>;
+  /** Verify host-specific evidence before accepting a completed native transcript. */
+  validateTranscript?(transcript: ClaudeTranscript): Promise<void>;
+  /** Account connector names that count as eval MCP calls, not client built-ins. */
+  mcpServerNames?(): readonly string[];
+  /** Native account connector name to the eval's stable server label. */
+  mcpServerLabels?(): Readonly<Record<string, string>>;
   /**
    * After a failed case, leave the app with no task running and no prompt
    * open, so the next case is independent. Never types or submits.

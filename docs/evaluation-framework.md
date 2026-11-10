@@ -58,6 +58,15 @@ A key the schema doesn't define is an error, in an eval config and in a dataset,
 A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`; a bare `namespace/dataset/name` is a [plugin's dataset](#plugin-datasets-and-snapshots). Relative dataset and plugin paths in an eval config resolve against the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the eval config, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
 Every other pluggable block is a tagged object. `servers` is the MCP servers under test, a map keyed by label (`"servers": { "acme": { "transport": "http", ... } }`); an entry doesn't set `label`, because the key is its label. A variant picks servers by label (`"servers": ["acme"]`): one that lists none uses every server, and `[]` uses none. An empty map is valid for clients that provide their own capabilities. When the eval config and a shared config it extends both set `servers`, the eval config's map replaces the shared config's whole, like every key; a variant may name a shared config's servers when the eval config sets none.
 
+For Cowork, `clientOptions.mode: "first-party"` uses this same server map and
+variant selection to select **existing authenticated account connectors**. Each
+HTTP `serverUrl` must uniquely match a connected Claude account endpoint; MST
+applies account-wide tool permissions instead of installing a developer server.
+Only plain HTTPS URL declarations are supported in this mode, with sequential
+local macOS runs. See [first-party Cowork](cowork.md#cloud-sessions) for permission
+policies, restoration, and unsupported transport settings. The default Cowork
+mode remains the MST-managed third-party profile.
+
 ## Plugins
 
 Dataset sources, clients, judges, metrics and result stores are extensions. Each one owns its tagged-config schema; core doesn't know organization-specific options. ADR [0001](adr/0001-eslint-style-declarative-plugins.md) records why plugins take this shape.
@@ -768,7 +777,7 @@ What each one needs on the machine that runs its trials (`mst clients show <clie
 - **`claude-code`.** Install: Claude Code (`claude`) on `PATH`. Credentials: `ANTHROPIC_API_KEY`, or Google Application Default Credentials with `provider: "vertex"`.
 - **`codex-app`.** Install: macOS: the ChatGPT app, signed in with access to Codex, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's ChatGPT image (`--runner docker`), which runs Codex in the ChatGPT app. Credentials: macOS: `ANTHROPIC_API_KEY` or an LLM gateway, for the Computer Use planner; Linux image: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`). Setup: Docker: `mst runner setup docker --config <a Codex app eval>`.
 - **`codex-cli`.** Install: `@openai/codex-sdk` beside MST (`npm install @openai/codex-sdk`), which brings the Codex CLI. Credentials: `OPENAI_API_KEY`, or a gateway that serves the Responses API (`OPENAI_BASE_URL` with `OPENAI_API_KEY` or `MST_LLM_AUTH_COMMAND`).
-- **`cowork`.** Install: macOS: Claude Desktop, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's Cowork image (`--runner docker`), or a prepared desktop with Claude Desktop. Credentials: macOS: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider; `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner; Linux image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`). Setup: macOS: `mst cowork setup`, then sign in to Claude Desktop once; Docker: `mst runner setup docker`.
+- **`cowork`.** Install: macOS: Claude Desktop, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST; Linux: MST's Cowork image (`--runner docker`), or a prepared desktop with Claude Desktop. Credentials: macOS default third-party: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider; macOS first-party: Cowork inference uses the existing signed-in Claude account; MST installs no inference credential; macOS both modes: `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner; Linux image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`). Setup: macOS default third-party: `mst cowork setup`, then sign in to Claude Desktop once; macOS first-party: use the installed Claude Desktop and Chrome signed in to the same Claude account, with its selected connectors connected; Chrome needs a loopback DevTools port (`MST_CLAUDE_AI_DEBUG_PORT`, default 9222). Do not run `mst cowork setup` for this mode; Docker: `mst runner setup docker`.
 
 Options and their defaults follow. `timeout` is in milliseconds. Required options must be supplied; “not set” preserves omission. OS- and environment-dependent defaults resolve on the trial machine, not while listing or loading the config. Removed options are not listed.
 
@@ -854,6 +863,8 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 | `appVersion`       | installed app version (macOS only)                                  |
 | `pluginRoots`      | not set (caller stages plugin roots on Linux)                       |
 | `mcpDataRoot`      | not set (caller provides a private root on Linux)                   |
+| `mode`             | third-party (MST-managed profile)                                   |
+| `connectors`       | first-party: selected servers read-only                             |
 | `timeout`          | 900000                                                              |
 | `model`            | Cowork default                                                      |
 | `env`              | inherited environment; no extra variables                           |

@@ -38,14 +38,27 @@ import {
   type TaggedConfig,
 } from './evalConfig.js';
 import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
+import { isFirstPartyCowork } from './cowork/firstParty.js';
 
 /**
  * The servers a client must support. A connector server is checked once `mst
  * run` has expanded it (to the entry its connector launches).
  */
 function declaredTransports(
-  servers: readonly EvalServerConfig[] | undefined
+  servers: readonly EvalServerConfig[] | undefined,
+  client?: ClientConfig,
+  simulateWrites?: boolean
 ): MCPConfig[] {
+  if (client && isFirstPartyCowork(client)) {
+    if (simulateWrites)
+      throw new Error(
+        'First-party mode cannot simulate writes; it does not use an MST proxy.'
+      );
+    if (servers?.some(isConnectorServer))
+      throw new Error(
+        'First-party mode accepts plain HTTP serverUrl declarations, not MST connector launches or injected credentials.'
+      );
+  }
   return (servers ?? []).filter(
     (server): server is MCPConfig => !isConnectorServer(server)
   );
@@ -511,7 +524,11 @@ export function validateEvalConfig(
     : undefined;
   if (!evalConfig.variants?.length && client) {
     assertClientSupports(client, {
-      servers: declaredTransports(evalConfig.servers),
+      servers: declaredTransports(
+        evalConfig.servers,
+        client,
+        evalConfig.simulateWrites
+      ),
       tools: evalConfig.tools,
       concurrency: evalConfig.concurrency,
       context: 'The eval config',
@@ -531,7 +548,11 @@ export function validateEvalConfig(
     if (patch && variantClient) variantClients.push(variantClient);
     if (variantClient) {
       assertClientSupports(variantClient, {
-        servers: declaredTransports(servers),
+        servers: declaredTransports(
+          servers,
+          variantClient,
+          evalConfig.simulateWrites
+        ),
         tools: variant.tools ?? evalConfig.tools,
         concurrency: evalConfig.concurrency,
         context: `Variant "${variant.name}"`,

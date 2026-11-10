@@ -231,6 +231,7 @@ import {
 } from './connectorServers.js';
 import { credentialStoreFor } from '../auth/grants/stores.js';
 import { resolveServerSecrets } from './serverSecrets.js';
+import { isFirstPartyCowork } from './cowork/firstParty.js';
 import type { CredentialStore } from '../auth/grants/types.js';
 import {
   LOCAL_RUNNER,
@@ -2463,7 +2464,12 @@ async function evaluate(
     if (options.recordServedTools && !replay) {
       const listings = new Map<string, Promise<ListedServerTools[]>>();
       for (const variant of variants) {
-        const { servers, resolvedServers } = setupVariant(variant);
+        const { servers, resolvedServers, clientConfig } =
+          setupVariant(variant);
+        if (isFirstPartyCowork(clientConfig.declaration))
+          throw new Error(
+            'First-party mode records its account tool inventory in connector-policy.json; direct recordServedTools probes are unsupported.'
+          );
         const key = JSON.stringify(servers);
         let listing = listings.get(key);
         if (!listing)
@@ -2486,7 +2492,7 @@ async function evaluate(
     if (!regrade) {
       const declared = evalConfig.writes ?? {};
       const checked = variants.map((variant) => {
-        const { resolvedServers } = setupVariant(variant);
+        const { resolvedServers, clientConfig } = setupVariant(variant);
         const established = new Map<string, WriteMode>();
         resolvedServers.forEach((server, index) => {
           const label = mcpServerLabel(server, index);
@@ -2501,6 +2507,9 @@ async function evaluate(
             declared
           ),
           servers: resolvedServers,
+          toolsCheckedAfterPrepare: isFirstPartyCowork(
+            clientConfig.declaration
+          ),
         };
       });
       await assertWriteModes({

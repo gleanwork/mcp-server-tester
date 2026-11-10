@@ -24,6 +24,18 @@ import type { ComputerUseTelemetry } from './interaction.js';
 
 /** Offline: never opens an app or touches the display. */
 
+describe('Cowork unified composer instructions', () => {
+  it('recognizes an already-selected Cowork chip and does not wait for an empty placeholder to vanish', async () => {
+    const result = await runActions([FILL, ENTER]);
+    const instruction = JSON.stringify(result.request?.messages[0]);
+    expect(instruction).toContain('Cowork chip inside the composer');
+    expect(instruction).toContain(
+      'Do not wait for placeholder text to disappear'
+    );
+    expect(result.result?.status).toBe('submitted');
+  });
+});
+
 type Proposal = DesktopAction | { tool: string; input: unknown };
 const FILL: Proposal = { tool: 'fill_query', input: {} };
 const ENTER: Proposal = { action: 'key', text: 'Return' };

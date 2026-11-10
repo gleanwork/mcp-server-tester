@@ -19,9 +19,7 @@ import {
   type DesktopClientAdapter,
   type DesktopContinuation,
 } from './desktopBatch.js';
-import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { coworkDesktopLease } from './cowork/desktopLease.js';
 import { validateMacLocalServers } from './coworkSetup/macLocalMcp.js';
 import {
   findMatchingClaudeSessions,
@@ -66,6 +64,8 @@ import {
   osName,
 } from './desktopOS.js';
 import { removedClientOptions } from './renamedKeys.js';
+import { CloudConnectorsSchema } from './cowork/claudeAiConnectors.js';
+import { assertFirstPartyServers } from './cowork/firstParty.js';
 
 const CoworkSchema = z
   .object({
@@ -128,6 +128,14 @@ const CoworkSchema = z
       'x-defaultDescription':
         'not set (caller provides a private root on Linux)',
     }),
+    /** Select existing account connectors by the normal HTTP server labels. */
+    mode: z.enum(['third-party', 'first-party']).optional().meta({
+      'x-defaultDescription': 'third-party (MST-managed profile)',
+    }),
+    /** Account-wide 1P remote connector policies, restored when the session closes. */
+    connectors: CloudConnectorsSchema.optional().meta({
+      'x-defaultDescription': 'first-party: selected servers read-only',
+    }),
     /** The trial's time limit in ms (default 900000). */
     timeout: z.number().int().positive().default(900_000),
     model: z
@@ -153,7 +161,25 @@ const CoworkSchema = z
       })
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine((options) => !options.connectors || options.mode === 'first-party', {
+    message: 'clientOptions.connectors requires mode: first-party.',
+    path: ['connectors'],
+  })
+  .refine(
+    (options) =>
+      options.mode !== 'first-party' ||
+      (!options.appVersion &&
+        !options.dataDir &&
+        !options.pluginRoots &&
+        !options.mcpDataRoot &&
+        !options.plugins?.length),
+    {
+      message:
+        'First-party mode uses the signed-in installed app; appVersion, dataDir, plugins, pluginRoots and mcpDataRoot are unsupported.',
+      path: ['mode'],
+    }
+  );
 
 /**
  * The Cowork options that the OS a trial runs on can't use: `pluginRoots`
@@ -167,11 +193,16 @@ export function coworkOptionIssues(
     mcpDataRoot?: unknown;
     computerUseModel?: unknown;
     appVersion?: unknown;
+    mode?: unknown;
   },
   os: NodeJS.Platform
 ): string[] {
   const issues: string[] = [];
   const on = osName(os);
+  if (options.mode === 'first-party' && os !== 'darwin')
+    issues.push(
+      'First-party Cowork requires macOS and a signed-in Claude account.'
+    );
   if (
     os !== 'linux' &&
     (options.pluginRoots !== undefined || options.mcpDataRoot !== undefined)
@@ -197,6 +228,7 @@ export function coworkOptionIssues(
  */
 const COWORK_SESSION_EVIDENCE = [
   'audit.jsonl',
+  'connector-policy.json',
   'outputs',
   '.claude/projects/*/*.jsonl',
   '.claude/projects/*/*/tool-results',
@@ -343,13 +375,28 @@ async function desktopAdapter(
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkClientPlugins(plugins);
   const servers = requests[0]!.input.servers;
+  const firstParty = config.mode === 'first-party';
+  if (firstParty) {
+    assertFirstPartyServers(servers, config.connectors);
+    if (
+      context.evalConfig.simulateWrites ||
+      context.evalConfig.tools ||
+      context.variant?.tools
+    )
+      throw new Error(
+        'First-party mode cannot use simulated writes or tool-metadata proxies.'
+      );
+  }
   // A request carries `checkServers` only when its servers are proxied. MST
   // then checked them as declared before the proxy started, so Cowork's
   // check after prepare has nothing left to check.
-  const readinessServers = requests[0]!.input.checkServers ? [] : servers;
+  // Account-backed preparation checks tools and permissions using Claude's auth.
+  const readinessServers =
+    firstParty || requests[0]!.input.checkServers ? [] : servers;
+  const managedServers = firstParty ? [] : servers;
   // Validate declarations before desktop actions. macOS resolves client-resolved
   // paths inside its leased setup transaction; Linux uses prepared runtime paths.
-  const stdioServers = clientStdioServers(servers, plugins);
+  const stdioServers = clientStdioServers(managedServers, plugins);
   let stdioPaths = {
     ...(config.pluginRoots ? { pluginRoots: config.pluginRoots } : {}),
     ...(config.mcpDataRoot ? { dataRoot: config.mcpDataRoot } : {}),
@@ -371,7 +418,7 @@ async function desktopAdapter(
       'mcp_server_invalid',
       unknownRoot ?? 'dataRoot'
     );
-  const httpServers = servers
+  const httpServers = managedServers
     .map((server, index) => ({
       ...server,
       label: mcpServerLabel(server, index),
@@ -379,8 +426,8 @@ async function desktopAdapter(
     .filter((server) => server.transport === 'http');
   if (mac) validateMacLocalServers(httpServers);
   coworkManagedPluginSettings({
-    servers: mac ? httpServers : servers,
-    declaredServers: servers,
+    servers: mac ? httpServers : managedServers,
+    declaredServers: managedServers,
     plugins,
     paths: stdioPaths,
   });
@@ -391,6 +438,17 @@ async function desktopAdapter(
     );
   // Select the concrete entry point here, on the machine running this batch.
   let platform = selectedDesktop;
+  if (firstParty) {
+    const { coworkClaudeAi } = await import('./cowork/claudeAi.js');
+    platform = coworkClaudeAi(
+      platform ?? (await import('./cowork/macos.js')).coworkMacos,
+      {
+        servers,
+        connectors: config.connectors,
+        writes: context.evalConfig.writes,
+      }
+    );
+  }
   if (!platform) {
     if (os === 'darwin')
       platform = (await import('./cowork/macos.js')).coworkMacos;
@@ -428,14 +486,9 @@ async function desktopAdapter(
     redactClientError(error, secrets, 'Cowork operation failed.');
   return {
     name: 'Cowork',
-    // One desktop per run, across processes.
-    // One run per desktop, across processes. The desktop is identified by
-    // the native data directory it runs from, so separate desktops (e.g.
-    // several Linux displays) don't block each other.
-    lease: {
-      directory: join(homedir(), '.mcp-server-tester'),
-      file: `cowork-desktop-${createHash('sha256').update(dataDir).digest('hex').slice(0, 12)}.lock`,
-    },
+    // Both macOS modes drive the same app, even with a custom session path.
+    // Separate Linux data directories identify independently prepared desktops.
+    lease: coworkDesktopLease(dataDir, os),
     secrets,
     resetVerb: 'reset',
     // On Linux, a reset that fails once (accessibility_scan_timeout on a
@@ -497,9 +550,19 @@ async function desktopAdapter(
         }
       : {}),
     async dispose(session) {
-      await session?.dispose();
+      if (session) await session.dispose();
+      else await platform.dispose?.();
     },
     async runCase(session, request, index, ledger) {
+      function recordingFailure(error: unknown): string {
+        const message = safeError(error);
+        const cause = session?.recordingError?.();
+        return cause
+          ? safeError(
+              new Error(`${message} Session recording failed: ${cause}`)
+            )
+          : message;
+      }
       const caseStartedAt = Date.now();
       const computerUse: Record<
         'submission' | 'hitl',
@@ -593,6 +656,7 @@ async function desktopAdapter(
           throw new Error(
             'Native session matched more than one case; refusing duplicate attribution.'
           );
+        await platform.bindSession?.(bound);
       } catch (error) {
         if (computerUse.submission.status !== 'completed') {
           computerUse.submission = {
@@ -606,7 +670,10 @@ async function desktopAdapter(
         // to the case: not the model. Computer Use types why it stopped
         // (a permission, the planner's provider, the deadline); anything
         // else is the client app.
-        const message = safeError(error);
+        const message =
+          computerUse.submission.status === 'completed'
+            ? recordingFailure(error)
+            : safeError(error);
         result = {
           ...failure(message),
           ending: computerUseEnding(error, message),
@@ -635,8 +702,8 @@ async function desktopAdapter(
           process.stderr.write(
             `[mst:cowork] case ${index + 1} already completed; skipping HITL\n`
           );
-        } else if (mac && coworkSetup.approveWriteTools) {
-          // Staged connector defaults must work without a click-through fallback.
+        } else if (mac && coworkSetup.approveWriteTools && !firstParty) {
+          // Only third-party mode stages connector defaults without a click-through fallback.
           computerUse.hitl = { status: 'not-attempted' };
         } else {
           const hitl = await platform.handleHitl({
@@ -756,7 +823,7 @@ async function desktopAdapter(
           ...match,
           sessionPath,
           timeoutMs: remaining,
-          ...(mac && !coworkSetup.approveWriteTools
+          ...(mac && (!coworkSetup.approveWriteTools || firstParty)
             ? {
                 onPending: async (pending) => {
                   // A tool request can arrive after the initial visual check. Revisit
@@ -811,21 +878,15 @@ async function desktopAdapter(
             'Native session identity changed; refusing attribution.'
           );
         hostSessions = sessionIdsOf(transcript);
-        process.stderr.write(
-          `[mst:cowork] case ${index + 1}: native completion found (${transcript.toolCalls.length} tool calls)\n`
-        );
-        if (
-          config.model &&
-          !transcript.telemetry.models.includes(config.model)
-        ) {
-          throw new Error(
-            `Cowork model mismatch: requested ${config.model}, observed ${transcript.telemetry.models.join(', ') || 'unavailable'}.`
-          );
-        }
         const nativeResult: ClientRunResult = {
           finalText: transcript.finalAnswer ?? '',
           events: toolCallEvents(
-            coworkOwnToolCalls(transcript.toolCalls, servers),
+            coworkOwnToolCalls(
+              transcript.toolCalls,
+              servers,
+              platform.mcpServerNames?.(),
+              platform.mcpServerLabels?.()
+            ),
             servers
           ),
           ...(transcript.modelCalls?.length
@@ -869,6 +930,20 @@ async function desktopAdapter(
           },
           llmDurationMs: transcript.llmDurationMs,
         };
+        // Validation may write its own audit receipt and then reject the task.
+        // Keep the completed native evidence even when that happens early.
+        await platform.validateTranscript?.(transcript);
+        process.stderr.write(
+          `[mst:cowork] case ${index + 1}: native completion found (${transcript.toolCalls.length} tool calls)\n`
+        );
+        if (
+          config.model &&
+          !transcript.telemetry.models.includes(config.model)
+        ) {
+          throw new Error(
+            `Cowork model mismatch: requested ${config.model}, observed ${transcript.telemetry.models.join(', ') || 'unavailable'}.`
+          );
+        }
         const unavailable = coworkWorkspaceUnavailable(transcript.toolCalls);
         if (unavailable !== undefined) {
           // Cowork's VM didn't start, so the task ran without its shell:
@@ -898,7 +973,7 @@ async function desktopAdapter(
         }
       } catch (error) {
         // Transcript collection or attribution failed: the app state is unknown.
-        const message = safeError(error);
+        const message = recordingFailure(error);
         // The bound session never finished or went away: the client app
         // failed, not the model. Any other error here is the trial's.
         const lostSession =
@@ -908,7 +983,7 @@ async function desktopAdapter(
         const ending = lostSession
           ? infrastructureEnding('client-app', message)
           : undefined;
-        result = { ...failure(message), ...(ending ? { ending } : {}) };
+        result = { ...result, error: message, ...(ending ? { ending } : {}) };
         if (Date.now() >= deadlineAt) {
           // Past the deadline the task may still be running: keep what
           // its bound session did by now, as a failed case's evidence.
@@ -926,7 +1001,12 @@ async function desktopAdapter(
             result = {
               finalText: partial.finalAnswer ?? '',
               events: toolCallEvents(
-                coworkOwnToolCalls(partial.toolCalls, servers),
+                coworkOwnToolCalls(
+                  partial.toolCalls,
+                  servers,
+                  platform.mcpServerNames?.(),
+                  platform.mcpServerLabels?.()
+                ),
                 servers
               ),
               ...(partial.modelCalls?.length
@@ -971,18 +1051,70 @@ async function desktopAdapter(
  */
 export function coworkOwnToolCalls(
   calls: readonly LLMToolCall[],
-  servers: readonly MCPConfig[]
+  servers: readonly MCPConfig[],
+  accountServerNames: readonly string[] = [],
+  accountLabels: Readonly<Record<string, string>> = {}
 ): LLMToolCall[] {
-  const labels = new Set(
-    servers.map((server, index) => mcpServerLabel(server, index))
-  );
-  return calls.map((call) =>
-    call.source === 'mcp' &&
-    call.server !== undefined &&
-    !labels.has(call.server)
-      ? { ...call, source: 'builtin' }
-      : call
-  );
+  const nativeNames = [
+    ...new Set([...accountServerNames, ...Object.keys(accountLabels)]),
+  ];
+  const labels = new Set([
+    ...servers.map((server, index) => mcpServerLabel(server, index)),
+    ...nativeNames,
+    ...Object.values(accountLabels),
+  ]);
+  // The generic parser splits on the first __. Account connector names can
+  // contain it too, so only the account's known prefixes establish identity.
+  function nativeTool(raw: string | undefined) {
+    if (!raw) return undefined;
+    const matches = nativeNames.filter(
+      (name) => raw.startsWith(`mcp__${name}__`) && raw.length > name.length + 7
+    );
+    if (matches.length > 1)
+      throw new Error(
+        `Ambiguous native MCP identity ${raw}: matches ${matches.join(', ')}. Rename the account connectors to remove the ambiguity; refusing attribution.`
+      );
+    const native = matches[0];
+    return native === undefined
+      ? undefined
+      : {
+          server: accountLabels[native] ?? native,
+          name: raw.slice(`mcp__${native}__`.length),
+        };
+  }
+  return calls.map((call) => {
+    const identity = nativeTool(call.rawName);
+    const server =
+      identity?.server ??
+      (call.server === undefined
+        ? undefined
+        : (accountLabels[call.server] ?? call.server));
+    const source =
+      call.source === 'mcp' && server !== undefined && !labels.has(server)
+        ? 'builtin'
+        : call.source;
+    return {
+      ...call,
+      ...(identity ? { name: identity.name } : {}),
+      ...(server !== undefined ? { server } : {}),
+      ...(source !== undefined ? { source } : {}),
+      ...(call.results
+        ? {
+            results: call.results.map((result) => ({
+              ...result,
+              ...(nativeTool(
+                result.server === undefined
+                  ? result.name
+                  : `mcp__${result.server}__${result.name}`
+              ) ??
+                (result.server
+                  ? { server: accountLabels[result.server] ?? result.server }
+                  : {})),
+            })),
+          }
+        : {}),
+    };
+  });
 }
 
 /**
@@ -1017,11 +1149,14 @@ export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
         "Linux: MST's Cowork image (`--runner docker`), or a prepared desktop with Claude Desktop",
       ],
       credentials: [
-        'macOS: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider; `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner',
+        'macOS default third-party: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider',
+        'macOS first-party: Cowork inference uses the existing signed-in Claude account; MST installs no inference credential',
+        'macOS both modes: `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner',
         'Linux image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`)',
       ],
       setup: [
-        'macOS: `mst cowork setup`, then sign in to Claude Desktop once',
+        'macOS default third-party: `mst cowork setup`, then sign in to Claude Desktop once',
+        'macOS first-party: use the installed Claude Desktop and Chrome signed in to the same Claude account, with its selected connectors connected; Chrome needs a loopback DevTools port (`MST_CLAUDE_AI_DEBUG_PORT`, default 9222). Do not run `mst cowork setup` for this mode',
         'Docker: `mst runner setup docker`',
       ],
     },
