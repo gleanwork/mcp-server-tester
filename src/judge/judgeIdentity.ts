@@ -51,7 +51,7 @@ function isBuiltin(reference: string): boolean {
  * declares or, for a plugin judge that declares none, its plugin's package
  * version. Undefined when it has neither.
  */
-export function judgeVersion(
+function judgeVersion(
   reference: string,
   definition: IdentifiedJudge
 ): string | undefined {
@@ -74,6 +74,24 @@ export function judgeIsVersioned(
   return (
     isBuiltin(reference) || judgeVersion(reference, definition) !== undefined
   );
+}
+
+/**
+ * The judge's version and whether it is unversioned, as `mst judges` lists
+ * them and `run.json` records them: the version a person reads, beside the
+ * identity hash.
+ */
+export function judgeVersionFields(
+  reference: string,
+  definition: IdentifiedJudge
+): { version?: string; unversioned?: true } {
+  const version = judgeVersion(reference, definition);
+  return {
+    ...(version !== undefined ? { version } : {}),
+    ...(judgeIsVersioned(reference, definition)
+      ? {}
+      : { unversioned: true as const }),
+  };
 }
 
 /**

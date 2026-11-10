@@ -3,6 +3,7 @@ import type { ChatgptDesktop } from './desktop.js';
 import { CHATGPT_PRODUCT } from './product.js';
 import { stringOption } from './driver.js';
 import { submitWithComputerUse } from './turn.js';
+import { macAppBundle } from '../installedApp.js';
 import {
   defaultChatgptAppPath,
   defaultChatgptBundleId,
@@ -39,6 +40,9 @@ export const chatgptMacos: ChatgptDesktop = {
       appPath: application.appPath,
       bundleId: application.bundleId,
     });
+  },
+  async app(application) {
+    return application.appPath ? macAppBundle(application.appPath) : undefined;
   },
   validate() {
     /* macOS needs no validation beyond the shared config checks. */

@@ -5,6 +5,7 @@ import type { ChatgptAppConfig } from './config.js';
 import type { ChatgptPlatformProfile } from '../chatgptSetup/linuxProfile.js';
 import type { ChatgptTurn, ChatgptTurnState } from './turn.js';
 import type { DesktopProduct } from './product.js';
+import type { ClientApp } from '../installedApp.js';
 
 /** Comparable application identity; `leaseKey` claims the app within this process. */
 interface ChatgptApplication {
@@ -41,6 +42,11 @@ export interface ChatgptDesktop {
     openPrompt: ChatgptPromptOpener
   ): Promise<SemanticDesktopTelemetry>;
   validate(config: ChatgptAppConfig): void;
+  /**
+   * The installed app and its version, which each trial records as
+   * `clientTelemetry.clientApp`; undefined when the app can't say.
+   */
+  app(application: ChatgptApplication): Promise<ClientApp | undefined>;
   /** How long a fresh native session may take to appear after submission. */
   readonly bindingWindowMs: number;
   /** Whether native transcripts escape Markdown in the recorded prompt. */

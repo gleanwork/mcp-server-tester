@@ -1,5 +1,5 @@
 {
-  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester/schema/history/v1/history.schema.json",
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester@2/schema/history/v1/history.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
@@ -100,6 +100,7 @@
                 "type": { "type": "string" },
                 "level": { "type": "string" },
                 "identity": { "type": "string" },
+                "version": { "type": "string" },
                 "optionsHash": { "type": "string" }
               },
               "required": ["type", "level", "optionsHash"],

@@ -39,19 +39,20 @@ const DEADLINE_TEST_MS = 15_000;
 // Scripts that finish return when the child exits; the default only bounds a
 // hang. Keep it well above Node startup under full-eval load (a 1.5s default
 // timed out before `init`, reading as `missing`). Deadline tests pass their own.
-function host(body: string, timeout = 10_000) {
+const ACME = [
+  {
+    label: 'acme',
+    transport: 'http' as const,
+    serverUrl: 'https://mcp.invalid',
+    auth: { accessToken: 'credential-canary' },
+  },
+];
+function host(body: string, timeout = 10_000, servers = ACME) {
   script(body);
   return getClient('claude-code').run!(
     {
       prompt: 'unchanged scenario',
-      servers: [
-        {
-          label: 'acme',
-          transport: 'http',
-          serverUrl: 'https://mcp.invalid',
-          auth: { accessToken: 'credential-canary' },
-        },
-      ],
+      servers,
       env: {
         PATH: directory,
         ENABLE_TOOL_SEARCH: 'true',
@@ -81,6 +82,34 @@ describe('Claude Code MCP startup', () => {
     expect(invalid.diagnostics.claudeStartup?.status).toBe('failed');
   });
 
+  it('records the Claude Code version its init event reported', async () => {
+    const result = await host(
+      `console.log(${JSON.stringify(line(init))}); console.log(JSON.stringify({type:'result',result:'answer'}));`
+    );
+    expect(result.telemetry?.clientApp).toEqual({
+      name: 'Claude Code',
+      version: '2.1.195',
+      source: 'installed',
+    });
+    // An init event without a usable version records no app.
+    const unversioned = await host(
+      `console.log(${JSON.stringify(line({ ...init, claude_code_version: 'x\ny' }))}); console.log(JSON.stringify({type:'result',result:'answer'}));`
+    );
+    expect(unversioned.telemetry?.clientApp).toBeUndefined();
+  });
+
+  it('records the version with no MCP servers, without checking their startup', async () => {
+    const result = await host(
+      `console.log(${JSON.stringify(line({ ...init, mcp_servers: [], tools: null }))}); console.log(JSON.stringify({type:'result',result:'answer'}));`,
+      undefined,
+      []
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.finalText).toBe('answer');
+    expect(result.diagnostics?.claudeStartup).toBeUndefined();
+    expect(result.telemetry?.clientApp).toMatchObject({ version: '2.1.195' });
+  });
+
   it.skipIf(process.platform === 'win32')(
     'stops owned descendants even when they ignore SIGTERM and hold pipes open',
     async () => {
@@ -93,6 +122,9 @@ describe('Claude Code MCP startup', () => {
           DEADLINE_MS
         );
         expect(result.error).toContain('timed out');
+        expect(result.telemetry?.clientApp).toMatchObject({
+          version: '2.1.195',
+        });
         const before = fs.readFileSync(marker, 'utf8');
         await new Promise((resolve) => setTimeout(resolve, 100));
         expect(fs.readFileSync(marker, 'utf8')).toBe(before);
@@ -269,6 +301,7 @@ setInterval(() => {}, 1000);
     );
     expect(result.error).toContain('exit code 7');
     expect(result.diagnostics?.claudeStartup?.status).toBe('ready');
+    expect(result.telemetry?.clientApp).toMatchObject({ version: '2.1.195' });
     expect(JSON.stringify(result)).not.toContain('credential-canary');
   });
 

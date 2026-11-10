@@ -12,6 +12,7 @@ import {
   type RunStore,
 } from './runStore.js';
 import { parseResultsFlag } from './builtinResultStores.js';
+import { RUN_SCHEMAS } from './runFormat.js';
 
 /** Objects in the mocked bucket, by full name. */
 const objects = new Map<string, Buffer>();
@@ -250,6 +251,41 @@ describe('fetching a stored run', () => {
       'transcripts/v/case/0.json',
     ]);
     expect(await fs.readdir(path.dirname(u.into))).toEqual([runId]);
+  });
+
+  it('names the manifest kind, and still fetches an rc.0 manifest without one', async () => {
+    const u = await uploaded();
+    expect(u.manifest).toMatchObject({ format: 1, kind: 'manifest', runId });
+    expect(RUN_SCHEMAS.manifest.safeParse(u.manifest).success).toBe(true);
+    const { kind: _kind, ...rc0 } = u.manifest as typeof u.manifest & {
+      kind?: string;
+    };
+    await u.store.put(u.manifestKey, JSON.stringify(rc0));
+    expect(
+      await fetchRun(u.store, { evalName: 'my-eval', runId, directory: u.into })
+    ).toEqual({ files: 2, bytes: 15 });
+  });
+
+  it('says to upgrade MST for a manifest a newer MST wrote', async () => {
+    const u = await uploaded();
+    const fetch = () =>
+      fetchRun(u.store, { evalName: 'my-eval', runId, directory: u.into });
+    await u.store.put(
+      u.manifestKey,
+      JSON.stringify({ ...u.manifest, format: 2, signature: 'x' })
+    );
+    await expect(fetch()).rejects.toThrow(/at format.*Upgrade MST to read it/s);
+    // A field it doesn't know, beside the format it does, is kept and read,
+    // even one named like a failure.
+    await u.store.put(
+      u.manifestKey,
+      JSON.stringify({ ...u.manifest, signature: 'x', error: 'none' })
+    );
+    await expect(fetch()).resolves.toEqual({ files: 2, bytes: 15 });
+    // Not JSON at all: no hint.
+    await fs.rm(u.into, { recursive: true, force: true });
+    await u.store.put(u.manifestKey, '{');
+    await expect(fetch()).rejects.toThrow("manifest.json isn't JSON.");
   });
 
   it("refuses a run without its manifest, a file that doesn't match it, and a path that leaves the run", async () => {

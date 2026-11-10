@@ -378,6 +378,30 @@ describe('stored tool optimization', () => {
     expect(record.rounds).toEqual([]);
   }, 120_000);
 
+  it('runs a round against an rc.0 baseline, whose judges record no version', async () => {
+    const { configPath } = await evalDir({
+      judges: [{ type: 'usecase/judge/keywords', keywords: ['outage'] }],
+    });
+    const optimization = await startToolOptimization({
+      evalConfig: target(configPath),
+    });
+    const [baselineId] = await runIds(optimization.evalDirectory);
+    const runFile = path.join(
+      runsDirectory(optimization.evalDirectory),
+      baselineId!,
+      'run.json'
+    );
+    await editJson(runFile, (run) => {
+      const judges = run.judges as Array<Record<string, unknown>>;
+      expect(judges[0]?.version).toBe('1.0.0');
+      run.judges = judges.map(({ version: _version, ...rest }) => rest);
+    });
+    const reopened = await openToolOptimization({
+      evalConfig: target(configPath),
+    });
+    await expect(reopened.tryCandidates([concise])).resolves.toBeDefined();
+  }, 120_000);
+
   it("refuses a round when a judge's options changed since the baseline", async () => {
     const { configPath } = await evalDir({
       judges: [{ type: 'usecase/judge/keywords', keywords: ['outage'] }],
