@@ -606,7 +606,7 @@ async function drive<T>(promise: Promise<T>): Promise<T> {
     () => (settled = true),
     () => (settled = true)
   );
-  for (let step = 0; step < 400 && !settled; step++) {
+  while (!settled) {
     await new Promise((resolve) => setImmediate(resolve));
     await vi.advanceTimersByTimeAsync(100);
   }
