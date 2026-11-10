@@ -7,6 +7,8 @@
 # `desktop-session --dirs-only` (as root) only makes the private directories
 # and exits: a grade container has no desktop, but its worker's HOME and
 # TMPDIR (the image's ENV) are on the same tmpfs.
+# `--prepare` initializes the same directories before a runtime hook.
+# `--start-prepared` supervises startup and preserves hook-written files.
 set -euo pipefail
 
 if [[ "$(id -u)" == 0 ]]; then
@@ -14,7 +16,24 @@ if [[ "$(id -u)" == 0 ]]; then
   for dir in session tokens home tmp evidence; do
     install -d -o mst -g mst -m 0700 "/run/mst/${dir}"
   done
-  [[ "${1:-}" == --dirs-only ]] && exit 0
+  [[ "${1:-}" == --dirs-only || "${1:-}" == --prepare ]] && exit 0
+  if [[ "${1:-}" == --start-prepared ]]; then
+    # Keep raw diagnostics private: they may contain plugin-managed secrets.
+    # Only the numeric exit receipt crosses back to the runner.
+    umask 077
+    log=/run/mst/session
+    rm -f "${log}/ready" "${log}/failed" "${log}/startup-exit" \
+      "${log}/startup-exit.new" "${log}/startup.log"
+    if "$0" --prepared > "${log}/startup.log" 2>&1; then
+      status=0
+    else
+      status=$?
+    fi
+    printf '%s\n' "${status}" > "${log}/startup-exit.new"
+    mv -f "${log}/startup-exit.new" "${log}/startup-exit"
+    touch "${log}/failed"
+    exit "${status}"
+  fi
   exec setpriv --reuid=mst --regid=mst --init-groups --reset-env \
     env PATH="${PATH}" HOME="${HOME}" USER=mst LANG="${LANG}" \
     DISPLAY="${DISPLAY}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS}" \

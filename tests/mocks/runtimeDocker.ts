@@ -1,21 +1,36 @@
-#!/usr/bin/env -S node --import tsx
 /** Offline CLI boundary for the actual Docker runner's runtime lifecycle tests. */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import packageJson from '../../package.json' with { type: 'json' };
 
 const root = process.env.RUNTIME_DOCKER_ROOT!;
 const invoked = path.basename(process.argv[1]!);
-// Stand-ins for the image entrypoint's directory-only invocation.
-if (invoked === 'id') {
-  console.log('0');
-  process.exit(0);
-}
-if (invoked === 'install') {
+// Image scripts run only against redirected scratch paths, never the host.
+if (['id', 'install', 'chown', 'chmod', 'setpriv'].includes(invoked)) {
+  const args = process.argv.slice(2);
   await fs.appendFile(
     path.join(root, 'image-calls.jsonl'),
-    `${JSON.stringify(process.argv.slice(2))}\n`
+    `${JSON.stringify({ invoked, args })}\n`
   );
+  if (invoked === 'id') console.log('0');
+  else if (invoked === 'setpriv') {
+    if (process.env.RUNTIME_IMAGE_EXIT_CODE) {
+      console.error(process.env.RUNTIME_IMAGE_DIAGNOSTIC);
+      process.exit(Number(process.env.RUNTIME_IMAGE_EXIT_CODE));
+    }
+  } else {
+    let index = 0;
+    if (invoked === 'install') {
+      while (args[index]?.startsWith('-'))
+        index += args[index] === '-d' ? 1 : 2;
+    } else index = 1;
+    for (const target of args.slice(index)) {
+      if (!path.resolve(target).startsWith(`${root}${path.sep}`))
+        throw new Error('Image fixture refused a non-scratch path');
+      if (invoked === 'install') await fs.mkdir(target, { recursive: true });
+    }
+  }
   process.exit(0);
 }
 
@@ -75,8 +90,13 @@ function fail(message: string): never {
 if (command === 'ps' || command === 'logs') {
   // No orphan containers and no logs.
 } else if (command === 'info') console.log(`${8 * 1024 ** 3} 4`);
-else if (command === 'image') console.log('sha256:runtime-test');
-else if (command === 'inspect') console.log('false');
+else if (command === 'image') {
+  console.log(
+    args.join(' ').includes('runtime-preparation')
+      ? (process.env.RUNTIME_DOCKER_CAPABILITY ?? '1')
+      : 'sha256:runtime-test'
+  );
+} else if (command === 'inspect') console.log('false');
 else if (command === 'run') {
   const name = rest[rest.indexOf('--name') + 1]!;
   await fs.mkdir(container(name), { recursive: true });
@@ -110,8 +130,49 @@ else if (command === 'run') {
   const argv = rest.slice(index + 1);
   await fs.access(container(name));
   if (argv[0] === '/opt/mst/bin/desktop-session') {
-    if (argv[1] === '--dirs-only') await directories(name);
-    else await desktop(name);
+    if (process.env.RUNTIME_DOCKER_IMAGE_SESSION) {
+      const imageRoot = process.env.RUNTIME_DOCKER_IMAGE_ROOT!;
+      if (imageRoot !== container(name))
+        fail('image script must use the scratch container root');
+      const session = spawnSync(
+        'bash',
+        [process.env.RUNTIME_DOCKER_IMAGE_SESSION, ...argv.slice(1)],
+        {
+          timeout: 3000,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            RUNTIME_DOCKER_ROOT: imageRoot,
+            PATH: `${imageRoot}/bin:${process.env.PATH}`,
+            HOME: `${imageRoot}/home/mst`,
+            DISPLAY: ':99',
+            LANG: 'C',
+            DBUS_SESSION_BUS_ADDRESS: `unix:path=${imageRoot}/bus`,
+            XDG_RUNTIME_DIR: `${imageRoot}/session`,
+            GNOME_KEYRING_CONTROL: `${imageRoot}/keyring`,
+            AT_SPI_BUS_ADDRESS: `unix:path=${imageRoot}/a11y`,
+            MST_INFERENCE_GATEWAY_URL: '',
+          },
+        }
+      );
+      // A detached exec succeeds at dispatch even when its session exits.
+      // Output stays in the image's private log, never on this CLI boundary.
+      if (!rest.includes('--detach') && session.status !== 0)
+        fail('image initialization failed');
+    } else if (argv[1] === '--dirs-only' || argv[1] === '--prepare') {
+      if (
+        argv[1] === '--prepare' &&
+        process.env.RUNTIME_DOCKER_WAIT_INITIALIZE === '1'
+      )
+        await new Promise(() => setInterval(() => {}, 1000));
+      await directories(name);
+    } else if (process.env.RUNTIME_DOCKER_DESKTOP === 'exited') {
+      await fs.writeFile(inside(name, '/run/mst/session/startup-exit'), '23');
+      await fs.writeFile(
+        inside(name, '/run/mst/session/startup.log'),
+        'synthetic-opaque-runtime-input'
+      );
+    } else await desktop(name);
   } else if (argv[0] === 'mkdir' || argv[0] === 'install') {
     await fs.mkdir(inside(name, argv.at(-1)!), { recursive: true });
   } else if (argv[0] === 'chown' || argv[0] === 'pkill') {
@@ -130,6 +191,13 @@ else if (command === 'run') {
       inside(name, '/run/mst/opaque-runtime'),
       Buffer.concat(input)
     );
+  } else if (argv[0] === 'channel-probe') {
+    if (process.env.RUNTIME_DOCKER_WAIT_STDIN === '1') {
+      for await (const _chunk of process.stdin) {
+        /* drain */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   } else if (argv[0] === 'runtime-cleanup') {
     await fs.access(inside(name, '/run/mst/opaque-runtime'));
     if (process.env.RUNTIME_DOCKER_CLEANUP_FAIL === '1')
@@ -154,11 +222,22 @@ else if (command === 'run') {
       await fs.writeFile(path.join(root, 'waiting-ready'), '');
       await new Promise(() => setInterval(() => {}, 1000));
     }
-    console.log(
-      (await exists(inside(name, '/run/mst/session/ready')))
-        ? 'ready'
-        : 'failed'
-    );
+    const mode = process.env.RUNTIME_DOCKER_READY_MODE;
+    if (mode === 'starting' || mode === 'ready-then-block') {
+      console.log(mode === 'starting' ? 'starting' : 'ready');
+      await fs.writeFile(path.join(root, 'readiness-output'), '');
+      if (mode === 'ready-then-block')
+        await new Promise(() => setInterval(() => {}, 1000));
+    } else if (await exists(inside(name, '/run/mst/session/startup-exit'))) {
+      console.log(
+        `exited:${await fs.readFile(inside(name, '/run/mst/session/startup-exit'), 'utf8')}`
+      );
+    } else
+      console.log(
+        (await exists(inside(name, '/run/mst/session/ready')))
+          ? 'ready'
+          : 'failed'
+      );
   } else if (argv[0] === 'tail') {
     console.log('synthetic desktop failure');
   } else if (argv[0] === 'mst') {

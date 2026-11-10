@@ -114,8 +114,11 @@ export function dockerClient(client: string | undefined): DockerClient {
 
 /** Inside the image (docker/cowork-linux/Dockerfile). */
 const USER = 'mst';
-/** Both images' entrypoint; `--dirs-only` makes only runtime directories. */
+/** Both images' entrypoint; its preparation protocol is opt-in. */
 const DESKTOP_SESSION = '/opt/mst/bin/desktop-session';
+const RUNTIME_PREPARATION_LABEL = 'io.glean.mst.runtime-preparation';
+const RUNTIME_PREPARATION_VERSION = '1';
+const RUNTIME_INITIALIZATION_TIMEOUT_MS = 60_000;
 const WORK_DIR = '/home/mst/work';
 /** The container's tmpfs, and the worker's tokens directory on it (MST_TOKENS_DIR). */
 const RUN_DIR = '/run/mst';
@@ -591,45 +594,79 @@ async function waitForDesktop(
   context: string | undefined,
   name: string,
   timeoutS: number,
-  signal: AbortSignal
+  signal: AbortSignal,
+  prepared = false
 ): Promise<void> {
   const deadline = Date.now() + timeoutS * 1000;
-  while (Date.now() < deadline) {
-    if (signal.aborted) throw new Error('The run was cancelled.');
-    const state = await docker(
-      context,
-      [
-        'exec',
-        name,
-        'sh',
-        '-c',
-        `if [ -e ${SESSION_DIR}/ready ]; then echo ready; elif [ -e ${SESSION_DIR}/failed ]; then echo failed; else echo starting; fi`,
-      ],
-      { signal }
-    );
-    signal.throwIfAborted();
-    const status = state.stdout.trim();
-    if (status === 'ready') return;
-    if (status === 'failed' || state.code !== 0) {
-      const why =
-        status === 'failed'
-          ? (
-              await docker(context, [
-                'exec',
-                name,
-                'tail',
-                '-n',
-                '3',
-                `${SESSION_DIR}/restart.log`,
-              ])
-            ).stdout
-          : (await docker(context, ['logs', '--tail', '5', name])).stderr ||
-            state.stderr;
-      throw new Error(
-        `The desktop in container ${name} didn't come up: ${why.trim().replace(/\s+/g, ' ')}`
+  const waiting = AbortSignal.any([
+    signal,
+    AbortSignal.timeout(timeoutS * 1000),
+  ]);
+  try {
+    while (Date.now() < deadline) {
+      if (signal.aborted) throw new Error('The run was cancelled.');
+      const state = await docker(
+        context,
+        [
+          'exec',
+          name,
+          'sh',
+          '-c',
+          `${prepared ? `if [ -e ${SESSION_DIR}/startup-exit ]; then printf 'exited:'; cat ${SESSION_DIR}/startup-exit; elif ` : 'if '}[ -e ${SESSION_DIR}/ready ]; then echo ready; elif [ -e ${SESSION_DIR}/failed ]; then echo failed; else echo starting; fi`,
+        ],
+        { signal: waiting }
+      );
+      signal.throwIfAborted();
+      if (waiting.aborted) break;
+      const status = state.stdout.trim();
+      const exited = prepared ? /^exited:(\d{1,3})$/.exec(status) : null;
+      if (exited) {
+        throw new Error(
+          `The desktop in container ${name} didn't come up: prepared desktop session exited with status ${exited[1]} (private diagnostics: ${SESSION_DIR}/startup.log).`
+        );
+      }
+      if (status === 'ready') return;
+      if (status === 'failed' || state.code !== 0) {
+        // A plugin may put secrets in desktop output too. Never copy its raw
+        // logs or Docker stderr into shard metadata, even on a startup failure.
+        if (prepared)
+          throw new Error(
+            `The desktop in container ${name} didn't come up during prepared startup (private diagnostics: ${SESSION_DIR}/startup.log and restart.log).`
+          );
+        const why =
+          status === 'failed'
+            ? (
+                await docker(
+                  context,
+                  [
+                    'exec',
+                    name,
+                    'tail',
+                    '-n',
+                    '3',
+                    `${SESSION_DIR}/restart.log`,
+                  ],
+                  { signal: waiting }
+                )
+              ).stdout
+            : (
+                await docker(context, ['logs', '--tail', '5', name], {
+                  signal: waiting,
+                })
+              ).stderr || state.stderr;
+        throw new Error(
+          `The desktop in container ${name} didn't come up: ${why.trim().replace(/\s+/g, ' ')}`
+        );
+      }
+      await sleep(
+        Math.min(3000, Math.max(0, deadline - Date.now())),
+        undefined,
+        { signal: waiting }
       );
     }
-    await sleep(3000, undefined, { signal });
+  } catch (error) {
+    if (signal.aborted) throw new Error('The run was cancelled.');
+    if (!waiting.aborted) throw error;
   }
   throw new Error(
     `The desktop in container ${name} wasn't ready within ${timeoutS} s (--runner-option readyTimeout).`
@@ -680,7 +717,10 @@ function containerChannel(
         stdout: child.stdout,
         stderr: child.stderr,
         exit: new Promise<number>((resolve) => {
-          child.on('error', () => resolve(-1));
+          child.on('error', () => {
+            signal.removeEventListener('abort', kill);
+            resolve(-1);
+          });
           child.on('close', (code) => {
             signal.removeEventListener('abort', kill);
             resolve(code ?? -1);
@@ -991,6 +1031,29 @@ function openDocker(
         ['image', 'inspect', '--format', '{{.Id}}', image],
         `Finding image ${image} (build it with \`mst runner setup docker\`)`
       );
+      if (deferredDesktop) {
+        // Never execute an unknown --prepare/--dirs-only: old images ignore
+        // arguments and start a blocking desktop instead.
+        const capability = await docker(
+          dockerContext,
+          [
+            'image',
+            'inspect',
+            '--format',
+            `{{index .Config.Labels "${RUNTIME_PREPARATION_LABEL}"}}`,
+            image,
+          ],
+          { signal }
+        );
+        if (signal.aborted) throw new Error('The run was cancelled.');
+        if (
+          capability.code !== 0 ||
+          capability.stdout.trim() !== RUNTIME_PREPARATION_VERSION
+        )
+          throw new Error(
+            `Image ${image} must advertise runtime preparation protocol ${RUNTIME_PREPARATION_VERSION} (${RUNTIME_PREPARATION_LABEL}=${RUNTIME_PREPARATION_VERSION}). Rebuild the stock image with \`mst runner setup docker\` on this context, or upgrade the custom image; see docs/evaluation-framework.md#plugins.`
+          );
+      }
       // Guarded from here: removed at exit even if this run never disposes it.
       claimContainer(dockerContext, name);
       claimed = true;
@@ -1023,18 +1086,30 @@ function openDocker(
         signal,
       });
       if (deferredDesktop) {
-        await dockerOk(
-          dockerContext,
-          ['exec', '-u', 'root', name, DESKTOP_SESSION, '--dirs-only'],
-          'Creating the private directories',
-          { signal }
-        );
-        await dockerOk(
-          dockerContext,
-          ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
-          'Creating the work directory',
-          { signal }
-        );
+        const initializing = AbortSignal.any([
+          signal,
+          AbortSignal.timeout(RUNTIME_INITIALIZATION_TIMEOUT_MS),
+        ]);
+        try {
+          await dockerOk(
+            dockerContext,
+            ['exec', '-u', 'root', name, DESKTOP_SESSION, '--prepare'],
+            'Initializing the private directories and base settings',
+            { signal: initializing }
+          );
+          await dockerOk(
+            dockerContext,
+            ['exec', '-u', USER, name, 'mkdir', '-p', WORK_DIR],
+            'Creating the work directory',
+            { signal: initializing }
+          );
+        } catch (cause) {
+          if (signal.aborted) throw new Error('The run was cancelled.');
+          throw new Error(
+            `Runtime initialization ${initializing.aborted ? 'timed out after 60 s' : 'failed'} for container ${name}.`,
+            { cause }
+          );
+        }
       }
       if (secret) {
         await deliverToken(
@@ -1072,14 +1147,37 @@ function openDocker(
       }
       if (deferredDesktop) {
         signal.throwIfAborted();
-        await dockerOk(
+        const started = await docker(
           dockerContext,
-          ['exec', '--detach', '-u', 'root', name, DESKTOP_SESSION],
-          `Starting the desktop in container ${name}`,
-          { signal }
+          [
+            'exec',
+            '--detach',
+            '-u',
+            'root',
+            name,
+            DESKTOP_SESSION,
+            '--start-prepared',
+          ],
+          {
+            signal: AbortSignal.any([
+              signal,
+              AbortSignal.timeout(RUNTIME_INITIALIZATION_TIMEOUT_MS),
+            ]),
+          }
         );
+        if (signal.aborted) throw new Error('The run was cancelled.');
+        if (started.code !== 0)
+          throw new Error(
+            `Starting the prepared desktop in container ${name} failed.`
+          );
       }
-      await waitForDesktop(dockerContext, name, readyTimeoutS, signal);
+      await waitForDesktop(
+        dockerContext,
+        name,
+        readyTimeoutS,
+        signal,
+        deferredDesktop
+      );
       if (!deferredDesktop)
         await dockerOk(
           dockerContext,
@@ -1136,7 +1234,7 @@ function openDocker(
       }
       // Diagnose after cleanup, never hold a cancelled runtime for a probe.
       const cause =
-        limits && !signal.aborted
+        limits && (!deferredDesktop || claimed) && !signal.aborted
           ? await diagnose(dockerContext, name, 'collect', limits)().catch(
               () => undefined
             )

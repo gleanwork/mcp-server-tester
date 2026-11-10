@@ -8,13 +8,31 @@
 #   MST_INFERENCE_AUTH_SCHEME   how the token is sent (default: bearer)
 #   MST_INFERENCE_MODELS        comma-separated models Claude Desktop offers
 # The token itself is read from /run/mst/inference-token when Claude asks.
-# `--dirs-only` as root makes only the private runtime directories and exits.
+# `--dirs-only` makes only directories. `--prepare` also writes base settings.
+# `--start-prepared` supervises startup without overwriting prepared settings.
 set -euo pipefail
 
 if [[ "$(id -u)" == 0 ]]; then
   install -d -o mst -g mst -m 0700 /run/mst /run/mst/session /run/mst/tokens \
     /run/mst/settings
   [[ "${1:-}" == --dirs-only ]] && exit 0
+  if [[ "${1:-}" == --start-prepared ]]; then
+    # Keep raw diagnostics private: they may contain plugin-managed secrets.
+    # Only the numeric exit receipt crosses back to the runner.
+    umask 077
+    log=/run/mst/session
+    rm -f "${log}/ready" "${log}/failed" "${log}/startup-exit" \
+      "${log}/startup-exit.new" "${log}/startup.log"
+    if "$0" --prepared > "${log}/startup.log" 2>&1; then
+      status=0
+    else
+      status=$?
+    fi
+    printf '%s\n' "${status}" > "${log}/startup-exit.new"
+    mv -f "${log}/startup-exit.new" "${log}/startup-exit"
+    touch "${log}/failed"
+    exit "${status}"
+  fi
   # The devices are this container's own nodes: opening them here changes
   # nothing on the host.
   for device in /dev/kvm /dev/vhost-net /dev/vhost-vsock /dev/net/tun; do
@@ -22,14 +40,17 @@ if [[ "$(id -u)" == 0 ]]; then
   done
   # The staged settings MST writes over (MST_COWORK_SETTINGS_FILE);
   # restart-desktop installs a root-owned copy for Claude Desktop.
-  staging=/run/mst/settings/managed-settings.json
-  if [[ -n "${MST_INFERENCE_GATEWAY_URL:-}" ]]; then
-    node /opt/mst/bin/base-settings.mjs > "${staging}"
-  else
-    echo '{}' > "${staging}"
+  if [[ "${1:-}" != --prepared ]]; then
+    staging=/run/mst/settings/managed-settings.json
+    if [[ -n "${MST_INFERENCE_GATEWAY_URL:-}" ]]; then
+      node /opt/mst/bin/base-settings.mjs > "${staging}"
+    else
+      echo '{}' > "${staging}"
+    fi
+    chown mst:mst "${staging}"
+    chmod 0600 "${staging}"
   fi
-  chown mst:mst "${staging}"
-  chmod 0600 "${staging}"
+  [[ "${1:-}" == --prepare ]] && exit 0
   # The VM bundle the image seeded (bin/seed-vm-bundle), where Claude Desktop
   # keeps its download cache: each file, and its origin (the bundle id), so
   # Claude decompresses it rather than downloading it. A failed first VM
