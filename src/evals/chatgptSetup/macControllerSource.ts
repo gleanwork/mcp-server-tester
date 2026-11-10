@@ -49,15 +49,18 @@ case "start":
     }
     let options = NSWorkspace.OpenConfiguration()
     options.activates = true
+    // Only MST's managed batch may select a rollout trace root. Never inherit
+    // an operator's trace path when the client disabled trace capture.
+    var launchEnvironment = ProcessInfo.processInfo.environment
+    launchEnvironment.removeValue(forKey: "CODEX_ROLLOUT_TRACE_ROOT")
     let data = FileHandle.standardInput.readDataToEndOfFile()
     if !data.isEmpty {
         guard let environment = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
             fputs("Invalid launch environment.\n", stderr); exit(1)
         }
-        if !environment.isEmpty {
-            options.environment = ProcessInfo.processInfo.environment.merging(environment) { _, configured in configured }
-        }
+        launchEnvironment.merge(environment) { _, configured in configured }
     }
+    options.environment = launchEnvironment
     var done = false
     var succeeded = false
     var launchError: NSError?
