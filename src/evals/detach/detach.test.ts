@@ -14,8 +14,10 @@ import {
   runPlan,
   type CoordinatorChild,
 } from './coordinate.js';
+import type { RunStore } from '../runStore.js';
 import {
   DetachPlanSchema,
+  detachKeys,
   findDetachId,
   newDetachId,
   readStatus,
@@ -306,7 +308,6 @@ describe('the coordinator', () => {
 
   it('stops the command under way when the run is cancelled', async () => {
     const store = fileRunStore(await tempDir());
-    await store.put(`cowork/detached/${plan().id}/cancel`, 'now');
     let release: () => void = () => {};
     const blocked = new Promise<void>((resolve) => (release = resolve));
     let interrupted = 0;
@@ -315,6 +316,8 @@ describe('the coordinator', () => {
       machine: 'vm-1',
       mst: () => ({
         lines: (async function* () {
+          // Cancelled once the command is under way.
+          await store.put(`cowork/detached/${plan().id}/cancel`, 'now');
           await blocked;
           yield 'Output: /opt/mst/results/runs/20261020T120100Z-aaaaaa';
         })(),
@@ -336,6 +339,108 @@ describe('the coordinator', () => {
       runId: '20261020T120100Z-aaaaaa',
     });
     expect(status.gradedRunId).toBeUndefined();
+  });
+
+  it('starts no command when the run was cancelled before it started', async () => {
+    const store = fileRunStore(await tempDir());
+    await store.put(`cowork/detached/${plan().id}/cancel`, 'now');
+    const started: string[][] = [];
+    const status = await runPlan(plan(), paths, undefined, {
+      store,
+      machine: 'vm-1',
+      mst: (args) => {
+        started.push(args);
+        throw new Error('no command should start');
+      },
+      log: () => {},
+      readLog: async () => '',
+      finish: async () => {},
+      // The step checks for itself; it needs no heartbeat.
+      heartbeatMs: 60_000,
+    });
+    expect(started).toEqual([]);
+    expect(status.state).toBe('cancelled');
+    expect(status.error).toBeUndefined();
+  });
+
+  it('starts no command after a cancel the heartbeat saw while the step saved its status', async () => {
+    const inner = fileRunStore(await tempDir());
+    const keys = detachKeys('cowork', plan().id);
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    // The collect step's status write waits until the heartbeat has seen the
+    // cancel, which is written once that write starts: the heartbeat sees it
+    // while no command runs.
+    const store: RunStore = {
+      location: inner.location,
+      get: (key) => inner.get(key),
+      list: (prefix, options) => inner.list(prefix, options),
+      put: async (key, body) => {
+        if (
+          !held &&
+          key === keys.status &&
+          String(body).includes('"phase": "collect"')
+        ) {
+          held = true;
+          await inner.put(keys.cancel, 'now');
+          await released;
+        }
+        await inner.put(key, body);
+      },
+    };
+    const started: string[][] = [];
+    const status = await runPlan(plan(), paths, undefined, {
+      store,
+      machine: 'vm-1',
+      mst: (args) => {
+        started.push(args);
+        throw new Error('no command should start');
+      },
+      log: (line) => {
+        if (line.includes('cancel requested')) release();
+      },
+      readLog: async () => '',
+      finish: async () => {},
+      heartbeatMs: 1,
+    });
+    expect(held).toBe(true);
+    expect(started).toEqual([]);
+    expect(status.state).toBe('cancelled');
+  });
+
+  it('starts neither resume nor grade after a cancel between commands, and keeps what is missing', async () => {
+    const store = fileRunStore(await tempDir());
+    const calls: string[][] = [];
+    const status = await runPlan(plan(), paths, undefined, {
+      store,
+      machine: 'vm-1',
+      mst: (args) => {
+        calls.push(args);
+        return {
+          lines: (async function* () {
+            yield '[mst] 1 trials are missing: the run is partial.';
+            yield 'Output: /opt/mst/results/runs/20261020T120100Z-aaaaaa';
+            // Cancelled as the collect ends, before the resume.
+            await store.put(`cowork/detached/${plan().id}/cancel`, 'now');
+          })(),
+          exit: Promise.resolve(0),
+          interrupt: () => {},
+        };
+      },
+      log: () => {},
+      readLog: async () => '',
+      finish: async () => {},
+      heartbeatMs: 60_000,
+    });
+    expect(calls).toHaveLength(1);
+    expect(status).toMatchObject({
+      state: 'cancelled',
+      runId: '20261020T120100Z-aaaaaa',
+      missing: true,
+    });
+    expect(status.gradedRunId).toBeUndefined();
+    expect(status.error).toBeUndefined();
   });
 });
 

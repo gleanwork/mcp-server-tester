@@ -197,13 +197,18 @@ export async function runPlan(
   };
   let current: CoordinatorChild | undefined;
   let cancelled = false;
+  /** Notes a requested cancel, and stops the command under way, if any. */
+  const checkCancel = async () => {
+    const requested = await deps.store.get(keys.cancel).catch(() => null);
+    // Read after the await: another check may have seen it meanwhile.
+    if (cancelled || !requested) return;
+    cancelled = true;
+    deps.log('[mst coordinate] cancel requested: stopping the run');
+    current?.interrupt();
+  };
   const heartbeat = setInterval(() => {
     void (async () => {
-      if (!cancelled && (await deps.store.get(keys.cancel).catch(() => null))) {
-        cancelled = true;
-        deps.log('[mst coordinate] cancel requested: stopping the run');
-        current?.interrupt();
-      }
+      await checkCancel();
       await save();
     })();
   }, deps.heartbeatMs ?? HEARTBEAT_MS);
@@ -219,6 +224,11 @@ export async function runPlan(
   ) => {
     status.phase = phase;
     await save();
+    // A cancel the heartbeat saw while no command ran had nothing to stop:
+    // don't start one. Nothing awaits between this check and `current`, so a
+    // later cancel finds the command to stop.
+    await checkCancel();
+    if (cancelled) throw new Error('cancelled');
     deps.log(`[mst coordinate] mst ${args.join(' ')}`);
     current = deps.mst(args);
     let output: string | undefined;
@@ -255,11 +265,14 @@ export async function runPlan(
       const runDir = first.output;
       let { partial } = first;
       status.runId = path.basename(runDir);
+      // After each command, so a later step that throws (cancelled, or
+      // failed) leaves what the run is missing.
+      status.missing = partial;
       for (let attempt = 0; partial && attempt < plan.resumes; attempt++) {
         if (cancelled) break;
         ({ partial } = await step('resume', commands.resume(runDir)));
+        status.missing = partial;
       }
-      status.missing = partial;
       if (plan.gradeRunner && !cancelled) {
         const graded = await step('grade', commands.grade(status.runId));
         status.gradedRunId = path.basename(graded.output);
