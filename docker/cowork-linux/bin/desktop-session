@@ -13,34 +13,35 @@
 set -euo pipefail
 
 if [[ "$(id -u)" == 0 ]]; then
-  install -d -o mst -g mst -m 0700 /run/mst /run/mst/session /run/mst/tokens \
-    /run/mst/settings
-  [[ "${1:-}" == --dirs-only ]] && exit 0
   if [[ "${1:-}" == --start-prepared ]]; then
-    # Keep raw diagnostics private: they may contain plugin-managed secrets.
-    # Only the numeric exit receipt crosses back to the runner.
-    umask 077
-    log=/run/mst/session
-    rm -f "${log}/ready" "${log}/failed" "${log}/startup-exit" \
-      "${log}/startup-exit.new" "${log}/startup.log"
-    if "$0" --prepared > "${log}/startup.log" 2>&1; then
+    # /run is root-owned. Never publish through /run/mst: the desktop user
+    # can replace its directories or plant symlinks while the session runs.
+    install -d -o root -g root -m 0755 /run/mst-root
+    umask 022
+    receipt=/run/mst-root/startup-exit
+    rm -f "${receipt}" "${receipt}.new"
+    # The dropped child opens its own private log. Even failures before the
+    # drop expose only a numeric receipt, never raw output, to the runner.
+    if "$0" --prepared > /dev/null 2>&1; then
       status=0
     else
       status=$?
     fi
-    printf '%s\n' "${status}" > "${log}/startup-exit.new"
-    mv -f "${log}/startup-exit.new" "${log}/startup-exit"
-    touch "${log}/failed"
+    printf '%s\n' "${status}" > "${receipt}.new"
+    mv -f "${receipt}.new" "${receipt}"
     exit "${status}"
   fi
-  # The devices are this container's own nodes: opening them here changes
-  # nothing on the host.
-  for device in /dev/kvm /dev/vhost-net /dev/vhost-vsock /dev/net/tun; do
-    [[ -e "${device}" ]] && chmod 0666 "${device}"
-  done
-  # The staged settings MST writes over (MST_COWORK_SETTINGS_FILE);
-  # restart-desktop installs a root-owned copy for Claude Desktop.
   if [[ "${1:-}" != --prepared ]]; then
+    install -d -o mst -g mst -m 0700 /run/mst /run/mst/session /run/mst/tokens \
+      /run/mst/settings
+    [[ "${1:-}" == --dirs-only ]] && exit 0
+    # The devices are this container's own nodes: opening them here changes
+    # nothing on the host.
+    for device in /dev/kvm /dev/vhost-net /dev/vhost-vsock /dev/net/tun; do
+      [[ -e "${device}" ]] && chmod 0666 "${device}"
+    done
+    # The staged settings MST writes over (MST_COWORK_SETTINGS_FILE);
+    # restart-desktop installs a root-owned copy for Claude Desktop.
     staging=/run/mst/settings/managed-settings.json
     if [[ -n "${MST_INFERENCE_GATEWAY_URL:-}" ]]; then
       node /opt/mst/bin/base-settings.mjs > "${staging}"
@@ -49,34 +50,36 @@ if [[ "$(id -u)" == 0 ]]; then
     fi
     chown mst:mst "${staging}"
     chmod 0600 "${staging}"
-  fi
-  [[ "${1:-}" == --prepare ]] && exit 0
-  # The VM bundle the image seeded (bin/seed-vm-bundle), where Claude Desktop
-  # keeps its download cache: each file, and its origin (the bundle id), so
-  # Claude decompresses it rather than downloading it. A failed first VM
-  # start then lets the guest finish booting instead of reinstalling it:
-  # the files' checksums were checked when the image was built.
-  if [[ -s /opt/cowork-vm/bundle ]]; then
-    bundle=/home/mst/.config/Claude-3p/vm_bundles/claudevm.bundle
-    sha="$(cat /opt/cowork-vm/bundle)"
-    install -d -o mst -g mst -m 0700 /home/mst/.config \
-      /home/mst/.config/Claude-3p /home/mst/.config/Claude-3p/vm_bundles "${bundle}"
-    for file in /opt/cowork-vm/*.zst; do
-      name="$(basename "${file}")"
-      ln -sf "${file}" "${bundle}/${name}"
-      printf '%s' "${sha}" > "${bundle}/.${name}.origin"
-    done
-    touch "${bundle}/.auto_reinstall_attempted"
-    chown -h mst:mst "${bundle}"/* "${bundle}"/.[!.]*
-    chmod 0600 "${bundle}"/.[!.]*
+    # Seed the VM download cache before a hook can change mst-owned paths.
+    # Default startup initializes it here too, as before.
+    if [[ -s /opt/cowork-vm/bundle ]]; then
+      bundle=/home/mst/.config/Claude-3p/vm_bundles/claudevm.bundle
+      sha="$(cat /opt/cowork-vm/bundle)"
+      install -d -o mst -g mst -m 0700 /home/mst/.config \
+        /home/mst/.config/Claude-3p /home/mst/.config/Claude-3p/vm_bundles "${bundle}"
+      for file in /opt/cowork-vm/*.zst; do
+        name="$(basename "${file}")"
+        ln -sf "${file}" "${bundle}/${name}"
+        printf '%s' "${sha}" > "${bundle}/.${name}.origin"
+      done
+      touch "${bundle}/.auto_reinstall_attempted"
+      chown -h mst:mst "${bundle}"/* "${bundle}"/.[!.]*
+      chmod 0600 "${bundle}"/.[!.]*
+    fi
+    [[ "${1:-}" == --prepare ]] && exit 0
   fi
   exec setpriv --reuid=mst --regid=mst --init-groups --reset-env \
     env PATH="${PATH}" HOME=/home/mst USER=mst LANG="${LANG}" \
     DISPLAY="${DISPLAY}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS}" \
-    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" "$0"
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" "$0" "$@"
 fi
 
 log=/run/mst/session
+if [[ "${1:-}" == --prepared ]]; then
+  umask 077
+  rm -f "${log}/ready" "${log}/failed" "${log}/startup.log"
+  exec > "${log}/startup.log" 2>&1
+fi
 Xvfb "${DISPLAY}" -screen 0 1440x900x24 -nolisten tcp > "${log}/xvfb.log" 2>&1 &
 xvfb=$!
 for _ in $(seq 50); do

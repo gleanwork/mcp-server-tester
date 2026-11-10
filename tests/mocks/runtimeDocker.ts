@@ -7,24 +7,72 @@ import packageJson from '../../package.json' with { type: 'json' };
 const root = process.env.RUNTIME_DOCKER_ROOT!;
 const invoked = path.basename(process.argv[1]!);
 // Image scripts run only against redirected scratch paths, never the host.
-if (['id', 'install', 'chown', 'chmod', 'setpriv'].includes(invoked)) {
+if (
+  [
+    'id',
+    'install',
+    'chown',
+    'chmod',
+    'setpriv',
+    'seq',
+    'Xvfb',
+    'dbus-daemon',
+    'gdbus',
+    'gnome-keyring-daemon',
+    'at-spi-bus-launcher',
+    'restart-desktop',
+  ].includes(invoked)
+) {
   const args = process.argv.slice(2);
   await fs.appendFile(
     path.join(root, 'image-calls.jsonl'),
     `${JSON.stringify({ invoked, args })}\n`
   );
-  if (invoked === 'id') console.log('0');
+  if (invoked === 'id')
+    console.log(process.env.RUNTIME_IMAGE_USER === '1' ? '1000' : '0');
   else if (invoked === 'setpriv') {
+    if (args.at(-1) === '--prepared') {
+      // Emulate only the unprivileged desktop, after the real root shell drops
+      // privileges. The private-log prelude is also exercised directly below.
+      const session = path.join(root, 'run/mst/session');
+      await fs.writeFile(
+        path.join(session, 'startup.log'),
+        process.env.RUNTIME_IMAGE_DIAGNOSTIC ?? '',
+        { mode: 0o600 }
+      );
+      if (process.env.RUNTIME_IMAGE_MARKERS === '1') {
+        await fs.writeFile(path.join(session, 'ready'), '');
+        await fs.writeFile(path.join(session, 'failed'), '');
+      }
+    }
+    if (process.env.RUNTIME_IMAGE_ATTACK) {
+      let session = path.join(root, 'run/mst/session');
+      if (process.env.RUNTIME_IMAGE_ATTACK === 'swap') {
+        await fs.rename(session, `${session}-original`);
+        const replacement = path.join(root, 'replacement-session');
+        await fs.mkdir(replacement);
+        await fs.symlink(replacement, session);
+        session = replacement;
+      }
+      await fs.symlink(
+        path.join(root, 'victim'),
+        path.join(session, 'startup-exit.new')
+      );
+      await fs.symlink(
+        path.join(root, 'failed-victim'),
+        path.join(session, 'failed')
+      );
+    }
     if (process.env.RUNTIME_IMAGE_EXIT_CODE) {
       console.error(process.env.RUNTIME_IMAGE_DIAGNOSTIC);
       process.exit(Number(process.env.RUNTIME_IMAGE_EXIT_CODE));
     }
-  } else {
+  } else if (['install', 'chown', 'chmod'].includes(invoked)) {
     let index = 0;
     if (invoked === 'install') {
       while (args[index]?.startsWith('-'))
         index += args[index] === '-d' ? 1 : 2;
-    } else index = 1;
+    } else index = invoked === 'chown' && args[0] === '-h' ? 2 : 1;
     for (const target of args.slice(index)) {
       if (!path.resolve(target).startsWith(`${root}${path.sep}`))
         throw new Error('Image fixture refused a non-scratch path');
@@ -167,7 +215,8 @@ else if (command === 'run') {
         await new Promise(() => setInterval(() => {}, 1000));
       await directories(name);
     } else if (process.env.RUNTIME_DOCKER_DESKTOP === 'exited') {
-      await fs.writeFile(inside(name, '/run/mst/session/startup-exit'), '23');
+      await fs.mkdir(inside(name, '/run/mst-root'), { recursive: true });
+      await fs.writeFile(inside(name, '/run/mst-root/startup-exit'), '23\n');
       await fs.writeFile(
         inside(name, '/run/mst/session/startup.log'),
         'synthetic-opaque-runtime-input'
@@ -193,10 +242,11 @@ else if (command === 'run') {
     );
   } else if (argv[0] === 'channel-probe') {
     if (process.env.RUNTIME_DOCKER_WAIT_STDIN === '1') {
+      await fs.writeFile(path.join(root, 'channel-probe-started'), '');
       for await (const _chunk of process.stdin) {
         /* drain */
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise(() => setInterval(() => {}, 1000));
     }
   } else if (argv[0] === 'runtime-cleanup') {
     await fs.access(inside(name, '/run/mst/opaque-runtime'));
@@ -207,6 +257,7 @@ else if (command === 'run') {
     argv[0] === 'sh' &&
     argv.join(' ').includes('cat > /run/mst/inference-token')
   ) {
+    const refreshing = await exists(inside(name, '/run/mst/inference-token'));
     const input: Buffer[] = [];
     for await (const chunk of process.stdin)
       input.push(Buffer.from(chunk as Buffer));
@@ -214,6 +265,7 @@ else if (command === 'run') {
       inside(name, '/run/mst/inference-token'),
       Buffer.concat(input)
     );
+    if (refreshing) await fs.writeFile(path.join(root, 'token-refreshed'), '');
   } else if (
     argv[0] === 'sh' &&
     argv.join(' ').includes('/run/mst/session/ready')
@@ -228,16 +280,18 @@ else if (command === 'run') {
       await fs.writeFile(path.join(root, 'readiness-output'), '');
       if (mode === 'ready-then-block')
         await new Promise(() => setInterval(() => {}, 1000));
-    } else if (await exists(inside(name, '/run/mst/session/startup-exit'))) {
-      console.log(
-        `exited:${await fs.readFile(inside(name, '/run/mst/session/startup-exit'), 'utf8')}`
+    } else {
+      // Execute the runner's exact sh command against the scratch container,
+      // including receipt precedence, whitespace and default marker handling.
+      const result = spawnSync(
+        'sh',
+        ['-c', argv[2]!.replaceAll('/run/mst', inside(name, '/run/mst'))],
+        { encoding: 'utf8' }
       );
-    } else
-      console.log(
-        (await exists(inside(name, '/run/mst/session/ready')))
-          ? 'ready'
-          : 'failed'
-      );
+      process.stdout.write(result.stdout);
+      process.stderr.write(result.stderr);
+      process.exit(result.status ?? 1);
+    }
   } else if (argv[0] === 'tail') {
     console.log('synthetic desktop failure');
   } else if (argv[0] === 'mst') {

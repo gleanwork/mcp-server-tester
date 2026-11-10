@@ -12,10 +12,18 @@ import { build } from 'esbuild';
 import { getEventListeners } from 'node:events';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { watch, type FSWatcher } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { setTimeout as sleep } from 'node:timers/promises';
+import type * as TimerPromises from 'node:timers/promises';
+
+vi.mock('node:timers/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof TimerPromises>();
+  return { ...actual, setTimeout: vi.fn(actual.setTimeout) };
+});
 import {
   createDockerRunner,
   dockerRunner,
@@ -55,6 +63,7 @@ afterAll(async () => {
 const opaque = 'synthetic-opaque-runtime-input';
 const token = 'synthetic-inference-token';
 const dirs: string[] = [];
+const watchers = new Set<FSWatcher>();
 interface Call {
   context?: string;
   args: string[];
@@ -84,6 +93,7 @@ async function drain(stream: AsyncIterable<string | Buffer>): Promise<void> {
 }
 
 beforeEach(() => {
+  vi.mocked(sleep).mockClear();
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vi.stubEnv('MST_DOCKER', cli);
   vi.stubEnv('MST_LLM_AUTH_COMMAND', '');
@@ -96,6 +106,13 @@ beforeEach(() => {
 afterEach(async () => {
   // A failed-removal test explicitly checks this guard before releasing it.
   for (const name of liveContainers()) releaseContainer('offline', name);
+  for (const watcher of watchers) watcher.close();
+  watchers.clear();
+  vi.mocked(sleep).mockReset();
+  const actual = await vi.importActual<typeof TimerPromises>(
+    'node:timers/promises'
+  );
+  vi.mocked(sleep).mockImplementation(actual.setTimeout);
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   await Promise.all(
@@ -201,6 +218,51 @@ function stage(call: Call): string | undefined {
   return undefined;
 }
 
+function waitForFile(file: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const watcher = watch(path.dirname(file), { persistent: false }, () => {
+      void check();
+    });
+    watchers.add(watcher);
+    watcher.once('error', (error) => {
+      watcher.close();
+      watchers.delete(watcher);
+      reject(error);
+    });
+    async function check(): Promise<void> {
+      if (
+        !(await fs.access(file).then(
+          () => true,
+          () => false
+        ))
+      )
+        return;
+      watcher.close();
+      watchers.delete(watcher);
+      resolve();
+    }
+    // Covers a file created between arming the watcher and the first event.
+    void check();
+  });
+}
+
+function observeReadinessPoll(): Promise<AbortSignal> {
+  let onPoll!: (signal: AbortSignal) => void;
+  const started = new Promise<AbortSignal>((resolve) => {
+    onPoll = resolve;
+  });
+  const original = vi.mocked(sleep).getMockImplementation()! as typeof sleep;
+  vi.mocked(sleep).mockImplementation(function <T = void>(
+    delay?: number,
+    value?: T,
+    options?: Parameters<typeof sleep>[2]
+  ): Promise<T> {
+    if (delay === 3000 && options?.signal) onPoll(options.signal);
+    return original<T>(delay, value, options);
+  });
+  return started;
+}
+
 function preparation(
   cleanups: DockerRuntimeContext[] = []
 ): DockerRunnerOptions['prepareRuntime'] {
@@ -217,6 +279,7 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
   it.each(['cowork', 'chatgpt'])(
     'prepares %s before desktop startup and cleans before removal',
     async (client) => {
+      const interval = vi.spyOn(globalThis, 'setInterval');
       vi.stubEnv('RUNTIME_DOCKER_EXPECT_PREPARED', '1');
       const cleanups: DockerRuntimeContext[] = [];
       const f = await fixture({
@@ -239,6 +302,9 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
         'rm',
       ]);
       expect(cleanups).toHaveLength(1);
+      expect(interval.mock.calls.some(([, delay]) => delay === 240_000)).toBe(
+        false
+      );
       expect(cleanups[0]).toMatchObject({
         runId: 'runtime-test',
         shardIndex: 0,
@@ -279,6 +345,8 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
   );
 
   it('delivers MST-managed inference before preparation, over stdin only', async () => {
+    const interval = vi.spyOn(globalThis, 'setInterval');
+    const clear = vi.spyOn(globalThis, 'clearInterval');
     vi.stubEnv('RUNTIME_DOCKER_EXPECT_TOKEN', '1');
     const f = await fixture({ runtime: { prepareRuntime: preparation() } });
     expect(await f.run()).toMatchObject({ ok: true });
@@ -287,6 +355,11 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
     expect(stages.indexOf('token')).toBeLessThan(stages.indexOf('prepare'));
     expect(stages.indexOf('prepare')).toBeLessThan(stages.indexOf('desktop'));
     expect(JSON.stringify(await f.calls())).not.toContain(token);
+    const scheduled = interval.mock.calls.findIndex(
+      ([, delay]) => delay === 240_000
+    );
+    expect(scheduled).toBeGreaterThanOrEqual(0);
+    expect(clear).toHaveBeenCalledWith(interval.mock.results[scheduled]!.value);
   });
 
   it.each(['cowork', 'chatgpt'])(
@@ -325,12 +398,133 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
     }
   );
 
+  it.each(['cowork', 'chatgpt'])(
+    'keeps the default %s container and releases its removal guard',
+    async (client) => {
+      const interval = vi.spyOn(globalThis, 'setInterval');
+      const clear = vi.spyOn(globalThis, 'clearInterval');
+      const f = await fixture({
+        definition: dockerRunner,
+        client,
+        keep: 'always',
+      });
+      expect(await f.run()).toMatchObject({ ok: true });
+      const stages = (await f.calls()).map(stage).filter(Boolean);
+      expect(stages).toEqual([
+        'run',
+        'token',
+        'ready',
+        'cp',
+        'worker',
+        'cp',
+        'rename',
+      ]);
+      expect(liveContainers()).not.toContain('mst-runtime-test-1');
+      const scheduled = interval.mock.calls.findIndex(
+        ([, delay]) => delay === 240_000
+      );
+      expect(scheduled).toBeGreaterThanOrEqual(0);
+      expect(clear).toHaveBeenCalledWith(
+        interval.mock.results[scheduled]!.value
+      );
+      expect(await fs.readdir(path.join(f.root, 'containers'))).toEqual([
+        'mst-runtime-test-1-kept',
+      ]);
+    }
+  );
+
+  it.each([
+    { client: 'cowork', deferred: false },
+    { client: 'chatgpt', deferred: false },
+    { client: 'cowork', deferred: true },
+    { client: 'chatgpt', deferred: true },
+  ])(
+    'refreshes MST inference for $client (deferred=$deferred) and stops on cancellation',
+    async ({ client, deferred }) => {
+      vi.stubEnv('RUNTIME_DOCKER_WAIT_WORKER', '1');
+      const interval = vi.spyOn(globalThis, 'setInterval');
+      const clear = vi.spyOn(globalThis, 'clearInterval');
+      const f = await fixture({
+        client,
+        ...(deferred
+          ? { runtime: { prepareRuntime: preparation() } }
+          : { definition: dockerRunner }),
+      });
+      let onHello!: () => void;
+      const hello = new Promise<void>((resolve) => {
+        onHello = resolve;
+      });
+      f.events.progress = (event) => {
+        if (event.type === 'hello') onHello();
+      };
+      const running = f.run();
+      await hello;
+      const scheduled = interval.mock.calls.findIndex(
+        ([, delay]) => delay === 240_000
+      );
+      expect(scheduled).toBeGreaterThanOrEqual(0);
+      const timer = interval.mock.results[scheduled]!.value as NodeJS.Timeout;
+      expect(timer.hasRef()).toBe(false);
+      const fresh = 'synthetic-refreshed-token';
+      vi.stubEnv(
+        client === 'cowork' ? 'ANTHROPIC_API_KEY' : 'OPENAI_API_KEY',
+        fresh
+      );
+      // Invoke the observed production interval, not a shorter test interval.
+      const refreshed = waitForFile(path.join(f.root, 'token-refreshed'));
+      interval.mock.calls[scheduled]![0]();
+      await refreshed;
+      expect(
+        await fs.readFile(
+          path.join(
+            f.root,
+            'containers/mst-runtime-test-1/run/mst/inference-token'
+          ),
+          'utf8'
+        )
+      ).toBe(fresh);
+      f.controller.abort();
+      expect(await running).toMatchObject({ ok: false, cancelled: true });
+      expect(clear).toHaveBeenCalledWith(timer);
+      expect(
+        (await f.calls()).map(stage).filter((value) => value === 'token')
+      ).toHaveLength(2);
+      expect(JSON.stringify(await f.calls())).not.toContain(fresh);
+    }
+  );
+
+  it.each([false, true])(
+    'stops the MST refresh timer after startup failure (deferred=%s)',
+    async (deferred) => {
+      vi.stubEnv('RUNTIME_DOCKER_DESKTOP', 'failed');
+      const interval = vi.spyOn(globalThis, 'setInterval');
+      const clear = vi.spyOn(globalThis, 'clearInterval');
+      const f = await fixture(
+        deferred
+          ? { runtime: { prepareRuntime: preparation() } }
+          : { definition: dockerRunner }
+      );
+      expect(await f.run()).toMatchObject({ ok: false });
+      const scheduled = interval.mock.calls.findIndex(
+        ([, delay]) => delay === 240_000
+      );
+      expect(scheduled).toBeGreaterThanOrEqual(0);
+      expect(clear).toHaveBeenCalledWith(
+        interval.mock.results[scheduled]!.value
+      );
+    }
+  );
+
   it('does not resolve MST inference when the plugin manages it, even without a hook', async () => {
+    const interval = vi.spyOn(globalThis, 'setInterval');
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     vi.stubEnv('OPENAI_API_KEY', '');
     const f = await fixture({ runtime: { inference: 'plugin' } });
     expect(await f.run()).toMatchObject({ ok: true });
     expect((await f.calls()).map(stage)).not.toContain('token');
+    expect(interval.mock.calls.some(([, delay]) => delay === 240_000)).toBe(
+      false
+    );
   });
 
   it.each(['', '<no value>', '2'])(
@@ -417,13 +611,14 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
       keep: 'always',
       runtime: { inference: 'plugin', prepareRuntime: preparation(cleanups) },
     });
-    const start = Date.now();
     const outcome = await f.run();
     expect(outcome).toMatchObject({
       ok: false,
       reason: expect.stringContaining('exited with status 23'),
     });
-    expect(Date.now() - start).toBeLessThan(4000);
+    expect(vi.mocked(sleep).mock.calls.some(([delay]) => delay === 3000)).toBe(
+      false
+    );
     expect(JSON.stringify(outcome)).not.toContain(opaque);
     const calls = await f.calls();
     expect(
@@ -447,20 +642,21 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
       const f = await fixture({
         runtime: { inference: 'plugin', prepareRuntime: preparation(cleanups) },
       });
+      const poll = observeReadinessPoll();
       const running = f.run();
-      await vi.waitFor(() => fs.access(path.join(f.root, 'readiness-output')), {
-        timeout: 4000,
-      });
-      // Let the starting response close and enter the poll sleep.
-      if (mode === 'starting')
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      const start = Date.now();
+      let waiting: AbortSignal | undefined;
+      if (mode === 'starting') waiting = await poll;
+      else await waitForFile(path.join(f.root, 'readiness-output'));
       f.controller.abort();
       const outcome = await running;
       expect(outcome).toMatchObject({ ok: false, cancelled: true });
       expect(outcome.reason).toContain('The run was cancelled.');
-      expect(Date.now() - start).toBeLessThan(750);
+      expect(waiting?.aborted).toBe(mode === 'starting' ? true : undefined);
+      expect(
+        vi.mocked(sleep).mock.calls.filter(([delay]) => delay === 3000)
+      ).toHaveLength(mode === 'starting' ? 1 : 0);
       const calls = await f.calls();
+      expect(calls.filter((call) => stage(call) === 'ready')).toHaveLength(1);
       expect(calls.map(stage)).not.toContain('cp');
       expect(calls.map(stage)).not.toContain('worker');
       expect(calls.some((call) => call.args[0] === 'inspect')).toBe(false);
@@ -471,12 +667,11 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
   it('retains default readiness cancellation wording and a cancelled outcome', async () => {
     vi.stubEnv('RUNTIME_DOCKER_READY_MODE', 'starting');
     const f = await fixture({ definition: dockerRunner });
+    const poll = observeReadinessPoll();
     const running = f.run();
-    await vi.waitFor(() => fs.access(path.join(f.root, 'readiness-output')), {
-      timeout: 4000,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const waiting = await poll;
     f.controller.abort();
+    expect(waiting.aborted).toBe(true);
     expect(await running).toMatchObject({
       ok: false,
       cancelled: true,
@@ -495,7 +690,7 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
             signal: context.signal,
             stdin: (async function* () {
               yield opaque;
-              await new Promise((resolve) => setTimeout(resolve, 50));
+              await waitForFile(path.join(f.root, 'channel-probe-started'));
               throw new Error(opaque);
             })(),
           });
@@ -671,9 +866,7 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
       },
     });
     const running = f.run();
-    await vi.waitFor(() => fs.access(path.join(f.root, 'waiting-ready')), {
-      timeout: 10_000,
-    });
+    await waitForFile(path.join(f.root, 'waiting-ready'));
     f.controller.abort();
     expect(await running).toMatchObject({ ok: false, cancelled: true });
     expect(cleanups).toHaveLength(1);
@@ -835,6 +1028,7 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
     { work: 'grade' as const, client: 'chatgpt' },
     { work: 'collect' as const, client: 'api' },
   ])('skips runtime hooks for $work/$client', async ({ work, client }) => {
+    const interval = vi.spyOn(globalThis, 'setInterval');
     const prepareRuntime = vi
       .fn<NonNullable<DockerRunnerOptions['prepareRuntime']>>()
       .mockRejectedValue(new Error('must not run'));
@@ -849,6 +1043,9 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
     expect(stages).not.toContain('prepare');
     expect(stages).not.toContain('desktop');
     expect(stages).not.toContain('token');
+    expect(interval.mock.calls.some(([, delay]) => delay === 240_000)).toBe(
+      false
+    );
   });
 
   it('keeps in-process runtime options out of the serialized runner schema', () => {
@@ -876,7 +1073,20 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
         const bin = path.join(root, 'bin');
         await fs.mkdir(bin, { recursive: true });
         await fs.mkdir(path.join(root, 'dev'));
-        for (const name of ['id', 'install', 'chown', 'chmod', 'setpriv'])
+        for (const name of [
+          'id',
+          'install',
+          'chown',
+          'chmod',
+          'setpriv',
+          'seq',
+          'Xvfb',
+          'dbus-daemon',
+          'gdbus',
+          'gnome-keyring-daemon',
+          'at-spi-bus-launcher',
+          'restart-desktop',
+        ])
           await fs.symlink(cli, path.join(bin, name));
         const source = fileURLToPath(
           new URL(
@@ -890,6 +1100,10 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
           .replaceAll('/home/mst', path.join(root, 'home/mst'))
           .replaceAll('/opt/cowork-vm', path.join(root, 'vm'))
           .replaceAll('/opt/mst/bin', bin)
+          .replaceAll(
+            '/usr/libexec/at-spi-bus-launcher',
+            path.join(bin, 'at-spi-bus-launcher')
+          )
           .replaceAll('/tmp/.X11-unix', path.join(root, 'x11'));
         const session = path.join(root, 'desktop-session');
         await fs.writeFile(session, script, { mode: 0o700 });
@@ -997,7 +1211,89 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
         ).toContain('setpriv');
       });
 
-      it('records an actual early shell exit privately before readiness', async () => {
+      it.each(['symlinks', 'swap'])(
+        'does not publish privileged writes through a planted %s',
+        async (attack) => {
+          const f = await imageFixture();
+          await f.shell(['--prepare']);
+          const victim = path.join(f.root, 'victim');
+          await fs.writeFile(victim, 'root-owned-data');
+          const before = await fs.readFile(
+            path.join(f.root, 'image-calls.jsonl'),
+            'utf8'
+          );
+          await f.shell(['--start-prepared'], {
+            RUNTIME_IMAGE_ATTACK: attack,
+          });
+          expect(await fs.readFile(victim, 'utf8')).toBe('root-owned-data');
+          await expect(
+            fs.access(path.join(f.root, 'failed-victim'))
+          ).rejects.toThrow();
+          expect(
+            await fs.readFile(
+              path.join(f.root, 'run/mst-root/startup-exit'),
+              'utf8'
+            )
+          ).toBe('0\n');
+          expect(
+            (await fs.stat(path.join(f.root, 'run/mst-root/startup-exit')))
+              .mode & 0o777
+          ).toBe(0o644);
+          const imageCalls = (
+            await fs.readFile(path.join(f.root, 'image-calls.jsonl'), 'utf8')
+          )
+            .trim()
+            .split('\n')
+            .map(
+              (line) => JSON.parse(line) as { invoked: string; args: string[] }
+            );
+          expect(imageCalls).toContainEqual({
+            invoked: 'install',
+            args: [
+              '-d',
+              '-o',
+              'root',
+              '-g',
+              'root',
+              '-m',
+              '0755',
+              path.join(f.root, 'run/mst-root'),
+            ],
+          });
+          // After preparation, root must not reinitialize mst-owned paths.
+          expect(
+            imageCalls
+              .slice(before.trim().split('\n').length)
+              .filter(
+                (call) =>
+                  ['install', 'chown', 'chmod'].includes(call.invoked) &&
+                  call.args.some(
+                    (arg) =>
+                      arg.startsWith(path.join(f.root, 'run/mst/')) ||
+                      arg.startsWith(path.join(f.root, 'home/mst/'))
+                  )
+              )
+          ).toHaveLength(0);
+        }
+      );
+
+      it('keeps the unprivileged prepared shell diagnostics private', async () => {
+        const f = await imageFixture();
+        await f.shell(['--prepare']);
+        await expect(
+          f.shell(['--prepared'], {
+            RUNTIME_IMAGE_USER: '1',
+            DISPLAY: undefined,
+          })
+        ).rejects.toMatchObject({ code: 1, stdout: '', stderr: '' });
+        const log = path.join(f.root, 'run/mst/session/startup.log');
+        expect(await fs.readFile(log, 'utf8')).toContain(
+          'DISPLAY: unbound variable'
+        );
+        expect((await fs.stat(log)).mode & 0o777).toBe(0o600);
+      });
+
+      it('records a privilege-transition exit without exposing diagnostics', async () => {
         const f = await imageFixture();
         await f.shell(['--prepare']);
         // Unset DISPLAY fails under set -u before setpriv or ready/failed markers.
@@ -1006,52 +1302,79 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
         ).rejects.toMatchObject({ code: 1, stdout: '', stderr: '' });
         expect(
           await fs.readFile(
-            path.join(f.root, 'run/mst/session/startup-exit'),
+            path.join(f.root, 'run/mst-root/startup-exit'),
             'utf8'
           )
         ).toBe('1\n');
-        const log = path.join(f.root, 'run/mst/session/startup.log');
-        expect(await fs.readFile(log, 'utf8')).toContain(
-          'DISPLAY: unbound variable'
-        );
-        expect((await fs.stat(log)).mode & 0o777).toBe(0o600);
+        await expect(
+          fs.access(path.join(f.root, 'run/mst/session/startup.log'))
+        ).rejects.toThrow();
       });
 
-      it('reports the real shell early exit through the runner before cleanup and removal', async () => {
-        const cleanups: DockerRuntimeContext[] = [];
-        const f = await fixture({
-          client,
-          keep: 'always',
-          runtime: {
-            inference: 'plugin',
-            prepareRuntime: preparation(cleanups),
-          },
+      it.each([0, 1, 23, 127, 255])(
+        'reports real shell exit %s through the exact readiness command before cleanup and removal',
+        async (status) => {
+          const cleanups: DockerRuntimeContext[] = [];
+          const f = await fixture({
+            client,
+            keep: 'always',
+            runtime: {
+              inference: 'plugin',
+              prepareRuntime: preparation(cleanups),
+            },
+          });
+          const image = await imageFixture(
+            path.join(f.root, 'containers/mst-runtime-test-1')
+          );
+          vi.stubEnv('RUNTIME_DOCKER_IMAGE_SESSION', image.session);
+          vi.stubEnv('RUNTIME_DOCKER_IMAGE_ROOT', image.root);
+          vi.stubEnv('RUNTIME_IMAGE_EXIT_CODE', String(status));
+          vi.stubEnv('RUNTIME_IMAGE_DIAGNOSTIC', opaque);
+          vi.stubEnv('RUNTIME_IMAGE_MARKERS', '1');
+          const outcome = await f.run();
+          expect(outcome).toMatchObject({
+            ok: false,
+            reason: expect.stringContaining(`exited with status ${status}`),
+          });
+          expect(JSON.stringify(outcome)).not.toContain(opaque);
+          expect(
+            vi.mocked(console.error).mock.calls.flat().join(' ')
+          ).not.toContain(opaque);
+          expect(cleanups).toHaveLength(1);
+          const calls = await f.calls();
+          expect(
+            calls.map(stage).filter((value) => value === 'rm')
+          ).toHaveLength(1);
+          expect(calls.map(stage)).not.toContain('worker');
+          expect(calls.map(stage)).not.toContain('rename');
+          expect(await fs.readdir(path.join(f.root, 'containers'))).toEqual([]);
+        }
+      );
+
+      if (client === 'cowork')
+        it('seeds the VM bundle before the hook and does not rewrite hook-controlled bundle paths', async () => {
+          const f = await imageFixture();
+          const vm = path.join(f.root, 'vm');
+          await fs.mkdir(vm);
+          await fs.writeFile(path.join(vm, 'bundle'), 'bundle-sha');
+          await fs.writeFile(path.join(vm, 'rootfs.zst'), 'compressed-image');
+          await f.shell(['--prepare']);
+          const bundle = path.join(
+            f.root,
+            'home/mst/.config/Claude-3p/vm_bundles/claudevm.bundle'
+          );
+          const origin = path.join(bundle, '.rootfs.zst.origin');
+          expect(await fs.readlink(path.join(bundle, 'rootfs.zst'))).toBe(
+            path.join(vm, 'rootfs.zst')
+          );
+          expect(await fs.readFile(origin, 'utf8')).toBe('bundle-sha');
+          const victim = path.join(f.root, 'bundle-victim');
+          await fs.writeFile(victim, 'root-owned-data');
+          await fs.rm(origin);
+          await fs.symlink(victim, origin);
+          await f.shell(['--start-prepared']);
+          expect(await fs.readFile(victim, 'utf8')).toBe('root-owned-data');
         });
-        const image = await imageFixture(
-          path.join(f.root, 'containers/mst-runtime-test-1')
-        );
-        vi.stubEnv('RUNTIME_DOCKER_IMAGE_SESSION', image.session);
-        vi.stubEnv('RUNTIME_DOCKER_IMAGE_ROOT', image.root);
-        vi.stubEnv('RUNTIME_IMAGE_EXIT_CODE', '23');
-        vi.stubEnv('RUNTIME_IMAGE_DIAGNOSTIC', opaque);
-        const outcome = await f.run();
-        expect(outcome).toMatchObject({
-          ok: false,
-          reason: expect.stringContaining('exited with status 23'),
-        });
-        expect(JSON.stringify(outcome)).not.toContain(opaque);
-        expect(
-          vi.mocked(console.error).mock.calls.flat().join(' ')
-        ).not.toContain(opaque);
-        expect(cleanups).toHaveLength(1);
-        const calls = await f.calls();
-        expect(calls.map(stage).filter((value) => value === 'rm')).toHaveLength(
-          1
-        );
-        expect(calls.map(stage)).not.toContain('worker');
-        expect(calls.map(stage)).not.toContain('rename');
-        expect(await fs.readdir(path.join(f.root, 'containers'))).toEqual([]);
-      });
 
       it('never echoes a secret-bearing startup diagnostic', async () => {
         const f = await imageFixture();
@@ -1064,7 +1387,7 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
         ).rejects.toMatchObject({ code: 23, stdout: '', stderr: '' });
         expect(
           await fs.readFile(
-            path.join(f.root, 'run/mst/session/startup-exit'),
+            path.join(f.root, 'run/mst-root/startup-exit'),
             'utf8'
           )
         ).toBe('23\n');

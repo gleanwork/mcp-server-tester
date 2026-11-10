@@ -79,7 +79,11 @@ export interface DockerRuntimeContext {
   readonly desktop: DockerClient;
 }
 
-/** Runs before keeping or removing a prepared container, with a fresh signal. */
+/**
+ * Runs before keeping/removing a container during normal disposal or
+ * cooperative cancellation, with a fresh signal. Emergency termination can
+ * remove the container without awaiting this async hook.
+ */
 export type DockerRuntimeCleanup = (
   context: DockerRuntimeContext
 ) => Promise<void>;
@@ -124,6 +128,8 @@ const WORK_DIR = '/home/mst/work';
 const RUN_DIR = '/run/mst';
 const TOKENS_DIR = `${RUN_DIR}/tokens`;
 const SESSION_DIR = '/run/mst/session';
+/** Root-controlled ancestry, outside the desktop user's writable runtime. */
+const STARTUP_EXIT_FILE = '/run/mst-root/startup-exit';
 const TOKEN_FILE = '/run/mst/inference-token';
 const DEFAULT_READY_TIMEOUT_S = 1200;
 /** Shorter than the gateway token's life, and than MST's token cache. */
@@ -612,7 +618,7 @@ async function waitForDesktop(
           name,
           'sh',
           '-c',
-          `${prepared ? `if [ -e ${SESSION_DIR}/startup-exit ]; then printf 'exited:'; cat ${SESSION_DIR}/startup-exit; elif ` : 'if '}[ -e ${SESSION_DIR}/ready ]; then echo ready; elif [ -e ${SESSION_DIR}/failed ]; then echo failed; else echo starting; fi`,
+          `${prepared ? `if [ -e ${STARTUP_EXIT_FILE} ]; then printf 'exited:'; cat ${STARTUP_EXIT_FILE}; elif ` : 'if '}[ -e ${SESSION_DIR}/ready ]; then echo ready; elif [ -e ${SESSION_DIR}/failed ]; then echo failed; else echo starting; fi`,
         ],
         { signal: waiting }
       );

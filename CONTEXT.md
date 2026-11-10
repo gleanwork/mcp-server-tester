@@ -321,7 +321,7 @@ How the coordinator reaches a worker's machine: run a command with its input and
 _Avoid_: transport (MCP's word), connection
 
 **Runtime preparation**:
-A plugin's in-process setup of a Docker desktop runtime through the worker channel, after private directories exist and before the desktop starts (`createDockerRunner`). It returns cleanup, which runs before keeping or removing the container, including on cancellation. Plugin-managed inference disables MST's inference delivery and refresh; credentials and runtime formats stay plugin-owned. Grade and headless shards skip runtime preparation.
+A plugin's in-process setup of a Docker desktop runtime through the worker channel, after private directories exist and before the desktop starts (`createDockerRunner`). It returns cleanup, which runs before keeping or removing the container during normal disposal and cooperative cancellation. Emergency process termination can skip the async hook. Plugin-managed inference disables MST's inference delivery and refresh; credentials and runtime formats stay plugin-owned. Grade and headless shards skip runtime preparation.
 _Avoid_: login provider, credential extension
 
 **Limits**:
