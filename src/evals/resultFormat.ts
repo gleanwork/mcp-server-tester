@@ -159,6 +159,23 @@ export function assertCurrentSummaryResults(
 }
 
 /**
+ * Throws when a stored comparison's case results (each case's `baseline` and
+ * `candidate`) use older field names or score keys.
+ */
+export function assertCurrentComparisonResults(
+  value: unknown,
+  what: string
+): void {
+  if (!isObject(value) || !Array.isArray(value.cases)) return;
+  const caseResults = value.cases.flatMap((comparison) =>
+    isObject(comparison)
+      ? [comparison.baseline, comparison.candidate].filter(isObject)
+      : []
+  );
+  assertCurrentRunResult({ caseResults }, what);
+}
+
+/**
  * Throws when a saved run result uses 1.x result field names, or a 2.0
  * release candidate's.
  */

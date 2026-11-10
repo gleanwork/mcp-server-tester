@@ -9,7 +9,9 @@
 import { z } from 'zod';
 import {
   RUN_FORMAT,
+  assertCurrentComparisonResults,
   assertCurrentRunResult,
+  assertCurrentSummaryResults,
   assertRunFormat,
 } from './resultFormat.js';
 import { INFRASTRUCTURE_BREAKS } from './trialEnding.js';
@@ -100,10 +102,10 @@ export function parseRunFile<T extends z.ZodType>(
   );
 }
 
-export const Envelope = <K extends string>(kind: K) => ({
-  format: z.literal(RUN_FORMAT),
-  kind: z.literal(kind),
-});
+/** The fields that name a run-format file's format and kind. */
+export function Envelope<K extends string>(kind: K) {
+  return { format: z.literal(RUN_FORMAT), kind: z.literal(kind) };
+}
 
 /** How a server handles a write (ADR 0014). */
 export const WriteModeSchema = z.enum([
@@ -263,13 +265,14 @@ export function parseBaselineFile(value: unknown, file: string): unknown {
 }
 
 /**
- * Parse an `EvalResultStore` artifact that `what` names: its envelope. An
- * older format, or an eval runner's result with older field names, fails
- * with what to do.
+ * Parse an `EvalResultStore` artifact that `what` names, read where the
+ * store keeps artifacts of `kind`. Another kind, an older format, or case
+ * results with older field names fail, saying what to do.
  */
 export function parseStoredArtifact(
   value: unknown,
-  what: string
+  what: string,
+  kind: (typeof STORED_ARTIFACT_KINDS)[number]
 ): z.infer<typeof StoredArtifactSchema> {
   assertRunFormat(value, what);
   const artifact = parseRunFile(
@@ -278,7 +281,12 @@ export function parseStoredArtifact(
     what,
     'a stored result artifact'
   );
-  if (artifact.kind === 'eval-runner-result')
+  if (artifact.kind !== kind)
+    throw new Error(`${what} is an ${artifact.kind}, not an ${kind}.`);
+  if (kind === 'eval-runner-result')
     assertCurrentRunResult(artifact.data, what);
+  else if (kind === 'eval-run-summary')
+    assertCurrentSummaryResults(artifact.data, what);
+  else assertCurrentComparisonResults(artifact.data, what);
   return artifact;
 }
