@@ -85,7 +85,7 @@ to display labels such as `5.6 Terra Medium`. Linux rejects `clientOptions.confi
 
 ## The native rollout trace
 
-The `chatgpt` client keeps the desktop backend's rollout trace by default.
+Both `chatgpt` and `codex-app` keep the desktop backend's rollout trace by default.
 Set `"clientOptions": { "rolloutTrace": false }` to turn it off. The trace
 contains each model request exactly as the backend sent it (instructions,
 input items and tool definitions), responses with usage and response IDs, and
@@ -121,7 +121,6 @@ it (an app whose bundled backend does not support this hook writes none).
 Every entry of the batch directory counts toward the entry limit. None of
 these fails an otherwise valid trial. Backend support is version-dependent; the
 hook was verified in the app's bundled Codex `0.163.0-alpha.11` app-server.
-This option is not yet enabled for `codex-app`.
 
 ## macOS runs in your own profile
 

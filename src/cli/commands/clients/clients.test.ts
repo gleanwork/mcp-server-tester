@@ -289,6 +289,7 @@ describe('mst clients', () => {
         'correlation',
         'maxActions',
         'computerUseModel',
+        'rolloutTrace',
       ],
     };
     for (const [client, names] of Object.entries(expected)) {

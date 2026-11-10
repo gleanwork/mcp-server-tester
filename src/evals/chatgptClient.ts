@@ -111,10 +111,7 @@ const schemaOf = (product: DesktopProduct) =>
       }),
       requireMcpCalls: z.boolean().optional().meta({ default: false }),
       /** Keep the native model requests, responses and tool results as trial artifacts. */
-      rolloutTrace:
-        product.client === 'chatgpt'
-          ? z.boolean().default(true)
-          : z.never().optional(),
+      rolloutTrace: z.boolean().default(true),
       /** Gone: the surface is the client (`chatgpt` or `codex-app`). */
       surface: z
         .never({ error: (issue) => surfaceGone(product, issue.input) })
@@ -293,7 +290,7 @@ function desktopAdapter(
       model: config.model,
       reasoningEffort: config.reasoningEffort,
       timeoutMs: config.timeout,
-      rolloutTrace: config.rolloutTrace ?? false,
+      rolloutTrace: config.rolloutTrace,
       correlation: {
         strategy: config.correlation,
         includeInPrompt: config.correlation === 'prompt_marker',

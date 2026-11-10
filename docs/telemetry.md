@@ -74,7 +74,7 @@ A span with no times of its own is placed at the start of its trial and marked `
 
 ## Native desktop rollout bundles
 
-The `chatgpt` client's `rolloutTrace` option (on by default) keeps the
+The `chatgpt` and `codex-app` clients' `rolloutTrace` option (on by default) keeps the
 backend's native request/response/tool bundle as trial artifacts, separately
 from OpenTelemetry. `telemetry.rolloutTrace` describes the copy, not its
 content. Neither `telemetry.host.content` nor `telemetry.otlp.content`
