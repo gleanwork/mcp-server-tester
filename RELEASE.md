@@ -37,33 +37,31 @@ npm token and no one-time password.
 1. Check the labels and titles of the pull requests since the last release
    (see Preparation). The changelog is generated from them, and the workflow
    has no editor step to fix it afterwards.
-2. Do a dry run, and read the changelog in the run's log:
+2. Run the Release workflow with `dry_run` on. Its log shows the version it
+   would release and the changelog. Check both.
+3. Run it again with `dry_run` off, and the same inputs.
+4. Check the result: the run succeeded, npm lists the new version, and the
+   GitHub release exists.
 
-   ```sh
-   gh workflow run release.yml -f increment=prerelease -f pre_release=beta -f dry_run=true
-   ```
+Choose the inputs from the release you want, not from a past example:
 
-3. Release:
+| To release                                         | `increment`                   | `pre_release`      |
+| -------------------------------------------------- | ----------------------------- | ------------------ |
+| The next prerelease on the current line            | `prerelease`                  | Empty              |
+| The first prerelease of a new line (rc after beta) | `prerelease`                  | The new identifier |
+| The final version of a prerelease line             | The line's: `major` for x.0.0 | Empty              |
+| A version after a final release                    | `patch`, `minor` or `major`   | Empty              |
 
-   ```sh
-   gh workflow run release.yml -f increment=prerelease -f pre_release=beta
-   ```
+With `pre_release` empty, a prerelease keeps the current identifier: the
+version after `x.y.z-rc.N` is `x.y.z-rc.N+1`. A new identifier must sort after
+the current one, or the version goes down. A prerelease publishes under its
+identifier as the npm dist-tag (`beta`, `rc`). A final release becomes
+`latest`.
 
-   `increment` is `prerelease`, `patch`, `minor` or `major`; `pre_release` is
-   the prerelease identifier, empty for a final release. From `2.0.0-beta.14`:
-   `prerelease` + `beta` gives `2.0.0-beta.15`; `prerelease` + `rc` gives
-   `2.0.0-rc.0`; `major` alone gives `2.0.0`. A prerelease publishes under its
-   identifier as the npm dist-tag (`beta`, `rc`); a final release becomes
-   `latest`.
-
-4. Check the result: the run succeeded (`gh run watch`),
-   `npm view @gleanwork/mcp-server-tester versions` lists the new version, and
-   the GitHub release exists.
-
-The workflow runs `npx release-it <increment> --ci`. That bumps the version and
-publishes to npm (`prepublishOnly` builds and tests first). Then it commits
-`Release <version>`, tags `v<version>`, pushes both to `main` as the
-`gleanwork-ci` GitHub App, and creates the GitHub release.
+The workflow runs release-it, which bumps the version and publishes to npm
+(`prepublishOnly` builds and tests first). Then it commits `Release <version>`,
+tags `v<version>`, pushes both to `main` as the `gleanwork-ci` GitHub App, and
+creates the GitHub release.
 
 A pull request that changes `release.yml` or `.release-it.js` gets a dry run.
 
@@ -89,13 +87,10 @@ A pull request that changes `release.yml` or `.release-it.js` gets a dry run.
 release-it publishes to npm before it commits and tags. If a later step fails,
 npm has the new version and GitHub doesn't. Don't rerun the workflow: it would
 try to publish the same version again, and npm versions can't be republished.
-Finish the GitHub side from an up-to-date checkout of `main` instead. This is
-the command in fish; `CI=true` turns off the changelog editor and the npm
-checks:
-
-```sh
-env CI=true GITHUB_AUTH=(gh auth token) npx release-it <version> --no-npm.publish
-```
+Finish the GitHub side from an up-to-date checkout of `main` instead: run
+release-it for the version npm already has, with npm publishing off
+(`--no-npm.publish`), `CI=true` (no changelog editor, no npm checks) and
+`GITHUB_AUTH` set to a GitHub token.
 
 ### From a laptop
 

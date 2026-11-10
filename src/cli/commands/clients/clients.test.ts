@@ -250,6 +250,8 @@ describe('mst clients', () => {
         'rolloutTrace',
       ],
       cowork: [
+        'mode',
+        'connectors',
         'maxActions',
         'hitlMaxActions',
         'computerUseModel',

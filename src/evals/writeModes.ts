@@ -115,7 +115,11 @@ export function readOnlyServerLabels(
 /** What the load check needs about the run. */
 export interface WriteModeCheck {
   variants: ReadonlyArray<
-    VariantWriteModes & { servers: readonly MCPConfig[] }
+    VariantWriteModes & {
+      servers: readonly MCPConfig[];
+      /** The client checks its effective, authenticated tool set before submission. */
+      toolsCheckedAfterPrepare?: boolean;
+    }
   >;
   /** `--allow-live-writes`. */
   allowLiveWrites: boolean;
@@ -217,8 +221,9 @@ export async function assertWriteModes(check: WriteModeCheck): Promise<void> {
   const checked = new Set<string>();
   const problems: string[] = [];
   const log = check.log ?? ((line: string) => console.warn(line));
-  for (const { servers, modes } of check.variants)
+  for (const { servers, modes, toolsCheckedAfterPrepare } of check.variants)
     for (const [index, server] of servers.entries()) {
+      if (toolsCheckedAfterPrepare) continue;
       const label = mcpServerLabel(server, index);
       if (modes[label] !== 'read-only') continue;
       const key = JSON.stringify(server);

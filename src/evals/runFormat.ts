@@ -24,6 +24,7 @@ import type { RecordedRunner } from './runners/builtinRunners.js';
 import type { ShardRecord } from './runners/shardedCollect.js';
 import type { ListedServerTools } from './toolSurface.js';
 import { storedClientName, storedClientSetup } from './clientNames.js';
+import { TranscriptSchema } from './transcriptFormat.js';
 
 /**
  * The run format, `mst.run/v1`: what a run leaves behind, one directory per
@@ -40,9 +41,21 @@ import { storedClientName, storedClientSetup } from './clientNames.js';
  * <eval dir>/runs/<run-id>/summary.json
  * ```
  *
- * Every file starts with `format` and `kind`. Readers ignore fields they
- * don't know, so adding an optional field keeps the version; removing or
- * renaming one moves the format to `mst.run/v2`.
+ * Every file starts with `format` and `kind`. Readers keep fields they don't
+ * know, at every depth, so adding an optional field keeps the version;
+ * removing or renaming one moves the format to `mst.run/v2`.
+ *
+ * A field whose values the format names (a write mode, an ending, a transcript
+ * event's kind, a label) is closed: a value this MST doesn't know fails the
+ * read, with a message to upgrade MST (`parseRunFile`). MST's code handles
+ * each value it names, in grading, resuming, metrics and reports, and
+ * guessing what a new one means could change a count or a grade. Adding such
+ * a value keeps the version, and an older MST can't read a run that uses it.
+ * A known field of the wrong type is a malformed file and fails the read.
+ * Every client's events are checked against the stored shape where they
+ * enter MST (`transcriptFormat.ts`), so MST doesn't write a run it can't read.
+ * A regrade keeps a trial's transcript and write record as recorded, fields
+ * it doesn't know included, and writes the trial record's own fields anew.
  *
  * A trial's transcript is written when the trial finishes (`writeTrial`), so a
  * run that is killed keeps every trial that finished. The other files are
@@ -87,6 +100,91 @@ function segment(name: string): string {
   return `${encoded.slice(0, MAX_SEGMENT_BYTES - 17).replace(/%[0-9A-F]?$/, '')}~${hash}`;
 }
 
+/**
+ * A Zod error's issues with each union replaced by its closest branch, the
+ * one with the fewest issues, and every path made absolute. Without this a
+ * union says only "Invalid input", and a branch the file was never meant to
+ * be (a pairwise calibration's `judgeKind` against the pointwise branch)
+ * looks like an unknown value.
+ */
+function closestIssues(
+  issues: readonly z.core.$ZodIssue[],
+  prefix: readonly PropertyKey[] = []
+): z.core.$ZodIssue[] {
+  return issues.flatMap((issue) => {
+    const at = [...prefix, ...issue.path];
+    if (issue.code === 'invalid_union' && issue.errors.length) {
+      const closest = issue.errors.reduce((best, branch) =>
+        branch.length < best.length ? branch : best
+      );
+      return closestIssues(closest, at);
+    }
+    return [{ ...issue, path: at }];
+  });
+}
+
+/** `writeRecord.writes[0].mode`, as Zod prints a path. */
+function issuePath(path: readonly PropertyKey[]): string {
+  return (
+    path
+      .map((key, i) =>
+        typeof key === 'number' ? `[${key}]` : `${i ? '.' : ''}${String(key)}`
+      )
+      .join('') || '(root)'
+  );
+}
+
+/** The value at a Zod issue's path in what was parsed. */
+function valueAt(value: unknown, path: readonly PropertyKey[]): unknown {
+  let at = value;
+  for (const key of path) {
+    if (at === null || typeof at !== 'object') return undefined;
+    at = (at as Record<PropertyKey, unknown>)[key];
+  }
+  return at;
+}
+
+/**
+ * Where a file has a value in a closed field this MST doesn't know: an enum
+ * or literal value, or a discriminator no branch has. A field that is
+ * missing is a malformed file, not a newer one.
+ */
+function unknownValues(
+  value: unknown,
+  issues: readonly z.core.$ZodIssue[]
+): string[] {
+  return issues.flatMap((issue) =>
+    (issue.code === 'invalid_value' ||
+      (issue.code === 'invalid_union' && 'discriminator' in issue)) &&
+    valueAt(value, issue.path) !== undefined
+      ? [issuePath(issue.path)]
+      : []
+  );
+}
+
+/**
+ * Parse one run-format file with its schema. Throws with the file's name, and
+ * says to upgrade MST when the file has a value in a closed field that this
+ * MST doesn't know: a newer MST may have written it.
+ */
+function parseRunFile<T extends z.ZodType>(
+  schema: T,
+  value: unknown,
+  file: string,
+  what: string
+): z.infer<T> {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const issues = closestIssues(parsed.error.issues);
+  const unknown = [...new Set(unknownValues(value, issues))];
+  const hint = unknown.length
+    ? ` It has a value this MST doesn't know at ${unknown.join(', ')}: a newer MST may have written it. Upgrade MST to read it.`
+    : '';
+  throw new Error(
+    `${file} isn't ${what}: ${z.prettifyError(new z.ZodError(issues))}${hint}`
+  );
+}
+
 const Envelope = <K extends string>(kind: K) => ({
   format: z.literal(RUN_FORMAT),
   kind: z.literal(kind),
@@ -103,9 +201,9 @@ export const WriteModeSchema = z.enum([
 ]);
 
 /** A trial's write record (ADR 0014): what its dry-run proxies recorded. */
-const WriteRecordSchema = z.object({
+const WriteRecordSchema = z.looseObject({
   writes: z.array(
-    z.object({
+    z.looseObject({
       server: z.string(),
       tool: z.string(),
       arguments: z.unknown(),
@@ -118,14 +216,14 @@ const WriteRecordSchema = z.object({
   ),
   unreported: z.number().int().nonnegative(),
   unrecorded: z.array(
-    z.object({
+    z.looseObject({
       server: z.string(),
       tool: z.string(),
       eventId: z.string().optional(),
     })
   ),
   unclassified: z.array(
-    z.object({
+    z.looseObject({
       server: z.string(),
       tool: z.string(),
       arguments: z.unknown(),
@@ -209,6 +307,8 @@ const RunRecordSchema = z.looseObject({
           .string()
           .regex(/^[0-9a-f]{64}$/)
           .optional(),
+        /** The judge's version, or its plugin's (ADR 0009). */
+        version: z.string().optional(),
         /** The judge has no version MST can see change (ADR 0009). */
         unversioned: z.literal(true).optional(),
       })
@@ -372,8 +472,8 @@ export function trialArtifactsPath(
 
 /** How a trial's attempt ended (ADR 0010): a trial, or an infrastructure failure. */
 const TrialEndingSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('trial') }),
-  z.object({
+  z.looseObject({ kind: z.literal('trial') }),
+  z.looseObject({
     kind: z.literal('infrastructure'),
     /** What broke around the client. */
     broke: z.enum(INFRASTRUCTURE_BREAKS),
@@ -403,7 +503,7 @@ const TrialRecordSchema = z.looseObject({
   /** A grader couldn't score the trial (`<grader>: <error>`); the client ran. */
   gradingError: z.string().optional(),
   /** The trial's transcript: what the client did. */
-  transcript: z.looseObject({}).optional(),
+  transcript: TranscriptSchema.optional(),
   /**
    * The writes its servers' dry-run proxies recorded (ADR 0014), when any
    * server's writes go through one.
@@ -517,13 +617,10 @@ export function labelRecordPath(
 /** Parses a label file's contents; throws with the file's name when it isn't one. */
 export function parseLabelRecord(value: unknown, file: string): LabelRecord {
   assertRunFormat(value, file);
-  const parsed = LabelRecordSchema.safeParse(value);
-  if (!parsed.success)
-    throw new Error(`${file} isn't a label: ${parsed.error.message}`);
-  return parsed.data;
+  return parseRunFile(LabelRecordSchema, value, file, 'a label');
 }
 
-const RateSchema = z.object({
+const RateSchema = z.looseObject({
   k: z.number().int().nonnegative(),
   n: z.number().int().nonnegative(),
   value: z.number().nullable(),
@@ -552,13 +649,13 @@ const CalibrationFields = {
  * what `mst judges check` measured for one judge identity against people's
  * labels. It applies only to that identity.
  */
-const CalibrationRecordSchema = z.union([
+const CalibrationRecordSchema = z.discriminatedUnion('judgeKind', [
   z.looseObject({
     ...CalibrationFields,
     judgeKind: z.literal('pointwise'),
     humanPass: z.number().int().nonnegative(),
     humanFail: z.number().int().nonnegative(),
-    counts: z.object({
+    counts: z.looseObject({
       truePositive: z.number().int().nonnegative(),
       falseNegative: z.number().int().nonnegative(),
       trueNegative: z.number().int().nonnegative(),
@@ -567,7 +664,7 @@ const CalibrationRecordSchema = z.union([
     tpr: RateSchema,
     tnr: RateSchema,
     kappa: z.number().nullable(),
-    gate: z.object({
+    gate: z.looseObject({
       minPassLabels: z.number(),
       minFailLabels: z.number(),
       minRate: z.number(),
@@ -609,17 +706,54 @@ export function parseCalibrationRecord(
   file: string
 ): CalibrationRecord {
   assertRunFormat(value, file);
-  const parsed = CalibrationRecordSchema.safeParse(value);
-  if (!parsed.success)
-    throw new Error(`${file} isn't a calibration: ${parsed.error.message}`);
-  return parsed.data;
+  return parseRunFile(CalibrationRecordSchema, value, file, 'a calibration');
 }
+
+/** One grader's score in a case or trial result, by its grader's name. */
+const ScoresSchema = z.record(
+  z.string(),
+  z.looseObject({
+    pass: z.boolean(),
+    score: z.number().optional(),
+    reasoning: z.string().optional(),
+  })
+);
+
+/** One trial of a case that ran several. */
+const TrialResultSchema = z.looseObject({
+  pass: z.boolean(),
+  durationMs: z.number(),
+  scores: ScoresSchema.optional(),
+  error: z.string().optional(),
+  gradingError: z.string().optional(),
+  ending: TrialEndingSchema.optional(),
+  transcript: TranscriptSchema.optional(),
+  writeRecord: WriteRecordSchema.optional(),
+});
+
+/** A case's result: its trials, scores and transcript joined. */
+const CaseResultSchema = z.looseObject({
+  id: z.string(),
+  datasetName: z.string(),
+  variant: z.string().optional(),
+  pass: z.boolean(),
+  durationMs: z.number(),
+  ending: TrialEndingSchema.optional(),
+  scores: ScoresSchema,
+  error: z.string().optional(),
+  gradingError: z.string().optional(),
+  passRate: z.number().optional(),
+  trialResults: z.array(TrialResultSchema).optional(),
+  transcript: TranscriptSchema.optional(),
+  writeRecord: WriteRecordSchema.optional(),
+  tags: z.array(z.string()).optional(),
+});
 
 /** `results.json`: every case result, transcripts and scores joined. */
 const ResultsRecordSchema = z.looseObject({
   ...Envelope('results'),
   runId: z.string(),
-  cases: z.array(z.looseObject({ id: z.string(), pass: z.boolean() })),
+  cases: z.array(CaseResultSchema),
 });
 
 /** `summary.json`: the run summary, per variant, without the case list. */
@@ -642,6 +776,36 @@ const LatestRecordSchema = z.looseObject({
   path: z.string(),
 });
 
+/**
+ * A stored run's `manifest.json`, which its upload writes last: each file's
+ * size and SHA-256 (`runStore.ts`). It has its own `format: 1`, which
+ * predates `mst.run/v1`; `kind` names its schema, and manifests from before
+ * rc.1 have none.
+ */
+const RunManifestSchema = z.looseObject({
+  format: z.literal(1),
+  kind: z.literal('manifest').optional(),
+  runId: z.string(),
+  files: z.array(
+    z.looseObject({
+      path: z.string(),
+      bytes: z.number().int().nonnegative(),
+      sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    })
+  ),
+});
+
+/** A stored run's `manifest.json`. */
+export type RunManifest = z.infer<typeof RunManifestSchema>;
+
+/**
+ * Parse a stored run's `manifest.json`. Throws with the file's name, and
+ * says to upgrade MST for a format it doesn't know.
+ */
+export function parseRunManifest(value: unknown, file: string): RunManifest {
+  return parseRunFile(RunManifestSchema, value, file, "a run's manifest");
+}
+
 /** The schemas `schema/run/v1/` is generated from, by file kind. */
 export const RUN_SCHEMAS = {
   run: RunRecordSchema,
@@ -653,6 +817,7 @@ export const RUN_SCHEMAS = {
   results: ResultsRecordSchema,
   summary: SummaryRecordSchema,
   latest: LatestRecordSchema,
+  manifest: RunManifestSchema,
 } as const;
 
 /** A dataset's content hash: the cases a run took from it, as they ran. */
@@ -706,6 +871,13 @@ export interface JudgeRecord {
   level: string;
   optionsHash: string;
   identity?: string;
+  /**
+   * The version a person reads beside the identity: the one the judge
+   * declares or, for a plugin judge that declares none, its plugin's package
+   * version. Absent for an unversioned judge, a built-in that declares none
+   * (MST's version stands for it), and runs from before MST recorded it.
+   */
+  version?: string;
   /** The judge has no version MST can see change (ADR 0009). */
   unversioned?: true;
 }
@@ -854,10 +1026,22 @@ function trialRecord(
     ...(t.error !== undefined ? { error: t.error } : {}),
     // The client ran; a grader couldn't score it. A regrade can finish it.
     ...(t.gradingError !== undefined ? { gradingError: t.gradingError } : {}),
+    // The stored shapes keep unknown fields (an index signature), which
+    // MST's interfaces don't declare.
     ...(t.transcript
-      ? { transcript: t.transcript as unknown as Record<string, unknown> }
+      ? {
+          transcript: t.transcript as unknown as z.infer<
+            typeof TranscriptSchema
+          >,
+        }
       : {}),
-    ...(t.writeRecord ? { writeRecord: t.writeRecord } : {}),
+    ...(t.writeRecord
+      ? {
+          writeRecord: t.writeRecord as unknown as z.infer<
+            typeof WriteRecordSchema
+          >,
+        }
+      : {}),
     ...(t.clientUsage ? { clientUsage: t.clientUsage } : {}),
     ...(t.clientTelemetry ? { clientTelemetry: t.clientTelemetry } : {}),
     ...(t.clientMetadata ? { clientMetadata: t.clientMetadata } : {}),
@@ -1202,23 +1386,68 @@ export async function readRunDirectory(directory: string): Promise<StoredRun> {
   };
   const record = await read('run.json');
   await assertCurrentRunLayout(record, directory);
-  const run = RunRecordSchema.parse(record);
-  const summary = (await read('summary.json')) as EvaluationSummary;
-  const results = (await read('results.json')) as { cases?: EvalCaseResult[] };
+  const run = parseRunRecord(record, path.join(directory, 'run.json'));
+  const results = await read('results.json');
   // Old score keys in the results, too: a run stopped before its scores
   // has `results.json` but no `scores/`.
   assertCurrentRunResult(
-    { caseResults: results.cases },
+    { caseResults: (results as { cases?: EvalCaseResult[] }).cases },
     path.join(directory, 'results.json')
+  );
+  const { cases } = parseResultsRecord(
+    results,
+    path.join(directory, 'results.json')
+  );
+  const summary = parseSummaryRecord(
+    await read('summary.json'),
+    path.join(directory, 'summary.json')
   );
   return {
     directory,
     run: runWithCurrentClients(run),
-    summary: summaryWithCurrentClients(
-      joinCaseResults(summary, results.cases ?? []),
-      run
-    ),
+    summary: summaryWithCurrentClients(joinCaseResults(summary, cases), run),
   };
+}
+
+/**
+ * Parse a stored `run.json` (after `assertRunFormat`). Throws with the file's
+ * name, and says to upgrade MST for a value it doesn't know.
+ */
+export function parseRunRecord(value: unknown, file: string): RunRecord {
+  return parseRunFile(RunRecordSchema, value, file, "a run's run.json");
+}
+
+/**
+ * Parse a stored `results.json` (after `assertRunFormat`): its case results,
+ * as written. Checking a large file doesn't keep a second copy of it.
+ */
+export function parseResultsRecord(
+  value: unknown,
+  file: string
+): { cases: EvalCaseResult[] } {
+  parseRunFile(ResultsRecordSchema, value, file, "a run's results.json");
+  return { cases: (value as { cases: EvalCaseResult[] }).cases };
+}
+
+/**
+ * A stored `results.json`'s case results, for a reader that has only that
+ * file (the previous-run comparison): its format checked, then its cases.
+ */
+export function storedCaseResults(
+  value: unknown,
+  file: string
+): EvalCaseResult[] {
+  assertRunFormat(value, file);
+  return parseResultsRecord(value, file).cases;
+}
+
+/** Parse a stored `summary.json` (after `assertRunFormat`), as written. */
+export function parseSummaryRecord(
+  value: unknown,
+  file: string
+): EvaluationSummary {
+  parseRunFile(SummaryRecordSchema, value, file, "a run's summary.json");
+  return value as EvaluationSummary;
 }
 
 /**
@@ -1362,7 +1591,7 @@ export async function readRunTrials(directory: string): Promise<TrialRecord[]> {
       const full = path.join(root, file);
       const value = await readJsonFile(full);
       assertRunFormat(value, full);
-      return TrialRecordSchema.parse(value);
+      return parseRunFile(TrialRecordSchema, value, full, 'a trial');
     })
   );
   return trials.sort(

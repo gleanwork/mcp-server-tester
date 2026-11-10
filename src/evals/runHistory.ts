@@ -40,8 +40,10 @@ import type { GraderScore } from '../types/index.js';
 import { assertRunFormat } from './resultFormat.js';
 import {
   RUN_ID_PATTERN,
-  RUN_SCHEMAS,
   joinCaseResults,
+  parseResultsRecord,
+  parseRunRecord,
+  parseSummaryRecord,
   runWithCurrentClients,
   summaryWithCurrentClients,
   type RunRecord,
@@ -70,7 +72,7 @@ export { HISTORY_FORMAT };
  * The version of the code that builds a row from a run. A cached row built
  * by another version is built again, so a row never mixes two definitions.
  */
-const ROW_BUILDER = 4;
+const ROW_BUILDER = 5;
 
 /**
  * Parses `history.json`; undefined when it isn't one this MST reads, and
@@ -546,6 +548,7 @@ function historyRunOf(run: RunRecord, summary: EvaluationSummary): HistoryRun {
       type: judge.type,
       level: judge.level,
       ...(judge.identity ? { identity: judge.identity } : {}),
+      ...(judge.version !== undefined ? { version: judge.version } : {}),
       optionsHash: judge.optionsHash,
     })),
     ...(run.plugins
@@ -1164,11 +1167,16 @@ async function readRow(
     if (summary === undefined)
       return { runId, reason: 'it has no summary.json' };
     assertRunFormat(summary, `${prefix}summary.json`);
-    const results = (await getJson(location.store, `${prefix}results.json`)) as
-      | { cases?: EvalCaseResult[] }
-      | undefined;
+    const results = await getJson(location.store, `${prefix}results.json`);
+    if (results !== undefined)
+      assertRunFormat(results, `${prefix}results.json`);
     const joined = summaryWithCurrentClients(
-      joinCaseResults(summary as EvaluationSummary, results?.cases ?? []),
+      joinCaseResults(
+        parseSummaryRecord(summary, `${prefix}summary.json`),
+        results === undefined
+          ? []
+          : parseResultsRecord(results, `${prefix}results.json`).cases
+      ),
       run
     );
     return historyRunOf(run, joined);
@@ -1209,7 +1217,7 @@ export async function buildHistory(
         const value = await getJson(location.store, key);
         if (value === undefined) return undefined;
         assertRunFormat(value, key);
-        run = runWithCurrentClients(RUN_SCHEMAS.run.parse(value));
+        run = runWithCurrentClients(parseRunRecord(value, key));
       } catch (error) {
         return {
           runId,

@@ -9,6 +9,7 @@ import { mcpServerLabel, type MCPConfig } from '../config/mcpConfig.js';
 import type { LLMToolCall } from './mstClient/types.js';
 import type { SkillLoad } from '../types/index.js';
 import type { ClientExecution, ClientResponse } from './caseExecution.js';
+import { checkedClientEvents } from './transcriptFormat.js';
 
 /** Fill a missing server on one-server runs, without changing client names. */
 function attributed(
@@ -20,7 +21,7 @@ function attributed(
     throw new Error(
       "A client returned a transcript event with `source: 'host'`; it is now `source: 'builtin'` (the client's built-in tools)."
     );
-  return withEventServers(events, servers);
+  return withEventServers(checkedClientEvents(events), servers);
 }
 
 /**

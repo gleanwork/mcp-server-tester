@@ -13,6 +13,7 @@
  */
 import type { UsageMetrics } from '../types/index.js';
 import type { ModelCall, TranscriptEvent } from './evalFrameworkTypes.js';
+import { clientApp, withClientApp } from './installedApp.js';
 
 type ObjectValue = Record<string, unknown>;
 
@@ -201,6 +202,8 @@ interface RolloutFacts {
   modelCalls: ModelCall[];
   durationMs?: number;
   timeToFirstTokenMs?: number;
+  /** The Codex CLI version that wrote the rollout (`session_meta.cli_version`). */
+  cliVersion?: string;
 }
 
 function assistantText(payload: ObjectValue): string {
@@ -240,6 +243,8 @@ export function parseCodexRollout(
     if (!record) continue;
     const at = string(record.timestamp);
     const payload = object(record.payload) ?? {};
+    if (record.type === 'session_meta')
+      facts.cliVersion ??= string(payload.cli_version);
     if (record.type === 'turn_context') {
       facts.model ??= string(payload.model);
       facts.reasoningEffort ??= string(payload.effort);
@@ -512,6 +517,7 @@ export function buildCodexTranscript(
     completedAt: context.endedAt,
     ...(error ? { error } : {}),
     telemetry: {
+      ...withClientApp(clientApp('Codex CLI', facts?.cliVersion)),
       ...(model ? { models: [model] } : {}),
       ...(facts?.reasoningEffort
         ? { reasoningEffort: facts.reasoningEffort }

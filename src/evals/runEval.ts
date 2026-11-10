@@ -106,7 +106,7 @@ import type { CaseJudge } from './datasetTypes.js';
 import {
   contentHash,
   judgeIdentity,
-  judgeIsVersioned,
+  judgeVersionFields,
 } from '../judge/judgeIdentity.js';
 import { getJudge } from '../judge/builtinJudges.js';
 import { WriteRecordLedger, withWriteRecords } from './writeRecord.js';
@@ -231,6 +231,7 @@ import {
 } from './connectorServers.js';
 import { credentialStoreFor } from '../auth/grants/stores.js';
 import { resolveServerSecrets } from './serverSecrets.js';
+import { isFirstPartyCowork } from './cowork/firstParty.js';
 import type { CredentialStore } from '../auth/grants/types.js';
 import {
   LOCAL_RUNNER,
@@ -847,9 +848,15 @@ function assertResumable(
   const recorded = run.judges ?? [];
   const withoutIdentity = (records: readonly JudgeRecord[]) =>
     // What older runs don't record: a run graded before MST recorded them
-    // can still be resumed.
+    // can still be resumed. A judge's version is only for reading: its
+    // identity, compared below, covers it.
     records.map(
-      ({ identity: _identity, unversioned: _unversioned, ...record }) => record
+      ({
+        identity: _identity,
+        unversioned: _unversioned,
+        version: _version,
+        ...record
+      }) => record
     );
   if (
     JSON.stringify(withoutIdentity(recorded)) !==
@@ -922,22 +929,27 @@ function entryIdentity(
 }
 
 /**
- * Whether an eval config entry's judge has no version MST can see change.
- * Scores record it for pointwise judges; run.json records it for every
- * level, so a pairwise judge's calibration can say so too.
+ * An eval config entry's judge version, which a person reads beside its
+ * identity, and whether it has no version MST can see change. Scores record
+ * `unversioned` for pointwise judges; run.json records both for every level,
+ * so a pairwise judge's calibration can say so too. Nothing when the judge
+ * isn't loaded.
  */
-function entryUnversioned(level: string, entry: unknown): boolean {
+function entryVersion(
+  level: string,
+  entry: unknown
+): { version?: string; unversioned?: true } {
   const config = (typeof entry === 'string' ? { type: entry } : entry) as {
     type: string;
   } & Record<string, unknown>;
   try {
     if (level === 'pairwise') {
       const { type } = pairwiseJudgeSpec(config);
-      return !judgeIsVersioned(type, getPairwiseJudge(type));
+      return judgeVersionFields(type, getPairwiseJudge(type));
     }
-    return !judgeIsVersioned(config.type, getJudge(config.type));
+    return judgeVersionFields(config.type, getJudge(config.type));
   } catch {
-    return false;
+    return {};
   }
 }
 
@@ -971,9 +983,7 @@ function judgeRecords(
           .update(JSON.stringify(options))
           .digest('hex'),
         ...(identity !== undefined ? { identity } : {}),
-        ...(entryUnversioned(level, entry)
-          ? { unversioned: true as const }
-          : {}),
+        ...entryVersion(level, entry),
       };
     };
   const configJudges = JSON.stringify(evalConfig.judges ?? []);
@@ -2454,7 +2464,12 @@ async function evaluate(
     if (options.recordServedTools && !replay) {
       const listings = new Map<string, Promise<ListedServerTools[]>>();
       for (const variant of variants) {
-        const { servers, resolvedServers } = setupVariant(variant);
+        const { servers, resolvedServers, clientConfig } =
+          setupVariant(variant);
+        if (isFirstPartyCowork(clientConfig.declaration))
+          throw new Error(
+            'First-party mode records its account tool inventory in connector-policy.json; direct recordServedTools probes are unsupported.'
+          );
         const key = JSON.stringify(servers);
         let listing = listings.get(key);
         if (!listing)
@@ -2477,7 +2492,7 @@ async function evaluate(
     if (!regrade) {
       const declared = evalConfig.writes ?? {};
       const checked = variants.map((variant) => {
-        const { resolvedServers } = setupVariant(variant);
+        const { resolvedServers, clientConfig } = setupVariant(variant);
         const established = new Map<string, WriteMode>();
         resolvedServers.forEach((server, index) => {
           const label = mcpServerLabel(server, index);
@@ -2492,6 +2507,9 @@ async function evaluate(
             declared
           ),
           servers: resolvedServers,
+          toolsCheckedAfterPrepare: isFirstPartyCowork(
+            clientConfig.declaration
+          ),
         };
       });
       await assertWriteModes({

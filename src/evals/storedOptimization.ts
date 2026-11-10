@@ -346,12 +346,20 @@ function setupChange(
   if (hashes(baseline.datasets) !== hashes(planned.datasets))
     return 'its datasets changed (different cases or case content)';
   // Each judge with a hash of its options, so a changed rubric or threshold
-  // shows even when the judge's type doesn't.
+  // shows even when the judge's type doesn't. Its version is only for
+  // reading (its identity covers it), and baselines from before MST recorded
+  // it have none.
   const configJudges = (judges: readonly unknown[] | undefined) =>
     JSON.stringify(
-      (judges ?? []).filter(
-        (judge) => (judge as { level?: unknown }).level === 'config'
-      )
+      (judges ?? [])
+        .filter((judge) => (judge as { level?: unknown }).level === 'config')
+        .map((judge) => {
+          const { version: _version, ...record } = judge as Record<
+            string,
+            unknown
+          >;
+          return record;
+        })
     );
   if (configJudges(baseline.judges) !== configJudges(planned.judges))
     return "the eval config's judges or their options changed";

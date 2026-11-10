@@ -4,7 +4,6 @@ import {
   lstat,
   mkdir,
   open,
-  readFile,
   realpath,
   rename,
   rm,
@@ -20,6 +19,7 @@ import { freemem, homedir, loadavg, totalmem, uptime } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkDesktop } from './desktop.js';
+import { installedDebApp } from '../installedApp.js';
 import { transportServers } from '../evalConfig.js';
 import { credentialHelperScript } from '../coworkSetup/credentialHelper.js';
 import {
@@ -317,43 +317,6 @@ export function desktopRestartTimeoutMs(
  * the same variant) doesn't restart it.
  */
 const ownedDesktopSettings = new Map<string, string>();
-
-/**
- * A Debian package's installed version, from dpkg's status file (the
- * `Package:` stanza whose `Status:` says installed). Undefined when it isn't
- * installed.
- */
-export function installedDebVersion(
-  status: string,
-  name: string
-): string | undefined {
-  for (const stanza of status.split(/\n\s*\n/)) {
-    const field = (key: string) =>
-      new RegExp(`^${key}: (.+)$`, 'm').exec(stanza)?.[1]?.trim();
-    if (field('Package') !== name) continue;
-    if (!/\binstalled$/.test(field('Status') ?? '')) continue;
-    return field('Version');
-  }
-  return undefined;
-}
-
-/** The Claude Desktop package this machine runs, as each case records it. */
-async function installedClaudeDesktop(): Promise<
-  { name: string; version: string; source: 'installed' } | undefined
-> {
-  try {
-    const version = installedDebVersion(
-      await readFile('/var/lib/dpkg/status', 'utf8'),
-      'claude-desktop'
-    );
-    return version
-      ? { name: 'Claude', version, source: 'installed' }
-      : undefined;
-  } catch {
-    // Not a Debian system, or no dpkg: nothing to record.
-    return undefined;
-  }
-}
 
 interface ServerHeaderFiles {
   /** Each server's helper, by server name. */
@@ -765,6 +728,14 @@ async function systemState(dataDir: string): Promise<object> {
 }
 
 /** Attach to caller-owned resources. Never create, authenticate, or stop a desktop. */
+/**
+ * The Claude desktop app the image installs as the `claude-desktop` package
+ * (docker/cowork-linux). Not a Debian system, or no dpkg: nothing to record.
+ */
+export async function installedCoworkApp() {
+  return installedDebApp('claude-desktop', 'Claude');
+}
+
 export const coworkLinux: CoworkDesktop = {
   dataDirectory: (options) =>
     options.dataDir ??
@@ -872,7 +843,7 @@ export const coworkLinux: CoworkDesktop = {
       await restore().catch(() => {});
       throw error;
     }
-    const app = await installedClaudeDesktop();
+    const app = await installedCoworkApp();
     return { dispose: restore, ...(app ? { app } : {}) };
 
     async function checkAndProbe(): Promise<void> {

@@ -7,10 +7,7 @@
 import type { ZodType } from 'zod';
 import { listJudges } from '../../../judge/builtinJudges.js';
 import { listPairwiseJudges } from '../../../evals/pairwiseComparison.js';
-import {
-  judgeIsVersioned,
-  judgeVersion,
-} from '../../../judge/judgeIdentity.js';
+import { judgeVersionFields } from '../../../judge/judgeIdentity.js';
 import {
   formatTable,
   inNamespaces,
@@ -34,20 +31,6 @@ interface ListedJudge {
   unversioned?: true;
   description?: string;
   requires: string[];
-}
-
-/** `version` or `unversioned`, as a listed judge reports them. */
-function versionFields(
-  ref: string,
-  definition: { schema: ZodType; version?: string }
-): Pick<ListedJudge, 'version' | 'unversioned'> {
-  const version = judgeVersion(ref, definition);
-  return {
-    ...(version !== undefined ? { version } : {}),
-    ...(judgeIsVersioned(ref, definition)
-      ? {}
-      : { unversioned: true as const }),
-  };
 }
 
 /** A version for a table: a content hash is cut to 12 characters. */
@@ -75,7 +58,7 @@ async function judgeEntries(options: DiscoveryOptions): Promise<JudgeEntry[]> {
     ...listJudges().map(([ref, definition]) => ({
       ref,
       kind: 'judge' as const,
-      ...versionFields(ref, definition),
+      ...judgeVersionFields(ref, definition),
       ...(definition.description !== undefined
         ? { description: definition.description }
         : {}),
@@ -85,7 +68,7 @@ async function judgeEntries(options: DiscoveryOptions): Promise<JudgeEntry[]> {
     ...listPairwiseJudges().map(([ref, definition]) => ({
       ref,
       kind: 'pairwise' as const,
-      ...versionFields(ref, definition),
+      ...judgeVersionFields(ref, definition),
       ...(definition.description !== undefined
         ? { description: definition.description }
         : {}),

@@ -7,6 +7,7 @@
  */
 import { z } from 'zod';
 import { RUN_ID_PATTERN, WriteModeSchema } from './runFormat.js';
+import { schemaId } from '../schemaIds.js';
 
 /** The history format. Readers ignore fields they don't know. */
 export const HISTORY_FORMAT = 'mst.history/v1' as const;
@@ -163,6 +164,7 @@ const RunSchema = z.looseObject({
       type: z.string(),
       level: z.string(),
       identity: z.string().optional(),
+      version: z.string().optional(),
       optionsHash: z.string(),
     })
   ),
@@ -197,7 +199,7 @@ export const HistoryIndexSchema = z.looseObject({
 /** The JSON Schema of `history.json`, as `schema/history/v1/` publishes it. */
 export function historyJsonSchema(): Record<string, unknown> {
   return {
-    $id: 'https://unpkg.com/@gleanwork/mcp-server-tester/schema/history/v1/history.schema.json',
+    $id: schemaId('history/v1/history.schema.json'),
     ...(z.toJSONSchema(HistoryIndexSchema, {
       target: 'draft-7',
       io: 'output',

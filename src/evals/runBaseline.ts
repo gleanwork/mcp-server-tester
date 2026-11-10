@@ -10,6 +10,7 @@ import { compareEvalRuns } from './evalRunComparison.js';
 import type { EvalResultStore } from './resultStore.js';
 import {
   joinCaseResults,
+  storedCaseResults,
   summaryWithCurrentClients,
   type RunRecord,
 } from './runFormat.js';
@@ -63,7 +64,10 @@ export interface RunHistory {
   runIds(): Promise<string[]>;
   /** A run's `summary.json`, or undefined when it has none. */
   summary(runId: string): Promise<unknown>;
-  /** A run's case results, from its `results.json`. */
+  /**
+   * A run's case results, from its `results.json`: none when it has no
+   * `results.json`. Throws when the file can't be read as one.
+   */
   cases(runId: string): Promise<EvalCaseResult[]>;
   /**
    * A run's `run.json`, or undefined when it has none: what its variants
@@ -87,11 +91,16 @@ function localRunHistory(runsDirectory: string): RunHistory {
       return value;
     },
     async cases(runId) {
-      // In chunks: a run's results can pass V8's string limit.
-      const results = (await readJsonFile(
-        path.join(runsDirectory, runId, 'results.json')
-      )) as { cases?: EvalCaseResult[] };
-      return results.cases ?? [];
+      const file = path.join(runsDirectory, runId, 'results.json');
+      let value: unknown;
+      try {
+        // In chunks: a run's results can pass V8's string limit.
+        value = await readJsonFile(file);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+        throw error;
+      }
+      return storedCaseResults(value, file);
     },
     async run(runId) {
       return readJsonFile(path.join(runsDirectory, runId, 'run.json'));
@@ -218,8 +227,10 @@ export async function findPreviousRun(options: {
     );
   const newest = runs[0];
   if (!newest) return undefined;
-  // A run without results.json compares as having no cases.
-  const cases = await history.cases(newest.entry).catch(() => []);
+  // A run without results.json compares as having no cases. One that can't
+  // be read fails the comparison, which its caller reports: a comparison
+  // with cases it misread would be wrong without saying so.
+  const cases = await history.cases(newest.entry);
   // Without run.json, a case's client reads by its name alone.
   const run = await history.run?.(newest.entry).catch(() => undefined);
   return {

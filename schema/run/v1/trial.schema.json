@@ -1,5 +1,5 @@
 {
-  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester/schema/run/v1/trial.schema.json",
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester@2/schema/run/v1/trial.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
@@ -17,7 +17,7 @@
           "type": "object",
           "properties": { "kind": { "type": "string", "const": "trial" } },
           "required": ["kind"],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         {
           "type": "object",
@@ -39,7 +39,7 @@
             "reason": { "type": "string" }
           },
           "required": ["kind", "broke", "retryable", "reason"],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       ]
     },
@@ -48,7 +48,67 @@
     "gradingError": { "type": "string" },
     "transcript": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tool_call",
+                  "skill",
+                  "command",
+                  "subagent",
+                  "tool_search"
+                ]
+              },
+              "source": { "type": "string", "enum": ["mcp", "builtin"] },
+              "name": { "type": "string" },
+              "server": { "type": "string" },
+              "arguments": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": {}
+              },
+              "output": { "type": "string" },
+              "isError": { "type": "boolean" },
+              "id": { "type": "string" },
+              "durationMs": { "type": "number" }
+            },
+            "required": ["kind", "name"],
+            "additionalProperties": {}
+          }
+        },
+        "finalText": { "type": "string" },
+        "modelCalls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {}
+          }
+        },
+        "usage": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "hostTelemetry": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "evidence": {
+          "type": "string",
+          "enum": ["structured", "observed", "none"]
+        },
+        "startedAt": { "type": "string" },
+        "completedAt": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "required": ["events"],
       "additionalProperties": {}
     },
     "writeRecord": {
@@ -71,7 +131,7 @@
               "eventId": { "type": "string" }
             },
             "required": ["server", "tool", "arguments", "mode"],
-            "additionalProperties": false
+            "additionalProperties": {}
           }
         },
         "unreported": {
@@ -89,7 +149,7 @@
               "eventId": { "type": "string" }
             },
             "required": ["server", "tool"],
-            "additionalProperties": false
+            "additionalProperties": {}
           }
         },
         "unclassified": {
@@ -104,7 +164,7 @@
               "reason": { "type": "string", "enum": ["dispatch", "unmarked"] }
             },
             "required": ["server", "tool", "arguments", "reason"],
-            "additionalProperties": false
+            "additionalProperties": {}
           }
         },
         "attribution": { "type": "string", "enum": ["exclusive", "matched"] }
@@ -116,7 +176,7 @@
         "unclassified",
         "attribution"
       ],
-      "additionalProperties": false
+      "additionalProperties": {}
     },
     "artifacts": { "type": "string" }
   },

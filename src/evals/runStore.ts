@@ -2,9 +2,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseChunked } from '@discoveryjs/json-ext';
-import { z } from 'zod';
 import { loadGCSStorage } from './gcsStorage.js';
-import { latestRecord, RUN_ID_PATTERN } from './runFormat.js';
+import {
+  latestRecord,
+  parseRunManifest,
+  RUN_ID_PATTERN,
+  storedCaseResults,
+  type RunManifest,
+} from './runFormat.js';
 import type { RunHistory } from './runBaseline.js';
 import type { EvalCaseResult } from '../types/reporter.js';
 
@@ -258,16 +263,6 @@ async function eachLimited<T>(
  */
 const RUN_MANIFEST = 'manifest.json';
 
-interface RunManifest {
-  readonly format: 1;
-  readonly runId: string;
-  readonly files: ReadonlyArray<{
-    readonly path: string;
-    readonly bytes: number;
-    readonly sha256: string;
-  }>;
-}
-
 function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -320,6 +315,7 @@ export async function uploadRun(
     `${JSON.stringify(
       {
         format: 1,
+        kind: 'manifest',
         runId: options.runId,
         files: manifest.sort((a, b) => a.path.localeCompare(b.path)),
       } satisfies RunManifest,
@@ -353,36 +349,36 @@ export function storeRunHistory(store: RunStore, evalName: string): RunHistory {
   return {
     runIds: () => storedRunIds(store, evalName),
     summary: (runId) => getJson(store, `${runs}${runId}/summary.json`),
-    async cases(runId) {
-      const results = (await getJson(store, `${runs}${runId}/results.json`)) as
-        | { cases?: EvalCaseResult[] }
-        | undefined;
-      return results?.cases ?? [];
+    async cases(runId): Promise<EvalCaseResult[]> {
+      const key = `${runs}${runId}/results.json`;
+      const results = await getJson(store, key);
+      return results === undefined ? [] : storedCaseResults(results, key);
     },
     run: (runId) => getJson(store, `${runs}${runId}/run.json`),
   };
 }
 
-const RunManifestSchema = z.object({
-  format: z.literal(1),
-  runId: z.string(),
-  files: z.array(
-    z.object({
-      path: z.string(),
-      bytes: z.number().int().nonnegative(),
-      sha256: z.string().regex(/^[0-9a-f]{64}$/),
-    })
-  ),
-});
-
-function parseManifest(bytes: Uint8Array): RunManifest | undefined {
+/**
+ * A stored run's manifest. Throws, prefixed with `what`, when it isn't JSON
+ * or isn't a manifest (with an upgrade hint when a newer MST wrote it).
+ */
+function parseManifest(
+  bytes: Uint8Array,
+  file: string,
+  what: string
+): RunManifest {
+  let value: unknown;
   try {
-    const parsed = RunManifestSchema.safeParse(
-      JSON.parse(Buffer.from(bytes).toString('utf8'))
-    );
-    return parsed.success ? parsed.data : undefined;
+    value = JSON.parse(Buffer.from(bytes).toString('utf8'));
   } catch {
-    return undefined;
+    throw new Error(`${what}: ${file} isn't JSON.`);
+  }
+  try {
+    return parseRunManifest(value, file);
+  } catch (error) {
+    throw new Error(
+      `${what}: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -429,9 +425,8 @@ export async function fetchRun(
     throw new Error(
       `${what} isn't complete: it has no ${RUN_MANIFEST} (it isn't there, its upload didn't finish, or an MST before beta.13 uploaded it).`
     );
-  const manifest = parseManifest(manifestBytes);
+  const manifest = parseManifest(manifestBytes, RUN_MANIFEST, what);
   if (
-    !manifest ||
     manifest.runId !== runId ||
     !manifest.files.some((file) => file.path === 'run.json')
   )

@@ -24,6 +24,7 @@ import {
   type RunRecord,
   type TrialRecord,
 } from './runFormat.js';
+import { unknownTranscriptFields } from './transcriptFormat.js';
 import { ALL_ARTIFACTS } from './allArtifacts.js';
 import { endingOf, resumeCollects } from './trialEnding.js';
 import fs from 'node:fs/promises';
@@ -271,6 +272,16 @@ async function storedExecution(
   );
   const completed: ClientExecution = {
     ...execution,
+    // Fields a newer MST or client recorded: the regraded transcript keeps
+    // them, as it keeps unknown fields in events and the write record.
+    ...(execution.transcript
+      ? {
+          transcript: {
+            ...unknownTranscriptFields(trial.transcript ?? {}),
+            ...execution.transcript,
+          },
+        }
+      : {}),
     response: {
       ...execution.response,
       ...(trial.skillLoads

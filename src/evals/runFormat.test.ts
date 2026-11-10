@@ -1,8 +1,27 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Ajv, type ValidateFunction } from 'ajv';
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+  vi,
+} from 'vitest';
 import { z } from 'zod';
+import type {
+  RecordedWrite,
+  UnclassifiedCall,
+  WriteRecord,
+} from '../types/index.js';
+import type { TrialEnding } from '../types/trialEnding.js';
+import type {
+  TranscriptEvent,
+  TranscriptEvidence,
+} from './evalFrameworkTypes.js';
 import { runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
@@ -12,9 +31,13 @@ import {
   assertUniqueCaseIds,
   assertUniqueVariantNames,
   newRunId,
+  parseCalibrationRecord,
+  parseLabelRecord,
   readRunDirectory,
+  readRunTrials,
 } from './runFormat.js';
 import { runJsonSchema } from './runSchemas.js';
+import { buildHistory, localHistoryLocation } from './runHistory.js';
 import { RUN_FORMAT, assertRunFormat } from './resultFormat.js';
 
 let dir: string;
@@ -25,7 +48,19 @@ const plugin: Plugin = {
     echo: {
       schema: z.object({ type: z.string() }).strict(),
       evidence: 'structured',
-      run: async (input) => ({ finalText: `echo ${input.prompt}`, events: [] }),
+      run: async (input) => ({
+        finalText: `echo ${input.prompt}`,
+        events: [
+          {
+            kind: 'tool_call',
+            source: 'mcp',
+            server: 'docs',
+            name: 'docs.echo',
+            arguments: { text: input.prompt },
+            output: input.prompt,
+          },
+        ],
+      }),
     },
   },
   judges: {
@@ -416,7 +451,381 @@ describe('older and newer formats', () => {
   });
 });
 
+describe('what writers can write', () => {
+  type Stored = z.infer<typeof RUN_SCHEMAS.trial>;
+  type StoredWrites = NonNullable<Stored['writeRecord']>;
+  type StoredTranscript = NonNullable<Stored['transcript']>;
+
+  // `writeRun` casts a trial's transcript and write record to the reader's
+  // types. These fail to compile when a writer can make a value the reader
+  // rejects, so a new value lands in both or neither.
+  it('is what readers accept, for every closed field', () => {
+    expectTypeOf<RecordedWrite['mode']>().toExtend<
+      StoredWrites['writes'][number]['mode']
+    >();
+    expectTypeOf<UnclassifiedCall['reason']>().toExtend<
+      StoredWrites['unclassified'][number]['reason']
+    >();
+    expectTypeOf<WriteRecord['attribution']>().toExtend<
+      StoredWrites['attribution']
+    >();
+    expectTypeOf<TranscriptEvidence>().toExtend<
+      NonNullable<StoredTranscript['evidence']>
+    >();
+    expectTypeOf<TranscriptEvent['kind']>().toExtend<
+      StoredTranscript['events'][number]['kind']
+    >();
+    expectTypeOf<TranscriptEvent['source']>().toExtend<
+      NonNullable<StoredTranscript['events'][number]['source']>
+    >();
+    expectTypeOf<TrialEnding>().toExtend<NonNullable<Stored['ending']>>();
+  });
+});
+
+describe('fields and values this MST does not know', () => {
+  const trialFile = async (outputDir: string) =>
+    path.join(
+      outputDir,
+      (await files(outputDir)).find((file) =>
+        file.startsWith(`transcripts${path.sep}`)
+      )!
+    );
+
+  it('are kept at every depth when a trial is read', async () => {
+    const result = await run();
+    const file = await trialFile(result.outputDir);
+    const trial = await read(file);
+    const transcript = trial.transcript as {
+      events: Array<Record<string, unknown>>;
+    };
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        ...trial,
+        future: 1,
+        ending: { kind: 'trial', future: 2 },
+        transcript: {
+          ...transcript,
+          future: 3,
+          events: [{ ...transcript.events[0], future: 4 }],
+        },
+      })
+    );
+    const read0 = (await readRunTrials(result.outputDir)).find(
+      (t) => t.future === 1
+    )!;
+    expect(read0.ending).toEqual({ kind: 'trial', future: 2 });
+    expect(read0.transcript).toMatchObject({
+      future: 3,
+      events: [{ kind: 'tool_call', future: 4 }],
+    });
+  });
+
+  it('fail the read for a transcript event of a kind it does not know', async () => {
+    const result = await run();
+    const file = await trialFile(result.outputDir);
+    const trial = await read(file);
+    const transcript = trial.transcript as {
+      events: Array<Record<string, unknown>>;
+    };
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        ...trial,
+        transcript: {
+          ...transcript,
+          events: [{ ...transcript.events[0], kind: 'handoff' }],
+        },
+      })
+    );
+    await expect(readRunTrials(result.outputDir)).rejects.toThrow(
+      "It has a value this MST doesn't know at transcript.events[0].kind"
+    );
+  });
+
+  it("fail history's row for a run whose results.json it can't read, and the previous-run comparison", async () => {
+    const first = await run();
+    const file = path.join(first.outputDir, 'results.json');
+    const results = await read(file);
+    const [one, ...rest] = results.cases as Array<Record<string, unknown>>;
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        ...results,
+        cases: [{ ...one, ending: { kind: 'paused' } }, ...rest],
+      })
+    );
+    const history = await buildHistory(
+      localHistoryLocation(path.join(dir, '.mcp-test-results', 'run-format')),
+      { rebuild: true }
+    );
+    expect(history.skipped).toEqual([
+      expect.objectContaining({
+        runId: path.basename(first.outputDir),
+        reason: expect.stringContaining(
+          "It has a value this MST doesn't know at cases[0].ending.kind"
+        ),
+      }),
+    ]);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const second = await run();
+      expect(second.summary.previousRun).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /Couldn't compare with the previous run: .*results\.json isn't a run's results\.json:.*Upgrade MST/s
+        )
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("skip history's row for a run whose summary.json is malformed", async () => {
+    const first = await run();
+    const file = path.join(first.outputDir, 'summary.json');
+    const summary = await read(file);
+    // A field nothing after the read trips on: only the parse catches it.
+    await fs.writeFile(file, JSON.stringify({ ...summary, configId: 7 }));
+    const history = await buildHistory(
+      localHistoryLocation(path.join(dir, '.mcp-test-results', 'run-format')),
+      { rebuild: true }
+    );
+    expect(history.skipped.map((row) => row.runId)).toEqual([
+      path.basename(first.outputDir),
+    ]);
+  });
+
+  it('fail the read when a closed field has a value it does not know, and say to upgrade', async () => {
+    const result = await run();
+    const file = await trialFile(result.outputDir);
+    const trial = await read(file);
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        ...trial,
+        ending: {
+          kind: 'infrastructure',
+          broke: 'quantum',
+          retryable: false,
+          reason: 'a newer kind of break',
+        },
+      })
+    );
+    await expect(readRunTrials(result.outputDir)).rejects.toThrow(
+      `${file} isn't a trial:`
+    );
+    await expect(readRunTrials(result.outputDir)).rejects.toThrow(
+      "It has a value this MST doesn't know at ending.broke: a newer MST may have written it. Upgrade MST to read it."
+    );
+  });
+
+  it('fail with the upgrade message for a trial ending of a kind it does not know', async () => {
+    const result = await run();
+    const file = await trialFile(result.outputDir);
+    const trial = await read(file);
+    await fs.writeFile(
+      file,
+      JSON.stringify({ ...trial, ending: { kind: 'paused' } })
+    );
+    await expect(readRunTrials(result.outputDir)).rejects.toThrow(
+      "It has a value this MST doesn't know at ending.kind"
+    );
+  });
+
+  it("fail a run's results.json with a value it does not know", async () => {
+    const result = await run();
+    const file = path.join(result.outputDir, 'results.json');
+    const results = await read(file);
+    const [first, ...rest] = results.cases as Array<Record<string, unknown>>;
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        ...results,
+        cases: [
+          { ...first, ending: { kind: 'infrastructure', broke: 'quantum' } },
+          ...rest,
+        ],
+      })
+    );
+    await expect(readRunDirectory(result.outputDir)).rejects.toThrow(
+      `${file} isn't a run's results.json:`
+    );
+    await expect(readRunDirectory(result.outputDir)).rejects.toThrow(
+      "It has a value this MST doesn't know at cases[0].ending.broke"
+    );
+  });
+
+  it('say what is wrong, without the upgrade message, for a file that is only malformed', () => {
+    const label = {
+      format: RUN_FORMAT,
+      kind: 'label',
+      judge: 'rf/judge/a',
+      variant: 'v',
+      caseId: 'c',
+      split: 'test',
+      labeledAt: '2026-11-09T00:00:00.000Z',
+      trial: 0,
+      label: 'pass',
+    };
+    // The closest branch is a pointwise label missing its labeler: not the
+    // pairwise branch's labels, which `pass` isn't one of.
+    expect(() => parseLabelRecord(label, 'label.json')).toThrow(/labeler/);
+    expect(() => parseLabelRecord(label, 'label.json')).not.toThrow(
+      /Upgrade MST/
+    );
+    // The pairwise branch is the closest for a pairwise label, though the
+    // pointwise branch comes first.
+    const pairwise = {
+      ...label,
+      trial: undefined,
+      baseline: 'r',
+      label: 'tie',
+    };
+    expect(() => parseLabelRecord(pairwise, 'label.json')).toThrow(/labeler/);
+    expect(() => parseLabelRecord(pairwise, 'label.json')).not.toThrow(
+      /Upgrade MST/
+    );
+    // A closed field that is missing is malformed, not newer.
+    const { split: _split, ...noSplit } = { ...label, labeler: 'me' };
+    expect(() => parseLabelRecord(noSplit, 'label.json')).toThrow(/split/);
+    expect(() => parseLabelRecord(noSplit, 'label.json')).not.toThrow(
+      /Upgrade MST/
+    );
+    expect(() =>
+      parseLabelRecord({ ...label, labeler: 'me', split: 'holdout' }, 'l.json')
+    ).toThrow("It has a value this MST doesn't know at split");
+
+    const calibration = {
+      format: RUN_FORMAT,
+      kind: 'calibration',
+      judge: 'rf/judge/a',
+      judgeIdentity: 'a'.repeat(64),
+      judgeModels: [],
+      createdAt: '2026-11-09T00:00:00.000Z',
+      runs: ['r'],
+      split: 'test',
+      labels: 2,
+      judgeKind: 'pairwise',
+    };
+    expect(() => parseCalibrationRecord(calibration, 'c.json')).toThrow(
+      /agreement/
+    );
+    expect(() => parseCalibrationRecord(calibration, 'c.json')).not.toThrow(
+      /Upgrade MST/
+    );
+    expect(() =>
+      parseCalibrationRecord({ ...calibration, judgeKind: 'ranked' }, 'c.json')
+    ).toThrow("It has a value this MST doesn't know at judgeKind");
+    const { judgeKind: _kind, ...noKind } = calibration;
+    expect(() => parseCalibrationRecord(noKind, 'c.json')).not.toThrow(
+      /Upgrade MST/
+    );
+  });
+
+  it('are kept in a calibration', () => {
+    const rate = { k: 1, n: 2, value: 0.5, low: 0.1, high: 0.9, future: 1 };
+    const record = parseCalibrationRecord(
+      {
+        format: RUN_FORMAT,
+        kind: 'calibration',
+        judge: 'rf/judge/a',
+        judgeIdentity: 'a'.repeat(64),
+        judgeModels: [],
+        createdAt: '2026-11-09T00:00:00.000Z',
+        runs: ['r'],
+        split: 'test',
+        labels: 2,
+        unknown: rate,
+        judgeKind: 'pairwise',
+        agreement: rate,
+        judgeTies: rate,
+        humanTies: rate,
+        future: { nested: true },
+      },
+      'calibration.json'
+    );
+    expect(record).toMatchObject({
+      future: { nested: true },
+      agreement: { future: 1 },
+    });
+  });
+});
+
 describe('published schemas', () => {
+  it('describe a real run to an independent validator, transcripts and case results included', async () => {
+    const result = await run();
+    const ajv = new Ajv({ strict: true, allErrors: true });
+    const validators = new Map<string, ValidateFunction>();
+    const validatorFor = async (kind: string) => {
+      const known = validators.get(kind);
+      if (known) return known;
+      const schema = JSON.parse(
+        await fs.readFile(
+          path.join(
+            process.cwd(),
+            'schema',
+            'run',
+            'v1',
+            `${kind}.schema.json`
+          ),
+          'utf8'
+        )
+      ) as Record<string, unknown>;
+      const compiled = ajv.compile(schema);
+      validators.set(kind, compiled);
+      return compiled;
+    };
+    const tree = (await files(result.outputDir)).filter(
+      (file) => !file.startsWith(`report${path.sep}`)
+    );
+    for (const file of tree) {
+      const value = await read(path.join(result.outputDir, file));
+      const validate = await validatorFor(String(value.kind));
+      validate(value);
+      expect({ file, errors: validate.errors ?? [] }).toEqual({
+        file,
+        errors: [],
+      });
+    }
+
+    const trial = await read(
+      path.join(
+        result.outputDir,
+        tree.find((file) => file.startsWith(`transcripts${path.sep}`))!
+      )
+    );
+    expect(trial.transcript).toMatchObject({
+      events: [{ kind: 'tool_call', name: 'docs.echo' }],
+    });
+    const validTrial = await validatorFor('trial');
+    expect(
+      validTrial({ ...trial, transcript: { events: 'x', finalText: 123 } })
+    ).toBe(false);
+    expect(
+      (validTrial.errors ?? []).map((error) => error.instancePath).sort()
+    ).toEqual(['/transcript/events', '/transcript/finalText']);
+    // A field it doesn't know, at any depth, is still a trial.
+    expect(
+      validTrial({
+        ...trial,
+        future: 1,
+        transcript: {
+          events: [{ kind: 'tool_call', name: 'n', future: 2 }],
+          future: 3,
+        },
+      })
+    ).toBe(true);
+
+    const results = await read(path.join(result.outputDir, 'results.json'));
+    const validResults = await validatorFor('results');
+    const [first] = results.cases as Array<Record<string, unknown>>;
+    expect(
+      validResults({ ...results, cases: [{ ...first, scores: { x: 1 } }] })
+    ).toBe(false);
+  });
+
   it('match schema/run/v1 (run `npm run schema:generate`)', async () => {
     for (const kind of Object.keys(RUN_SCHEMAS) as Array<
       keyof typeof RUN_SCHEMAS

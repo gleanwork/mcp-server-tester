@@ -288,8 +288,14 @@ export function validateCliOutput(result: unknown): string | null {
     if (typeof tc.name !== 'string') {
       return `toolCalls[${i}].name must be a string, got ${typeof tc.name}`;
     }
-    if (typeof tc.arguments !== 'object' || tc.arguments === null) {
-      return `toolCalls[${i}].arguments must be an object, got ${typeof tc.arguments}`;
+    // An MCP tool's arguments are an object, and a stored run's transcript
+    // must say so (`mst.run/v1`): an array would write a run MST can't read.
+    if (
+      typeof tc.arguments !== 'object' ||
+      tc.arguments === null ||
+      Array.isArray(tc.arguments)
+    ) {
+      return `toolCalls[${i}].arguments must be an object, got ${Array.isArray(tc.arguments) ? 'array' : typeof tc.arguments}`;
     }
   }
   return null;

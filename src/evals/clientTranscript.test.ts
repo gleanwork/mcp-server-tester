@@ -6,6 +6,7 @@ import { infrastructureEnding } from './trialEnding.js';
 import type {
   ClientDefinition,
   ClientRunResult,
+  TranscriptEvent,
   TranscriptEvidence,
 } from './evalFrameworkTypes.js';
 import type { LLMToolCall } from './mstClient/types.js';
@@ -67,6 +68,48 @@ describe('clientRunToExecution', () => {
         'structured'
       )
     ).toThrow("it is now `source: 'builtin'`");
+  });
+
+  it.each([
+    [{ kind: 'tool_call', source: 'mcp', arguments: {} }, 'name'],
+    [
+      { kind: 'tool_call', source: 'mcp', name: 'a', arguments: ['x'] },
+      'arguments',
+    ],
+    [{ kind: 'handoff', source: 'mcp', name: 'a' }, 'kind'],
+    [
+      { kind: 'tool_call', source: 'mcp', name: 'a', output: { o: 1 } },
+      'output',
+    ],
+  ])(
+    "fails a client's event the run format can't store (%j)",
+    (event, field) => {
+      expect(() =>
+        clientRunToExecution(
+          { finalText: '', events: [event as unknown as TranscriptEvent] },
+          'structured'
+        )
+      ).toThrow(
+        new RegExp(
+          `A client returned transcript events MST can't store:[\\s\\S]*at \\[0\\]\\.${field}`
+        )
+      );
+    }
+  );
+
+  it('drops a duration that is not a finite number, which JSON would store as null', () => {
+    const execution = clientRunToExecution(
+      {
+        finalText: '',
+        events: [
+          { kind: 'tool_call', source: 'mcp', name: 'a', durationMs: NaN },
+        ],
+      },
+      'structured'
+    );
+    expect(execution.transcript?.events).toEqual([
+      { kind: 'tool_call', source: 'mcp', name: 'a' },
+    ]);
   });
 
   it("keeps the producer's ending from the client run to the execution (ADR 0010)", () => {

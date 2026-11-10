@@ -1,7 +1,7 @@
 {
-  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester/schema/run/v1/calibration.schema.json",
+  "$id": "https://unpkg.com/@gleanwork/mcp-server-tester@2/schema/run/v1/calibration.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "anyOf": [
+  "oneOf": [
     {
       "type": "object",
       "properties": {
@@ -37,7 +37,7 @@
             "high": { "type": ["number", "null"] }
           },
           "required": ["k", "n", "value", "low", "high"],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "judgeKind": { "type": "string", "const": "pointwise" },
         "humanPass": {
@@ -80,7 +80,7 @@
             "trueNegative",
             "falsePositive"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "tpr": {
           "type": "object",
@@ -100,7 +100,7 @@
             "high": { "type": ["number", "null"] }
           },
           "required": ["k", "n", "value", "low", "high"],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "tnr": {
           "type": "object",
@@ -120,7 +120,7 @@
             "high": { "type": ["number", "null"] }
           },
           "required": ["k", "n", "value", "low", "high"],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "kappa": { "type": ["number", "null"] },
         "gate": {
@@ -137,7 +137,7 @@
             "minRate",
             "maxUnknownRate"
           ],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "usable": { "type": "boolean" },
         "reasons": { "type": "array", "items": { "type": "string" } }
@@ -201,7 +201,7 @@
             "high": { "type": ["number", "null"] }
           },
           "required": ["k", "n", "value", "low", "high"],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "judgeKind": { "type": "string", "const": "pairwise" },
         "agreement": {
@@ -222,7 +222,7 @@
             "high": { "type": ["number", "null"] }
           },
           "required": ["k", "n", "value", "low", "high"],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "judgeTies": {
           "type": "object",
@@ -242,7 +242,7 @@
             "high": { "type": ["number", "null"] }
           },
           "required": ["k", "n", "value", "low", "high"],
-          "additionalProperties": false
+          "additionalProperties": {}
         },
         "humanTies": {
           "type": "object",
@@ -262,7 +262,7 @@
             "high": { "type": ["number", "null"] }
           },
           "required": ["k", "n", "value", "low", "high"],
-          "additionalProperties": false
+          "additionalProperties": {}
         }
       },
       "required": [

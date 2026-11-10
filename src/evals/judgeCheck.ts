@@ -36,7 +36,9 @@ export interface CheckedRun {
 }
 
 /** The gate a usable judge passes. Each number can be changed. */
-export interface UsableGate {
+// Type aliases, not interfaces: a calibration record keeps fields it doesn't
+// know, and only an alias fits its index signature.
+export type UsableGate = {
   /** Labels people passed, at least. @default 15 */
   minPassLabels: number;
   /** Labels people failed, at least. @default 15 */
@@ -45,7 +47,7 @@ export interface UsableGate {
   minRate: number;
   /** The share of labeled trials the judge answered `unknown`, at most. @default 0.1 */
   maxUnknownRate: number;
-}
+};
 
 const DEFAULT_GATE: UsableGate = {
   minPassLabels: 15,
@@ -55,13 +57,13 @@ const DEFAULT_GATE: UsableGate = {
 };
 
 /** A share with its 95% Wilson interval; null without a sample. */
-export interface Rate {
+export type Rate = {
   k: number;
   n: number;
   value: number | null;
   low: number | null;
   high: number | null;
-}
+};
 
 const Z95 = 1.959963984540054;
 
@@ -84,7 +86,7 @@ export function wilson(k: number, n: number, z = Z95): Rate {
 }
 
 /** The counts of a pointwise judge against labels, failing as positive. */
-export interface ConfusionCounts {
+export type ConfusionCounts = {
   /** People failed it; the judge failed it. */
   truePositive: number;
   /** People failed it; the judge passed it. */
@@ -93,7 +95,7 @@ export interface ConfusionCounts {
   trueNegative: number;
   /** People passed it; the judge failed it. */
   falsePositive: number;
-}
+};
 
 /** Cohen's kappa for two raters on two classes; null when chance explains everything. */
 export function cohensKappa(counts: ConfusionCounts): number | null {

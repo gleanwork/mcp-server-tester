@@ -70,6 +70,121 @@ function installTestPlugin(extra: TestExtensions = {}): void {
 
 afterEach(() => resetPluginsForTests());
 
+describe('first-party Cowork configuration', () => {
+  const input = {
+    name: 'account',
+    datasets: ['cases.json'],
+    client: 'cowork',
+    clientOptions: { mode: 'first-party' },
+    servers: {
+      glean: { transport: 'http', serverUrl: 'https://glean.example/mcp' },
+      other: { transport: 'http', serverUrl: 'https://other.example/mcp' },
+    },
+  };
+  const validate = (patch: Record<string, unknown> = {}) =>
+    validateEvalConfig(
+      loadEvalConfigFromObject(
+        { ...input, ...patch },
+        { skipDatasetValidation: true }
+      ),
+      { os: 'darwin', runner: 'local' }
+    );
+  it('uses normal variant labels, omitted selection means all, and [] means none', () => {
+    const config = validate({
+      variants: [
+        { name: 'all' },
+        { name: 'glean-only', servers: ['glean'] },
+        { name: 'none', servers: [] },
+      ],
+    });
+    expect(config.variants?.map((v) => v.servers?.map((s) => s.label))).toEqual(
+      [['glean', 'other'], ['glean'], []]
+    );
+    expect(
+      config.variants?.every((v) => v.clientOptions?.mode === 'first-party')
+    ).toBe(true);
+  });
+  it('fails unsupported declarations during validation, not after touching the desktop', () => {
+    expect(() =>
+      validate({ servers: { local: { transport: 'stdio', command: 'node' } } })
+    ).toThrow('stdio');
+    expect(() =>
+      validate({
+        servers: {
+          glean: {
+            transport: 'http',
+            serverUrl: 'https://glean.example/mcp',
+            auth: { accessTokenEnv: 'TOKEN' },
+          },
+        },
+      })
+    ).toThrow('cannot apply auth');
+    expect(() => validate({ concurrency: 2 })).toThrow('concurrency: 1');
+    expect(() => validate({ simulateWrites: true })).toThrow(
+      'cannot simulate writes'
+    );
+    expect(() =>
+      validate({
+        clientOptions: {
+          mode: 'first-party',
+          plugins: [
+            { name: 'x', marketplace: { source: 'a/b', ref: 'a'.repeat(40) } },
+          ],
+        },
+      })
+    ).toThrow('unsupported');
+    expect(() =>
+      validateEvalConfig(
+        loadEvalConfigFromObject(input, { skipDatasetValidation: true }),
+        { os: 'linux', runner: 'docker' }
+      )
+    ).toThrow('requires macOS');
+  });
+
+  it('rejects tool-metadata proxies on the eval config and on a variant', () => {
+    const tools = { search: { description: 'Search the account.' } };
+    expect(() => validate({ tools })).toThrow(
+      'The eval config: first-party mode cannot apply tool-metadata proxies.'
+    );
+    expect(() =>
+      validate({ variants: [{ name: 'described', tools }] })
+    ).toThrow(
+      'Variant "described": first-party mode cannot apply tool-metadata proxies.'
+    );
+    // The same declarations pass without the tool metadata.
+    expect(() => validate({ variants: [{ name: 'plain' }] })).not.toThrow();
+  });
+
+  it('rejects a runner other than local on macOS, with a reason distinct from the OS rule', () => {
+    const run = (runner: string, os: NodeJS.Platform) => () =>
+      validateEvalConfig(
+        loadEvalConfigFromObject(input, { skipDatasetValidation: true }),
+        { os, runner }
+      );
+    // macOS, so the OS rule is satisfied: only the runner rule can fire.
+    for (const runner of ['docker', 'mst/runner/docker', 'test/runner/mac']) {
+      const error = (() => {
+        try {
+          run(runner, 'darwin')();
+        } catch (caught) {
+          return caught as Error;
+        }
+        return undefined;
+      })();
+      expect(error?.message, runner).toContain(
+        'first-party mode currently supports only the local runner'
+      );
+      expect(error?.message, runner).not.toContain('requires macOS');
+    }
+    // Local runners on macOS pass.
+    expect(run('local', 'darwin')).not.toThrow();
+    expect(run('mst/runner/local', 'darwin')).not.toThrow();
+    // A Linux runner fails the OS rule first, with its own reason.
+    expect(run('docker', 'linux')).toThrow('requires macOS');
+    expect(run('docker', 'linux')).not.toThrow(/only the local runner/);
+  });
+});
+
 describe('eval config validation', () => {
   it('validates all eval config references and labeled server sets', () => {
     installTestPlugin();
