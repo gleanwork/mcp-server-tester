@@ -44,6 +44,8 @@ interface RunSpec {
   at: string;
   variants: Record<string, Outcomes>;
   judge?: string;
+  /** The judge's readable version, which rc.0 runs don't record. */
+  judgeVersion?: string;
   /** Per-variant cost of a trial. */
   cost?: Record<string, number>;
   partial?: boolean;
@@ -226,6 +228,7 @@ async function writeSpec(evalDirectory: string, spec: RunSpec): Promise<void> {
               level: 'case',
               optionsHash: 'o',
               identity: createHash('sha256').update(spec.judge).digest('hex'),
+              ...(spec.judgeVersion ? { version: spec.judgeVersion } : {}),
             },
           ],
         }
@@ -879,6 +882,41 @@ describe('the history of an eval', () => {
     expect(second!.changes).toEqual([
       { reason: 'judge changed: rubric', breaks: true },
     ]);
+  });
+
+  it("keeps a judge's version, and starts no era when an rc.0 run's judge had none", async () => {
+    const dir = path.join(await tempDir(), 'weekly');
+    for (const [n, judgeVersion] of [
+      [1, undefined],
+      [2, '1.2.3'],
+    ] as const)
+      await writeSpec(dir, {
+        id: `2026100${n}T090000Z-00000${n}`,
+        at: `2026-10-0${n}T09:00:00.000Z`,
+        variants: { official: ids(2) },
+        judge: 'prompt-1',
+        ...(judgeVersion ? { judgeVersion } : {}),
+      });
+    const [second, first] = (await buildHistory(localHistoryLocation(dir)))
+      .runs;
+    expect(first!.judges?.[0]?.version).toBeUndefined();
+    expect(second!.judges?.[0]?.version).toBe('1.2.3');
+    expect(second!.era).toBe(first!.era);
+    expect(second!.changes).toBeUndefined();
+
+    // A row an earlier builder cached, without the version, is built again.
+    await updateHistory(localHistoryLocation(dir));
+    const file = path.join(dir, 'history.json');
+    const cached = JSON.parse(await fs.readFile(file, 'utf8')) as {
+      runs: Array<{ builder: number; judges?: Array<{ version?: string }> }>;
+    };
+    for (const row of cached.runs) {
+      row.builder = 4;
+      for (const judge of row.judges ?? []) delete judge.version;
+    }
+    await fs.writeFile(file, JSON.stringify(cached));
+    const rebuilt = await updateHistory(localHistoryLocation(dir));
+    expect(rebuilt.runs[0]!.judges?.[0]?.version).toBe('1.2.3');
   });
 
   it('starts an era when a plugin the eval loads changes version', async () => {

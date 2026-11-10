@@ -4,9 +4,46 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   clientApp,
+  installedDebApp,
   installedDebVersion,
   macAppBundle,
 } from './installedApp.js';
+
+describe('installedDebApp', () => {
+  it("reads an installed package's version from dpkg's status file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mst-dpkg-'));
+    try {
+      const status = join(dir, 'status');
+      await writeFile(
+        status,
+        [
+          'Package: chatgpt',
+          'Status: install ok installed',
+          'Version: 1.2026.300',
+          '',
+          'Package: claude-desktop',
+          'Status: deinstall ok config-files',
+          'Version: 0.9.0',
+          '',
+        ].join('\n')
+      );
+      expect(await installedDebApp('chatgpt', 'ChatGPT', status)).toEqual({
+        name: 'ChatGPT',
+        version: '1.2026.300',
+        source: 'installed',
+      });
+      // Removed, or no status file (not a Debian system): no app.
+      expect(
+        await installedDebApp('claude-desktop', 'Claude', status)
+      ).toBeUndefined();
+      expect(
+        await installedDebApp('chatgpt', 'ChatGPT', join(dir, 'missing'))
+      ).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 // It reads the bundle with macOS's plutil.
 describe.skipIf(process.platform !== 'darwin')('macAppBundle', () => {

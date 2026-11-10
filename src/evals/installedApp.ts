@@ -64,11 +64,12 @@ export function installedDebVersion(
 /** The installed Debian package `name`, as the app `label`; undefined when it isn't. */
 export async function installedDebApp(
   name: string,
-  label: string
+  label: string,
+  statusFile = '/var/lib/dpkg/status'
 ): Promise<ClientApp | undefined> {
   try {
     const version = installedDebVersion(
-      await readFile('/var/lib/dpkg/status', 'utf8'),
+      await readFile(statusFile, 'utf8'),
       name
     );
     return clientApp(label, version, 'installed');
