@@ -83,9 +83,10 @@ A pull request that changes `release.yml` or `.release-it.js` gets a dry run.
   Its credentials are the `GLEANWORK_CI_CLIENT_ID` and
   `GLEANWORK_CI_KEY` organization secrets, shared with this
   repository; the token is scoped to this repository when it is minted.
-- The `VERCEL_TOKEN` repository secret holds a Vercel token for the
-  `glean-developers` team, which owns the docs site's `mcp-server-tester`
-  project. `deploy-website.yml` uses it.
+- `deploy-website.yml` reads three repository secrets: `VERCEL_TOKEN`, a
+  Vercel token for the `glean-developers` team, and `VERCEL_ORG_ID` and
+  `VERCEL_PROJECT_ID`, the IDs of that team and of the docs site's
+  `mcp-server-tester` project.
 
 ### If a release fails after publishing
 

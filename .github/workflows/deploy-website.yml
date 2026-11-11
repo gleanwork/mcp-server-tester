@@ -12,7 +12,9 @@ name: Deploy website
 # The site is built here (`vercel build`) and uploaded as prebuilt output
 # (`vercel deploy --prebuilt`), so Vercel runs no build. The Vercel project's
 # Root Directory is `website`, so the CLI runs from the repo root and applies
-# it. The only secret is VERCEL_TOKEN, a token for the glean-developers team.
+# it. The CLI reads three repository secrets: VERCEL_TOKEN (a token for the
+# glean-developers team), VERCEL_ORG_ID and VERCEL_PROJECT_ID (the team's and
+# the mcp-server-tester project's IDs).
 on:
   push:
     tags:
@@ -39,8 +41,8 @@ jobs:
       url: https://mcp-server-tester-docs.vercel.app
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_SCOPE: glean-developers
-      VERCEL_PROJECT: mcp-server-tester
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,10 +60,14 @@ jobs:
           git checkout --quiet "refs/tags/$tag"
           echo "Deploying $tag"
 
-      - name: Require the Vercel token
+      - name: Require the Vercel secrets
         run: |
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "::error::Set the VERCEL_TOKEN secret to a token for the $VERCEL_SCOPE Vercel team."
+          missing=()
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!name}" ]; then missing+=("$name"); fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Set the repository secrets: ${missing[*]}"
             exit 1
           fi
 
@@ -73,9 +79,6 @@ jobs:
 
       - name: Install the Vercel CLI
         run: npm install --global vercel@65
-
-      - name: Link the Vercel project
-        run: vercel link --yes --project="$VERCEL_PROJECT" --scope="$VERCEL_SCOPE" --token="$VERCEL_TOKEN"
 
       - name: Pull Vercel project settings
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
