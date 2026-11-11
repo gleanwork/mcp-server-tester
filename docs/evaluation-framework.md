@@ -903,17 +903,18 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 
 #### `codex-cli` options
 
-| Option            | Default                                                        |
-| ----------------- | -------------------------------------------------------------- |
-| `model`           | Codex default                                                  |
-| `timeout`         | 300000                                                         |
-| `systemPrompt`    | not set (no additional instructions)                           |
-| `reasoningEffort` | Codex default                                                  |
-| `sandbox`         | read-only; danger-full-access when MST_JUDGE_SANDBOX=container |
-| `webSearch`       | false                                                          |
-| `cwd`             | empty temporary directory, removed after the trial             |
-| `apiKeyEnvVar`    | OPENAI_API_KEY or LLM gateway                                  |
-| `env`             | allowed inherited variables; no extra variables                |
+| Option                 | Default                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| `model`                | Codex default                                                  |
+| `timeout`              | 300000                                                         |
+| `systemPrompt`         | not set (no additional instructions)                           |
+| `reasoningEffort`      | Codex default                                                  |
+| `sandbox`              | read-only; danger-full-access when MST_JUDGE_SANDBOX=container |
+| `webSearch`            | false                                                          |
+| `cwd`                  | empty temporary directory, removed after the trial             |
+| `apiKeyEnvVar`         | OPENAI_API_KEY or LLM gateway                                  |
+| `authCacheDirectories` | none; authentication state is isolated per trial               |
+| `env`                  | allowed inherited variables; no extra variables                |
 
 #### `cowork` options
 
