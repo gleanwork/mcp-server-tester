@@ -12,6 +12,7 @@ import {
   renamedScoreKeys,
 } from './resultFormat.js';
 import type { EvaluationSummary } from './evalFrameworkTypes.js';
+import type { BuiltinModelUse } from '../llm/modelDefaults.js';
 import type { EvalCaseResult, TrialResult } from '../types/reporter.js';
 import type { GraderScore } from '../types/index.js';
 import type { EvalDataset } from './datasetTypes.js';
@@ -311,6 +312,24 @@ const RunRecordSchema = z.looseObject({
         version: z.string().optional(),
         /** The judge has no version MST can see change (ADR 0009). */
         unversioned: z.literal(true).optional(),
+      })
+    )
+    .optional(),
+  /**
+   * MST's built-in models the run used because nothing set one: no option,
+   * eval config or mst.config.json (ADR 0015). Each names the `models`
+   * entry that would set it, the model, and what used it (`api client`,
+   * `judge rubric`). A regrade records its own judges' and its source run's
+   * clients'. Absent: the run set every model, or it is from before run.json
+   * recorded them.
+   */
+  builtinModels: z
+    .array(
+      z.looseObject({
+        /** Where to set it: `models.judge.anthropic`. */
+        setting: z.string(),
+        model: z.string(),
+        usedBy: z.array(z.string()),
       })
     )
     .optional(),
@@ -917,6 +936,8 @@ export interface RunFacts {
     snapshot?: string;
   }>;
   judges?: JudgeRecord[];
+  /** MST's built-in models the run used because nothing set one (ADR 0015). */
+  builtinModels?: BuiltinModelUse[];
   /** The plugins that collected the run, with their versions and settings. */
   plugins?: PluginRecord[];
   /** Which key hashed the run's client options. */
@@ -1150,6 +1171,9 @@ export async function writeRun(
     variants: facts.variants,
     datasets: facts.datasets,
     ...(facts.judges?.length ? { judges: facts.judges } : {}),
+    ...(facts.builtinModels?.length
+      ? { builtinModels: facts.builtinModels }
+      : {}),
     ...(facts.plugins ? { plugins: facts.plugins } : {}),
     ...(facts.optionKey ? { optionKey: facts.optionKey } : {}),
     partial: summary.partial ?? false,

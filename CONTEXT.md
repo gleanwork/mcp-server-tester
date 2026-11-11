@@ -376,6 +376,10 @@ _Avoid_: preset, profile
 Values a plugin takes from the repo that runs evals rather than from one extension's options (for example a cloud project), written per plugin namespace in `mst.config.json` or an eval config's `settings`, and checked by the plugin's settings schema. Every extension of the plugin receives them as `settings`.
 _Avoid_: plugin options, plugin config, factory options
 
+**Model defaults**:
+The model MST uses where nothing names one: for the `api` client by provider, for LLM and agentic judges, and for the Computer Use planner. Set in a `models` block in the user's and the repo's `mst.config.json`, the eval config and `--mst-config`, each entry overriding the one before it; MST's **built-in models** are the last resort, and a run warns about each one it uses and records it in `run.json` as `builtinModels` ([ADR 0015](docs/adr/0015-default-models-come-from-config-files.md)).
+_Avoid_: default model config, model presets
+
 **Endpoint source**:
 (Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in source reads environment variables.
 _Avoid_: gateway config, LLM provider

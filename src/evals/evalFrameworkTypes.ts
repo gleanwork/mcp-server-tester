@@ -22,6 +22,7 @@ import type {
 import type { RunStore } from './runStore.js';
 import type { EvalRunnerResult } from './evalRunner.js';
 import type { JudgeInput, JudgeScore } from '../judge/judgeContract.js';
+import type { JudgeModelSlot } from '../llm/modelDefaults.js';
 import type { PairwiseComparisonResult } from './pairwiseComparison.js';
 import type { ShardTokens, TrialKey } from './runners/protocol.js';
 import type { GradeKey } from './gradingSource.js';
@@ -599,6 +600,20 @@ export interface JudgeDefinition {
     options: Record<string, unknown>,
     criterion: string
   ) => Record<string, unknown>;
+  /**
+   * For a judge with a `model` option that falls back on one of MST's
+   * built-in models: the entry of `models` it takes its model from, given
+   * options that name none (`{ kind: 'judge', key: 'openai' }` is
+   * `models.judge.openai`). When `mst.config.json` or the eval config sets
+   * that entry, MST writes the model into the options as `model`, so the
+   * judge's identity and scores record it. When nothing sets it, MST warns
+   * and records the built-in model in `run.json`. Return undefined to keep
+   * the judge's own default. The judges `defineQuestionJudge` and
+   * `agenticJudge` build have one.
+   */
+  readonly modelSlot?: (
+    options: Record<string, unknown>
+  ) => JudgeModelSlot | undefined;
   /**
    * Grades one run of a case. `input.case` is the case as written in the
    * dataset; `input.trial` is the observed run. `options` is parsed by `schema`.

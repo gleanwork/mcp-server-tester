@@ -325,7 +325,7 @@ describe('mst clients', () => {
         });
         expect(shown.options.properties.computerUseModel).toMatchObject({
           'x-defaultDescription':
-            'macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner',
+            'macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else claude-sonnet-4-6; Linux: no planner',
         });
       }
       expect(outputs[0]).toBe(outputs[1]);
@@ -484,7 +484,10 @@ describe('mst clients', () => {
       options: { properties: Record<string, unknown> };
     };
     expect(shown.options.properties).toMatchObject({
-      model: { default: 'claude-sonnet-4-20250514' },
+      model: {
+        'x-defaultDescription':
+          'models.api for the provider (mst.config.json), else claude-sonnet-4-20250514 (anthropic), gpt-4o (openai), gemini-2.0-flash (google), mistral-large-latest (mistral)',
+      },
       maxToolCalls: { default: 5 },
       temperature: { default: 0 },
       skills: { default: 'off' },

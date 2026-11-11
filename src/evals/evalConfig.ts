@@ -25,7 +25,18 @@ import {
   mergeSettings,
   type SettingsSections,
 } from '../plugins/settings.js';
-import { findSettingsFile, readSettingsFile } from '../plugins/settingsFile.js';
+import {
+  configOverrideFile,
+  findSettingsFile,
+  readConfigFile,
+  readUserConfigFile,
+  type ConfigFile,
+} from '../plugins/settingsFile.js';
+import {
+  mergeModelDefaults,
+  ModelDefaultsSchema,
+  type ModelDefaults,
+} from '../llm/modelDefaults.js';
 
 /** USD per million tokens for one model. Cache rates default to the input rate. */
 export interface ModelPricing {
@@ -211,6 +222,13 @@ export interface EvalConfig {
    * `loadEvalConfig` merges in here.
    */
   settings?: SettingsSections;
+  /**
+   * The models MST uses where nothing names one: the api client's, LLM
+   * judges', agentic judges' and the Computer Use planner's (ADR 0015).
+   * `loadEvalConfig` merges the user's and the repo's `mst.config.json`
+   * under it, entry by entry, and `mst --mst-config` over it.
+   */
+  models?: ModelDefaults;
   /** The model the client uses: a default for every variant and case. */
   model?: string;
   provider?: string;
@@ -584,6 +602,7 @@ export const EvalConfigSchema = z
     plugins: z.array(z.string().min(1)).optional(),
     extends: z.array(z.string().min(1)).optional(),
     settings: SettingsSectionsSchema.optional(),
+    models: ModelDefaultsSchema.optional(),
     provider: z.string().optional(),
     concurrency: z.number().int().positive().optional(),
     trials: z.number().int().positive().optional(),
@@ -669,6 +688,7 @@ const CONFIG_OWN_KEYS = [
   'plugins',
   'extends',
   'settings',
+  'models',
 ] as const;
 
 /**
@@ -833,10 +853,11 @@ export interface LoadEvalConfigOptions {
   configDir?: string;
   skipDatasetValidation?: boolean;
   /**
-   * For `loadEvalConfig`: the `mst.config.json` whose settings the eval
-   * config's own replace. Default: the nearest one at or above the eval
-   * config's directory, up to the repository root. `false` reads none, as for
-   * an eval config a run sent with its settings already in it.
+   * For `loadEvalConfig`: the repo's `mst.config.json`, whose settings and
+   * models the eval config's own replace. Default: the nearest one at or
+   * above the eval config's directory, up to the repository root. `false`
+   * reads no file at all (not the user's, nor `--mst-config`), as for an
+   * eval config a run sent with its settings and models already in it.
    */
   settingsFile?: string | false;
 }
@@ -884,14 +905,45 @@ export function loadEvalConfig(
     rootDir: options.rootDir ?? path.dirname(absolutePath),
     configDir: path.dirname(absolutePath),
   });
+  if (options.settingsFile === false) return evalConfig;
   const settingsFile =
-    options.settingsFile === undefined
-      ? findSettingsFile(path.dirname(absolutePath))
-      : options.settingsFile || undefined;
-  if (settingsFile === undefined) return evalConfig;
-  const settings = mergeSettings(
-    readSettingsFile(settingsFile),
-    evalConfig.settings
-  );
-  return settings ? { ...evalConfig, settings } : evalConfig;
+    options.settingsFile ?? findSettingsFile(path.dirname(absolutePath));
+  return withConfigFiles(evalConfig, {
+    user: readUserConfigFile(),
+    repo: settingsFile ? readConfigFile(settingsFile) : undefined,
+    override: configOverrideFile()
+      ? readConfigFile(configOverrideFile()!)
+      : undefined,
+  });
+}
+
+/**
+ * An eval config with its `mst.config.json` files applied: settings by
+ * namespace and models entry by entry, the repo's under the eval config's
+ * own and the `--mst-config` file's over them; the user's models under
+ * everything (ADR 0008, ADR 0015).
+ */
+function withConfigFiles(
+  evalConfig: EvalConfig,
+  files: { user?: ModelDefaults; repo?: ConfigFile; override?: ConfigFile }
+): EvalConfig {
+  // Unchanged when no file sets anything, so its contentHash stays the same.
+  let result = evalConfig;
+  if (files.repo?.settings || files.override?.settings) {
+    const settings = mergeSettings(
+      mergeSettings(files.repo?.settings, evalConfig.settings),
+      files.override?.settings
+    );
+    if (settings) result = { ...result, settings };
+  }
+  if (files.user || files.repo?.models || files.override?.models) {
+    const models = mergeModelDefaults(
+      files.user,
+      files.repo?.models,
+      evalConfig.models,
+      files.override?.models
+    );
+    if (models) result = { ...result, models };
+  }
+  return result;
 }

@@ -339,6 +339,28 @@ describe('stagedPairwiseJudge', () => {
     expect(tasks[0]!.task.prompt).toBe('o\nc1');
   });
 
+  it('takes a default model only for stages that name none', () => {
+    const bundle = (models: Array<string | undefined>) =>
+      stagedPairwiseJudge({
+        schemaVersion: 1,
+        name: 'models',
+        stages: models.map((model, i) => ({
+          id: `s${i}`,
+          ...(i > 0 && { after: [`s${i - 1}`] }),
+          prompt: [{ text: 's' }],
+          ...(i === models.length - 1 && { output: 'verdict' as const }),
+          ...(model && { model }),
+        })),
+        result: { overall: `s${models.length - 1}` },
+      });
+    // So MST neither writes a model in nor warns about one it never calls.
+    expect(bundle(['m1', 'm2']).modelSlot).toBeUndefined();
+    expect(bundle(['m1', undefined]).modelSlot?.({})).toEqual({
+      kind: 'agentJudge',
+      key: 'claude-agent',
+    });
+  });
+
   it('rejects a bundle with a bad graph or reference when it is defined', () => {
     const base = { schemaVersion: 1 as const, name: 'bad' };
     const verdict = { output: 'verdict' as const };
