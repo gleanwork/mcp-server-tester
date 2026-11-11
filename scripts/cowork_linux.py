@@ -360,7 +360,13 @@ class Driver:
                 "duration_ms": (time.monotonic() - self.started) * 1000}
 
     def probe(self) -> dict:
-        controls = self.desktop.controls({"Cowork", "Start task"}, {"button", "radio button"})
+        # Ready once Cowork's controls are on screen: its mode switch or the
+        # sidebar's Cowork button (older Desktops), or its composer's Start task,
+        # which the empty composer shows disabled. Desktop's November 2026 UI
+        # has neither Cowork control (its mode switch says Claude / Code), so the
+        # empty composer's Start task is all there is.
+        controls = (self.desktop.controls({"Cowork", "Start task"}, {"button", "radio button"})
+                    or self.desktop.controls({"Start task"}, {"button"}, require_enabled=False))
         if not controls:
             raise DriverFailure("cowork_not_ready")
         return self.receipt("ready")
@@ -448,6 +454,14 @@ class Driver:
                 if tabs and "tab" not in requested:
                     requested.add("tab")
                     self.action(lambda: self.desktop.activate(tabs[0]))
+                elif not tabs and "link" not in requested:
+                    # Desktop's November 2026 UI has no Cowork control: its
+                    # mode switch says Claude / Code, and the sidebar has no
+                    # Cowork button. The previous case's task view (its
+                    # composer has no Start task) leaves only the empty
+                    # new-task link, as reset uses, to reach Cowork's composer.
+                    requested.add("link")
+                    self.action(lambda: self.desktop.open_prompt("", self.remaining()))
             time.sleep(min(0.1, self.remaining()))
 
     def wait_for_empty_composer(self) -> None:
