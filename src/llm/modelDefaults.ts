@@ -247,7 +247,23 @@ export class BuiltinModelUses {
   }
 }
 
-const warnedSettings = new Set<string>();
+interface ProcessModelState {
+  /** What `setProcessModelDefaults` set. */
+  models?: ModelDefaults;
+  /** The settings a built-in model warning named already. */
+  warned: Set<string>;
+}
+
+// Shared across this package's bundles: the Playwright fixtures bundle has
+// its own copy of this module, and sets the defaults that the root's
+// `runEvalDataset` and matchers read. Versioned so a later MST with a
+// different shape doesn't read this one.
+const STATE_KEY = Symbol.for('mcp-server-tester.model-defaults.v1');
+const globalState = globalThis as unknown as Record<symbol, unknown>;
+const processState = (globalState[STATE_KEY] ??= {
+  warned: new Set<string>(),
+}) as ProcessModelState;
+const warnedSettings = processState.warned;
 
 /**
  * Warns, once per process for each setting, that MST used its built-in
@@ -286,8 +302,6 @@ export function resetBuiltinModelWarningsForTests(): void {
   warnedSettings.clear();
 }
 
-let processModels: ModelDefaults | undefined;
-
 /**
  * Sets the model defaults for code that runs outside an eval config: the
  * matchers, validators and `runEvalDataset`. The Playwright fixtures set it
@@ -296,10 +310,10 @@ let processModels: ModelDefaults | undefined;
 export function setProcessModelDefaults(
   models: ModelDefaults | undefined
 ): void {
-  processModels = models;
+  processState.models = models;
 }
 
 /** The model defaults `setProcessModelDefaults` set, if any. */
 export function processModelDefaults(): ModelDefaults | undefined {
-  return processModels;
+  return processState.models;
 }

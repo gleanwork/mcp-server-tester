@@ -163,6 +163,20 @@ describe('built-in model warnings', () => {
     ]);
   });
 
+  it("shares the process's defaults and warnings with another copy of this module, as the fixtures bundle has", async () => {
+    setProcessModelDefaults({ judge: { openai: 'from-fixture' } });
+    const warn = vi.fn();
+    const use = { setting: 'models.api.google', model: 'm', usedBy: ['x'] };
+    warnBuiltinModels([use], warn);
+    vi.resetModules();
+    const copy = await import('./modelDefaults.js');
+    expect(copy.processModelDefaults()).toEqual({
+      judge: { openai: 'from-fixture' },
+    });
+    copy.warnBuiltinModels([use], warn);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it('warns once per process for each setting', () => {
     const warn = vi.fn();
     const use = { setting: 'models.api.openai', model: 'm', usedBy: ['x'] };
