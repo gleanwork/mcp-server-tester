@@ -1,0 +1,98 @@
+name: Deploy website
+
+# The docs site deploys only when a release is tagged (release-it pushes
+# v<version> tags), so the published docs match a published package. Pull
+# requests and pushes to main don't deploy: website/vercel.json turns off
+# Vercel's Git deployments. The CI workflow still builds and tests the site on
+# every pull request.
+#
+# The release workflow pushes its tag as the gleanwork-ci GitHub App, so the
+# tag push starts this workflow. (A tag pushed with GITHUB_TOKEN would not.)
+#
+# The site is built here (`vercel build`) and uploaded as prebuilt output
+# (`vercel deploy --prebuilt`), so Vercel runs no build. The Vercel project's
+# Root Directory is `website`, so the CLI runs from the repo root and applies
+# it. The only secret is VERCEL_TOKEN, a token for the glean-developers team.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag to deploy (for example v2.0.0). Defaults to the latest tag.
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-website
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Vercel
+    runs-on: ubuntu-24.04
+    environment:
+      name: website
+      url: https://mcp-server-tester-docs.vercel.app
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_SCOPE: glean-developers
+      VERCEL_PROJECT: mcp-server-tester
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Manual runs deploy a tag, never an untagged commit.
+      - name: Check out the release tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          tag="${REF:-$(git describe --tags --abbrev=0 --match 'v*')}"
+          case "$tag" in v*) ;; *) echo "::error::Not a release tag: $tag"; exit 1 ;; esac
+          git checkout --quiet "refs/tags/$tag"
+          echo "Deploying $tag"
+
+      - name: Require the Vercel token
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "::error::Set the VERCEL_TOKEN secret to a token for the $VERCEL_SCOPE Vercel team."
+            exit 1
+          fi
+
+      - uses: jdx/mise-action@v2
+
+      - name: Install site dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Install the Vercel CLI
+        run: npm install --global vercel@65
+
+      - name: Link the Vercel project
+        run: vercel link --yes --project="$VERCEL_PROJECT" --scope="$VERCEL_SCOPE" --token="$VERCEL_TOKEN"
+
+      - name: Pull Vercel project settings
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      # Runs website/vercel.json's install and build commands (postbuild runs
+      # docusaurus-mcp-verify) and bundles api/mcp.mjs.
+      - name: Build
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Smoke-test the MCP endpoint
+        working-directory: website
+        run: npm run smoke
+
+      - name: Deploy
+        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+
+      - name: Check the production endpoint
+        run: |
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 --retry-all-errors \
+            https://mcp-server-tester-docs.vercel.app/mcp
