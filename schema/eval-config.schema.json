@@ -428,6 +428,9 @@
       },
       "description": "Plugin settings by plugin namespace, each checked by its plugin's settings schema. Each section replaces the same namespace's section of the repo's mst.config.json (ADR 0008)."
     },
+    "models": {
+      "$ref": "#/definitions/modelDefaults"
+    },
     "coworkSetup": {
       "type": "object",
       "description": "Cowork desktop setup; see docs/cowork.md."
@@ -476,6 +479,71 @@
     }
   },
   "definitions": {
+    "modelDefaults": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "properties": {
+        "api": {
+          "description": "The api client's model by provider, when no case, variant or eval config names one.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic",
+              "azure",
+              "google",
+              "mistral",
+              "deepseek",
+              "openrouter",
+              "xai",
+              "vertex-anthropic"
+            ]
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "judge": {
+          "description": "LLM judges' model by judge provider, when the judge's options name none.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": [
+              "anthropic",
+              "vertex-anthropic",
+              "anthropic-agent-sdk",
+              "openai",
+              "google"
+            ]
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "agentJudge": {
+          "description": "Agentic judges' model by runtime, when neither the judge's options nor the judge name one.",
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "enum": ["codex", "claude-agent"]
+          },
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "computerUse": {
+          "description": "The macOS Computer Use planner's model (Cowork, ChatGPT, Codex app), when computerUseModel is unset.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "description": "Default models, entry by entry over the user's and the repo's mst.config.json (ADR 0015)."
+    },
     "mcpConfig": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "oneOf": [

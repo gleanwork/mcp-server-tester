@@ -17,6 +17,7 @@
 import type { ZodType } from 'zod';
 import type { SettingsContext } from '../plugins/plugin.js';
 import type { UsageMetrics } from './judgeTypes.js';
+import type { JudgeModelSlot } from '../llm/modelDefaults.js';
 import type { JudgeCase, JudgeSubScore, JudgeTrial } from './judgeContract.js';
 
 /** The argument of `compare`. */
@@ -89,6 +90,10 @@ export interface PairwiseJudgeDefinition {
    * randomizes or debiases order itself sets false.
    */
   readonly swapPositions?: boolean;
+  /** As `JudgeDefinition.modelSlot`. */
+  readonly modelSlot?: (
+    options: Record<string, unknown>
+  ) => JudgeModelSlot | undefined;
   /**
    * Fails, naming what to install or set, when the judge can't run (a missing
    * SDK or credential). Called once before a run collects anything.

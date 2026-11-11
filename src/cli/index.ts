@@ -34,6 +34,7 @@ import {
   watchRun,
 } from './commands/runs/index.js';
 import { history, type HistoryOptions } from './commands/history/index.js';
+import { setConfigOverrideFile } from '../plugins/settingsFile.js';
 import {
   restoreCoworkConnectorsCommand,
   setupCowork,
@@ -101,7 +102,15 @@ program
     'MST (MCP Server Tester): CLI tools for MCP server evaluation and testing.\n' +
       'Also available as `mcp-server-tester`.'
   )
-  .version(packageJson.version);
+  .version(packageJson.version)
+  .option(
+    '--mst-config <path>',
+    "An mst.config.json read over the user's and the repo's, and over each eval config's settings and models"
+  )
+  .hook('preAction', () => {
+    const file = program.opts<{ mstConfig?: string }>().mstConfig;
+    if (file !== undefined) setConfigOverrideFile(file);
+  });
 
 // Init command
 program
