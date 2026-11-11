@@ -25,7 +25,8 @@ export function createCoworkCloudControlClient(
         timer: NodeJS.Timeout;
       }
     | undefined;
-  let bytes = Buffer.alloc(0);
+  let chunks: Buffer[] = [];
+  let byteLength = 0;
   function fail(): void {
     failure ??= new Error(
       'Cowork source cloud control disconnected or sent invalid evidence; no local/gateway fallback is permitted. Source recovery state must be retained.'
@@ -66,21 +67,24 @@ export function createCoworkCloudControlClient(
     socket.on('data', (chunk: Buffer) => {
       if (
         !pending ||
-        bytes.length + chunk.length > COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES
+        byteLength + chunk.length > COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES
       ) {
         fail();
         return;
       }
-      bytes = Buffer.concat([bytes, chunk]);
-      const newline = bytes.indexOf(10);
+      chunks.push(chunk);
+      byteLength += chunk.length;
+      const newline = chunk.indexOf(10);
       if (newline < 0) return;
-      if (newline !== bytes.length - 1) {
+      if (newline !== chunk.length - 1) {
         fail();
         return;
       }
       try {
+        // Join and decode only the complete frame, preserving split UTF-8 bytes.
+        const bytes = Buffer.concat(chunks, byteLength);
         const response = CoworkCloudControlResponseSchema.parse(
-          JSON.parse(bytes.subarray(0, newline).toString('utf8'))
+          JSON.parse(bytes.subarray(0, byteLength - 1).toString('utf8'))
         );
         if (response.id !== pending.id) {
           fail();
@@ -88,7 +92,8 @@ export function createCoworkCloudControlClient(
         }
         const completed = pending;
         pending = undefined;
-        bytes = Buffer.alloc(0);
+        chunks = [];
+        byteLength = 0;
         clearTimeout(completed.timer);
         if (response.ok) completed.resolve(response.result);
         else completed.reject(new Error(response.error));

@@ -30,6 +30,7 @@ import { getClient } from '../builtinClients.js';
 import { bareClientName } from '../clientNames.js';
 import { machineRunner } from './channel.js';
 import { readShardBundle } from './protocol.js';
+import { stageInstalledPackage } from './installedPackage.js';
 import {
   formatMemory,
   memoryArg,
@@ -1351,9 +1352,9 @@ async function headlessMachine(
 }
 
 /**
- * `npm pack` arguments. A checkout runs its `prepare` script so it is packed
- * as built; an installed package is already built (and lacks the dev
- * dependencies its build needs), so its scripts are skipped.
+ * `npm pack` arguments. Checkouts keep their lifecycle scripts. Installed
+ * packages are staged without pack hooks first: npm 10 does not suppress
+ * prepare with --ignore-scripts alone.
  */
 export function npmPackArgs(
   destination: string,
@@ -1407,9 +1408,26 @@ async function setupDocker(
     // or an installed package. Installing the published version instead
     // would let the worker drift from the coordinator.
     const root = path.resolve(source, '../..');
-    const checkout = existsSync(path.join(root, 'src', 'cli', 'index.ts'));
+    // Git dependencies can retain source after installation without their
+    // build dependencies. A checkout also has its own .git entry (a file
+    // for a worktree, a directory for a clone), not just source files.
+    const checkout =
+      existsSync(path.join(root, '.git')) &&
+      existsSync(path.join(root, 'src', 'cli', 'index.ts'));
     log(`Packing MST from ${root}…`);
-    await npmPack(root, packages, { ignoreScripts: !checkout });
+    if (checkout) {
+      await npmPack(root, packages);
+    } else {
+      // Keep the source staging outside Docker's build context. Neither it
+      // nor any local dependencies or credentials belong in the image.
+      const staged = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-repack-'));
+      try {
+        await stageInstalledPackage(root, staged);
+        await npmPack(staged, packages, { ignoreScripts: true });
+      } finally {
+        await fs.rm(staged, { recursive: true, force: true });
+      }
+    }
     // The eval's plugins, packed from where this machine has them, so a
     // private or linked package needs no registry: the image installs them
     // (and their dependencies) in MST_PLUGIN_DIR.

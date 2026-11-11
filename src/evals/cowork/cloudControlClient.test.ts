@@ -1,7 +1,7 @@
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCoworkCloudControlClient } from './cloudControlClient.js';
 import {
   COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES,
@@ -104,6 +104,86 @@ describe('worker cloud-control domain RPC (offline Unix socket)', () => {
     ]);
     expect(results).toEqual(['prepare', 'beginTask']);
     expect(observed).toEqual(['prepare', 'beginTask']);
+  });
+
+  it('assembles fragmented UTF-8 responses with linear copying and newline scanning', async () => {
+    const result = '🌍'.repeat(256 * 1024);
+    let frameBytes = 0;
+    const { client } = await serve((request, socket) => {
+      const frame = Buffer.from(reply(request, result));
+      frameBytes = frame.length;
+      // Split inside the first four-byte character, not only between characters.
+      const split = frame.indexOf(Buffer.from('🌍')) + 1;
+      socket.write(frame.subarray(0, split));
+      let offset = split;
+      function send(): void {
+        if (socket.destroyed || offset === frame.length) return;
+        const end = Math.min(offset + 16 * 1024, frame.length);
+        socket.write(frame.subarray(offset, end));
+        offset = end;
+        setImmediate(send);
+      }
+      setImmediate(send);
+    });
+    const scans = vi.spyOn(Buffer.prototype, 'indexOf');
+    const copies = vi.spyOn(Buffer, 'concat');
+    const byteLengths = vi.spyOn(Buffer, 'byteLength');
+    try {
+      await expect(client.call({ method: 'listSessions' })).resolves.toBe(
+        result
+      );
+      const newlineScans = scans.mock.calls.flatMap((args, index) => {
+        const buffer = scans.mock.contexts[index] as Buffer;
+        return args[0] === 10 ? [buffer.length] : [];
+      });
+      expect(newlineScans.length).toBeGreaterThan(1);
+      expect(newlineScans.reduce((sum, length) => sum + length, 0)).toBe(
+        frameBytes
+      );
+      expect(
+        copies.mock.calls.reduce(
+          (sum, [chunks]) =>
+            sum + chunks.reduce((size, chunk) => size + chunk.length, 0),
+          0
+        )
+      ).toBe(frameBytes);
+      // Request sizing is fine; rescanning the growing response is not.
+      expect(
+        byteLengths.mock.calls.reduce(
+          (sum, [value]) =>
+            sum + (typeof value === 'string' ? value.length : value.byteLength),
+          0
+        )
+      ).toBeLessThan(frameBytes);
+    } finally {
+      scans.mockRestore();
+      copies.mockRestore();
+      byteLengths.mockRestore();
+    }
+  });
+
+  it('fails closed when fragmented bytes exceed the limit before a newline', async () => {
+    const { client } = await serve((_request, socket) => {
+      const chunk = Buffer.alloc(64 * 1024, 'x');
+      let sent = 0;
+      function send(): void {
+        if (socket.destroyed) return;
+        if (sent === COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES) {
+          socket.write('x');
+          return;
+        }
+        socket.write(chunk);
+        sent += chunk.length;
+        setImmediate(send);
+      }
+      send();
+    });
+    await expect(client.call({ method: 'listSessions' })).rejects.toThrow(
+      /disconnected/
+    );
+    await expect(client.call({ method: 'restore' })).rejects.toThrow(
+      /disconnected/
+    );
   });
 
   it.each(['id', 'protocol', 'extra-frame', 'oversize', 'malformed'] as const)(

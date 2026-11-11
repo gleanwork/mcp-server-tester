@@ -299,6 +299,36 @@ def real_desktop(api):
 
 
 class AtspiDesktopTests(unittest.TestCase):
+    def test_probe_accepts_the_visible_disabled_start_in_the_claude_code_ui_without_actions(self):
+        start = AtspiNode("Start task", states=("VISIBLE", "SHOWING"))
+        desktop = real_desktop(FakeAtspi(
+            AtspiNode("Claude", "radio button"), AtspiNode("Code", "radio button"), start))
+        driver = module.Driver(desktop, 1000, 4)
+        with patch.object(driver, "action", side_effect=AssertionError("readiness must not act")):
+            receipt = driver.probe()
+        self.assertEqual((receipt["status"], receipt["action_count"]), ("ready", 0))
+        self.assertEqual(start.scrolled, [])
+
+    def test_probe_rejects_hidden_starts_and_unrelated_disabled_controls_without_actions(self):
+        for control in (
+                AtspiNode("Start task", states=("VISIBLE",)),
+                AtspiNode("Start task", states=("SHOWING",)),
+                AtspiNode("Start task", states=("VISIBLE", "ENABLED", "SENSITIVE")),
+                AtspiNode("Start task", "label", states=("VISIBLE", "SHOWING")),
+                AtspiNode("Start task", "radio button", states=("VISIBLE", "SHOWING")),
+                AtspiNode("Cowork", states=("VISIBLE", "SHOWING")),
+                AtspiNode("Cowork", "radio button", states=("VISIBLE", "SHOWING")),
+        ):
+            with self.subTest(name=control.name, role=control.role, states=control.states):
+                desktop = real_desktop(FakeAtspi(
+                    AtspiNode("Claude", "radio button"), AtspiNode("Code", "radio button"), control))
+                driver = module.Driver(desktop, 1000, 4)
+                with patch.object(driver, "action", side_effect=AssertionError("readiness must not act")):
+                    with self.assertRaisesRegex(module.DriverFailure, "cowork_not_ready"):
+                        driver.probe()
+                self.assertEqual(driver.actions, 0)
+                self.assertEqual(control.scrolled, [])
+
     def test_a_control_below_the_window_is_found_only_when_asked_for(self):
         # VISIBLE but not SHOWING: laid out, but scrolled out of the window.
         below = AtspiNode("Start task", states=("VISIBLE", "ENABLED", "SENSITIVE"))

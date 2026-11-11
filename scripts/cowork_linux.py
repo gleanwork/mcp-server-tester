@@ -390,7 +390,11 @@ class Driver:
                 "duration_ms": (time.monotonic() - self.started) * 1000}
 
     def probe(self) -> dict:
-        controls = self.desktop.controls({"Cowork", "Start task"}, {"button", "radio button"})
+        # Newer desktops label the mode switch Claude / Code, not Cowork.
+        # The empty composer's visible, disabled Start task still proves readiness,
+        # not permission to submit. Keep this fallback limited to showing buttons.
+        controls = (self.desktop.controls({"Cowork", "Start task"}, {"button", "radio button"})
+                    or self.desktop.controls({"Start task"}, {"button"}, require_enabled=False))
         if not controls:
             raise DriverFailure("cowork_not_ready")
         return self.receipt("ready")
