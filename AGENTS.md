@@ -275,6 +275,17 @@ authType?: 'oauth' | 'api-token' | 'none';  // Don't do this!
 - No `any` types - TypeScript strict mode is enabled
 - Keep `async` keyword even if no `await` currently used
 
+## Tests for New Behavior
+
+Every change that adds behavior adds a test that fails without it, in the same PR. Reviews of this repo keep finding new code paths that no test runs. Before you open a PR, list what the change adds and point to the test for each:
+
+- Each new CLI flag or command, through the CLI, with the flag set: `src/cli/commands/cli.test.ts` runs the built `mst` binary. A test of the function behind it doesn't show the CLI passes the flag through.
+- Each new client or config option, with the option on and off. A test that the schema accepts it doesn't show what it does.
+- Each new branch, including error, fallback and non-interactive paths, such as no TTY, a missing file or a failed read. A happy-path test doesn't cover them.
+- Each new process, server or proxy a command starts, through the command that starts it. A test of the module alone doesn't show the command starts it.
+
+If a path can't be tested, say why in the PR description.
+
 ## Pre-Push Checklist
 
 Before pushing commits or creating a PR, run all CI checks locally and fix any failures. These mirror the CI pipeline (`.github/workflows/ci.yml`) exactly. Build before typecheck and lint: legacy examples resolve package self-imports through `dist`.
