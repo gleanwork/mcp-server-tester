@@ -54,7 +54,7 @@ import {
 import { removedClientOptions } from './renamedKeys.js';
 import { DEFAULT_COMPUTER_USE_MODEL } from './cowork/computerUseLoop.js';
 import { withClientApp } from './installedApp.js';
-import { copyChatgptRolloutTrace } from './chatgpt/rolloutTrace.js';
+import { keepRolloutTrace } from './rolloutTraceCopy.js';
 
 /**
  * Why `clientOptions.surface` fails: the surface is the client now (ADR
@@ -426,17 +426,29 @@ function desktopAdapter(
               error: transcript.error,
               clientMetadata: result.clientMetadata,
             }));
-      // Only a unique, bound native session can own a trace. A failed bound
+      // The batch's backend writes every chat's trace in one root, so a
+      // trial keeps only its bound native thread's bundles. A failed bound
       // turn may still have requests worth preserving; an unbound/duplicate
       // turn must never collect another chat's prompts.
-      const trace = appSession.rolloutTraceRoot
-        ? await copyChatgptRolloutTrace(
-            appSession.rolloutTraceRoot,
-            result.success && !executionTrusted ? undefined : session?.id,
-            // As the transcript is redacted.
-            { secrets }
-          )
-        : undefined;
+      const traceThread =
+        result.success && !executionTrusted ? undefined : session?.id;
+      const trace = !appSession.rolloutTraceRoot
+        ? undefined
+        : traceThread
+          ? await keepRolloutTrace(appSession.rolloutTraceRoot, {
+              rootThreadId: traceThread,
+              noTrace:
+                'The desktop backend wrote no rollout trace for the attributed native thread.',
+              // As the transcript is redacted.
+              secrets,
+            })
+          : {
+              telemetry: {
+                bundles: 0,
+                notKept:
+                  'No unique native thread was attributed to this trial.',
+              },
+            };
       const caseResult: ClientRunResult = {
         ...transcript,
         ...(trace?.artifacts ? { artifacts: trace.artifacts } : {}),

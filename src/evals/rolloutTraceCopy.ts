@@ -24,6 +24,7 @@ import {
   mkdir,
   mkdtemp,
   open,
+  opendir,
   readdir,
   rm,
   writeFile,
@@ -35,6 +36,7 @@ import {
   redactClientSecretBytes,
   redactClientSecrets,
 } from './clientSecrets.js';
+import type { ClientArtifacts } from './evalFrameworkTypes.js';
 
 /** The directory the copy keeps the trace's bundles in. */
 export const ROLLOUT_TRACE_DIR = 'codex-rollout-trace';
@@ -62,18 +64,16 @@ function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
 }
 
-/** Whether `error` says a path doesn't exist (`ENOENT`). */
-export function isMissingPath(error: unknown): boolean {
+function isMissingPath(error: unknown): boolean {
   return errorCode(error) === 'ENOENT';
 }
 
 /**
- * Why a client didn't keep a trace, for `telemetry.rolloutTrace.notKept`,
- * from what {@link copyRolloutTrace} (or a client's own look at the trace)
- * threw: a limit, an entry MST doesn't copy, or a failure to read it, with
- * the error. Every value in `secrets` is redacted.
+ * Why a trace wasn't kept, from what selecting or copying it threw: a limit,
+ * an entry MST doesn't copy, or a failure to read it, with the error. Every
+ * value in `secrets` is redacted.
  */
-export function rolloutTraceNotKept(
+function rolloutTraceNotKept(
   error: unknown,
   secrets: readonly string[] = []
 ): string {
@@ -157,10 +157,7 @@ async function labelled<T>(name: string, fn: () => Promise<T>): Promise<T> {
  * of at most `maxBytes`. Never opens a symbolic link, and doesn't block on a
  * pipe. Fails when the file changes while it is read.
  */
-export async function readTraceFile(
-  file: string,
-  maxBytes: number
-): Promise<Buffer> {
+async function readTraceFile(file: string, maxBytes: number): Promise<Buffer> {
   let handle;
   try {
     handle = await open(
@@ -299,4 +296,145 @@ export async function copyRolloutTrace(
     throw error;
   }
   return { dir: target, files, bytes };
+}
+
+/** A manifest names a bundle's threads; it is never this large. */
+const MAX_MANIFEST_BYTES = 64 * 1024;
+
+/**
+ * Whether the bundle `dir` has a `manifest.json`, and, with `rootThreadId`,
+ * whether its version-1 manifest names that thread as the root thread. A
+ * filename is not attribution. A manifest MST won't read (a link, a hard
+ * link, another user's file, too large) or can't parse is another chat's or
+ * not a bundle's; any other error reading it is thrown, so it isn't taken
+ * for no trace.
+ */
+async function isBundle(
+  dir: string,
+  rootThreadId: string | undefined
+): Promise<boolean> {
+  const file = path.join(dir, 'manifest.json');
+  try {
+    if (rootThreadId === undefined) {
+      await lstat(file);
+      return true;
+    }
+    const manifest: unknown = JSON.parse(
+      (await readTraceFile(file, MAX_MANIFEST_BYTES)).toString('utf8')
+    );
+    if (typeof manifest !== 'object' || manifest === null) return false;
+    const { schema_version, root_thread_id } = manifest as Record<
+      string,
+      unknown
+    >;
+    return schema_version === 1 && root_thread_id === rootThreadId;
+  } catch (error) {
+    if (
+      isMissingPath(error) ||
+      error instanceof RolloutTraceError ||
+      error instanceof SyntaxError
+    )
+      return false;
+    throw error;
+  }
+}
+
+/**
+ * The bundles in `root` (directories with a manifest; with `rootThreadId`,
+ * only that thread's), sorted. A missing `root` holds none. Every entry of
+ * `root` counts toward `limits.entries`, so a root with too many is over the
+ * limit before MST reads them all.
+ */
+async function traceBundles(
+  root: string,
+  rootThreadId: string | undefined,
+  limits: ArtifactLimits
+): Promise<string[]> {
+  let directory;
+  try {
+    directory = await opendir(root);
+  } catch (error) {
+    if (isMissingPath(error)) return [];
+    throw error;
+  }
+  const bundles: string[] = [];
+  let entries = 0;
+  for await (const entry of directory) {
+    if (++entries > limits.entries)
+      throw new RolloutTraceError(
+        'limit',
+        `the trace root has more than ${limits.entries} entries`
+      );
+    if (
+      entry.isDirectory() &&
+      (await isBundle(path.join(root, entry.name), rootThreadId))
+    )
+      bundles.push(entry.name);
+  }
+  return bundles.sort();
+}
+
+/** What a trial keeps of a rollout trace, and its `telemetry.rolloutTrace`. */
+export interface KeptRolloutTrace {
+  readonly artifacts?: ClientArtifacts;
+  readonly telemetry: {
+    /** The bundles kept; absent when MST couldn't list them. */
+    readonly bundles?: number;
+    readonly files?: number;
+    readonly bytes?: number;
+    readonly notKept?: string;
+  };
+}
+
+/**
+ * What a trial keeps of the rollout trace in `root`: a copy
+ * ({@link copyRolloutTrace}) of its bundles, as the trial's client
+ * artifacts. A client whose root holds only the trial's trace takes every
+ * bundle; one whose root is shared (a desktop backend's, across a batch)
+ * passes the trial's `rootThreadId`, and only bundles whose manifest names it
+ * are kept. A trace not written (`noTrace` says why), over a limit, with an
+ * entry MST doesn't copy, or that MST couldn't read is not kept, and
+ * `telemetry.notKept` says why: the trial is still graded, where a copy over
+ * a limit would make it an infrastructure failure. `root` stays the
+ * caller's to remove.
+ */
+export async function keepRolloutTrace(
+  root: string,
+  options: {
+    readonly noTrace: string;
+    readonly rootThreadId?: string;
+    readonly secrets?: readonly string[];
+    readonly limits?: ArtifactLimits;
+  }
+): Promise<KeptRolloutTrace> {
+  const limits = options.limits ?? ARTIFACT_LIMITS;
+  let bundles: string[] | undefined;
+  try {
+    bundles = await traceBundles(root, options.rootThreadId, limits);
+    if (bundles.length === 0)
+      return { telemetry: { bundles: 0, notKept: options.noTrace } };
+    const copy = await copyRolloutTrace(root, bundles, {
+      secrets: options.secrets,
+      limits,
+    });
+    return {
+      artifacts: {
+        dir: copy.dir,
+        include: [ROLLOUT_TRACE_DIR],
+        temporary: true,
+      },
+      telemetry: {
+        bundles: bundles.length,
+        files: copy.files,
+        bytes: copy.bytes,
+      },
+    };
+  } catch (error) {
+    return {
+      telemetry: {
+        ...(bundles ? { bundles: bundles.length } : {}),
+        notKept: rolloutTraceNotKept(error, options.secrets),
+      },
+    };
+  }
 }

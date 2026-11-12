@@ -100,15 +100,9 @@ by its filename. A failed but bound turn can keep its partial trace; an
 unbound or duplicate session cannot. The copy survives app/profile teardown,
 and the batch source is removed after the app stops.
 
-The copy is made as `codex-cli`'s is ([The rollout trace](codex.md#the-rollout-trace)):
-only directories and regular files that MST's user owns, never a symbolic
-link (a link in a bundle is left out) and never a hard link, each opened
-without following a link at its name, and re-checked so a directory swapped
-for a link while MST copies keeps the trace from being kept. In every file,
-MST replaces the credentials it knows for the batch with `[REDACTED]`, as in
-the transcript: server tokens and credential headers, plugin credentials and
-credential-named environment variables. Values MST doesn't know, such as a
-secret a server returns, stay as the backend wrote them.
+MST copies the trial's bundles as it copies `codex-cli`'s, with the same
+link checks and limits, and with the batch's known credentials redacted as
+in the transcript; see [The rollout trace](codex.md#the-rollout-trace).
 
 The trial reports the copy as client artifacts under `codex-rollout-trace/`,
 so judges can read it. With `"redactStoredResponses": false`, MST keeps it at
@@ -118,14 +112,12 @@ and reasoning summaries: run only where that data may be read by the judges,
 and turn tracing off if they must not receive it. `telemetry.host.content`
 and `telemetry.otlp.content` do not control this bundle.
 
-`telemetry.rolloutTrace` records the bundles, files and bytes copied (as
-written, after redaction), or a `notKept` reason: no attributed native
-thread, no trace for it (an app whose bundled backend does not support this
-hook writes none), a trace over the trial artifact limits (16 MB per file,
-64 MB total, 4,096 entries, 16 directory levels; every entry of the batch
-directory counts), an entry MST doesn't copy, or a trace MST couldn't read,
-with the error. When MST couldn't list the trace, `rolloutTrace` has no
-`bundles`. None of these fails an otherwise valid trial. Backend support is version-dependent; the
+`telemetry.rolloutTrace` records the bundles, files and bytes copied, or a
+`notKept` reason, as for `codex-cli`. Two reasons are the desktop's own: no
+native thread was attributed to the trial, or the backend wrote no trace for
+it (an app whose bundled backend does not support this hook writes none).
+Every entry of the batch directory counts toward the entry limit. None of
+these fails an otherwise valid trial. Backend support is version-dependent; the
 hook was verified in the app's bundled Codex `0.163.0-alpha.11` app-server.
 This option is not yet enabled for `codex-app`.
 

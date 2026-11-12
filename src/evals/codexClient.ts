@@ -21,7 +21,6 @@
  */
 import fs from 'node:fs';
 import {
-  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -54,18 +53,16 @@ import {
 import type { ClientDiagnostics } from '../types/index.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import {
-  copyRolloutTrace,
-  isMissingPath,
+  keepRolloutTrace,
   ROLLOUT_TRACE_DIR,
-  rolloutTraceNotKept,
   type ArtifactLimits,
+  type KeptRolloutTrace,
 } from './rolloutTraceCopy.js';
 import {
   buildCodexTranscript,
   type TimedCodexEvent,
 } from './codexTranscript.js';
 import type {
-  ClientArtifacts,
   ClientDefinition,
   ClientRunContext,
   ClientRunInput,
@@ -421,84 +418,23 @@ async function findRollout(
 export const CODEX_ROLLOUT_TRACE_DIR = ROLLOUT_TRACE_DIR;
 
 /**
- * The bundles Codex wrote in `root`: its directories that hold a
- * `manifest.json`, sorted. A missing `root` holds none; any other error
- * reading it is thrown. The copy checks what each one is.
+ * What a trial keeps of the rollout trace Codex wrote under `dir`
+ * ({@link keepRolloutTrace}, with `secrets` replaced). A trial's Codex has
+ * its own trace root, so every bundle in it is the trial's. `dir` stays the
+ * caller's to remove.
  */
-async function codexTraceBundles(root: string): Promise<string[]> {
-  let entries: fs.Dirent[];
-  try {
-    entries = await readdir(root, { withFileTypes: true });
-  } catch (error) {
-    if (isMissingPath(error)) return [];
-    throw error;
-  }
-  const bundles: string[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    try {
-      await lstat(path.join(root, entry.name, 'manifest.json'));
-      bundles.push(entry.name);
-    } catch (error) {
-      if (!isMissingPath(error)) throw error;
-    }
-  }
-  return bundles.sort();
-}
-
-/**
- * What a trial keeps of the rollout trace Codex wrote under `dir`: a copy of
- * its bundles (rolloutTraceCopy.ts), as the trial's client artifacts, with
- * `secrets` replaced, when they fit what a trial's artifacts may hold. A
- * trace Codex didn't write, one over a limit, one with a file MST won't copy
- * (a link, or a file another user owns) or one MST couldn't read is not kept,
- * and `telemetry` says why (with `bundles` when MST could list them): the
- * trial is still graded, where a copy over a limit would make it an
- * infrastructure failure. `dir` stays the caller's to remove.
- */
-export async function codexRolloutTrace(
+export function codexRolloutTrace(
   dir: string,
   options: {
     readonly secrets?: readonly string[];
     readonly limits?: ArtifactLimits;
   } = {}
-): Promise<{
-  artifacts?: ClientArtifacts;
-  telemetry: Record<string, unknown>;
-}> {
-  const root = path.join(dir, CODEX_ROLLOUT_TRACE_DIR);
-  let bundles: string[] | undefined;
-  try {
-    bundles = await codexTraceBundles(root);
-    if (bundles.length === 0)
-      return {
-        telemetry: {
-          bundles: 0,
-          notKept:
-            'Codex wrote no rollout trace. Codex CLI 0.124 or later writes one.',
-        },
-      };
-    const copy = await copyRolloutTrace(root, bundles, options);
-    return {
-      artifacts: {
-        dir: copy.dir,
-        include: [CODEX_ROLLOUT_TRACE_DIR],
-        temporary: true,
-      },
-      telemetry: {
-        bundles: bundles.length,
-        files: copy.files,
-        bytes: copy.bytes,
-      },
-    };
-  } catch (error) {
-    return {
-      telemetry: {
-        ...(bundles ? { bundles: bundles.length } : {}),
-        notKept: rolloutTraceNotKept(error, options.secrets),
-      },
-    };
-  }
+): Promise<KeptRolloutTrace> {
+  return keepRolloutTrace(path.join(dir, CODEX_ROLLOUT_TRACE_DIR), {
+    ...options,
+    noTrace:
+      'Codex wrote no rollout trace. Codex CLI 0.124 or later writes one.',
+  });
 }
 
 function pick(
