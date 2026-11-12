@@ -79,7 +79,8 @@ let failCall: ((message: Message) => boolean) | undefined;
 let hangCall: ((message: Message) => boolean) | undefined;
 let heldKeyboardReplies: Map<number, (error: unknown) => void>;
 let override:
-  ((message: Message) => { value: unknown } | undefined) | undefined;
+  | ((message: Message) => { value: unknown } | undefined)
+  | undefined;
 let delayReply: boolean;
 let activeCalls: number;
 let maxActiveCalls: number;

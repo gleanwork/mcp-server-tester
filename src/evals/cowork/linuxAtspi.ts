@@ -264,7 +264,7 @@ async function walk<T>(
   const queue: TreeItem[] = [{ ref: root }];
   const seen = new Set([id(root)]);
   const records = new Map<string, Visited<T>>();
-  for (let offset = 0; offset < queue.length;) {
+  for (let offset = 0; offset < queue.length; ) {
     const batch = queue.slice(offset, offset + CONCURRENCY);
     offset += batch.length;
     const results = await Promise.all(batch.map(visit));
