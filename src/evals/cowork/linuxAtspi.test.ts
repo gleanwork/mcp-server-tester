@@ -79,8 +79,7 @@ let failCall: ((message: Message) => boolean) | undefined;
 let hangCall: ((message: Message) => boolean) | undefined;
 let heldKeyboardReplies: Map<number, (error: unknown) => void>;
 let override:
-  | ((message: Message) => { value: unknown } | undefined)
-  | undefined;
+  ((message: Message) => { value: unknown } | undefined) | undefined;
 let delayReply: boolean;
 let activeCalls: number;
 let maxActiveCalls: number;
@@ -419,6 +418,48 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
       }),
     ]);
   });
+
+  it.each(['\n', 'existing draft', 'first paragraph\nsecond paragraph'])(
+    'reads Chromium embedded paragraph text without discarding a draft: %j',
+    async (text) => {
+      nodes.get('/entry')!.text = '\ufffc';
+      nodes.get('/entry')!.children = ['/paragraph'];
+      nodes.set('/paragraph', { ...node('', 'paragraph'), text });
+      const ui = await connect();
+      expect(await ui.readText(await entry(ui))).toBe(text);
+    }
+  );
+
+  it('resolves nested structural objects once and preserves paragraph order', async () => {
+    nodes.get('/entry')!.text = '\ufffc\ufffc';
+    nodes.get('/entry')!.children = ['/paragraph1', '/paragraph2'];
+    nodes.set('/paragraph1', {
+      ...node('', 'paragraph', ['/static']),
+      text: '\ufffc',
+    });
+    nodes.set('/static', { ...node('', 'static'), text: 'first' });
+    nodes.set('/paragraph2', { ...node('', 'paragraph'), text: 'second' });
+    const ui = await connect();
+    expect(await ui.readText(await entry(ui))).toBe('first\nsecond');
+  });
+
+  it.each([
+    { text: 'literal\ufffc', children: ['/line1'], role: 'text' },
+    { text: '\ufffc', children: [], role: 'text' },
+    { text: '\ufffc\ufffc', children: ['/line1'], role: 'text' },
+    { text: '\ufffc', children: ['/line1'], role: 'image' },
+    { text: '\ufffc', children: ['/line1'], role: 'password text' },
+  ])(
+    'refuses ambiguous embedded content rather than treating it as empty: %j',
+    async ({ text, children, role }) => {
+      Object.assign(nodes.get('/entry')!, { text, children });
+      Object.assign(nodes.get('/line1')!, { role, text: '' });
+      const ui = await connect();
+      await expect(ui.readText(await entry(ui))).rejects.toThrow(
+        'accessibility_text_unavailable'
+      );
+    }
+  );
 
   it('does one DoAction(0), never replays an uncertain acknowledgement, and uses native ScrollTo', async () => {
     const ui = await connect();

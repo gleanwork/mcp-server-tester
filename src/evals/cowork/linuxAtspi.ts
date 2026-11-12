@@ -264,7 +264,7 @@ async function walk<T>(
   const queue: TreeItem[] = [{ ref: root }];
   const seen = new Set([id(root)]);
   const records = new Map<string, Visited<T>>();
-  for (let offset = 0; offset < queue.length; ) {
+  for (let offset = 0; offset < queue.length;) {
     const batch = queue.slice(offset, offset + CONCURRENCY);
     offset += batch.length;
     const results = await Promise.all(batch.map(visit));
@@ -462,6 +462,7 @@ export async function connectLinuxUi(
     },
     async readText(node) {
       const root = reference(node);
+      const embeddedChildren = new Set<string>();
       const pieces = await walk(root, async ({ ref }) => {
         const interfaces = await bus.call({
           ...ref,
@@ -473,6 +474,17 @@ export async function connectLinuxUi(
           !interfaces.every((entry: unknown) => typeof entry === 'string')
         )
           throw new LinuxUiError('accessibility_invalid_reply');
+        if (embeddedChildren.has(id(ref))) {
+          const role = string(
+            await bus.call({
+              ...ref,
+              interface: ACCESSIBLE,
+              member: 'GetRoleName',
+            })
+          );
+          if (!TEXT_ROLES.has(role) || !interfaces.includes(TEXT))
+            throw new LinuxUiError('accessibility_text_unavailable');
+        }
         if (interfaces.includes(TEXT)) {
           const text = string(
             await bus.call({
@@ -483,6 +495,22 @@ export async function connectLinuxUi(
               body: [0, -1],
             })
           );
+          if (text.includes('\ufffc')) {
+            // Chromium represents editor paragraphs as embedded objects, even
+            // when empty. Resolve their text instead of discarding the markers.
+            // Mixed literals/objects need hyperlink-offset reconstruction; fail
+            // closed rather than lose literal text or guess its reading order.
+            if (text.replace(/[\ufffc\r\n]/g, '') !== '')
+              throw new LinuxUiError('accessibility_text_unavailable');
+            const descendants = await children(bus, ref);
+            const markers = [...text].filter(
+              (char) => char === '\ufffc'
+            ).length;
+            if (descendants.length !== markers)
+              throw new LinuxUiError('accessibility_text_unavailable');
+            for (const child of descendants) embeddedChildren.add(id(child));
+            return { value: '', children: descendants };
+          }
           return { value: text, children: [] };
         }
         const role = string(
