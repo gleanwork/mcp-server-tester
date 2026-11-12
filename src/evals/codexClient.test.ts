@@ -7,6 +7,7 @@ import {
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -844,7 +845,7 @@ describe('codex-cli client run', () => {
     expect(result.telemetry!.rolloutTrace).toEqual({
       bundles: 1,
       notKept:
-        "The rollout trace holds a file MST doesn't copy: trace-t1-thread-9/payloads/config.toml is a hard link.",
+        "The rollout trace holds an entry MST doesn't copy: trace-t1-thread-9/payloads/config.toml is a hard link.",
     });
     expect(existsSync(env.CODEX_HOME!)).toBe(false);
     expect(existsSync(join(env.CODEX_ROLLOUT_TRACE_ROOT!, '..'))).toBe(false);
@@ -1120,7 +1121,43 @@ describe('codex-cli rollout trace', () => {
       telemetry: {
         bundles: 1,
         notKept:
-          "The rollout trace holds a file MST doesn't copy: trace-t1-thread-9/payloads/config.toml is a hard link.",
+          "The rollout trace holds an entry MST doesn't copy: trace-t1-thread-9/payloads/config.toml is a hard link.",
+      },
+    });
+  });
+
+  it('keeps no trace whose root is a symbolic link, which could lead anywhere', async () => {
+    const root = join(dir, CODEX_ROLLOUT_TRACE_DIR);
+    await rename(root, join(dir, 'elsewhere'));
+    await symlink(join(dir, 'elsewhere'), root);
+    expect(await codexRolloutTrace(dir)).toEqual({
+      telemetry: {
+        bundles: 1,
+        notKept:
+          "The rollout trace holds an entry MST doesn't copy: the trace root is a symbolic link.",
+      },
+    });
+  });
+
+  it('says Codex wrote no trace only when the trace root is missing', async () => {
+    await rm(join(dir, CODEX_ROLLOUT_TRACE_DIR), { recursive: true });
+    expect(await codexRolloutTrace(dir)).toEqual({
+      telemetry: {
+        bundles: 0,
+        notKept: expect.stringMatching(/no rollout trace.*0\.124/),
+      },
+    });
+  });
+
+  it("says MST couldn't read a trace root that isn't a directory", async () => {
+    const root = join(dir, CODEX_ROLLOUT_TRACE_DIR);
+    await rm(root, { recursive: true });
+    await writeFile(root, '');
+    expect(await codexRolloutTrace(dir)).toEqual({
+      telemetry: {
+        notKept: expect.stringMatching(
+          /^MST couldn't read the rollout trace: ENOTDIR/
+        ),
       },
     });
   });
@@ -1164,6 +1201,43 @@ describe('codex-cli rollout trace', () => {
         ),
       });
       expect(telemetry.notKept).not.toMatch(/larger/);
+    }
+  );
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    "says MST couldn't read a trace root it couldn't list, not that Codex wrote none",
+    async () => {
+      const root = join(dir, CODEX_ROLLOUT_TRACE_DIR);
+      await chmod(root, 0o000);
+      try {
+        const { artifacts, telemetry } = await codexRolloutTrace(dir);
+        expect(artifacts).toBeUndefined();
+        expect(telemetry).toEqual({
+          notKept: expect.stringMatching(
+            /^MST couldn't read the rollout trace: EACCES/
+          ),
+        });
+      } finally {
+        await chmod(root, 0o700);
+      }
+    }
+  );
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    "says MST couldn't read a bundle whose manifest it couldn't look for",
+    async () => {
+      await chmod(bundle(), 0o000);
+      try {
+        const { artifacts, telemetry } = await codexRolloutTrace(dir);
+        expect(artifacts).toBeUndefined();
+        expect(telemetry).toEqual({
+          notKept: expect.stringMatching(
+            /^MST couldn't read the rollout trace: EACCES/
+          ),
+        });
+      } finally {
+        await chmod(bundle(), 0o700);
+      }
     }
   );
 
