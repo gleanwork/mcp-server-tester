@@ -126,7 +126,7 @@ The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`),
 
 ### Docs Site (`website/`)
 
-`website/` is a Docusaurus site with its own `package.json`. It renders the pages in `docs/` where they are (one copy, read the same on GitHub), and serves them and `skills/` to AI agents over MCP at `/mcp` through `docusaurus-plugin-mcp-server` (`website/api/mcp.mjs`). Write pages in `docs/` as GitHub Markdown: the site parses `.md` as CommonMark, not MDX. A page links to repo files outside `docs/` with relative paths as usual; `website/src/remark/repoLinks.mts` points them at GitHub and fails the build when the target is missing. A new page needs a place in `website/sidebars.ts`. `tests/site/` tests the MCP endpoint with MST (`npm run test:site`, after a site build); the main Playwright config ignores it. Vercel's Git integration deploys the site: production from `main`, a preview for each PR. The Vercel project's Root Directory is `website`, so Vercel reads `website/vercel.json` and runs `website/api/`; with the repo root as Root Directory, Vercel builds the library instead and fails. The site's URL, `https://mcp-server-tester-docs.vercel.app`, is set in `website/docusaurus.config.ts`; change it there if the production domain changes.
+`website/` is a Docusaurus site with its own `package.json`. It renders the pages in `docs/` where they are (one copy, read the same on GitHub), and serves them and `skills/` to AI agents over MCP at `/mcp` through `docusaurus-plugin-mcp-server` (`website/api/mcp.mjs`). Write pages in `docs/` as GitHub Markdown: the site parses `.md` as CommonMark, not MDX. A page links to repo files outside `docs/` with relative paths as usual; `website/src/remark/repoLinks.mts` points them at GitHub and fails the build when the target is missing. A new page needs a place in `website/sidebars.ts`. `tests/site/` tests the MCP endpoint with MST (`npm run test:site`, after a site build); the main Playwright config ignores it. The site deploys only when a release is tagged: `.github/workflows/deploy-website.yml` runs on `v*` tags (or by hand for a tag), builds with the Vercel CLI and uploads the prebuilt output to production. Pull requests and pushes to `main` don't deploy; `website/vercel.json` sets `git.deploymentEnabled: false`, so Vercel's Git integration makes no previews or production builds. The workflow needs the `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` secrets. The Vercel project (`glean-developers/mcp-server-tester`) has `website` as its Root Directory, so Vercel reads `website/vercel.json` and runs `website/api/`, and the CLI runs from the repo root; with the repo root as Root Directory, Vercel builds the library instead and fails. The site's URL, `https://mcp-server-tester-docs.vercel.app`, is set in `website/docusaurus.config.ts`; change it there if the production domain changes.
 
 ### Trials and Pass Rate
 
@@ -274,6 +274,17 @@ authType?: 'oauth' | 'api-token' | 'none';  // Don't do this!
 - Descriptive type names (e.g., `EvalDataset`, `MCPFixtureApi`, `Judge`, `ValidationResult`)
 - No `any` types - TypeScript strict mode is enabled
 - Keep `async` keyword even if no `await` currently used
+
+## Tests for New Behavior
+
+Every change that adds behavior adds a test that fails without it, in the same PR. Reviews of this repo keep finding new code paths that no test runs. Before you open a PR, list what the change adds and point to the test for each:
+
+- Each new CLI flag or command, through the CLI, with the flag set: `src/cli/commands/cli.test.ts` runs the built `mst` binary. A test of the function behind it doesn't show the CLI passes the flag through.
+- Each new client or config option, with the option on and off. A test that the schema accepts it doesn't show what it does.
+- Each new branch, including error, fallback and non-interactive paths, such as no TTY, a missing file or a failed read. A happy-path test doesn't cover them.
+- Each new process, server or proxy a command starts, through the command that starts it. A test of the module alone doesn't show the command starts it.
+
+If a path can't be tested, say why in the PR description.
 
 ## Pre-Push Checklist
 
