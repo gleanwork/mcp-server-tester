@@ -589,6 +589,101 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
     expect(stages.filter((value) => value === 'rm')).toHaveLength(1);
   });
 
+  it.each([
+    { readyTimeout: '3000000', prepared: false },
+    { readyTimeout: '5000000', prepared: false },
+    { readyTimeout: '3000000', prepared: true },
+    { readyTimeout: '5000000', prepared: true },
+  ])(
+    'supports readyTimeout=$readyTimeout without timer overflow (prepared=$prepared)',
+    async ({ readyTimeout, prepared }) => {
+      expect(dockerRunner.schema.parse({ readyTimeout })).toMatchObject({
+        readyTimeout,
+      });
+      const timers = vi.spyOn(globalThis, 'setTimeout');
+      const cleared = vi.spyOn(globalThis, 'clearTimeout');
+      const f = await fixture({
+        readyTimeout,
+        ...(prepared
+          ? { runtime: { inference: 'plugin' as const } }
+          : { definition: dockerRunner }),
+      });
+      expect(await f.run()).toMatchObject({ ok: true, collected: 1 });
+      expect((await f.calls()).map(stage)).toContain('worker');
+      const longTimers = timers.mock.calls.flatMap(([, delay], index) =>
+        delay !== undefined && delay > 1_000_000
+          ? [
+              {
+                delay,
+                timer: timers.mock.results[index]!.value as NodeJS.Timeout,
+              },
+            ]
+          : []
+      );
+      expect(longTimers).toHaveLength(1);
+      expect(longTimers[0]!.delay).toBeLessThanOrEqual(2 ** 31 - 1);
+      expect(cleared).toHaveBeenCalledWith(longTimers[0]!.timer);
+      expect(liveContainers()).toEqual([]);
+    }
+  );
+
+  it('rearms a long readiness deadline and aborts a blocked command only at the full deadline', async () => {
+    vi.stubEnv('RUNTIME_DOCKER_WAIT_READY', '1');
+    const cleanups: DockerRuntimeContext[] = [];
+    const f = await fixture({
+      readyTimeout: '3000000',
+      runtime: { inference: 'plugin', prepareRuntime: preparation(cleanups) },
+    });
+    const chunks: Array<{
+      delay: number;
+      timer: NodeJS.Timeout;
+      fire: () => void;
+    }> = [];
+    const realSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      callback: (...args: unknown[]) => void,
+      delay?: number,
+      ...args: unknown[]
+    ) => {
+      const timer = realSetTimeout(callback, delay, ...args);
+      if (delay !== undefined && delay > 1_000_000) {
+        chunks.push({
+          delay,
+          timer,
+          fire: () => {
+            clearTimeout(timer);
+            callback(...args);
+          },
+        });
+      }
+      return timer;
+    }) as typeof setTimeout);
+    const cleared = vi.spyOn(globalThis, 'clearTimeout');
+    const running = f.run();
+    await waitForFile(path.join(f.root, 'waiting-ready'));
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]!.delay).toBe(2 ** 31 - 1);
+    expect(chunks[0]!.timer.hasRef()).toBe(false);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 2 ** 31 - 1);
+    chunks[0]!.fire();
+    expect(chunks).toHaveLength(2);
+    expect(chunks[1]!.delay).toBeGreaterThan(800_000_000);
+    expect(chunks[1]!.delay).toBeLessThan(900_000_000);
+    expect(cleanups).toHaveLength(0);
+    clock.mockReturnValue(now + 3_000_000_000);
+    chunks[1]!.fire();
+    expect(await running).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining("wasn't ready within 3000000 s"),
+    });
+    expect(chunks).toHaveLength(2);
+    expect(cleared).toHaveBeenCalledWith(chunks[1]!.timer);
+    expect(cleanups).toHaveLength(1);
+    expect((await f.calls()).map(stage)).not.toContain('worker');
+    expect(liveContainers()).toEqual([]);
+  });
+
   it('bounds a blocked readiness command with the existing readyTimeout', async () => {
     vi.stubEnv('RUNTIME_DOCKER_WAIT_READY', '1');
     const cleanups: DockerRuntimeContext[] = [];
@@ -664,9 +759,14 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
     }
   );
 
-  it('retains default readiness cancellation wording and a cancelled outcome', async () => {
+  it('retains default readiness cancellation wording and clears its long deadline', async () => {
     vi.stubEnv('RUNTIME_DOCKER_READY_MODE', 'starting');
-    const f = await fixture({ definition: dockerRunner });
+    const timers = vi.spyOn(globalThis, 'setTimeout');
+    const cleared = vi.spyOn(globalThis, 'clearTimeout');
+    const f = await fixture({
+      definition: dockerRunner,
+      readyTimeout: '5000000',
+    });
     const poll = observeReadinessPoll();
     const running = f.run();
     const waiting = await poll;
@@ -677,6 +777,13 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
       cancelled: true,
       reason: expect.stringContaining('The run was cancelled.'),
     });
+    const deadlineIndex = timers.mock.calls.findIndex(
+      ([, delay]) => delay === 2 ** 31 - 1
+    );
+    expect(deadlineIndex).toBeGreaterThanOrEqual(0);
+    expect(cleared).toHaveBeenCalledWith(
+      timers.mock.results[deadlineIndex]!.value
+    );
   });
 
   it('kills a channel command when its stdin iterator throws', async () => {
@@ -860,6 +967,7 @@ describe('in-process Docker runtime preparation (external CLI stand-in)', () => 
     vi.stubEnv('RUNTIME_DOCKER_WAIT_READY', '1');
     const cleanups: DockerRuntimeContext[] = [];
     const f = await fixture({
+      readyTimeout: '5000000',
       runtime: {
         inference: 'plugin',
         prepareRuntime: preparation(cleanups),

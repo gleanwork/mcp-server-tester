@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { loadJudgeSdk } from '../adapterSupport.js';
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
+import { BUILTIN_MODELS } from '../../llm/modelDefaults.js';
 import { codexSandboxMode } from './codexSandbox.js';
 import {
   runtimeEnv,
@@ -69,7 +70,7 @@ export interface CodexRuntimeOptions {
   env?: readonly string[];
 }
 
-const DEFAULT_CODEX_JUDGE_MODEL = 'gpt-5.5';
+const DEFAULT_CODEX_JUDGE_MODEL = BUILTIN_MODELS.agentJudge.codex;
 
 function stepOf(
   item: Record<string, unknown> & { type: string }

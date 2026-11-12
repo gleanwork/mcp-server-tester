@@ -405,8 +405,9 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertIsNone(desktop.prompt)
 
     def test_submit_leaves_the_previous_task_view_without_cowork_controls(self):
-        # November 2026 UI: no Cowork radio or sidebar button in the old task.
-        # One empty link opens its composer; only then does the prompt follow.
+        # Desktop's November 2026 UI, on the previous case's task view: no
+        # Cowork radio or sidebar button, and its composer has no Start task.
+        # One empty new-task link opens Cowork's composer; then the prompt.
         desktop = Desktop()
         desktop.radios = desktop.tabs = []
         desktop.starts = []
@@ -424,6 +425,8 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(receipt["action_count"], 3)
 
     def test_submit_opens_the_new_task_link_only_once(self):
+        # The link didn't reach Cowork's composer: no second link, and no
+        # submission, before the deadline.
         desktop = Desktop()
         desktop.radios = desktop.tabs = []
         desktop.starts = []
@@ -433,10 +436,13 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(desktop.actions, [])
 
     def test_probe_accepts_the_empty_composer_without_cowork_controls(self):
+        # Desktop's November 2026 UI: no Cowork radio or sidebar button, only
+        # the empty composer's Start task, disabled until text is inserted.
         desktop = Desktop()
         desktop.radios = desktop.tabs = []
         self.assertEqual(module.Driver(desktop, 1000, 4).probe()["status"], "ready")
         self.assertEqual(desktop.actions, [])
+        # No composer and no Cowork control: not ready.
         desktop.starts = []
         with self.assertRaisesRegex(module.DriverFailure, "cowork_not_ready"):
             module.Driver(desktop, 1000, 4).probe()

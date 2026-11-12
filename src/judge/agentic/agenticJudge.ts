@@ -25,6 +25,11 @@ import type {
 import { claudeRuntime } from './claudeRuntime.js';
 import { codexRuntime, probeCodexSandbox } from './codexRuntime.js';
 import { loadJudgeSdk, requireJudgeCredential } from '../adapterSupport.js';
+import {
+  AGENT_JUDGE_RUNTIMES,
+  type AgentJudgeRuntimeId,
+} from './runtimeIds.js';
+import type { JudgeModelSlot } from '../../llm/modelDefaults.js';
 import type {
   AgentJudgeResult,
   AgentJudgeRuntime,
@@ -38,9 +43,7 @@ import {
   type WorkspaceFile,
 } from './workspace.js';
 
-/** Built-in runtime ids. */
-export const AGENT_JUDGE_RUNTIMES = ['codex', 'claude-agent'] as const;
-export type AgentJudgeRuntimeId = (typeof AGENT_JUDGE_RUNTIMES)[number];
+export { AGENT_JUDGE_RUNTIMES, type AgentJudgeRuntimeId };
 
 /** Runtime settings, from the judge's defaults and then its options. */
 export const AgentJudgeOptionsSchema = z
@@ -176,6 +179,17 @@ export function settings(
   return merged as AgentJudgeOptions & typeof DEFAULTS;
 }
 
+/**
+ * `modelSlot` for an agentic judge: `models.agentJudge` for the runtime it
+ * runs on, unless the judge's own defaults name a model.
+ */
+export function agentModelSlot(spec: { defaults?: AgentJudgeOptions }) {
+  return (options: Record<string, unknown>): JudgeModelSlot | undefined =>
+    spec.defaults?.model !== undefined
+      ? undefined
+      : { kind: 'agentJudge', key: settings(spec, options).runtime };
+}
+
 async function runAgent<Input>(
   spec: AgenticBase<Input>,
   input: Input,
@@ -240,6 +254,7 @@ export function agenticJudge(spec: AgenticJudgeSpec): JudgeDefinition {
     schema: optionsSchema(spec),
     ...(spec.version !== undefined && { version: spec.version }),
     ...(spec.requires !== undefined && { requires: spec.requires }),
+    modelSlot: agentModelSlot(spec),
     preflight: (options) => preflightRuntime(settings(spec, options).runtime),
     evaluate: (input, options) =>
       runAgent(
@@ -269,6 +284,7 @@ export function agenticPairwiseJudge(
     ...(spec.swapPositions !== undefined && {
       swapPositions: spec.swapPositions,
     }),
+    modelSlot: agentModelSlot(spec),
     preflight: (options) => preflightRuntime(settings(spec, options).runtime),
     compare: (input, options) =>
       runAgent(

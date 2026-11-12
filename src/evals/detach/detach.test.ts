@@ -787,6 +787,35 @@ describe('--detach', () => {
     }
   );
 
+  it('sends the coordinator the models its mst.config.json files resolved', async () => {
+    const f = await evalConfig({
+      models: { judge: { anthropic: 'eval-judge' } },
+    });
+    await fs.writeFile(
+      path.join(f.dir, 'mst.config.json'),
+      JSON.stringify({
+        models: {
+          api: { openai: 'repo-api' },
+          judge: { anthropic: 'repo-judge' },
+        },
+      })
+    );
+    await detach({
+      ...base,
+      configPath: f.configPath,
+      rootDir: f.dir,
+      secretsFile: f.secrets,
+    });
+    const sent = JSON.parse(detachTestState().sent.get('eval.json')!) as {
+      models?: unknown;
+    };
+    // The eval config's entry over the repo file's, as a local run has them.
+    expect(sent.models).toEqual({
+      api: { openai: 'repo-api' },
+      judge: { anthropic: 'eval-judge' },
+    });
+  });
+
   it("finds a coordinator's result store though a file dataset's relative path isn't on its machine", async () => {
     const f = await evalConfig();
     // The bundle's copy of the eval config, away from its ./cases.json.

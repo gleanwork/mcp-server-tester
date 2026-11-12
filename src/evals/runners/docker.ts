@@ -605,11 +605,22 @@ async function waitForDesktop(
   prepared = false
 ): Promise<void> {
   const deadline = Date.now() + timeoutS * 1000;
-  const waiting = AbortSignal.any([
-    signal,
-    AbortSignal.timeout(timeoutS * 1000),
-  ]);
+  const timeout = new AbortController();
+  const waiting = AbortSignal.any([signal, timeout.signal]);
+  let timer: NodeJS.Timeout | undefined;
+  function armTimeout(): void {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      timeout.abort();
+      return;
+    }
+    // Node timers overflow above 2^31-1 ms. Keep the full readiness budget,
+    // but wake in safe chunks, including while a Docker command is blocked.
+    timer = setTimeout(armTimeout, Math.min(remaining, 2 ** 31 - 1));
+    timer.unref();
+  }
   try {
+    armTimeout();
     while (Date.now() < deadline) {
       if (signal.aborted) throw new Error('The run was cancelled.');
       const state = await docker(
@@ -674,6 +685,8 @@ async function waitForDesktop(
   } catch (error) {
     if (signal.aborted) throw new Error('The run was cancelled.');
     if (!waiting.aborted) throw error;
+  } finally {
+    clearTimeout(timer);
   }
   throw new Error(
     `The desktop in container ${name} wasn't ready within ${timeoutS} s (--runner-option readyTimeout).`
@@ -1352,7 +1365,7 @@ async function headlessMachine(
 }
 
 /**
- * `npm pack` arguments. Checkouts keep their lifecycle scripts. Installed
+ * `npm pack` arguments. Source trees keep their lifecycle scripts. Installed
  * packages are staged without pack hooks first: npm 10 does not suppress
  * prepare with --ignore-scripts alone.
  */
@@ -1408,14 +1421,14 @@ async function setupDocker(
     // or an installed package. Installing the published version instead
     // would let the worker drift from the coordinator.
     const root = path.resolve(source, '../..');
-    // Git dependencies can retain source after installation without their
-    // build dependencies. A checkout also has its own .git entry (a file
-    // for a worktree, a directory for a clone), not just source files.
-    const checkout =
-      existsSync(path.join(root, '.git')) &&
+    // Node resolves the image export to its real package location, including
+    // linked checkouts. Installed Git dependencies may retain source but lack
+    // build dependencies; source archives lack .git but still need a build.
+    const sourceTree =
+      !root.split(path.sep).includes('node_modules') &&
       existsSync(path.join(root, 'src', 'cli', 'index.ts'));
     log(`Packing MST from ${root}…`);
-    if (checkout) {
+    if (sourceTree) {
       await npmPack(root, packages);
     } else {
       // Keep the source staging outside Docker's build context. Neither it

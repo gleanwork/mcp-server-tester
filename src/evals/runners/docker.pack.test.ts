@@ -43,7 +43,13 @@ afterEach(async () => {
   );
 });
 
-type PackageKind = 'installed' | 'installed-source' | 'checkout' | 'worktree';
+type PackageKind =
+  | 'installed'
+  | 'installed-source'
+  | 'checkout'
+  | 'worktree'
+  | 'archive-missing-dist'
+  | 'archive-stale-dist';
 
 async function packageFixture(kind: PackageKind) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-pack-'));
@@ -67,7 +73,8 @@ async function packageFixture(kind: PackageKind) {
     await fs.mkdir(path.join(root, 'src', 'cli'), { recursive: true });
     await fs.writeFile(path.join(root, 'src', 'cli', 'index.ts'), '');
   }
-  await fs.writeFile(path.join(root, 'dist', 'index.js'), '// prebuilt\n');
+  if (kind !== 'archive-missing-dist')
+    await fs.writeFile(path.join(root, 'dist', 'index.js'), '// prebuilt\n');
   await fs.writeFile(
     path.join(root, 'docker', 'cowork-linux', 'Dockerfile'),
     'FROM scratch\n'
@@ -165,7 +172,14 @@ describe('packing MST for Docker setup', () => {
     );
   });
 
-  it.each(['installed', 'installed-source', 'checkout', 'worktree'] as const)(
+  it.each([
+    'installed',
+    'installed-source',
+    'checkout',
+    'worktree',
+    'archive-missing-dist',
+    'archive-stale-dist',
+  ] as const)(
     'packs the %s package with the correct lifecycle policy',
     async (kind) => {
       const { dir, root, installed, manifest, originalManifest } =
@@ -208,6 +222,12 @@ describe('packing MST for Docker setup', () => {
             }
           : manifest.scripts,
       });
+      const { stdout: built } = await exec('tar', [
+        '-xOf',
+        tarball,
+        'package/dist/index.js',
+      ]);
+      expect(built).toBe(installed ? '// prebuilt\n' : '// rebuilt\n');
       const { stdout: contents } = await exec('tar', ['-tf', tarball]);
       const files = contents.trim().split('\n');
       for (const file of [

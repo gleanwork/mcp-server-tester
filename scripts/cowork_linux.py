@@ -389,9 +389,11 @@ class Driver:
                     requested.add("tab")
                     self.action(lambda: self.desktop.activate(tabs[0]))
                 elif not tabs and "link" not in requested:
-                    # November 2026 desktops have no Cowork mode control in
-                    # the previous task view. Open its empty new-task link
-                    # once, then require Start task before inserting a prompt.
+                    # Desktop's November 2026 UI has no Cowork control: its
+                    # mode switch says Claude / Code, and the sidebar has no
+                    # Cowork button. The previous case's task view (its
+                    # composer has no Start task) leaves only the empty
+                    # new-task link, as reset uses, to reach Cowork's composer.
                     requested.add("link")
                     self.action(lambda: self.desktop.open_prompt("", self.remaining()))
             time.sleep(min(0.1, self.remaining()))

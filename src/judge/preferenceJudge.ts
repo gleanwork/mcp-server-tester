@@ -12,7 +12,7 @@ import type {
 } from './pairwiseContract.js';
 import { createJudgeCompletion, preflightJudge } from './judgeClient.js';
 import { contentHash } from './judgeIdentity.js';
-import { DEFAULT_JUDGE_MODELS } from './adapterSupport.js';
+import { DEFAULT_JUDGE_MODELS, llmJudgeModelSlot } from './adapterSupport.js';
 import { DEFAULT_JUDGE_PROVIDER, JudgeLLMSchema } from './judgeTypes.js';
 import {
   renderJudgePair,
@@ -91,6 +91,7 @@ export const PREFERENCE_JUDGE: PairwiseJudgeDefinition = {
   schema: PreferenceOptionsSchema,
   version: VERSION,
   swapPositions: true,
+  modelSlot: llmJudgeModelSlot,
   async preflight(rawOptions) {
     await preflightJudge(
       judgeLLMConfig(PreferenceOptionsSchema.parse(rawOptions))
