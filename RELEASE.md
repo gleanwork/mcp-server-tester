@@ -61,7 +61,9 @@ identifier as the npm dist-tag (`beta`, `rc`). A final release becomes
 The workflow runs release-it, which bumps the version and publishes to npm
 (`prepublishOnly` builds and tests first). Then it commits `Release <version>`,
 tags `v<version>`, pushes both to `main` as the `gleanwork-ci` GitHub App, and
-creates the GitHub release.
+creates the GitHub release. The tag starts `deploy-website.yml`, which deploys
+the docs site to production. The site deploys only from release tags; to
+redeploy one, run that workflow by hand with the tag.
 
 A pull request that changes `release.yml` or `.release-it.js` gets a dry run.
 
@@ -81,6 +83,10 @@ A pull request that changes `release.yml` or `.release-it.js` gets a dry run.
   Its credentials are the `GLEANWORK_CI_CLIENT_ID` and
   `GLEANWORK_CI_KEY` organization secrets, shared with this
   repository; the token is scoped to this repository when it is minted.
+- `deploy-website.yml` reads three repository secrets: `VERCEL_TOKEN`, a
+  Vercel token for the `glean-developers` team, and `VERCEL_ORG_ID` and
+  `VERCEL_PROJECT_ID`, the IDs of that team and of the docs site's
+  `mcp-server-tester` project.
 
 ### If a release fails after publishing
 

@@ -4,6 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import type { MCPConfig } from '../config/mcpConfig.js';
+import {
+  BUILTIN_MODELS,
+  defaultApiModel,
+  type ModelDefaults,
+} from '../llm/modelDefaults.js';
 import { removedClientOptions } from './renamedKeys.js';
 import { usesToolSurfaceProxy } from './toolSurfaceProxy.js';
 import {
@@ -98,7 +103,11 @@ async function runBuiltinClient(
   if (!input.prompt) throw new Error('Clients require an input.');
   const prompt = input.prompt;
   const config = {
-    ...factory({ ...options.client, env }, options.servers),
+    ...factory(
+      { ...options.client, env },
+      options.servers,
+      context.evalConfig.models
+    ),
     env,
   };
   const clients: Array<Awaited<ReturnType<typeof createMCPClientForConfig>>> =
@@ -394,7 +403,9 @@ export interface BuiltinClientOptions {
  */
 type BuiltinClientFactory = (
   options: BuiltinClientOptions,
-  servers?: readonly MCPConfig[]
+  servers?: readonly MCPConfig[],
+  /** The eval's configured default models (ADR 0015). */
+  models?: ModelDefaults
 ) => MstClientConfig;
 
 /** Why a client option that never chose the servers fails (ADR 0011). */
@@ -418,7 +429,13 @@ const SdkClientSchema = z
   .object({
     type: z.literal('api').optional(),
     ...GenerationOptions,
-    model: GenerationOptions.model.meta({ default: API_CLIENT_DEFAULTS.model }),
+    model: GenerationOptions.model.meta({
+      'x-defaultDescription': `models.api for the provider (mst.config.json), else ${Object.entries(
+        BUILTIN_MODELS.api
+      )
+        .map(([provider, model]) => `${model} (${provider})`)
+        .join(', ')}`,
+    }),
     maxToolCalls: GenerationOptions.maxToolCalls.meta({
       default: API_CLIENT_DEFAULTS.maxToolCalls,
     }),
@@ -573,14 +590,16 @@ export function getClient(reference: string): ClientDefinition {
 
 /**
  * The simulator settings the api or claude-code client resolves its options
- * to: its defaults (such as the model) included. Throws for other clients.
+ * to: its defaults (such as the model, from `models` when it is configured)
+ * included. Throws for other clients.
  */
 export function getBuiltinClientConfig(
   name: string,
   options: BuiltinClientOptions = {},
-  servers?: readonly MCPConfig[]
+  servers?: readonly MCPConfig[],
+  models?: ModelDefaults
 ): MstClientConfig {
-  const config = builtinClientDefaults(name, options, servers);
+  const config = builtinClientDefaults(name, options, servers, models);
   if (!config)
     throw new Error(
       `Client "${name}" doesn't run on MST's simulator (api, claude-code).`
@@ -592,12 +611,13 @@ export function getBuiltinClientConfig(
 export function builtinClientDefaults(
   name: string,
   options: BuiltinClientOptions = {},
-  servers?: readonly MCPConfig[]
+  servers?: readonly MCPConfig[],
+  models?: ModelDefaults
 ): MstClientConfig | undefined {
   const factory = Object.hasOwn(BUILTIN_CLIENTS, name)
     ? BUILTIN_CLIENTS[name]
     : undefined;
-  return factory?.(options, servers);
+  return factory?.(options, servers, models);
 }
 
 const BUILTIN_CLIENTS: Record<string, BuiltinClientFactory> = {
@@ -624,8 +644,16 @@ export function providerForModel(
   return undefined;
 }
 
-function vercelSdkClient(options: BuiltinClientOptions): MstClientConfig {
+function vercelSdkClient(
+  options: BuiltinClientOptions,
+  _servers?: readonly MCPConfig[],
+  models?: ModelDefaults
+): MstClientConfig {
   SdkClientSchema.parse(options);
+  const provider =
+    (options.provider as MstClientConfig['provider']) ??
+    providerForModel(options.model) ??
+    API_CLIENT_DEFAULTS.provider;
   return {
     timeout: options.timeout,
     temperature: options.temperature,
@@ -633,11 +661,9 @@ function vercelSdkClient(options: BuiltinClientOptions): MstClientConfig {
     apiKeyEnvVar: options.apiKeyEnvVar,
     env: options.env,
     clientType: 'sdk',
-    provider:
-      (options.provider as MstClientConfig['provider']) ??
-      providerForModel(options.model) ??
-      API_CLIENT_DEFAULTS.provider,
-    model: options.model ?? API_CLIENT_DEFAULTS.model,
+    provider,
+    // Per provider: a Claude model sent to another provider never works.
+    model: options.model ?? defaultApiModel(provider, models),
     maxToolCalls: options.maxToolCalls ?? API_CLIENT_DEFAULTS.maxToolCalls,
     ...(options.systemPrompt !== undefined
       ? { systemPrompt: options.systemPrompt }
@@ -717,10 +743,11 @@ export function assertClientSupports(
       );
     if (
       options.runner &&
-      !['local', 'mst/runner/local'].includes(options.runner)
+      !['local', 'mst/runner/local'].includes(options.runner) &&
+      options.os !== 'linux'
     )
       throw new Error(
-        `${options.context}: first-party mode currently supports only the local runner with a signed-in account.`
+        `${options.context}: first-party mode requires the local runner on macOS, or a Linux runner with plugin-staged account preflight and source cloud control.`
       );
   }
   const showsToolMetadata =

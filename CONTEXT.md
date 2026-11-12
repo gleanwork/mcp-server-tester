@@ -38,6 +38,10 @@ _Avoid_: canonical answer, golden, target, reference
 The MCP client application an eval tests, named canonically: `claude-code`, `codex-cli` (the Codex CLI; it was `codex`), `cowork`, `chatgpt`, `codex-app` (the Codex surface of the ChatGPT desktop app; it was `chatgpt` with `surface: "codex"`), or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). One client is one product: no option changes which product it is. How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. Desktop execution uses the product's `macos.ts` or `linux.ts` entry point, selected on the machine running the trial. New results record no driver identity; old stored results keep theirs. A client returns a transcript, never a score. Built-in and plugin clients return the same `ClientRunResult`: a final answer, ordered events and optional usage, diagnostics and telemetry. MST derives the assertion/report view from it. `mst clients` lists each client's requirements, options and defaults from its definition and schema. It describes OS-dependent defaults without resolving them on the coordinator. A client with its model is an agent harness.
 _Avoid_: host, harness (unqualified), agent, runner, solver, provider. One exception: **host telemetry**.
 
+**Client auth cache**:
+Authentication state a client application's own helper keeps, separate from MST connector grants and credential stores. The `codex-cli` option `authCacheDirectories` links dedicated private cache directories into otherwise fresh trial homes; it does not reuse operator configuration or import existing credentials.
+_Avoid_: shared client home
+
 **Host telemetry**:
 The OpenTelemetry a client application sends about a trial. MST receives it when an eval config sets `telemetry.host`, and stores it in the trial's `transcript.hostTelemetry` (docs/telemetry.md). Its OpenTelemetry export uses `mst.host.*` attributes. The name keeps "host" on purpose: the MCP specification calls the application the host, and this is the application's own export. `clientTelemetry` is different: it holds numbers MST reads from the client's own records. 1.x used `hostTelemetry` for those, as a field of a case or trial result. 2.0 writes `hostTelemetry` only inside a transcript, so MST never mistakes it for the 1.x field.
 _Avoid_: client telemetry (that is `clientTelemetry`)
@@ -67,7 +71,7 @@ A connector a user adds inside the client, such as one from Cowork's connector d
 _Avoid_: native connector, built-in connector
 
 **First-party mode**:
-A Cowork option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). Local macOS only, one trial at a time. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
+A Cowork option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). It runs locally on macOS or in a plugin-prepared Linux runtime with attached macOS source control, one trial at a time on one shard with a dedicated account. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
 _Avoid_: claude-ai mode, account mode
 
 **Variant**:
@@ -320,6 +324,10 @@ _Avoid_: agent, guest, runner
 How the coordinator reaches a worker's machine: run a command with its input and output attached, and copy files in and out (`docker exec` and `docker cp`, or SSH and `scp`).
 _Avoid_: transport (MCP's word), connection
 
+**Runtime preparation**:
+A plugin's in-process setup of a Docker desktop runtime through the worker channel, after private directories exist and before the desktop starts (`createDockerRunner`). It returns cleanup, which runs before keeping or removing the container during normal disposal and cooperative cancellation. Emergency process termination can skip the async hook. Plugin-managed inference disables MST's inference delivery and refresh; credentials and runtime formats stay plugin-owned. Grade and headless shards skip runtime preparation.
+_Avoid_: login provider, credential extension
+
 **Limits**:
 The eval config's run-wide caps on trials running at once, per LLM provider and per server label, across every shard (`limits`). A worker waits for room before each trial.
 _Avoid_: rate limit (that is the provider's), quota, concurrency
@@ -375,6 +383,10 @@ _Avoid_: preset, profile
 **Plugin settings**:
 Values a plugin takes from the repo that runs evals rather than from one extension's options (for example a cloud project), written per plugin namespace in `mst.config.json` or an eval config's `settings`, and checked by the plugin's settings schema. Every extension of the plugin receives them as `settings`.
 _Avoid_: plugin options, plugin config, factory options
+
+**Model defaults**:
+The model MST uses where nothing names one: for the `api` client by provider, for LLM and agentic judges, and for the Computer Use planner. Set in a `models` block in the user's and the repo's `mst.config.json`, the eval config and `--mst-config`, each entry overriding the one before it; MST's **built-in models** are the last resort, and a run warns about each one it uses and records it in `run.json` as `builtinModels` ([ADR 0015](docs/adr/0015-default-models-come-from-config-files.md)).
+_Avoid_: default model config, model presets
 
 **Endpoint source**:
 (Planned.) An extension that supplies the base URL and credentials MST's own LLM calls use. A run uses exactly one; the built-in source reads environment variables.

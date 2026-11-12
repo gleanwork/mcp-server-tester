@@ -15,6 +15,14 @@ import { resolveCredentials } from '../auth/credentials.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import { installPlugins } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
+import { fileModelDefaults } from '../plugins/settingsFile.js';
+import {
+  mergeModelDefaults,
+  processModelDefaults,
+  setProcessModelDefaults,
+  type ModelDefaults,
+} from '../llm/modelDefaults.js';
+import path from 'node:path';
 import packageJson from '../../package.json' with { type: 'json' };
 
 /**
@@ -48,6 +56,18 @@ type MCPFixtures = {
   mcpPlugins: readonly Plugin[];
 
   /**
+   * Default models for this project's judges and `runEvalDataset` cases,
+   * over the user's and the repo's `mst.config.json` `models`, entry by
+   * entry (ADR 0015). A judge or case that names a model keeps it. Set with
+   * `test.use({ mcpModels: { judge: { openai: 'gpt-5-mini' } } })` or in a
+   * project's `use` block.
+   */
+  mcpModels: ModelDefaults | undefined;
+
+  /** Applies the model defaults for each test (not for external use). */
+  _mcpModelDefaults: void;
+
+  /**
    * Raw MCP client instance (automatically connected and cleaned up)
    */
   mcpClient: Client;
@@ -77,6 +97,25 @@ type MCPFixtures = {
 export const test = base.extend<MCPFixtures>({
   mcpProtocol: [undefined, { option: true }],
   mcpPlugins: [[], { option: true }],
+  mcpModels: [undefined, { option: true }],
+
+  _mcpModelDefaults: [
+    async ({ mcpModels }, use, testInfo) => {
+      const previous = processModelDefaults();
+      setProcessModelDefaults(
+        mergeModelDefaults(
+          fileModelDefaults(path.dirname(testInfo.file)),
+          mcpModels
+        )
+      );
+      try {
+        await use();
+      } finally {
+        setProcessModelDefaults(previous);
+      }
+    },
+    { scope: 'test', auto: true },
+  ],
 
   /**
    * Internal fixture state - tracks resolved auth type between fixtures

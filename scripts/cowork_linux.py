@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Bounded AT-SPI actions against an already prepared Linux Cowork desktop.
+"""Bounded third-party (managed/gateway) Linux Cowork driver.
 
-This module does not provision, authenticate, launch a desktop session, or collect
-answers. The MST client binds and reads native sessions. JSON input arrives on stdin;
-stdout contains only an allowlisted receipt, never prompt or accessibility text.
-
-`--mode diagnose` takes no action: after a failed case it writes what the desktop
-shows into the payload's `dir` (a trial artifact, as private as the session it
-failed to produce): `screen.png` and `accessibility.txt`.
+The compatibility cowork-linux-runtime export intentionally stays third-party.
+Account-backed Cowork uses its separate first-party entrypoint.
 """
 from __future__ import annotations
 
@@ -27,36 +22,26 @@ class DriverFailure(RuntimeError):
     pass
 
 
-# A scan that can't finish: the app's tree is too large to walk, or walking
-# it would outlast the call. Nothing is known about the controls, so nothing
-# was found or acted on.
+# An incomplete scan cannot establish that any control is safe to act on.
 SCAN_INCOMPLETE = {"accessibility_tree_budget", "accessibility_scan_timeout"}
-
-# Controls never live inside a table: an answer's markdown table, or a
-# presented spreadsheet's preview, whose cells can number in the thousands.
-# The scan skips their subtrees.
+# Controls never live inside a table, whose cells can exhaust the scan budget.
 SKIPPED_ROLES = {"table", "tree table"}
-
-# Claude Desktop keeps this many characters of a new-task deep link's prompt
-# and drops the rest: the model would get a truncated prompt. A longer prompt
-# is pasted into the empty task's composer instead (140,000 characters
-# measured, in about a second).
+# Claude Desktop truncates longer new-task links; paste those prompts instead.
 DEEP_LINK_PROMPT_CHARS = 14_336
-
-# How much of a pasted prompt's end the composer must show for the paste to
-# have landed.
 PASTE_CHECK_CHARS = 200
-
-# How long a paste may take to land: well past the second a long one takes,
-# well short of the submit's whole budget, which a paste that never lands
-# would otherwise spend.
 PASTE_TIMEOUT_SECONDS = 30
-
-# X's ControlMask: AT-SPI locks it around a key, as a held Ctrl.
 CONTROL_MASK = 1 << 2
-
-# The composer's entry, in every Cowork view.
 COMPOSER = "Write your prompt to Claude"
+SHORTCUT_SUFFIX = re.compile(r" [0-9]$")
+TEXT_ROLES = {"static", "text", "label", "paragraph", "heading"}
+QUESTION_PAGE = re.compile(r"(\d+) of (\d+)", re.IGNORECASE)
+OPTION_ROLES = {"radio button", "check box", "checkbox", "toggle button", "button"}
+NOT_OPTION = re.compile(
+    r"(?:Skip|Next|Back|Previous|Continue|Submit|Send|Cancel|Dismiss|Create|Allow|Accept|Connect|"
+    r"Approve|Stop|Show|Copy|Edit|Retry|More options|Read aloud|Restart conversation|Add |"
+    r"Press and hold|Progress|Working folder|Context|Start task|Deny)(?:\b|,)", re.IGNORECASE)
+ADVANCE = re.compile(r"(?:Submit|Send|Next|Continue)(?: answers?)?", re.IGNORECASE)
+CARD_ACTIONS = {"Create", "Update", "Schedule", "Run", "Delete"}
 
 
 class Desktop:
@@ -65,8 +50,6 @@ class Desktop:
         gi.require_version("Atspi", "2.0")
         from gi.repository import Atspi
         self.api = Atspi
-        # A scan gives up (accessibility_scan_timeout) past this monotonic
-        # time, so the call still returns its receipt before it's killed.
         self.scan_deadline: float | None = None
 
     def application(self):
@@ -82,9 +65,7 @@ class Desktop:
 
     def controls(self, names, roles: set[str], *, require_enabled: bool = True,
                  require_showing: bool = True, raw: bool = False):
-        """Visible controls of `roles` whose label is in `names` (a set, or a
-        predicate on the label). With `raw`, a control also matches on its
-        whole name, a trailing number included."""
+        """Visible controls matching names and roles; raw also matches the whole name."""
         test = names if callable(names) else names.__contains__
         wanted = (lambda node: test(self.label(node)) or (raw and test(node.get_name() or "")))
         pending = [self.application()]
@@ -119,12 +100,10 @@ class Desktop:
 
     @staticmethod
     def label(node) -> str:
-        # Newer desktops append a control's keyboard shortcut to its
-        # accessible name ("Allow once 3", "Deny 1").
         return SHORTCUT_SUFFIX.sub("", node.get_name() or "")
 
     def reveal(self, node) -> None:
-        """Scrolls a control into view. Never presses it."""
+        """Scroll a control into view without pressing it."""
         if not node.scroll_to(self.api.ScrollType.ANYWHERE):
             raise DriverFailure("reveal_failed")
 
@@ -133,24 +112,20 @@ class Desktop:
         return states.contains(self.api.StateType.CHECKED) or states.contains(self.api.StateType.SELECTED)
 
     def texts(self, pattern: re.Pattern) -> list[str]:
-        """The showing text of the app's static and label nodes that matches
-        `pattern`, whole."""
         return [(node.get_name() or "").strip() for node in self.controls(
             lambda name: bool(pattern.fullmatch(name.strip())), TEXT_ROLES, require_enabled=False,
             raw=True)]
 
     def activate(self, node) -> None:
         if not node.is_action() or not node.do_action(0):
-            # Even a failed action acknowledgement may have had an effect.
+            # Even a failed acknowledgement may have had an effect.
             raise DriverFailure("action_acknowledgement_uncertain")
 
     def composer_text(self, entry) -> str:
-        """The composer's text: its text nodes' names in reading order, one per line."""
+        """The composer's text nodes in reading order, one per line."""
         def children(node):
             return [node.get_child_at_index(index) for index in range(node.get_child_count())]
 
-        # Depth first, each node before its children and those before its
-        # next sibling: a link's text sits where the link does.
         lines, pending = [], children(entry)[::-1]
         while pending:
             node = pending.pop()
@@ -160,9 +135,7 @@ class Desktop:
         return "\n".join(lines)
 
     def paste_prompt(self, prompt: str, timeout: float) -> None:
-        # Into the empty composer: the clipboard holds the prompt (xclip, which
-        # serves it until killed) and Ctrl+V pastes it. Synthesized typing
-        # drops a long string, and the composer has no editable-text interface.
+        # Synthesized typing drops long strings. Paste once into an empty entry.
         entries = self.controls({COMPOSER}, {"entry"})
         if len(entries) != 1:
             raise DriverFailure("composer_missing_or_ambiguous")
@@ -178,7 +151,6 @@ class Desktop:
         try:
             clipboard.stdin.write(prompt.encode("utf-8"))
             clipboard.stdin.close()
-            # xclip owns the selection once it has read its input.
             time.sleep(0.5)
             if clipboard.poll() is not None:
                 raise DriverFailure("clipboard_unavailable")
@@ -189,13 +161,8 @@ class Desktop:
                 self.api.generate_keyboard_event(0x76, None, self.api.KeySynthType.SYM)
             finally:
                 self.api.generate_keyboard_event(CONTROL_MASK, None, self.api.KeySynthType.UNLOCKMODIFIERS)
-            # The paste has landed once the composer ends with the prompt's
-            # last characters, up to whitespace (the composer's paragraphs
-            # don't keep blank lines). Not the whole text: the composer
-            # renders a pasted prompt (links, a slash command) and its
-            # accessibility tree needn't spell it out verbatim, and a false
-            # "not pasted" loses the case. Claude records the exact prompt,
-            # and MST binds the task by it, reporting any difference.
+            # Rendering need not retain all whitespace or the beginning of a long
+            # prompt. Native-session binding checks the complete unchanged prompt.
             tail = " ".join(prompt.split())[-PASTE_CHECK_CHARS:]
             deadline = time.monotonic() + timeout
             while not " ".join(self.composer_text(entry).split()).endswith(tail):
@@ -216,7 +183,7 @@ class Desktop:
 
 
 def accessibility_text(desktop, budget: int = 5000) -> str:
-    """Every showing, named node of the app: role, name, and whether it is enabled."""
+    """Every showing, named node: role, name, and whether it is enabled."""
     lines = []
     pending = [(desktop.application(), 0)]
     while pending and len(lines) < budget:
@@ -263,7 +230,7 @@ def xwd_to_png(data: bytes) -> bytes:
 
 
 def diagnose(directory, timeout: float) -> dict:
-    """Read-only: what the desktop shows, as files in `directory`. Never acts."""
+    """Read-only desktop capture. Never acts on the app."""
     if not isinstance(directory, str) or not os.path.isabs(directory) or not os.path.isdir(directory):
         raise DriverFailure("invalid_directory")
     started = time.monotonic()
@@ -288,39 +255,18 @@ def diagnose(directory, timeout: float) -> dict:
             "duration_ms": (time.monotonic() - started) * 1000, "files": written}
 
 
-SHORTCUT_SUFFIX = re.compile(r" [0-9]$")
-
-# Clarifying questions (AskUserQuestion). Cowork shows one question per page,
-# marked "2 of 3" when there are several; each option is a control whose
-# name is its label, or its label then its description.
-TEXT_ROLES = {"static", "text", "label", "paragraph", "heading"}
-QUESTION_PAGE = re.compile(r"(\d+) of (\d+)", re.IGNORECASE)
-OPTION_ROLES = {"radio button", "check box", "checkbox", "toggle button", "button"}
-# Controls on or near the form that are never an option.
-NOT_OPTION = re.compile(
-    r"(?:Skip|Next|Back|Previous|Continue|Submit|Send|Cancel|Dismiss|Create|Allow|Accept|Connect|"
-    r"Approve|Stop|Show|Copy|Edit|Retry|More options|Read aloud|Restart conversation|Add |"
-    r"Press and hold|Progress|Working folder|Context|Start task|Deny)(?:\b|,)", re.IGNORECASE)
-# The control that takes a page's checked options.
-ADVANCE = re.compile(r"(?:Submit|Send|Next|Continue)(?: answers?)?", re.IGNORECASE)
-
-
 def normalized(text: str) -> str:
     return " ".join(text.split())
 
 
 def first_option_owner(labels: list[str], name: str) -> bool:
-    """Whether a control named `name` is the first option's: its exact label,
-    or the label then a description, unless a longer label it also starts
-    with ("Table with chart" beside "Table") claims it."""
+    """Match the first option's label/description unless a longer label claims it."""
     first = labels[0]
     starts = lambda label: name == label or name.startswith(label + " ")
     return starts(first) and not any(len(label) > len(first) and starts(label) for label in labels)
 
 
 def question_page(texts: list[str], count: int) -> int | None:
-    """The index of the question on screen: its "i of N" marker, which must
-    agree with the questions asked, or the only question."""
     marks = {(int(m.group(1)), int(m.group(2))) for m in map(QUESTION_PAGE.fullmatch, texts) if m}
     if not marks:
         return 0 if count == 1 else None
@@ -328,9 +274,6 @@ def question_page(texts: list[str], count: int) -> int | None:
         return None
     page, total = marks.pop()
     return page - 1 if total == count and 1 <= page <= total else None
-
-# Primary actions of Cowork's built-in tool confirmation cards (always shown with Cancel).
-CARD_ACTIONS = {"Create", "Update", "Schedule", "Run", "Delete"}
 
 
 class Driver:
@@ -360,23 +303,24 @@ class Driver:
                 "duration_ms": (time.monotonic() - self.started) * 1000}
 
     def probe(self) -> dict:
-        # Ready once Cowork's controls are on screen: its mode switch or the
-        # sidebar's Cowork button (older Desktops), or its composer's Start task,
-        # which the empty composer shows disabled. Desktop's November 2026 UI
-        # has neither Cowork control (its mode switch says Claude / Code), so the
-        # empty composer's Start task is all there is.
-        controls = (self.desktop.controls({"Cowork", "Start task"}, {"button", "radio button"})
-                    or self.desktop.controls({"Start task"}, {"button"}, require_enabled=False))
-        if not controls:
-            raise DriverFailure("cowork_not_ready")
-        return self.receipt("ready")
+        # A visible Start task proves the managed surface even while disabled.
+        # A selected Cowork radio alone also exists on hosted first-party UI.
+        starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False)
+        if len(starts) == 1:
+            return self.receipt("ready")
+        # Legacy desktops may start outside Cowork; submit selects that mode
+        # and then requires Start task before inserting any prompt.
+        radios = self.desktop.controls({"Cowork"}, {"radio button"})
+        if not starts and len(radios) == 1 and not self.desktop.selected(radios[0]):
+            return self.receipt("ready")
+        if not starts and not radios:
+            tabs = self.desktop.controls({"Cowork"}, {"button"})
+            if len(tabs) == 1:
+                return self.receipt("ready")
+        raise DriverFailure("cowork_not_ready")
 
     def stop_running_task(self) -> bool:
-        # A failed case's task may still run (past its deadline, or waiting on
-        # a prompt): its composer shows Stop response. Stop it, so it doesn't
-        # go on using Cowork's VM and the connectors beside the next task;
-        # it's stopped once Stop response is gone (Send message is back,
-        # within 2 s on Linux). Never sends.
+        # Stop a failed case's task before leaving it. Never sends.
         stops = self.desktop.controls({"Stop response"}, {"button"})
         if not stops:
             return False
@@ -392,12 +336,8 @@ class Driver:
         return True
 
     def reset(self) -> dict:
-        # After a failed case: stop its task if it still runs, leave its view
-        # with one empty new-task deep link, then wait read-only for an empty
-        # Cowork start surface. Never types or sends. An empty composer
-        # disables Start task; one still enabled holds a draft the link didn't
-        # clear, which the next case's link would not replace either (a long
-        # prompt's draft did, on Linux).
+        # Stop, then open one empty new-task link and wait read-only. An enabled
+        # Start task still holds a draft the link failed to clear.
         stopped = self.stop_running_task()
         self.action(lambda: self.desktop.open_prompt("", self.remaining()))
         draft = False
@@ -415,13 +355,10 @@ class Driver:
                     return {**self.receipt("ready"), **({"stopped": True} if stopped else {})}
                 draft = True
             elif not starts:
-                # Not in Cowork mode only if the composer's mode switch says so:
-                # one Cowork radio, unselected. The sidebar's Cowork button is
-                # always on screen, the old task view included, and the link
-                # returns before the app has navigated, so it proves nothing.
+                # The sidebar button proves nothing. An unselected mode radio
+                # permits the next submit to select Cowork, then verify Start task.
                 radios = self.desktop.controls({"Cowork"}, {"radio button"}, require_enabled=False)
                 if len(radios) == 1 and not self.desktop.selected(radios[0]):
-                    # The next submit selects it.
                     return {**self.receipt("ready"), **({"stopped": True} if stopped else {})}
             time.sleep(min(0.1, left))
 
@@ -429,9 +366,8 @@ class Driver:
         requested = set()
         while True:
             self.remaining()
-            # The empty Cowork composer disables Start task until text is inserted.
-            # Its presence proves the mode, not permission to submit; below the
-            # window (a long draft) still counts.
+            # Only the third-party Start task proves mode. A disabled or
+            # offscreen one counts, but a hosted selected Cowork radio does not.
             starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False,
                                            require_showing=False)
             if len(starts) > 1:
@@ -442,9 +378,7 @@ class Driver:
             if len(radios) > 1:
                 raise DriverFailure("cowork_control_ambiguous")
             if radios:
-                if self.desktop.selected(radios[0]):
-                    return
-                if "radio" not in requested:
+                if not self.desktop.selected(radios[0]) and "radio" not in requested:
                     requested.add("radio")
                     self.action(lambda: self.desktop.activate(radios[0]))
             else:
@@ -465,7 +399,6 @@ class Driver:
             time.sleep(min(0.1, self.remaining()))
 
     def wait_for_empty_composer(self) -> None:
-        # The empty task's Cowork composer: its Start task, disabled while empty.
         while True:
             left = self.remaining()
             starts = self.desktop.controls({"Start task"}, {"button"}, require_enabled=False,
@@ -475,14 +408,16 @@ class Driver:
                 return
             time.sleep(min(0.1, left))
 
-    def submit(self, prompt: str) -> dict:
+    def submit(self, prompt: str, target_model: str | None = None) -> dict:
         if not isinstance(prompt, str) or not prompt.strip():
             raise DriverFailure("invalid_prompt")
+        # Managed model selection belongs to settings, never an account picker.
+        if target_model is not None:
+            raise DriverFailure("managed_model_requires_settings")
         self.select_cowork()
         if len(prompt) <= DEEP_LINK_PROMPT_CHARS:
             self.action(lambda: self.desktop.open_prompt(prompt, self.remaining()))
         else:
-            # Too long for the link: an empty task, then the prompt pasted.
             self.action(lambda: self.desktop.open_prompt("", self.remaining()))
             self.wait_for_empty_composer()
             self.action(lambda: self.desktop.paste_prompt(
@@ -497,8 +432,6 @@ class Driver:
                 # Exactly one submit attempt. No key fallback or action retry.
                 self.action(lambda: self.desktop.activate(starts[0]))
                 return self.receipt("submitted")
-            # A long prompt grows the composer until Start task is below the
-            # window: scroll the one there is into view, once.
             hidden = self.desktop.controls({"Start task"}, {"button"}, require_showing=False)
             if len(hidden) == 1 and not revealed:
                 revealed = True
@@ -507,10 +440,7 @@ class Driver:
             time.sleep(min(0.1, self.remaining()))
 
     def answer(self, questions) -> dict:
-        """One step of a clarifying question's form: the first option of the
-        question on screen, or, once a checked option waits on it, the page's
-        one Submit/Next control. Acts only on an unambiguous control; on
-        anything else it acts on nothing, and the caller looks again."""
+        """Take one unambiguous first-option or advance action on a question form."""
         if (not isinstance(questions, list) or not questions or not all(
                 isinstance(q, dict) and isinstance(q.get("labels"), list) and q["labels"]
                 and all(isinstance(label, str) and label.strip() for label in q["labels"])
@@ -521,9 +451,6 @@ class Driver:
             if page is None:
                 return {**self.receipt("hitl_checked"), "question": "not_found"}
             labels = [normalized(label) for label in questions[page]["labels"]]
-            # A control named exactly the first label is its option, whatever
-            # the label says; one that only starts with it mustn't be a
-            # control of the form or the app.
             exact = self.desktop.controls(
                 lambda name: normalized(name) == labels[0], OPTION_ROLES, raw=True)
             options = exact or self.desktop.controls(
@@ -549,11 +476,7 @@ class Driver:
         if approve_writes:
             names |= {"Always allow", "Allow always", "Full access", "Allow full access"}
         try:
-            # The task asked for a folder of the user's computer
-            # (request_cowork_directory): a card with Choose folder beside
-            # Deny. A headless run has no folder to give; it answers as a user
-            # without one would, and the model goes on with the tools it has.
-            # Denying grants nothing, so either policy may.
+            # A headless run has no user folder to grant. Denial grants nothing.
             folder = self.desktop.controls({"Choose folder"}, {"button"})
             if folder:
                 denies = self.desktop.controls({"Deny"}, {"button"})
@@ -563,34 +486,27 @@ class Driver:
                 return {**self.receipt("hitl_checked"), "denied": "folder_request"}
             controls = self.desktop.controls(names, {"button"})
             if not controls:
-                # Cowork confirms built-in tools with an inline card whose primary
-                # action names the write (artifacts: Create/Update; scheduled tasks:
-                # Schedule/Update/Run/Delete) beside Cancel, not an Allow prompt.
-                # 3p desktops offer no Skip all approvals mode, so approve the card
-                # itself. Only the write policy may do this; read-only refuses below.
+                # Managed Cowork's built-in writes use named cards beside Cancel.
                 if self.desktop.controls({"Cancel"}, {"button"}):
                     controls = self.desktop.controls(CARD_ACTIONS, {"button"})
         except DriverFailure as failure:
-            # A scan that couldn't finish, before any action: no prompt seen
-            # this pass. The caller scans again; it doesn't end HITL.
             if str(failure) not in SCAN_INCOMPLETE:
                 raise
             return {**self.receipt("hitl_checked"), "scan": "incomplete"}
         if not controls:
             return self.receipt("hitl_checked")
-        # Do not choose among unrelated prompts or continue arbitrary onboarding.
         once = [node for node in controls if self.desktop.label(node) == "Allow once"]
         selected = once if len(once) == 1 else controls
         if len(selected) != 1:
             raise DriverFailure("approval_control_ambiguous")
         if not approve_writes:
-            # A generic UI Allow button gives no reliable read/write classification.
             raise DriverFailure("approval_requires_explicit_write_policy")
         self.action(lambda: self.desktop.activate(selected[0]))
         return self.receipt("hitl_checked")
 
 
 def main() -> int:
+    """JSON stdin and allowlisted receipts for the managed third-party runtime."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["probe", "reset", "submit", "hitl", "answer", "diagnose"],
                         required=True)
@@ -604,12 +520,17 @@ def main() -> int:
         payload = json.loads(sys.stdin.read(2 * 1024 * 1024))
         if not isinstance(payload, dict):
             raise DriverFailure("invalid_input")
+        # Reject account-backed requests before constructing Desktop or taking
+        # a diagnostic screenshot. Metadata is a guard, never a mode selector.
+        if payload.get("firstParty") is True or any(os.environ.get(key) for key in (
+                "MST_COWORK_ACCOUNT_OWNER", "MST_COWORK_ACCOUNT_MARKER", "MST_COWORK_ACCOUNT_PROFILE")):
+            raise DriverFailure("wrong_driver_mode")
         if args.mode == "diagnose":
             print(json.dumps(diagnose(payload.get("dir"), args.timeout_ms / 1000)))
             return 0
         driver = Driver(Desktop(), args.timeout_ms, args.max_actions)
         if args.mode == "submit":
-            result = driver.submit(payload.get("prompt"))
+            result = driver.submit(payload.get("prompt"), payload.get("targetModel"))
         elif args.mode == "hitl":
             result = driver.hitl(payload.get("approveWriteTools") is True)
         elif args.mode == "answer":

@@ -51,7 +51,8 @@ jobs:
       - run: npm run test:playwright
 
   # The docs site in website/: it renders docs/ and serves it, with skills/,
-  # over MCP. Vercel deploys it: production from main, a preview for each PR.
+  # over MCP. This job only builds and tests it; deploy-website.yml deploys it
+  # to Vercel when a release is tagged.
   website:
     runs-on: ubuntu-24.04
     steps:

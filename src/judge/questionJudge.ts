@@ -15,6 +15,7 @@ import {
   DEFAULT_JUDGE_MAX_TOKENS,
   DEFAULT_JUDGE_MODELS,
   DEFAULT_JUDGE_TEMPERATURE,
+  llmJudgeModelSlot,
 } from './adapterSupport.js';
 import {
   missingRequirement,
@@ -556,6 +557,7 @@ export function defineQuestionJudge<
     ...(spec.criterionOptions !== undefined
       ? { criterionOptions: spec.criterionOptions }
       : {}),
+    modelSlot: llmJudgeModelSlot,
     async evaluate(input, rawOptions) {
       const options = schema.parse(rawOptions) as z.infer<
         z.ZodObject<Options>

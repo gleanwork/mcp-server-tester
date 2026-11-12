@@ -28,24 +28,45 @@ Codex reaches its model as every OpenAI-shaped call in MST does, through `resolv
 
 For `--runner` and `--detach` runs, put these in the `--secrets-file`: workers get the run's secrets, not the coordinator's environment.
 
+## Persistent authentication for managed gateways
+
+Machine-wide managed Codex settings still apply inside an isolated trial. If a managed provider runs a token helper that keeps its cache under `HOME`, a fresh trial home otherwise makes every trial look like a first sign-in.
+
+Opt in to persistent authentication directories with `clientOptions.authCacheDirectories`:
+
+```json
+{
+  "clientOptions": {
+    "authCacheDirectories": {
+      ".example-gateway": "/home/me/.mcp-server-tester/example-gateway-auth"
+    }
+  }
+}
+```
+
+Keys are single dot-prefixed directory names under the trial's `HOME`. Values are absolute directories on the machine collecting trials, not paths on a coordinator. Choose a new or empty dedicated directory. MST creates it privately (mode 0700 on POSIX), marks it as an MST auth cache, and links it into each fresh trial home. The helper can sign in once and reuse or refresh its own credentials in later trials; expired or revoked credentials can still require sign-in.
+
+MST does not read or copy credential files, import an existing credential store, alter managed gateway settings, or reuse the operator's Codex configuration. A nonempty directory without MST's cache marker, a symlink target, an insecure or foreign-owned POSIX directory, and general config/instruction directories such as `.codex` and `.agents` are refused. Cache directories must be separate from trial homes. Trial cleanup removes only the links; persistent auth state remains. The default is unchanged: no shared cache. These client-owned caches are separate from MST connector grants and are not uploaded with run results.
+
 ## Options (`clientOptions`)
 
-| Option            | Meaning                                                                                                                                                                                                                      |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`           | The model Codex runs (or the eval config's `model`). Without one, Codex's default.                                                                                                                                           |
-| `timeout`         | The trial's limit in ms (default 300000). Each server's tool calls may run that long.                                                                                                                                        |
-| `systemPrompt`    | Added to Codex's instructions as `developer_instructions`; Codex's own stay.                                                                                                                                                 |
-| `reasoningEffort` | `minimal`, `low`, `medium`, `high` or `xhigh`. `max` and `ultra`, which the ChatGPT app takes, fail here.                                                                                                                    |
-| `sandbox`         | Codex's sandbox for its shell: `read-only` (default), `workspace-write` or `danger-full-access`. Where `MST_JUDGE_SANDBOX=container` (MST's Linux image), the default is `danger-full-access`: the container is the sandbox. |
-| `webSearch`       | Let Codex search the web. Default `false`, so answers come from the servers.                                                                                                                                                 |
-| `cwd`             | The directory Codex runs in. Default: an empty temporary directory, removed afterwards.                                                                                                                                      |
-| `apiKeyEnvVar`    | Read the model key from this variable only.                                                                                                                                                                                  |
-| `env`             | Extra environment variables for the Codex process.                                                                                                                                                                           |
-| `rolloutTrace`    | Have Codex write its rollout trace: each model request exactly as Codex sent it, each response, and the tool calls. Default `true`; `false` keeps none. See [The rollout trace](#the-rollout-trace).                         |
+| Option                 | Meaning                                                                                                                                                                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`                | The model Codex runs (or the eval config's `model`). Without one, Codex's default.                                                                                                                                           |
+| `timeout`              | The trial's limit in ms (default 300000). Each server's tool calls may run that long.                                                                                                                                        |
+| `systemPrompt`         | Added to Codex's instructions as `developer_instructions`; Codex's own stay.                                                                                                                                                 |
+| `reasoningEffort`      | `minimal`, `low`, `medium`, `high` or `xhigh`. `max` and `ultra`, which the ChatGPT app takes, fail here.                                                                                                                    |
+| `sandbox`              | Codex's sandbox for its shell: `read-only` (default), `workspace-write` or `danger-full-access`. Where `MST_JUDGE_SANDBOX=container` (MST's Linux image), the default is `danger-full-access`: the container is the sandbox. |
+| `webSearch`            | Let Codex search the web. Default `false`, so answers come from the servers.                                                                                                                                                 |
+| `cwd`                  | The directory Codex runs in. Default: an empty temporary directory, removed afterwards.                                                                                                                                      |
+| `authCacheDirectories` | Opt-in map of auth-directory names under `HOME` to dedicated private persistent directories; see above.                                                                                                                      |
+| `apiKeyEnvVar`         | Read the model key from this variable only.                                                                                                                                                                                  |
+| `env`                  | Extra environment variables for the Codex process.                                                                                                                                                                           |
+| `rolloutTrace`         | Have Codex write its rollout trace: each model request exactly as Codex sent it, each response, and the tool calls. Default `true`; `false` keeps none. See [The rollout trace](#the-rollout-trace).                         |
 
 ## What each trial runs with
 
-- **A fresh, private `CODEX_HOME`** (also its `HOME`), holding only the `config.toml` MST writes (mode 0600): the model provider, the servers and their credentials, and settings that keep extras out of the result. Codex's plugins, apps, memories, bundled skills, history, update check, analytics and OpenAI-bound metrics are off. Nothing secret is on Codex's command line. The directory is removed after the trial.
+- **A fresh, private `CODEX_HOME`** (also its `HOME`), holding the `config.toml` MST writes (mode 0600) and any explicitly configured auth-cache links: the model provider, the servers and their credentials, and settings that keep extras out of the result. Codex's plugins, apps, memories, bundled skills, history, update check, analytics and OpenAI-bound metrics are off. Nothing secret is on Codex's command line. The directory is removed after the trial.
 - **Its environment** is only what Codex needs (`PATH`, locale, proxy and CA settings), the model key, and the client's `env`. Codex's shell gets only core variables (`shell_environment_policy.inherit = "core"`).
 - **Servers.** Each server is required: one that doesn't start fails the trial with Codex's reason, instead of Codex answering without it. Tool calls are approved (`approval_policy = "never"`, tools `approve`): the servers, or a connector's dry-run proxy, decide what a write does. A server's `connectTimeoutMs` is Codex's startup timeout (default 60 s). Codex can't forward OAuth, client credentials, mTLS, a proxy, `retryAttempts` or client capabilities; an eval that sets them for a `codex-cli` server fails validation.
 - **Server labels** become Codex `mcp_servers` keys (characters other than letters, digits, `_` and `-` become `_`); the transcript keeps the eval's labels.

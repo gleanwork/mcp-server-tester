@@ -7,8 +7,9 @@
  * the `config.toml` MST writes: the model endpoint, the MCP servers and
  * their credentials, and settings that keep the operator's and OpenAI's
  * extras out of the result (no plugins, apps, memories, bundled skills,
- * history or update checks). Nothing secret is passed as an argument. The
- * trial runs in an empty working directory (or `cwd`), both removed after.
+ * history or update checks). Explicit `authCacheDirectories` may link only
+ * dedicated persistent auth state into that home. Nothing secret is passed as
+ * an argument. The home and any generated working directory are removed after.
  *
  * The transcript is Codex's own record (see codexTranscript.ts): its streamed events,
  * and the session's rollout file for each model response's usage and the
@@ -39,6 +40,10 @@ import {
 } from '../config/mcpConfig.js';
 import { resolveLLMEndpoint } from '../llm/endpoint.js';
 import { codexSandboxMode } from '../judge/agentic/codexSandbox.js';
+import {
+  AuthCacheDirectoriesSchema,
+  linkAuthCacheDirectories,
+} from './isolatedAuthCache.js';
 import type { TrialEnding } from '../types/trialEnding.js';
 import {
   contextOverflowEnding,
@@ -154,6 +159,11 @@ export const CodexClientSchema = z
       .min(1)
       .optional()
       .meta({ 'x-defaultDescription': 'OPENAI_API_KEY or LLM gateway' }),
+    /** Dedicated persistent auth directories linked into the otherwise fresh HOME. */
+    authCacheDirectories: AuthCacheDirectoriesSchema.optional().meta({
+      'x-defaultDescription':
+        'none; authentication state is isolated per trial',
+    }),
     /** Extra environment variables for the Codex process (and its shell). */
     env: z.record(z.string(), z.string().optional()).optional().meta({
       'x-defaultDescription': 'allowed inherited variables; no extra variables',
@@ -547,6 +557,7 @@ async function runCodex(
     | { kind: ClientDiagnostics['failureKind']; message: string }
     | undefined;
   try {
+    await linkAuthCacheDirectories(home, options.authCacheDirectories);
     const cwd =
       options.cwd !== undefined
         ? path.resolve(options.cwd)

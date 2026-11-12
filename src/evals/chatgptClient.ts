@@ -146,7 +146,7 @@ const schemaOf = (product: DesktopProduct) =>
         .regex(/^[A-Za-z0-9._:-]+$/)
         .optional()
         .meta({
-          'x-defaultDescription': `macOS: MST_COWORK_CUA_MODEL or ${DEFAULT_COMPUTER_USE_MODEL}; Linux: no planner`,
+          'x-defaultDescription': `macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else ${DEFAULT_COMPUTER_USE_MODEL}; Linux: no planner`,
         }),
       /** Gone: the action budget is `maxActions`. */
       computerUseMaxActions: z
@@ -303,7 +303,13 @@ function desktopAdapter(
         : {}),
       options: {
         environment: { ...config.env, ...serverConfig.environment },
-        computerUseModel: config.computerUseModel,
+        // macOS's planner: the option, else the eval's `models.computerUse`
+        // (ADR 0015), else MST_COWORK_CUA_MODEL or the built-in one.
+        computerUseModel:
+          config.computerUseModel ??
+          (platform.os === 'darwin'
+            ? context.evalConfig.models?.computerUse
+            : undefined),
         surface: product.surface,
         // The budget of the OS's automation: Computer Use on macOS, the
         // accessibility automation on Linux.

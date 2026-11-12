@@ -34,6 +34,11 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { ClientMetadata } from './clientTelemetryTypes.js';
 import { getBuiltinClientConfig, getClient } from './builtinClients.js';
+import {
+  apiBuiltinSlot,
+  processModelDefaults,
+  warnBuiltinSlots,
+} from '../llm/modelDefaults.js';
 import { bareClientName, resolveClientName } from './clientNames.js';
 import { clientRunToExecution } from './clientTranscript.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
@@ -225,9 +230,17 @@ export async function executeEvalCase(
     if (!mcp) throw new Error('The api client requires an MCP connection.');
     if (!evalCase.input)
       throw new Error(`Eval case ${evalCase.id}: a case needs input`);
+    // Outside an eval config, the Playwright fixtures' model defaults.
+    const options = playwrightClientOf(evalCase, client);
     const config = getBuiltinClientConfig(
       'api',
-      playwrightClientOf(evalCase, client)
+      options,
+      undefined,
+      processModelDefaults()
+    );
+    warnBuiltinSlots(
+      [apiBuiltinSlot(options, processModelDefaults())],
+      'api client'
     );
     const run = withOriginalToolNames(
       await runApiClient(mcp, evalCase.input, config),

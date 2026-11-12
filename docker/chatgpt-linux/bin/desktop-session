@@ -7,23 +7,50 @@
 # `desktop-session --dirs-only` (as root) only makes the private directories
 # and exits: a grade container has no desktop, but its worker's HOME and
 # TMPDIR (the image's ENV) are on the same tmpfs.
+# `--prepare` initializes the same directories before a runtime hook.
+# `--start-prepared` supervises startup and preserves hook-written files.
 set -euo pipefail
 
 if [[ "$(id -u)" == 0 ]]; then
-  install -d -o mst -g mst -m 0755 /run/mst
-  for dir in session tokens home tmp evidence; do
-    install -d -o mst -g mst -m 0700 "/run/mst/${dir}"
-  done
-  [[ "${1:-}" == --dirs-only ]] && exit 0
+  if [[ "${1:-}" == --start-prepared ]]; then
+    # /run is root-owned. Never publish through /run/mst: the desktop user
+    # can replace its directories or plant symlinks while the session runs.
+    install -d -o root -g root -m 0755 /run/mst-root
+    umask 022
+    receipt=/run/mst-root/startup-exit
+    rm -f "${receipt}" "${receipt}.new"
+    # The dropped child opens its own private log. Even failures before the
+    # drop expose only a numeric receipt, never raw output, to the runner.
+    if "$0" --prepared > /dev/null 2>&1; then
+      status=0
+    else
+      status=$?
+    fi
+    printf '%s\n' "${status}" > "${receipt}.new"
+    mv -f "${receipt}.new" "${receipt}"
+    exit "${status}"
+  fi
+  if [[ "${1:-}" != --prepared ]]; then
+    install -d -o mst -g mst -m 0755 /run/mst
+    for dir in session tokens home tmp evidence; do
+      install -d -o mst -g mst -m 0700 "/run/mst/${dir}"
+    done
+    [[ "${1:-}" == --dirs-only || "${1:-}" == --prepare ]] && exit 0
+  fi
   exec setpriv --reuid=mst --regid=mst --init-groups --reset-env \
     env PATH="${PATH}" HOME="${HOME}" USER=mst LANG="${LANG}" \
     DISPLAY="${DISPLAY}" DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS}" \
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR}" GNOME_KEYRING_CONTROL="${GNOME_KEYRING_CONTROL}" \
     AT_SPI_BUS_ADDRESS="${AT_SPI_BUS_ADDRESS}" \
-    "$0"
+    "$0" "$@"
 fi
 
 log=/run/mst/session
+if [[ "${1:-}" == --prepared ]]; then
+  umask 077
+  rm -f "${log}/ready" "${log}/failed" "${log}/startup.log"
+  exec > "${log}/startup.log" 2>&1
+fi
 Xvfb "${DISPLAY}" -screen 0 1440x900x24 -nolisten tcp > "${log}/xvfb.log" 2>&1 &
 xvfb=$!
 for _ in $(seq 50); do

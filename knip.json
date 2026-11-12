@@ -27,7 +27,7 @@
       "ignoreDependencies": ["@modelcontextprotocol/server-filesystem"]
     }
   },
-  "ignoreBinaries": ["pbcopy", "xwd"],
+  "ignoreBinaries": ["pbcopy", "xclip", "xwd"],
   "rules": {
     "optionalPeerDependencies": "off"
   }

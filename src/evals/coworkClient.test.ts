@@ -83,7 +83,18 @@ const linuxPlatform = vi.hoisted(() => ({
   submit: vi.fn(),
   handleHitl: vi.fn(),
 }));
-vi.mock('./cowork/linux.js', () => ({ coworkLinux: linuxPlatform }));
+const linuxAccountPlatform = vi.hoisted(() => ({
+  dataDirectory: () => '/prepared/account-session',
+  prepare: vi.fn(),
+  recover: vi.fn(),
+  submit: vi.fn(),
+  handleHitl: vi.fn(),
+}));
+const cloudWrapper = vi.hoisted(() => ({ wrap: vi.fn() }));
+vi.mock('./cowork/linux.js', () => ({
+  coworkLinux: linuxPlatform,
+  coworkLinuxFirstParty: linuxAccountPlatform,
+}));
 
 vi.mock('./coworkSetup/recoverSession.js', () => ({
   recoverMacCoworkSession: vi.fn(),
@@ -181,6 +192,14 @@ beforeEach(async () => {
     mocks.order.push('dispose');
   });
   linuxPlatform.prepare.mockResolvedValue({ dispose: mocks.dispose });
+  linuxAccountPlatform.prepare.mockResolvedValue({ dispose: mocks.dispose });
+  linuxAccountPlatform.submit.mockRejectedValue(
+    new Error('submission boundary reached')
+  );
+  linuxAccountPlatform.handleHitl.mockResolvedValue({
+    status: 'hitl_checked',
+    action_count: 0,
+  });
   linuxPlatform.submit.mockResolvedValue({ status: 'submitted' });
   linuxPlatform.handleHitl.mockResolvedValue({
     status: 'hitl_checked',
@@ -2607,6 +2626,163 @@ describe("Cowork's workspace unavailable", () => {
         { ...down('Workspace unavailable.'), isError: false },
       ])
     ).toBeUndefined();
+  });
+});
+
+describe('Linux first-party Cowork platform dispatch', () => {
+  const accountServer: MCPConfig = {
+    transport: 'http',
+    label: 'primary',
+    serverUrl: 'https://example.com/mcp',
+  };
+  function batch(model = 'native-model'): ClientBatchRequest[] {
+    return [
+      {
+        caseId: 'linux-account',
+        trial: 0,
+        config: { ...clientConfig, mode: 'first-party', model },
+        input: {
+          prompt: '  exact unchanged prompt 中文  ',
+          servers: [accountServer],
+        },
+      },
+    ];
+  }
+  beforeEach(() => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    // The cloud wrapper is independently tested. This seam pins which Linux
+    // desktop it receives and what the real adapter forwards to that base.
+    vi.doMock('./cowork/claudeAi.js', () => ({
+      coworkClaudeAi(base: CoworkPlatform, policy: unknown) {
+        cloudWrapper.wrap(base, policy);
+        return base;
+      },
+    }));
+  });
+  afterEach(() => {
+    vi.doUnmock('./cowork/claudeAi.js');
+  });
+
+  it('wraps the separate attach base, preserving model, connectors, writes and server labels', async () => {
+    const connectors = { default: 'block', failOnApproval: true, servers: {} };
+    const work = batch();
+    work[0]!.config.connectors = connectors;
+    const result = await collectClientBatch(COWORK_CLIENT, work, {
+      ...context,
+      evalConfig: { ...context.evalConfig, writes: { primary: 'live' } },
+    });
+    expect(result[0]?.error).toContain('submission boundary reached');
+    expect(cloudWrapper.wrap).toHaveBeenCalledWith(linuxAccountPlatform, {
+      servers: [accountServer],
+      connectors,
+      writes: { primary: 'live' },
+    });
+    expect(linuxAccountPlatform.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'native-model' })
+    );
+    expect(linuxAccountPlatform.submit).toHaveBeenCalledWith(
+      '  exact unchanged prompt 中文  ',
+      expect.objectContaining({ targetModel: 'native-model', model: undefined })
+    );
+    expect(linuxPlatform.prepare).not.toHaveBeenCalled();
+    expect(linuxPlatform.submit).not.toHaveBeenCalled();
+    expect(mocks.setup).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it('fails missing account preflight before submission or raw readiness probes', async () => {
+    linuxAccountPlatform.prepare.mockRejectedValueOnce(
+      new Error('plugin-staged account runtime missing')
+    );
+    await expect(
+      COWORK_CLIENT.open!(
+        {
+          config: batch()[0]!.config,
+          input: { servers: [accountServer] },
+        },
+        context
+      )
+    ).rejects.toThrow('plugin-staged account runtime missing');
+    expect(linuxAccountPlatform.submit).not.toHaveBeenCalled();
+    expect(linuxPlatform.prepare).not.toHaveBeenCalled();
+    expect(mocks.readiness).not.toHaveBeenCalled();
+  });
+
+  it('still checks the exact model in completed native evidence on Linux', async () => {
+    linuxAccountPlatform.submit.mockResolvedValueOnce({
+      status: 'submitted',
+      action_count: 1,
+    });
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      batch('different-model'),
+      context
+    );
+    expect(result[0]?.error).toContain(
+      'Cowork model mismatch: requested different-model, observed native-model'
+    );
+    expect(linuxAccountPlatform.submit).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [{ computerUseModel: 'planner' }, 'computerUseModel is the planner'],
+    [{ appVersion: '1.2.3' }, 'unsupported'],
+  ] as const)(
+    'retains Linux option rejection for %j',
+    async (options, reason) => {
+      const work = batch();
+      work[0]!.config = { ...work[0]!.config, ...options };
+      await expect(
+        collectClientBatch(COWORK_CLIENT, work, context)
+      ).rejects.toThrow(reason);
+      expect(linuxAccountPlatform.prepare).not.toHaveBeenCalled();
+      expect(linuxPlatform.prepare).not.toHaveBeenCalled();
+      expect(cloudWrapper.wrap).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['simulateWrites', 'tools'] as const)(
+    'retains first-party %s rejection before preflight',
+    async (option) => {
+      const invalidContext = {
+        ...context,
+        evalConfig: {
+          ...context.evalConfig,
+          [option]: option === 'simulateWrites' ? true : {},
+        },
+      };
+      await expect(
+        collectClientBatch(COWORK_CLIENT, batch(), invalidContext)
+      ).rejects.toThrow('cannot use simulated writes or tool-metadata proxies');
+      expect(cloudWrapper.wrap).not.toHaveBeenCalled();
+      expect(linuxAccountPlatform.prepare).not.toHaveBeenCalled();
+    }
+  );
+
+  it('leaves third-party Linux on managed prepare with no first-party model-picker payload', async () => {
+    const work = batch();
+    work[0]!.config.mode = 'third-party';
+    const result = await collectClientBatch(COWORK_CLIENT, work, context);
+    expect(result[0]?.error).toBeUndefined();
+    expect(linuxPlatform.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'native-model' })
+    );
+    expect(linuxPlatform.submit).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.not.objectContaining({ targetModel: expect.anything() })
+    );
+    expect(linuxAccountPlatform.prepare).not.toHaveBeenCalled();
+    expect(cloudWrapper.wrap).not.toHaveBeenCalled();
+  });
+
+  it('retains first-party transport/auth restrictions before any platform action', async () => {
+    const work = batch();
+    work[0]!.input.servers = [server];
+    await expect(
+      collectClientBatch(COWORK_CLIENT, work, context)
+    ).rejects.toThrow('cannot apply auth');
+    expect(cloudWrapper.wrap).not.toHaveBeenCalled();
+    expect(linuxAccountPlatform.prepare).not.toHaveBeenCalled();
   });
 });
 
