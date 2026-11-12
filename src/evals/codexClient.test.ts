@@ -1,5 +1,13 @@
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'smol-toml';
@@ -25,6 +33,10 @@ const sdk = vi.hoisted(() => ({
   input: undefined as string | undefined,
   config: undefined as string | undefined,
   homeMode: undefined as number | undefined,
+  authCacheName: undefined as string | undefined,
+  authCachePath: undefined as string | undefined,
+  authCacheBefore: undefined as string | undefined,
+  homeEntries: undefined as string[] | undefined,
   hang: false,
   /** Hang before the first turn starts, as a Codex stuck starting does. */
   hangBeforeTurn: undefined as boolean | undefined,
@@ -60,6 +72,21 @@ vi.mock('@openai/codex-sdk', () => ({
             'utf8'
           );
           sdk.homeMode = statSync(join(env.CODEX_HOME!, 'config.toml')).mode;
+          if (sdk.authCacheName) {
+            // Simulate a managed helper with a fake credential, never a real
+            // sign-in or model call. It discovers its cache through HOME.
+            sdk.homeEntries = await readdir(env.HOME!);
+            sdk.authCachePath = await realpath(
+              join(env.HOME!, sdk.authCacheName)
+            );
+            const cacheFile = join(sdk.authCachePath, 'credentials.json');
+            sdk.authCacheBefore = await readFile(cacheFile, 'utf8').catch(
+              () => undefined
+            );
+            await writeFile(cacheFile, 'test-only-auth-fixture', {
+              mode: 0o600,
+            });
+          }
           const sessions = join(
             env.CODEX_HOME!,
             'sessions',
@@ -256,6 +283,7 @@ describe('codex-cli client options', () => {
         sandbox: 'read-only',
         webSearch: false,
         systemPrompt: 'Be brief.',
+        authCacheDirectories: { '.example-gateway': join(tmpdir(), 'cache') },
       })
     ).toMatchObject({ model: 'gpt-5.5', reasoningEffort: 'high' });
     expect(() =>
@@ -463,6 +491,88 @@ describe('codex-cli client run', () => {
     // The trial's home and working directory are gone.
     expect(existsSync(env.CODEX_HOME!)).toBe(false);
     expect(existsSync(String(sdk.thread!.workingDirectory))).toBe(false);
+  });
+
+  it('reuses opted-in auth state without reusing trial configuration or HOME', async () => {
+    const cache = join(cwd, 'persistent-auth');
+    const options = {
+      type: 'codex-cli',
+      authCacheDirectories: { '.example-gateway': cache },
+    };
+    sdk.authCacheName = '.example-gateway';
+    await CODEX_CLIENT.run!(
+      { prompt: 'Find x', servers: [servers[0]!] },
+      options,
+      context(GATEWAY)
+    );
+    const firstHome = (sdk.options!.env as Record<string, string>).HOME!;
+    expect(sdk.authCacheBefore).toBeUndefined();
+    expect(existsSync(firstHome)).toBe(false);
+    expect(await readFile(join(cache, 'credentials.json'), 'utf8')).toBe(
+      'test-only-auth-fixture'
+    );
+    await CODEX_CLIENT.run!(
+      { prompt: 'Find y', servers: [servers[0]!] },
+      options,
+      context(GATEWAY)
+    );
+    const env = sdk.options!.env as Record<string, string>;
+    expect(env.HOME).not.toBe(firstHome);
+    expect(env.HOME).toBe(env.CODEX_HOME);
+    expect(sdk.authCacheBefore).toBe('test-only-auth-fixture');
+    expect(sdk.authCachePath).toBe(await realpath(cache));
+    expect(sdk.homeEntries?.sort()).toEqual([
+      '.example-gateway',
+      'config.toml',
+    ]);
+    expect(parse(sdk.config!)).toMatchObject({
+      features: { plugins: false, apps: false, memories: false },
+      skills: { bundled: { enabled: false } },
+      history: { persistence: 'none' },
+    });
+    expect(existsSync(env.HOME!)).toBe(false);
+    expect(existsSync(join(cache, 'credentials.json'))).toBe(true);
+  });
+
+  it('keeps the opted-in auth cache when the Codex process fails', async () => {
+    const cache = join(cwd, 'persistent-auth');
+    sdk.authCacheName = '.example-gateway';
+    sdk.fail = 'offline test failure';
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'Find x', servers: [servers[0]!] },
+      {
+        type: 'codex-cli',
+        authCacheDirectories: { '.example-gateway': cache },
+      },
+      context(GATEWAY)
+    );
+    expect(result.error).toContain('offline test failure');
+    const env = sdk.options!.env as Record<string, string>;
+    expect(existsSync(env.HOME!)).toBe(false);
+    expect(await readFile(join(cache, 'credentials.json'), 'utf8')).toBe(
+      'test-only-auth-fixture'
+    );
+  });
+
+  it('keeps the opted-in auth cache when the trial times out', async () => {
+    const cache = join(cwd, 'persistent-auth');
+    sdk.authCacheName = '.example-gateway';
+    sdk.hang = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'Find x', servers: [servers[0]!] },
+      {
+        type: 'codex-cli',
+        timeout: 200,
+        authCacheDirectories: { '.example-gateway': cache },
+      },
+      context(GATEWAY)
+    );
+    expect(result.error).toContain('timed out');
+    const env = sdk.options!.env as Record<string, string>;
+    expect(existsSync(env.HOME!)).toBe(false);
+    expect(await readFile(join(cache, 'credentials.json'), 'utf8')).toBe(
+      'test-only-auth-fixture'
+    );
   });
 
   it("gives its model calls the request IDs the host's events name them by, as Cowork and Claude Code do", async () => {

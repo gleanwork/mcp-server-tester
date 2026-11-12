@@ -246,6 +246,7 @@ describe('mst clients', () => {
         'webSearch',
         'cwd',
         'apiKeyEnvVar',
+        'authCacheDirectories',
         'env',
       ],
       cowork: [
