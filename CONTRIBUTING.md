@@ -234,7 +234,10 @@ When adding features:
 1. Update documentation for any changed functionality
 2. Add tests for new features
 3. Ensure all tests pass
-4. Update CHANGELOG.md (if maintaining one)
+4. Label the pull request for the changelog: `breaking`, `enhancement`, `bug`,
+   `documentation` or `internal`. Don't edit CHANGELOG.md: release-it
+   generates each release's section from the merged pull requests' titles and
+   labels. Put upgrade steps in `docs/migrations/`.
 5. Request review from maintainers
 
 ### PR Title Format
