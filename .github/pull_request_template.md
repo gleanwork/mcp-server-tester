@@ -14,3 +14,4 @@
 - [ ] `npm run test:eval-foundation`, `npm run test:eval-review`, `npm test`, `npm run test:usecases`, `npm run test:playwright`
 - [ ] Tests cover the change
 - [ ] Docs updated
+- [ ] Labeled `breaking`, `enhancement`, `bug`, `documentation` or `internal` (the changelog is generated from labels and titles; don't edit CHANGELOG.md)
