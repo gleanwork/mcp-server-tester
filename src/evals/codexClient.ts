@@ -20,7 +20,6 @@
  */
 import fs from 'node:fs';
 import {
-  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -47,8 +46,13 @@ import {
   TRIAL_ENDING,
 } from './trialEnding.js';
 import type { ClientDiagnostics } from '../types/index.js';
-import { ARTIFACT_LIMITS } from './allArtifacts.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
+import {
+  copyRolloutTrace,
+  ROLLOUT_TRACE_DIR,
+  RolloutTraceError,
+  type ArtifactLimits,
+} from './rolloutTraceCopy.js';
 import {
   buildCodexTranscript,
   type TimedCodexEvent,
@@ -402,33 +406,38 @@ async function findRollout(
  * thread (`trace-<trace ID>-<thread ID>/`: `manifest.json`, `trace.jsonl`
  * and `payloads/`).
  */
-export const CODEX_ROLLOUT_TRACE_DIR = 'codex-rollout-trace';
+export const CODEX_ROLLOUT_TRACE_DIR = ROLLOUT_TRACE_DIR;
 
 /**
- * What a trial keeps of the rollout trace Codex wrote under `dir`: its
- * bundles, as the trial's client artifacts, when they fit what a trial's
- * artifacts may hold. A trace Codex didn't write, or one over a limit, is
- * not kept, and `telemetry` says why: the trial is still graded, where a
- * copy over a limit would make it an infrastructure failure.
+ * What a trial keeps of the rollout trace Codex wrote under `dir`: a copy of
+ * its bundles (rolloutTraceCopy.ts), as the trial's client artifacts, with
+ * `secrets` replaced, when they fit what a trial's artifacts may hold. A
+ * trace Codex didn't write, one over a limit, one with a file MST won't copy
+ * (a link, or a file another user owns) or one MST couldn't read is not kept,
+ * and `telemetry` says why: the trial is still graded, where a copy over a
+ * limit would make it an infrastructure failure. `dir` stays the caller's to
+ * remove.
  */
 export async function codexRolloutTrace(
   dir: string,
-  limits: {
-    readonly [K in keyof typeof ARTIFACT_LIMITS]: number;
-  } = ARTIFACT_LIMITS
+  options: {
+    readonly secrets?: readonly string[];
+    readonly limits?: ArtifactLimits;
+  } = {}
 ): Promise<{
   artifacts?: ClientArtifacts;
   telemetry: Record<string, unknown>;
 }> {
   const root = path.join(dir, CODEX_ROLLOUT_TRACE_DIR);
-  const bundles = (
-    await readdir(root, { withFileTypes: true }).catch(() => [])
-  ).filter(
-    (entry) =>
-      entry.isDirectory() &&
-      fs.existsSync(path.join(root, entry.name, 'manifest.json'))
-  ).length;
-  if (bundles === 0)
+  const bundles = (await readdir(root, { withFileTypes: true }).catch(() => []))
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        fs.existsSync(path.join(root, entry.name, 'manifest.json'))
+    )
+    .map((entry) => entry.name)
+    .sort();
+  if (bundles.length === 0)
     return {
       telemetry: {
         bundles: 0,
@@ -436,48 +445,37 @@ export async function codexRolloutTrace(
           'Codex wrote no rollout trace. Codex CLI 0.124 or later writes one.',
       },
     };
-  // As the copy counts them (trialArtifacts.ts), so a trace kept here fits.
-  let entries = 0;
-  let files = 0;
-  let bytes = 0;
-  const walk = async (relative: string[]): Promise<void> => {
-    if (relative.length > limits.depth)
-      throw new Error(`it is more than ${limits.depth} directories deep`);
-    const from = path.join(dir, ...relative);
-    for (const entry of await readdir(from, { withFileTypes: true })) {
-      if (++entries > limits.entries)
-        throw new Error(`it has more than ${limits.entries} entries`);
-      const segments = [...relative, entry.name];
-      if (entry.isDirectory()) {
-        await walk(segments);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const { size } = await lstat(path.join(dir, ...segments));
-      if (size > limits.fileBytes)
-        throw new Error(
-          `${segments.join('/')} is larger than ${limits.fileBytes} bytes`
-        );
-      files += 1;
-      bytes += size;
-      if (bytes > limits.totalBytes)
-        throw new Error(`it holds more than ${limits.totalBytes} bytes`);
-    }
-  };
   try {
-    await walk([]);
+    const copy = await copyRolloutTrace(root, bundles, options);
+    return {
+      artifacts: {
+        dir: copy.dir,
+        include: [CODEX_ROLLOUT_TRACE_DIR],
+        temporary: true,
+      },
+      telemetry: {
+        bundles: bundles.length,
+        files: copy.files,
+        bytes: copy.bytes,
+      },
+    };
   } catch (error) {
+    const reason = redactClientSecrets(
+      error instanceof Error ? error.message : String(error),
+      options.secrets ?? []
+    );
     return {
       telemetry: {
-        bundles,
-        notKept: `The rollout trace is larger than a trial's artifacts may be: ${error instanceof Error ? error.message : String(error)}.`,
+        bundles: bundles.length,
+        notKept:
+          error instanceof RolloutTraceError
+            ? error.kind === 'limit'
+              ? `The rollout trace is larger than a trial's artifacts may be: ${reason}.`
+              : `The rollout trace holds a file MST doesn't copy: ${reason}.`
+            : `MST couldn't read the rollout trace: ${reason}`,
       },
     };
   }
-  return {
-    artifacts: { dir, include: [CODEX_ROLLOUT_TRACE_DIR], temporary: true },
-    telemetry: { bundles, files, bytes },
-  };
 }
 
 function pick(
@@ -535,7 +533,7 @@ async function runCodex(
 
   const home = await mkdtemp(path.join(os.tmpdir(), 'mst-codex-'));
   let workDir: string | undefined;
-  // The trial's rollout trace (`rolloutTrace`), until its result reports it.
+  // Where Codex writes the trial's rollout trace (`rolloutTrace`).
   let traceDir: string | undefined;
   let receiver: HostTelemetryReceiver | undefined;
   const controller = new AbortController();
@@ -661,10 +659,12 @@ async function runCodex(
             );
     const durationMs = Date.parse(endedAt) - Date.parse(startedAt);
     const toolMs = transcript.telemetry.toolWallDurationMs;
-    const trace = traceDir ? await codexRolloutTrace(traceDir) : undefined;
-    // Reported as artifacts, the directory is MST's: it copies the trace for
-    // the judges, then removes it (trialArtifacts.ts).
-    if (trace?.artifacts) traceDir = undefined;
+    // A copy of its own, redacted: Codex's directory is removed below. The
+    // copy, reported as artifacts, is MST's: it copies it again for the
+    // judges, then removes it (trialArtifacts.ts).
+    const trace = traceDir
+      ? await codexRolloutTrace(traceDir, { secrets })
+      : undefined;
     return {
       finalText: transcript.finalText,
       events: transcript.events,

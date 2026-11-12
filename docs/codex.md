@@ -84,7 +84,9 @@ The trial reports the trace as its [client artifacts](./evaluation-framework.md#
 
 `codex debug trace-reduce <bundle>` replays a bundle into `state.json`: what the model saw in each request, and what ran.
 
-The trial's telemetry has `rolloutTrace`: how many bundles, files and bytes it kept. A trace that is larger than a trial's artifacts may be (16 MB per file, 64 MB in all, 4,096 entries), or that Codex didn't write, isn't kept, and `rolloutTrace.notKept` says why. The trial is graded either way: a missing trace doesn't make it an infrastructure failure.
+Codex's shell can write where the trace is, so the trial keeps a copy MST makes as soon as Codex is done, and removes Codex's directory with the trial's home. The copy has only regular files that MST's user owns: never a symbolic link, and never a hard link, which could point at the trial's `config.toml`. In every file, MST replaces the credentials it knows for the trial (the model key, the servers' tokens and credential headers, credential-named environment variables) with `[REDACTED]`, as written and as a JSON string escapes them, as it does in the transcript. A value MST doesn't know, such as a secret a server returns, stays as Codex wrote it.
+
+The trial's telemetry has `rolloutTrace`: how many bundles, files and bytes it kept (as written, after redaction). A trace that is larger than a trial's artifacts may be (16 MB per file, 64 MB in all, 4,096 entries), that has a hard link or a file another user owns, that MST couldn't read, or that Codex didn't write, isn't kept, and `rolloutTrace.notKept` says why. The trial is graded either way: a missing trace doesn't make it an infrastructure failure.
 
 The trace is on by default because it is the only record of what the model got in each request. Codex cuts a tool output that is over the model's budget down to its start and end, and only the trace shows what the model actually read. A trial that didn't keep the trace can't get it back.
 
