@@ -36,6 +36,8 @@ This builds `mst-cowork-linux:<MST version>` on each Docker context you name (de
 
 If the eval loads plugins, add `--config eval.json`: the image then installs them (see [Plugins](#plugins)).
 
+Plugins that use `createDockerRunner` runtime preparation need a rebuilt image, even when its existing tag matches this MST version. Deferred startup checks the versioned image capability before creating a container and refuses older images. Re-run setup on each context with the same eval config. Custom images must implement the [runtime preparation protocol](./evaluation-framework.md#plugins), including `/usr/bin/tini`, `sleep infinity`, settings initialization and supervised prepared startup, before advertising support.
+
 The build also downloads Cowork's VM bundle (1.2 GB), which Claude Desktop would otherwise download in every new container. It reads the bundle's files and SHA-256 checksums from the Claude Desktop package, downloads them from the same place Claude Desktop does, and checks them. If the package's manifest can't be read, the build goes on without the bundle and Claude Desktop downloads it on first use.
 
 ## Run
