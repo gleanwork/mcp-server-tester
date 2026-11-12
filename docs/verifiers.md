@@ -1,0 +1,128 @@
+# Run MST clients under verifiers
+
+> **Experimental.** This follows [ADR 0015](./adr/0015-mst-clients-run-as-verifiers-harnesses.md), which is proposed. Names and settings can change.
+
+[verifiers](https://github.com/PrimeIntellect-ai/verifiers) is a Python library for evaluation and RL environments. If your tasks are already a verifiers taskset, you can run them on MST's clients without rewriting them as MST datasets. verifiers runs the eval and MST runs the client:
+
+- **verifiers** loads the taskset, starts each rollout's runtime, records the model's traffic through its interception server, and scores the result with the task's rewards and judges.
+- **MST** is the rollout's harness. The `mst-harness` Python package runs one `mst run` trial per rollout and returns what the client did.
+
+Use `mst run` when you want MST's datasets, graders, variant comparisons and report. Use verifiers when the tasks and rewards are already written for verifiers, or the same tasks also train a model.
+
+## How a rollout runs
+
+```text
+verifiers                                  rollout runtime (subprocess or container)
+─────────                                  ─────────────────────────────────────────
+taskset ── task ──► MSTHarness.launch() ──► mst run --no-grade ──► client (api, codex-cli, …)
+                     writes dataset.json                             │            │
+                     and eval.json                                   │ model      │ MCP
+                                                                     ▼            ▼
+              interception server ◄──────────────────────────── verifiers'   the task's
+                     │                                           endpoint     MCP servers
+                     ├──► model provider
+                     └──► trace ──► rewards, judges, metrics
+```
+
+1. verifiers loads a task, starts the task's MCP servers and the rollout's runtime.
+2. `MSTHarness.setup()` checks that MST starts in the runtime.
+3. `MSTHarness.launch()` writes a one-case dataset (the task's prompt, unchanged) and an eval config (the client, its options, the model, and the task's MCP servers by name).
+4. It runs `mst run --no-grade` with the client's inference pointed at verifiers' endpoint. The client's model calls go through verifiers, and its MCP calls go to the task's servers.
+5. It reads MST's trial file, keeps it in `trace.info["mst"]`, and returns the client's final reply.
+6. verifiers scores the trace with the task's rewards and judges.
+
+## Install
+
+You need Node.js 22+ for MST and Python 3.11+ for verifiers. Install MST where the rollout runs, and `mst-harness` next to verifiers:
+
+```bash
+npm install -g @gleanwork/mcp-server-tester
+uv add mst-harness   # brings verifiers>=0.2.1,<0.3
+```
+
+## Configure a rollout
+
+Name the harness by its package, in the eval config verifiers reads:
+
+```toml
+model = "claude-sonnet-4-6"
+
+[taskset]
+id = "acme-tasks"
+
+[harness]
+id = "mst-harness"
+client = "api"
+
+[harness.runtime]
+type = "subprocess"
+
+[client]
+type = "eval"
+base_url = "https://api.anthropic.com"
+api_key_var = "ANTHROPIC_API_KEY"
+
+[interception]
+type = "server"
+```
+
+Run it with verifiers' CLI: `uv run eval @ acme.toml`. Results go to `outputs/<taskset>--<model>--<harness>/<run>/traces.jsonl`.
+
+| Setting          | Default         | Meaning                                                                                                                                         |
+| ---------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `client`         | `"claude-code"` | The MST client, by its canonical name (`mst clients` lists them). It must be on the supported list below.                                       |
+| `client_options` | `{}`            | The client's options, as in an eval config's `clientOptions`.                                                                                   |
+| `api`            | `"anthropic"`   | The API family the client's inference uses: `"anthropic"` or `"openai"`. `codex-cli` needs `"openai"`.                                          |
+| `plugins`        | `[]`            | MST plugins to load, for a plugin client.                                                                                                       |
+| `writes`         | `"unguarded"`   | The write mode MST gives the task's servers. The taskset's own proxy decides what reaches a service.                                            |
+| `workdir`        | unset           | Subdirectories to create in a working directory the harness keeps. The files the client leaves there come back in `trace.info["mst"]["files"]`. |
+| `mst_command`    | `["mst"]`       | How to start MST in the runtime, for example `["npx", "mst"]`.                                                                                  |
+
+[`python/environments/mst_smoke_v1`](../python/environments/mst_smoke_v1/README.md) is a complete environment that checks the path end to end: its tasks need one MCP tool call, and its reward checks the client's final reply.
+
+## Supported clients
+
+verifiers records a rollout from the model calls that go through its endpoint. A client is supported only if MST can send its inference to an endpoint chosen for each rollout.
+
+| Client                 | Runtime           | Status        | Why                                                                                         |
+| ---------------------- | ----------------- | ------------- | ------------------------------------------------------------------------------------------- |
+| `api`                  | any               | Supported     | MST makes the model calls itself, to `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL`.             |
+| `codex-cli`            | any               | Supported     | MST gives Codex a provider for `OPENAI_BASE_URL`. Set `api = "openai"`.                     |
+| `claude-code`          | any               | Supported     | Takes `ANTHROPIC_BASE_URL`, unless Claude Code's managed settings set it (see below).       |
+| `cowork`, `chatgpt`    | MST's Linux image | Not yet       | Take inference from a gateway, but the image needs a runtime that starts it with VM access. |
+| `cowork`               | macOS             | Not supported | Takes inference from managed preferences, which MST doesn't set per run.                    |
+| `chatgpt`, `codex-app` | macOS             | Not supported | Run signed in to the user's account.                                                        |
+
+**Managed settings win.** Claude Code's managed settings (`/Library/Application Support/ClaudeCode/managed-settings.json` on macOS) override `ANTHROPIC_BASE_URL`. On such a machine, Claude Code's model calls skip verifiers. The harness fails each such rollout and names the cause, rather than scoring a reply verifiers never saw. Use `api` or `codex-cli` there.
+
+## What MST returns
+
+| verifiers        | From MST                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
+| The trace        | Built by verifiers from the model calls it intercepted. MST adds nothing to it.                                  |
+| The output       | The client's final reply.                                                                                        |
+| `trace.info.mst` | The client, the trial's ending, the transcript (events, model calls, evidence), the write record, and any files. |
+| A failed rollout | An infrastructure failure (client app, workspace, network, provider, setup), or model calls that skip verifiers. |
+
+A reward can read `trace.info["mst"]["transcript"]["events"]` to check the client's tool calls, which the trace's model calls don't separate into MCP and built-in tools.
+
+## Terms
+
+verifiers and MST name the same things differently. In this mode, verifiers' names are used for what verifiers owns.
+
+| verifiers | MST                                      | Note                                                                                   |
+| --------- | ---------------------------------------- | -------------------------------------------------------------------------------------- |
+| taskset   | dataset                                  |                                                                                        |
+| task      | case                                     | MST avoids "task", which the MCP specification uses for something else.                |
+| harness   | client with its model (an agent harness) | `mst-harness` is one harness for every supported MST client.                           |
+| rollout   | trial                                    | One rollout is one MST trial.                                                          |
+| trace     | transcript                               | verifiers' trace holds the model calls. MST's transcript holds what the client did.    |
+| reward    | grader score                             |                                                                                        |
+| env       | none                                     | verifiers' control flow. It is not MST's environment, the services behind the servers. |
+| runtime   | runner                                   | Where the rollout runs. Under verifiers, MST's runners aren't used.                    |
+
+## Limits
+
+- **One turn per rollout.** A multi-turn env, such as a simulated user, needs a session MST keeps open across turns, which `mst run` doesn't. ADR 0015 names the path: an `mst acp` command and verifiers 0.4's `ACPHarness`.
+- **verifiers 0.2.** `mst-harness` implements 0.2's `Harness.launch()` contract.
+- **One client start per rollout.** Each rollout runs `mst run` once.

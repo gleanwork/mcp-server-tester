@@ -214,6 +214,7 @@ Cowork's `mode: "first-party"` is separate: it runs on existing HTTPS connectors
 - [Built-in Judges](./docs/judges.md) — the built-in judges measured on MST's calibration set
 - [Cowork](./docs/cowork.md) and [ChatGPT Desktop](./docs/chatgpt-desktop.md) — running evals on desktop clients
 - [Codex CLI](./docs/codex.md) — running evals on the Codex CLI (`codex-cli`), headless
+- [Run under verifiers](./docs/verifiers.md) — experimental: MST clients as harnesses for verifiers tasksets
 - [Design walkthrough](./docs/design/README.md) and [explainer](./docs/design/explainer.md) — how evals are meant to run end to end, and what is built so far
 - [Architecture decisions](./docs/adr/) — why MST is built as it is, including [detached runs](./docs/adr/0007-detached-runs-move-the-coordinator.md): a run on a runner that keeps going with the laptop off
 - [Glossary](./CONTEXT.md) — the terms MST uses
@@ -324,6 +325,19 @@ referenced as `<namespace>/<kind>/<name>`. See
 [Plugins](docs/evaluation-framework.md#plugins).
 Secrets remain environment-variable or plugin-owned runtime inputs and do not
 belong in committed eval configs.
+
+## Run under verifiers (experimental)
+
+If your tasks are a [verifiers](https://github.com/PrimeIntellect-ai/verifiers) taskset, you can run them on MST's clients without rewriting them as datasets. verifiers runs the eval: it loads the tasks, records the model's traffic through its interception server, and scores each rollout with the task's rewards and judges. MST is the rollout's harness: a small Python package, `mst-harness`, runs one `mst run` trial per rollout and returns the client's reply and transcript.
+
+```toml
+[harness]
+id = "mst-harness"
+client = "codex-cli"
+api = "openai"
+```
+
+It supports the clients whose inference MST can send to verifiers: `api`, `codex-cli` and `claude-code`. See [Run MST clients under verifiers](./docs/verifiers.md) and [ADR 0015](./docs/adr/0015-mst-clients-run-as-verifiers-harnesses.md).
 
 ## Known Limitations
 

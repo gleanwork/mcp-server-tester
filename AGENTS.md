@@ -268,7 +268,7 @@ authType?: 'oauth' | 'api-token' | 'none';  // Don't do this!
 
 ## Code Style
 
-- Write TypeScript. Use Swift only for a macOS API that Node can't reach, compiled with `nativeHelper.ts`, and keep it to JSON-in, JSON-out primitives with no eval logic. New shell is only for an image's entry points and one-line glue. Don't add Python or any other language, including a script inside a TypeScript string or in an image (ADR 0006, `docs/adr/0006-mst-is-written-in-typescript.md`). Fixing the existing Python that ADR 0006 lists is fine
+- Write TypeScript. Use Swift only for a macOS API that Node can't reach, compiled with `nativeHelper.ts`, and keep it to JSON-in, JSON-out primitives with no eval logic. New shell is only for an image's entry points and one-line glue. Don't add Python or any other language, including a script inside a TypeScript string or in an image (ADR 0006, `docs/adr/0006-mst-is-written-in-typescript.md`). Fixing the existing Python that ADR 0006 lists is fine. The one exception is `python/`, the verifiers harness and its environments (ADR 0015): no client logic and no grading there, and it keeps its own checks
 - Use function declarations, not arrow function expressions for exports
 - Use explicit `null` in ternaries instead of short-circuit (`condition ? 'value' : null`)
 - Descriptive type names (e.g., `EvalDataset`, `MCPFixtureApi`, `Judge`, `ValidationResult`)
@@ -292,6 +292,9 @@ npm run test:usecases       # Use cases through the CLI (tests/usecases)
 npm test                    # Unit tests (Vitest)
 npx playwright install --with-deps chromium
 npm run test:playwright     # Integration tests (Playwright)
+
+# The verifiers harness (the CI python job)
+(cd python/mst-harness && uv sync --locked && uv run ruff check . ../environments && uv run ruff format --check . ../environments && uv run pyright && uv run pytest)
 
 # The docs site (the CI website job)
 (cd website && npm ci && npm run typecheck && npm test && npm run build && npm run smoke)
