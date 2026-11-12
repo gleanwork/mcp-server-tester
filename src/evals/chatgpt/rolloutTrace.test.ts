@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   access,
+  chmod,
   link,
   mkdir,
   mkdtemp,
@@ -56,9 +57,13 @@ async function collect(
   thread: string | undefined,
   limits = ARTIFACT_LIMITS as {
     readonly [K in keyof typeof ARTIFACT_LIMITS]: number;
-  }
+  },
+  secrets: readonly string[] = []
 ) {
-  const result = await copyChatgptRolloutTrace(root, thread, limits);
+  const result = await copyChatgptRolloutTrace(root, thread, {
+    limits,
+    secrets,
+  });
   if (result.artifacts) copies.push(result.artifacts.dir);
   return result;
 }
@@ -132,22 +137,69 @@ describe('desktop rollout trace attribution', () => {
     expect((await collect('trial-1')).artifacts).toBeUndefined();
   });
 
-  it.each(['symlink', 'hardlink'] as const)(
-    'rejects a %s inside a matched bundle without exposing other content',
-    async (kind) => {
-      const dir = await bundle('matched', 'trial-1');
-      const other = await bundle('other', 'other-chat');
-      const from = join(other, 'payloads', '1.json');
-      const to = join(dir, 'payloads', 'linked.json');
-      await (kind === 'symlink' ? symlink(from, to) : link(from, to));
-      const result = await collect('trial-1');
-      expect(result.artifacts).toBeUndefined();
-      expect(result.telemetry.notKept).toBeTruthy();
-      expect(JSON.stringify(result.telemetry)).not.toContain(
-        'trial-private-prompt'
-      );
-    }
-  );
+  it('leaves out a symbolic link inside a matched bundle, as the artifact copy does', async () => {
+    const dir = await bundle('matched', 'trial-1');
+    const other = await bundle('other', 'other-chat');
+    await writeFile(join(other, 'payloads', '1.json'), 'other-chat-prompt');
+    await symlink(
+      join(other, 'payloads', '1.json'),
+      join(dir, 'payloads', 'linked.json')
+    );
+    const result = await collect('trial-1');
+    expect(result.telemetry).toMatchObject({ bundles: 1, files: 3 });
+    expect(result.telemetry.notKept).toBeUndefined();
+    const payloads = join(
+      result.artifacts!.dir,
+      'codex-rollout-trace',
+      'matched',
+      'payloads'
+    );
+    expect(await readdir(payloads)).toEqual(['1.json']);
+  });
+
+  it("keeps no trace with a hard link in a matched bundle, which could be another chat's file", async () => {
+    const dir = await bundle('matched', 'trial-1');
+    const other = await bundle('other', 'other-chat');
+    await link(
+      join(other, 'payloads', '1.json'),
+      join(dir, 'payloads', 'linked.json')
+    );
+    const result = await collect('trial-1');
+    expect(result.artifacts).toBeUndefined();
+    // Both names are links to one file; the copy reports the one it reads first.
+    expect(result.telemetry).toEqual({
+      bundles: 1,
+      notKept: expect.stringMatching(
+        /^The rollout trace holds an entry MST doesn't copy: matched\/payloads\/(1|linked)\.json is a hard link\.$/
+      ),
+    });
+    expect(JSON.stringify(result.telemetry)).not.toContain(
+      'trial-private-prompt'
+    );
+  });
+
+  it('replaces the credentials MST knows in the kept files', async () => {
+    const dir = await bundle('matched', 'trial-1');
+    await writeFile(
+      join(dir, 'payloads', '1.json'),
+      '{"headers":{"Authorization":"Bearer fixture-secret-token"}}'
+    );
+    const result = await collect('trial-1', undefined, [
+      'fixture-secret-token',
+    ]);
+    expect(
+      await readFile(
+        join(
+          result.artifacts!.dir,
+          'codex-rollout-trace',
+          'matched',
+          'payloads',
+          '1.json'
+        ),
+        'utf8'
+      )
+    ).toBe('{"headers":{"Authorization":"Bearer [REDACTED]"}}');
+  });
 
   it.each([
     ['fileBytes', 5],
@@ -163,7 +215,9 @@ describe('desktop rollout trace attribution', () => {
         [key]: value,
       });
       expect(result.artifacts).toBeUndefined();
-      expect(result.telemetry.notKept).toBeTruthy();
+      expect(result.telemetry.notKept).toMatch(
+        /^The rollout trace is larger than a trial's artifacts may be: /
+      );
     }
   );
 
@@ -172,14 +226,64 @@ describe('desktop rollout trace attribution', () => {
     await bundle('two', 'other');
     expect(
       (await collect('trial-1', { ...ARTIFACT_LIMITS, entries: 1 })).telemetry
-        .notKept
-    ).toBe('too many trace root entries');
+    ).toEqual({
+      notKept:
+        "The rollout trace is larger than a trial's artifacts may be: the trace root has more than 1 entries.",
+    });
   });
 
-  it('reports an unavailable source without echoing its path', async () => {
+  it('says the backend wrote no trace only when the trace root is missing', async () => {
     await rm(root, { recursive: true });
     const result = await collect('trial-1');
     expect(result.artifacts).toBeUndefined();
-    expect(result.telemetry.notKept).not.toContain(root);
+    expect(result.telemetry).toEqual({
+      bundles: 0,
+      notKept:
+        'The desktop backend wrote no rollout trace for the attributed native thread.',
+    });
   });
+
+  it("says MST couldn't read a trace root that isn't a directory", async () => {
+    await rm(root, { recursive: true });
+    await writeFile(root, '');
+    expect((await collect('trial-1')).telemetry).toEqual({
+      notKept: expect.stringMatching(
+        /^MST couldn't read the rollout trace: ENOTDIR/
+      ),
+    });
+  });
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    "says MST couldn't read a trace root it couldn't list, not that the backend wrote none",
+    async () => {
+      await bundle('matched', 'trial-1');
+      await chmod(root, 0o000);
+      try {
+        const result = await collect('trial-1');
+        expect(result.artifacts).toBeUndefined();
+        expect(result.telemetry).toEqual({
+          notKept: expect.stringMatching(
+            /^MST couldn't read the rollout trace: EACCES/
+          ),
+        });
+      } finally {
+        await chmod(root, 0o700);
+      }
+    }
+  );
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    "says MST couldn't read a manifest it couldn't open, not that it is another chat's",
+    async () => {
+      const dir = await bundle('matched', 'trial-1');
+      await chmod(join(dir, 'manifest.json'), 0o000);
+      const result = await collect('trial-1');
+      expect(result.artifacts).toBeUndefined();
+      expect(result.telemetry).toEqual({
+        notKept: expect.stringMatching(
+          /^MST couldn't read the rollout trace: EACCES/
+        ),
+      });
+    }
+  );
 });

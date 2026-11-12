@@ -55,8 +55,9 @@ import type { ClientDiagnostics } from '../types/index.js';
 import { clientSecretValues, redactClientSecrets } from './clientSecrets.js';
 import {
   copyRolloutTrace,
+  isMissingPath,
   ROLLOUT_TRACE_DIR,
-  RolloutTraceError,
+  rolloutTraceNotKept,
   type ArtifactLimits,
 } from './rolloutTraceCopy.js';
 import {
@@ -419,10 +420,6 @@ async function findRollout(
  */
 export const CODEX_ROLLOUT_TRACE_DIR = ROLLOUT_TRACE_DIR;
 
-function isMissing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
-}
-
 /**
  * The bundles Codex wrote in `root`: its directories that hold a
  * `manifest.json`, sorted. A missing `root` holds none; any other error
@@ -433,7 +430,7 @@ async function codexTraceBundles(root: string): Promise<string[]> {
   try {
     entries = await readdir(root, { withFileTypes: true });
   } catch (error) {
-    if (isMissing(error)) return [];
+    if (isMissingPath(error)) return [];
     throw error;
   }
   const bundles: string[] = [];
@@ -443,7 +440,7 @@ async function codexTraceBundles(root: string): Promise<string[]> {
       await lstat(path.join(root, entry.name, 'manifest.json'));
       bundles.push(entry.name);
     } catch (error) {
-      if (!isMissing(error)) throw error;
+      if (!isMissingPath(error)) throw error;
     }
   }
   return bundles.sort();
@@ -495,19 +492,10 @@ export async function codexRolloutTrace(
       },
     };
   } catch (error) {
-    const reason = redactClientSecrets(
-      error instanceof Error ? error.message : String(error),
-      options.secrets ?? []
-    );
     return {
       telemetry: {
         ...(bundles ? { bundles: bundles.length } : {}),
-        notKept:
-          error instanceof RolloutTraceError
-            ? error.kind === 'limit'
-              ? `The rollout trace is larger than a trial's artifacts may be: ${reason}.`
-              : `The rollout trace holds an entry MST doesn't copy: ${reason}.`
-            : `MST couldn't read the rollout trace: ${reason}`,
+        notKept: rolloutTraceNotKept(error, options.secrets),
       },
     };
   }

@@ -330,14 +330,25 @@ const GATEWAY = {
   OPENAI_API_KEY: 'sk-gateway',
 };
 
-beforeEach(() => {
+/**
+ * Each test's own temp directory. A trial's copy of its trace is the
+ * caller's to remove (trialArtifacts.ts moves it), so a test that runs the
+ * client alone would leave every copy behind without it.
+ */
+let testTmp: string | undefined;
+
+beforeEach(async () => {
   for (const key of Object.keys(sdk) as Array<keyof typeof sdk>)
     (sdk as Record<string, unknown>)[key] = key === 'hang' ? false : undefined;
+  testTmp = await mkdtemp(join(tmpdir(), 'mst-codex-client-test-'));
+  vi.stubEnv('TMPDIR', testTmp);
 });
 
 afterEach(async () => {
   for (const dir of clientTraceDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
+  vi.unstubAllEnvs();
+  if (testTmp) await rm(testTmp, { recursive: true, force: true });
 });
 
 describe('codex-cli client options', () => {

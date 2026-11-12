@@ -1,173 +1,168 @@
-/** Trial-local copies of the desktop backend's native rollout trace. */
-import { constants } from 'node:fs';
-import { mkdir, mkdtemp, open, opendir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+/**
+ * A trial's copy of the rollout trace the desktop app's Codex backend writes
+ * under its batch's `CODEX_ROLLOUT_TRACE_ROOT`. A batch shares one backend,
+ * so the root also holds other trials' and other chats' bundles: a trial
+ * keeps only the bundles whose manifest names its bound native thread, and
+ * copies them as every client's trace is copied (rolloutTraceCopy.ts):
+ * directories and regular files MST's user owns, never through a link, with
+ * the credentials MST knows replaced, within the artifact limits.
+ */
+import { opendir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ARTIFACT_LIMITS } from '../allArtifacts.js';
 import type { ClientArtifacts } from '../evalFrameworkTypes.js';
+import {
+  copyRolloutTrace,
+  isMissingPath,
+  readTraceFile,
+  ROLLOUT_TRACE_DIR,
+  RolloutTraceError,
+  rolloutTraceNotKept,
+  type ArtifactLimits,
+} from '../rolloutTraceCopy.js';
 
-const TRACE_DIR = 'codex-rollout-trace';
+/** A manifest names a bundle's root thread; it is never this large. */
 const MAX_MANIFEST_BYTES = 64 * 1024;
-type Limits = { readonly [K in keyof typeof ARTIFACT_LIMITS]: number };
 
 interface TraceCopy {
   artifacts?: ClientArtifacts;
   telemetry: {
-    bundles: number;
+    /** Bundles of the trial's thread; absent when MST couldn't list them. */
+    bundles?: number;
     files?: number;
     bytes?: number;
     notKept?: string;
   };
 }
 
-/** Read only a bounded, regular, singly-linked file, never a symlink or pipe. */
-async function readTraceFile(file: string, maxBytes: number): Promise<Buffer> {
-  const handle = await open(
-    file,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
-  );
+/**
+ * Whether the bundle `dir` is `threadId`'s: its version-1 `manifest.json`
+ * names it as the root thread. A filename is not attribution. A bundle with
+ * no manifest, or one MST won't read (a link, a hard link, another user's
+ * file, too large) or can't parse, is another chat's or not a bundle; any
+ * other error reading the manifest is thrown, so it isn't mistaken for no
+ * trace.
+ */
+async function isThreadBundle(dir: string, threadId: string): Promise<boolean> {
+  let manifest: unknown;
   try {
-    const before = await handle.stat();
+    manifest = JSON.parse(
+      (
+        await readTraceFile(join(dir, 'manifest.json'), MAX_MANIFEST_BYTES)
+      ).toString('utf8')
+    );
+  } catch (error) {
     if (
-      !before.isFile() ||
-      before.nlink !== 1 ||
-      before.uid !== process.getuid?.() ||
-      before.size > maxBytes
+      isMissingPath(error) ||
+      error instanceof RolloutTraceError ||
+      error instanceof SyntaxError
     )
-      throw new Error('unsafe or oversized trace file');
-    const buffer = Buffer.alloc(before.size);
-    let offset = 0;
-    while (offset < buffer.length) {
-      const { bytesRead } = await handle.read(
-        buffer,
-        offset,
-        buffer.length - offset,
-        offset
-      );
-      if (!bytesRead) throw new Error('trace file changed while being copied');
-      offset += bytesRead;
-    }
-    const after = await handle.stat();
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs)
-      throw new Error('trace file changed while being copied');
-    return buffer;
-  } finally {
-    await handle.close();
+      return false;
+    throw error;
   }
+  if (typeof manifest !== 'object' || manifest === null) return false;
+  const { schema_version, root_thread_id } = manifest as Record<
+    string,
+    unknown
+  >;
+  return schema_version === 1 && root_thread_id === threadId;
 }
 
 /**
- * Copy only bundles whose native manifest names the trial's bound root thread.
- * A desktop batch shares one backend, so copying the batch root would leak
- * other trials or unrelated chats into the judge's evidence. Never move a live
- * backend's files: the session removes the source root after stopping the app.
- * Missing, unsafe and over-limit traces are telemetry, not trial failures.
+ * The bundles in `root` that are `threadId`'s, sorted. A missing `root`
+ * holds none. Every entry of `root` counts toward `limits.entries`, the
+ * other chats' too, so a root with too many is over the limit before MST
+ * reads them all.
+ */
+async function threadBundles(
+  root: string,
+  threadId: string,
+  limits: ArtifactLimits
+): Promise<string[]> {
+  let directory;
+  try {
+    directory = await opendir(root);
+  } catch (error) {
+    if (isMissingPath(error)) return [];
+    throw error;
+  }
+  const bundles: string[] = [];
+  let entries = 0;
+  for await (const entry of directory) {
+    if (++entries > limits.entries)
+      throw new RolloutTraceError(
+        'limit',
+        `the trace root has more than ${limits.entries} entries`
+      );
+    if (
+      entry.isDirectory() &&
+      (await isThreadBundle(join(root, entry.name), threadId))
+    )
+      bundles.push(entry.name);
+  }
+  return bundles.sort();
+}
+
+/**
+ * What a trial keeps of its batch's rollout trace in `root`: a copy of the
+ * bundles rooted in `threadId`, its bound native thread, as the trial's
+ * client artifacts. Without a bound thread, nothing: an unbound or duplicate
+ * turn must never collect another chat's prompts. A bound turn that failed
+ * may still keep the requests it made. A trace the backend didn't write, one
+ * over a limit, one with an entry MST doesn't copy or one MST couldn't read
+ * is not kept, and `telemetry.notKept` says why: the trial is still graded.
+ * Never moves the live backend's files: the session removes `root` after
+ * stopping the app.
  */
 export async function copyChatgptRolloutTrace(
   root: string,
   threadId: string | undefined,
-  limits: Limits = ARTIFACT_LIMITS
+  options: {
+    readonly secrets?: readonly string[];
+    readonly limits?: ArtifactLimits;
+  } = {}
 ): Promise<TraceCopy> {
-  const telemetry: TraceCopy['telemetry'] = { bundles: 0 };
-  const notKept = (reason: string): TraceCopy => ({
-    telemetry: { ...telemetry, notKept: reason },
-  });
   if (!threadId)
-    return notKept('No unique native thread was attributed to this trial.');
-  let target: string | undefined;
-  try {
-    const bundles: string[] = [];
-    let scanned = 0;
-    const directory = await opendir(root);
-    for await (const entry of directory) {
-      if (++scanned > limits.entries)
-        throw new Error('too many trace root entries');
-      if (!entry.isDirectory()) continue;
-      let manifest: unknown;
-      try {
-        manifest = JSON.parse(
-          (
-            await readTraceFile(
-              join(root, entry.name, 'manifest.json'),
-              MAX_MANIFEST_BYTES
-            )
-          ).toString('utf8')
-        );
-      } catch {
-        continue;
-      }
-      if (
-        manifest &&
-        typeof manifest === 'object' &&
-        'schema_version' in manifest &&
-        manifest.schema_version === 1 &&
-        'root_thread_id' in manifest &&
-        manifest.root_thread_id === threadId
-      )
-        bundles.push(entry.name);
-    }
-    telemetry.bundles = bundles.length;
-    if (!bundles.length)
-      return notKept(
-        'The desktop backend wrote no rollout trace for the attributed native thread.'
-      );
-    target = await mkdtemp(join(tmpdir(), 'mst-chatgpt-trial-trace-'));
-    let entries = 1; // The top-level TRACE_DIR counts in the final artifact copy.
-    let files = 0;
-    let bytes = 0;
-    const walk = async (
-      source: string,
-      destination: string,
-      depth: number
-    ): Promise<void> => {
-      if (depth > limits.depth)
-        throw new Error('trace directory depth limit exceeded');
-      await mkdir(destination, { recursive: true, mode: 0o700 });
-      const directory = await opendir(source);
-      for await (const entry of directory) {
-        if (++entries > limits.entries)
-          throw new Error('trace entry limit exceeded');
-        const from = join(source, entry.name);
-        const to = join(destination, entry.name);
-        if (entry.isDirectory()) {
-          await walk(from, to, depth + 1);
-        } else if (entry.isFile()) {
-          const data = await readTraceFile(
-            from,
-            Math.min(limits.fileBytes, limits.totalBytes - bytes)
-          );
-          bytes += data.length;
-          await writeFile(to, data, { flag: 'wx', mode: 0o600 });
-          files += 1;
-        } else {
-          throw new Error('trace contains a non-regular file');
-        }
-      }
-    };
-    for (const bundle of bundles) {
-      if (++entries > limits.entries)
-        throw new Error('trace entry limit exceeded');
-      await walk(join(root, bundle), join(target, TRACE_DIR, bundle), 2);
-    }
     return {
-      artifacts: { dir: target, include: [TRACE_DIR], temporary: true },
-      telemetry: { bundles: bundles.length, files, bytes },
+      telemetry: {
+        bundles: 0,
+        notKept: 'No unique native thread was attributed to this trial.',
+      },
+    };
+  const limits = options.limits ?? ARTIFACT_LIMITS;
+  let bundles: string[] | undefined;
+  try {
+    bundles = await threadBundles(root, threadId, limits);
+    if (!bundles.length)
+      return {
+        telemetry: {
+          bundles: 0,
+          notKept:
+            'The desktop backend wrote no rollout trace for the attributed native thread.',
+        },
+      };
+    const copy = await copyRolloutTrace(root, bundles, {
+      secrets: options.secrets,
+      limits,
+    });
+    return {
+      artifacts: {
+        dir: copy.dir,
+        include: [ROLLOUT_TRACE_DIR],
+        temporary: true,
+      },
+      telemetry: {
+        bundles: bundles.length,
+        files: copy.files,
+        bytes: copy.bytes,
+      },
     };
   } catch (error) {
-    if (target) await rm(target, { recursive: true, force: true });
-    // Never echo native paths, filenames or prompts from an exception.
-    return notKept(
-      error instanceof Error &&
-        [
-          'too many trace root entries',
-          'trace directory depth limit exceeded',
-          'trace entry limit exceeded',
-          'trace contains a non-regular file',
-          'unsafe or oversized trace file',
-          'trace file changed while being copied',
-        ].includes(error.message)
-        ? error.message
-        : 'The native rollout trace could not be copied.'
-    );
+    return {
+      telemetry: {
+        ...(bundles ? { bundles: bundles.length } : {}),
+        notKept: rolloutTraceNotKept(error, options.secrets),
+      },
+    };
   }
 }
