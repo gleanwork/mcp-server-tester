@@ -95,7 +95,7 @@ const CoworkSchema = z
       .regex(/^[A-Za-z0-9._:-]+$/)
       .optional()
       .meta({
-        'x-defaultDescription': `macOS: MST_COWORK_CUA_MODEL or ${DEFAULT_COMPUTER_USE_MODEL}; Linux: no planner`,
+        'x-defaultDescription': `macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else ${DEFAULT_COMPUTER_USE_MODEL}; Linux: no planner`,
       }),
     dataDir: z.string().min(1).optional().meta({
       'x-defaultDescription':
@@ -369,6 +369,11 @@ async function desktopAdapter(
   const osIssues = coworkOptionIssues(config, os);
   if (osIssues.length)
     throw new Error(`Cowork can't run this trial: ${osIssues.join(' ')}`);
+  // macOS's planner: the option, else the eval's `models.computerUse`
+  // (ADR 0015), else MST_COWORK_CUA_MODEL or the built-in one. Linux has none.
+  const computerUseModel =
+    config.computerUseModel ??
+    (mac ? context.evalConfig.models?.computerUse : undefined);
   const coworkSetup = resolveCoworkSetupConfig(context.evalConfig.coworkSetup);
   const approvalTask = `Approve ${coworkSetup.approveWriteTools ? 'read and write' : 'read-only'} calls only using one-time or current-task approval. Never select persistent or always-allow approval, or change settings.`;
   const plugins = config.plugins ?? [];
@@ -532,7 +537,7 @@ async function desktopAdapter(
             // deadline only stops a stuck driver.
             await platform.reset!({
               deadlineAt: Date.now() + 180_000,
-              model: config.computerUseModel,
+              model: computerUseModel,
               env,
               ...(session?.appPath ? { appPath: session.appPath } : {}),
               ...(session?.restart
@@ -638,7 +643,7 @@ async function desktopAdapter(
         const submission = await platform.submit(request.input.prompt, {
           deadlineAt,
           maxActions: config.maxActions,
-          model: config.computerUseModel,
+          model: computerUseModel,
           ...(mac && config.model ? { targetModel: config.model } : {}),
           env,
           ...(session?.appPath ? { appPath: session.appPath } : {}),
@@ -709,7 +714,7 @@ async function desktopAdapter(
           const hitl = await platform.handleHitl({
             deadlineAt: deadlineAt,
             maxActions: config.hitlMaxActions,
-            model: config.computerUseModel,
+            model: computerUseModel,
             env,
             ...(session?.appPath ? { appPath: session.appPath } : {}),
             approveWriteTools: coworkSetup.approveWriteTools,
@@ -847,7 +852,7 @@ async function desktopAdapter(
                     const followup = await platform.handleHitl({
                       deadlineAt: Math.min(deadlineAt, Date.now() + 60_000),
                       maxActions: config.hitlMaxActions - hitlActions,
-                      model: config.computerUseModel,
+                      model: computerUseModel,
                       env,
                       ...(session?.appPath ? { appPath: session.appPath } : {}),
                       approveWriteTools: coworkSetup.approveWriteTools,

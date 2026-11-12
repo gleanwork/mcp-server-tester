@@ -41,6 +41,7 @@ import type {
 import type { UsageMetrics } from '../judgeTypes.js';
 import {
   AgentJudgeOptionsSchema,
+  agentModelSlot,
   agentRuntime,
   optionsSchema,
   preflightRuntime,
@@ -742,6 +743,10 @@ export function stagedPairwiseJudge(
     ...(bundle.requires.length > 0 && { requires: bundle.requires }),
     // A randomized bundle hides the order itself; one call per rep.
     swapPositions: bundle.order.mode !== 'randomized',
+    // A bundle whose every stage names its model uses no default.
+    ...(bundle.stages.some((stage) => stage.model === undefined) && {
+      modelSlot: agentModelSlot(spec),
+    }),
     preflight: (options) => preflightRuntime(settings(spec, options).runtime),
     compare,
   };

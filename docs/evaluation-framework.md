@@ -55,6 +55,44 @@ A key the schema doesn't define is an error, in an eval config and in a dataset,
 - **Client defaults:** `model`, `provider`, `maxToolCalls`, `timeout`, `temperature` and `maxTokens` default each client option of that name, for the clients that take it.
 - **The client:** `client` names the client under test, `model` the model it uses, and `clientOptions` the client's other options. A variant or case may set any of the three; it inherits the eval config's `clientOptions` only when it uses the same client.
 
+### Default models
+
+MST has a built-in model for each place nothing names one: the `api` client (by provider), LLM judges (by judge provider), agentic judges (by runtime) and the macOS Computer Use planner. You can replace any of them without a new MST release, in a `models` block ([ADR 0015](./adr/0015-default-models-come-from-config-files.md)):
+
+```json
+{
+  "models": {
+    "api": { "anthropic": "claude-sonnet-4-6", "openai": "gpt-5-mini" },
+    "judge": { "anthropic": "claude-opus-4-1" },
+    "agentJudge": { "codex": "gpt-5.5" },
+    "computerUse": "claude-sonnet-4-6"
+  }
+}
+```
+
+MST reads `models` from these places, lowest first, and merges them entry by entry, so a later one replaces only the entries it sets:
+
+1. MST's built-in table (`BUILTIN_MODELS`).
+2. Your own `~/.mcp-server-tester/mst.config.json` (`MST_USER_CONFIG` names another file; empty reads none). This file may set only `models`.
+3. The repo's `mst.config.json`: the nearest one at or above the eval config, as for [settings](#plugins).
+4. The eval config's own `models`. A plugin's shared config can't set it.
+5. The file `mst --mst-config <path>` names, for every eval config the command loads. Its `settings` sections also replace the repo's.
+
+A model that a case, variant, eval config (`model`), judge option or `computerUseModel` names always wins. A default applies only where nothing names a model.
+
+The built-in models are a last resort, and they go stale between MST releases. When a run falls back on one, MST says so at the start of the run, with the `models` entry to set:
+
+```
+[mst] No model is set for this, so MST uses its built-in default. Set it in mst.config.json ("models") to choose your own:
+  models.judge.anthropic: claude-sonnet-4-6 (judge correctness)
+```
+
+`run.json` records the same list as `builtinModels`. A run that sets every model has none. `mst init` writes a `models` block into the new project's `mst.config.json`, so a new project starts with its own.
+
+The resolved `models` are part of the eval config, so they go to workers, grade shards and a detached coordinator, and they change the eval's `contentHash`. MST writes a configured judge model into the judge's options before it computes the judge's identity, so `run.json` and each score record the model that graded. A judge that runs on its built-in model keeps the identity it has today.
+
+Playwright tests read the user's file and the nearest repo file above the spec. The `mcpModels` option goes over both: `test.use({ mcpModels: { judge: { openai: 'gpt-5-mini' } } })`. It applies to `toPassToolJudge` and to `runEvalDataset` cases.
+
 A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`; a bare `namespace/dataset/name` is a [plugin's dataset](#plugin-datasets-and-snapshots). Relative dataset and plugin paths in an eval config resolve against the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the eval config, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.
 Every other pluggable block is a tagged object. `servers` is the MCP servers under test, a map keyed by label (`"servers": { "acme": { "transport": "http", ... } }`); an entry doesn't set `label`, because the key is its label. A variant picks servers by label (`"servers": ["acme"]`): one that lists none uses every server, and `[]` uses none. An empty map is valid for clients that provide their own capabilities. When the eval config and a shared config it extends both set `servers`, the eval config's map replaces the shared config's whole, like every key; a variant may name a shared config's servers when the eval config sets none.
 
@@ -142,6 +180,31 @@ export default plugin;
   - **`open`** returns a runner with `work: ['collect', 'grade']`. Its `runShard` passes both kinds of shard on, and without `work` it would run collect shards only, so `mst grade --runner` would refuse it.
   - **`runShard`** creates a host for the shard and a Docker context for it. It opens `dockerRunner` with that context only and runs the shard on it, in a `try`. The docker runner limits each container to the host's memory (`docker info`): a Cowork container to all the host can spare, a grade container to 2 GiB. Pass `memory` (and `cpus`) on to `dockerRunner.open` to change that, for example when a grade shard runs agentic judges side by side. The docker runner reports a shard's failures (a bundle it couldn't copy, a worker it couldn't start, a silent worker) in the shard's result (its `ShardOutcome`), not as a throw; the `try` is for your own host management (opening the docker runner, the host API). A throw from it counts as a result that isn't `ok`. In the `finally` it closes the docker runner, then deletes the host and its context, unless `context.keep` keeps them: `'always'`, or `'failed'` when the result isn't `ok`. Catch a host or context deletion that fails there and add it to the result (`note` on a good shard, `reason` on a failed one), as MST's own machine runners do: a `runShard` that rejects after a good shard turns its collected trials into a failed shard. The docker runner keeps the container by the same rule, and prints a `docker --context <context> exec` command that works only while the host and its context exist.
   - **`close`** deletes the hosts and contexts of shards that are still running.
+
+  **Runtime preparation.** A plugin that must prepare a desktop runtime before it starts can compose `createDockerRunner` (from `./evals`) instead of `dockerRunner`. This is an in-process factory, not a new extension kind or a runner-option schema:
+
+  ```ts
+  import { createDockerRunner } from '@gleanwork/mcp-server-tester/evals';
+  import { prepareRuntime } from './runtime.js'; // Your plugin's implementation.
+
+  const containers = createDockerRunner({
+    inference: 'plugin', // Omit for MST-managed inference delivery and refresh.
+    prepareRuntime,
+  });
+  ```
+
+  Use `containers.open`, `setup` and `close` as described above for `dockerRunner`. With a hook or `inference: 'plugin'`, desktop containers start idle with the normal labels, devices and resource controls. Before creating a container, MST checks the image's `io.glean.mst.runtime-preparation="1"` label on the selected Docker context. Missing or unsupported versions fail with rebuild instructions; MST never probes an unknown image by running a startup mode, and never falls back to immediate startup. Rebuild existing stock images with `mst runner setup docker` (and the same context and eval config), even if their tag already matches the current MST version. Upgrade or rebuild custom images too.
+
+  Protocol version 1 requires `/usr/bin/tini` and `sleep infinity` for idle containers, plus these root modes on `/opt/mst/bin/desktop-session`:
+  - `--dirs-only` creates private runtime directories and exits, without starting a desktop. ChatGPT-image grade and headless containers use this mode; Cowork-image containers keep creating `/run/mst` and `/run/mst/tokens` directly with `install -d`.
+  - `--prepare` creates those directories and initializes base settings, then exits. Cowork writes its staged `MST_COWORK_SETTINGS_FILE` and seeds its VM bundle cache here, before the hook runs.
+  - `--start-prepared` starts the desktop without replacing prepared settings or hook-written files. The unprivileged session opens its private, mode-0600 `/run/mst/session/startup.log`. The root supervisor atomically writes only the numeric exit status to `/run/mst-root/startup-exit` (mode 0644), under root-owned, mode-0755 ancestry outside `/run/mst`. It never writes logs or failure markers through mst-owned paths after preparation. Readiness polling checks the receipt before `ready` or `failed`, so an early exit fails promptly even while the idle container remains alive. Failures before the privilege drop produce a receipt without raw diagnostics. Custom images must implement this behavior before advertising the label.
+
+  Initialization and startup dispatch each have a 60-second bound. After initialization, MST creates the work directory, delivers its inference token only when inference is MST-managed, calls the hook, then starts the prepared desktop and waits for readiness (`readyTimeout`). Startup failure metadata contains only a fixed phase description and, when available, the numeric exit status, never raw desktop output, which could contain hook secrets. Raw diagnostics stay on the container's private tmpfs and disappear when it is removed. A kept container retains them for controlled inspection. Default `dockerRunner` startup is unchanged. Grade and headless shards skip runtime hooks and inference delivery.
+
+  `prepareRuntime(context)` receives the existing `WorkerChannel`, the shard's cancellation `signal`, `runId`, zero-based `shardIndex`, `shardCount`, optional eval `client`, and image `desktop` (`cowork` or `chatgpt`). It returns an async cleanup function receiving the same identity and channel with a fresh signal. Send opaque runtime input through `channel.exec` stdin, never command arguments, runner options, bundles or logs. Drain command output, check its exit code, and keep plugin credentials and formats in the plugin. MST does not inspect runtime input or include hook error details in run metadata.
+
+  During normal disposal and cooperative cancellation (the first Ctrl-C), MST calls returned cleanup once before keeping or removing the container, including after later failures. Emergency process termination can remove the container without awaiting the async hook; a second Ctrl-C, direct SIGTERM/SIGHUP or process exit uses that path, and SIGKILL cannot run cleanup. Cleanup has an independent 30-second deadline; it must honor its signal and await its channel operations. Preparation must honor cancellation and undo partial work before throwing, because no cleanup was returned yet. Neither operation is retried. Failed preparation always removes the container. Failed or timed-out cleanup prevents keeping it and attempts removal; a failed removal is reported and remains guarded for process-exit cleanup. Disposal errors follow `machineRunner`'s existing outcome contract: a `note` after successful collection, or added to a failed shard's `reason`. This seam adds no provider login APIs or Linux first-party client support.
 
   A worker machine needs the same MST version as the coordinator (a mismatch fails the shard at `hello`), on `PATH` as `mst`, and the client's plugin. Access tokens reach it only over stdin; the worker writes them to `MST_TOKENS_DIR` (default `/run/mst/tokens`, which a worker image should mount as tmpfs), one file per server label, renews them before they expire, and removes them at the end. `MST_IMAGE` names the image in the worker's `hello`. A shard's failures (no machine, a bundle the channel couldn't stage, a worker it couldn't start, a silent or cancelled worker, a machine it couldn't delete afterwards) are in its result; `runShard` doesn't throw for them. A `machineRunner` machine that couldn't be deleted after a good shard is a `note`, not a failure. A runner that throws from `runShard` anyway fails only its own shard (`Shard N failed: …`): the run's other shards finish and keep what they collected.
 
@@ -783,33 +846,33 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 
 #### `api` options
 
-| Option         | Default                                   |
-| -------------- | ----------------------------------------- |
-| `model`        | "claude-sonnet-4-20250514"                |
-| `maxToolCalls` | 5                                         |
-| `timeout`      | none (no time limit)                      |
-| `temperature`  | 0                                         |
-| `maxTokens`    | not set (provider default)                |
-| `provider`     | inferred from model; otherwise anthropic  |
-| `apiKeyEnvVar` | provider credential or LLM gateway        |
-| `systemPrompt` | not set (no additional instructions)      |
-| `skills`       | "off"                                     |
-| `env`          | inherited environment; no extra variables |
+| Option         | Default                                                                                                                                                              |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`        | models.api for the provider (mst.config.json), else claude-sonnet-4-20250514 (anthropic), gpt-4o (openai), gemini-2.0-flash (google), mistral-large-latest (mistral) |
+| `maxToolCalls` | 5                                                                                                                                                                    |
+| `timeout`      | none (no time limit)                                                                                                                                                 |
+| `temperature`  | 0                                                                                                                                                                    |
+| `maxTokens`    | not set (provider default)                                                                                                                                           |
+| `provider`     | inferred from model; otherwise anthropic                                                                                                                             |
+| `apiKeyEnvVar` | provider credential or LLM gateway                                                                                                                                   |
+| `systemPrompt` | not set (no additional instructions)                                                                                                                                 |
+| `skills`       | "off"                                                                                                                                                                |
+| `env`          | inherited environment; no extra variables                                                                                                                            |
 
 #### `chatgpt` options
 
-| Option             | Default                                                             |
-| ------------------ | ------------------------------------------------------------------- |
-| `model`            | required                                                            |
-| `reasoningEffort`  | app default                                                         |
-| `timeout`          | 300000                                                              |
-| `env`              | inherited environment; no extra variables                           |
-| `plugins`          | no marketplace plugins (Linux only)                                 |
-| `configPath`       | app profile config.toml on the trial machine (OS-specific)          |
-| `requireMcpCalls`  | false                                                               |
-| `correlation`      | "exact_prompt"                                                      |
-| `maxActions`       | macOS: 32; Linux: 24                                                |
-| `computerUseModel` | macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner |
+| Option             | Default                                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `model`            | required                                                                                                          |
+| `reasoningEffort`  | app default                                                                                                       |
+| `timeout`          | 300000                                                                                                            |
+| `env`              | inherited environment; no extra variables                                                                         |
+| `plugins`          | no marketplace plugins (Linux only)                                                                               |
+| `configPath`       | app profile config.toml on the trial machine (OS-specific)                                                        |
+| `requireMcpCalls`  | false                                                                                                             |
+| `correlation`      | "exact_prompt"                                                                                                    |
+| `maxActions`       | macOS: 32; Linux: 24                                                                                              |
+| `computerUseModel` | macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else claude-sonnet-4-6; Linux: no planner |
 
 #### `claude-code` options
 
@@ -825,18 +888,18 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 
 #### `codex-app` options
 
-| Option             | Default                                                             |
-| ------------------ | ------------------------------------------------------------------- |
-| `model`            | required                                                            |
-| `reasoningEffort`  | app default                                                         |
-| `timeout`          | 300000                                                              |
-| `env`              | inherited environment; no extra variables                           |
-| `plugins`          | no marketplace plugins (Linux only)                                 |
-| `configPath`       | app profile config.toml on the trial machine (OS-specific)          |
-| `requireMcpCalls`  | false                                                               |
-| `correlation`      | "exact_prompt"                                                      |
-| `maxActions`       | macOS: 32; Linux: 24                                                |
-| `computerUseModel` | macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner |
+| Option             | Default                                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `model`            | required                                                                                                          |
+| `reasoningEffort`  | app default                                                                                                       |
+| `timeout`          | 300000                                                                                                            |
+| `env`              | inherited environment; no extra variables                                                                         |
+| `plugins`          | no marketplace plugins (Linux only)                                                                               |
+| `configPath`       | app profile config.toml on the trial machine (OS-specific)                                                        |
+| `requireMcpCalls`  | false                                                                                                             |
+| `correlation`      | "exact_prompt"                                                                                                    |
+| `maxActions`       | macOS: 32; Linux: 24                                                                                              |
+| `computerUseModel` | macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else claude-sonnet-4-6; Linux: no planner |
 
 #### `codex-cli` options
 
@@ -854,21 +917,21 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 
 #### `cowork` options
 
-| Option             | Default                                                             |
-| ------------------ | ------------------------------------------------------------------- |
-| `maxActions`       | 24                                                                  |
-| `hitlMaxActions`   | 12                                                                  |
-| `computerUseModel` | macOS: MST_COWORK_CUA_MODEL or claude-sonnet-4-6; Linux: no planner |
-| `dataDir`          | Claude Desktop session directory on the trial machine (OS-specific) |
-| `appVersion`       | installed app version (macOS only)                                  |
-| `pluginRoots`      | not set (caller stages plugin roots on Linux)                       |
-| `mcpDataRoot`      | not set (caller provides a private root on Linux)                   |
-| `mode`             | third-party (MST-managed profile)                                   |
-| `connectors`       | first-party: selected servers read-only                             |
-| `timeout`          | 900000                                                              |
-| `model`            | Cowork default                                                      |
-| `env`              | inherited environment; no extra variables                           |
-| `plugins`          | no marketplace plugins                                              |
+| Option             | Default                                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `maxActions`       | 24                                                                                                                |
+| `hitlMaxActions`   | 12                                                                                                                |
+| `computerUseModel` | macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else claude-sonnet-4-6; Linux: no planner |
+| `dataDir`          | Claude Desktop session directory on the trial machine (OS-specific)                                               |
+| `appVersion`       | installed app version (macOS only)                                                                                |
+| `pluginRoots`      | not set (caller stages plugin roots on Linux)                                                                     |
+| `mcpDataRoot`      | not set (caller provides a private root on Linux)                                                                 |
+| `mode`             | third-party (MST-managed profile)                                                                                 |
+| `connectors`       | first-party: selected servers read-only                                                                           |
+| `timeout`          | 900000                                                                                                            |
+| `model`            | Cowork default                                                                                                    |
+| `env`              | inherited environment; no extra variables                                                                         |
+| `plugins`          | no marketplace plugins                                                                                            |
 
 <!-- clients:end -->
 
@@ -1095,7 +1158,7 @@ Each run of an eval is a directory, in the versioned `mst.run/v1` format:
 ├── calibrations/<judge>/<identity>.json  # how one judge identity agreed with people (mst judges check)
 ├── option-key                      # the key run.json hashes credential-like client options with
 └── runs/<run-id>/
-    ├── run.json                    # what ran: variants, datasets (with content hashes), judges, plugins, runner, phases
+    ├── run.json                    # what ran: variants, datasets (with content hashes), judges, built-in models used, plugins, runner, phases
     ├── transcripts/<variant>/<case-id>/<trial>.json     # what the client did in one trial
     ├── scores/<grader>/<variant>/<case-id>/<trial>.json # one grader's score for one trial
     ├── labels/<judge>/<variant>/<case-id>/<trial>.json  # a person's label for a judge's verdict (mst label)

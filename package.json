@@ -124,6 +124,7 @@
     "debug": "^4.4.3",
     "import-meta-resolve": "^4.2.0",
     "ndjson": "^2.0.0",
+    "npm-packlist": "^8.0.2",
     "oauth4webapi": "^3.0.0",
     "open": "^10.1.0",
     "smol-toml": "^1.4.2",

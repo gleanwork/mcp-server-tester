@@ -118,7 +118,8 @@ ENV DISPLAY=:99 \
   MST_JUDGE_SANDBOX=container \
   LANG=C.UTF-8
 
-LABEL org.opencontainers.image.title="MST Cowork Linux desktop" \
+LABEL io.glean.mst.runtime-preparation="1" \
+  org.opencontainers.image.title="MST Cowork Linux desktop" \
   org.opencontainers.image.source="https://github.com/gleanwork/mcp-server-tester"
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/mst/bin/desktop-session"]

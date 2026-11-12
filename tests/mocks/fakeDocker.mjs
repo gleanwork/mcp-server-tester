@@ -59,6 +59,11 @@ if (command === 'image') {
   if (!fs.existsSync(containerRoot(name))) fail(`No such container: ${name}`);
   process.stdout.write(`${outOfMemory(name)}\n`);
 } else if (command === 'build') {
+  // Let packaging tests inspect the actual tarballs before setup cleans up.
+  if (process.env.FAKE_DOCKER_BUILD_CAPTURE)
+    fs.cpSync(rest.at(-1), process.env.FAKE_DOCKER_BUILD_CAPTURE, {
+      recursive: true,
+    });
   if (process.env.FAKE_DOCKER_BUILD_ERROR) {
     process.stderr.write(
       `#12 [5/9] RUN npm install\n${process.env.FAKE_DOCKER_BUILD_ERROR}\n`

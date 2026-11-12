@@ -97,7 +97,8 @@ ENV DISPLAY=:99 \
   MST_PLUGIN_DIR=/opt/mst/plugins \
   LANG=C.UTF-8
 
-LABEL org.opencontainers.image.title="MST ChatGPT Linux desktop" \
+LABEL io.glean.mst.runtime-preparation="1" \
+  org.opencontainers.image.title="MST ChatGPT Linux desktop" \
   org.opencontainers.image.source="https://github.com/gleanwork/mcp-server-tester"
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/mst/bin/desktop-session"]
