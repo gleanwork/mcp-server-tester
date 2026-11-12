@@ -432,7 +432,9 @@ function desktopAdapter(
       const trace = appSession.rolloutTraceRoot
         ? await copyChatgptRolloutTrace(
             appSession.rolloutTraceRoot,
-            result.success && !executionTrusted ? undefined : session?.id
+            result.success && !executionTrusted ? undefined : session?.id,
+            // As the transcript is redacted.
+            { secrets }
           )
         : undefined;
       const caseResult: ClientRunResult = {

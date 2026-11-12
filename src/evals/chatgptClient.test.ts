@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { collectClientBatch } from './desktopBatch.js';
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type * as OsModule from 'node:os';
 import { join } from 'node:path';
@@ -212,6 +219,55 @@ describe('ChatGPT and Codex app sessions', () => {
         if (artifacts)
           await rm(artifacts.dir, { recursive: true, force: true });
       }
+    }
+  });
+
+  it("redacts the batch's credentials in the kept trace, as in the transcript", async () => {
+    lifecycle.traceRoot = join(home.value, 'native-traces');
+    const dir = join(lifecycle.traceRoot, 'native-bundle');
+    await mkdir(join(dir, 'payloads'), { recursive: true });
+    await writeFile(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ schema_version: 1, root_thread_id: 'session' })
+    );
+    await writeFile(
+      join(dir, 'payloads', '1.json'),
+      '{"Authorization":"Bearer fixture-secret"}'
+    );
+    vi.mocked(runChatgptTurn).mockResolvedValue({
+      success: true,
+      response: 'answer',
+      toolCalls: [],
+      clientMetadata: metadata,
+    });
+    const session = await CHATGPT_CLIENT.open!(
+      { config, input: requests()[0]!.input },
+      context
+    );
+    let artifacts: ClientArtifacts | undefined;
+    try {
+      ({
+        result: { artifacts },
+      } = await session.run({
+        caseId: 'trace',
+        trial: 0,
+        input: { prompt: 'query' },
+      }));
+      expect(
+        await readFile(
+          join(
+            artifacts!.dir,
+            'codex-rollout-trace',
+            'native-bundle',
+            'payloads',
+            '1.json'
+          ),
+          'utf8'
+        )
+      ).toBe('{"Authorization":"Bearer [REDACTED]"}');
+    } finally {
+      await session.close();
+      if (artifacts) await rm(artifacts.dir, { recursive: true, force: true });
     }
   });
 

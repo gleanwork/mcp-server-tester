@@ -31,7 +31,10 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { ARTIFACT_LIMITS } from './allArtifacts.js';
-import { redactClientSecretBytes } from './clientSecrets.js';
+import {
+  redactClientSecretBytes,
+  redactClientSecrets,
+} from './clientSecrets.js';
 
 /** The directory the copy keeps the trace's bundles in. */
 export const ROLLOUT_TRACE_DIR = 'codex-rollout-trace';
@@ -57,6 +60,32 @@ export class RolloutTraceError extends Error {
 
 function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
+}
+
+/** Whether `error` says a path doesn't exist (`ENOENT`). */
+export function isMissingPath(error: unknown): boolean {
+  return errorCode(error) === 'ENOENT';
+}
+
+/**
+ * Why a client didn't keep a trace, for `telemetry.rolloutTrace.notKept`,
+ * from what {@link copyRolloutTrace} (or a client's own look at the trace)
+ * threw: a limit, an entry MST doesn't copy, or a failure to read it, with
+ * the error. Every value in `secrets` is redacted.
+ */
+export function rolloutTraceNotKept(
+  error: unknown,
+  secrets: readonly string[] = []
+): string {
+  const reason = redactClientSecrets(
+    error instanceof Error ? error.message : String(error),
+    secrets
+  );
+  if (!(error instanceof RolloutTraceError))
+    return `MST couldn't read the rollout trace: ${reason}`;
+  return error.kind === 'limit'
+    ? `The rollout trace is larger than a trial's artifacts may be: ${reason}.`
+    : `The rollout trace holds an entry MST doesn't copy: ${reason}.`;
 }
 
 function checkOwner(stats: BigIntStats): void {
@@ -128,7 +157,10 @@ async function labelled<T>(name: string, fn: () => Promise<T>): Promise<T> {
  * of at most `maxBytes`. Never opens a symbolic link, and doesn't block on a
  * pipe. Fails when the file changes while it is read.
  */
-async function readTraceFile(file: string, maxBytes: number): Promise<Buffer> {
+export async function readTraceFile(
+  file: string,
+  maxBytes: number
+): Promise<Buffer> {
   let handle;
   try {
     handle = await open(
