@@ -71,7 +71,7 @@ A connector a user adds inside the client, such as one from Cowork's connector d
 _Avoid_: native connector, built-in connector
 
 **First-party mode**:
-A Cowork option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). Local macOS only, one trial at a time. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
+A Cowork option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). It runs locally on macOS or in a plugin-prepared Linux runtime with attached macOS source control, one trial at a time on one shard with a dedicated account. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
 _Avoid_: claude-ai mode, account mode
 
 **Variant**:

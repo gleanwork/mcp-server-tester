@@ -1,6 +1,9 @@
 import importlib.util
+import io
+import json
 from pathlib import Path
 import os
+import sys
 import subprocess
 import time
 import unittest
@@ -46,8 +49,9 @@ class Desktop:
             if self.stop_lingers <= 0:
                 self.stops = []
             self.stop_lingers -= 1
+        test = names if callable(names) else names.__contains__
         return [node for node in self.starts + self.radios + self.tabs + self.approvals + self.stops
-                if node.name in names and node.role in roles
+                if test(node.name) and node.role in roles
                 # The empty composer disables Start task.
                 and not (node.name == "Start task" and require_enabled and not self.prompt)
                 and not (require_showing and node.name in self.hidden)]
@@ -139,6 +143,36 @@ def real_desktop(api):
 
 
 class AtspiDesktopTests(unittest.TestCase):
+    def test_probe_accepts_the_visible_disabled_start_in_the_claude_code_ui_without_actions(self):
+        start = AtspiNode("Start task", states=("VISIBLE", "SHOWING"))
+        desktop = real_desktop(FakeAtspi(
+            AtspiNode("Claude", "radio button"), AtspiNode("Code", "radio button"), start))
+        driver = module.Driver(desktop, 1000, 4)
+        with patch.object(driver, "action", side_effect=AssertionError("readiness must not act")):
+            receipt = driver.probe()
+        self.assertEqual((receipt["status"], receipt["action_count"]), ("ready", 0))
+        self.assertEqual(start.scrolled, [])
+
+    def test_probe_rejects_hidden_starts_and_unrelated_disabled_controls_without_actions(self):
+        for control in (
+                AtspiNode("Start task", states=("VISIBLE",)),
+                AtspiNode("Start task", states=("SHOWING",)),
+                AtspiNode("Start task", states=("VISIBLE", "ENABLED", "SENSITIVE")),
+                AtspiNode("Start task", "label", states=("VISIBLE", "SHOWING")),
+                AtspiNode("Start task", "radio button", states=("VISIBLE", "SHOWING")),
+                AtspiNode("Cowork", states=("VISIBLE", "SHOWING")),
+                AtspiNode("Cowork", "radio button", states=("VISIBLE", "SHOWING")),
+        ):
+            with self.subTest(name=control.name, role=control.role, states=control.states):
+                desktop = real_desktop(FakeAtspi(
+                    AtspiNode("Claude", "radio button"), AtspiNode("Code", "radio button"), control))
+                driver = module.Driver(desktop, 1000, 4)
+                with patch.object(driver, "action", side_effect=AssertionError("readiness must not act")):
+                    with self.assertRaisesRegex(module.DriverFailure, "cowork_not_ready"):
+                        driver.probe()
+                self.assertEqual(driver.actions, 0)
+                self.assertEqual(control.scrolled, [])
+
     def test_a_control_below_the_window_is_found_only_when_asked_for(self):
         # VISIBLE but not SHOWING: laid out, but scrolled out of the window.
         below = AtspiNode("Start task", states=("VISIBLE", "ENABLED", "SENSITIVE"))
@@ -190,7 +224,115 @@ class AtspiDesktopTests(unittest.TestCase):
             desktop.reveal(node)
 
 
+class LinuxCliTests(unittest.TestCase):
+    def invoke(self, mode, payload, env=None, desktop=None):
+        output = io.StringIO()
+        with patch.dict(os.environ, env or {}, clear=True), \
+                patch.object(sys, "argv", ["cowork_linux.py", "--mode", mode, "--timeout-ms", "1000"]), \
+                patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), \
+                patch.object(sys, "stdout", output), \
+                patch.object(module, "Desktop", return_value=desktop) as connect, \
+                patch.object(module.subprocess, "run", side_effect=AssertionError("no desktop capture")) as run:
+            status = module.main()
+        return status, json.loads(output.getvalue()), connect, run
+
+    def test_account_payload_and_each_runtime_marker_fail_before_any_desktop_access(self):
+        for mode in ("probe", "reset", "submit", "hitl", "answer", "diagnose"):
+            for env in ({}, {"MST_COWORK_ACCOUNT_OWNER": "owner"},
+                        {"MST_COWORK_ACCOUNT_MARKER": "/private/marker"},
+                        {"MST_COWORK_ACCOUNT_PROFILE": "/private/profile"}):
+                with self.subTest(mode=mode, env=env):
+                    payload = {"prompt": "private query", "dir": "/private/artifacts"}
+                    if not env:
+                        payload["firstParty"] = True
+                    status, receipt, connect, run = self.invoke(mode, payload, env)
+                    self.assertEqual(status, 1)
+                    self.assertEqual(receipt, {"status": "failed", "action_count": 0,
+                                              "duration_ms": 0, "error": "wrong_driver_mode"})
+                    connect.assert_not_called()
+                    run.assert_not_called()
+
+    def test_ordinary_managed_calls_keep_the_json_receipt_contract(self):
+        for mode, payload, expected, actions in (
+                ("probe", {}, "ready", 0),
+                ("reset", {}, "ready", 1),
+                ("submit", {"firstParty": False, "prompt": "private query"}, "submitted", 2),
+                ("hitl", {"approveWriteTools": True}, "hitl_checked", 0)):
+            with self.subTest(mode=mode):
+                desktop = Desktop()
+                status, receipt, connect, _ = self.invoke(mode, payload, desktop=desktop)
+                self.assertEqual(status, 0)
+                self.assertEqual(set(receipt), {"status", "action_count", "duration_ms"})
+                self.assertEqual((receipt["status"], receipt["action_count"]), (expected, actions))
+                self.assertGreaterEqual(receipt["duration_ms"], 0)
+                connect.assert_called_once_with()
+                self.assertNotIn("private query", json.dumps(receipt))
+
+    def test_runtime_script_runs_alone_without_sibling_python_modules(self):
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "cowork_linux.py"
+            shutil.copyfile(Path(__file__).with_name("cowork_linux.py"), script)
+            result = subprocess.run(
+                [sys.executable, "-I", str(script), "--mode", "probe", "--timeout-ms", "1000"],
+                input='{"firstParty":true}', text=True, capture_output=True, env={})
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads(result.stdout), {"status": "failed", "action_count": 0,
+                                                    "duration_ms": 0, "error": "wrong_driver_mode"})
+        self.assertEqual(result.stderr, "")
+
+
 class LinuxDriverTests(unittest.TestCase):
+    def test_selected_hosted_cowork_radio_never_allows_prompt_insertion(self):
+        for prompt in ("query", "x" * (module.DEEP_LINK_PROMPT_CHARS + 1)):
+            desktop = Desktop()
+            desktop.starts = []
+            with self.assertRaisesRegex(module.DriverFailure, "cowork_not_ready"):
+                module.Driver(desktop, 100, 4).probe()
+            with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
+                module.Driver(desktop, 10, 4).submit(prompt)
+            self.assertIsNone(desktop.prompt)
+            self.assertEqual(desktop.actions, [])
+            self.assertFalse(hasattr(desktop, "links"))
+
+    def test_legacy_mode_selection_waits_for_start_task_before_the_query_link(self):
+        class LegacyDesktop(Desktop):
+            def activate(self, node):
+                super().activate(node)
+                if node.name == "Cowork":
+                    self.radio_selected = True
+                    self.starts = [Node("Start task")]
+        for radio in (True, False):
+            desktop = LegacyDesktop()
+            desktop.starts = []
+            desktop.radio_selected = False
+            if not radio:
+                desktop.radios = []
+            self.assertEqual(module.Driver(desktop, 1000, 4).probe()["status"], "ready")
+            self.assertEqual(desktop.actions, [])
+            result = module.Driver(desktop, 1000, 4).submit("unchanged")
+            self.assertEqual(result["status"], "submitted")
+            self.assertEqual(desktop.actions, ["Cowork", "Start task"])
+            self.assertEqual(desktop.links, ["unchanged"])
+
+    def test_first_party_payload_is_rejected_before_opening_the_desktop(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("cowork_linux.py")),
+             "--mode", "submit", "--timeout-ms", "1000"],
+            input='{"firstParty":true,"prompt":"private query"}', text=True, capture_output=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"error": "wrong_driver_mode"', result.stdout)
+        self.assertIn('"action_count": 0', result.stdout)
+        self.assertNotIn("private query", result.stdout + result.stderr)
+
+    def test_managed_model_cannot_use_the_account_picker(self):
+        desktop = Desktop()
+        with self.assertRaisesRegex(module.DriverFailure, "managed_model_requires_settings"):
+            module.Driver(desktop, 1000, 4).submit("query", "claude-opus-4-6")
+        self.assertIsNone(desktop.prompt)
+        self.assertEqual(desktop.actions, [])
+
     def test_url_opener_is_a_prepared_environment_boundary(self):
         prompt = "  Find 中文 & \"quoted\" text\nwith a new line  "
         desktop = object.__new__(module.Desktop)
@@ -649,9 +791,9 @@ class LinuxDiagnoseTests(unittest.TestCase):
                 receipt = module.diagnose(directory, 10)
             self.assertEqual(run.call_args.args[0], ["xwd", "-root", "-silent"])
             self.assertEqual((receipt["status"], receipt["action_count"], receipt["files"]), ("diagnosed", 0, ["screen.png"]))
-            self.assertEqual(png_pixels(open(os.path.join(directory, "screen.png"), "rb").read()), [[255, 255, 255]])
+            self.assertEqual(png_pixels((Path(directory) / "screen.png").read_bytes()), [[255, 255, 255]])
             # Without an accessibility bus it says why, without the error's text.
-            self.assertEqual(open(os.path.join(directory, "accessibility.error")).read(), "RuntimeError\n")
+            self.assertEqual((Path(directory) / "accessibility.error").read_text(), "RuntimeError\n")
 
     def test_diagnose_needs_an_existing_absolute_directory(self):
         for directory in (None, "relative", "/nonexistent/mst-diagnose"):

@@ -8,6 +8,22 @@
  * @packageDocumentation
  */
 
+export { createCoworkAccountControl } from '../evals/cowork/cloudControl.js';
+export type {
+  CoworkAccountControl,
+  CoworkAccountControlOptions,
+} from '../evals/cowork/cloudControl.js';
+export {
+  COWORK_CLOUD_CONTROL_PROTOCOL,
+  COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES,
+} from '../evals/cowork/cloudControlProtocol.js';
+export type {
+  CoworkAccountIdentity,
+  CoworkCloudControlRequest,
+  CoworkCloudControlResponse,
+  CoworkCloudPreparation,
+  CoworkCloudVerification,
+} from '../evals/cowork/cloudControlProtocol.js';
 export { auditCoworkNativeRun } from '../evals/auditCoworkNativeRun.js';
 export type {
   AuditCoworkNativeRunOptions,

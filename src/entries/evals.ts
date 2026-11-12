@@ -129,7 +129,12 @@ export type {
   DockerRuntimeContext,
   DockerRuntimeCleanup,
 } from '../evals/runners/docker.js';
-export type { ShardTokens, TrialKey } from '../evals/runners/protocol.js';
+export { readShardBundle } from '../evals/runners/protocol.js';
+export type {
+  ShardBundle,
+  ShardTokens,
+  TrialKey,
+} from '../evals/runners/protocol.js';
 export { resolveConfigExtends } from '../evals/configExtends.js';
 export type { ValidateEvalConfigOptions } from '../evals/configValidation.js';
 export {

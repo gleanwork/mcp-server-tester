@@ -743,10 +743,11 @@ export function assertClientSupports(
       );
     if (
       options.runner &&
-      !['local', 'mst/runner/local'].includes(options.runner)
+      !['local', 'mst/runner/local'].includes(options.runner) &&
+      options.os !== 'linux'
     )
       throw new Error(
-        `${options.context}: first-party mode currently supports only the local runner with a signed-in account.`
+        `${options.context}: first-party mode requires the local runner on macOS, or a Linux runner with plugin-staged account preflight and source cloud control.`
       );
   }
   const showsToolMetadata =
