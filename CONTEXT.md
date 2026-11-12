@@ -103,7 +103,7 @@ What a client did in one trial, in order: tool calls (MCP or the client's own), 
 _Avoid_: trace, trajectory, log, response
 
 **Client artifacts**:
-A bounded copy of the files a client kept for one trial (such as Cowork's session folder), taken from the paths the client names as evidence, for judges to read. A run that keeps full transcripts stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
+A bounded copy of the files a client kept for one trial (such as Cowork's session folder, or the Codex CLI's rollout trace), taken from the paths the client names as evidence, for judges to read. A run that keeps full transcripts stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
 _Avoid_: attachments, session dump
 
 **Failure diagnosis**:

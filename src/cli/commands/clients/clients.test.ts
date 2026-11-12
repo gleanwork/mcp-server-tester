@@ -248,6 +248,7 @@ describe('mst clients', () => {
         'apiKeyEnvVar',
         'authCacheDirectories',
         'env',
+        'rolloutTrace',
       ],
       cowork: [
         'mode',

@@ -62,6 +62,7 @@ MST does not read or copy credential files, import an existing credential store,
 | `authCacheDirectories` | Opt-in map of auth-directory names under `HOME` to dedicated private persistent directories; see above.                                                                                                                      |
 | `apiKeyEnvVar`         | Read the model key from this variable only.                                                                                                                                                                                  |
 | `env`                  | Extra environment variables for the Codex process.                                                                                                                                                                           |
+| `rolloutTrace`         | Have Codex write its rollout trace: each model request exactly as Codex sent it, each response, and the tool calls. Default `true`; `false` keeps none. See [The rollout trace](#the-rollout-trace).                         |
 
 ## What each trial runs with
 
@@ -82,3 +83,32 @@ The transcript (`evidence: structured`) is Codex's own record:
 - **Its own telemetry.** With [`telemetry.host`](./telemetry.md#the-clients-own-telemetry), MST points Codex's OpenTelemetry exporter (`[otel]`) at its receiver, and keeps the trial's records (`codex.api_request`, `codex.tool_result`, `codex.sse_event`, ..., matched by `conversation.id`).
 
 A trial that times out, or whose Codex process fails, records what Codex reported until then, with the error.
+
+## The rollout trace
+
+The transcript has each model response, but not the request Codex sent for it. By default, MST sets `CODEX_ROLLOUT_TRACE_ROOT` for each trial, and Codex (0.124 or later) writes its rollout trace there: a local diagnostic record of the session, which Codex doesn't upload. It has each model request exactly as Codex sent it (instructions, input items, tool definitions, reasoning settings), each response with its usage and response ID, and the tool calls with their results, in order.
+
+```json
+{
+  "name": "codex-cli-traced",
+  "client": "codex-cli",
+  "redactStoredResponses": false,
+  "datasets": ["./cases.json"]
+}
+```
+
+The trial reports the trace as its [client artifacts](./evaluation-framework.md#client-artifacts), so judges read it with the trial (`trial.artifactsDir`). A run that keeps full transcripts (`"redactStoredResponses": false`) keeps it at `artifacts/<variant>/<case-id>/<trial>/codex-rollout-trace/`; otherwise it is removed once grading is done. Codex writes a bundle for the thread, `trace-<trace ID>-<thread ID>/`:
+
+- `manifest.json`: the trace's ID and the thread's.
+- `trace.jsonl`: Codex's events, in order. An `inference_started` event names the request's file (`request_payload.path`); `inference_completed`, the response's (`response_payload.path`).
+- `payloads/`: the requests, responses, tool calls, results and session events those events name.
+
+`codex debug trace-reduce <bundle>` replays a bundle into `state.json`: what the model saw in each request, and what ran.
+
+Codex's shell can write where the trace is, so the trial keeps a copy MST makes as soon as Codex is done, and removes Codex's directory with the trial's home. The copy has only directories and regular files that MST's user owns: never a symbolic link, and never a hard link, which could point at the trial's `config.toml`. It opens each directory and file without following a link at its name, and after it lists a directory or reads a file in one, it checks that the directory's path still leads to the directory it opened, so a directory swapped for a link while it copies keeps the trace from being kept. It reads through paths, so a process that swaps a directory for a link and back between two of those checks can still have it copy a file elsewhere that MST's user owns. Codex's default `read-only` sandbox can't write the trace at all. In every file, MST replaces the credentials it knows for the trial (the model key, the servers' tokens and credential headers, credential-named environment variables) with `[REDACTED]`, as written and as a JSON string escapes them, as it does in the transcript. A value MST doesn't know, such as a secret a server returns, stays as Codex wrote it.
+
+The trial's telemetry has `rolloutTrace`: how many bundles, files and bytes it kept (as written, after redaction). A trace that is larger than a trial's artifacts may be (16 MB per file, 64 MB in all, 4,096 entries), that has a link, a file another user owns or a directory that changed while MST copied it, that MST couldn't read, or that Codex didn't write, isn't kept, and `rolloutTrace.notKept` says why. When MST couldn't list the trace, `rolloutTrace` has no `bundles`. The trial is graded either way: a missing trace doesn't make it an infrastructure failure.
+
+The trace is on by default because it is the only record of what the model got in each request. Codex cuts a tool output that is over the model's budget down to its start and end, and only the trace shows what the model actually read. A trial that didn't keep the trace can't get it back.
+
+The trace holds everything the model saw, including what the servers returned, so keep the runs that store it where that data may go. To keep none, set `"clientOptions": { "rolloutTrace": false }`.
