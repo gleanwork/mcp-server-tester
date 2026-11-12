@@ -265,11 +265,15 @@ were restored. Clean up worker credentials independently even if source
 restoration fails. Recovery runs on the designated macOS source host, using its
 journal and Chrome sign-in, not on the worker.
 
-`--detach` refuses any effective first-party Cowork configuration, including
-variants and plugin shared configs, before result stores, secrets, dataset
-validation/loading or coordinator creation. Omitting account runner
-configuration does not bypass this guard. Do not use detach or multiple shards
-for the Linux account path.
+`--detach` refuses effective first-party Cowork clients in the eval config,
+variants and plugin shared configs before opening result stores, reading
+secrets, validating/loading datasets or creating a coordinator. Case-level
+client and option overrides remain supported. MST checks their effective
+settings in every variant immediately after loading the datasets, and refuses
+first-party Cowork cases before opening result stores, reading or forwarding
+secrets, or creating a coordinator. Both checks apply to run, resume and grade
+detach. Omitting account runner configuration does not bypass either check.
+Do not use detach or multiple shards for the Linux account path.
 
 #### Configure remote connectors
 

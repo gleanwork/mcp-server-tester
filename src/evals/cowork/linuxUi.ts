@@ -19,7 +19,8 @@ export interface LinuxUi {
   /** One clipboard paste into the specified entry. The driver verifies the result. */
   paste(node: LinuxUiNode, text: string): Promise<void>;
   openCowork(): Promise<void>;
-  close(): void;
+  /** Stop input, then allow at most one extra second solely for modifier cleanup. */
+  close(): void | Promise<void>;
 }
 
 export class LinuxUiError extends Error {

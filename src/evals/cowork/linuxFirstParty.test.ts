@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as FsPromises from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   coworkLinuxFirstParty,
   coworkLinux as coworkLinuxThirdParty,
@@ -133,7 +136,9 @@ beforeEach(() => {
                 ? 'submitted'
                 : mode === 'hitl' || mode === 'answer'
                   ? 'hitl_checked'
-                  : 'ready',
+                  : mode === 'diagnose'
+                    ? 'diagnosed'
+                    : 'ready',
             action_count: mode === 'probe' ? 0 : 1,
             duration_ms: 1,
           })
@@ -258,6 +263,35 @@ describe('plugin-staged first-party Linux desktop', () => {
     });
     expect(runtime.exec.mock.calls[0]![1][0]).toMatch(/\/cowork_linux\.py$/);
     expect(runtime.payloads).toEqual([{ prompt: 'query' }]);
+  });
+
+  it('captures failure diagnosis with the first-party Node helper and system state', async () => {
+    const directory = await mkdtemp(
+      join(tmpdir(), 'linux-first-party-diagnose-')
+    );
+    const dir = join(directory, 'diagnosis');
+    const dataDir = join(directory, 'Claude', 'local-agent-mode-sessions');
+    try {
+      await mkdir(dir);
+      await mkdir(dataDir, { recursive: true });
+      await coworkLinuxFirstParty.diagnose!({ dir, dataDir, env });
+
+      expect(runtime.exec).toHaveBeenCalledOnce();
+      const [command, args, options] = runtime.exec.mock.calls[0]!;
+      expect(command).toBe(process.execPath);
+      expect(args[0]).toMatch(/\/cowork\/linuxFirstParty\.js$/);
+      expect(args[args.indexOf('--mode') + 1]).toBe('diagnose');
+      expect(args[args.indexOf('--max-actions') + 1]).toBe('1');
+      expect(runtime.payloads).toEqual([{ dir }]);
+      expect(options.env.MST_COWORK_ACCOUNT_PROFILE).toBe(profile);
+      expect(options.env).not.toHaveProperty('MST_COWORK_CLOUD_CONTROL_SOCKET');
+      const system = JSON.parse(
+        await readFile(join(dir, 'system.json'), 'utf8')
+      );
+      expect(system.memory.totalBytes).toBeGreaterThan(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('requires source-owned recovery instead of inheriting managed recovery', async () => {

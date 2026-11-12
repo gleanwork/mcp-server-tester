@@ -321,6 +321,8 @@ export async function connectLinuxUi(
   let known = new Map<string, Reference>();
   let clipboard: ChildProcess | undefined;
   let closed = false;
+  let modifierCleanup: (() => Promise<void>) | undefined;
+  let closing: Promise<void> | undefined;
 
   function check(): void {
     if (closed) throw new LinuxUiError('accessibility_bus_closed');
@@ -341,6 +343,7 @@ export async function connectLinuxUi(
     type: number,
     cleanup = false
   ): Promise<void> {
+    if (!cleanup) check();
     await bus.call(
       {
         destination: REGISTRY,
@@ -523,6 +526,13 @@ export async function connectLinuxUi(
       if (accepted !== true) throw new LinuxUiError('reveal_failed');
     },
     async paste(node, text) {
+      let unlock: Promise<void> | undefined;
+      function releaseModifiers(): Promise<void> {
+        // Shutdown and paste's finally share exactly one bounded unlock,
+        // including when the lock or paste acknowledgement never arrives.
+        unlock ??= keyboard(1 << 2, 6, true); // UNLOCKMODIFIERS, Control
+        return unlock;
+      }
       const ref = reference(node);
       const child = await startClipboard(text);
       try {
@@ -534,11 +544,16 @@ export async function connectLinuxUi(
         if (focused !== true) throw new LinuxUiError('composer_not_focused');
         if (child.exitCode !== null || child.signalCode !== null)
           throw new LinuxUiError('clipboard_unavailable');
+        modifierCleanup = releaseModifiers;
         try {
           await keyboard(1 << 2, 5); // LOCKMODIFIERS, Control
           await keyboard(0x76, 3); // SYM, v — exactly one paste
         } finally {
-          await keyboard(1 << 2, 6, true); // UNLOCKMODIFIERS, even after an uncertain lock
+          try {
+            await releaseModifiers();
+          } finally {
+            modifierCleanup = undefined;
+          }
         }
         // Keep selection ownership until close: the application may consume it
         // after the key-event reply. The driver verifies the resulting text.
@@ -573,10 +588,20 @@ export async function connectLinuxUi(
       });
     },
     close() {
+      if (closed) return closing;
       closed = true;
-      bus.close();
-      for (const child of processes) stop(child);
-      known.clear();
+      function finish(): void {
+        bus.close();
+        for (const child of processes) stop(child);
+        known.clear();
+      }
+      if (modifierCleanup) {
+        // Only modifier release may outlive the action deadline, for at most
+        // its existing one-second call budget. Never wait for or replay input.
+        closing = modifierCleanup().then(finish, finish);
+        return closing;
+      }
+      return finish();
     },
   };
 }

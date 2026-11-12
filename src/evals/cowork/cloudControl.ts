@@ -285,6 +285,12 @@ export async function createCoworkAccountControl(
           10
         )) {
           if (!/^cse_[0-9A-Za-z_]+$/.test(session.id)) continue;
+          const activity = Date.parse(
+            session.last_event_at ?? session.created_at ?? ''
+          );
+          // Only provably old history is unrelated. Recent or undated
+          // sessions still require a complete read before a new submission.
+          if (Number.isFinite(activity) && activity < since - 5_000) continue;
           if (
             cloudInitialMessage(await fetchCloudEvents(port, session.id)) !==
             undefined

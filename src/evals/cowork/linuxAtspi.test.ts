@@ -77,6 +77,7 @@ let uis: LinuxUi[];
 let accessibilityAddress: string;
 let failCall: ((message: Message) => boolean) | undefined;
 let hangCall: ((message: Message) => boolean) | undefined;
+let heldKeyboardReplies: Map<number, (error: unknown) => void>;
 let override:
   | ((message: Message) => { value: unknown } | undefined)
   | undefined;
@@ -162,6 +163,7 @@ beforeEach(() => {
   accessibilityAddress = 'unix:abstract=atspi-test';
   failCall = undefined;
   hangCall = undefined;
+  heldKeyboardReplies = new Map();
   override = undefined;
   delayReply = false;
   activeCalls = 0;
@@ -181,7 +183,11 @@ beforeEach(() => {
         callback: (error: unknown, value?: unknown) => void
       ) => {
         calls.push(message);
-        if (hangCall?.(message)) return;
+        if (hangCall?.(message)) {
+          if (message.member === 'GenerateKeyboardEvent')
+            heldKeyboardReplies.set(Number(message.body?.[2]), callback);
+          return;
+        }
         activeCalls++;
         maxActiveCalls = Math.max(maxActiveCalls, activeCalls);
         const respond = () => {
@@ -212,8 +218,8 @@ beforeEach(() => {
     }
   );
 });
-afterEach(() => {
-  for (const ui of uis) ui.close();
+afterEach(async () => {
+  for (const ui of uis) await ui.close();
   vi.useRealTimers();
 });
 
@@ -235,7 +241,7 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
     );
     expect(sockets[0]!.destroy).toHaveBeenCalledOnce();
     expect(sockets[1]!.destroy).not.toHaveBeenCalled();
-    ui.close();
+    await ui.close();
     expect(sockets[1]!.destroy).toHaveBeenCalledOnce();
   });
 
@@ -445,7 +451,7 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
     );
     await vi.advanceTimersByTimeAsync(100);
     await assertion;
-    ui.close();
+    await ui.close();
     expect(
       sockets.every((socket) => socket.destroy.mock.calls.length > 0)
     ).toBe(true);
@@ -476,7 +482,7 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
     const closed = expect(other.snapshot()).rejects.toThrow(
       'accessibility_bus_closed'
     );
-    other.close();
+    await other.close();
     await closed;
   });
 });
@@ -588,7 +594,7 @@ describe('real dbus-native wire ABI', () => {
         received.find((message) => message.member === 'DoAction')
       ).toMatchObject({ signature: 'i', body: [0] });
     } finally {
-      ui?.close();
+      await ui?.close();
       for (const socket of peers) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await rm(directory, { recursive: true, force: true });
@@ -626,7 +632,7 @@ describe('clipboard and URL process seam', () => {
       { signature: 'isu', body: [4, '', 6] },
     ]);
     expect(children[0]!.kill).not.toHaveBeenCalled();
-    ui.close();
+    await ui.close();
     expect(children[0]!.kill).toHaveBeenCalledWith('SIGKILL');
   });
 
@@ -662,6 +668,51 @@ describe('clipboard and URL process seam', () => {
     await assertion;
     expect(keyboardCalls().map((call) => call.body?.[2])).toEqual([5, 6]);
     expect(children[0]!.kill).toHaveBeenCalledOnce();
+  });
+
+  it('shares one unlock with shutdown and never pastes after a late pre-deadline lock reply', async () => {
+    const ui = await connect();
+    const target = await entry(ui);
+    hangCall = (message) => message.member === 'GenerateKeyboardEvent';
+    const assertion = expect(ui.paste(target, 'hello')).rejects.toThrow(
+      'accessibility_bus_closed'
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(keyboardCalls().map((call) => call.body?.[2])).toEqual([5]);
+    const closing = ui.close();
+    expect(ui.close()).toBe(closing);
+    expect(keyboardCalls().map((call) => call.body?.[2])).toEqual([5, 6]);
+    expect(sockets[1]!.destroy).not.toHaveBeenCalled();
+    heldKeyboardReplies.get(5)!(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(keyboardCalls().map((call) => call.body?.[2])).toEqual([5, 6]);
+    heldKeyboardReplies.get(6)!(null);
+    await closing;
+    await assertion;
+    expect(sockets[1]!.destroy).toHaveBeenCalledOnce();
+  });
+
+  it('does not restart the one-second budget when shutdown joins an existing unlock', async () => {
+    const ui = await connect();
+    const target = await entry(ui);
+    failCall = (message) =>
+      message.member === 'GenerateKeyboardEvent' && message.body?.[2] === 5;
+    hangCall = (message) =>
+      message.member === 'GenerateKeyboardEvent' && message.body?.[2] === 6;
+    const assertion = expect(ui.paste(target, 'hello')).rejects.toThrow(
+      'deadline_exceeded'
+    );
+    await vi.advanceTimersByTimeAsync(500);
+    expect(keyboardCalls().map((call) => call.body?.[2])).toEqual([5, 6]);
+    await vi.advanceTimersByTimeAsync(250);
+    const closing = ui.close();
+    await vi.advanceTimersByTimeAsync(749);
+    expect(sockets[1]!.destroy).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await closing;
+    await assertion;
+    expect(sockets[1]!.destroy).toHaveBeenCalledOnce();
+    expect(keyboardCalls().map((call) => call.body?.[2])).toEqual([5, 6]);
   });
 
   it('does not send keys when focus fails', async () => {

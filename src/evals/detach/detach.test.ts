@@ -740,6 +740,197 @@ describe('--detach', () => {
     }
   );
 
+  describe.each([
+    {
+      name: 'a case selecting first-party Cowork',
+      config: {},
+      evalCase: {
+        client: 'cowork',
+        clientOptions: { mode: 'first-party' },
+      },
+    },
+    {
+      name: 'a case selecting the fully qualified built-in client',
+      config: {},
+      evalCase: {
+        client: 'mst/client/cowork',
+        clientOptions: { mode: 'first-party' },
+      },
+    },
+    {
+      name: 'case options replacing the variant mode',
+      config: {
+        client: 'cowork',
+        clientOptions: { mode: 'third-party' },
+      },
+      evalCase: { clientOptions: { mode: 'first-party' } },
+    },
+    {
+      name: 'case options inheriting a later variant client',
+      config: {
+        variants: [
+          { name: 'api' },
+          {
+            name: 'desktop',
+            client: 'cowork',
+            clientOptions: { mode: 'third-party' },
+          },
+        ],
+      },
+      evalCase: { clientOptions: { mode: 'first-party' } },
+    },
+    {
+      name: 'case options replacing a plugin shared mode',
+      config: {
+        client: undefined,
+        extends: ['account/config/third-party'],
+      },
+      evalCase: { clientOptions: { mode: 'first-party' } },
+    },
+  ])('$name', ({ config, evalCase }) => {
+    it.each(['run', 'resume', 'grade'] as const)(
+      'refuses %s immediately after loading datasets, before store, secret or coordinator I/O',
+      async (operation) => {
+        const f = await accountEvalConfig({ concurrency: 1, ...config });
+        await fs.writeFile(
+          path.join(f.dir, 'cases.json'),
+          JSON.stringify({
+            name: 'cases',
+            cases: [
+              { id: 'a', input: 'a' },
+              { id: 'account', input: 'b', ...evalCase },
+            ],
+          })
+        );
+        const datasets = vi.spyOn(runEvalIO, 'loadEvalDatasets');
+        const resultStore = vi.spyOn(runEvalIO, 'evalResultStore');
+        const secrets = vi.spyOn(runEvalIO, 'loadSecretsFile');
+        const log = vi.fn();
+        await expect(
+          detach({
+            ...base,
+            command: operation === 'grade' ? 'grade' : 'run',
+            ...(operation === 'resume'
+              ? { resume: true, run: 'existing-run' }
+              : {}),
+            configPath: f.configPath,
+            rootDir: f.dir,
+            secretsFile: f.secrets,
+            log,
+          })
+        ).rejects.toThrow(/--detach.*first-party Cowork.*attached/);
+        expect(datasets).toHaveBeenCalledOnce();
+        expect(resultStore).not.toHaveBeenCalled();
+        expect(secrets).not.toHaveBeenCalled();
+        expect(detachTestState().coordinatorOptions).toBeUndefined();
+        expect(detachTestState().objects.size).toBe(0);
+        expect(detachTestState().sent.size).toBe(0);
+        expect(detachTestState().stdin).toEqual([]);
+        expect(log).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+  it('checks case overrides in every loaded dataset through the CLI', async () => {
+    const f = await evalConfig({
+      concurrency: 1,
+      datasets: ['./cases.json', './more-cases.json'],
+    });
+    await fs.writeFile(
+      path.join(f.dir, 'more-cases.json'),
+      JSON.stringify({
+        name: 'more-cases',
+        cases: [
+          {
+            id: 'account',
+            input: 'b',
+            client: 'cowork',
+            clientOptions: { mode: 'first-party' },
+          },
+        ],
+      })
+    );
+    const datasets = vi.spyOn(runEvalIO, 'loadEvalDatasets');
+    const secrets = vi.spyOn(runEvalIO, 'loadSecretsFile');
+    await expect(
+      runCommand({
+        config: f.configPath,
+        rootDir: f.dir,
+        detach: true,
+        runner: base.runner,
+        runnerOption: [...base.runnerOptions, 'shards=2'],
+        results: base.results,
+        secretsFile: f.secrets,
+      })
+    ).rejects.toThrow(/--detach.*first-party Cowork.*attached/);
+    expect(datasets).toHaveBeenCalledOnce();
+    expect(secrets).not.toHaveBeenCalled();
+    expect(detachTestState().coordinatorOptions).toBeUndefined();
+    expect(detachTestState().stdin).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'a default third-party case client',
+      config: {},
+      evalCase: { client: 'cowork' },
+    },
+    {
+      name: 'an explicit third-party case client',
+      config: {},
+      evalCase: {
+        client: 'cowork',
+        clientOptions: { mode: 'third-party' },
+      },
+    },
+    {
+      name: 'case options preserving the variant mode',
+      config: {
+        client: 'cowork',
+        clientOptions: { mode: 'third-party' },
+      },
+      evalCase: { clientOptions: { mode: 'third-party' } },
+    },
+    {
+      name: 'a client change discarding account-mode defaults',
+      config: {
+        client: 'cowork',
+        clientOptions: { mode: 'first-party' },
+        variants: [{ name: 'api', client: 'api' }],
+      },
+      evalCase: { client: 'cowork' },
+    },
+    {
+      name: 'another case client, model and options',
+      config: {},
+      evalCase: {
+        client: 'api',
+        model: 'case-model',
+        clientOptions: { provider: 'openai' },
+      },
+    },
+  ])(
+    'preserves $name in the coordinator bundle',
+    async ({ config, evalCase }) => {
+      const f = await evalConfig({ concurrency: 1, ...config });
+      const loadedCase = { id: 'override', input: 'a', ...evalCase };
+      await fs.writeFile(
+        path.join(f.dir, 'cases.json'),
+        JSON.stringify({ name: 'cases', cases: [loadedCase] })
+      );
+      const result = await detach({
+        ...base,
+        configPath: f.configPath,
+        rootDir: f.dir,
+      });
+      expect(result.machine).toBe(`coordinator-${result.id}`);
+      const datasets = JSON.parse(
+        detachTestState().sent.get('datasets.json')!
+      ) as Array<{ cases: Array<Record<string, unknown>> }>;
+      expect(datasets[0]!.cases).toEqual([loadedCase]);
+    }
+  );
+
   it.each([
     { name: 'default third-party mode', config: { client: 'cowork' } },
     {

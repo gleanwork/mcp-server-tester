@@ -618,6 +618,7 @@ async function chromeFetch(input: string | URL): Promise<Response> {
 
 /** Advances the adapter's sleeps while real I/O completes. */
 async function drive<T>(promise: Promise<T>): Promise<T> {
+  if (!vi.isFakeTimers()) return promise;
   let settled = false;
   promise.then(
     () => (settled = true),
@@ -638,8 +639,12 @@ async function eventually<T>(check: () => Promise<T>): Promise<T> {
     } catch (error) {
       last = error;
     }
-    await new Promise((resolve) => setImmediate(resolve));
-    await vi.advanceTimersByTimeAsync(100);
+    if (vi.isFakeTimers()) {
+      await new Promise((resolve) => setImmediate(resolve));
+      await vi.advanceTimersByTimeAsync(100);
+    } else {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
   throw last;
 }
@@ -2182,6 +2187,9 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     // bridge are real. Only Chrome/account responses and Docker transport are fixtures.
     const relayRoot = process.env.MST_TEST_COWORK_RELAY_ROOT;
     async function relayFixture(control: CoworkAccountControl) {
+      // The bridge now runs in a real child process. Its startup and pipe I/O
+      // must share wall-clock time with the relay's readiness deadline.
+      vi.useRealTimers();
       type Relay = { readonly lost: boolean; stop(): Promise<void> };
       const { startCoworkRelay } = (await import(
         /* @vite-ignore */ pathToFileURL(
@@ -2399,6 +2407,97 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       expect(host.commands).toEqual([]);
       await control.disconnect();
     });
+
+    it.each(['unavailable', 'over event cap'] as const)(
+      'starts a task without reading unrelated old history that is %s',
+      async (history) => {
+        const { control, call } = await controller();
+        expect((await call({ method: 'prepare' })).ok).toBe(true);
+        const oldPrompt = {
+          ...promptEvents({ tools: [SEARCH] })[0]!,
+          created_at: '2020-01-01T00:00:00Z',
+        };
+        account.eventPageSize = 200;
+        account.sessions.push({
+          id: 'cse_history',
+          // last_event_at takes precedence; otherwise created_at is used.
+          created_at:
+            history === 'unavailable' ? now() : '2020-01-01T00:00:00Z',
+          ...(history === 'unavailable'
+            ? { last_event_at: '2020-01-01T00:00:00Z' }
+            : {}),
+          events:
+            history === 'over event cap'
+              ? Array.from({ length: 10_001 }, () => oldPrompt)
+              : [oldPrompt],
+        });
+        if (history === 'unavailable')
+          account.eventsStatusBySession.set('cse_history', 404);
+
+        expect((await call({ method: 'beginTask', prompt: PROMPT })).ok).toBe(
+          true
+        );
+        expect(await saved()).toHaveProperty('pendingTask');
+        expect(
+          account.requests.filter((request) =>
+            request.path.includes('/cse_history/events')
+          )
+        ).toEqual([]);
+
+        // Skipping old history must not make it eligible for a fresh task.
+        account.eventsStatusBySession.delete('cse_history');
+        account.sessions[0]!.events = [oldPrompt];
+        expect(
+          (await call({ method: 'bindTask', sessionId: 'cse_history' })).ok
+        ).toBe(false);
+        expect((await saved()).pendingTask).not.toHaveProperty('sessionId');
+        const current = addTrial(promptEvents({ tools: [SEARCH] }));
+        expect(
+          (await call({ method: 'bindTask', sessionId: current.id })).ok
+        ).toBe(true);
+        expect((await call({ method: 'restore' })).ok).toBe(true);
+        await drive(control.close());
+      }
+    );
+
+    it.each([
+      'recent activity',
+      'recent creation',
+      'five-second boundary',
+      'undated',
+      'invalid date',
+    ] as const)(
+      'fails closed before submission when %s history cannot be read',
+      async (activity) => {
+        vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+        const { control, call } = await controller();
+        expect((await call({ method: 'prepare' })).ok).toBe(true);
+        const session = addTrial(promptEvents({ tools: [SEARCH] }));
+        if (activity === 'recent creation') {
+          session.created_at = now();
+          delete session.last_event_at;
+        } else if (activity === 'five-second boundary') {
+          session.last_event_at = now(-5_000);
+        } else if (activity === 'undated') {
+          Reflect.deleteProperty(session, 'created_at');
+          delete session.last_event_at;
+        } else if (activity === 'invalid date') {
+          session.last_event_at = 'invalid';
+        }
+        account.eventsStatusBySession.set(session.id, 404);
+
+        expect((await call({ method: 'beginTask', prompt: PROMPT })).ok).toBe(
+          false
+        );
+        expect(await saved()).not.toHaveProperty('pendingTask');
+        expect(
+          account.requests.some((request) =>
+            request.path.includes(`/${session.id}/events`)
+          )
+        ).toBe(true);
+        await drive(control.close());
+      }
+    );
 
     it('retains pending-task journal and source lease after lost relay and deletion of the synthetic VM', async () => {
       const vm = await mkdtemp(join(tmpdir(), 'mst-disposable-vm-'));

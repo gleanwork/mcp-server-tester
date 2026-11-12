@@ -113,7 +113,7 @@ async function main(): Promise<void> {
           : 'invalid_request',
     };
   } finally {
-    ui?.close();
+    await ui?.close();
   }
   process.stdout.write(`${JSON.stringify(receipt)}\n`);
   process.exitCode = receipt.status === 'failed' ? 1 : 0;
