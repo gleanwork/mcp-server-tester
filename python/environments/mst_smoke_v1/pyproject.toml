@@ -5,10 +5,6 @@ description = "A verifiers environment that runs MST clients through mst-harness
 requires-python = ">=3.11,<3.14"
 dependencies = ["verifiers>=0.2.1,<0.3", "mst-harness"]
 
-[project.scripts]
-# `uv run eval` that builds the taskset's own Environment (see mst_smoke_v1/eval.py).
-eval = "mst_smoke_v1.eval:main"
-
 [tool.uv.sources]
 mst-harness = { path = "../../mst-harness", editable = true }
 

@@ -1,7 +1,7 @@
 """mst-smoke-v1 verifiers environment.
 
-`uv run eval @ configs/eval.toml` imports this package because
-`taskset.id = "mst-smoke-v1"`. The harness is MST's: `harness.id = "mst-harness"`.
+`mst verifiers run python/environments/mst_smoke_v1 --model <model>` loads this package
+as taskset `mst-smoke-v1`, with MST's harness (`mst-harness`).
 
 Discovered from `__all__` by subclass:
   - MstSmokeTaskset — Taskset (tasks + MCP tool + reward)

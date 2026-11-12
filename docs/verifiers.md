@@ -7,6 +7,12 @@
 - **verifiers** loads the taskset, starts each rollout's runtime, records the model's traffic through its interception server, and scores the result with the task's rewards and judges.
 - **MST** is the rollout's harness. The `mst-harness` Python package runs one `mst run` trial per rollout and returns what the client did.
 
+`mst verifiers run <taskset>` does both on this machine. The taskset is the only input:
+
+```bash
+ANTHROPIC_API_KEY=... mst verifiers run ./acme-tasks --model claude-sonnet-4-6
+```
+
 Use `mst run` when you want MST's datasets, graders, variant comparisons and report. Use verifiers when the tasks and rewards are already written for verifiers, or the same tasks also train a model.
 
 ## How a rollout runs
@@ -31,18 +37,46 @@ taskset ── task ──► MSTHarness.launch() ──► mst run --no-grade �
 5. It reads MST's trial file, keeps it in `trace.info["mst"]`, and returns the client's final reply.
 6. verifiers scores the trace with the task's rewards and judges.
 
-## Install
+## Run a taskset
 
-You need Node.js 22+ for MST and Python 3.11+ for verifiers. Install MST where the rollout runs, and `mst-harness` next to verifiers:
+You need MST and [uv](https://docs.astral.sh/uv/). MST bundles `mst-harness`. For each run, uv installs it, the taskset and verifiers 0.2 into a temporary venv, removed after the run, so nothing else needs installing. The bundled `mst-harness` wins over any `mst-harness` the taskset names, so the harness always matches the MST that runs it. A client needs what it needs under `mst run`: `codex-cli` needs `@openai/codex-sdk` installed next to MST, and `claude-code` needs `@anthropic-ai/claude-agent-sdk`.
+
+```bash
+mst verifiers run <taskset> --model <model> [options] [-- verifiers eval options]
+```
+
+`<taskset>` is a taskset package directory (a Python package with a `pyproject.toml` that exports its `Taskset` through `__all__`), or the name of a taskset package that uv can install. The rollouts run here, in subprocesses, and the results stay here: `outputs/<taskset>--<model>--mst-harness/<run>/traces.jsonl`. MST sets verifiers' `push` to false.
+
+| Option                        | Default                                    | Meaning                                                                                                        |
+| ----------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `-m, --model <model>`         | required                                   | The model, as the endpoint names it.                                                                           |
+| `--client <client>`           | `api`                                      | The MST client. It must be on the supported list below.                                                        |
+| `--api <api>`                 | `openai` for `codex-cli`, else `anthropic` | The API family the client's inference uses.                                                                    |
+| `--base-url <url>`            | the API family's provider                  | The endpoint verifiers forwards model calls to, such as a gateway.                                             |
+| `--api-key-var <name>`        | `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`    | The variable that holds the endpoint's key. MST stops before starting verifiers when it is unset.              |
+| `--client-option <key=value>` | none                                       | A client option; repeat for more. A JSON value is parsed: `timeout=300000`.                                    |
+| `--workdir <dirs...>`         | none                                       | Subdirectories of a working directory the client runs in. Its files come back in `trace.info["mst"]["files"]`. |
+| `-n, --num-tasks <n>`         | all                                        | How many of the taskset's tasks.                                                                               |
+| `-r, --rollouts <n>`          | 1                                          | Rollouts per task.                                                                                             |
+| `-c, --concurrency <n>`       | verifiers'                                 | Rollouts at once.                                                                                              |
+| `-o, --output-dir <dir>`      | `outputs/`                                 | Where verifiers writes the run.                                                                                |
+| `--plugins <modules...>`      | none                                       | MST plugins, for a plugin client.                                                                              |
+| `--python <version>`          | `3.12`                                     | The Python uv runs verifiers with.                                                                             |
+
+Options after `--` go to verifiers' eval unchanged, and win over the ones above: a taskset's own options (`--taskset.<name>`), sampling (`--sampling.reasoning_effort low`), or a config file (`@ file.toml`).
+
+[`python/environments/mst_smoke_v1`](../python/environments/mst_smoke_v1/README.md) is a small taskset that checks the path end to end: its tasks need one MCP tool call, and its reward checks the client's final reply.
+
+## Use the harness from verifiers
+
+To run verifiers yourself, with your own config, install `mst-harness` next to verifiers and MST where the rollout runs:
 
 ```bash
 npm install -g @gleanwork/mcp-server-tester
 uv add mst-harness   # brings verifiers>=0.2.1,<0.3
 ```
 
-## Configure a rollout
-
-Name the harness by its package, in the eval config verifiers reads:
+Then name the harness by its package, in the eval config verifiers reads:
 
 ```toml
 model = "claude-sonnet-4-6"
@@ -66,7 +100,7 @@ api_key_var = "ANTHROPIC_API_KEY"
 type = "server"
 ```
 
-Run it with verifiers' CLI: `uv run eval @ acme.toml`. Results go to `outputs/<taskset>--<model>--<harness>/<run>/traces.jsonl`.
+Run it with `python -m mst_harness.eval @ acme.toml`. That is verifiers' `eval`, except that it builds an `Environment` subclass when the taskset package exports one. verifiers' own `uv run eval` works too, for tasksets that don't. Set `push = false` to keep the results local.
 
 | Setting          | Default         | Meaning                                                                                                                                         |
 | ---------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -77,8 +111,6 @@ Run it with verifiers' CLI: `uv run eval @ acme.toml`. Results go to `outputs/<t
 | `writes`         | `"unguarded"`   | The write mode MST gives the task's servers. The taskset's own proxy decides what reaches a service.                                            |
 | `workdir`        | unset           | Subdirectories to create in a working directory the harness keeps. The files the client leaves there come back in `trace.info["mst"]["files"]`. |
 | `mst_command`    | `["mst"]`       | How to start MST in the runtime, for example `["npx", "mst"]`.                                                                                  |
-
-[`python/environments/mst_smoke_v1`](../python/environments/mst_smoke_v1/README.md) is a complete environment that checks the path end to end: its tasks need one MCP tool call, and its reward checks the client's final reply.
 
 ## Supported clients
 
@@ -97,12 +129,12 @@ verifiers records a rollout from the model calls that go through its endpoint. A
 
 ## What MST returns
 
-| verifiers        | From MST                                                                                                         |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------- |
-| The trace        | Built by verifiers from the model calls it intercepted. MST adds nothing to it.                                  |
-| The output       | The client's final reply.                                                                                        |
-| `trace.info.mst` | The client, the trial's ending, the transcript (events, model calls, evidence), the write record, and any files. |
-| A failed rollout | An infrastructure failure (client app, workspace, network, provider, setup), or model calls that skip verifiers. |
+| verifiers        | From MST                                                                                                                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The trace        | Built by verifiers from the model calls it intercepted. MST adds nothing to it.                                                                                                     |
+| The output       | The client's final reply.                                                                                                                                                           |
+| `trace.info.mst` | The client, the trial's ending, the transcript (events, model calls, evidence), the write record, and any files.                                                                    |
+| A failed rollout | An infrastructure failure (client app, workspace, network, provider, setup), model calls that skip verifiers, or a client that failed before any model call, such as a missing SDK. |
 
 A reward can read `trace.info["mst"]["transcript"]["events"]` to check the client's tool calls, which the trace's model calls don't separate into MCP and built-in tools.
 

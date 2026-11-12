@@ -40,8 +40,11 @@ The two don't fit together today:
 
   The client code, readiness checks and trial endings are the ones `mst run` uses. verifiers loads a harness by package name, so `harness.id = "mst-harness"` needs no change to verifiers.
 
+- **`mst verifiers run <taskset>` runs a taskset here.** The taskset, a package directory or a package name, is its only required input. The command writes verifiers' eval config (the harness with this MST's CLI as `mst_command`, a subprocess runtime, verifiers' interception server, the endpoint, and `push = false`), installs the bundled `mst-harness` and the taskset into a temporary venv with uv, and runs `python -m mst_harness.eval` there. The bundled `mst-harness` overrides any `mst-harness` source the taskset names, so the harness always matches the MST that runs it. verifiers then runs the eval as above. The TypeScript side only builds that command; it holds no Python. The npm package ships `mst-harness`'s source, so an installed MST needs only uv.
+
 - **Only the client's inference goes through verifiers.** The harness sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` (or the `OPENAI_` pair) to verifiers' endpoint and rollout secret, and clears the gateway settings a runtime inherits (`MST_LLM_AUTH_COMMAND`, `ANTHROPIC_AUTH_TOKEN`). MST resolves them in `resolveLLMEndpoint()`, as it does a gateway.
 - **A rollout whose model calls bypass verifiers fails.** A client can take its endpoint from somewhere MST doesn't control: Claude Code's managed settings override `ANTHROPIC_BASE_URL`. When MST's transcript has model calls and verifiers' trace has none, the harness fails the rollout. Otherwise verifiers would score an empty reply as the client's answer.
+- **A client that fails before any model call fails the rollout.** When MST records a client error and neither side saw a model call, as with a missing SDK, nothing the model did is there to score. An error after the model acted is still graded, as in ADR 0010.
 - **Supported clients are the ones whose inference MST can route per rollout:** `api` and `codex-cli`, and `claude-code` where no managed settings pin its endpoint. Cowork and ChatGPT in MST's Linux image take inference from a gateway, so they can be added once a verifiers runtime can start that image. These are out of scope: Cowork on macOS and its first-party mode, and ChatGPT and the Codex app on macOS, which run signed in to the user's account.
 - **The taskset owns MCP traffic and writes.** A proxy that filters what a server returns, or stops writes, is part of the taskset. MST declares the task's servers `unguarded` by default: their writes reach the taskset's server, which decides what reaches a service. MST's dry-run proxy and write record still apply to servers that MST configures through a connector.
 - **A client can leave files.** With `harness.workdir`, the client runs in a working directory the harness keeps, and the files it leaves there come back in `trace.info["mst"]["files"]`. Tasks that ask for a deliverable file read it from there.
@@ -53,7 +56,8 @@ The two don't fit together today:
 
 ## Consequences
 
-- **MST runs in two modes.** `mst run` is unchanged. Under verifiers, the results and scores are verifiers'. MST's transcript reaches them through `trace.info`.
+- **MST runs in two modes.** `mst run` is unchanged. `mst verifiers run` runs a verifiers taskset, and its results and scores are verifiers', in verifiers' output format. MST's transcript reaches them through `trace.info`.
+- **The command needs uv.** It fails before starting with uv's install link when uv is missing, and before starting verifiers when the endpoint's key variable is unset.
 - **One rollout is one turn.** A multi-turn env, such as a simulated user, needs the ACP form.
 - **A rollout pays the client's start-up cost.** Each rollout runs `mst run` once. A desktop client would start once per rollout.
 - **Each new client needs a routing check.** A client joins the supported list only when MST can send its inference to a per-rollout endpoint.

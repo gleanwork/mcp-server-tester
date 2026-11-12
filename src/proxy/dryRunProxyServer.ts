@@ -1,11 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { StdioMCPConfig } from '../config/mcpConfig.js';
+import { PACKAGE_NAME, packageRoot } from '../utils/packageRoot.js';
 
 export { PLANNED_WRITE_KEY } from './plannedWrite.js';
-
-const PACKAGE_NAME = '@gleanwork/mcp-server-tester';
 
 /**
  * Where the proxy records writes and how it answers them: what MST gives a
@@ -68,23 +66,6 @@ export interface DryRunProxyServerOptions {
   minTools?: number;
   /** Node to run the proxy with. Default: the Node running MST. */
   nodePath?: string;
-}
-
-function packageRoot(): string {
-  let directory = dirname(fileURLToPath(import.meta.url));
-  for (;;) {
-    const manifest = join(directory, 'package.json');
-    if (existsSync(manifest)) {
-      const { name } = JSON.parse(readFileSync(manifest, 'utf8')) as {
-        name?: string;
-      };
-      if (name === PACKAGE_NAME) return directory;
-    }
-    const parent = dirname(directory);
-    if (parent === directory)
-      throw new Error(`Cannot find the ${PACKAGE_NAME} package.`);
-    directory = parent;
-  }
 }
 
 /** The dry-run proxy's entry point in the installed package (built). */

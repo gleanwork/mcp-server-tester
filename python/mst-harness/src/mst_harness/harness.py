@@ -167,7 +167,16 @@ class MSTHarness(Harness[MSTHarnessConfig]):
                 "elsewhere (for Claude Code, check managed settings' ANTHROPIC_BASE_URL); "
                 "use a client that takes the endpoint from its environment, such as `api`.",
             )
-        # A trial is graded even when the client errored (ADR 0010); verifiers scores it.
+        if result.error and not result.model_calls and not trace.calls:
+            # The client failed before it reached the model (for example, a missing
+            # package): nothing the model did is there to score.
+            return ProgramResult(
+                1,
+                result.final_text,
+                f"MST's {self.config.client} client failed before any model call: {result.error}",
+            )
+        # A trial is graded even when the client errored after reaching the model
+        # (ADR 0010); verifiers scores it.
         return ProgramResult(0, result.final_text, ran.stderr)
 
     def _env(self, endpoint: str | None = None, secret: str | None = None) -> dict[str, str]:

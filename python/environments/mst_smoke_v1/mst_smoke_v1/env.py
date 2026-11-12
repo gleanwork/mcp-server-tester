@@ -1,8 +1,7 @@
 """The smoke environment: verifiers' interception, with an optional Bearer upstream.
 
 verifiers' Anthropic dialect sends the upstream key as `x-api-key`. Some gateways want
-`Authorization: Bearer` instead; `taskset.upstream_bearer = true` adds it, the way
-enterprise-bench's interception server does for the Glean gateway.
+`Authorization: Bearer` instead; `taskset.upstream_bearer = true` adds it.
 """
 
 from __future__ import annotations

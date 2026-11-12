@@ -4,11 +4,17 @@ Run [MST](https://github.com/gleanwork/mcp-server-tester) clients as [verifiers]
 
 Each rollout is one MST trial. The harness writes a one-case dataset and an eval config into the rollout's runtime, runs `mst run --no-grade`, and returns the client's final answer. The trial MST recorded (transcript, evidence and ending) goes in `trace.info["mst"]`.
 
-The client's inference goes to verifiers' interception endpoint, so verifiers records every model call. This works only for clients whose model calls MST can route: `api`, `claude-code`, `codex-cli`, and Cowork in MST's Linux image when it calls a provider directly. See [docs/verifiers.md](../../docs/verifiers.md).
+The client's inference goes to verifiers' interception endpoint, so verifiers records every model call. This works only for clients whose model calls MST can route: `api`, `codex-cli`, and `claude-code` where no managed settings pin its endpoint. See [docs/verifiers.md](../../docs/verifiers.md).
 
 ## Use
 
-Install MST in the rollout's runtime, and `mst-harness` next to verifiers:
+The simplest way is MST's command, which bundles this package and runs a taskset locally with uv:
+
+```sh
+mst verifiers run ./acme-tasks --model claude-sonnet-4-6
+```
+
+To run verifiers yourself, install MST in the rollout's runtime, and `mst-harness` next to verifiers:
 
 ```sh
 npm install -g @gleanwork/mcp-server-tester
@@ -23,6 +29,8 @@ id = "mst-harness"
 client = "claude-code"
 client_options = { timeout = 1800000 }
 ```
+
+and run `python -m mst_harness.eval @ eval.toml`: verifiers' `eval`, which also builds an `Environment` subclass a taskset package exports.
 
 | Field            | Default         | What it does                                                                                                                                                                         |
 | ---------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

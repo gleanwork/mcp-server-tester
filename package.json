@@ -77,7 +77,10 @@
     "scripts/chatgpt_linux_contract.json",
     "schema",
     "docker",
-    "skills"
+    "skills",
+    "python/mst-harness/pyproject.toml",
+    "python/mst-harness/README.md",
+    "python/mst-harness/src/mst_harness/*.py"
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",

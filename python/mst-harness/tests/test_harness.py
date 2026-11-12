@@ -212,6 +212,22 @@ async def test_model_calls_that_bypass_verifiers_fail_the_rollout() -> None:
     assert "none through verifiers' endpoint" in result.stderr
 
 
+async def test_a_client_that_fails_before_any_model_call_fails_the_rollout() -> None:
+    missing = "The codex client requires the `@openai/codex-sdk` package"
+    trial = trial_file(error=missing, transcript={"finalText": "", "events": [], "modelCalls": []})
+    result = await launch(harness(client="codex-cli"), FakeRuntime(trial), fake_trace(calls=[]))
+    assert result.exit_code == 1
+    assert "failed before any model call" in result.stderr
+    assert missing in result.stderr
+
+
+async def test_a_client_error_after_model_calls_is_scored() -> None:
+    # ADR 0010: an error after the model acted is the model's outcome, so it is graded.
+    trial = trial_file(error="The client timed out")
+    result = await launch(harness(), FakeRuntime(trial), fake_trace())
+    assert result.exit_code == 0
+
+
 async def test_no_trial_file_names_mst_output() -> None:
     runtime = FakeRuntime(None, exit_code=2)
     result = await launch(harness(), runtime, fake_trace())
