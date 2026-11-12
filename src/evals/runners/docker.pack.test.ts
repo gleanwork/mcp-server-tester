@@ -254,6 +254,21 @@ describe('packing MST for Docker setup', () => {
     30_000
   );
 
+  it('packs MST when an npm dry run started it', async () => {
+    // `npm publish --dry-run` passes the flag to the scripts it runs.
+    const { dir } = await packageFixture('checkout');
+    vi.stubEnv('npm_config_dry_run', 'true');
+    await dockerRunner.setup!({}, { log: () => {} });
+    await expect(
+      fs.stat(
+        path.join(
+          dir,
+          'capture/mst-package/gleanwork-mcp-server-tester-0.0.0-test.tgz'
+        )
+      )
+    ).resolves.toBeTruthy();
+  }, 30_000);
+
   it.each(['pack', 'build'] as const)(
     'cleans staging and preserves the installed manifest after %s failure',
     async (failure) => {

@@ -1382,6 +1382,18 @@ export function npmPackArgs(
   ];
 }
 
+/**
+ * The environment for MST's own npm commands. An npm command that runs MST
+ * with `--dry-run` (`npm publish --dry-run` runs the tests) passes it on as
+ * `npm_config_dry_run`, and `npm pack` would then exit 0 and write nothing.
+ */
+function npmEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env))
+    if (/^npm_config_dry[-_]run$/i.test(key)) delete env[key];
+  return env;
+}
+
 /** `npm pack`s the package in `dir` into `destination`. `MST_NPM` names another npm CLI. */
 async function npmPack(
   dir: string,
@@ -1392,7 +1404,7 @@ async function npmPack(
     const child = spawn(
       process.env.MST_NPM || 'npm',
       npmPackArgs(destination, { ignoreScripts }),
-      { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] }
+      { cwd: dir, env: npmEnv(), stdio: ['ignore', 'ignore', 'inherit'] }
     );
     child.on('error', () => resolve(-1));
     child.on('close', (code) => resolve(code ?? -1));

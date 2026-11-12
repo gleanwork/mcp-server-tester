@@ -27,6 +27,10 @@ beforeAll(async () => {
     MST_DOCKER: path.join(repo, 'tests/mocks/fakeDocker.mjs'),
     FAKE_DOCKER_ROOT: root,
   };
+  // `npm publish --dry-run` runs these tests with npm_config_dry_run set; the
+  // fixture's own npm pack and install must still write their output.
+  for (const key of Object.keys(env))
+    if (/^npm_config_dry[-_]run$/i.test(key)) delete env[key];
   // External runtime dependencies resolve from the fixture's parent. Its own
   // build-only dependency is deliberately absent there and in the consumer.
   await fs.symlink(
