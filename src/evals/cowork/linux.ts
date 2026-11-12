@@ -522,10 +522,13 @@ function receipt(stdout: string): Receipt | undefined {
   }
 }
 
+type LinuxCoworkMode = 'third-party' | 'first-party';
+
 async function execute(
   mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'answer' | 'diagnose',
   payload: object,
-  options: CoworkDriverOptions
+  options: CoworkDriverOptions,
+  driverMode: LinuxCoworkMode = 'third-party'
 ): Promise<Receipt> {
   const started = Date.now();
   const remaining = options.deadlineAt - started;
@@ -547,7 +550,11 @@ async function execute(
     );
   const script = createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url
-  ).resolve('@gleanwork/mcp-server-tester/cowork-linux-runtime');
+  ).resolve(
+    driverMode === 'first-party'
+      ? '@gleanwork/mcp-server-tester/cowork-linux-first-party-runtime'
+      : '@gleanwork/mcp-server-tester/cowork-linux-runtime'
+  );
   // A hard query's UI submission can take minutes on a cold desktop; the
   // case deadline still bounds it.
   const timeout = Math.min(
@@ -566,7 +573,9 @@ async function execute(
   const result = await new Promise<{ failed: boolean; stdout: string }>(
     (resolve) => {
       const child = execFile(
-        env.MST_COWORK_PYTHON ?? 'python3',
+        driverMode === 'first-party'
+          ? process.execPath
+          : (env.MST_COWORK_PYTHON ?? 'python3'),
         [
           script,
           '--mode',
@@ -893,7 +902,28 @@ async function checkAccountRuntime(
   }
 }
 
-export const coworkLinux: CoworkDesktop = {
+async function diagnoseLinux(
+  { dir, dataDir, env }: Parameters<NonNullable<CoworkDesktop['diagnose']>>[0],
+  driverMode: LinuxCoworkMode
+): Promise<void> {
+  // Read-only: capture the desktop, native logs and machine state.
+  await execute(
+    'diagnose',
+    { dir },
+    { deadlineAt: Date.now() + 20_000, maxActions: 1, env },
+    driverMode
+  ).catch(() => {
+    // Partial is still useful: the driver records what it couldn't capture.
+  });
+  await copyLogTails(join(dirname(dataDir), 'logs'), join(dir, 'logs'));
+  await writeFile(
+    join(dir, 'system.json'),
+    `${JSON.stringify(await systemState(dataDir), null, 2)}\n`,
+    { mode: 0o600 }
+  );
+}
+
+const coworkLinuxThirdParty: CoworkDesktop = {
   dataDirectory: (options) =>
     options.dataDir ??
     join(
@@ -909,6 +939,14 @@ export const coworkLinux: CoworkDesktop = {
     stdioPaths = {},
     otlpSettings,
   }) {
+    if (
+      env.MST_COWORK_ACCOUNT_OWNER ||
+      env.MST_COWORK_ACCOUNT_PROFILE ||
+      env.MST_COWORK_ACCOUNT_MARKER
+    )
+      throw new Error(
+        'The managed third-party driver cannot prepare an account runtime. Select first-party mode; no settings were changed.'
+      );
     const settingsFile =
       env.MST_COWORK_SETTINGS_FILE ??
       '/etc/claude-desktop/managed-settings.json';
@@ -1053,23 +1091,8 @@ export const coworkLinux: CoworkDesktop = {
       'Linux desktop recovery belongs to the runtime owner, not the MST driver.'
     );
   },
-  async diagnose({ dir, dataDir, env }) {
-    // Read-only: the screen and the app's accessible controls (the driver's
-    // diagnose mode), Cowork's own logs, and the machine's state.
-    await execute(
-      'diagnose',
-      { dir },
-      { deadlineAt: Date.now() + 20_000, maxActions: 1, env }
-    ).catch(() => {
-      // Partial is still useful: the driver records what it couldn't capture.
-    });
-    // Cowork keeps its logs beside its session data (Claude-3p/logs).
-    await copyLogTails(join(dirname(dataDir), 'logs'), join(dir, 'logs'));
-    await writeFile(
-      join(dir, 'system.json'),
-      `${JSON.stringify(await systemState(dataDir), null, 2)}\n`,
-      { mode: 0o600 }
-    );
+  async diagnose(options) {
+    await diagnoseLinux(options, 'third-party');
   },
   async reset(options) {
     // Stop the failed case's task if it still runs (its Stop response), then
@@ -1086,13 +1109,16 @@ export const coworkLinux: CoworkDesktop = {
     };
   },
   async handleHitl(options) {
-    return handleLinuxHitl(options, false);
+    return handleLinuxHitl(options, 'third-party');
   },
 };
 
+/** Compatibility name: always the managed third-party adapter. */
+export const coworkLinux = coworkLinuxThirdParty;
+
 async function handleLinuxHitl(
   options: CoworkDriverOptions,
-  oneTimeApprovalsOnly: boolean
+  driverMode: LinuxCoworkMode
 ): Promise<CoworkHitlReceipt> {
   if (!options.isComplete)
     throw new Error('Linux HITL requires a bound native completion check.');
@@ -1151,7 +1177,8 @@ async function handleLinuxHitl(
         const result = await execute(
           'answer',
           { questions: question.questions },
-          { ...options, maxActions: Math.min(1, budget - actions) }
+          { ...options, maxActions: Math.min(1, budget - actions) },
+          driverMode
         );
         driving = false;
         actions += result.action_count;
@@ -1172,9 +1199,9 @@ async function handleLinuxHitl(
         'hitl',
         {
           approveWriteTools: options.approveWriteTools === true,
-          ...(oneTimeApprovalsOnly ? { oneTimeApprovalsOnly: true } : {}),
         },
-        { ...options, maxActions: budget - actions }
+        { ...options, maxActions: budget - actions },
+        driverMode
       );
       driving = false;
       actions += result.action_count;
@@ -1210,7 +1237,14 @@ async function handleLinuxHitl(
 
 /** Account mode attaches only. Managed 3P preparation must never run here. */
 export const coworkLinuxFirstParty: CoworkDesktop = {
-  ...coworkLinux,
+  async recover() {
+    throw new Error(
+      'First-party Linux Cowork recovery requires its account source runtime; managed desktop recovery is unsupported.'
+    );
+  },
+  async diagnose(options) {
+    await diagnoseLinux(options, 'first-party');
+  },
   dataDirectory: () => {
     const profile = process.env.MST_COWORK_ACCOUNT_PROFILE;
     if (!profile)
@@ -1229,7 +1263,8 @@ export const coworkLinuxFirstParty: CoworkDesktop = {
     await execute(
       'probe',
       {},
-      { deadlineAt: Date.now() + 15_000, maxActions: 1, env }
+      { deadlineAt: Date.now() + 15_000, maxActions: 1, env },
+      'first-party'
     );
     const app = await installedCoworkApp();
     return {
@@ -1242,11 +1277,11 @@ export const coworkLinuxFirstParty: CoworkDesktop = {
   async handleHitl(options) {
     await checkAccountRuntime(options.env ?? process.env);
     // Account `ask` must not become a persistent account permission in the UI.
-    return handleLinuxHitl(options, true);
+    return handleLinuxHitl(options, 'first-party');
   },
   async reset(options) {
     await checkAccountRuntime(options.env ?? process.env);
-    await execute('reset', { firstParty: true }, { ...options, maxActions: 2 });
+    await execute('reset', {}, { ...options, maxActions: 2 }, 'first-party');
   },
   async submit(query, options) {
     await checkAccountRuntime(options.env ?? process.env);
@@ -1255,10 +1290,10 @@ export const coworkLinuxFirstParty: CoworkDesktop = {
       'submit',
       {
         prompt: query,
-        firstParty: true,
         ...(options.targetModel ? { targetModel: options.targetModel } : {}),
       },
-      options
+      options,
+      'first-party'
     );
     return {
       status: 'submitted',

@@ -174,11 +174,31 @@ same account. MST mirrors those events into its native transcript layout. Core
 does not import account credentials, provision VMs or submit tasks through an
 undocumented API.
 
-The Linux account path has only been validated offline with fixtures and fake
-infrastructure. A reviewed Linux package/ASAR pin and an authorized live check
-of sign-in, accessibility, model selection, same-profile URL opening and native
-model/task evidence are still required. This implementation does not establish
-live Linux app or account compatibility.
+Linux selects separate first-party and third-party adapters; it does not infer
+the mode from environment variables. The first-party driver is TypeScript and
+talks directly to AT-SPI over D-Bus. The managed third-party driver remains
+standalone Python, with its existing setup, readiness and submission flow.
+The first-party implementation follows [ADR 0006](./adr/0006-mst-is-written-in-typescript.md)
+without a Python helper or an ADR exception. Porting the third-party driver
+remains future work.
+
+Before entering a first-party prompt, MST checks the selected Cowork tab and an
+empty composer, and selects and verifies the exact requested model when one is
+configured. It opens the new-task link in the prepared account profile, pastes
+the prompt once, verifies the rendered prompt tail, and activates Start task
+once. Start task appears only after text is entered. An uncertain action is not
+retried; native task binding still checks the complete prompt. Account runtime
+guards reject managed settings, inference credentials and invalid or expired
+profile metadata. The third-party adapter rejects account runtime metadata.
+First-party HITL permits only an explicitly authorized one-time approval, never
+persistent approval controls or inline write cards.
+
+A live smoke check of the TypeScript first-party driver is pending. Offline
+tests and prior Python checks do not establish its live Linux app or account
+compatibility. Each account image needs a reviewed package/ASAR integrity
+contract and an authorized live check of sign-in, accessibility, model
+selection, same-profile URL opening and native model/task evidence. Package
+integrity does not pin the hosted first-party frontend.
 
 Start a dedicated Chrome recorder profile with a loopback DevTools port. Use a
 `--user-data-dir` that no other Chrome uses, and sign in to the same claude.ai
@@ -574,14 +594,25 @@ and against Linux for `--runner docker`. A plugin's runner checks them on its
 worker, before any app is prepared.
 
 The caller supplies a working Claude Desktop session with the desired model/MCP
-settings. MST accesses that session through X11, D-Bus, and AT-SPI (Python `gi`),
-and `xclip` to paste a prompt longer than a deep link carries.
-Run MST in the prepared desktop's filesystem and session context. `DISPLAY` and `DBUS_SESSION_BUS_ADDRESS` are
-required. `MST_COWORK_PYTHON` can select a prepared system interpreter; MST does not
-install Linux desktop dependencies. The packaged `cowork-linux-runtime` export
-resolves the Python driver independently of the working directory.
+settings. Both modes use X11, D-Bus, AT-SPI and `xclip` for clipboard input.
+Run MST in the prepared desktop's filesystem and session context. `DISPLAY` and
+`DBUS_SESSION_BUS_ADDRESS` are required. MST does not install Linux desktop
+dependencies.
 
-The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
+The package exposes two executable runtime files, resolved independently of the
+working directory:
+
+- `./cowork-linux-first-party-runtime` resolves to
+  `dist/cowork/linuxFirstParty.js`. MST executes it with the Node that runs MST
+  (`process.execPath`). It uses direct AT-SPI D-Bus calls, not Python or GObject
+  bindings. It requires the prepared account runtime and attached source control
+  described in [Cloud sessions](#cloud-sessions).
+- `./cowork-linux-runtime` remains `scripts/cowork_linux.py`, the standalone
+  managed third-party driver using Python `gi`. `MST_COWORK_PYTHON` selects its
+  prepared interpreter; it has no effect on first-party execution.
+
+The following managed settings and owned-desktop behavior apply only to
+`third-party` mode. The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
 `MST_COWORK_SETTINGS_FILE`) and fails if its model, MCP servers, or wildcard
 approval policy disagree with the eval config. Other `policy-only` entries must
 block all tools (`{"*": "blocked"}`). With client `plugins`,
@@ -639,8 +670,7 @@ sole argument. The caller owns protocol registration and application launch flag
 MST does not select an application binary or sandbox policy. The prompt is preserved
 unchanged, and the opener runs without a shell and with a bounded deadline. Claude
 keeps only the first 14,336 characters of a deep link's prompt, so a longer one
-(1–2.5% of the Cortex eval sets' cases, up to 135,000 characters) goes another
-way: an empty new-task link, then the prompt pasted into the composer (`xclip`
+goes another way: an empty new-task link, then the prompt pasted into the composer (`xclip`
 holds it on the clipboard; AT-SPI presses Ctrl+V), checked against the composer's
 text before `Start task`. A bound session whose stored prompt is only the
 prompt's beginning fails as an infrastructure failure (`failureKind: "input"`):
@@ -783,8 +813,12 @@ the bytes present at audit time; notices contain no original digest to authentic
   system `PATH` and a private `TMPDIR`. The ChatGPT controller launches the app
   with the test environment; see [ChatGPT desktop](./chatgpt-desktop.md).
 - `cowork/interaction.ts`: shared receipts, error classifications, and scoped telemetry. New Linux receipts omit `driver`; old receipts remain readable.
-- `cowork/linux.ts`: the Linux entry point, with readiness checks and execution against a caller-owned desktop.
-- `scripts/cowork_linux.py`: bounded semantic UI actions; no lifecycle or answer parsing.
+- `cowork/linux.ts`: separate first-party and third-party adapters, with runtime guards, readiness checks and execution against a caller-owned desktop.
+- `cowork/linuxUi.ts`: the bounded native UI interface and driver receipts.
+- `cowork/linuxAtspi.ts`: TypeScript AT-SPI primitives over D-Bus, with bounded tree reads, native actions and clipboard input.
+- `cowork/linuxFirstPartyDriver.ts`: first-party readiness, model selection, single submission, scoped HITL and diagnostics over the UI interface.
+- `cowork/linuxFirstPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-first-party-runtime`, accepting JSON input and returning a receipt.
+- `scripts/cowork_linux.py`: the standalone managed third-party driver, with bounded semantic UI actions; no lifecycle or answer parsing.
 - `cowork/anthropicComputerUse.ts`: the macOS CU driver entry point, its deadline
   and its error reporting.
 - `cowork/computerUseLoop.ts`: the planner loop: bounded screenshot navigation,
@@ -828,13 +862,17 @@ matches. MST binds within 30 seconds after submission and pins collection to
 the bound session. A failed case is never
 retried or resent. Each case is self-contained: after a submit, binding, HITL, or
 transcript failure, MST records that case's failure and resets the app before the next
-case. On Linux the reset first stops the failed case's task if it still runs (a
+case. On third-party Linux the reset first stops the failed case's task if it still runs (a
 task past its deadline, or one waiting on a prompt): it clicks the task's Stop
 response and waits until it's gone, about 2 seconds. A task that won't stop fails
 the reset (`task_not_stopped`), and the old task's view is left as it is. The
 reset then opens one empty new-task deep link and waits read-only (about 10
-seconds) for the Cowork start surface. What the screen showed is captured before
-the reset (When something fails, in [cowork-docker.md](cowork-docker.md)). On macOS, the Computer Use planner
+seconds) for the Cowork start surface. First-party Linux reset instead refuses
+an active task; it opens a new-task link only when no Stop control is present.
+Before reset, first-party diagnosis captures a bounded accessibility dump, not
+a screenshot. The Linux adapter also collects native log tails and system state.
+Third-party diagnosis includes a screenshot (When something fails, in
+[cowork-docker.md](cowork-docker.md)). On macOS, the Computer Use planner
 stops a task that is still running and declines an open permission prompt, within
 eight actions. The driver refuses typing, drags and key presses other than Escape
 (a refused proposal does nothing, and the planner may try again within the

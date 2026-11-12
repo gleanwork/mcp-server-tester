@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as FsPromises from 'node:fs/promises';
-import { coworkLinuxFirstParty } from './linux.js';
+import {
+  coworkLinuxFirstParty,
+  coworkLinux as coworkLinuxThirdParty,
+} from './linux.js';
 import type { EvalConfig } from '../evalConfig.js';
 
 const runtime = vi.hoisted(() => ({
@@ -128,7 +131,7 @@ beforeEach(() => {
             status:
               mode === 'submit'
                 ? 'submitted'
-                : mode === 'hitl'
+                : mode === 'hitl' || mode === 'answer'
                   ? 'hitl_checked'
                   : 'ready',
             action_count: mode === 'probe' ? 0 : 1,
@@ -141,6 +144,14 @@ beforeEach(() => {
 });
 
 describe('plugin-staged first-party Linux desktop', () => {
+  it('rejects the managed adapter on an account runtime before settings access', async () => {
+    await expect(
+      coworkLinuxThirdParty.prepare({ evalConfig: config, env })
+    ).rejects.toThrow('no settings were changed');
+    expect(runtime.open).not.toHaveBeenCalled();
+    expect(runtime.exec).not.toHaveBeenCalled();
+  });
+
   it.each(['{}', undefined])(
     'only probes an unmanaged runtime (%s); never writes, restarts or warms up',
     async (value) => {
@@ -150,7 +161,11 @@ describe('plugin-staged first-party Linux desktop', () => {
       expect(session.app).toMatchObject({ name: 'Claude', version: '1.2.3' });
       expect(session.restart).toBeUndefined();
       expect(runtime.exec).toHaveBeenCalledOnce();
+      expect(runtime.exec.mock.calls[0]![0]).toBe(process.execPath);
       expect(runtime.exec.mock.calls[0]![1]).toContain('probe');
+      expect(runtime.exec.mock.calls[0]![1][0]).toMatch(
+        /\/cowork\/linuxFirstParty\.js$/
+      );
       expect(runtime.payloads).toEqual([{}]);
       expect(
         runtime.open.mock.calls.every(([, flags]) => (Number(flags) & 3) === 0)
@@ -172,11 +187,13 @@ describe('plugin-staged first-party Linux desktop', () => {
       env,
     });
     expect(runtime.payloads).toEqual([
-      { prompt, targetModel: 'claude-opus-4-6', firstParty: true },
+      { prompt, targetModel: 'claude-opus-4-6' },
     ]);
     expect(runtime.exec).toHaveBeenCalledOnce();
     const [, args, options] = runtime.exec.mock.calls[0]!;
     expect(args).toContain('9');
+    expect(runtime.exec.mock.calls[0]![0]).toBe(process.execPath);
+    expect(args[0]).toMatch(/\/cowork\/linuxFirstParty\.js$/);
     expect(options.env.MST_COWORK_URL_OPENER).toBe(env.MST_COWORK_URL_OPENER);
     expect(options.env.HOME).toBe(env.HOME);
     expect(options.env.XDG_CONFIG_HOME).toBe(env.XDG_CONFIG_HOME);
@@ -190,16 +207,17 @@ describe('plugin-staged first-party Linux desktop', () => {
     expect(options.env).not.toHaveProperty('MST_COWORK_CLOUD_CONTROL_SOCKET');
   });
 
-  it('shares the HITL loop but restricts account approvals to one-time scope', async () => {
+  it('routes account HITL to its own helper without a payload mode flag', async () => {
     await coworkLinuxFirstParty.handleHitl({
       deadlineAt: Date.now() + 10_000,
       env,
       approveWriteTools: true,
       isComplete: vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true),
     });
-    expect(runtime.payloads).toEqual([
-      { approveWriteTools: true, oneTimeApprovalsOnly: true },
-    ]);
+    expect(runtime.payloads).toEqual([{ approveWriteTools: true }]);
+    expect(runtime.exec.mock.calls[0]![1][0]).toMatch(
+      /\/cowork\/linuxFirstParty\.js$/
+    );
   });
 
   it('uses the same profile-preserving launcher for reset, without managed restart', async () => {
@@ -207,12 +225,49 @@ describe('plugin-staged first-party Linux desktop', () => {
       deadlineAt: Date.now() + 10_000,
       env,
     });
-    expect(runtime.payloads).toEqual([{ firstParty: true }]);
+    expect(runtime.payloads).toEqual([{}]);
+    expect(runtime.exec.mock.calls[0]![1][0]).toMatch(
+      /\/cowork\/linuxFirstParty\.js$/
+    );
     expect(runtime.exec).toHaveBeenCalledOnce();
     expect(runtime.exec.mock.calls[0]![1]).toContain('reset');
     expect(runtime.exec.mock.calls[0]![2].env.MST_COWORK_URL_OPENER).toBe(
       env.MST_COWORK_URL_OPENER
     );
+  });
+
+  it('routes clarifying answers to the account helper too', async () => {
+    const questions = [{ labels: ['First', 'Second'], multiSelect: false }];
+    await coworkLinuxFirstParty.handleHitl({
+      deadlineAt: Date.now() + 10_000,
+      env,
+      pendingQuestion: async () => ({ id: 'question', questions }),
+      isComplete: vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true),
+    });
+    expect(runtime.payloads).toEqual([{ questions }]);
+    expect(runtime.exec.mock.calls[0]![1]).toContain('answer');
+    expect(runtime.exec.mock.calls[0]![1][0]).toMatch(
+      /\/cowork\/linuxFirstParty\.js$/
+    );
+  });
+
+  it('does not infer account mode from environment on the third-party adapter', async () => {
+    await coworkLinuxThirdParty.submit('query', {
+      deadlineAt: Date.now() + 10_000,
+      env,
+    });
+    expect(runtime.exec.mock.calls[0]![1][0]).toMatch(/\/cowork_linux\.py$/);
+    expect(runtime.payloads).toEqual([{ prompt: 'query' }]);
+  });
+
+  it('requires source-owned recovery instead of inheriting managed recovery', async () => {
+    expect(coworkLinuxFirstParty.recover).not.toBe(
+      coworkLinuxThirdParty.recover
+    );
+    await expect(coworkLinuxFirstParty.recover()).rejects.toThrow(
+      'account source runtime'
+    );
+    expect(runtime.exec).not.toHaveBeenCalled();
   });
 
   it.each([

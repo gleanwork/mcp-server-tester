@@ -1,6 +1,9 @@
 import importlib.util
+import io
+import json
 from pathlib import Path
 import os
+import sys
 import subprocess
 import time
 import unittest
@@ -40,11 +43,6 @@ class Desktop:
         self.hidden = set()
         # The composer keeps its draft when an empty new-task link opens.
         self.keeps_draft = False
-        self.model_buttons = []
-        self.model_options = []
-        self.model_menu = False
-        self.cowork_links = 0
-        self.events = []
 
     def controls(self, names, roles, *, require_enabled=True, require_showing=True):
         if "Stop response" in self.actions and self.stops:
@@ -52,8 +50,7 @@ class Desktop:
                 self.stops = []
             self.stop_lingers -= 1
         test = names if callable(names) else names.__contains__
-        models = self.model_buttons + (self.model_options if self.model_menu else [])
-        return [node for node in self.starts + self.radios + self.tabs + self.approvals + self.stops + models
+        return [node for node in self.starts + self.radios + self.tabs + self.approvals + self.stops
                 if test(node.name) and node.role in roles
                 # The empty composer disables Start task.
                 and not (node.name == "Start task" and require_enabled and not self.prompt)
@@ -71,20 +68,8 @@ class Desktop:
 
     def activate(self, node):
         self.actions.append(node.name)
-        self.events.append(node.name)
         if self.fail:
             raise module.DriverFailure("action_acknowledgement_uncertain")
-        if node in self.model_buttons:
-            self.model_menu = True
-        elif node in self.model_options:
-            self.model_buttons = [Node(node.name)]
-            self.model_menu = False
-
-    def open_cowork(self, timeout):
-        self.cowork_links += 1
-        self.events.append("fresh Cowork")
-        if not self.keeps_draft:
-            self.prompt = ""
 
     def open_prompt(self, prompt, timeout):
         self.links = getattr(self, "links", []) + [prompt]
@@ -93,148 +78,7 @@ class Desktop:
 
     def paste_prompt(self, prompt, timeout):
         self.actions.append("paste")
-        self.events.append("paste")
         self.prompt = prompt
-
-
-class FirstPartyModelTests(unittest.TestCase):
-    def test_opens_fresh_cowork_before_selection_and_one_unchanged_submit(self):
-        desktop = Desktop()
-        desktop.prompt = "old draft"
-        desktop.model_buttons = [Node("Sonnet 4.6")]
-        desktop.model_options = [Node("Opus 4.6", "radio menu item")]
-        prompt = "  Find 中文 & \"quoted\" text\nunchanged  "
-        result = module.Driver(desktop, 1000, 8).submit(prompt, "claude-opus-4-6", True)
-        self.assertEqual(desktop.events, ["fresh Cowork", "Sonnet 4.6", "Opus 4.6", "paste", "Start task"])
-        self.assertEqual(desktop.prompt, prompt)
-        self.assertEqual(desktop.cowork_links, 1)
-        self.assertEqual((result["status"], result["action_count"]), ("submitted", 5))
-        self.assertFalse(hasattr(desktop, "links"))
-
-    def test_already_selected_exact_model_needs_no_menu_action(self):
-        for label in ("claude-opus-4-6", "Opus 4.6", "Claude Opus 4.6"):
-            with self.subTest(label=label):
-                desktop = Desktop()
-                desktop.model_buttons = [Node(label)]
-                result = module.Driver(desktop, 1000, 3).submit("query", "claude-opus-4-6", True)
-                self.assertEqual(desktop.actions, ["paste", "Start task"])
-                self.assertEqual(result["action_count"], 3)
-
-    def test_missing_generic_or_ambiguous_model_control_never_pastes_or_sends(self):
-        for labels in ([], ["Opus"], ["Opus 4.6", "Opus 4.6"], ["Opus 4.6", "Sonnet 4.6"]):
-            with self.subTest(labels=labels):
-                desktop = Desktop()
-                desktop.model_buttons = [Node(label) for label in labels]
-                with self.assertRaisesRegex(module.DriverFailure, "model_control_missing_or_ambiguous"):
-                    module.Driver(desktop, 1000, 8).submit("query", "claude-opus-4-6", True)
-                self.assertEqual(desktop.actions, [])
-                self.assertEqual(desktop.prompt, "")
-
-    def test_unavailable_disabled_or_ambiguous_model_choice_never_sends(self):
-        for labels in (["Sonnet 4.6"], ["Opus 4.6", "Opus 4.6"], ["Opus 4.6", "Claude Opus 4.6"]):
-            with self.subTest(labels=labels):
-                desktop = Desktop()
-                desktop.model_buttons = [Node("Sonnet 4.6")]
-                desktop.model_options = [Node(label, "radio menu item") for label in labels]
-                with self.assertRaisesRegex(module.DriverFailure, "model_unavailable_or_ambiguous"):
-                    module.Driver(desktop, 1000, 8).submit("query", "claude-opus-4-6", True)
-                self.assertEqual(desktop.actions, ["Sonnet 4.6"])
-                self.assertEqual(desktop.prompt, "")
-        # A disabled or non-showing choice isn't eligible in real AT-SPI.
-        disabled = AtspiNode("Opus 4.6", "radio menu item", states=("VISIBLE", "SHOWING"))
-        hidden = AtspiNode("Opus 4.6", "radio menu item", states=("VISIBLE", "ENABLED", "SENSITIVE"))
-        desktop = real_desktop(FakeAtspi(disabled, hidden))
-        self.assertEqual(desktop.controls({"Opus 4.6"}, module.MODEL_OPTION_ROLES), [])
-
-    def test_dated_revision_is_not_silently_mapped_to_the_undated_label(self):
-        self.assertEqual(module.model_labels("claude-opus-4-6-20260101"), {"claude-opus-4-6-20260101"})
-        desktop = Desktop()
-        desktop.model_buttons = [Node("Opus 4.6")]
-        desktop.model_options = [Node("Opus 4.6", "radio menu item")]
-        with self.assertRaisesRegex(module.DriverFailure, "model_unavailable_or_ambiguous"):
-            module.Driver(desktop, 1000, 8).submit("query", "claude-opus-4-6-20260101", True)
-        self.assertNotIn("Start task", desktop.actions)
-
-    def test_selection_must_be_visibly_confirmed_before_prompt_or_submit(self):
-        class StickyModel(Desktop):
-            def activate(self, node):
-                super().activate(node)
-                self.model_buttons = [Node("Sonnet 4.6")]
-        desktop = StickyModel()
-        desktop.model_buttons = [Node("Sonnet 4.6")]
-        desktop.model_options = [Node("Opus 4.6", "radio menu item")]
-        with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
-            module.Driver(desktop, 10, 8).submit("query", "claude-opus-4-6", True)
-        self.assertEqual(desktop.actions, ["Sonnet 4.6", "Opus 4.6"])
-        self.assertEqual(desktop.prompt, "")
-
-    def test_invalid_model_and_exhausted_budget_never_send(self):
-        desktop = Desktop()
-        with self.assertRaisesRegex(module.DriverFailure, "invalid_target_model"):
-            module.Driver(desktop, 1000, 8).submit("query", "Opus or Sonnet", True)
-        self.assertEqual(desktop.cowork_links, 0)
-        desktop.model_buttons = [Node("Opus 4.6")]
-        with self.assertRaisesRegex(module.DriverFailure, "action_budget_exhausted"):
-            module.Driver(desktop, 1000, 2).submit("query", "claude-opus-4-6", True)
-        self.assertEqual(desktop.actions, ["paste"])
-
-    def test_ambiguous_submit_and_uncertain_selection_are_never_retried(self):
-        desktop = Desktop()
-        desktop.starts = [Node("Start task"), Node("Start task")]
-        with self.assertRaisesRegex(module.DriverFailure, "submission_control_ambiguous"):
-            module.Driver(desktop, 1000, 8).submit("query", "claude-opus-4-6", True)
-        self.assertNotIn("Start task", desktop.actions)
-        desktop = Desktop()
-        desktop.model_buttons = [Node("Sonnet 4.6")]
-        desktop.fail = True
-        with self.assertRaisesRegex(module.DriverFailure, "action_acknowledgement_uncertain"):
-            module.Driver(desktop, 1000, 8).submit("query", "claude-opus-4-6", True)
-        self.assertEqual(desktop.actions, ["Sonnet 4.6"])
-
-    def test_no_requested_model_keeps_the_app_default_but_still_opens_a_fresh_task(self):
-        desktop = Desktop()
-        result = module.Driver(desktop, 1000, 3).submit("query", first_party=True)
-        self.assertEqual(desktop.events, ["fresh Cowork", "paste", "Start task"])
-        self.assertEqual(result["action_count"], 3)
-
-    def test_stale_draft_fails_without_overwriting_or_sending(self):
-        desktop = Desktop()
-        desktop.prompt, desktop.keeps_draft = "old draft", True
-        with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
-            module.Driver(desktop, 10, 8).submit("query", "claude-opus-4-6", True)
-        self.assertEqual(desktop.prompt, "old draft")
-        self.assertEqual(desktop.actions, [])
-
-    def test_account_hitl_never_grants_persistent_or_ambiguous_scope(self):
-        for label in ("Always allow", "Allow always", "Full access", "Allow full access", "Allow"):
-            with self.subTest(label=label):
-                desktop = Desktop()
-                desktop.approvals = [Node(label)]
-                receipt = module.Driver(desktop, 1000, 4).hitl(True, one_time_only=True)
-                self.assertEqual(receipt["action_count"], 0)
-                self.assertEqual(desktop.actions, [])
-        desktop = Desktop()
-        desktop.approvals = [Node("Allow once"), Node("Always allow")]
-        module.Driver(desktop, 1000, 4).hitl(True, one_time_only=True)
-        self.assertEqual(desktop.actions, ["Allow once"])
-        desktop = Desktop()
-        desktop.approvals = [Node("Allow once")]
-        with self.assertRaisesRegex(module.DriverFailure, "approval_requires_explicit_write_policy"):
-            module.Driver(desktop, 1000, 4).hitl(False, one_time_only=True)
-        self.assertEqual(desktop.actions, [])
-
-    def test_reset_uses_the_same_empty_cowork_link_and_never_sends(self):
-        desktop = Desktop()
-        receipt = module.Driver(desktop, 1000, 2).reset(first_party=True)
-        self.assertEqual((receipt["status"], desktop.cowork_links), ("ready", 1))
-        self.assertEqual(desktop.actions, [])
-        self.assertFalse(hasattr(desktop, "links"))
-
-    def test_real_desktop_fresh_link_uses_the_same_prepared_opener_without_a_prompt(self):
-        desktop = object.__new__(module.Desktop)
-        with patch.dict(os.environ, {"MST_COWORK_URL_OPENER": "/prepared/open-url"}), patch.object(module.subprocess, "run") as run:
-            desktop.open_cowork(2)
-            self.assertEqual(run.call_args.args[0], ["/prepared/open-url", "claude://claude.ai/new?q="])
 
 
 class AtspiStates:
@@ -380,7 +224,115 @@ class AtspiDesktopTests(unittest.TestCase):
             desktop.reveal(node)
 
 
+class LinuxCliTests(unittest.TestCase):
+    def invoke(self, mode, payload, env=None, desktop=None):
+        output = io.StringIO()
+        with patch.dict(os.environ, env or {}, clear=True), \
+                patch.object(sys, "argv", ["cowork_linux.py", "--mode", mode, "--timeout-ms", "1000"]), \
+                patch.object(sys, "stdin", io.StringIO(json.dumps(payload))), \
+                patch.object(sys, "stdout", output), \
+                patch.object(module, "Desktop", return_value=desktop) as connect, \
+                patch.object(module.subprocess, "run", side_effect=AssertionError("no desktop capture")) as run:
+            status = module.main()
+        return status, json.loads(output.getvalue()), connect, run
+
+    def test_account_payload_and_each_runtime_marker_fail_before_any_desktop_access(self):
+        for mode in ("probe", "reset", "submit", "hitl", "answer", "diagnose"):
+            for env in ({}, {"MST_COWORK_ACCOUNT_OWNER": "owner"},
+                        {"MST_COWORK_ACCOUNT_MARKER": "/private/marker"},
+                        {"MST_COWORK_ACCOUNT_PROFILE": "/private/profile"}):
+                with self.subTest(mode=mode, env=env):
+                    payload = {"prompt": "private query", "dir": "/private/artifacts"}
+                    if not env:
+                        payload["firstParty"] = True
+                    status, receipt, connect, run = self.invoke(mode, payload, env)
+                    self.assertEqual(status, 1)
+                    self.assertEqual(receipt, {"status": "failed", "action_count": 0,
+                                              "duration_ms": 0, "error": "wrong_driver_mode"})
+                    connect.assert_not_called()
+                    run.assert_not_called()
+
+    def test_ordinary_managed_calls_keep_the_json_receipt_contract(self):
+        for mode, payload, expected, actions in (
+                ("probe", {}, "ready", 0),
+                ("reset", {}, "ready", 1),
+                ("submit", {"firstParty": False, "prompt": "private query"}, "submitted", 2),
+                ("hitl", {"approveWriteTools": True}, "hitl_checked", 0)):
+            with self.subTest(mode=mode):
+                desktop = Desktop()
+                status, receipt, connect, _ = self.invoke(mode, payload, desktop=desktop)
+                self.assertEqual(status, 0)
+                self.assertEqual(set(receipt), {"status", "action_count", "duration_ms"})
+                self.assertEqual((receipt["status"], receipt["action_count"]), (expected, actions))
+                self.assertGreaterEqual(receipt["duration_ms"], 0)
+                connect.assert_called_once_with()
+                self.assertNotIn("private query", json.dumps(receipt))
+
+    def test_runtime_script_runs_alone_without_sibling_python_modules(self):
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "cowork_linux.py"
+            shutil.copyfile(Path(__file__).with_name("cowork_linux.py"), script)
+            result = subprocess.run(
+                [sys.executable, "-I", str(script), "--mode", "probe", "--timeout-ms", "1000"],
+                input='{"firstParty":true}', text=True, capture_output=True, env={})
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads(result.stdout), {"status": "failed", "action_count": 0,
+                                                    "duration_ms": 0, "error": "wrong_driver_mode"})
+        self.assertEqual(result.stderr, "")
+
+
 class LinuxDriverTests(unittest.TestCase):
+    def test_selected_hosted_cowork_radio_never_allows_prompt_insertion(self):
+        for prompt in ("query", "x" * (module.DEEP_LINK_PROMPT_CHARS + 1)):
+            desktop = Desktop()
+            desktop.starts = []
+            with self.assertRaisesRegex(module.DriverFailure, "cowork_not_ready"):
+                module.Driver(desktop, 100, 4).probe()
+            with self.assertRaisesRegex(module.DriverFailure, "deadline_exceeded"):
+                module.Driver(desktop, 10, 4).submit(prompt)
+            self.assertIsNone(desktop.prompt)
+            self.assertEqual(desktop.actions, [])
+            self.assertFalse(hasattr(desktop, "links"))
+
+    def test_legacy_mode_selection_waits_for_start_task_before_the_query_link(self):
+        class LegacyDesktop(Desktop):
+            def activate(self, node):
+                super().activate(node)
+                if node.name == "Cowork":
+                    self.radio_selected = True
+                    self.starts = [Node("Start task")]
+        for radio in (True, False):
+            desktop = LegacyDesktop()
+            desktop.starts = []
+            desktop.radio_selected = False
+            if not radio:
+                desktop.radios = []
+            self.assertEqual(module.Driver(desktop, 1000, 4).probe()["status"], "ready")
+            self.assertEqual(desktop.actions, [])
+            result = module.Driver(desktop, 1000, 4).submit("unchanged")
+            self.assertEqual(result["status"], "submitted")
+            self.assertEqual(desktop.actions, ["Cowork", "Start task"])
+            self.assertEqual(desktop.links, ["unchanged"])
+
+    def test_first_party_payload_is_rejected_before_opening_the_desktop(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("cowork_linux.py")),
+             "--mode", "submit", "--timeout-ms", "1000"],
+            input='{"firstParty":true,"prompt":"private query"}', text=True, capture_output=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('"error": "wrong_driver_mode"', result.stdout)
+        self.assertIn('"action_count": 0', result.stdout)
+        self.assertNotIn("private query", result.stdout + result.stderr)
+
+    def test_managed_model_cannot_use_the_account_picker(self):
+        desktop = Desktop()
+        with self.assertRaisesRegex(module.DriverFailure, "managed_model_requires_settings"):
+            module.Driver(desktop, 1000, 4).submit("query", "claude-opus-4-6")
+        self.assertIsNone(desktop.prompt)
+        self.assertEqual(desktop.actions, [])
+
     def test_url_opener_is_a_prepared_environment_boundary(self):
         prompt = "  Find 中文 & \"quoted\" text\nwith a new line  "
         desktop = object.__new__(module.Desktop)
@@ -451,6 +403,43 @@ class LinuxDriverTests(unittest.TestCase):
         self.assertEqual(module.Driver(desktop, 1000, 4).probe()["status"], "ready")
         self.assertEqual(desktop.actions, [])
         self.assertIsNone(desktop.prompt)
+
+    def test_submit_leaves_the_previous_task_view_without_cowork_controls(self):
+        # November 2026 UI: no Cowork radio or sidebar button in the old task.
+        # One empty link opens its composer; only then does the prompt follow.
+        desktop = Desktop()
+        desktop.radios = desktop.tabs = []
+        desktop.starts = []
+        opened = desktop.open_prompt
+
+        def open_prompt(prompt, timeout):
+            desktop.starts = [Node("Start task")]
+            opened(prompt, timeout)
+
+        desktop.open_prompt = open_prompt
+        receipt = module.Driver(desktop, 1000, 4).submit("hello")
+        self.assertEqual(receipt["status"], "submitted")
+        self.assertEqual(desktop.links, ["", "hello"])
+        self.assertEqual(desktop.actions, ["Start task"])
+        self.assertEqual(receipt["action_count"], 3)
+
+    def test_submit_opens_the_new_task_link_only_once(self):
+        desktop = Desktop()
+        desktop.radios = desktop.tabs = []
+        desktop.starts = []
+        with self.assertRaises(module.DriverFailure):
+            module.Driver(desktop, 300, 4).submit("hello")
+        self.assertEqual(desktop.links, [""])
+        self.assertEqual(desktop.actions, [])
+
+    def test_probe_accepts_the_empty_composer_without_cowork_controls(self):
+        desktop = Desktop()
+        desktop.radios = desktop.tabs = []
+        self.assertEqual(module.Driver(desktop, 1000, 4).probe()["status"], "ready")
+        self.assertEqual(desktop.actions, [])
+        desktop.starts = []
+        with self.assertRaisesRegex(module.DriverFailure, "cowork_not_ready"):
+            module.Driver(desktop, 1000, 4).probe()
 
     def test_reset_opens_one_empty_task_and_never_sends(self):
         desktop = Desktop()
@@ -796,9 +785,9 @@ class LinuxDiagnoseTests(unittest.TestCase):
                 receipt = module.diagnose(directory, 10)
             self.assertEqual(run.call_args.args[0], ["xwd", "-root", "-silent"])
             self.assertEqual((receipt["status"], receipt["action_count"], receipt["files"]), ("diagnosed", 0, ["screen.png"]))
-            self.assertEqual(png_pixels(open(os.path.join(directory, "screen.png"), "rb").read()), [[255, 255, 255]])
+            self.assertEqual(png_pixels((Path(directory) / "screen.png").read_bytes()), [[255, 255, 255]])
             # Without an accessibility bus it says why, without the error's text.
-            self.assertEqual(open(os.path.join(directory, "accessibility.error")).read(), "RuntimeError\n")
+            self.assertEqual((Path(directory) / "accessibility.error").read_text(), "RuntimeError\n")
 
     def test_diagnose_needs_an_existing_absolute_directory(self):
         for directory in (None, "relative", "/nonexistent/mst-diagnose"):

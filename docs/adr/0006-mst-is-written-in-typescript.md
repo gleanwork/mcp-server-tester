@@ -7,7 +7,7 @@ status: accepted
 MST is a TypeScript package, and its checks are TypeScript checks: `typecheck`, `lint`, `format`, `knip`, Vitest and Playwright. During the 2.0 prereleases it also gained Python:
 
 - `scripts/cowork_computer_use.py` drove Claude Desktop on macOS with a computer-use loop. It needed `anthropic`, `pyautogui`, `mss`, `Pillow` and pyobjc, which `src/evals/cowork/pythonRuntime.ts` installed into a venv on the user's machine at run time, from `scripts/cowork-requirements.txt`. It is now TypeScript and a Swift helper (port 1 below).
-- `scripts/cowork_linux.py` and `scripts/chatgpt_linux.py` drive Claude Desktop and ChatGPT on Linux over AT-SPI, through Python's GObject bindings.
+- `scripts/cowork_linux.py` and `scripts/chatgpt_linux.py` drive managed third-party Claude Desktop and ChatGPT on Linux over AT-SPI, through Python's GObject bindings. First-party Linux Cowork now uses TypeScript over D-Bus (port 4 below).
 - `docker/cowork-linux/bin/desktop-ready` is a Python script, and `install-settings` checks JSON with `python3 -c`.
 - `src/evals/coworkSetup/bundle.ts` and `src/evals/coworkSetup/macTransaction.ts` write credential helpers for Claude Desktop to run, as Python inside a shell script, run with `/usr/bin/python3`. They are now Node scripts (port 2 below).
 
@@ -36,7 +36,7 @@ Fixes to the Python above can continue until each piece is ported. The ports, in
 1. **`cowork_computer_use.py`**: done. It is TypeScript and a Swift helper, its LLM calls go through `resolveLLMEndpoint()`, and MST no longer creates a Python environment on macOS. `pythonRuntime.ts`, `scripts/cowork-requirements.txt` and the `./cowork-runtime` and `./cowork-requirements` exports are gone, with a migration note.
 2. **The credential helpers in `bundle.ts` and `macTransaction.ts`**: done. Their checks (owner-only, no symlinks, size limit, file unchanged while read) are `readCredential` in `coworkSetup/credentialHelper.ts`, typed and tested in-process. Each helper is a shell script that runs that function's own source on the Node that runs MST, with a few lines of glue that call it and print the result. The wrapper starts Node with `env -i`, so nothing in the environment Claude Desktop starts it with, such as `NODE_OPTIONS`, can load code into it.
 3. **`desktop-ready` and `install-settings`**: to TypeScript run by the image's Node, and `node -e`.
-4. **`cowork_linux.py` and `chatgpt_linux.py`**: to TypeScript over D-Bus, after the spike.
+4. **`cowork_linux.py` and `chatgpt_linux.py`**: their ports remain future work. First-party Linux Cowork now follows this decision: `linuxFirstPartyDriver.ts` owns workflow policy over the `LinuxUi` interface, and `linuxAtspi.ts` implements native primitives directly over D-Bus. `linuxFirstPartyMain.ts` is packaged as `./cowork-linux-first-party-runtime` and runs with MST's Node. It adds no Python helper and needs no ADR exception. Its live TypeScript smoke check remains pending; offline tests do not establish live compatibility.
 
 After the last port, MST removes `pythonDrivers.test.ts`, the `MST_COWORK_PYTHON` and `MST_CHATGPT_PYTHON` settings, and `python3`, `python3-gi` and `gir1.2-atspi-2.0` from the Dockerfile. It also removes the package exports `./cowork-linux-runtime` and `./chatgpt-linux-runtime`. Those are contracts, so their removal gets a migration note.
 
@@ -54,5 +54,5 @@ After the last port, MST removes `pythonDrivers.test.ts`, the `MST_COWORK_PYTHON
 ## Consequences
 
 - New Python fails review (REVIEW.md, "One language"), and AGENTS.md tells agents to write TypeScript.
-- Linux Cowork and ChatGPT runs need Python until port 4 lands. On macOS, MST needs no Python.
+- Managed third-party Linux Cowork and Linux ChatGPT runs still need Python until their ports land. First-party Linux Cowork uses Node, and macOS needs no Python.
 - The two remaining package exports above go away during the 2.0 prereleases, with a migration note.
