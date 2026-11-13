@@ -5,10 +5,11 @@
  * or a removal leaves them pointing at code that no longer exists. This keeps
  * them true to the repo:
  *
- * - every repo path they show in code (`runners/collect.ts`,
- *   `docker/cowork-linux/`) is a tracked file or directory, matched by its
- *   whole trailing path, so a renamed directory fails as well as a renamed
- *   file;
+ * - every repo path they show in code is a tracked file or directory. A path
+ *   that starts with a top-level directory (`docker/cowork-linux/`) must
+ *   exist from the repo root; any other (`runners/collect.ts`, written
+ *   relative to `src/`) is matched by its whole trailing path. Either way a
+ *   renamed directory fails as well as a renamed file;
  * - every relative link resolves, and its `#anchor` names a heading there;
  * - AGENTS.md names every package export, and CONTEXT.md every extension kind.
  */
@@ -36,6 +37,32 @@ const NOT_REPO_PATHS = new Set([
   'runs/',
   'transcripts/',
   'scores/containsText/',
+]);
+
+/**
+ * The repo's top-level directories. A path that starts with one is matched
+ * from the root only, so `skills/` can't pass on `src/skills/` once the
+ * top-level `skills/` is gone. This is a fixed list, not read from the
+ * checkout, for that reason; a test below fails when a new top-level
+ * directory is missing from it.
+ */
+const ROOT_DIRECTORIES = new Set([
+  '.claude',
+  '.claude-plugin',
+  '.codex',
+  '.github',
+  'assets',
+  'data',
+  'docker',
+  'docs',
+  'examples',
+  'schema',
+  'scripts',
+  'skills',
+  'snippets',
+  'src',
+  'tests',
+  'website',
 ]);
 
 /** File extensions a bare file name (no directory) is checked for. */
@@ -93,6 +120,12 @@ function codePaths(markdown: string): string[] {
 
 /** Whether a path the docs show names a tracked file or directory. */
 function existsInRepo(shown: string, files: string[]): boolean {
+  const [first] = shown.split('/');
+  if (shown.includes('/') && first && ROOT_DIRECTORIES.has(first)) {
+    return shown.endsWith('/')
+      ? files.some((file) => file.startsWith(shown))
+      : files.includes(shown);
+  }
   if (shown.endsWith('/')) {
     return files.some(
       (file) => file.startsWith(shown) || file.includes(`/${shown}`)
@@ -126,8 +159,42 @@ function relativeLinks(markdown: string): string[] {
     .filter((target) => !/^[a-z]+:/.test(target));
 }
 
+describe('existsInRepo', () => {
+  const files = [
+    'skills/review/SKILL.md',
+    'src/skills/client.ts',
+    'src/evals/runners/collect.ts',
+  ];
+
+  it('matches a path under a top-level directory from the root only', () => {
+    expect(existsInRepo('skills/', files)).toBe(true);
+    expect(existsInRepo('skills/', files.slice(1))).toBe(false);
+    expect(existsInRepo('src/evals/runners/collect.ts', files)).toBe(true);
+    expect(existsInRepo('src/runners/collect.ts', files)).toBe(false);
+  });
+
+  it('matches any other path by its whole trailing path', () => {
+    expect(existsInRepo('runners/collect.ts', files)).toBe(true);
+    expect(existsInRepo('environments/collect.ts', files)).toBe(false);
+    expect(existsInRepo('runners/', files)).toBe(true);
+    expect(existsInRepo('collect.ts', files)).toBe(true);
+  });
+});
+
 describe('agent files', () => {
   const files = trackedFiles();
+
+  it('lists every top-level directory in ROOT_DIRECTORIES', () => {
+    const directories = new Set(
+      files
+        .filter((file) => file.includes('/'))
+        .map((file) => file.split('/')[0])
+    );
+    const unlisted = [...directories].filter(
+      (directory) => directory && !ROOT_DIRECTORIES.has(directory)
+    );
+    expect(unlisted, 'add these to ROOT_DIRECTORIES').toEqual([]);
+  });
 
   describe.each(AGENT_FILES)('%s', (file) => {
     const markdown = read(file);
