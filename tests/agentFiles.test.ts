@@ -62,6 +62,7 @@ const ROOT_DIRECTORIES = new Set([
   'snippets',
   'src',
   'tests',
+  'verifiers',
   'website',
 ]);
 
