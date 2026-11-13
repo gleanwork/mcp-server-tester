@@ -50,6 +50,31 @@ jobs:
 
       - run: npm run test:playwright
 
+  # The verifiers harness and its smoke taskset (ADR 0015). Python lives only in python/,
+  # its own uv workspace.
+  python:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - run: uv sync --locked --python 3.12
+
+      - run: uv run ruff check .
+
+      - run: uv run ruff format --check .
+
+      - run: uv run pyright
+
+      - run: uv run pytest
+
+      # verifiers loads the smoke taskset and checks its tasks; no model needed.
+      - run: uv run vf-validate mst-smoke --runtime.type subprocess
+
   # The docs site in website/: it renders docs/ and serves it, with skills/,
   # over MCP. This job only builds and tests it; deploy-website.yml deploys it
   # to Vercel when a release is tagged.

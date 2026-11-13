@@ -56,6 +56,7 @@ const ROOT_DIRECTORIES = new Set([
   'docker',
   'docs',
   'examples',
+  'python',
   'schema',
   'scripts',
   'skills',

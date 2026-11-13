@@ -1,0 +1,48 @@
+# MST's Python: verifiers plugins that run MST clients (ADR 0015). It is its own uv
+# workspace, separate from the TypeScript package: it calls MST only through the `mst`
+# CLI that is installed where a rollout runs.
+#
+#   verifiers/<harness>/     harness packages, as verifiers' own verifiers/v1/harnesses/
+#   environments/<taskset>/  taskset packages, as verifiers' own environments/
+[tool.uv.workspace]
+members = ["verifiers/*", "environments/*"]
+
+[dependency-groups]
+dev = [
+  "mst-harness",
+  "mst-smoke",
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.6",
+  "pyright>=1.1.380",
+]
+
+[tool.uv.sources]
+mst-harness = { workspace = true }
+mst-smoke = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mst_harness", "mst_smoke"]
+
+[tool.pyright]
+# The harness only: the tasksets are written as verifiers' own example tasksets are,
+# which strict mode doesn't accept (Ruff checks them).
+include = ["verifiers", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false

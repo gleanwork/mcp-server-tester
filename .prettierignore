@@ -2,6 +2,11 @@
 dist/
 website/.docusaurus/
 .venv/
+
+# Python caches and verifiers eval runs (python/.gitignore)
+.pytest_cache/
+.ruff_cache/
+python/**/outputs/
 .mcp-test-results/
 
 # Changelog (auto-generated, has specific formatting)
