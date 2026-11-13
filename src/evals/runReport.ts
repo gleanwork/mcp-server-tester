@@ -515,6 +515,7 @@ export function buildRunReport(
             preference?: string;
             reasoning?: string;
             error?: string;
+            skipReason?: string;
           };
           return {
             judge: preference.judge,
@@ -522,7 +523,12 @@ export function buildRunReport(
             // A pairwise judge's reasoning can quote both answers.
             ...(preference.reasoning && !run.redactStoredResponses
               ? { reasoning: clip(preference.reasoning) }
-              : {}),
+              : preference.skipReason === 'mixed-write-evidence'
+                ? {
+                    reasoning:
+                      'Mixed write modes: a write was attempted or the write evidence is incomplete; comparison skipped.',
+                  }
+                : {}),
             ...(preference.error ? { error: clip(preference.error) } : {}),
           };
         });

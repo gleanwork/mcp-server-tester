@@ -1083,12 +1083,14 @@ MST doesn't sit between a `read-only` server and its client, so it checks each t
 The run also doesn't start when:
 
 - a server is `live` without `--allow-live-writes`, or a case lists writes on a run with a `live` server: a live write case needs an outcome check, which MST doesn't have yet;
-- compared variants' servers stop writes in different ways (`planned`, `simulated`, `server-planned`), so the same request gets different replies;
+- compared variants' servers stop writes in different ways (`planned`, `simulated`, `server-planned`), unless the eval opts in to mixed stopped-write modes;
 - a case lists writes on a server whose writes MST doesn't record;
 - a connector's launch doesn't pass `context.writes` to its proxy, or changes whether it simulates;
 - `writes` names a server that isn't in a variant, or one whose proxy already gives it a mode.
 
 `run.json` keeps each variant's write modes (`variants[].writeModes`), and a regrade grades with them.
+
+For read-focused comparisons, `"allowMixedWriteModes": true` allows variants to use different stopped-write modes. A run with mixed modes still rejects `live` and `unguarded` servers. Pairwise judging skips a case if a trial attempted a write, lacks a required write record, has unrecorded or unclassified calls, or has overlapping write-record attribution. The skipped preference gives the reason and does not count toward the win rate. This does not turn writes into equivalent actions; use it only when those skipped cases are acceptable.
 
 ### The write record and the `writes` grader
 
