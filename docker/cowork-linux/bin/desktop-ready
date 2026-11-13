@@ -3,4 +3,5 @@
 # The check is MST's own code (src/evals/cowork/desktopReady.ts), run on the
 # image's Node from the MST package the image installed (`mst` is its
 # dist/cli/index.js).
-exec node "$(dirname "$(readlink -f "$(command -v mst)")")/../cowork/desktopReady.js"
+mst="$(command -v mst)" || { echo "desktop-ready: mst isn't on PATH" >&2; exit 1; }
+exec node "$(dirname "$(readlink -f "${mst}")")/../cowork/desktopReady.js"
