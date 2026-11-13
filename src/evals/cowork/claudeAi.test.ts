@@ -27,7 +27,9 @@ import {
   type CoworkAccountControl,
 } from './cloudControl.js';
 import {
+  COWORK_CLOUD_CONTROL_MAX_ERROR_LENGTH,
   COWORK_CLOUD_CONTROL_PROTOCOL,
+  CoworkCloudControlResponseSchema,
   type CoworkCloudControlCommand,
   type CoworkCloudControlResponse,
 } from './cloudControlProtocol.js';
@@ -2556,9 +2558,14 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       const first = events[0]!;
       const session = addTrial(events);
       first.payload.message = { role: 'user', content: 'a different prompt' };
+      // Only verification mismatches say why; other source errors stay generic.
       expect(
-        (await call({ method: 'bindTask', sessionId: session.id })).ok
-      ).toBe(false);
+        await call({ method: 'bindTask', sessionId: session.id })
+      ).toMatchObject({
+        ok: false,
+        error:
+          'Cowork source bindTask failed; no task completion or account cleanup is implied. Inspect retained source recovery state.',
+      });
       first.payload.message = { role: 'user', content: PROMPT };
       first.created_at = now(-60_000);
       expect(
@@ -2625,7 +2632,31 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       await call({ method: 'beginTask', prompt: PROMPT });
       addTrial(promptEvents({ tools: [SEARCH, SEND] }));
       await call({ method: 'bindTask', sessionId: 'cse_trial1' });
-      expect((await call({ method: 'verify' })).ok).toBe(false);
+      // The worker learns which tool broke the policy, not just that one did.
+      expect(await call({ method: 'verify' })).toEqual({
+        protocol: COWORK_CLOUD_CONTROL_PROTOCOL,
+        id: expect.any(Number),
+        ok: false,
+        error: `Cowork source verify failed: Cloud connector configuration mismatch: 1 unexpected tools, 0 missing tools. Unexpected: ${SEND}. Missing: none. The connector catalog may have changed since preparation.`,
+      });
+      // A tool Claude's list never had is named as such, and a long list is
+      // cut to the response's error limit rather than failing the frame.
+      const unlisted = Array.from(
+        { length: 60 },
+        (_, index) => `mcp__Acme_Search__new_tool_${index}`
+      );
+      account.sessions[0]!.events = promptEvents({
+        tools: [SEARCH, ...unlisted],
+      });
+      const long = await call({ method: 'verify' });
+      expect(long.ok).toBe(false);
+      const error = (long as { error: string }).error;
+      expect(error).toHaveLength(COWORK_CLOUD_CONTROL_MAX_ERROR_LENGTH);
+      expect(error).toMatch(
+        /^Cowork source verify failed: Cloud connector configuration mismatch: 60 unexpected tools, 0 missing tools\. Unexpected: mcp__Acme_Search__new_tool_0, /
+      );
+      expect(error.endsWith('\u2026')).toBe(true);
+      expect(() => CoworkCloudControlResponseSchema.parse(long)).not.toThrow();
       account.sessions[0]!.events = promptEvents({ tools: [SEARCH] });
       expect(await call({ method: 'verify' })).toMatchObject({
         ok: true,

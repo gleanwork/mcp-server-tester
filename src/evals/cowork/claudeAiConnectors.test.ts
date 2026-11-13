@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describeError } from '../../utils/describeError.js';
 import { redactClientError } from '../clientSecrets.js';
 import {
+  CloudConnectorVerificationError,
   CloudPermissionWriteNotSentError,
   configureCloudConnectors,
   planCloudConnectors,
@@ -963,15 +964,30 @@ describe('cloud connector configuration', () => {
           reference('mcp__Acme_Documents__search'),
         ]).observedAllowedTools
       ).toEqual(['mcp__Acme_Documents__search']);
-      for (const tool of [
-        'mcp__Acme_Documents__send',
-        'mcp__Acme_Documents__new_tool',
-        'mcp__Task_Board__read',
-        'mcp__Task_Board__new_tool',
-      ]) {
-        expect(() =>
-          verifyCloudConnectorEvents(plan, [init, search, reference(tool)])
-        ).toThrow('1 unexpected tools');
+      for (const [tool, unlisted] of [
+        ['mcp__Acme_Documents__send', false],
+        ['mcp__Acme_Documents__new_tool', true],
+        ['mcp__Task_Board__read', false],
+        ['mcp__Task_Board__new_tool', true],
+      ] as const) {
+        let error: unknown;
+        try {
+          verifyCloudConnectorEvents(plan, [init, search, reference(tool)]);
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error).toBeInstanceOf(CloudConnectorVerificationError);
+        const message = (error as Error).message;
+        expect(message).toContain('1 unexpected tools');
+        // A tool with no prepared permission is named; a blocked one is not.
+        expect(
+          message.includes(
+            `Claude's tool list for the connector had no ${tool} when MST prepared the run`
+          )
+        ).toBe(unlisted);
+        expect(message.includes('may have changed since preparation')).toBe(
+          !unlisted
+        );
       }
     }
   );
