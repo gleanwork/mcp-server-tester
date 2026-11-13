@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { collectClientBatch } from './desktopBatch.js';
-import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type * as OsModule from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +22,10 @@ import {
 import { runChatgptTurn } from './chatgpt/turn.js';
 import type * as ChatgptTurnModule from './chatgpt/turn.js';
 import { clientRunToExecution } from './clientTranscript.js';
-import type { ClientBatchRequest } from './evalFrameworkTypes.js';
+import type {
+  ClientArtifacts,
+  ClientBatchRequest,
+} from './evalFrameworkTypes.js';
 import type { ChatgptDesktop } from './chatgpt/desktop.js';
 import { linuxEnvironment } from './chatgpt/linuxEnvironment.fixture.js';
 
@@ -24,6 +34,7 @@ const lifecycle = vi.hoisted(() => ({
   prepare: vi.fn(),
   restart: vi.fn(),
   dispose: vi.fn(),
+  traceRoot: undefined as string | undefined,
 }));
 vi.mock('./chatgptSetup/session.js', () => ({
   ChatgptAppSession: class {
@@ -31,6 +42,9 @@ vi.mock('./chatgptSetup/session.js', () => ({
     prepare = lifecycle.prepare;
     restart = lifecycle.restart;
     dispose = lifecycle.dispose;
+    get rolloutTraceRoot() {
+      return lifecycle.traceRoot;
+    }
     telemetry = { scope: 'batch', id: 'test-batch' };
     app = { name: 'ChatGPT', version: '1.2026.300', source: 'installed' };
   },
@@ -80,6 +94,7 @@ const metadata = {
 
 beforeEach(async () => {
   home.value = await mkdtemp(join(tmpdir(), 'chatgpt-v2-test-'));
+  lifecycle.traceRoot = undefined;
   lifecycle.prepare.mockReset().mockResolvedValue(undefined);
   lifecycle.restart.mockReset().mockResolvedValue(undefined);
   lifecycle.dispose.mockReset().mockResolvedValue(undefined);
@@ -124,6 +139,197 @@ afterEach(async () => {
 });
 
 describe('ChatGPT and Codex app sessions', () => {
+  it.each([
+    ['chatgpt', CHATGPT_CLIENT],
+    ['chatgpt', CHATGPT_LINUX_CLIENT],
+    ['codex-app', CODEX_APP_CLIENT],
+    ['codex-app', CODEX_APP_LINUX_CLIENT],
+  ] as const)(
+    'enables %s rollout tracing by default and allows opting out',
+    async (type, client) => {
+      const env =
+        client === CHATGPT_LINUX_CLIENT || client === CODEX_APP_LINUX_CLIENT
+          ? linuxEnvironment(home.value)
+          : undefined;
+      for (const enabled of [undefined, false]) {
+        const session = await client.open!(
+          {
+            config: {
+              ...config,
+              type,
+              env,
+              ...(enabled === undefined ? {} : { rolloutTrace: enabled }),
+            },
+            input: { servers: [] },
+          },
+          context
+        );
+        try {
+          expect(lifecycle.prepare).toHaveBeenLastCalledWith(
+            expect.objectContaining({ rolloutTrace: enabled ?? true })
+          );
+        } finally {
+          await session.close();
+        }
+      }
+    }
+  );
+
+  it.each([
+    ['chatgpt', CHATGPT_CLIENT],
+    ['chatgpt', CHATGPT_LINUX_CLIENT],
+    ['codex-app', CODEX_APP_CLIENT],
+    ['codex-app', CODEX_APP_LINUX_CLIENT],
+  ] as const)(
+    'copies %s native trace artifacts, including a failed bound turn',
+    async (type, client) => {
+      lifecycle.traceRoot = join(home.value, 'native-traces');
+      const dir = join(lifecycle.traceRoot, 'native-bundle');
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        join(dir, 'manifest.json'),
+        JSON.stringify({ schema_version: 1, root_thread_id: 'session' })
+      );
+      for (const success of [true, false]) {
+        vi.mocked(runChatgptTurn).mockResolvedValue({
+          ...(success
+            ? { success: true as const, response: 'answer' }
+            : { success: false as const, error: 'timed out' }),
+          toolCalls: [],
+          clientMetadata: metadata,
+        });
+        const session = await client.open!(
+          {
+            config: {
+              ...config,
+              type,
+              ...(client === CHATGPT_LINUX_CLIENT ||
+              client === CODEX_APP_LINUX_CLIENT
+                ? { env: linuxEnvironment(home.value) }
+                : {}),
+            },
+            input: { servers: [] },
+          },
+          context
+        );
+        let artifacts: ClientArtifacts | undefined;
+        try {
+          const { result } = await session.run({
+            caseId: 'trace',
+            trial: 0,
+            input: { prompt: 'query' },
+          });
+          artifacts = result.artifacts;
+          expect(result.telemetry).toMatchObject({
+            rolloutTrace: { bundles: 1, files: 1 },
+          });
+          expect(artifacts).toMatchObject({
+            include: ['codex-rollout-trace'],
+            temporary: true,
+          });
+          await expect(
+            access(
+              join(
+                artifacts!.dir,
+                'codex-rollout-trace',
+                'native-bundle',
+                'manifest.json'
+              )
+            )
+          ).resolves.toBeUndefined();
+        } finally {
+          await session.close();
+          if (artifacts)
+            await rm(artifacts.dir, { recursive: true, force: true });
+        }
+      }
+    }
+  );
+
+  it("redacts the batch's credentials in the kept trace, as in the transcript", async () => {
+    lifecycle.traceRoot = join(home.value, 'native-traces');
+    const dir = join(lifecycle.traceRoot, 'native-bundle');
+    await mkdir(join(dir, 'payloads'), { recursive: true });
+    await writeFile(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ schema_version: 1, root_thread_id: 'session' })
+    );
+    await writeFile(
+      join(dir, 'payloads', '1.json'),
+      '{"Authorization":"Bearer fixture-secret"}'
+    );
+    vi.mocked(runChatgptTurn).mockResolvedValue({
+      success: true,
+      response: 'answer',
+      toolCalls: [],
+      clientMetadata: metadata,
+    });
+    const session = await CHATGPT_CLIENT.open!(
+      { config, input: requests()[0]!.input },
+      context
+    );
+    let artifacts: ClientArtifacts | undefined;
+    try {
+      ({
+        result: { artifacts },
+      } = await session.run({
+        caseId: 'trace',
+        trial: 0,
+        input: { prompt: 'query' },
+      }));
+      expect(
+        await readFile(
+          join(
+            artifacts!.dir,
+            'codex-rollout-trace',
+            'native-bundle',
+            'payloads',
+            '1.json'
+          ),
+          'utf8'
+        )
+      ).toBe('{"Authorization":"Bearer [REDACTED]"}');
+    } finally {
+      await session.close();
+      if (artifacts) await rm(artifacts.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not collect a duplicate native session trace', async () => {
+    lifecycle.traceRoot = join(home.value, 'native-traces');
+    await mkdir(lifecycle.traceRoot);
+    vi.mocked(runChatgptTurn).mockResolvedValue({
+      success: true,
+      response: 'answer',
+      toolCalls: [],
+      clientMetadata: metadata,
+    });
+    const session = await CHATGPT_CLIENT.open!(
+      { config, input: { servers: [] } },
+      context
+    );
+    try {
+      await session.run({
+        caseId: 'one',
+        trial: 0,
+        input: { prompt: 'query' },
+      });
+      const { result } = await session.run({
+        caseId: 'two',
+        trial: 0,
+        input: { prompt: 'query' },
+      });
+      expect(result.artifacts).toBeUndefined();
+      expect(result.telemetry).toMatchObject({
+        rolloutTrace: {
+          notKept: 'No unique native thread was attributed to this trial.',
+        },
+      });
+    } finally {
+      await session.close();
+    }
+  });
+
   it.each([
     ['chatgpt', CHATGPT_CLIENT, 'chatgpt-work'],
     ['codex-app', CODEX_APP_CLIENT, 'codex'],

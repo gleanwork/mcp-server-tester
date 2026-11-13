@@ -879,6 +879,7 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 | `plugins`          | no marketplace plugins (Linux only)                                                                               |
 | `configPath`       | app profile config.toml on the trial machine (OS-specific)                                                        |
 | `requireMcpCalls`  | false                                                                                                             |
+| `rolloutTrace`     | true                                                                                                              |
 | `correlation`      | "exact_prompt"                                                                                                    |
 | `maxActions`       | macOS: 32; Linux: 24                                                                                              |
 | `computerUseModel` | macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else claude-sonnet-4-6; Linux: no planner |
@@ -906,6 +907,7 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 | `plugins`          | no marketplace plugins (Linux only)                                                                               |
 | `configPath`       | app profile config.toml on the trial machine (OS-specific)                                                        |
 | `requireMcpCalls`  | false                                                                                                             |
+| `rolloutTrace`     | true                                                                                                              |
 | `correlation`      | "exact_prompt"                                                                                                    |
 | `maxActions`       | macOS: 32; Linux: 24                                                                                              |
 | `computerUseModel` | macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else claude-sonnet-4-6; Linux: no planner |

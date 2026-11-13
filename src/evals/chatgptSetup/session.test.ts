@@ -344,6 +344,62 @@ async function turnOf(
 }
 
 describe('ChatGPT batch app lifecycle', () => {
+  it('owns a private trace root across restarts and removes it only after stopping the app', async () => {
+    const session = new ChatgptAppSession(chatgptMacos);
+    const config = { ...testConfig(), rolloutTrace: true };
+    let root: string | undefined;
+    try {
+      await session.prepare(config);
+      root = session.rolloutTraceRoot;
+      expect(root).toBeTruthy();
+      expect((await stat(root!)).mode & 0o777).toBe(0o700);
+      expect(controller.start).toHaveBeenLastCalledWith(
+        expect.objectContaining({ CODEX_ROLLOUT_TRACE_ROOT: root })
+      );
+      await session.restart();
+      expect(controller.start).toHaveBeenLastCalledWith(
+        expect.objectContaining({ CODEX_ROLLOUT_TRACE_ROOT: root })
+      );
+      expect(() =>
+        session.assertCompatible({ ...config, rolloutTrace: false })
+      ).toThrow('different settings');
+    } finally {
+      await session.dispose();
+    }
+    await expect(stat(root!)).rejects.toThrow();
+    expect(session.telemetry.events.map((event) => event.operation)).toContain(
+      'remove_rollout_trace'
+    );
+  });
+
+  it('does not accept an operator trace root when tracing is disabled', async () => {
+    const session = new ChatgptAppSession(chatgptMacos);
+    try {
+      await session.prepare({
+        ...testConfig('gpt-test', {
+          environment: { CODEX_ROLLOUT_TRACE_ROOT: '/operator/path' },
+        }),
+        rolloutTrace: false,
+      });
+      expect(session.rolloutTraceRoot).toBeUndefined();
+      expect(controller.start.mock.calls[0]![0]).not.toHaveProperty(
+        'CODEX_ROLLOUT_TRACE_ROOT'
+      );
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('removes the private trace root after a failed app launch', async () => {
+    const session = new ChatgptAppSession(chatgptMacos);
+    controller.start.mockRejectedValueOnce(new Error('fixture launch failure'));
+    await expect(
+      session.prepare({ ...testConfig(), rolloutTrace: true })
+    ).rejects.toThrow('fixture launch failure');
+    const root = session.rolloutTraceRoot!;
+    await session.dispose();
+    await expect(stat(root)).rejects.toThrow();
+  });
   it('reads the app it runs once the app has started', async () => {
     const app = vi.fn(async () => ({
       name: 'ChatGPT',
@@ -510,6 +566,23 @@ describe('ChatGPT Linux native lifecycle', () => {
   });
   afterEach(async () => {
     await rm(home, { recursive: true, force: true });
+  });
+
+  it('passes the private trace root to Linux app launches and cleans it after profile teardown', async () => {
+    const session = new ChatgptAppSession(chatgptLinux);
+    let root: string | undefined;
+    try {
+      await session.prepare({ ...linuxConfig(), rolloutTrace: true });
+      root = session.rolloutTraceRoot;
+      expect(controller.start).toHaveBeenLastCalledWith(
+        expect.objectContaining({ CODEX_ROLLOUT_TRACE_ROOT: root })
+      );
+      expect((await stat(root!)).isDirectory()).toBe(true);
+    } finally {
+      await session.dispose();
+    }
+    expect(disposeProfile).toHaveBeenCalledOnce();
+    await expect(stat(root!)).rejects.toThrow();
   });
 
   it('passes client plugins to the Linux profile before start', async () => {

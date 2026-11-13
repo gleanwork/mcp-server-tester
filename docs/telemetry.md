@@ -72,6 +72,15 @@ The trace has what the client recorded. Every client reports its answer and tool
 
 A span with no times of its own is placed at the start of its trial and marked `mst.untimed`. A tool call timed from the model requests around it is marked `mst.timing: "inferred"`; one timed by the client's own telemetry, `mst.timing: "host"`.
 
+## Native desktop rollout bundles
+
+The `chatgpt` and `codex-app` clients' `rolloutTrace` option (on by default) keeps the
+backend's native request/response/tool bundle as trial artifacts, separately
+from OpenTelemetry. `telemetry.rolloutTrace` describes the copy, not its
+content. Neither `telemetry.host.content` nor `telemetry.otlp.content`
+controls these raw artifacts. See [The native rollout trace](chatgpt-desktop.md#the-native-rollout-trace)
+for attribution, retention, limits and the opt-out.
+
 ## The client's own telemetry
 
 A client's record of a trial is its conversation: messages, tool calls and results, usage per message. Some clients also report what they measured while running, over their own OpenTelemetry exporter, and never write it into that record: a request's duration, time to first token and cost, permission decisions, retries and API errors, the hooks and plugins that ran. With `telemetry.host`, MST records that too, in the same trial:
