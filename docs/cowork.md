@@ -948,8 +948,8 @@ API cost. A test assertion or judge failure is distinct from a driver failure.
 
 - `timeToFirstTokenMs` and `timeToFirstTokenStreamMs`: the trial's first turn,
   to its first token and to the first token of the response stream, with
-  `firstRequestAt`. Each model call's own TTFT is in the client's own telemetry
-  ([`telemetry.host`](./telemetry.md#the-clients-own-telemetry)).
+  `firstRequestAt`. Each model call's own TTFT is in host telemetry
+  ([`telemetry.host`](./telemetry.md#host-telemetry)).
 - `permissionRequestCount`, `permissionDenialCount` and `approvalWaitMs`: the
   tool approvals Cowork asked for, the ones refused, and the time from each
   request to its answer. The wait is part of `durationMs`.
