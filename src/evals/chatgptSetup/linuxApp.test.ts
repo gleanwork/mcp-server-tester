@@ -76,7 +76,7 @@ afterEach(async () => {
 });
 
 describe('deep-link URL encoding', () => {
-  it('matches Python quote(safe="") byte for byte', () => {
+  it('percent-encodes every UTF-8 byte except A-Za-z0-9_.~-', () => {
     expect(quoteUrlComponent('/tmp/a b/é')).toBe('%2Ftmp%2Fa%20b%2F%C3%A9');
     expect(quoteUrlComponent("α 😀\n!*'()~-_.")).toBe(
       '%CE%B1%20%F0%9F%98%80%0A%21%2A%27%28%29~-_.'

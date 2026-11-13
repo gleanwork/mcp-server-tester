@@ -79,10 +79,15 @@ export default defineConfig([
       js: '#!/usr/bin/env node',
     },
   },
-  // First-party Linux UI: a separate Node process bounds native D-Bus calls.
-  // The managed third-party client keeps its existing Python runtime.
+  // The Linux desktop drivers: each runs as a separate Node process that
+  // bounds its native D-Bus calls. desktopReady is the Cowork image's
+  // readiness check (docker/cowork-linux/bin/desktop-ready).
   {
-    entry: { linuxFirstParty: 'src/evals/cowork/linuxFirstPartyMain.ts' },
+    entry: {
+      linuxFirstParty: 'src/evals/cowork/linuxFirstPartyMain.ts',
+      linuxThirdParty: 'src/evals/cowork/linuxThirdPartyMain.ts',
+      desktopReady: 'src/evals/cowork/desktopReadyMain.ts',
+    },
     format: ['esm'],
     dts: false,
     splitting: false,
@@ -90,6 +95,18 @@ export default defineConfig([
     treeshake: true,
     minify: false,
     outDir: 'dist/cowork',
+    tsconfig: './tsconfig.build.json',
+    external: ['@homebridge/dbus-native'],
+  },
+  {
+    entry: { linuxDriver: 'src/evals/chatgpt/linuxDriverMain.ts' },
+    format: ['esm'],
+    dts: false,
+    splitting: false,
+    sourcemap: false,
+    treeshake: true,
+    minify: false,
+    outDir: 'dist/chatgpt',
     tsconfig: './tsconfig.build.json',
     external: ['@homebridge/dbus-native'],
   },

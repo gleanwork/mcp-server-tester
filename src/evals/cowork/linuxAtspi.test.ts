@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectLinuxUi } from './linuxAtspi.js';
-import type { LinuxUi } from './linuxUi.js';
+import type { LinuxUi, LinuxUiNode } from './linuxUi.js';
 
 const external = vi.hoisted(() => ({
   createClient: vi.fn(),
@@ -366,7 +366,8 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
     { member: 'Get', value: ['s', 'not the low-level variant ABI'] },
     { member: 'GetState', value: [1] },
     { member: 'GetState', value: [-1, 0] },
-    { member: 'GetChildren', value: [['', '/org/a11y/atspi/null']] },
+    { member: 'GetChildren', value: [['not-a-bus-name', '/line1']] },
+    { member: 'GetChildren', value: [[':1.20', '/org/a11y/atspi/null', 'x']] },
   ])('rejects malformed $member replies', async ({ member, value }) => {
     const ui = await connect();
     override = (message) =>
@@ -374,6 +375,25 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
         ? { value }
         : undefined;
     await expect(ui.snapshot()).rejects.toThrow('accessibility_invalid_reply');
+  });
+
+  it("skips the null references AT-SPI sends for children it can't produce", async () => {
+    const ui = await connect();
+    const fields = (nodes: readonly LinuxUiNode[]) =>
+      nodes.map(({ name, role, parentId }) => ({ name, role, parentId }));
+    const expected = fields(await ui.snapshot());
+    const children = nodes.get('/app')!.children;
+    override = (message) =>
+      message.path === '/app' && message.member === 'GetChildren'
+        ? {
+            value: [
+              [':1.20', '/org/a11y/atspi/null'],
+              ...children.map((path) => [':1.20', path]),
+              ['', '/org/a11y/atspi/null'],
+            ],
+          }
+        : undefined;
+    expect(fields(await ui.snapshot())).toEqual(expected);
   });
 
   it('rejects defunct nodes and cycles', async () => {

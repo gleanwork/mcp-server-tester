@@ -28,9 +28,9 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
-    "./cowork-linux-runtime": "./scripts/cowork_linux.py",
+    "./cowork-linux-runtime": "./dist/cowork/linuxThirdParty.js",
     "./cowork-linux-first-party-runtime": "./dist/cowork/linuxFirstParty.js",
-    "./chatgpt-linux-runtime": "./scripts/chatgpt_linux.py",
+    "./chatgpt-linux-runtime": "./dist/chatgpt/linuxDriver.js",
     "./evals": {
       "types": "./dist/evals.d.ts",
       "import": "./dist/evals.js"
@@ -73,9 +73,6 @@
   },
   "files": [
     "dist",
-    "scripts/cowork_linux.py",
-    "scripts/chatgpt_linux.py",
-    "scripts/chatgpt_linux_contract.json",
     "schema",
     "docker",
     "skills"

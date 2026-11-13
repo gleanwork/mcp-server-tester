@@ -1,21 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import contract from '../../../scripts/chatgpt_linux_contract.json' with { type: 'json' };
 import packageJson from '../../../package.json' with { type: 'json' };
 import {
   LINUX_CHATGPT_ERROR_CODES,
+  LINUX_CHATGPT_HELPER_ENVIRONMENT,
   LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
   pickEnvironment,
 } from './linuxContract.js';
 
 describe('Linux ChatGPT shared contract', () => {
-  it('ships with the Python runtime', () => {
-    expect(packageJson.files).toContain('scripts/chatgpt_linux.py');
-    expect(packageJson.files).toContain('scripts/chatgpt_linux_contract.json');
+  it('ships the Node driver', () => {
+    expect(packageJson.exports['./chatgpt-linux-runtime']).toBe(
+      './dist/chatgpt/linuxDriver.js'
+    );
   });
 
   it('has unique error codes and environment keys', () => {
     expect(new Set(LINUX_CHATGPT_ERROR_CODES).size).toBe(
-      contract.errorCodes.length
+      LINUX_CHATGPT_ERROR_CODES.length
     );
     expect(new Set(LINUX_CHATGPT_RUNTIME_ENVIRONMENT).size).toBe(
       LINUX_CHATGPT_RUNTIME_ENVIRONMENT.length
@@ -23,17 +24,13 @@ describe('Linux ChatGPT shared contract', () => {
   });
 
   it('never forwards model or MCP credentials or removed helper paths', () => {
-    for (const key of LINUX_CHATGPT_RUNTIME_ENVIRONMENT)
+    for (const key of [
+      ...LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
+      ...LINUX_CHATGPT_HELPER_ENVIRONMENT,
+    ])
       expect(key).not.toMatch(
         /(^|_)(API_KEY|TOKEN|SECRET|PASSWORD)(_|$)|^MST_/
       );
-    expect(Object.keys(contract)).toEqual([
-      'sessionEnvironment',
-      'profileEnvironment',
-      'helperEnvironment',
-      'maxActions',
-      'errorCodes',
-    ]);
   });
 
   it('picks only defined allowlisted values', () => {

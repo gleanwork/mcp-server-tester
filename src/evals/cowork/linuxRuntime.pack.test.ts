@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, readdir, realpath, rm, symlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +11,7 @@ import { stageInstalledPackage } from '../runners/installedPackage.js';
 
 const exec = promisify(execFile);
 
-it('ships a Node first-party runtime and the standalone Python third-party runtime', async () => {
+it('ships every Linux desktop runtime as Node, with no Python', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'mst-linux-runtime-pack-'));
   const root = fileURLToPath(new URL('../../../', import.meta.url));
   try {
@@ -24,28 +24,31 @@ it('ships a Node first-party runtime and the standalone Python third-party runti
       'dir'
     );
     const require = createRequire(join(directory, 'package.json'));
-    for (const [entry, file, command] of [
-      ['cowork-linux-runtime', 'scripts/cowork_linux.py', 'python3'],
-      [
-        'cowork-linux-first-party-runtime',
-        'dist/cowork/linuxFirstParty.js',
-        process.execPath,
-      ],
+    for (const [entry, file] of [
+      ['cowork-linux-runtime', 'dist/cowork/linuxThirdParty.js'],
+      ['cowork-linux-first-party-runtime', 'dist/cowork/linuxFirstParty.js'],
+      ['chatgpt-linux-runtime', 'dist/chatgpt/linuxDriver.js'],
     ] as const) {
       const helper = require.resolve(`@gleanwork/mcp-server-tester/${entry}`);
       expect(helper).toBe(await realpath(join(directory, file)));
-      const { stdout } = await exec(command, [helper, '--help'], {
+      const { stdout } = await exec(process.execPath, [helper, '--help'], {
         timeout: 10_000,
         maxBuffer: 64 * 1024,
       });
       expect(stdout).toContain('--mode');
       expect(stdout).toContain('--max-actions');
     }
-    for (const file of [
-      'cowork_linux_common.py',
-      'cowork_linux_first_party.py',
-    ])
-      expect(existsSync(join(directory, 'scripts', file))).toBe(false);
+    // The Cowork image's readiness check runs from the installed package.
+    expect(existsSync(join(directory, 'dist/cowork/desktopReady.js'))).toBe(
+      true
+    );
+    const shipped = await readdir(directory, { recursive: true });
+    expect(
+      shipped.filter(
+        (file) => !file.startsWith('node_modules') && /\.py$/.test(file)
+      )
+    ).toEqual([]);
+    expect(existsSync(join(directory, 'scripts'))).toBe(false);
     const helper =
       require.resolve('@gleanwork/mcp-server-tester/cowork-linux-first-party-runtime');
     await expect(

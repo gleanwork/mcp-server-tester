@@ -334,7 +334,8 @@ class FirstPartyDriver {
     await this.action(() => this.ui.paste(before.entry, prompt));
     const tail = normalized(prompt).slice(-200);
     // AT-SPI can omit the start of long rendered drafts. Session binding checks
-    // the complete submitted prompt; this guard checks the same tail as Python.
+    // the complete submitted prompt; this guard checks the same tail as the
+    // managed driver (linuxThirdPartyDriver.ts).
     await this.poll(30_000, 'prompt_not_pasted', async (snapshot, until) => {
       const surface = await this.surface(
         snapshot,
