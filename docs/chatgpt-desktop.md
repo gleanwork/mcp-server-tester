@@ -20,8 +20,8 @@ validation and names the client to use. `clientOptions.provider`, which took
 only `openai`, is gone too: each client fixes its provider, so it fails
 validation. The client picks the surface, which
 controls UI setup and the expected native originator; MST does not add surface
-instructions to the evaluated prompt. Everything else on this page applies to
-both clients. Both drive the same app, so they share its desktop lease: a
+instructions to the evaluated prompt. Except where a client is named explicitly,
+this page applies to both clients. Both drive the same app, so they share its desktop lease: a
 `chatgpt` variant and a `codex-app` variant never drive the app at once.
 
 macOS keeps the Anthropic Computer Use submission driver. It receives the selected
@@ -82,6 +82,46 @@ Model and effort are installed in the native configuration. MST verifies both
 against the completed native turn. Linux does not guess mappings from model IDs
 to display labels such as `5.6 Terra Medium`. Linux rejects `clientOptions.configPath`
 (unless it equals `$HOME/.codex/config.toml`) and `chatgptSessionRoot`.
+
+## The native rollout trace
+
+The `chatgpt` client keeps the desktop backend's rollout trace by default.
+Set `"clientOptions": { "rolloutTrace": false }` to turn it off. The trace
+contains each model request exactly as the backend sent it (instructions,
+input items and tool definitions), responses with usage and response IDs, and
+tool calls with their results. It is a local artifact bundle, not OpenTelemetry,
+and does not change how MST submits the evaluated query through the app.
+
+MST launches the app with `CODEX_ROLLOUT_TRACE_ROOT` pointing at a private
+batch directory. After a trial, it copies only bundles whose native
+manifest's `root_thread_id` matches that trial's uniquely attributed native
+session. MST reads manifest versions 1 and 2 (Codex 0.167, bundled with
+ChatGPT 26.1103, writes 2); a bundle of the trial's thread in another version
+is not kept, and `notKept` names the version. It never gives a judge the batch
+directory or a bundle selected only by its filename. A failed but bound turn
+can keep its partial trace; an unbound or duplicate session cannot. The copy survives app/profile teardown,
+and the batch source is removed after the app stops.
+
+MST copies the trial's bundles as it copies `codex-cli`'s, with the same
+link checks and limits, and with the batch's known credentials redacted as
+in the transcript; see [The rollout trace](codex.md#the-rollout-trace).
+
+The trial reports the copy as client artifacts under `codex-rollout-trace/`,
+so judges can read it. With `"redactStoredResponses": false`, MST keeps it at
+`artifacts/<variant>/<case-id>/<trial>/codex-rollout-trace/` for regrading;
+otherwise it is removed after grading. These are raw prompts, tool results
+and reasoning summaries: run only where that data may be read by the judges,
+and turn tracing off if they must not receive it. `telemetry.host.content`
+and `telemetry.otlp.content` do not control this bundle.
+
+`telemetry.rolloutTrace` records the bundles, files and bytes copied, or a
+`notKept` reason, as for `codex-cli`. Two reasons are the desktop's own: no
+native thread was attributed to the trial, or the backend wrote no trace for
+it (an app whose bundled backend does not support this hook writes none).
+Every entry of the batch directory counts toward the entry limit. None of
+these fails an otherwise valid trial. Backend support is version-dependent; the
+hook was verified in the app's bundled Codex `0.163.0-alpha.11` app-server.
+This option is not yet enabled for `codex-app`.
 
 ## macOS runs in your own profile
 

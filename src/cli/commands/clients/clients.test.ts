@@ -276,6 +276,7 @@ describe('mst clients', () => {
         'correlation',
         'maxActions',
         'computerUseModel',
+        'rolloutTrace',
       ],
       'codex-app': [
         'model',

@@ -54,6 +54,7 @@ import {
 import { removedClientOptions } from './renamedKeys.js';
 import { DEFAULT_COMPUTER_USE_MODEL } from './cowork/computerUseLoop.js';
 import { withClientApp } from './installedApp.js';
+import { keepRolloutTrace } from './rolloutTraceCopy.js';
 
 /**
  * Why `clientOptions.surface` fails: the surface is the client now (ADR
@@ -109,6 +110,11 @@ const schemaOf = (product: DesktopProduct) =>
           'app profile config.toml on the trial machine (OS-specific)',
       }),
       requireMcpCalls: z.boolean().optional().meta({ default: false }),
+      /** Keep the native model requests, responses and tool results as trial artifacts. */
+      rolloutTrace:
+        product.client === 'chatgpt'
+          ? z.boolean().default(true)
+          : z.never().optional(),
       /** Gone: the surface is the client (`chatgpt` or `codex-app`). */
       surface: z
         .never({ error: (issue) => surfaceGone(product, issue.input) })
@@ -287,6 +293,7 @@ function desktopAdapter(
       model: config.model,
       reasoningEffort: config.reasoningEffort,
       timeoutMs: config.timeout,
+      rolloutTrace: config.rolloutTrace ?? false,
       correlation: {
         strategy: config.correlation,
         includeInPrompt: config.correlation === 'prompt_marker',
@@ -419,8 +426,32 @@ function desktopAdapter(
               error: transcript.error,
               clientMetadata: result.clientMetadata,
             }));
+      // The batch's backend writes every chat's trace in one root, so a
+      // trial keeps only its bound native thread's bundles. A failed bound
+      // turn may still have requests worth preserving; an unbound/duplicate
+      // turn must never collect another chat's prompts.
+      const traceThread =
+        result.success && !executionTrusted ? undefined : session?.id;
+      const trace = !appSession.rolloutTraceRoot
+        ? undefined
+        : traceThread
+          ? await keepRolloutTrace(appSession.rolloutTraceRoot, {
+              rootThreadId: traceThread,
+              noTrace:
+                'The desktop backend wrote no rollout trace for the attributed native thread.',
+              // As the transcript is redacted.
+              secrets,
+            })
+          : {
+              telemetry: {
+                bundles: 0,
+                notKept:
+                  'No unique native thread was attributed to this trial.',
+              },
+            };
       const caseResult: ClientRunResult = {
         ...transcript,
+        ...(trace?.artifacts ? { artifacts: trace.artifacts } : {}),
         ...(ending ? { ending } : {}),
         // The native turn's own times, when it was bound.
         ...(session?.startedAt ? { startedAt: session.startedAt } : {}),
@@ -428,6 +459,7 @@ function desktopAdapter(
         durationMs: Date.now() - started,
         ...(result.success ? { llmDurationMs: result.llmDurationMs } : {}),
         telemetry: {
+          ...(trace ? { rolloutTrace: trace.telemetry } : {}),
           caseExecution: {
             status: executionTrusted ? 'completed' : 'failed',
             continuation: executionTrusted ? 'allowed' : 'restart',
