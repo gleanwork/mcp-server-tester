@@ -181,13 +181,23 @@ export function settings(
 
 /**
  * `modelSlot` for an agentic judge: `models.agentJudge` for the runtime it
- * runs on, unless the judge's own defaults name a model.
+ * runs on. A configured model replaces a model the judge's own defaults
+ * name, as it replaces MST's built-in one.
  */
 export function agentModelSlot(spec: { defaults?: AgentJudgeOptions }) {
-  return (options: Record<string, unknown>): JudgeModelSlot | undefined =>
-    spec.defaults?.model !== undefined
-      ? undefined
-      : { kind: 'agentJudge', key: settings(spec, options).runtime };
+  return (options: Record<string, unknown>): JudgeModelSlot => ({
+    kind: 'agentJudge',
+    key: settings(spec, options).runtime,
+  });
+}
+
+/**
+ * The definition's `defaultModel` when the judge's own defaults name a
+ * model, so MST doesn't report it as running on a built-in one.
+ */
+export function agentDefaultModel(spec: { defaults?: AgentJudgeOptions }) {
+  const model = spec.defaults?.model;
+  return model !== undefined ? { defaultModel: () => model } : {};
 }
 
 async function runAgent<Input>(
@@ -255,6 +265,7 @@ export function agenticJudge(spec: AgenticJudgeSpec): JudgeDefinition {
     ...(spec.version !== undefined && { version: spec.version }),
     ...(spec.requires !== undefined && { requires: spec.requires }),
     modelSlot: agentModelSlot(spec),
+    ...agentDefaultModel(spec),
     preflight: (options) => preflightRuntime(settings(spec, options).runtime),
     evaluate: (input, options) =>
       runAgent(
@@ -285,6 +296,7 @@ export function agenticPairwiseJudge(
       swapPositions: spec.swapPositions,
     }),
     modelSlot: agentModelSlot(spec),
+    ...agentDefaultModel(spec),
     preflight: (options) => preflightRuntime(settings(spec, options).runtime),
     compare: (input, options) =>
       runAgent(

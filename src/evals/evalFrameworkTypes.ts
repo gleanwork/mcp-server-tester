@@ -607,13 +607,24 @@ export interface JudgeDefinition {
    * `models.judge.openai`). When `mst.config.json` or the eval config sets
    * that entry, MST writes the model into the options as `model`, so the
    * judge's identity and scores record it. When nothing sets it, MST warns
-   * and records the built-in model in `run.json`. Return undefined to keep
-   * the judge's own default. The judges `defineQuestionJudge` and
+   * and records the built-in model in `run.json`, unless `defaultModel`
+   * names the judge's own. Return undefined to keep the judge's own default
+   * whatever `models` sets. The judges `defineQuestionJudge` and
    * `agenticJudge` build have one.
    */
   readonly modelSlot?: (
     options: Record<string, unknown>
   ) => JudgeModelSlot | undefined;
+  /**
+   * For a judge with `modelSlot` whose fallback is a model of its own rather
+   * than MST's built-in one: that model, given options that name none. A
+   * configured model still replaces it; when nothing is configured, MST
+   * doesn't warn or list a built-in model in `run.json`. The judge's
+   * `version` must cover it, so a new default model is a new judge.
+   */
+  readonly defaultModel?: (
+    options: Record<string, unknown>
+  ) => string | undefined;
   /**
    * Grades one run of a case. `input.case` is the case as written in the
    * dataset; `input.trial` is the observed run. `options` is parsed by `schema`.
