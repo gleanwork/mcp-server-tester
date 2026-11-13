@@ -234,10 +234,14 @@ When adding features:
 1. Update documentation for any changed functionality
 2. Add tests for new features
 3. Ensure all tests pass
-4. Label the pull request for the changelog: `breaking`, `enhancement`, `bug`,
-   `documentation` or `internal`. Don't edit CHANGELOG.md: release-it
-   generates each release's section from the merged pull requests' titles and
-   labels. Put upgrade steps in `docs/migrations/`.
+4. Give the pull request one changelog label: `breaking`, `enhancement`,
+   `bug`, `documentation` or `internal`. The Changelog label workflow sets it
+   from the title (`feat:` is `enhancement`, `fix:` is `bug`, `docs:` is
+   `documentation`, `!` is `breaking`, other types are `internal`). Change it
+   when the title's type doesn't fit. The workflow fails when the title gives
+   no label, or when there is more than one. Don't edit CHANGELOG.md:
+   release-it generates each release's section from the merged pull requests'
+   titles and labels. Put upgrade steps in `docs/migrations/`.
 5. Request review from maintainers
 
 ### PR Title Format
