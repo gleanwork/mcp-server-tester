@@ -29,8 +29,9 @@ When reviewing merged PR's the labels to be used are:
   changelog/release notes.
 
 The Changelog label workflow (`.github/workflows/changelog-label.yml`) sets
-the label from each pull request's conventional commit title, and fails a pull
-request whose title gives no label or that has more than one. It doesn't know
+the label from each pull request's conventional commit title. It fails a pull
+request that has no changelog label and a title that gives none, or that has
+more than one. It doesn't know
 whether the title's type fits, so the titles and labels still need a check.
 
 ## Release

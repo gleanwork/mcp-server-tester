@@ -16,9 +16,12 @@ on:
 
 permissions: {}
 
+# One run at a time per pull request, in order, so two runs never change its
+# labels at once. A run reads the labels when it starts, not from its event.
+# Cancelling instead could stop the `opened` run before it adds the label.
 concurrency:
   group: changelog-label-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   label:

@@ -64,7 +64,7 @@ export interface LabelState {
   previousTitle?: string;
   /** Every label on the pull request now. */
   labels: string[];
-  /** Add a label when there is none. Label events only check. */
+  /** Add or change a label. Removing a label only checks. */
   mayAdd: boolean;
 }
 
@@ -116,6 +116,16 @@ export function planLabels(state: LabelState): LabelPlan {
   }
 
   return { kind: 'ok', label: current };
+}
+
+/**
+ * A person who removes a label may be about to add another, and adding one
+ * back on the removal would leave two. A `labeled` event still changes
+ * labels: it may be an unrelated label (Dependabot's `dependencies`) that
+ * arrived before the `opened` run labeled the pull request.
+ */
+export function mayChangeLabelsOn(action: string): boolean {
+  return action !== 'unlabeled';
 }
 
 interface PullRequestEvent {
@@ -172,9 +182,7 @@ async function main(): Promise<void> {
     title: event.pull_request.title,
     previousTitle: event.changes?.title?.from,
     labels: labels.map((label) => label.name),
-    // Replacing a label in GitHub's picker removes one and adds the other in
-    // separate events. Adding on the removal would leave two.
-    mayAdd: event.action !== 'labeled' && event.action !== 'unlabeled',
+    mayAdd: mayChangeLabelsOn(event.action),
   });
 
   if (plan.kind === 'error') {

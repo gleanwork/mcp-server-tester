@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  mayChangeLabelsOn,
   planLabels,
   readTitle,
   type LabelState,
@@ -132,7 +133,21 @@ describe('planLabels', () => {
     ).toEqual({ kind: 'ok', label: 'enhancement' });
   });
 
-  describe('on label events', () => {
+  describe('mayChangeLabelsOn', () => {
+    it.each([
+      ['opened', true],
+      ['reopened', true],
+      ['edited', true],
+      ['synchronize', true],
+      // Dependabot adds `dependencies` right after opening.
+      ['labeled', true],
+      ['unlabeled', false],
+    ])('%s -> %s', (action, expected) => {
+      expect(mayChangeLabelsOn(action)).toBe(expected);
+    });
+  });
+
+  describe('when a label was removed', () => {
     it('only checks, so replacing a label never leaves two', () => {
       const result = plan({ title: 'feat: x', mayAdd: false });
       expect(result.kind).toBe('error');

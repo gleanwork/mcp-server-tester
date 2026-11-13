@@ -236,10 +236,13 @@ When adding features:
 3. Ensure all tests pass
 4. Give the pull request one changelog label: `breaking`, `enhancement`,
    `bug`, `documentation` or `internal`. The Changelog label workflow sets it
-   from the title (`feat:` is `enhancement`, `fix:` is `bug`, `docs:` is
-   `documentation`, `!` is `breaking`, other types are `internal`). Change it
-   when the title's type doesn't fit. The workflow fails when the title gives
-   no label, or when there is more than one. Don't edit CHANGELOG.md:
+   from the title: `feat:` and `perf:` are `enhancement`, `fix:` is `bug`,
+   `docs:` is `documentation`, `!` is `breaking`, and `build:`, `chore:`,
+   `ci:`, `refactor:`, `style:` and `test:` are `internal`, as are dependency
+   bumps (`fix(deps):`). Change it when the title's type doesn't fit. The
+   workflow fails when the pull request has no changelog label and the title
+   gives none, or when it has more than one. A title with `!` always gets
+   `breaking`. Don't edit CHANGELOG.md:
    release-it generates each release's section from the merged pull requests'
    titles and labels. Put upgrade steps in `docs/migrations/`.
 5. Request review from maintainers
