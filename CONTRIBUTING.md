@@ -239,7 +239,8 @@ When adding features:
    from the title: `feat:` and `perf:` are `enhancement`, `fix:` is `bug`,
    `docs:` is `documentation`, `!` is `breaking`, and `build:`, `chore:`,
    `ci:`, `refactor:`, `style:` and `test:` are `internal`, as are dependency
-   bumps (`fix(deps):`). Change it when the title's type doesn't fit. The
+   bumps (`fix(deps):`). Change it when the title's type doesn't fit: a label
+   you set stays, and one the workflow set follows the title. The
    workflow fails when the pull request has no changelog label and the title
    gives none, or when it has more than one. A title with `!` always gets
    `breaking`. Don't edit CHANGELOG.md:

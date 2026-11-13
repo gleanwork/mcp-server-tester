@@ -1,13 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  lastAddedBy,
   mayChangeLabelsOn,
   planLabels,
   readTitle,
+  WORKFLOW_ACTOR,
   type LabelState,
 } from '../scripts/changelog-label.js';
 
 function plan(state: Partial<LabelState> & { title: string }) {
-  return planLabels({ labels: [], mayAdd: true, ...state });
+  return planLabels({
+    labels: [],
+    mayAdd: true,
+    setByWorkflow: false,
+    ...state,
+  });
 }
 
 describe('readTitle', () => {
@@ -96,39 +103,35 @@ describe('planLabels', () => {
     ).toEqual({ kind: 'change', add: 'breaking', remove: 'bug' });
   });
 
-  it('moves a label that came from the old title to the new one', () => {
+  it('moves a label the workflow added to follow the title', () => {
     expect(
       plan({
         title: 'feat(runner): add a runner',
-        previousTitle: 'fix(runner): add a runner',
         labels: ['bug'],
+        setByWorkflow: true,
       })
     ).toEqual({ kind: 'change', add: 'enhancement', remove: 'bug' });
     expect(
       plan({
         title: 'feat: drop the flag',
-        previousTitle: 'feat!: drop the flag',
         labels: ['breaking'],
+        setByWorkflow: true,
       })
     ).toEqual({ kind: 'change', add: 'enhancement', remove: 'breaking' });
   });
 
-  it('keeps a chosen label when the title changes', () => {
+  it('keeps a label a person added when the title changes', () => {
     expect(
-      plan({
-        title: 'feat(runner): add a runner',
-        previousTitle: 'fix(runner): add a runner',
-        labels: ['internal'],
-      })
+      plan({ title: 'feat(runner): add a runner', labels: ['internal'] })
     ).toEqual({ kind: 'ok', label: 'internal' });
   });
 
-  it('keeps the label when the new title implies none', () => {
+  it('keeps the label when the title implies none', () => {
     expect(
       plan({
         title: 'Add a runner',
-        previousTitle: 'feat: add a runner',
         labels: ['enhancement'],
+        setByWorkflow: true,
       })
     ).toEqual({ kind: 'ok', label: 'enhancement' });
   });
@@ -144,6 +147,48 @@ describe('planLabels', () => {
       ['unlabeled', false],
     ])('%s -> %s', (action, expected) => {
       expect(mayChangeLabelsOn(action)).toBe(expected);
+    });
+  });
+
+  describe('lastAddedBy', () => {
+    const added = (label: string, login: string) => ({
+      event: 'labeled',
+      actor: { login },
+      label: { name: label },
+    });
+
+    it('names who added the label last', () => {
+      expect(
+        lastAddedBy(
+          [
+            added('bug', WORKFLOW_ACTOR),
+            {
+              event: 'unlabeled',
+              actor: { login: 'a' },
+              label: { name: 'bug' },
+            },
+            added('Bug', 'a-person'),
+            added('internal', WORKFLOW_ACTOR),
+          ],
+          'bug'
+        )
+      ).toBe('a-person');
+      expect(
+        lastAddedBy(
+          [added('bug', 'a-person'), added('bug', WORKFLOW_ACTOR)],
+          'bug'
+        )
+      ).toBe(WORKFLOW_ACTOR);
+    });
+
+    it('is null when nobody added it, or the actor is gone', () => {
+      expect(lastAddedBy([{ event: 'renamed' }], 'bug')).toBeNull();
+      expect(
+        lastAddedBy(
+          [{ event: 'labeled', actor: null, label: { name: 'bug' } }],
+          'bug'
+        )
+      ).toBeNull();
     });
   });
 
@@ -172,6 +217,17 @@ describe('planLabels', () => {
       expect(
         plan({ title: 'feat: x', labels: ['documentation'], mayAdd: false })
       ).toEqual({ kind: 'ok', label: 'documentation' });
+    });
+
+    it('leaves a workflow label for the next run to move', () => {
+      expect(
+        plan({
+          title: 'feat: x',
+          labels: ['bug'],
+          setByWorkflow: true,
+          mayAdd: false,
+        })
+      ).toEqual({ kind: 'ok', label: 'bug' });
     });
   });
 });

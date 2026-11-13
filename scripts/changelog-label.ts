@@ -8,8 +8,12 @@
  * lerna-changelog leaves out a pull request with none of these labels, and
  * lists one with two under both headings. The label comes from the
  * conventional commit title (`feat:` is `enhancement`, `!` is `breaking`).
- * When the title changes, a label that came from the old title follows it. A
- * label a person chose stays, unless the title marks a breaking change.
+ * A label this workflow added follows the title when it changes. A label a
+ * person added stays, unless the title marks a breaking change.
+ *
+ * Every run reads the pull request's title, labels and label history as they
+ * are when it runs, never from its event. GitHub drops a queued run when a
+ * newer one queues, so the run that survives must reach the same answer.
  */
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -58,12 +62,43 @@ export function readTitle(title: string): TitleInfo {
   return { label: TYPE_LABELS[type] ?? null, breaking: false };
 }
 
+export function changelogLabelsIn(labels: string[]): ChangelogLabel[] {
+  return CHANGELOG_LABELS.filter((label) =>
+    labels.some((name) => name.toLowerCase() === label)
+  );
+}
+
+/** The login GitHub gives a workflow's `GITHUB_TOKEN`. */
+export const WORKFLOW_ACTOR = 'github-actions[bot]';
+
+interface IssueEvent {
+  event: string;
+  actor?: { login: string } | null;
+  label?: { name: string };
+}
+
+/** Who added `label` last, from the issue events (oldest first). */
+export function lastAddedBy(
+  events: IssueEvent[],
+  label: string
+): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event?.event === 'labeled' && event.label?.name.toLowerCase() === label)
+      return event.actor?.login ?? null;
+  }
+  return null;
+}
+
 export interface LabelState {
   title: string;
-  /** The title before this edit, when the event changed it. */
-  previousTitle?: string;
   /** Every label on the pull request now. */
   labels: string[];
+  /**
+   * This workflow added the pull request's changelog label, and no person
+   * has added it since.
+   */
+  setByWorkflow: boolean;
   /** Add or change a label. Removing a label only checks. */
   mayAdd: boolean;
 }
@@ -76,9 +111,7 @@ export type LabelPlan =
 const LABEL_LIST = CHANGELOG_LABELS.map((label) => `\`${label}\``).join(', ');
 
 export function planLabels(state: LabelState): LabelPlan {
-  const present = CHANGELOG_LABELS.filter((label) =>
-    state.labels.some((name) => name.toLowerCase() === label)
-  );
+  const present = changelogLabelsIn(state.labels);
   const title = readTitle(state.title);
 
   if (present.length > 1)
@@ -108,12 +141,14 @@ export function planLabels(state: LabelState): LabelPlan {
     };
   }
 
-  // A label that came from the old title follows the new one.
-  if (state.previousTitle !== undefined && title.label && state.mayAdd) {
-    const previous = readTitle(state.previousTitle).label;
-    if (previous === current && title.label !== current)
-      return { kind: 'change', add: title.label, remove: current };
-  }
+  // A label this workflow added follows the title.
+  if (
+    state.setByWorkflow &&
+    state.mayAdd &&
+    title.label &&
+    title.label !== current
+  )
+    return { kind: 'change', add: title.label, remove: current };
 
   return { kind: 'ok', label: current };
 }
@@ -131,8 +166,6 @@ export function mayChangeLabelsOn(action: string): boolean {
 interface PullRequestEvent {
   action: string;
   number: number;
-  pull_request: { title: string };
-  changes?: { title?: { from: string } };
 }
 
 async function github(
@@ -140,7 +173,8 @@ async function github(
   path: string,
   body?: unknown
 ): Promise<unknown> {
-  const response = await fetch(`https://api.github.com${path}`, {
+  const api = process.env.GITHUB_API_URL ?? 'https://api.github.com';
+  const response = await fetch(`${api}${path}`, {
     method,
     headers: {
       accept: 'application/vnd.github+json',
@@ -155,6 +189,18 @@ async function github(
       `${method} ${path}: ${response.status} ${await response.text()}`
     );
   return response.status === 204 ? null : response.json();
+}
+
+async function issueEvents(issue: string): Promise<IssueEvent[]> {
+  const events: IssueEvent[] = [];
+  for (let page = 1; ; page++) {
+    const batch = (await github(
+      'GET',
+      `${issue}/events?per_page=100&page=${page}`
+    )) as IssueEvent[];
+    events.push(...batch);
+    if (batch.length < 100) return events;
+  }
 }
 
 function requireEnv(name: string): string {
@@ -173,15 +219,21 @@ async function main(): Promise<void> {
   const event = JSON.parse(
     fs.readFileSync(requireEnv('GITHUB_EVENT_PATH'), 'utf8')
   ) as PullRequestEvent;
-  const issue = `/repos/${requireEnv('GITHUB_REPOSITORY')}/issues/${event.number}`;
-  // The labels now, not when the event fired: a person may have changed them.
-  const labels = (await github('GET', `${issue}/labels`)) as Array<{
-    name: string;
-  }>;
+  const repo = `/repos/${requireEnv('GITHUB_REPOSITORY')}`;
+  const issue = `${repo}/issues/${event.number}`;
+  const pull = (await github('GET', `${repo}/pulls/${event.number}`)) as {
+    title: string;
+    labels: Array<{ name: string }>;
+  };
+  const labels = pull.labels.map((label) => label.name);
+  const present = changelogLabelsIn(labels);
+  const setByWorkflow =
+    present.length === 1 &&
+    lastAddedBy(await issueEvents(issue), present[0] ?? '') === WORKFLOW_ACTOR;
   const plan = planLabels({
-    title: event.pull_request.title,
-    previousTitle: event.changes?.title?.from,
-    labels: labels.map((label) => label.name),
+    title: pull.title,
+    labels,
+    setByWorkflow,
     mayAdd: mayChangeLabelsOn(event.action),
   });
 

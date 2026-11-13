@@ -3,9 +3,10 @@ name: Changelog label
 # Every pull request needs exactly one changelog label (`breaking`,
 # `enhancement`, `bug`, `documentation` or `internal`): at release,
 # lerna-changelog leaves out a pull request with none and lists one with two
-# under both headings. This sets the label from the conventional commit title,
-# and fails when the title implies none or the labels disagree with it. See
-# scripts/changelog-label.ts for the rules.
+# under both headings. This sets the label from the conventional commit title
+# and moves a label it set when the title changes. A label a person set stays.
+# It fails when the pull request has no changelog label and the title implies
+# none, or has more than one. See scripts/changelog-label.ts for the rules.
 #
 # pull_request_target, so pull requests from forks and Dependabot get a token
 # that can label them. It runs the script from main, never code from the pull
@@ -16,9 +17,10 @@ on:
 
 permissions: {}
 
-# One run at a time per pull request, in order, so two runs never change its
-# labels at once. A run reads the labels when it starts, not from its event.
-# Cancelling instead could stop the `opened` run before it adds the label.
+# One run at a time per pull request, so two runs never change its labels at
+# once. GitHub keeps one queued run and drops an older one, so each run reads
+# the title, labels and label history when it starts, not from its event.
+# Cancelling the running one instead could stop it before it adds the label.
 concurrency:
   group: changelog-label-${{ github.event.pull_request.number }}
   cancel-in-progress: false
