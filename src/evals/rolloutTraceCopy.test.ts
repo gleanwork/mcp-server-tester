@@ -184,7 +184,48 @@ describe('keepRolloutTrace', () => {
     expect(await keptBundles(trace)).toEqual(['child', 'native-name']);
   });
 
-  it('never takes a linked bundle, a linked manifest, or one it can’t parse or doesn’t know', async () => {
+  it('reads the version-2 manifest Codex 0.167 writes', async () => {
+    // As ChatGPT 26.1103's bundled Codex wrote it.
+    await bundle(
+      'trace-1-trial-1',
+      'trial-1',
+      JSON.stringify({
+        schema_version: 2,
+        trace_id: '070d2c27-482a-4a28-8814-cbdadf34932d',
+        rollout_id: 'trial-1',
+        root_thread_id: 'trial-1',
+        started_at_unix_ms: 1794545207671,
+        raw_event_log: 'trace.jsonl',
+        payloads_dir: 'payloads',
+      })
+    );
+    const trace = await keep('trial-1');
+    expect(trace.telemetry).toMatchObject({ bundles: 1, files: 2 });
+    expect(await keptBundles(trace)).toEqual(['trace-1-trial-1']);
+  });
+
+  it('says when the thread’s bundle has a manifest version it doesn’t read, not that there is no trace', async () => {
+    await bundle(
+      'future',
+      'trial-1',
+      '{"schema_version":3,"root_thread_id":"trial-1"}'
+    );
+    // Another chat's unknown version is not the trial's.
+    await bundle(
+      'other-future',
+      'other-chat',
+      '{"schema_version":4,"root_thread_id":"other-chat"}'
+    );
+    expect(await keep('trial-1')).toEqual({
+      telemetry: {
+        bundles: 0,
+        notKept:
+          "The rollout trace's manifest is a version MST doesn't read (schema_version 3).",
+      },
+    });
+  });
+
+  it('never takes a linked bundle, a linked manifest, or one it can’t parse', async () => {
     const other = await bundle('other', 'other-chat');
     const elsewhere = await mkdtemp(join(tmpdir(), 'mst-keep-elsewhere-'));
     kept.push(elsewhere);
@@ -209,11 +250,6 @@ describe('keepRolloutTrace', () => {
       join(root, 'hard-linked-manifest', 'manifest.json')
     );
     await bundle('malformed', 'trial-1', '{');
-    await bundle(
-      'future',
-      'trial-1',
-      '{"schema_version":2,"root_thread_id":"trial-1"}'
-    );
     expect(await keep('trial-1')).toEqual({
       telemetry: { bundles: 0, notKept: noTrace },
     });

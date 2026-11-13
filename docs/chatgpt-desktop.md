@@ -93,11 +93,13 @@ tool calls with their results. It is a local artifact bundle, not OpenTelemetry,
 and does not change how MST submits the evaluated query through the app.
 
 MST launches the app with `CODEX_ROLLOUT_TRACE_ROOT` pointing at a private
-batch directory. After a trial, it copies only bundles whose version-1 native
+batch directory. After a trial, it copies only bundles whose native
 manifest's `root_thread_id` matches that trial's uniquely attributed native
-session. It never gives a judge the batch directory or a bundle selected only
-by its filename. A failed but bound turn can keep its partial trace; an
-unbound or duplicate session cannot. The copy survives app/profile teardown,
+session. MST reads manifest versions 1 and 2 (Codex 0.167, bundled with
+ChatGPT 26.1103, writes 2); a bundle of the trial's thread in another version
+is not kept, and `notKept` names the version. It never gives a judge the batch
+directory or a bundle selected only by its filename. A failed but bound turn
+can keep its partial trace; an unbound or duplicate session cannot. The copy survives app/profile teardown,
 and the batch source is removed after the app stops.
 
 MST copies the trial's bundles as it copies `codex-cli`'s, with the same

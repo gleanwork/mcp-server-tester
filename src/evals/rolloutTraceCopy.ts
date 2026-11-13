@@ -302,62 +302,76 @@ export async function copyRolloutTrace(
 const MAX_MANIFEST_BYTES = 64 * 1024;
 
 /**
- * Whether the bundle `dir` has a `manifest.json`, and, with `rootThreadId`,
- * whether its version-1 manifest names that thread as the root thread. A
- * filename is not attribution. A manifest MST won't read (a link, a hard
+ * The manifest versions MST reads. Each names the bundle's root thread as
+ * `root_thread_id`: Codex 0.163 writes version 1, and 0.167 writes version 2,
+ * which adds `rollout_id`, `raw_event_log` and `payloads_dir`.
+ */
+const MANIFEST_VERSIONS: ReadonlySet<unknown> = new Set([1, 2]);
+
+/**
+ * Whether the bundle `dir` is the trial's: it has a `manifest.json` and,
+ * with `rootThreadId`, a manifest of a version MST reads that names that
+ * thread as the root thread. A filename is not attribution. One that names
+ * the thread in a version MST doesn't read is reported as such, so a newer
+ * Codex isn't taken for no trace. A manifest MST won't read (a link, a hard
  * link, another user's file, too large) or can't parse is another chat's or
  * not a bundle's; any other error reading it is thrown, so it isn't taken
- * for no trace.
+ * for no trace either.
  */
-async function isBundle(
+async function bundleMatch(
   dir: string,
   rootThreadId: string | undefined
-): Promise<boolean> {
+): Promise<'match' | 'other' | { readonly unknownVersion: string }> {
   const file = path.join(dir, 'manifest.json');
   try {
     if (rootThreadId === undefined) {
       await lstat(file);
-      return true;
+      return 'match';
     }
     const manifest: unknown = JSON.parse(
       (await readTraceFile(file, MAX_MANIFEST_BYTES)).toString('utf8')
     );
-    if (typeof manifest !== 'object' || manifest === null) return false;
+    if (typeof manifest !== 'object' || manifest === null) return 'other';
     const { schema_version, root_thread_id } = manifest as Record<
       string,
       unknown
     >;
-    return schema_version === 1 && root_thread_id === rootThreadId;
+    if (root_thread_id !== rootThreadId) return 'other';
+    return MANIFEST_VERSIONS.has(schema_version)
+      ? 'match'
+      : { unknownVersion: String(JSON.stringify(schema_version)).slice(0, 32) };
   } catch (error) {
     if (
       isMissingPath(error) ||
       error instanceof RolloutTraceError ||
       error instanceof SyntaxError
     )
-      return false;
+      return 'other';
     throw error;
   }
 }
 
 /**
  * The bundles in `root` (directories with a manifest; with `rootThreadId`,
- * only that thread's), sorted. A missing `root` holds none. Every entry of
- * `root` counts toward `limits.entries`, so a root with too many is over the
- * limit before MST reads them all.
+ * only that thread's), sorted, and the manifest versions MST doesn't read
+ * that the thread's other bundles have. A missing `root` holds none. Every
+ * entry of `root` counts toward `limits.entries`, so a root with too many is
+ * over the limit before MST reads them all.
  */
 async function traceBundles(
   root: string,
   rootThreadId: string | undefined,
   limits: ArtifactLimits
-): Promise<string[]> {
+): Promise<{ bundles: string[]; unknownVersions: string[] }> {
   let directory;
   try {
     directory = await opendir(root);
   } catch (error) {
-    if (isMissingPath(error)) return [];
+    if (isMissingPath(error)) return { bundles: [], unknownVersions: [] };
     throw error;
   }
   const bundles: string[] = [];
+  const unknownVersions = new Set<string>();
   let entries = 0;
   for await (const entry of directory) {
     if (++entries > limits.entries)
@@ -365,13 +379,12 @@ async function traceBundles(
         'limit',
         `the trace root has more than ${limits.entries} entries`
       );
-    if (
-      entry.isDirectory() &&
-      (await isBundle(path.join(root, entry.name), rootThreadId))
-    )
-      bundles.push(entry.name);
+    if (!entry.isDirectory()) continue;
+    const match = await bundleMatch(path.join(root, entry.name), rootThreadId);
+    if (match === 'match') bundles.push(entry.name);
+    else if (match !== 'other') unknownVersions.add(match.unknownVersion);
   }
-  return bundles.sort();
+  return { bundles: bundles.sort(), unknownVersions: [...unknownVersions] };
 }
 
 /** What a trial keeps of a rollout trace, and its `telemetry.rolloutTrace`. */
@@ -410,9 +423,17 @@ export async function keepRolloutTrace(
   const limits = options.limits ?? ARTIFACT_LIMITS;
   let bundles: string[] | undefined;
   try {
-    bundles = await traceBundles(root, options.rootThreadId, limits);
+    const found = await traceBundles(root, options.rootThreadId, limits);
+    bundles = found.bundles;
     if (bundles.length === 0)
-      return { telemetry: { bundles: 0, notKept: options.noTrace } };
+      return {
+        telemetry: {
+          bundles: 0,
+          notKept: found.unknownVersions.length
+            ? `The rollout trace's manifest is a version MST doesn't read (schema_version ${found.unknownVersions.sort().join(', ')}).`
+            : options.noTrace,
+        },
+      };
     const copy = await copyRolloutTrace(root, bundles, {
       secrets: options.secrets,
       limits,
