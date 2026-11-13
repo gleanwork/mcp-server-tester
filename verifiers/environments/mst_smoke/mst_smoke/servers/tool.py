@@ -1,7 +1,3 @@
-"""The MCP tool the smoke tasks need: a lookup only the server can answer."""
-
-from __future__ import annotations
-
 import hashlib
 
 import verifiers.v1 as vf

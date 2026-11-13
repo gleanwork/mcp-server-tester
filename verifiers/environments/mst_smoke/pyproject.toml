@@ -1,0 +1,13 @@
+[project]
+name = "mst-smoke"
+version = "0.1.0"
+description = "mst-smoke — one MCP tool call per task, to check mst-harness end to end."
+requires-python = ">=3.11"
+dependencies = ["verifiers>=0.4.1,<0.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mst_smoke"]

@@ -328,9 +328,9 @@ belong in committed eval configs.
 
 ## Run under verifiers (experimental)
 
-If your tasks are a [verifiers](https://github.com/PrimeIntellect-ai/verifiers) taskset, you can run them on MST's clients without rewriting them as datasets. verifiers runs the eval: it loads the tasks, records the model's traffic through its interception server, and scores each rollout with the task's rewards and judges. MST is the rollout's harness: a small Python package, `mst-harness`, runs one `mst run` trial per rollout and returns the client's reply and transcript.
+If your tasks are a [verifiers](https://github.com/PrimeIntellect-ai/verifiers) taskset, you can run them on MST's clients without rewriting them as datasets. verifiers runs the eval: it loads the tasks, records the model's traffic through its interception server, and scores each rollout with the task's rewards and judges. MST is the rollout's harness: `mst-harness`, a verifiers harness plugin, runs one `mst run` trial per rollout and returns the client's reply and transcript. With verifiers installed, select it with `vf-run <taskset> --env.agent.harness.id mst-harness`.
 
-`mst verifiers run` does both on this machine, with [uv](https://docs.astral.sh/uv/). The taskset is the only input:
+`mst verifiers run` is a shortcut for that `vf-run`, with [uv](https://docs.astral.sh/uv/) installing the rest. The taskset is the only input:
 
 ```bash
 OPENAI_API_KEY=... npx mst verifiers run ./acme-tasks --client codex-cli --model gpt-5

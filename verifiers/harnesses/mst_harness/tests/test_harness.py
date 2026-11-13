@@ -7,10 +7,12 @@ from typing import Any, cast
 import pytest
 from verifiers.v1.clients import ModelContext
 from verifiers.v1.runtimes import ProgramResult, Runtime
+from verifiers.v1.task import TaskData
 from verifiers.v1.trace import Trace
+from verifiers.v1.utils.loaders import harness_class, harness_config_type
 
 from mst_harness import MSTHarness, MSTHarnessConfig
-from mst_harness.trial import TrialRequest, dataset, eval_config, parse_trial
+from mst_harness.harness import TrialRequest, dataset, eval_config, parse_trial
 
 ENDPOINT = "http://127.0.0.1:8765/rollout/abc/v1"
 
@@ -43,12 +45,11 @@ class FakeRuntime:
         self.exit_code = exit_code
         self.files: dict[str, bytes] = {}
         self.runs: list[tuple[list[str], dict[str, str]]] = []
-        self.programs: list[tuple[list[str], dict[str, str]]] = []
 
     async def write(self, path: str, data: bytes) -> None:
         self.files[path] = data
 
-    async def read(self, path: str) -> bytes:
+    async def read(self, path: str, max_bytes: int | None = None) -> bytes:
         if path in self.files:
             return self.files[path]
         assert self.trial is not None
@@ -56,6 +57,8 @@ class FakeRuntime:
 
     async def run(self, argv: list[str], env: dict[str, str]) -> ProgramResult:
         self.runs.append((argv, env))
+        if argv[:2] == ["mst", "run"]:
+            return ProgramResult(self.exit_code, "mst summary", "mst log")
         if argv[0] == "sh" and "find . -type f" in argv[2]:
             root = argv[2].split("cd ", 1)[1].split(" &&", 1)[0]
             listed = [f"./{p.removeprefix(root + '/')}" for p in self.files if p.startswith(root)]
@@ -64,33 +67,42 @@ class FakeRuntime:
             return ProgramResult(0, "results/runs/r1/transcripts/default/rollout/1.json\n", "")
         return ProgramResult(0, "", "")
 
-    async def run_program(self, argv: list[str], env: dict[str, str]) -> ProgramResult:
-        self.programs.append((argv, env))
-        return ProgramResult(self.exit_code, "mst summary", "mst log")
+    def mst_run(self) -> tuple[list[str], dict[str, str]]:
+        return next((argv, env) for argv, env in self.runs if argv[:2] == ["mst", "run"])
 
 
-AnyTrace = Trace[Any, Any]
+AnyTrace = Trace[Any, Any, Any]
 
 
-def fake_trace(
-    prompt: str = "Write the brief.",
-    system_prompt: str | None = None,
-    calls: list[object] | None = None,
-) -> AnyTrace:
+def fake_trace(calls: list[object] | None = None) -> AnyTrace:
     """A trace whose interception recorded `calls` (one model call by default)."""
-    task = SimpleNamespace(data=SimpleNamespace(prompt=prompt, system_prompt=system_prompt))
     recorded = [object()] if calls is None else calls
-    return cast(AnyTrace, SimpleNamespace(id="t-1", task=task, info={}, calls=recorded))
+    return cast(AnyTrace, SimpleNamespace(id="t-1", info={}, calls=recorded))
+
+
+def task_data(**fields: Any) -> TaskData:
+    return TaskData.model_validate(fields)
 
 
 def harness(**config: Any) -> MSTHarness:
     return MSTHarness(MSTHarnessConfig(**config))
 
 
-async def launch(h: MSTHarness, runtime: FakeRuntime, trace: AnyTrace) -> ProgramResult:
+async def launch(
+    h: MSTHarness,
+    runtime: FakeRuntime,
+    trace: AnyTrace,
+    data: TaskData | None = None,
+) -> ProgramResult:
     ctx = cast(ModelContext, SimpleNamespace(model="claude-sonnet-4-6"))
     return await h.launch(
-        ctx, trace, cast(Runtime, runtime), ENDPOINT, "secret-1", {"acme": "http://x/mcp/acme"}
+        ctx,
+        trace,
+        cast(Runtime, runtime),
+        ENDPOINT,
+        "secret-1",
+        {"acme": "http://x/mcp/acme"},
+        data or task_data(prompt="Write the brief."),
     )
 
 
@@ -141,11 +153,12 @@ def test_parse_trial_reads_the_answer_and_ending() -> None:
 async def test_launch_runs_one_trial_against_the_interception_endpoint() -> None:
     runtime = FakeRuntime(trial_file())
     trace = fake_trace()
-    result = await launch(harness(env={"KEEP": "1"}), runtime, trace)
+    data = task_data(prompt="Write the brief.", system_prompt="Be brief.")
+    result = await launch(harness(env={"KEEP": "1"}), runtime, trace, data)
 
     assert result.exit_code == 0
     assert result.stdout == "The answer."
-    argv, env = runtime.programs[0]
+    argv, env = runtime.mst_run()
     assert argv[:4] == ["mst", "run", "--config", ".vf-mst/t-1/eval.json"]
     assert "--no-grade" in argv
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8765/rollout/abc"
@@ -155,6 +168,9 @@ async def test_launch_runs_one_trial_against_the_interception_endpoint() -> None
     assert env["KEEP"] == "1"
     written = json.loads(runtime.files[".vf-mst/t-1/eval.json"])
     assert written["servers"]["acme"]["serverUrl"] == "http://x/mcp/acme"
+    assert written["clientOptions"] == {"systemPrompt": "Be brief."}
+    cases = json.loads(runtime.files[".vf-mst/t-1/dataset.json"])["cases"]
+    assert cases == [{"id": "rollout", "input": "Write the brief."}]
     assert trace.info["mst"]["client"] == "claude-code"
     assert trace.info["mst"]["transcript"]["events"][0]["name"] == "search"
 
@@ -163,7 +179,7 @@ async def test_workdir_runs_the_client_there_and_returns_its_files() -> None:
     runtime = FakeRuntime(trial_file())
     runtime.files[".vf-mst/t-1/workdir/answer/report.md"] = b"# Report\n"
     trace = fake_trace()
-    h = harness(client="codex-cli", api="openai", workdir=["answer"])
+    h = harness(client="codex-cli", workdir=["answer"])
     result = await launch(h, runtime, trace)
 
     assert result.exit_code == 0
@@ -181,13 +197,27 @@ async def test_workdir_needs_a_client_with_a_cwd_option() -> None:
         )
 
 
-async def test_launch_routes_openai_clients_to_the_openai_variables() -> None:
+@pytest.mark.parametrize(
+    ("config", "openai"),
+    [
+        ({"client": "codex-cli"}, True),
+        ({"client": "api"}, False),
+        ({"client": "api", "dialect": "chat_completions"}, True),
+        ({"client": "codex-cli", "dialect": "anthropic_messages"}, False),
+    ],
+)
+async def test_the_dialect_picks_the_endpoint_variables(
+    config: dict[str, str], openai: bool
+) -> None:
     runtime = FakeRuntime(trial_file())
-    await launch(harness(client="codex-cli", api="openai"), runtime, fake_trace())
-    env = runtime.programs[0][1]
-    assert env["OPENAI_BASE_URL"] == ENDPOINT
-    assert env["OPENAI_API_KEY"] == "secret-1"
-    assert env["ANTHROPIC_BASE_URL"] == ""
+    await launch(harness(**config), runtime, fake_trace())
+    env = runtime.mst_run()[1]
+    if openai:
+        assert (env["OPENAI_BASE_URL"], env["OPENAI_API_KEY"]) == (ENDPOINT, "secret-1")
+        assert env["ANTHROPIC_BASE_URL"] == ""
+    else:
+        assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8765/rollout/abc"
+        assert env["OPENAI_BASE_URL"] == ""
 
 
 async def test_an_infrastructure_failure_fails_the_rollout() -> None:
@@ -222,7 +252,7 @@ async def test_a_client_that_fails_before_any_model_call_fails_the_rollout() -> 
 
 
 async def test_a_client_error_after_model_calls_is_scored() -> None:
-    # ADR 0010: an error after the model acted is the model's outcome, so it is graded.
+    # MST's ADR 0010: an error after the model acted is the model's outcome, so it is graded.
     trial = trial_file(error="The client timed out")
     result = await launch(harness(), FakeRuntime(trial), fake_trace())
     assert result.exit_code == 0
@@ -241,12 +271,16 @@ async def test_setup_names_the_command_when_mst_is_missing() -> None:
         async def run(self, argv: list[str], env: dict[str, str]) -> ProgramResult:
             return ProgramResult(127, "", "mst: not found")
 
-    with pytest.raises(RuntimeError, match=r"harness\.mst_command"):
+    with pytest.raises(RuntimeError, match=r"npx mst.*mst_command"):
         await harness(mst_command=["npx", "mst"]).setup(cast(Runtime, Missing(None)))
 
 
 def test_verifiers_loads_the_package_as_a_harness() -> None:
-    from verifiers.v1.loaders import harness_class, harness_config_type
-
     assert harness_class("mst-harness") is MSTHarness
     assert harness_config_type("mst-harness") is MSTHarnessConfig
+
+
+def test_the_harness_runs_on_the_subprocess_runtime() -> None:
+    # verifiers refuses a NEEDS_CONTAINER harness on `subprocess`; MST isolates its clients.
+    assert MSTHarness.NEEDS_CONTAINER is False
+    assert MSTHarness.SUPPORTS_MCP is True

@@ -14,10 +14,12 @@ import {
   OVERRIDES,
   PYTHON,
   VENV,
+  VF_RUN,
   harnessDirectory,
   parseClientOptions,
   planVerifiersRun,
   runVerifiersPlan,
+  tasksetIdOf,
 } from './run.js';
 
 const mstCommand = ['/usr/bin/node', '/mst/dist/cli/index.js'];
@@ -26,15 +28,15 @@ function tasksetDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'mst-taskset-'));
   writeFileSync(
     path.join(dir, 'pyproject.toml'),
-    '[project]\nname = "acme-tasks"\n'
+    '[project]\nname = "acme-tasks"\nversion = "0.1.0"\n\n[tool.x]\nname = "other"\n'
   );
   return dir;
 }
 
 describe('planVerifiersRun', () => {
-  it('runs the taskset on the bundled mst-harness, locally, with this MST', () => {
+  it('runs vf-run on the bundled mst-harness, locally, with this MST', () => {
     const dir = tasksetDir();
-    const harnessDir = '/mst/python/mst-harness';
+    const harnessDir = '/mst/verifiers/harnesses/mst_harness';
     const plan = planVerifiersRun(
       dir,
       { model: 'claude-sonnet-4-6' },
@@ -42,21 +44,22 @@ describe('planVerifiersRun', () => {
     );
     expect(plan.config).toEqual({
       model: 'claude-sonnet-4-6',
-      push: false,
-      harness: {
-        id: 'mst-harness',
-        client: 'api',
-        api: 'anthropic',
-        mst_command: mstCommand,
-        runtime: { type: 'subprocess' },
+      env: {
+        agent: {
+          harness: {
+            id: 'mst-harness',
+            client: 'api',
+            mst_command: mstCommand,
+          },
+          runtime: { type: 'subprocess' },
+        },
       },
       client: {
-        type: 'eval',
         base_url: 'https://api.anthropic.com',
         api_key_var: 'ANTHROPIC_API_KEY',
       },
-      interception: { type: 'server' },
     });
+    expect(plan.taskset).toBe('acme-tasks');
     expect(plan.steps).toEqual([
       { command: 'uv', args: ['venv', '--quiet', '--python', '3.12', VENV] },
       {
@@ -73,10 +76,7 @@ describe('planVerifiersRun', () => {
           dir,
         ],
       },
-      {
-        command: PYTHON,
-        args: ['-m', 'mst_harness.eval', dir, '@', CONFIG],
-      },
+      { command: VF_RUN, args: ['acme-tasks', '@', CONFIG] },
     ]);
     // The bundled harness wins over any mst-harness source the taskset names.
     expect(plan.overrides).toEqual([
@@ -103,24 +103,43 @@ describe('planVerifiersRun', () => {
       { harnessDir: '/h', mstCommand }
     );
     expect(plan.config).toMatchObject({
-      harness: {
-        client: 'codex-cli',
-        api: 'openai',
-        client_options: { timeout: 300000, sandbox: 'workspace-write' },
-        workdir: ['answer'],
+      env: {
+        agent: {
+          harness: {
+            client: 'codex-cli',
+            client_options: { timeout: 300000, sandbox: 'workspace-write' },
+            workdir: ['answer'],
+          },
+        },
       },
       client: {
         base_url: 'https://gateway.example/v1',
         api_key_var: 'GATEWAY_KEY',
       },
-      num_tasks: 2,
+      select: { limit: 2 },
       num_rollouts: 3,
       max_concurrent: 4,
     });
+    // The harness picks codex-cli's dialect itself unless --api names one.
+    expect(plan.config.env.agent.harness).not.toHaveProperty('dialect');
+    expect(plan.config.client.base_url).toBe('https://gateway.example/v1');
     expect(plan.steps.at(-1)?.args.slice(-2)).toEqual([
       '--sampling.reasoning_effort',
       'low',
     ]);
+  });
+
+  it('gives an explicit --api to the harness as its dialect', () => {
+    const plan = planVerifiersRun(
+      tasksetDir(),
+      { model: 'm', client: 'api', api: 'openai' },
+      { harnessDir: '/h', mstCommand }
+    );
+    expect(plan.config.env.agent.harness.dialect).toBe('responses');
+    expect(plan.config.client).toEqual({
+      base_url: 'https://api.openai.com/v1',
+      api_key_var: 'OPENAI_API_KEY',
+    });
   });
 
   it('passes a name that is not a directory through as a taskset id', () => {
@@ -159,6 +178,27 @@ describe('planVerifiersRun', () => {
   });
 });
 
+describe('tasksetIdOf', () => {
+  it("reads the [project] name, not another table's", () => {
+    expect(tasksetIdOf(tasksetDir())).toBe('acme-tasks');
+  });
+
+  it('names a pyproject without a project name', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'mst-unnamed-'));
+    writeFileSync(path.join(dir, 'pyproject.toml'), '[tool.x]\nname = "x"\n');
+    expect(() => tasksetIdOf(dir)).toThrow(/no \[project\] name/);
+  });
+
+  it('is the smoke taskset id for the bundled smoke taskset', () => {
+    const smoke = path.join(
+      path.dirname(path.dirname(harnessDirectory())),
+      'environments',
+      'mst_smoke'
+    );
+    expect(tasksetIdOf(smoke)).toBe('mst-smoke');
+  });
+});
+
 describe('parseClientOptions', () => {
   it('parses JSON values and keeps other values as strings', () => {
     expect(parseClientOptions(['timeout=5', 'flag=true', 'name=a=b'])).toEqual({
@@ -191,22 +231,22 @@ describe('runVerifiersPlan', () => {
   }
 
   /**
-   * A uv that records each call: `venv` creates a Python that records its call and
-   * the config it was given, then exits with `pythonExit`.
+   * A uv that records each call: `venv` creates a `vf-run` that records its call and
+   * the config it was given, then exits with `vfRunExit`.
    */
-  function fakeUv(pythonExit: number): { uv: string; seen: () => Seen } {
+  function fakeUv(vfRunExit: number): { uv: string; seen: () => Seen } {
     const dir = mkdtempSync(path.join(tmpdir(), 'mst-fake-uv-'));
     const record = path.join(dir, 'record.json');
     writeFileSync(record, JSON.stringify({ steps: [] }));
-    const python = `#!/usr/bin/env node
+    const vfRun = `#!/usr/bin/env node
 const fs = require('node:fs');
 const seen = JSON.parse(fs.readFileSync(${JSON.stringify(record)}, 'utf8'));
 const args = process.argv.slice(2);
-seen.steps.push(['python', ...args]);
+seen.steps.push(['vf-run', ...args]);
 seen.config = args[args.indexOf('@') + 1];
 seen.body = JSON.parse(fs.readFileSync(seen.config, 'utf8'));
 fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify(seen));
-process.exit(${pythonExit});
+process.exit(${vfRunExit});
 `;
     const uv = path.join(dir, 'uv');
     writeFileSync(
@@ -220,7 +260,7 @@ seen.steps.push(['uv', ...args]);
 if (args[0] === 'venv') {
   const bin = path.join(args.at(-1), 'bin');
   fs.mkdirSync(bin, { recursive: true });
-  fs.writeFileSync(path.join(bin, 'python'), ${JSON.stringify(python)}, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'vf-run'), ${JSON.stringify(vfRun)}, { mode: 0o755 });
 }
 if (args[0] === 'pip') seen.overrides = fs.readFileSync(args[args.indexOf('--overrides') + 1], 'utf8');
 fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify(seen));
@@ -242,7 +282,7 @@ fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify(seen));
   const env = { ...process.env, ANTHROPIC_API_KEY: 'k' };
 
   it.skipIf(process.platform === 'win32')(
-    'creates the venv, installs with the overrides, runs the eval with the config, and cleans up',
+    'creates the venv, installs with the overrides, runs vf-run with the config, and cleans up',
     async () => {
       const { uv, seen } = fakeUv(3);
       const p = plan();
@@ -251,7 +291,7 @@ fs.writeFileSync(${JSON.stringify(record)}, JSON.stringify(seen));
       expect(record.steps.map((step) => step.slice(0, 2))).toEqual([
         ['uv', 'venv'],
         ['uv', 'pip'],
-        ['python', '-m'],
+        ['vf-run', 'acme-tasks'],
       ]);
       expect(record.overrides).toBe(`${p.overrides.join('\n')}\n`);
       expect(record.body).toEqual(p.config);

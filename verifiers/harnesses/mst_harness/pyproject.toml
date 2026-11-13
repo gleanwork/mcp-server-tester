@@ -6,9 +6,8 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-  # verifiers 0.2 is the release whose Harness.launch() contract this package implements.
-  # verifiers 0.4 moved to rollout-scoped sessions (ACPHarness); see ADR 0015.
-  "verifiers>=0.2.1,<0.3",
+  # The Harness.launch() contract and `env.agent.harness` config of verifiers 0.4.
+  "verifiers>=0.4.1,<0.5",
 ]
 
 [project.urls]
@@ -16,14 +15,18 @@ Homepage = "https://github.com/gleanwork/mcp-server-tester"
 Documentation = "https://github.com/gleanwork/mcp-server-tester/blob/main/docs/verifiers.md"
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "pyright>=1.1.380"]
+# mst-smoke is the smoke taskset next door, for `vf-validate mst-smoke` and `vf-run mst-smoke`.
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "pyright>=1.1.380", "mst-smoke"]
+
+[tool.uv.sources]
+mst-smoke = { path = "../../environments/mst_smoke", editable = true }
 
 [build-system]
 requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mst_harness"]
+packages = ["mst_harness"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -38,7 +41,9 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pyright]
-include = ["src", "tests"]
+# The harness only: the smoke taskset is written as verifiers' own example tasksets are,
+# which strict mode doesn't accept (Ruff checks it).
+include = ["mst_harness", "tests"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false

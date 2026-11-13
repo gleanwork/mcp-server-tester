@@ -3,10 +3,10 @@ dist/
 website/.docusaurus/
 .venv/
 
-# Python caches and verifiers eval runs (python/.gitignore)
+# Python caches and verifiers eval runs (verifiers/.gitignore)
 .pytest_cache/
 .ruff_cache/
-python/**/outputs/
+verifiers/**/outputs/
 .mcp-test-results/
 
 # Changelog (auto-generated, has specific formatting)

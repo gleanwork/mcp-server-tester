@@ -1,19 +1,23 @@
 /**
- * `mst verifiers run <taskset>`: a verifiers taskset, run on an MST client (ADR 0015).
+ * `mst verifiers run <taskset>`: verifiers' `vf-run`, with MST's harness (ADR 0015).
  *
  * verifiers runs the eval: it loads the taskset, records the model calls through its
  * interception server, and scores each rollout. MST is the harness: the bundled
- * `mst-harness` package runs one `mst run` trial per rollout, with this MST's CLI.
+ * `mst-harness` plugin runs one `mst run` trial per rollout, with this MST's CLI.
  *
- * MST installs `mst-harness` and the taskset into a temporary venv with uv, and runs
- * verifiers there, so nothing needs installing first but uv. The bundled `mst-harness`
- * overrides any other the taskset names, so the harness always matches this MST.
+ * This command is a shortcut, not a second runner. It installs `mst-harness` and the
+ * taskset into a temporary venv with uv, writes a `vf-run` config that selects the
+ * harness, and runs `vf-run` there, so nothing needs installing first but uv. The
+ * bundled `mst-harness` overrides any other the taskset names, so the harness always
+ * matches this MST. Anyone with verifiers installed can run the same eval with
+ * `vf-run <taskset> --env.agent.harness.id mst-harness` (docs/verifiers.md).
  */
 
 import { spawn } from 'node:child_process';
 import {
   existsSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -24,6 +28,12 @@ import { pathToFileURL } from 'node:url';
 import { packageRoot } from '../utils/packageRoot.js';
 
 type VerifiersApi = 'anthropic' | 'openai';
+
+/** The harness `dialect` an `--api` stands for. */
+const DIALECTS: Record<VerifiersApi, string> = {
+  anthropic: 'anthropic_messages',
+  openai: 'responses',
+};
 
 export interface VerifiersRunOptions {
   /** The MST client. Default: `api`. */
@@ -48,38 +58,55 @@ export interface VerifiersRunOptions {
   rollouts?: string;
   /** `--concurrency`: rollouts at once. */
   concurrency?: string;
-  /** `--output-dir`: where verifiers writes the run. Default: `outputs/` here. */
+  /** `--output-dir`: where verifiers writes the run. Default: verifiers' `outputs/` here. */
   outputDir?: string;
   /** The Python uv creates the venv with. */
   python?: string;
-  /** verifiers eval options after `--`, passed through. They override the ones above. */
+  /** `vf-run` options after `--`, passed through. They override the ones above. */
   verifiersArgs?: string[];
 }
 
 /** One command the run starts. Arguments may hold the placeholders below. */
 interface VerifiersRunStep {
-  /** `uv`, or the venv's Python. */
-  command: 'uv' | typeof PYTHON;
+  /** `uv`, or the venv's `vf-run`. */
+  command: 'uv' | typeof VF_RUN;
   args: string[];
 }
 
 export interface VerifiersRunPlan {
-  /** verifiers' eval config, written to a JSON file and passed as `@ file`. */
-  config: Record<string, unknown>;
+  /** `vf-run`'s config, written to a JSON file and passed as `@ file`. */
+  config: VerifiersRunConfig;
   /** `requirement @ url` lines that override what the taskset asks for. */
   overrides: string[];
   /** Create the venv, install into it, run the eval. */
   steps: VerifiersRunStep[];
-  /** The taskset argument: a package directory (absolute) or a taskset id. */
+  /** The taskset id `vf-run` loads. */
   taskset: string;
   /** The variable that must hold the upstream key. */
   apiKeyVar: string;
+}
+
+/** The `vf-run` config: the parts this command sets. */
+interface VerifiersRunConfig {
+  model: string;
+  env: {
+    agent: {
+      harness: { id: 'mst-harness'; client: string } & Record<string, unknown>;
+      runtime: { type: 'subprocess' };
+    };
+  };
+  client: { base_url: string; api_key_var: string };
+  select?: { limit: number };
+  num_rollouts?: number;
+  max_concurrent?: number;
+  output_dir?: string;
 }
 
 export const CONFIG = '{config}';
 export const VENV = '{venv}';
 export const OVERRIDES = '{overrides}';
 export const PYTHON = '{python}';
+export const VF_RUN = '{vf-run}';
 
 const PROVIDERS: Record<VerifiersApi, { baseUrl: string; apiKeyVar: string }> =
   {
@@ -95,7 +122,25 @@ const PROVIDERS: Record<VerifiersApi, { baseUrl: string; apiKeyVar: string }> =
 
 /** The `mst-harness` package directory bundled with MST. */
 export function harnessDirectory(root = packageRoot()): string {
-  return path.join(root, 'python', 'mst-harness');
+  return path.join(root, 'verifiers', 'harnesses', 'mst_harness');
+}
+
+/**
+ * The taskset id of a package directory: its project name, which verifiers imports
+ * with `-` as `_`, as it does for `vf-run <id>`.
+ */
+export function tasksetIdOf(directory: string): string {
+  const pyproject = path.join(directory, 'pyproject.toml');
+  if (!existsSync(pyproject))
+    throw new Error(
+      `${directory} has no pyproject.toml: a taskset is a Python package that exports its Taskset.`
+    );
+  const project = readFileSync(pyproject, 'utf8').split(/^\[project\]\s*$/m)[1];
+  const name = project
+    ?.split(/^\[/m)[0]
+    ?.match(/^name\s*=\s*["']([^"']+)["']/m)?.[1];
+  if (!name) throw new Error(`${pyproject} has no [project] name.`);
+  return name;
 }
 
 /** `key=value` flags as client options; a value that parses as JSON is that value. */
@@ -131,6 +176,7 @@ function count(flag: string, value: string | undefined): number | undefined {
 }
 
 function apiOf(options: VerifiersRunOptions, client: string): VerifiersApi {
+  // The same choice as the harness's `dialect = "auto"`.
   const api = options.api ?? (client === 'codex-cli' ? 'openai' : 'anthropic');
   if (api !== 'anthropic' && api !== 'openai')
     throw new Error(`--api is anthropic or openai, got "${api}"`);
@@ -157,39 +203,38 @@ export function planVerifiersRun(
   const apiKeyVar = options.apiKeyVar ?? provider.apiKeyVar;
   const local = path.resolve(cwd, taskset);
   const isDirectory = existsSync(local) && statSync(local).isDirectory();
-  if (isDirectory && !existsSync(path.join(local, 'pyproject.toml')))
-    throw new Error(
-      `${local} has no pyproject.toml: a taskset is a Python package that exports its Taskset.`
-    );
-  const tasksetArg = isDirectory ? local : taskset;
+  // A directory is installed from there; any other name is a package to install.
+  const requirement = isDirectory ? local : taskset;
+  const tasksetId = isDirectory ? tasksetIdOf(local) : taskset;
   const clientOptions = parseClientOptions(options.clientOption ?? []);
   const numTasks = count('--num-tasks', options.numTasks);
   const rollouts = count('--rollouts', options.rollouts);
   const concurrency = count('--concurrency', options.concurrency);
 
-  const config: Record<string, unknown> = {
+  const config: VerifiersRunConfig = {
     model: options.model,
-    // Results stay on this machine: verifiers pushes to Prime's hub by default.
-    push: false,
-    harness: {
-      id: 'mst-harness',
-      client,
-      api,
-      mst_command: mstCommand,
-      ...(Object.keys(clientOptions).length
-        ? { client_options: clientOptions }
-        : {}),
-      ...(options.plugins?.length ? { plugins: options.plugins } : {}),
-      ...(options.workdir?.length ? { workdir: options.workdir } : {}),
-      runtime: { type: 'subprocess' },
+    env: {
+      agent: {
+        harness: {
+          id: 'mst-harness',
+          client,
+          ...(options.api ? { dialect: DIALECTS[api] } : {}),
+          mst_command: mstCommand,
+          ...(Object.keys(clientOptions).length
+            ? { client_options: clientOptions }
+            : {}),
+          ...(options.plugins?.length ? { plugins: options.plugins } : {}),
+          ...(options.workdir?.length ? { workdir: options.workdir } : {}),
+        },
+        // MST starts the client on this machine, as `mst run` does.
+        runtime: { type: 'subprocess' },
+      },
     },
     client: {
-      type: 'eval',
       base_url: options.baseUrl ?? provider.baseUrl,
       api_key_var: apiKeyVar,
     },
-    interception: { type: 'server' },
-    ...(numTasks !== undefined ? { num_tasks: numTasks } : {}),
+    ...(numTasks !== undefined ? { select: { limit: numTasks } } : {}),
     ...(rollouts !== undefined ? { num_rollouts: rollouts } : {}),
     ...(concurrency !== undefined ? { max_concurrent: concurrency } : {}),
     ...(options.outputDir
@@ -213,26 +258,19 @@ export function planVerifiersRun(
         '--overrides',
         OVERRIDES,
         harnessDir,
-        tasksetArg,
+        requirement,
       ],
     },
     {
-      command: PYTHON,
-      args: [
-        '-m',
-        'mst_harness.eval',
-        tasksetArg,
-        '@',
-        CONFIG,
-        ...(options.verifiersArgs ?? []),
-      ],
+      command: VF_RUN,
+      args: [tasksetId, '@', CONFIG, ...(options.verifiersArgs ?? [])],
     },
   ];
   return {
     config,
     overrides: [`mst-harness @ ${pathToFileURL(harnessDir).href}`],
     steps,
-    taskset: tasksetArg,
+    taskset: tasksetId,
     apiKeyVar,
   };
 }
@@ -247,10 +285,10 @@ export function currentMstCommand(): string[] {
   return [process.execPath, entry];
 }
 
-function venvPython(venv: string): string {
+function venvBin(venv: string, name: string): string {
   return process.platform === 'win32'
-    ? path.join(venv, 'Scripts', 'python.exe')
-    : path.join(venv, 'bin', 'python');
+    ? path.join(venv, 'Scripts', `${name}.exe`)
+    : path.join(venv, 'bin', name);
 }
 
 function start(
@@ -297,7 +335,8 @@ export async function runVerifiersPlan(
     [CONFIG]: path.join(dir, 'eval.json'),
     [OVERRIDES]: path.join(dir, 'overrides.txt'),
     [VENV]: venv,
-    [PYTHON]: venvPython(venv),
+    [PYTHON]: venvBin(venv, 'python'),
+    [VF_RUN]: venvBin(venv, 'vf-run'),
   };
   writeFileSync(values[CONFIG]!, JSON.stringify(plan.config, null, 2));
   writeFileSync(values[OVERRIDES]!, `${plan.overrides.join('\n')}\n`);
@@ -309,7 +348,7 @@ export async function runVerifiersPlan(
       const args = step.args.map((arg) => values[arg] ?? arg);
       const isUv = step.command === 'uv';
       const code = await start(
-        isUv ? uv : values[PYTHON]!,
+        isUv ? uv : values[step.command]!,
         args,
         stepEnv,
         isUv

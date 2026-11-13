@@ -24,8 +24,8 @@ The two don't fit together today:
 1. **Port verifiers to TypeScript.** MST would own a copy of a fast-moving library, and every taskset written in Python would need rewriting. Rejected.
 2. **MST runs the eval, and verifiers tasksets load into it.** A Python sidecar would give MST a dataset source and a grader for each taskset. The model's traffic would bypass verifiers' interception, which loses the trace that verifiers' rewards and judges read. Rejected.
 3. **verifiers runs the eval, and an MST client is its harness.** A Python harness runs MST in the rollout's runtime. Chosen. It has two forms:
-   1. **One `mst run` per rollout.** The harness writes a one-case dataset and an eval config, runs `mst run --no-grade`, and reads back the trial. This fits verifiers 0.2's `Harness.launch()` contract, which runs a program to completion, and needs no change to MST.
-   2. **A session over the [Agent Client Protocol](https://agentclientprotocol.com).** A new `mst acp` command would serve one client session over stdio, so verifiers can send follow-up turns. verifiers 0.4's `ACPHarness` works this way.
+   1. **One `mst run` per rollout.** The harness writes a one-case dataset and an eval config, runs `mst run --no-grade`, and reads back the trial. This fits verifiers' `Harness.launch()` contract, which runs a program to completion, and needs no change to MST.
+   2. **A session over the [Agent Client Protocol](https://agentclientprotocol.com).** A new `mst acp` command would serve one client session over stdio, so verifiers can send follow-up turns. verifiers' `ACPHarness` works this way.
 
    This decision takes the first form now. The second is the path for multi-turn envs, and needs `mst acp` built.
 
@@ -38,9 +38,10 @@ The two don't fit together today:
   3. It runs `mst run --no-grade` with the client's inference pointed at verifiers' endpoint, and reads the `mst.run/v1` trial file.
   4. It returns the client's final reply as the program's output, and keeps the trial (transcript, evidence, ending, write record) in `trace.info["mst"]`.
 
-  The client code, readiness checks and trial endings are the ones `mst run` uses. verifiers loads a harness by package name, so `harness.id = "mst-harness"` needs no change to verifiers.
+  The client code, readiness checks and trial endings are the ones `mst run` uses. verifiers loads a harness by package name, so `--env.agent.harness.id mst-harness` needs no change to verifiers.
 
-- **`mst verifiers run <taskset>` runs a taskset here.** The taskset, a package directory or a package name, is its only required input. The command writes verifiers' eval config (the harness with this MST's CLI as `mst_command`, a subprocess runtime, verifiers' interception server, the endpoint, and `push = false`), installs the bundled `mst-harness` and the taskset into a temporary venv with uv, and runs `python -m mst_harness.eval` there. The bundled `mst-harness` overrides any `mst-harness` source the taskset names, so the harness always matches the MST that runs it. verifiers then runs the eval as above. The TypeScript side only builds that command; it holds no Python. The npm package ships `mst-harness`'s source, so an installed MST needs only uv.
+- **The Python follows verifiers' plugin layout.** The harness is `verifiers/harnesses/mst_harness`, as verifiers keeps its harnesses in `verifiers/harnesses/`, and a smoke taskset is `verifiers/environments/mst_smoke`, as verifiers keeps its tasksets in `environments/`. Each package exports its one plugin class through `__all__`. Neither adds an eval entry point or an `Environment` subclass: verifiers' own `vf-run` and `vf-validate` run them.
+- **`mst verifiers run <taskset>` is a shortcut for `vf-run`.** The taskset, a package directory or a package name, is its only required input. The command writes a `vf-run` config (the harness with this MST's CLI as `mst_command`, the `subprocess` runtime, and the endpoint), installs the bundled `mst-harness` and the taskset into a temporary venv with uv, and runs `vf-run` there. The bundled `mst-harness` overrides any `mst-harness` source the taskset names, so the harness always matches the MST that runs it. verifiers then runs the eval as above. The TypeScript side only builds that command; it holds no Python. The npm package ships `mst-harness`'s source, so an installed MST needs only uv.
 
 - **Only the client's inference goes through verifiers.** The harness sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` (or the `OPENAI_` pair) to verifiers' endpoint and rollout secret, and clears the gateway settings a runtime inherits (`MST_LLM_AUTH_COMMAND`, `ANTHROPIC_AUTH_TOKEN`). MST resolves them in `resolveLLMEndpoint()`, as it does a gateway.
 - **A rollout whose model calls bypass verifiers fails.** A client can take its endpoint from somewhere MST doesn't control: Claude Code's managed settings override `ANTHROPIC_BASE_URL`. When MST's transcript has model calls and verifiers' trace has none, the harness fails the rollout. Otherwise verifiers would score an empty reply as the client's answer.
@@ -48,7 +49,7 @@ The two don't fit together today:
 - **Supported clients are the ones whose inference MST can route per rollout:** `api` and `codex-cli`, and `claude-code` where no managed settings pin its endpoint. Cowork and ChatGPT in MST's Linux image take inference from a gateway, so they can be added once a verifiers runtime can start that image. These are out of scope: Cowork on macOS and its first-party mode, and ChatGPT and the Codex app on macOS, which run signed in to the user's account.
 - **The taskset owns MCP traffic and writes.** A proxy that filters what a server returns, or stops writes, is part of the taskset. MST declares the task's servers `unguarded` by default: their writes reach the taskset's server, which decides what reaches a service. MST's dry-run proxy and write record still apply to servers that MST configures through a connector.
 - **A client can leave files.** With `harness.workdir`, the client runs in a working directory the harness keeps, and the files it leaves there come back in `trace.info["mst"]["files"]`. Tasks that ask for a deliverable file read it from there.
-- **This amends ADR 0006.** Python is allowed in `python/` and nowhere else, under these rules:
+- **This amends ADR 0006.** Python is allowed in `verifiers/` and nowhere else, under these rules:
   - It holds no client logic. Starting, driving, resetting and diagnosing a client stay in TypeScript.
   - It holds no grading. Grading belongs to verifiers in this mode, and to MST everywhere else.
   - It has the checks the TypeScript has: format, lint, type check and unit tests, run in CI.
@@ -61,5 +62,5 @@ The two don't fit together today:
 - **One rollout is one turn.** A multi-turn env, such as a simulated user, needs the ACP form.
 - **A rollout pays the client's start-up cost.** Each rollout runs `mst run` once. A desktop client would start once per rollout.
 - **Each new client needs a routing check.** A client joins the supported list only when MST can send its inference to a per-rollout endpoint.
-- **verifiers' version is pinned.** `mst-harness` targets verifiers 0.2, whose `launch()` contract it implements. Moving to 0.4 means the ACP form.
+- **verifiers' version is pinned.** `mst-harness` targets verifiers 0.4 (`>=0.4.1,<0.5`), whose `launch()` contract and `env.agent.harness` config it implements. A new minor version is a deliberate upgrade.
 - **Releases cover two packages.** The npm package and `mst-harness` share a version. Publishing `mst-harness` to PyPI is a separate step to add to `RELEASE.md`.

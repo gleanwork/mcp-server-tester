@@ -389,7 +389,7 @@ _Avoid_: default model config, model presets
 _Avoid_: gateway config, LLM provider
 
 **verifiers harness**:
-(Experimental.) MST as a harness for [verifiers](https://github.com/PrimeIntellect-ai/verifiers), a Python eval and RL library: verifiers runs the eval, and the `mst-harness` package runs one `mst run` trial per rollout ([ADR 0015](docs/adr/0015-mst-clients-run-as-verifiers-harnesses.md)). In this mode verifiers' taskset, task, rollout, trace and reward stand where MST's dataset, case, trial, transcript and score do; the docs map them (docs/verifiers.md). Only clients whose inference MST can route to verifiers' endpoint are supported.
+(Experimental.) MST as a harness for [verifiers](https://github.com/PrimeIntellect-ai/verifiers), a Python eval and RL library: verifiers runs the eval, and the `mst-harness` harness plugin (`verifiers/harnesses/mst_harness`) runs one `mst run` trial per rollout ([ADR 0015](docs/adr/0015-mst-clients-run-as-verifiers-harnesses.md)). In this mode verifiers' taskset, task, rollout, trace and reward stand where MST's dataset, case, trial, transcript and score do; the docs map them (docs/verifiers.md). Only clients whose inference MST can route to verifiers' endpoint are supported.
 _Avoid_: verifier (the library is verifiers, plural; its grading is rewards and judges), MST plugin (it isn't one)
 
 **Marketplace plugin**:

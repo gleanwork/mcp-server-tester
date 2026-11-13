@@ -853,7 +853,7 @@ program
   )
   .command('run')
   .description(
-    'Run a verifiers taskset on an MST client, here, with uv: each rollout is one MST trial'
+    "verifiers' vf-run with MST's harness, here, with uv: each rollout is one MST trial"
   )
   .argument(
     '<taskset>',
@@ -861,7 +861,7 @@ program
   )
   .argument(
     '[verifiers-args...]',
-    'After --: more verifiers eval options, passed through (they win over the ones here)'
+    'After --: more vf-run options, passed through (they win over the ones here)'
   )
   .requiredOption('-m, --model <model>', 'The model, as the endpoint names it')
   .option('--client <client>', 'The MST client (mst clients lists them)', 'api')

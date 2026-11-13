@@ -1,18 +1,18 @@
-"""MST clients as verifiers harnesses.
+"""Run an MST client as a verifiers harness.
 
-Each rollout runs one MST trial in the rollout's runtime:
+Each rollout is one MST trial in the rollout's runtime:
 
 1. Write a one-case dataset and an eval config whose servers are the task's MCP
-   servers (`trial.py`).
+   servers. These are MST's documented inputs.
 2. Run `mst run --no-grade` with the client's inference pointed at verifiers'
    interception endpoint. MST resolves it in `resolveLLMEndpoint()`, as it does a
    gateway, so the client's model calls are the rollout's model calls.
-3. Read the trial file back, keep it in `trace.info["mst"]`, and return the
-   client's final answer as the program's output.
+3. Read the trial back (the `mst.run/v1` trial file), keep it in
+   `trace.info["mst"]`, and return the client's final answer as the program's output.
 
 MST owns the client: readiness, the run, the transcript and how the attempt
 ended. verifiers owns everything else: the task, the interception, the trace and
-the scores. See docs/verifiers.md and ADR 0015.
+the scores. See docs/verifiers.md in the MST repository.
 """
 
 from __future__ import annotations
@@ -20,25 +20,34 @@ from __future__ import annotations
 import base64
 import json
 import shlex
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, ClassVar, Literal
 
 from pydantic import Field
 from verifiers.v1.clients import ModelContext
-from verifiers.v1.harness import Harness, HarnessConfig
+from verifiers.v1.configs.harness import DialectName, HarnessConfig
+from verifiers.v1.harness import Harness
 from verifiers.v1.runtimes import ProgramResult, Runtime
+from verifiers.v1.task import TaskData
 from verifiers.v1.trace import Trace
 
-from mst_harness.trial import TrialRequest, WriteMode, dataset, eval_config, parse_trial
-
 WORK_ROOT = ".vf-mst"
-# Clients whose options include `cwd`, so `harness.workdir` can set it.
+CASE_ID = "rollout"
+DATASET_NAME = "verifiers"
+# Clients whose options include `cwd`, so `workdir` can set it.
 WORKDIR_CLIENTS = frozenset({"claude-code", "codex-cli"})
+# Clients whose options include `systemPrompt`. Others get the system prompt folded
+# into the input, as verifiers does for a harness that can't take one.
+SYSTEM_PROMPT_CLIENTS = frozenset({"api", "claude-code", "codex-cli"})
+# Clients that speak an OpenAI API, for `dialect = "auto"`. The rest speak Anthropic's.
+OPENAI_CLIENTS = frozenset({"codex-cli"})
 MAX_FILE_BYTES = 1_000_000
 
 # Settings that would send the client's inference somewhere other than verifiers'
 # endpoint, or authenticate it with something other than the rollout's secret. A
-# subprocess runtime inherits the host's environment, so they are cleared: an empty
-# value is unset for MST (`resolveLLMEndpoint`) and for the clients it starts.
+# subprocess runtime passes the host's environment through, so they are cleared: an
+# empty value is unset for MST (`resolveLLMEndpoint`) and for the clients it starts.
 _INFERENCE_OVERRIDES = (
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
@@ -48,19 +57,23 @@ _INFERENCE_OVERRIDES = (
     "MST_LLM_AUTH_COMMAND",
 )
 
+WriteMode = Literal["unguarded", "live", "read-only"]
+
 
 class MSTHarnessConfig(HarnessConfig):
     id: str = "mst-harness"
+    dialect: DialectName | Literal["auto"] = "auto"
+    """The model API the client speaks, which decides whether MST gets the endpoint in
+    ANTHROPIC_* or OPENAI_*. `auto`: `responses` for codex-cli, `anthropic_messages`
+    for the other clients."""
     client: str = "claude-code"
     """The MST client, by its canonical name (`mst clients` lists them)."""
     client_options: dict[str, Any] = Field(default_factory=dict)
     """The client's options, as in an eval config's `clientOptions`."""
     plugins: list[str] = Field(default_factory=list)
     """MST plugins to load, for a plugin client."""
-    api: Literal["anthropic", "openai"] = "anthropic"
-    """The API family the client's inference speaks to verifiers' endpoint."""
     writes: WriteMode = "unguarded"
-    """The write mode of the task's servers. The taskset's proxy owns their writes."""
+    """The write mode of the task's servers. The taskset decides what reaches a service."""
     mst_command: list[str] = Field(default_factory=lambda: ["mst"])
     """How to start MST in the runtime, e.g. `["npx", "mst"]` or `["node", "/opt/mst/cli.js"]`."""
     workdir: list[str] | None = None
@@ -73,6 +86,10 @@ class MSTHarnessConfig(HarnessConfig):
 class MSTHarness(Harness[MSTHarnessConfig]):
     APPENDS_SYSTEM_PROMPT: ClassVar[bool] = True
     SUPPORTS_MCP: ClassVar[bool] = True
+    # MST isolates the clients it starts (a fresh config and working directory per
+    # trial), so it runs on the subprocess runtime as well as in a container that has
+    # MST installed.
+    NEEDS_CONTAINER: ClassVar[bool] = False
 
     async def setup(self, runtime: Runtime) -> None:
         result = await runtime.run([*self.config.mst_command, "--version"], self._env())
@@ -81,28 +98,27 @@ class MSTHarness(Harness[MSTHarnessConfig]):
             raise RuntimeError(
                 f"MST didn't start in the runtime with {shlex.join(self.config.mst_command)}: "
                 f"{detail or 'no output'}. Install @gleanwork/mcp-server-tester in the runtime, "
-                "or set harness.mst_command."
+                "or set mst_command."
             )
 
     async def launch(
         self,
         ctx: ModelContext,
-        trace: Trace[Any, Any],
+        trace: Trace[Any, Any, Any],
         runtime: Runtime,
         endpoint: str,
         secret: str,
         mcp_urls: dict[str, str],
+        data: TaskData,
     ) -> ProgramResult:
-        system_prompt, prompt = self.resolve_prompt(trace.task.data)
-        if not isinstance(prompt, str):
-            raise ValueError("MST runs a task whose prompt is a string")
+        system_prompt, prompt = self.resolve_text_prompt(data)
         work = f"{WORK_ROOT}/{trace.id}"
         client_options = dict(self.config.client_options)
         workdir = f"{work}/workdir"
         if self.config.workdir is not None:
             if self.config.client not in WORKDIR_CLIENTS:
                 raise ValueError(
-                    f"harness.workdir needs a client with a `cwd` option "
+                    f"workdir needs a client with a `cwd` option "
                     f"({', '.join(sorted(WORKDIR_CLIENTS))}), not {self.config.client}"
                 )
             dirs = [workdir, *(f"{workdir}/{d.strip('/')}" for d in self.config.workdir)]
@@ -113,7 +129,7 @@ class MSTHarness(Harness[MSTHarnessConfig]):
         request = TrialRequest(
             client=self.config.client,
             model=ctx.model,
-            prompt=prompt,
+            prompt=prompt or "",
             system_prompt=system_prompt,
             mcp_urls=mcp_urls,
             client_options=client_options,
@@ -134,7 +150,7 @@ class MSTHarness(Harness[MSTHarnessConfig]):
             "--no-grade",
             "--no-report",
         ]
-        ran = await runtime.run_program(argv, self._env(endpoint, secret))
+        ran = await runtime.run(argv, self._env(endpoint, secret))
 
         trial_path = await self._trial_path(runtime, f"{work}/results")
         if trial_path is None:
@@ -176,7 +192,7 @@ class MSTHarness(Harness[MSTHarnessConfig]):
                 f"MST's {self.config.client} client failed before any model call: {result.error}",
             )
         # A trial is graded even when the client errored after reaching the model
-        # (ADR 0010); verifiers scores it.
+        # (MST's ADR 0010); verifiers scores it.
         return ProgramResult(0, result.final_text, ran.stderr)
 
     def _env(self, endpoint: str | None = None, secret: str | None = None) -> dict[str, str]:
@@ -184,7 +200,7 @@ class MSTHarness(Harness[MSTHarnessConfig]):
         if endpoint is None or secret is None:
             return env
         env.update(dict.fromkeys(_INFERENCE_OVERRIDES, ""))
-        if self.config.api == "anthropic":
+        if self.api_dialect == "anthropic_messages":
             # The Anthropic base URL is the API root: clients append /v1/messages.
             env["ANTHROPIC_BASE_URL"] = endpoint.removesuffix("/").removesuffix("/v1")
             env["ANTHROPIC_API_KEY"] = secret
@@ -192,6 +208,13 @@ class MSTHarness(Harness[MSTHarnessConfig]):
             env["OPENAI_BASE_URL"] = endpoint
             env["OPENAI_API_KEY"] = secret
         return env
+
+    @property
+    def api_dialect(self) -> DialectName:
+        """The configured dialect, with `auto` resolved from the client."""
+        if self.config.dialect != "auto":
+            return self.config.dialect
+        return "responses" if self.config.client in OPENAI_CLIENTS else "anthropic_messages"
 
     @staticmethod
     async def _trial_path(runtime: Runtime, results: str) -> str | None:
@@ -203,6 +226,127 @@ class MSTHarness(Harness[MSTHarnessConfig]):
         return paths[-1] if paths else None
 
 
+@dataclass(frozen=True)
+class TrialRequest:
+    """What one rollout asks MST to run."""
+
+    client: str
+    model: str
+    prompt: str
+    mcp_urls: Mapping[str, str]
+    system_prompt: str | None = None
+    client_options: Mapping[str, Any] | None = None
+    plugins: tuple[str, ...] = ()
+    writes: WriteMode = "unguarded"
+    name: str = "verifiers-rollout"
+
+
+def dataset(request: TrialRequest) -> dict[str, Any]:
+    """The one-case dataset: the task's prompt is the case's input, unchanged."""
+    prompt = request.prompt
+    if request.system_prompt and request.client not in SYSTEM_PROMPT_CLIENTS:
+        prompt = f"{request.system_prompt}\n\n{prompt}"
+    if not prompt.strip():
+        raise ValueError("The task's prompt is empty; MST rejects an empty case input.")
+    return {"name": DATASET_NAME, "cases": [{"id": CASE_ID, "input": prompt}]}
+
+
+def eval_config(request: TrialRequest, dataset_path: str) -> dict[str, Any]:
+    """The eval config for one rollout.
+
+    The task's MCP servers become the variant's servers, by name. Their writes are
+    the taskset's to handle, so they are declared `unguarded` by default: MST can't
+    see them and doesn't stop them. Transcripts are stored unredacted so the harness
+    can return them.
+    """
+    servers: dict[str, Any] = {
+        name: {"transport": "http", "serverUrl": url}
+        for name, url in sorted(request.mcp_urls.items())
+    }
+    options: dict[str, Any] = dict(request.client_options or {})
+    if request.system_prompt and request.client in SYSTEM_PROMPT_CLIENTS:
+        options.setdefault("systemPrompt", request.system_prompt)
+    config: dict[str, Any] = {
+        "name": request.name,
+        "datasets": [{"type": "file", "path": dataset_path}],
+        "servers": servers,
+        "client": request.client,
+        "model": request.model,
+        "redactStoredResponses": False,
+    }
+    if options:
+        config["clientOptions"] = options
+    if request.plugins:
+        config["plugins"] = list(request.plugins)
+    if servers and request.writes != "read-only":
+        config["writes"] = dict.fromkeys(servers, request.writes)
+    return config
+
+
+@dataclass(frozen=True)
+class TrialResult:
+    """What MST recorded for the rollout's one trial."""
+
+    final_text: str
+    ending: dict[str, Any]
+    error: str | None
+    transcript: dict[str, Any]
+    raw: dict[str, Any]
+
+    @property
+    def collected(self) -> bool:
+        """Whether the client's attempt was a trial, not an infrastructure failure.
+
+        `ending` is `{"kind": "trial"}` or `{"kind": "infrastructure", "broke", ...}`.
+        """
+        return self.ending.get("kind") == "trial"
+
+    @property
+    def model_calls(self) -> int:
+        """How many model calls MST saw the client make."""
+        calls = self.transcript.get("modelCalls")
+        return len(calls) if isinstance(calls, list) else 0
+
+    @property
+    def failure(self) -> str:
+        """What broke, for an infrastructure ending."""
+        broke = self.ending.get("broke", "unknown")
+        reason = self.ending.get("reason") or self.error or "no reason recorded"
+        return f"{broke}: {reason}"
+
+    def info(self) -> dict[str, Any]:
+        """The part of the trial a rollout keeps in `trace.info["mst"]`."""
+        return {
+            "format": self.raw.get("format"),
+            "ending": self.ending,
+            "error": self.error,
+            "durationMs": self.raw.get("durationMs"),
+            "evidence": self.transcript.get("evidence"),
+            "transcript": self.transcript,
+            "writeRecord": self.raw.get("writeRecord"),
+        }
+
+
+def parse_trial(data: bytes | str) -> TrialResult:
+    """Read MST's trial file (`transcripts/<variant>/<case>/<trial>.json`)."""
+    raw = json.loads(data)
+    if not isinstance(raw, dict):
+        raise ValueError("MST's trial file is not a JSON object")
+    trial: dict[str, Any] = raw
+    transcript = trial.get("transcript")
+    transcript = transcript if isinstance(transcript, dict) else {}
+    final_text = transcript.get("finalText")
+    ending = trial.get("ending")
+    error = trial.get("error")
+    return TrialResult(
+        final_text=final_text if isinstance(final_text, str) else "",
+        ending=ending if isinstance(ending, dict) else {},
+        error=error if isinstance(error, str) else None,
+        transcript=transcript,
+        raw=trial,
+    )
+
+
 async def _collect_files(runtime: Runtime, root: str) -> dict[str, dict[str, Any]]:
     """The files under `root`, by relative path: text when it decodes, else base64."""
     found = await runtime.run(["sh", "-c", f"cd {shlex.quote(root)} && find . -type f -print"], {})
@@ -211,14 +355,14 @@ async def _collect_files(runtime: Runtime, root: str) -> dict[str, dict[str, Any
         relative = line.strip().removeprefix("./")
         if not relative:
             continue
-        data = await runtime.read(f"{root}/{relative}")
-        if len(data) > MAX_FILE_BYTES:
-            files[relative] = {"size": len(data), "omitted": "larger than the harness keeps"}
+        content = await runtime.read(f"{root}/{relative}")
+        if len(content) > MAX_FILE_BYTES:
+            files[relative] = {"size": len(content), "omitted": "larger than the harness keeps"}
             continue
         try:
-            files[relative] = {"size": len(data), "text": data.decode()}
+            files[relative] = {"size": len(content), "text": content.decode()}
         except UnicodeDecodeError:
-            files[relative] = {"size": len(data), "base64": base64.b64encode(data).decode()}
+            files[relative] = {"size": len(content), "base64": base64.b64encode(content).decode()}
     return files
 
 

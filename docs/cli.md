@@ -1274,10 +1274,10 @@ A run's workers load the eval's plugins themselves, so a plugin must be installe
 ## `verifiers run` - Run a verifiers Taskset
 
 ```bash
-ANTHROPIC_API_KEY=... npx mst verifiers run ./acme-tasks --model claude-sonnet-4-6 [--client codex-cli] [-- verifiers eval options]
+ANTHROPIC_API_KEY=... npx mst verifiers run ./acme-tasks --model claude-sonnet-4-6 [--client codex-cli] [-- vf-run options]
 ```
 
-Runs a [verifiers](https://github.com/PrimeIntellect-ai/verifiers) taskset on an MST client, on this machine (experimental, [ADR 0015](./adr/0015-mst-clients-run-as-verifiers-harnesses.md)). The taskset, a package directory or a package name, is the only required input. verifiers loads it, records the model calls and scores each rollout; each rollout is one MST trial. It needs [uv](https://docs.astral.sh/uv/), and writes verifiers' results to `outputs/`. See [Run MST clients under verifiers](./verifiers.md#run-a-taskset) for its options and the clients it supports.
+Runs a [verifiers](https://github.com/PrimeIntellect-ai/verifiers) taskset on an MST client, on this machine (experimental, [ADR 0015](./adr/0015-mst-clients-run-as-verifiers-harnesses.md)). The taskset, a package directory or a package name, is the only required input. It is a shortcut for verifiers' `vf-run <taskset> --env.agent.harness.id mst-harness`: verifiers loads the taskset, records the model calls and scores each rollout; each rollout is one MST trial. It needs [uv](https://docs.astral.sh/uv/), which installs verifiers, the bundled harness and the taskset, and writes verifiers' results to `outputs/`. See [Run MST clients under verifiers](./verifiers.md#run-a-taskset) for its options and the clients it supports.
 
 ## Next Steps
 

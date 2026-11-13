@@ -78,9 +78,9 @@
     "schema",
     "docker",
     "skills",
-    "python/mst-harness/pyproject.toml",
-    "python/mst-harness/README.md",
-    "python/mst-harness/src/mst_harness/*.py"
+    "verifiers/harnesses/mst_harness/pyproject.toml",
+    "verifiers/harnesses/mst_harness/README.md",
+    "verifiers/harnesses/mst_harness/mst_harness/*.py"
   ],
   "scripts": {
     "build": "npm run build:ui && tsup && npm run build:copy-ui",
