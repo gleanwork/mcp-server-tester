@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   lastAddedBy,
-  mayChangeLabelsOn,
+  personRemovedLast,
   planLabels,
   readTitle,
   WORKFLOW_ACTOR,
@@ -136,17 +136,44 @@ describe('planLabels', () => {
     ).toEqual({ kind: 'ok', label: 'enhancement' });
   });
 
-  describe('mayChangeLabelsOn', () => {
-    it.each([
-      ['opened', true],
-      ['reopened', true],
-      ['edited', true],
-      ['synchronize', true],
-      // Dependabot adds `dependencies` right after opening.
-      ['labeled', true],
-      ['unlabeled', false],
-    ])('%s -> %s', (action, expected) => {
-      expect(mayChangeLabelsOn(action)).toBe(expected);
+  describe('personRemovedLast', () => {
+    const ev = (event: string, label: string, login: string) => ({
+      event,
+      actor: { login },
+      label: { name: label },
+    });
+
+    it('is true when a person removed a changelog label last', () => {
+      expect(
+        personRemovedLast([
+          ev('labeled', 'bug', WORKFLOW_ACTOR),
+          ev('unlabeled', 'bug', 'a-person'),
+          // Labels that aren't changelog labels don't count.
+          ev('labeled', 'dependencies', 'dependabot[bot]'),
+          ev('unlabeled', 'javascript', 'a-person'),
+        ])
+      ).toBe(true);
+    });
+
+    it('is false when a label was added since, or the workflow removed it', () => {
+      expect(
+        personRemovedLast([
+          ev('unlabeled', 'bug', 'a-person'),
+          ev('labeled', 'internal', 'a-person'),
+        ])
+      ).toBe(false);
+      // The workflow's own swap: remove, then add.
+      expect(
+        personRemovedLast([
+          ev('labeled', 'bug', WORKFLOW_ACTOR),
+          ev('unlabeled', 'bug', WORKFLOW_ACTOR),
+        ])
+      ).toBe(false);
+      // A person removed only a label that isn't a changelog label.
+      expect(
+        personRemovedLast([ev('unlabeled', 'dependencies', 'a-person')])
+      ).toBe(false);
+      expect(personRemovedLast([])).toBe(false);
     });
   });
 

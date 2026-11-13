@@ -90,6 +90,25 @@ export function lastAddedBy(
   return null;
 }
 
+/**
+ * A person removed the last changelog label, and may be about to add
+ * another: adding one back now would leave two. From the issue events, not
+ * the event that started the run.
+ */
+export function personRemovedLast(events: IssueEvent[]): boolean {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (
+      (event?.event === 'labeled' || event?.event === 'unlabeled') &&
+      changelogLabelsIn([event.label?.name ?? '']).length > 0
+    )
+      return (
+        event.event === 'unlabeled' && event.actor?.login !== WORKFLOW_ACTOR
+      );
+  }
+  return false;
+}
+
 export interface LabelState {
   title: string;
   /** Every label on the pull request now. */
@@ -99,7 +118,7 @@ export interface LabelState {
    * has added it since.
    */
   setByWorkflow: boolean;
-  /** Add or change a label. Removing a label only checks. */
+  /** Add or change a label: false when `personRemovedLast`. */
   mayAdd: boolean;
 }
 
@@ -153,18 +172,7 @@ export function planLabels(state: LabelState): LabelPlan {
   return { kind: 'ok', label: current };
 }
 
-/**
- * A person who removes a label may be about to add another, and adding one
- * back on the removal would leave two. A `labeled` event still changes
- * labels: it may be an unrelated label (Dependabot's `dependencies`) that
- * arrived before the `opened` run labeled the pull request.
- */
-export function mayChangeLabelsOn(action: string): boolean {
-  return action !== 'unlabeled';
-}
-
 interface PullRequestEvent {
-  action: string;
   number: number;
 }
 
@@ -226,15 +234,16 @@ async function main(): Promise<void> {
     labels: Array<{ name: string }>;
   };
   const labels = pull.labels.map((label) => label.name);
-  const present = changelogLabelsIn(labels);
-  const setByWorkflow =
-    present.length === 1 &&
-    lastAddedBy(await issueEvents(issue), present[0] ?? '') === WORKFLOW_ACTOR;
+  const [only, ...others] = changelogLabelsIn(labels);
+  const events = await issueEvents(issue);
   const plan = planLabels({
     title: pull.title,
     labels,
-    setByWorkflow,
-    mayAdd: mayChangeLabelsOn(event.action),
+    setByWorkflow:
+      only !== undefined &&
+      others.length === 0 &&
+      lastAddedBy(events, only) === WORKFLOW_ACTOR,
+    mayAdd: !personRemovedLast(events),
   });
 
   if (plan.kind === 'error') {
