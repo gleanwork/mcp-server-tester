@@ -32,7 +32,6 @@ const sidebars: SidebarsConfig = {
         'cowork-docker',
         'chatgpt-desktop',
         'chatgpt-docker',
-        'verifiers',
       ],
     },
     {

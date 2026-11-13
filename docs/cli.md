@@ -29,7 +29,6 @@ Before the package is installed (for example, running `init` in a new directory)
 - [cowork setup - Prepare Cowork](#cowork-setup---prepare-cowork)
 - [cowork restore-connectors - Restore Cloud Connector Settings](#cowork-restore-connectors---restore-cloud-connector-settings)
 - [runner setup - Prepare a Runner](#runner-setup---prepare-a-runner)
-- [verifiers run - Run a verifiers Taskset](#verifiers-run---run-a-verifiers-taskset)
 
 ## Global options
 
@@ -1283,14 +1282,6 @@ Prepares what runs in a runner need, once. For `docker`, it builds MST's Linux C
 | `--root-dir <dir>`            | Where relative plugin paths resolve. Default: the working directory.                                                                 |
 
 A run's workers load the eval's plugins themselves, so a plugin must be installed on each worker machine, at the version this machine runs: a worker with another version of a plugin package refuses to run. With `--config`, each of the eval's plugins must be a package (a directory with a `package.json`, installed where the eval config resolves it), not a file.
-
-## `verifiers run` - Run a verifiers Taskset
-
-```bash
-ANTHROPIC_API_KEY=... npx mst verifiers run ./acme-tasks --model claude-sonnet-4-6 [--client codex-cli] [-- vf-run options]
-```
-
-Runs a [verifiers](https://github.com/PrimeIntellect-ai/verifiers) taskset on an MST client, on this machine (experimental, [ADR 0015](./adr/0015-mst-clients-run-as-verifiers-harnesses.md)). The taskset, a package directory or a package name, is the only required input. It is a shortcut for verifiers' `vf-run <taskset> --env.agent.harness.id mst-harness`: verifiers loads the taskset, records the model calls and scores each rollout; each rollout is one MST trial. It needs [uv](https://docs.astral.sh/uv/), which installs verifiers, the bundled harness and the taskset, and writes verifiers' results to `outputs/`. See [Run MST clients under verifiers](./verifiers.md#run-a-taskset) for its options and the clients it supports.
 
 ## Next Steps
 

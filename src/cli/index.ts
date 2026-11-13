@@ -70,8 +70,6 @@ import {
   type RunnerSetupOptions,
 } from './commands/runner/index.js';
 import type { DiscoveryOptions } from './commands/discoveryPlugins.js';
-import { verifiersRun } from './commands/verifiers/index.js';
-import type { VerifiersRunOptions } from '../verifiers/run.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { inspect } from 'node:util';
 import { debugCli } from '../debug.js';
@@ -844,65 +842,6 @@ program
   .action(() => {
     throw new Error('`mst env` is now `mst runner`');
   });
-
-// Verifiers command: a verifiers taskset on an MST client (ADR 0015)
-program
-  .command('verifiers')
-  .description(
-    'Run verifiers tasksets on MST clients: verifiers scores, MST runs the client'
-  )
-  .command('run')
-  .description(
-    "verifiers' vf-run with MST's harness, here, with uv: each rollout is one MST trial"
-  )
-  .argument(
-    '<taskset>',
-    'A taskset package directory (with a pyproject.toml), or an installable taskset package name'
-  )
-  .argument(
-    '[verifiers-args...]',
-    'After --: more vf-run options, passed through (they win over the ones here)'
-  )
-  .requiredOption('-m, --model <model>', 'The model, as the endpoint names it')
-  .option('--client <client>', 'The MST client (mst clients lists them)', 'api')
-  .option(
-    '--api <api>',
-    "The client's API family, anthropic or openai (default: openai for codex-cli, else anthropic)"
-  )
-  .option(
-    '--base-url <url>',
-    "The endpoint verifiers forwards model calls to (default: the API family's provider)"
-  )
-  .option(
-    '--api-key-var <name>',
-    "The variable holding the endpoint's key (default: ANTHROPIC_API_KEY or OPENAI_API_KEY)"
-  )
-  .option(
-    '--client-option <key=value>',
-    'A client option; repeat for more (a JSON value is parsed: timeout=300000)',
-    (value: string, previous: string[]) => [...previous, value],
-    [] as string[]
-  )
-  .option('--plugins <modules...>', 'MST plugins, for a plugin client')
-  .option(
-    '--workdir <dirs...>',
-    'Subdirectories of a working directory the client runs in; its files come back with each rollout'
-  )
-  .option(
-    '-n, --num-tasks <n>',
-    "How many of the taskset's tasks (default: all)"
-  )
-  .option('-r, --rollouts <n>', 'Rollouts per task')
-  .option('-c, --concurrency <n>', 'Rollouts at once')
-  .option(
-    '-o, --output-dir <dir>',
-    'Where verifiers writes the run (default: outputs/ here)'
-  )
-  .option('--python <version>', 'The Python uv runs verifiers with', '3.12')
-  .action(
-    (taskset: string, verifiersArgs: string[], options: VerifiersRunOptions) =>
-      verifiersRun(taskset, { ...options, verifiersArgs })
-  );
 
 // Collect command: a shard's worker, started by runners (ADR 0004)
 program

@@ -12,16 +12,17 @@ Each rollout is one MST trial in the rollout's runtime:
 
 MST owns the client: readiness, the run, the transcript and how the attempt
 ended. verifiers owns everything else: the task, the interception, the trace and
-the scores. See docs/verifiers.md in the MST repository.
+the scores. See python/README.md in the MST repository.
 """
 
 from __future__ import annotations
 
 import base64
 import json
+import re
 import shlex
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar, Literal
 
 from pydantic import Field
@@ -59,6 +60,37 @@ _INFERENCE_OVERRIDES = (
 
 WriteMode = Literal["unguarded", "live", "read-only"]
 
+# An MST version as (major, minor, patch, release, prerelease tag, prerelease number):
+# `release` is 0 for a prerelease, so 2.0.0-rc.1 < 2.0.0.
+MSTVersion = tuple[int, int, int, int, int, int]
+_PRERELEASE_TAGS = {"alpha": 0, "beta": 1, "rc": 2}
+# The first MST whose `mst.run/v1` trial file and `--no-report` this harness reads.
+MIN_MST: MSTVersion = (2, 0, 0, 0, 2, 0)
+# What an MST that predates an eval config's `writes` (ADR 0014) says about the key. Such
+# an MST doesn't check writes either, so the harness reruns the trial without it. The
+# version can't tell: MST's main branch took `writes` while still at 2.0.0-rc.0.
+_WRITES_REJECTED = 'Unrecognized key: "writes"'
+
+
+def parse_mst_version(output: str) -> MSTVersion | None:
+    """The version `mst --version` prints, such as `2.0.0-rc.0`; None if unrecognized."""
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)\.(\d+))?", output)
+    if match is None:
+        return None
+    major, minor, patch, tag, number = match.groups()
+    if tag is None:
+        return (int(major), int(minor), int(patch), 1, 0, 0)
+    return (int(major), int(minor), int(patch), 0, _PRERELEASE_TAGS[tag], int(number))
+
+
+def _format(version: MSTVersion) -> str:
+    major, minor, patch, release, tag, number = version
+    base = f"{major}.{minor}.{patch}"
+    if release:
+        return base
+    name = next(n for n, rank in _PRERELEASE_TAGS.items() if rank == tag)
+    return f"{base}-{name}.{number}"
+
 
 class MSTHarnessConfig(HarnessConfig):
     id: str = "mst-harness"
@@ -91,6 +123,9 @@ class MSTHarness(Harness[MSTHarnessConfig]):
     # MST installed.
     NEEDS_CONTAINER: ClassVar[bool] = False
 
+    # Whether the runtime's MST takes an eval config's `writes`; False once it rejects it.
+    _declares_writes: bool = True
+
     async def setup(self, runtime: Runtime) -> None:
         result = await runtime.run([*self.config.mst_command, "--version"], self._env())
         if result.exit_code != 0:
@@ -99,6 +134,12 @@ class MSTHarness(Harness[MSTHarnessConfig]):
                 f"MST didn't start in the runtime with {shlex.join(self.config.mst_command)}: "
                 f"{detail or 'no output'}. Install @gleanwork/mcp-server-tester in the runtime, "
                 "or set mst_command."
+            )
+        version = parse_mst_version(result.stdout)
+        if version is not None and version < MIN_MST:
+            raise RuntimeError(
+                f"mst-harness needs MST {_format(MIN_MST)} or later; the runtime has "
+                f"{result.stdout.strip()}."
             )
 
     async def launch(
@@ -134,7 +175,7 @@ class MSTHarness(Harness[MSTHarnessConfig]):
             mcp_urls=mcp_urls,
             client_options=client_options,
             plugins=tuple(self.config.plugins),
-            writes=self.config.writes,
+            writes=self.config.writes if self._declares_writes else None,
             name=f"verifiers-{trace.id}",
         )
         await runtime.write(f"{work}/dataset.json", _json(dataset(request)))
@@ -151,8 +192,18 @@ class MSTHarness(Harness[MSTHarnessConfig]):
             "--no-report",
         ]
         ran = await runtime.run(argv, self._env(endpoint, secret))
-
         trial_path = await self._trial_path(runtime, f"{work}/results")
+        if (
+            trial_path is None
+            and request.writes is not None
+            and _WRITES_REJECTED in f"{ran.stdout}\n{ran.stderr}"
+        ):
+            # MST rejected the config before starting the client, so nothing ran.
+            self._declares_writes = False
+            request = replace(request, writes=None)
+            await runtime.write(f"{work}/eval.json", _json(eval_config(request, "dataset.json")))
+            ran = await runtime.run(argv, self._env(endpoint, secret))
+            trial_path = await self._trial_path(runtime, f"{work}/results")
         if trial_path is None:
             detail = (ran.stderr or ran.stdout).strip()[-2000:]
             return ProgramResult(
@@ -219,7 +270,13 @@ class MSTHarness(Harness[MSTHarnessConfig]):
     @staticmethod
     async def _trial_path(runtime: Runtime, results: str) -> str | None:
         found = await runtime.run(
-            ["sh", "-c", f"ls {shlex.quote(results)}/runs/*/transcripts/*/*/*.json 2>/dev/null"],
+            # `transcripts/` since MST 2.0.0-rc.1, `traces/` before.
+            [
+                "sh",
+                "-c",
+                f"ls {shlex.quote(results)}/runs/*/transcripts/*/*/*.json "
+                f"{shlex.quote(results)}/runs/*/traces/*/*/*.json 2>/dev/null",
+            ],
             {},
         )
         paths = [line for line in found.stdout.splitlines() if line.strip()]
@@ -237,7 +294,8 @@ class TrialRequest:
     system_prompt: str | None = None
     client_options: Mapping[str, Any] | None = None
     plugins: tuple[str, ...] = ()
-    writes: WriteMode = "unguarded"
+    writes: WriteMode | None = "unguarded"
+    """None: leave `writes` out, for an MST that predates it."""
     name: str = "verifiers-rollout"
 
 
@@ -278,7 +336,7 @@ def eval_config(request: TrialRequest, dataset_path: str) -> dict[str, Any]:
         config["clientOptions"] = options
     if request.plugins:
         config["plugins"] = list(request.plugins)
-    if servers and request.writes != "read-only":
+    if servers and request.writes not in (None, "read-only"):
         config["writes"] = dict.fromkeys(servers, request.writes)
     return config
 
@@ -328,12 +386,15 @@ class TrialResult:
 
 
 def parse_trial(data: bytes | str) -> TrialResult:
-    """Read MST's trial file (`transcripts/<variant>/<case>/<trial>.json`)."""
+    """Read MST's trial file (`transcripts/<variant>/<case>/<trial>.json`).
+
+    MST 2.0.0-rc.0 names the transcript `trace` (in `traces/`), and records no model calls.
+    """
     raw = json.loads(data)
     if not isinstance(raw, dict):
         raise ValueError("MST's trial file is not a JSON object")
     trial: dict[str, Any] = raw
-    transcript = trial.get("transcript")
+    transcript = trial.get("transcript", trial.get("trace"))
     transcript = transcript if isinstance(transcript, dict) else {}
     final_text = transcript.get("finalText")
     ending = trial.get("ending")

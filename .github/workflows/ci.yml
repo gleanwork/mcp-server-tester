@@ -50,12 +50,13 @@ jobs:
 
       - run: npm run test:playwright
 
-  # The verifiers harness and its smoke taskset (ADR 0015). Python lives only in verifiers/.
+  # The verifiers harness and its smoke taskset (ADR 0015). Python lives only in python/,
+  # its own uv workspace.
   python:
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: verifiers/harnesses/mst_harness
+        working-directory: python
     steps:
       - uses: actions/checkout@v4
 
@@ -63,9 +64,9 @@ jobs:
 
       - run: uv sync --locked --python 3.12
 
-      - run: uv run ruff check . ../../environments
+      - run: uv run ruff check .
 
-      - run: uv run ruff format --check . ../../environments
+      - run: uv run ruff format --check .
 
       - run: uv run pyright
 

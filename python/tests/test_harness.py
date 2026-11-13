@@ -12,7 +12,13 @@ from verifiers.v1.trace import Trace
 from verifiers.v1.utils.loaders import harness_class, harness_config_type
 
 from mst_harness import MSTHarness, MSTHarnessConfig
-from mst_harness.harness import TrialRequest, dataset, eval_config, parse_trial
+from mst_harness.harness import (
+    TrialRequest,
+    dataset,
+    eval_config,
+    parse_mst_version,
+    parse_trial,
+)
 
 ENDPOINT = "http://127.0.0.1:8765/rollout/abc/v1"
 
@@ -273,6 +279,77 @@ async def test_setup_names_the_command_when_mst_is_missing() -> None:
 
     with pytest.raises(RuntimeError, match=r"npx mst.*mst_command"):
         await harness(mst_command=["npx", "mst"]).setup(cast(Runtime, Missing(None)))
+
+
+def test_parse_trial_reads_an_rc0_trace() -> None:
+    rc0 = json.loads(trial_file())
+    rc0["trace"] = rc0.pop("transcript")
+    result = parse_trial(json.dumps(rc0))
+    assert result.final_text == "The answer."
+    assert result.info()["transcript"]["events"][0]["name"] == "search"
+
+
+def test_parse_mst_version_orders_prereleases_before_the_release() -> None:
+    beta9, rc0, rc1, final = (
+        parse_mst_version(v) for v in ("2.0.0-beta.9", "2.0.0-rc.0\n", "2.0.0-rc.1", "2.0.0")
+    )
+    assert beta9 is not None and rc0 is not None and rc1 is not None and final is not None
+    assert beta9 < rc0 < rc1 < final
+    assert parse_mst_version("no version") is None
+
+
+class Versioned(FakeRuntime):
+    def __init__(self, version: str) -> None:
+        super().__init__(trial_file())
+        self.version = version
+
+    async def run(self, argv: list[str], env: dict[str, str]) -> ProgramResult:
+        if argv[-1] == "--version":
+            return ProgramResult(0, f"{self.version}\n", "")
+        return await super().run(argv, env)
+
+
+class RejectsWrites(FakeRuntime):
+    """An MST from before `writes` (2.0.0-rc.0): it rejects the key and runs nothing."""
+
+    def __init__(self) -> None:
+        super().__init__(trial_file())
+        self.collected = False
+
+    async def run(self, argv: list[str], env: dict[str, str]) -> ProgramResult:
+        if argv[:2] == ["mst", "run"]:
+            config = json.loads(self.files[".vf-mst/t-1/eval.json"])
+            if "writes" in config:
+                self.runs.append((argv, env))
+                return ProgramResult(1, "", 'Invalid configuration:\n✖ Unrecognized key: "writes"')
+            self.collected = True
+        if argv[0] == "sh" and "ls " in argv[2] and not self.collected:
+            return ProgramResult(0, "", "")
+        return await super().run(argv, env)
+
+
+async def test_an_mst_that_rejects_writes_gets_the_trial_without_them() -> None:
+    h = harness()
+    runtime = RejectsWrites()
+    result = await launch(h, runtime, fake_trace())
+    assert result.exit_code == 0
+    assert [argv[:2] for argv, _ in runtime.runs].count(["mst", "run"]) == 2
+    assert "writes" not in json.loads(runtime.files[".vf-mst/t-1/eval.json"])
+    # Later rollouts leave `writes` out from the start.
+    runtime.runs.clear()
+    await launch(h, runtime, fake_trace())
+    assert [argv[:2] for argv, _ in runtime.runs].count(["mst", "run"]) == 1
+
+
+async def test_writes_are_declared_to_an_mst_that_takes_them() -> None:
+    runtime = FakeRuntime(trial_file())
+    await launch(harness(), runtime, fake_trace())
+    assert json.loads(runtime.files[".vf-mst/t-1/eval.json"])["writes"] == {"acme": "unguarded"}
+
+
+async def test_setup_rejects_an_mst_older_than_the_harness_reads() -> None:
+    with pytest.raises(RuntimeError, match=r"needs MST 2\.0\.0-rc\.0 or later.*beta\.9"):
+        await harness().setup(cast(Runtime, Versioned("2.0.0-beta.9")))
 
 
 def test_verifiers_loads_the_package_as_a_harness() -> None:

@@ -1,0 +1,22 @@
+[project]
+name = "mst-harness"
+version = "0.1.0"
+description = "Run MST (MCP Server Tester) clients as a verifiers harness"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  # The Harness.launch() contract and `env.agent.harness` config of verifiers 0.4.
+  "verifiers>=0.4.1,<0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/gleanwork/mcp-server-tester"
+Documentation = "https://github.com/gleanwork/mcp-server-tester/blob/main/python/README.md"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mst_harness"]
