@@ -28,6 +28,12 @@ When reviewing merged PR's the labels to be used are:
 - internal - Used for internal changes that still require a mention in the
   changelog/release notes.
 
+The Changelog label workflow (`.github/workflows/changelog-label.yml`) sets
+the label from each pull request's conventional commit title. It fails a pull
+request that has no changelog label and a title that gives none, or that has
+more than one. It doesn't know
+whether the title's type fits, so the titles and labels still need a check.
+
 ## Release
 
 Releases run in the Release workflow (`.github/workflows/release.yml`). It

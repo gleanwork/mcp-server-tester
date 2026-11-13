@@ -6,7 +6,9 @@
  * config names one for it, MST writes that model into the options before the
  * judge's identity is computed, so the identity, `run.json` and every score
  * record the model that graded. Judges say which entry of `models` applies
- * to them with `modelSlot`; a judge without it keeps its own defaults.
+ * to them with `modelSlot`; a judge without it keeps its own defaults. A
+ * judge with a fallback model of its own, rather than MST's built-in one,
+ * names it with `defaultModel`, so MST doesn't report it as built-in.
  */
 import {
   builtinModel,
@@ -20,6 +22,9 @@ interface ModelDefaulted {
   readonly modelSlot?: (
     options: Record<string, unknown>
   ) => JudgeModelSlot | undefined;
+  readonly defaultModel?: (
+    options: Record<string, unknown>
+  ) => string | undefined;
 }
 
 function isOptions(value: unknown): value is Record<string, unknown> {
@@ -43,14 +48,16 @@ export function configuredJudgeModel(
 
 /**
  * The slot of the built-in model a judge runs on, given options with any
- * configured model already written in: its options name no model, and MST
- * has a built-in one for its slot. Undefined otherwise.
+ * configured model already written in: its options name no model, it has no
+ * default model of its own, and MST has a built-in one for its slot.
+ * Undefined otherwise.
  */
 export function builtinJudgeSlot(
   definition: ModelDefaulted,
   options: Record<string, unknown>
 ): JudgeModelSlot | undefined {
   if (options.model !== undefined || !definition.modelSlot) return undefined;
+  if (definition.defaultModel?.(options) !== undefined) return undefined;
   const slot = definition.modelSlot(options);
   return slot && builtinModel(slot) !== undefined ? slot : undefined;
 }
