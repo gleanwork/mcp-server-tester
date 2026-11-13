@@ -584,6 +584,55 @@ describe('hitl', () => {
     });
     expect(ui.actions).toEqual([]);
   });
+
+  // A streaming reply adds and removes nodes while a poll walks the tree: a
+  // child can vanish (a null reference) or move under another parent (seen
+  // twice). One such read must not end the case's approval or answer polling.
+  it('rescans a tree that changed under the read, for approvals and answers', async () => {
+    for (const code of [
+      'accessibility_invalid_reply',
+      'accessibility_tree_invalid',
+    ]) {
+      const approval = new FakeUi();
+      approval.extra = [{ name: 'Allow once' }];
+      let once = true;
+      approval.snapshotError = () =>
+        once ? ((once = false), new LinuxUiError(code)) : undefined;
+      expect(
+        await run(approval, 'hitl', { approveWriteTools: true })
+      ).toMatchObject({ status: 'hitl_checked', action_count: 1 });
+      expect(approval.actions).toEqual(['Allow once']);
+      expect(approval.scans).toBe(2);
+
+      const asked = new FakeUi();
+      asked.starts = [];
+      asked.radios = [];
+      asked.tabs = [];
+      asked.extra = [{ name: 'Table', role: 'radio button' }];
+      let first = true;
+      asked.snapshotError = () =>
+        first ? ((first = false), new LinuxUiError(code)) : undefined;
+      expect(
+        await run(
+          asked,
+          'answer',
+          { questions: [{ labels: ['Table'] }] },
+          { timeout: 2000, actions: 1 }
+        )
+      ).toMatchObject({ answered: 'option', action_count: 1 });
+      expect(asked.actions).toEqual(['Table']);
+
+      // A tree that never settles still fails closed, after the bounded rescans.
+      const churning = new FakeUi();
+      churning.extra = [{ name: 'Allow once' }];
+      churning.snapshotError = () => new LinuxUiError(code);
+      expect(
+        (await run(churning, 'hitl', { approveWriteTools: true })).error
+      ).toBe(code);
+      expect(churning.scans).toBe(3);
+      expect(churning.actions).toEqual([]);
+    }
+  });
 });
 
 describe('clarifying questions', () => {

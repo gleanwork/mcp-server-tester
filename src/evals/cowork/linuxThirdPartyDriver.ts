@@ -16,10 +16,16 @@ const SCAN_INCOMPLETE = new Set([
   'accessibility_tree_budget',
   'accessibility_scan_timeout',
 ]);
-/** Reads that fail while the tree changes under a scan. The scan is repeated, never an action. */
+/**
+ * Reads that fail while the tree changes under a scan: a node gone mid-read, a
+ * child reference that is already null, or a node that moved under another
+ * parent and so appears twice. The scan is repeated, never an action.
+ */
 const TRANSIENT = new Set([
   'accessibility_dbus_error',
   'accessibility_node_defunct',
+  'accessibility_invalid_reply',
+  'accessibility_tree_invalid',
 ]);
 const SCAN_ATTEMPTS = 3;
 /** Claude Desktop truncates longer new-task links; paste those prompts instead. */
