@@ -538,6 +538,9 @@ const devtools = {
     webSocketDebuggerUrl?: string;
   }>,
   sockets: [] as string[],
+  /** False: page sockets never finish their handshake. */
+  opens: true,
+  closed: 0,
 };
 
 /** Evaluates `Runtime.evaluate` expressions in a synthetic claude.ai page. */
@@ -548,7 +551,7 @@ class FakeDevtoolsSocket {
   >();
   constructor(readonly url: string) {
     devtools.sockets.push(url);
-    setImmediate(() => this.emit('open', {}));
+    if (devtools.opens) setImmediate(() => this.emit('open', {}));
   }
   addEventListener(
     type: string,
@@ -577,7 +580,9 @@ class FakeDevtoolsSocket {
       })
     );
   }
-  close() {}
+  close() {
+    devtools.closed++;
+  }
   private async evaluate(expression: string) {
     const account = devtools.account;
     const page = vm.createContext({
@@ -751,6 +756,8 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     devtools.account = account;
     devtools.listening = true;
     devtools.sockets.length = 0;
+    devtools.opens = true;
+    devtools.closed = 0;
     devtools.targets = [
       { type: 'service_worker', url: 'https://claude.ai/sw.js' },
       {
@@ -1447,6 +1454,22 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     });
     await drive(session.dispose());
     expect(account.permissions).toEqual(account.original);
+  });
+
+  it('gives up on a DevTools handshake that never completes and closes its socket', async () => {
+    devtools.opens = false;
+    await expect(
+      drive(
+        adapter().prepare({
+          evalConfig: { name: 'acme-1p', datasets: [], servers: [SERVER] },
+          env,
+        })
+      )
+    ).rejects.toThrow('claude.ai request timed out');
+    expect(devtools.sockets).toHaveLength(1);
+    expect(devtools.closed).toBe(1);
+    expect(account.requests).toEqual([]);
+    expect(host.commands).toEqual([]);
   });
 
   it('fails with sign-in steps, without touching the account, when claude.ai cannot be read', async () => {

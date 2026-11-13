@@ -37,12 +37,14 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
   let base: CoworkDesktop;
   let preparation: CoworkCloudPreparation;
   let methods: string[];
+  let listed: Array<{ id: string; created_at: string; last_event_at: string }>;
   let rejectMethod: string | undefined;
   let dispose: (() => Promise<void>) | undefined;
   const actions: string[] = [];
   beforeEach(async () => {
     host.home = await mkdtemp('/tmp/mst-1p-worker-');
     methods = [];
+    listed = [];
     actions.length = 0;
     rejectMethod = undefined;
     dispose = undefined;
@@ -117,8 +119,10 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
             request.method === 'prepare'
               ? preparation
               : request.method === 'listSessions'
-                ? []
-                : null;
+                ? listed
+                : request.method === 'events'
+                  ? [{ payload: { type: 'system', subtype: 'init' } }]
+                  : null;
           const outcome =
             request.method === rejectMethod
               ? {
@@ -239,6 +243,52 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
       settingsVerified: true,
     });
   }, 10_000);
+
+  it('reads an idle session again only when its last event changes, or after 30 s', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    // Fake timers fire the mirror's polls; the socket round trips are real.
+    const elapse = async (ms: number) => {
+      for (let step = 0; step < ms; step += 100) {
+        await vi.advanceTimersByTimeAsync(100);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    };
+    try {
+      const reads = () => methods.filter((method) => method === 'events');
+      await prepared(desktop());
+      const at = (offsetMs: number) =>
+        new Date(Date.now() + offsetMs).toISOString();
+      listed = [{ id: 'cse_idle', created_at: at(0), last_event_at: at(0) }];
+      await elapse(20_000);
+      expect(reads()).toHaveLength(1);
+      expect(
+        methods.filter((m) => m === 'listSessions').length
+      ).toBeGreaterThan(5);
+
+      listed = [{ ...listed[0]!, last_event_at: at(0) }];
+      await elapse(3_000);
+      expect(reads()).toHaveLength(2);
+
+      // Unchanged, but two events can share a timestamp: read again by 30 s.
+      await elapse(25_000);
+      expect(reads()).toHaveLength(2);
+      await elapse(8_000);
+      expect(reads()).toHaveLength(3);
+    } finally {
+      // The mirror's next poll waits on a fake timer: stop it under them.
+      const stop = dispose;
+      dispose = undefined;
+      if (stop) {
+        let stopped = false;
+        const stopping = stop()
+          .catch(() => undefined)
+          .finally(() => (stopped = true));
+        while (!stopped) await elapse(100);
+        await stopping;
+      }
+      vi.useRealTimers();
+    }
+  }, 20_000);
 
   it('rejects managed/gateway preflight before source account mutations', async () => {
     base.prepare = vi.fn(async () => {
