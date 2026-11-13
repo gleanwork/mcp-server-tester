@@ -28,8 +28,11 @@ import { z } from 'zod';
 
 const dirs: string[] = [];
 
-/** A plugin whose judge takes `models.judge.openai`, recording its model. */
-function acmePick(seen: unknown[]): Plugin {
+/**
+ * A plugin whose judge takes `models.judge.openai`, recording its model, and
+ * falls back on `ownModel` when it is given.
+ */
+function acmePick(seen: unknown[], ownModel?: string): Plugin {
   return {
     meta: { name: 'acme-plugin', namespace: 'acme' },
     datasetSources: {
@@ -52,6 +55,7 @@ function acmePick(seen: unknown[]): Plugin {
       pick: {
         schema: z.object({ model: z.string().optional() }).passthrough(),
         modelSlot: () => ({ kind: 'judge', key: 'openai' }),
+        ...(ownModel !== undefined && { defaultModel: () => ownModel }),
         evaluate: async (_input, options) => {
           seen.push((options as { model?: string }).model);
           return { score: 1 };
@@ -400,6 +404,34 @@ describe('the models cascade', () => {
     expect(warnings[0]).toContain(
       `models.judge.openai: ${BUILTIN_MODELS.judge.openai} (judge acme/judge/pick)`
     );
+  });
+
+  it('neither warns about nor records a judge that falls back on a model of its own, and still gives it a configured one', async () => {
+    const seen: unknown[] = [];
+    const plugin = acmePick(seen, 'own-default');
+    const run = async (file?: Record<string, unknown>) => {
+      const configPath = await repo(
+        {
+          plugins: [],
+          client: 'acme/client/echo',
+          judges: ['acme/judge/pick'],
+        },
+        file
+      );
+      return runEval({
+        configPath,
+        rootDir: path.dirname(path.dirname(configPath)),
+        plugins: [plugin],
+      });
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const unset = await run();
+    expect(builtinWarnings(warn)).toEqual([]);
+    expect(await runRecord(unset.outputDir)).not.toHaveProperty(
+      'builtinModels'
+    );
+    await run({ models: { judge: { openai: 'from-file' } } });
+    expect(seen).toEqual([undefined, 'from-file']);
   });
 
   it('fails for a --mst-config file that does not exist', () => {

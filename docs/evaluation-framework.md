@@ -91,6 +91,8 @@ The built-in models are a last resort, and they go stale between MST releases. W
 
 The resolved `models` are part of the eval config, so they go to workers, grade shards and a detached coordinator, and they change the eval's `contentHash`. MST writes a configured judge model into the judge's options before it computes the judge's identity, so `run.json` and each score record the model that graded. A judge that runs on its built-in model keeps the identity it has today.
 
+A plugin judge takes a configured model with `modelSlot(options)`, which names its `models` entry, such as `{ kind: 'judge', key: 'openai' }`. If it falls back on a model of its own rather than MST's built-in one, it names that model with `defaultModel(options)`, and its `version` covers it. A configured model still replaces it, but MST doesn't warn about or record it as a built-in model.
+
 Playwright tests read the user's file and the nearest repo file above the spec. The `mcpModels` option goes over both: `test.use({ mcpModels: { judge: { openai: 'gpt-5-mini' } } })`. It applies to `toPassToolJudge` and to `runEvalDataset` cases.
 
 A bare dataset path is shorthand for `{ "type": "file", "path": "..." }`; a bare `namespace/dataset/name` is a [plugin's dataset](#plugin-datasets-and-snapshots). Relative dataset and plugin paths in an eval config resolve against the eval config's directory, then `rootDir` (`--root-dir`, the working directory by default). A `file` result store's `dir` is always relative to the eval config, so where results are written doesn't depend on the working directory. Plugin result stores resolve their own options.

@@ -41,6 +41,7 @@ import type {
 import type { UsageMetrics } from '../judgeTypes.js';
 import {
   AgentJudgeOptionsSchema,
+  agentDefaultModel,
   agentModelSlot,
   agentRuntime,
   optionsSchema,
@@ -746,6 +747,7 @@ export function stagedPairwiseJudge(
     // A bundle whose every stage names its model uses no default.
     ...(bundle.stages.some((stage) => stage.model === undefined) && {
       modelSlot: agentModelSlot(spec),
+      ...agentDefaultModel(spec),
     }),
     preflight: (options) => preflightRuntime(settings(spec, options).runtime),
     compare,
