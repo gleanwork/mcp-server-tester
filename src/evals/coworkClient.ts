@@ -199,9 +199,9 @@ export function coworkOptionIssues(
 ): string[] {
   const issues: string[] = [];
   const on = osName(os);
-  if (options.mode === 'first-party' && os !== 'darwin')
+  if (options.mode === 'first-party' && os !== 'darwin' && os !== 'linux')
     issues.push(
-      'First-party Cowork requires macOS and a signed-in Claude account.'
+      'First-party Cowork requires macOS with a signed-in Claude account, or Linux with a plugin-staged account runtime and source cloud control.'
     );
   if (
     os !== 'linux' &&
@@ -443,23 +443,23 @@ async function desktopAdapter(
     );
   // Select the concrete entry point here, on the machine running this batch.
   let platform = selectedDesktop;
-  if (firstParty) {
-    const { coworkClaudeAi } = await import('./cowork/claudeAi.js');
-    platform = coworkClaudeAi(
-      platform ?? (await import('./cowork/macos.js')).coworkMacos,
-      {
-        servers,
-        connectors: config.connectors,
-        writes: context.evalConfig.writes,
-      }
-    );
-  }
   if (!platform) {
     if (os === 'darwin')
       platform = (await import('./cowork/macos.js')).coworkMacos;
-    else if (os === 'linux')
-      platform = (await import('./cowork/linux.js')).coworkLinux;
-    else throw new Error(`Cowork runs on macOS or Linux, not ${os}.`);
+    else if (os === 'linux') {
+      const linuxDesktop = await import('./cowork/linux.js');
+      platform = firstParty
+        ? linuxDesktop.coworkLinuxFirstParty
+        : linuxDesktop.coworkLinux;
+    } else throw new Error(`Cowork runs on macOS or Linux, not ${os}.`);
+  }
+  if (firstParty) {
+    const { coworkClaudeAi } = await import('./cowork/claudeAi.js');
+    platform = coworkClaudeAi(platform, {
+      servers,
+      connectors: config.connectors,
+      writes: context.evalConfig.writes,
+    });
   }
   const dataDir = platform.dataDirectory(config);
   // Pass only the selected variant. Setup intentionally rejects multi-variant eval configs.
@@ -644,7 +644,9 @@ async function desktopAdapter(
           deadlineAt,
           maxActions: config.maxActions,
           model: computerUseModel,
-          ...(mac && config.model ? { targetModel: config.model } : {}),
+          ...((mac || (linux && firstParty)) && config.model
+            ? { targetModel: config.model }
+            : {}),
           env,
           ...(session?.appPath ? { appPath: session.appPath } : {}),
         });
@@ -1157,12 +1159,14 @@ export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
         'macOS default third-party: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider',
         'macOS first-party: Cowork inference uses the existing signed-in Claude account; MST installs no inference credential',
         'macOS both modes: `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner',
-        'Linux image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`)',
+        'Linux third-party image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`)',
+        'Linux first-party: a plugin-staged private account profile and source-host cloud control; no inference credential or Computer Use planner in MST',
       ],
       setup: [
         'macOS default third-party: `mst cowork setup`, then sign in to Claude Desktop once',
         'macOS first-party: use the installed Claude Desktop and Chrome signed in to the same Claude account, with its selected connectors connected; Chrome needs a loopback DevTools port (`MST_CLAUDE_AI_DEBUG_PORT`, default 9222). Do not run `mst cowork setup` for this mode',
-        'Docker: `mst runner setup docker`',
+        'Docker third-party: `mst runner setup docker`',
+        'Linux first-party: an attached plugin-owned runtime must stage the account profile and MST_COWORK_CLOUD_CONTROL_SOCKET; stock Docker or a managed/gateway profile cannot supply account mode',
       ],
     },
     evidence: 'structured',

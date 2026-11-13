@@ -38,6 +38,10 @@ _Avoid_: canonical answer, golden, target, reference
 The MCP client application an eval tests, named canonically: `claude-code`, `codex-cli` (the Codex CLI; it was `codex`), `cowork`, `chatgpt`, `codex-app` (the Codex surface of the ChatGPT desktop app; it was `chatgpt` with `surface: "codex"`), or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). One client is one product: no option changes which product it is. How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. Desktop execution uses the product's `macos.ts` or `linux.ts` entry point, selected on the machine running the trial. New results record no driver identity; old stored results keep theirs. A client returns a transcript, never a score. Built-in and plugin clients return the same `ClientRunResult`: a final answer, ordered events and optional usage, diagnostics and telemetry. MST derives the assertion/report view from it. `mst clients` lists each client's requirements, options and defaults from its definition and schema. It describes OS-dependent defaults without resolving them on the coordinator. A client with its model is an agent harness.
 _Avoid_: host, harness (unqualified), agent, runner, solver, provider. One exception: **host telemetry**.
 
+**Client auth cache**:
+Authentication state a client application's own helper keeps, separate from MST connector grants and credential stores. The `codex-cli` option `authCacheDirectories` links dedicated private cache directories into otherwise fresh trial homes; it does not reuse operator configuration or import existing credentials.
+_Avoid_: shared client home
+
 **Host telemetry**:
 The OpenTelemetry a client application sends about a trial. MST receives it when an eval config sets `telemetry.host`, and stores it in the trial's `transcript.hostTelemetry` (docs/telemetry.md). Its OpenTelemetry export uses `mst.host.*` attributes. The name keeps "host" on purpose: the MCP specification calls the application the host, and this is the application's own export. `clientTelemetry` is different: it holds numbers MST reads from the client's own records. 1.x used `hostTelemetry` for those, as a field of a case or trial result. 2.0 writes `hostTelemetry` only inside a transcript, so MST never mistakes it for the 1.x field.
 _Avoid_: client telemetry (that is `clientTelemetry`)
@@ -67,7 +71,7 @@ A connector a user adds inside the client, such as one from Cowork's connector d
 _Avoid_: native connector, built-in connector
 
 **First-party mode**:
-A Cowork option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). Local macOS only, one trial at a time. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
+A Cowork option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). It runs locally on macOS or in a plugin-prepared Linux runtime with attached macOS source control, one trial at a time on one shard with a dedicated account. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
 _Avoid_: claude-ai mode, account mode
 
 **Variant**:
@@ -99,7 +103,7 @@ What a client did in one trial, in order: tool calls (MCP or the client's own), 
 _Avoid_: trace, trajectory, log, response
 
 **Client artifacts**:
-A bounded copy of the files a client kept for one trial (such as Cowork's session folder), taken from the paths the client names as evidence, for judges to read. A run that keeps full transcripts stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
+A bounded copy of the files a client kept for one trial (such as Cowork's session folder, or the Codex CLI's rollout trace), taken from the paths the client names as evidence, for judges to read. A run that keeps full transcripts stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
 _Avoid_: attachments, session dump
 
 **Failure diagnosis**:
@@ -349,7 +353,7 @@ The first part of a plugin extension's name, `<namespace>/<kind>/<name>` (for ex
 _Avoid_: scope, prefix
 
 **Extension**:
-One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`), runner (`runner`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
+One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`), runner (`runner`), credential store (`credential-store`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
 _Avoid_: contribution, registration, capability
 
 **Built-in**:
@@ -365,7 +369,7 @@ The long-lived sign-in `mst auth` saves for a connector, which a run exchanges f
 _Avoid_: credential, login, refresh token (that is part of it)
 
 **Credential store**:
-Where refresh grants are kept. MST ships `mst/credential-store/local`, files in `~/.mcp-server-tester/grants`; stores from plugins are planned.
+Where refresh grants are kept. MST's own store keeps grants as files in `~/.mcp-server-tester/grants`, or in the directory `--store <dir>` names; a plugin can provide others, chosen with `--store <namespace>/credential-store/<name>`.
 _Avoid_: keychain, vault, secret store
 
 **Dry-run proxy**:

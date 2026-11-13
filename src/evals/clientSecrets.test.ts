@@ -4,6 +4,7 @@ import {
   isCredentialName,
   namedSecretValues,
   redactClientError,
+  redactClientSecretBytes,
   redactClientSecrets,
   redactedClientRun,
 } from './clientSecrets.js';
@@ -149,6 +150,42 @@ describe('redactClientSecrets', () => {
 
   it('leaves values shorter than a credential alone', () => {
     expect(redactClientSecrets('a b c', ['a', 'abc'])).toBe('a b c');
+  });
+});
+
+describe('redactClientSecretBytes', () => {
+  it('replaces secrets as written and as JSON escapes them, longest first', () => {
+    const quoted = 'a"b\\c-secret';
+    const data = Buffer.from(
+      JSON.stringify({ a: 'Bearer token-1234567', b: quoted, c: 'token-1234' })
+    );
+    expect(
+      JSON.parse(
+        redactClientSecretBytes(data, [
+          'token-1234',
+          'token-1234567',
+          quoted,
+        ]).toString('utf8')
+      )
+    ).toEqual({ a: 'Bearer [REDACTED]', b: '[REDACTED]', c: '[REDACTED]' });
+  });
+
+  it("keeps bytes that aren't UTF-8, and data without a secret as it is", () => {
+    const data = Buffer.concat([
+      Buffer.from([0xff, 0xfe]),
+      Buffer.from('key=sk-secret-1;'),
+      Buffer.from([0x80]),
+    ]);
+    expect(redactClientSecretBytes(data, ['sk-secret-1'])).toEqual(
+      Buffer.concat([
+        Buffer.from([0xff, 0xfe]),
+        Buffer.from('key=[REDACTED];'),
+        Buffer.from([0x80]),
+      ])
+    );
+    expect(redactClientSecretBytes(data, ['absent-secret'])).toBe(data);
+    // Too short to be a credential.
+    expect(redactClientSecretBytes(data, ['key'])).toBe(data);
   });
 });
 

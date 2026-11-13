@@ -21,7 +21,10 @@ import {
 } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
+import { z } from 'zod';
+import { createCoworkCloudControlClient } from './cloudControlClient.js';
+import { CoworkCloudPreparationSchema } from './cloudControlProtocol.js';
 import type { CoworkDesktop } from './desktop.js';
 import { parseClaudeTranscript } from './transcript.js';
 import { describeError } from '../../utils/describeError.js';
@@ -29,6 +32,7 @@ import type { MCPConfig } from '../../config/mcpConfig.js';
 import { bindFirstPartyServers } from './firstParty.js';
 import {
   CloudConnectorSnapshotSchema,
+  CloudConnectorsSchema,
   CloudPermissionStateSchema,
   CloudPermissionWriteNotSentError,
   configureCloudConnectors,
@@ -268,7 +272,7 @@ function requireOk(result: PageResult, what: string): void {
   throw new Error(`claude.ai ${what} failed (${result.status}).`);
 }
 
-async function listCloudSessions(
+export async function listCloudSessions(
   port: number,
   limit = 10
 ): Promise<CloudSessionSummary[]> {
@@ -287,7 +291,7 @@ const MAX_EVENT_PAGES = 50;
  * a page cursor that is malformed or repeats, fails instead of returning a
  * prefix: a prefix would be recorded as an unfinished task.
  */
-async function fetchCloudEvents(
+export async function fetchCloudEvents(
   port: number,
   sessionId: string
 ): Promise<CloudSessionEvent[]> {
@@ -513,6 +517,8 @@ function mirrorCloudSessions(options: {
   dir: string;
   sinceMs: number;
   intervalMs?: number;
+  listSessions?: () => Promise<CloudSessionSummary[]>;
+  events?: (sessionId: string) => Promise<CloudSessionEvent[]>;
 }): {
   stop(): Promise<void>;
   bindSession(sessionId?: string): void;
@@ -526,7 +532,9 @@ function mirrorCloudSessions(options: {
   const sync = async () => {
     let sessions: CloudSessionSummary[] = [];
     try {
-      sessions = await listCloudSessions(options.port, 10);
+      sessions = await (options.listSessions
+        ? options.listSessions()
+        : listCloudSessions(options.port, 10));
       listError = undefined;
     } catch (error) {
       listError = describeError(error);
@@ -553,7 +561,9 @@ function mirrorCloudSessions(options: {
         continue;
       if (!/^cse_[0-9A-Za-z_]+$/.test(session.id)) continue;
       try {
-        const events = await fetchCloudEvents(options.port, session.id);
+        const events = await (options.events
+          ? options.events(session.id)
+          : fetchCloudEvents(options.port, session.id));
         if (written.get(session.id) === events.length) continue;
         const metadata = cloudTrialMetadata(session, events, options.sinceMs);
         if (!metadata) continue;
@@ -608,7 +618,7 @@ const APP_PATH = '/Applications/Claude.app';
  * Where 1P keeps its mirrored sessions and its connector-permission journal.
  * Preparation and `restoreClaudeAiConnectors` use the same journal.
  */
-function claudeAiPaths(): { dir: string; journal: string } {
+export function claudeAiPaths(): { dir: string; journal: string } {
   const root = join(homedir(), '.mcp-server-tester');
   return {
     dir: join(root, 'cowork-claude-ai'),
@@ -620,7 +630,7 @@ function claudeAiPaths(): { dir: string; journal: string } {
  * The account connector permissions a run reads and writes, through the
  * signed-in claude.ai page of the Chrome on `port`.
  */
-function cloudConnectorIO(port: () => number): CloudConnectorIO {
+export function cloudConnectorIO(port: () => number): CloudConnectorIO {
   return {
     inspect: () => inspectCloudConnectors(port()),
     read: () => readCloudPermissions(port()),
@@ -695,6 +705,9 @@ export function coworkClaudeAi(
   let effectiveConnectors = connectors;
   let mirror: ReturnType<typeof mirrorCloudSessions> | undefined;
   let submittedPrompt: string | undefined;
+  let worker: ReturnType<typeof createCoworkCloudControlClient> | undefined;
+  let linuxSession: Awaited<ReturnType<CoworkDesktop['prepare']>> | undefined;
+  let remotePreparationAttempted = false;
   async function dispose(): Promise<void> {
     await mirror?.stop();
     if (configuration) {
@@ -702,6 +715,20 @@ export function coworkClaudeAi(
       await configuration.restore();
       configuration = undefined;
       submittedPrompt = undefined;
+      remotePreparationAttempted = false;
+      await linuxSession?.dispose();
+      linuxSession = undefined;
+      worker?.close();
+      return;
+    }
+    if (worker) {
+      await linuxSession?.dispose();
+      linuxSession = undefined;
+      worker.close();
+      if (remotePreparationAttempted)
+        throw new Error(
+          'Cloud preparation did not establish a worker transaction; source recovery state must be retained.'
+        );
       return;
     }
     // prepare can fail before it returns a session, including a transaction
@@ -721,7 +748,115 @@ export function coworkClaudeAi(
     dispose,
     mcpServerNames: () => remoteServerNames,
     mcpServerLabels: () => serverLabels,
-    async prepare({ env }) {
+    ...(process.platform === 'linux' && base.diagnose
+      ? { diagnose: base.diagnose.bind(base) }
+      : {}),
+    async prepare(options) {
+      const { env } = options;
+      if (process.platform === 'linux') {
+        if (!env.MST_COWORK_CLOUD_CONTROL_SOCKET)
+          throw new Error(
+            'Linux first-party Cowork requires private MST_COWORK_CLOUD_CONTROL_SOCKET.'
+          );
+        // Only the distinct account-mode base may be supplied here. Its
+        // preflight rejects managed/gateway state before any source mutation.
+        worker = createCoworkCloudControlClient(env);
+        linuxSession = await base.prepare(options);
+        remotePreparationAttempted = true;
+        const prepared = CoworkCloudPreparationSchema.parse(
+          await worker.call({ method: 'prepare' })
+        );
+        if (
+          !isDeepStrictEqual(prepared.servers, firstParty.servers) ||
+          !isDeepStrictEqual(
+            CloudConnectorsSchema.parse(prepared.requestedConnectors ?? {}),
+            CloudConnectorsSchema.parse(connectors ?? {})
+          ) ||
+          !isDeepStrictEqual(prepared.writes ?? {}, firstParty.writes ?? {}) ||
+          prepared.model !== options.model
+        )
+          throw new Error(
+            'Worker settings do not match the immutable source-authorized batch.'
+          );
+        remoteServerNames = prepared.remoteServerNames;
+        serverLabels = prepared.serverLabels;
+        effectiveConnectors = prepared.effectiveConnectors;
+        const control = worker;
+        configuration = {
+          plan: prepared.plan,
+          async verify() {
+            await control.call({ method: 'verify' });
+          },
+          async restore() {
+            await control.call({ method: 'restore' });
+          },
+          async beginTask() {
+            if (submittedPrompt === undefined)
+              throw new Error('No authorized prompt to submit.');
+            await control.call({
+              method: 'beginTask',
+              prompt: submittedPrompt,
+            });
+          },
+          async bindTask(sessionId) {
+            await control.call({ method: 'bindTask', sessionId });
+          },
+          async confirmTaskComplete() {
+            await control.call({ method: 'confirmTaskComplete' });
+          },
+        };
+        await rm(dir, { recursive: true, force: true });
+        await mkdir(dir, { recursive: true, mode: 0o700 });
+        mirror = mirrorCloudSessions({
+          port: 0,
+          dir,
+          sinceMs: Date.now(),
+          async listSessions() {
+            return z
+              .array(
+                z
+                  .object({
+                    id: z.string(),
+                    created_at: z.string().optional(),
+                    last_event_at: z.string().optional(),
+                    title: z.string().optional(),
+                  })
+                  .strict()
+              )
+              .max(10)
+              .parse(await control.call({ method: 'listSessions' }));
+          },
+          async events(sessionId) {
+            return z
+              .array(
+                z
+                  .object({
+                    source: z.string().optional(),
+                    created_at: z.string().optional(),
+                    payload: z.record(z.string(), z.unknown()).optional(),
+                  })
+                  .passthrough()
+              )
+              .max(10_000)
+              .parse(await control.call({ method: 'events', sessionId }));
+          },
+        });
+        const recorder = mirror;
+        const session = linuxSession;
+        return {
+          ...session,
+          recordingError: () => recorder.lastError(),
+          ...(session.restart
+            ? {
+                async restart() {
+                  await configuration?.confirmTaskComplete();
+                  await session.restart!();
+                },
+              }
+            : {}),
+          dispose,
+        };
+      }
       if (process.platform !== 'darwin')
         throw new Error('Cowork signed in to claude.ai runs on macOS only.');
       const port = claudeAiDebugPort(env);
@@ -817,11 +952,13 @@ export function coworkClaudeAi(
       await configuration.confirmTaskComplete();
       // Record intent before any UI action that might create a cloud task.
       // Even a rejected/timed-out submit stays unbound until proven otherwise.
-      await configuration.beginTask();
       submittedPrompt = query;
+      await configuration.beginTask();
       mirror?.bindSession(undefined);
-      await run('/usr/bin/open', [NEW_COWORK_TASK_URL]);
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      if (process.platform === 'darwin') {
+        await run('/usr/bin/open', [NEW_COWORK_TASK_URL]);
+        await new Promise((resolve) => setTimeout(resolve, 3_000));
+      }
       return base.submit(query, options);
     },
     async bindSession(transcript) {

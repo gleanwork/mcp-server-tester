@@ -79,6 +79,20 @@ export default defineConfig([
       js: '#!/usr/bin/env node',
     },
   },
+  // First-party Linux UI: a separate Node process bounds native D-Bus calls.
+  // The managed third-party client keeps its existing Python runtime.
+  {
+    entry: { linuxFirstParty: 'src/evals/cowork/linuxFirstPartyMain.ts' },
+    format: ['esm'],
+    dts: false,
+    splitting: false,
+    sourcemap: false,
+    treeshake: true,
+    minify: false,
+    outDir: 'dist/cowork',
+    tsconfig: './tsconfig.build.json',
+    external: ['@homebridge/dbus-native'],
+  },
   // Dry-run proxy: a small stdio entry point a client launches once per
   // server, so it doesn't load the whole CLI.
   {

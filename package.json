@@ -29,6 +29,7 @@
       "require": "./dist/index.cjs"
     },
     "./cowork-linux-runtime": "./scripts/cowork_linux.py",
+    "./cowork-linux-first-party-runtime": "./dist/cowork/linuxFirstParty.js",
     "./chatgpt-linux-runtime": "./scripts/chatgpt_linux.py",
     "./evals": {
       "types": "./dist/evals.d.ts",
@@ -118,6 +119,7 @@
   },
   "dependencies": {
     "@discoveryjs/json-ext": "^1.1.0",
+    "@homebridge/dbus-native": "^0.7.9",
     "@modelcontextprotocol/client": "^2.2.0",
     "@modelcontextprotocol/server": "^2.2.0",
     "commander": "^14.0.2",

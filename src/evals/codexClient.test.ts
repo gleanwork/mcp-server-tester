@@ -1,5 +1,17 @@
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'smol-toml';
@@ -7,11 +19,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import {
   CODEX_CLIENT,
+  CODEX_ROLLOUT_TRACE_DIR,
   CodexClientSchema,
   codexConfigToml,
   codexMcpServers,
+  codexRolloutTrace,
   codexServerKey,
 } from './codexClient.js';
+import { ARTIFACT_LIMITS } from './allArtifacts.js';
 import { assertClientSupports, getClient } from './builtinClients.js';
 import type { ClientRunContext } from './evalFrameworkTypes.js';
 import type { EvalConfig } from './evalConfig.js';
@@ -25,6 +40,10 @@ const sdk = vi.hoisted(() => ({
   input: undefined as string | undefined,
   config: undefined as string | undefined,
   homeMode: undefined as number | undefined,
+  authCacheName: undefined as string | undefined,
+  authCachePath: undefined as string | undefined,
+  authCacheBefore: undefined as string | undefined,
+  homeEntries: undefined as string[] | undefined,
   hang: false,
   /** Hang before the first turn starts, as a Codex stuck starting does. */
   hangBeforeTurn: undefined as boolean | undefined,
@@ -42,7 +61,57 @@ const sdk = vi.hoisted(() => ({
   hostEvents: undefined as
     | Array<{ name: string; attributes: Record<string, string> }>
     | undefined,
+  /** Write no rollout trace, as a Codex older than 0.124 doesn't. */
+  noTrace: undefined as boolean | undefined,
+  /** Have the trace quote the model key, as a payload echoing it would. */
+  traceQuotesKey: undefined as boolean | undefined,
+  /** Hard-link the trial's config.toml into the trace, as a shell could. */
+  traceLinksConfig: undefined as boolean | undefined,
 }));
+
+/** A rollout trace bundle as Codex writes one for a thread. */
+async function writeTraceBundle(root: string, threadId: string) {
+  const bundle = join(root, `trace-t1-${threadId}`);
+  await mkdir(join(bundle, 'payloads'), { recursive: true });
+  await writeFile(
+    join(bundle, 'manifest.json'),
+    JSON.stringify({
+      schema_version: 1,
+      trace_id: 't1',
+      rollout_id: threadId,
+      root_thread_id: threadId,
+      raw_event_log: 'trace.jsonl',
+      payloads_dir: 'payloads',
+    })
+  );
+  await writeFile(
+    join(bundle, 'trace.jsonl'),
+    `${JSON.stringify({
+      seq: 1,
+      payload: {
+        type: 'inference_started',
+        request_payload: {
+          kind: { type: 'inference_request' },
+          path: 'payloads/1.json',
+        },
+      },
+    })}\n`
+  );
+  await writeFile(
+    join(bundle, 'payloads', '1.json'),
+    JSON.stringify({
+      model: 'gpt-5.5',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'x' }] }],
+    })
+  );
+  return bundle;
+}
+
+/**
+ * The trace directories trials left. A trial's trace is temporary: MST removes
+ * it after copying, so a test that runs the client alone removes it here.
+ */
+const clientTraceDirs: string[] = [];
 
 vi.mock('@openai/codex-sdk', () => ({
   Codex: class {
@@ -60,6 +129,38 @@ vi.mock('@openai/codex-sdk', () => ({
             'utf8'
           );
           sdk.homeMode = statSync(join(env.CODEX_HOME!, 'config.toml')).mode;
+          if (env.CODEX_ROLLOUT_TRACE_ROOT && !sdk.noTrace) {
+            clientTraceDirs.push(join(env.CODEX_ROLLOUT_TRACE_ROOT, '..'));
+            const bundle = await writeTraceBundle(
+              env.CODEX_ROLLOUT_TRACE_ROOT,
+              'thread-9'
+            );
+            if (sdk.traceQuotesKey)
+              await writeFile(
+                join(bundle, 'payloads', '2.json'),
+                JSON.stringify({ echoed: `Bearer ${env.MST_CODEX_API_KEY}` })
+              );
+            if (sdk.traceLinksConfig)
+              await link(
+                join(env.CODEX_HOME!, 'config.toml'),
+                join(bundle, 'payloads', 'config.toml')
+              );
+          }
+          if (sdk.authCacheName) {
+            // Simulate a managed helper with a fake credential, never a real
+            // sign-in or model call. It discovers its cache through HOME.
+            sdk.homeEntries = await readdir(env.HOME!);
+            sdk.authCachePath = await realpath(
+              join(env.HOME!, sdk.authCacheName)
+            );
+            const cacheFile = join(sdk.authCachePath, 'credentials.json');
+            sdk.authCacheBefore = await readFile(cacheFile, 'utf8').catch(
+              () => undefined
+            );
+            await writeFile(cacheFile, 'test-only-auth-fixture', {
+              mode: 0o600,
+            });
+          }
           const sessions = join(
             env.CODEX_HOME!,
             'sessions',
@@ -234,6 +335,11 @@ beforeEach(() => {
     (sdk as Record<string, unknown>)[key] = key === 'hang' ? false : undefined;
 });
 
+afterEach(async () => {
+  for (const dir of clientTraceDirs.splice(0))
+    await rm(dir, { recursive: true, force: true });
+});
+
 describe('codex-cli client options', () => {
   it('is a built-in, headless client with a structured transcript', () => {
     expect(getClient('codex-cli')).toBe(CODEX_CLIENT);
@@ -256,6 +362,7 @@ describe('codex-cli client options', () => {
         sandbox: 'read-only',
         webSearch: false,
         systemPrompt: 'Be brief.',
+        authCacheDirectories: { '.example-gateway': join(tmpdir(), 'cache') },
       })
     ).toMatchObject({ model: 'gpt-5.5', reasoningEffort: 'high' });
     expect(() =>
@@ -263,6 +370,12 @@ describe('codex-cli client options', () => {
     ).toThrow(/bogus/);
     expect(() =>
       CodexClientSchema.parse({ type: 'codex-cli', sandbox: 'none' })
+    ).toThrow();
+    expect(
+      CodexClientSchema.parse({ type: 'codex-cli', rolloutTrace: false })
+    ).toMatchObject({ rolloutTrace: false });
+    expect(() =>
+      CodexClientSchema.parse({ type: 'codex-cli', rolloutTrace: 'yes' })
     ).toThrow();
   });
 
@@ -463,6 +576,105 @@ describe('codex-cli client run', () => {
     // The trial's home and working directory are gone.
     expect(existsSync(env.CODEX_HOME!)).toBe(false);
     expect(existsSync(String(sdk.thread!.workingDirectory))).toBe(false);
+    // The rollout trace is kept by default, as a copy: Codex's is gone.
+    expect(existsSync(env.CODEX_ROLLOUT_TRACE_ROOT!)).toBe(false);
+    expect(result.artifacts?.include).toEqual([CODEX_ROLLOUT_TRACE_DIR]);
+    expect(result.telemetry!.rolloutTrace).toMatchObject({ bundles: 1 });
+    await rm(result.artifacts!.dir, { recursive: true, force: true });
+  });
+
+  it('keeps no rollout trace with rolloutTrace false', async () => {
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex-cli', rolloutTrace: false },
+      context(GATEWAY)
+    );
+    const env = sdk.options!.env as Record<string, string>;
+    expect(env).not.toHaveProperty('CODEX_ROLLOUT_TRACE_ROOT');
+    expect(result).not.toHaveProperty('artifacts');
+    expect(result.telemetry).not.toHaveProperty('rolloutTrace');
+  });
+
+  it('reuses opted-in auth state without reusing trial configuration or HOME', async () => {
+    const cache = join(cwd, 'persistent-auth');
+    const options = {
+      type: 'codex-cli',
+      authCacheDirectories: { '.example-gateway': cache },
+    };
+    sdk.authCacheName = '.example-gateway';
+    await CODEX_CLIENT.run!(
+      { prompt: 'Find x', servers: [servers[0]!] },
+      options,
+      context(GATEWAY)
+    );
+    const firstHome = (sdk.options!.env as Record<string, string>).HOME!;
+    expect(sdk.authCacheBefore).toBeUndefined();
+    expect(existsSync(firstHome)).toBe(false);
+    expect(await readFile(join(cache, 'credentials.json'), 'utf8')).toBe(
+      'test-only-auth-fixture'
+    );
+    await CODEX_CLIENT.run!(
+      { prompt: 'Find y', servers: [servers[0]!] },
+      options,
+      context(GATEWAY)
+    );
+    const env = sdk.options!.env as Record<string, string>;
+    expect(env.HOME).not.toBe(firstHome);
+    expect(env.HOME).toBe(env.CODEX_HOME);
+    expect(sdk.authCacheBefore).toBe('test-only-auth-fixture');
+    expect(sdk.authCachePath).toBe(await realpath(cache));
+    expect(sdk.homeEntries?.sort()).toEqual([
+      '.example-gateway',
+      'config.toml',
+    ]);
+    expect(parse(sdk.config!)).toMatchObject({
+      features: { plugins: false, apps: false, memories: false },
+      skills: { bundled: { enabled: false } },
+      history: { persistence: 'none' },
+    });
+    expect(existsSync(env.HOME!)).toBe(false);
+    expect(existsSync(join(cache, 'credentials.json'))).toBe(true);
+  });
+
+  it('keeps the opted-in auth cache when the Codex process fails', async () => {
+    const cache = join(cwd, 'persistent-auth');
+    sdk.authCacheName = '.example-gateway';
+    sdk.fail = 'offline test failure';
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'Find x', servers: [servers[0]!] },
+      {
+        type: 'codex-cli',
+        authCacheDirectories: { '.example-gateway': cache },
+      },
+      context(GATEWAY)
+    );
+    expect(result.error).toContain('offline test failure');
+    const env = sdk.options!.env as Record<string, string>;
+    expect(existsSync(env.HOME!)).toBe(false);
+    expect(await readFile(join(cache, 'credentials.json'), 'utf8')).toBe(
+      'test-only-auth-fixture'
+    );
+  });
+
+  it('keeps the opted-in auth cache when the trial times out', async () => {
+    const cache = join(cwd, 'persistent-auth');
+    sdk.authCacheName = '.example-gateway';
+    sdk.hang = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'Find x', servers: [servers[0]!] },
+      {
+        type: 'codex-cli',
+        timeout: 200,
+        authCacheDirectories: { '.example-gateway': cache },
+      },
+      context(GATEWAY)
+    );
+    expect(result.error).toContain('timed out');
+    const env = sdk.options!.env as Record<string, string>;
+    expect(existsSync(env.HOME!)).toBe(false);
+    expect(await readFile(join(cache, 'credentials.json'), 'utf8')).toBe(
+      'test-only-auth-fixture'
+    );
   });
 
   it("gives its model calls the request IDs the host's events name them by, as Cowork and Claude Code do", async () => {
@@ -543,6 +755,134 @@ describe('codex-cli client run', () => {
     );
     expect(sdk.thread!.workingDirectory).toBe(cwd);
     expect(existsSync(cwd)).toBe(true);
+  });
+
+  it('reports the rollout trace Codex wrote as the trial artifacts', async () => {
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      {
+        type: 'codex-cli',
+        // MST's trace root wins over one the client's env sets.
+        env: { CODEX_ROLLOUT_TRACE_ROOT: join(cwd, 'elsewhere') },
+      },
+      context(GATEWAY)
+    );
+    try {
+      const env = sdk.options!.env as Record<string, string>;
+      expect(result.artifacts).toEqual({
+        dir: expect.any(String),
+        include: [CODEX_ROLLOUT_TRACE_DIR],
+        temporary: true,
+      });
+      const dir = result.artifacts!.dir;
+      expect(env.CODEX_ROLLOUT_TRACE_ROOT).not.toBe(join(cwd, 'elsewhere'));
+      expect(existsSync(join(cwd, 'elsewhere'))).toBe(false);
+      // The copy outlives the trial's home and Codex's trace directory: MST
+      // copies it for the judges, then removes it.
+      expect(existsSync(env.CODEX_HOME!)).toBe(false);
+      expect(existsSync(env.CODEX_ROLLOUT_TRACE_ROOT!)).toBe(false);
+      expect(
+        JSON.parse(
+          await readFile(
+            join(
+              dir,
+              CODEX_ROLLOUT_TRACE_DIR,
+              'trace-t1-thread-9',
+              'payloads',
+              '1.json'
+            ),
+            'utf8'
+          )
+        )
+      ).toMatchObject({ model: 'gpt-5.5' });
+      expect(result.telemetry!.rolloutTrace).toEqual({
+        bundles: 1,
+        files: 3,
+        bytes: expect.any(Number),
+      });
+    } finally {
+      if (result.artifacts)
+        await rm(result.artifacts.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('replaces the credentials MST knows in the trace it keeps', async () => {
+    sdk.traceQuotesKey = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex-cli' },
+      context(GATEWAY)
+    );
+    try {
+      const payload = await readFile(
+        join(
+          result.artifacts!.dir,
+          CODEX_ROLLOUT_TRACE_DIR,
+          'trace-t1-thread-9',
+          'payloads',
+          '2.json'
+        ),
+        'utf8'
+      );
+      expect(payload).not.toContain('sk-gateway');
+      expect(JSON.parse(payload)).toEqual({ echoed: 'Bearer [REDACTED]' });
+    } finally {
+      if (result.artifacts)
+        await rm(result.artifacts.dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps no trace with a hard link to the trial's config.toml", async () => {
+    sdk.traceLinksConfig = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex-cli' },
+      context(GATEWAY)
+    );
+    const env = sdk.options!.env as Record<string, string>;
+    expect(result.error).toBeUndefined();
+    expect(result).not.toHaveProperty('artifacts');
+    expect(result.telemetry!.rolloutTrace).toEqual({
+      bundles: 1,
+      notKept:
+        "The rollout trace holds an entry MST doesn't copy: trace-t1-thread-9/payloads/config.toml is a hard link.",
+    });
+    expect(existsSync(env.CODEX_HOME!)).toBe(false);
+    expect(existsSync(join(env.CODEX_ROLLOUT_TRACE_ROOT!, '..'))).toBe(false);
+  });
+
+  it('says why there is no trace when Codex wrote none, and removes its directory', async () => {
+    sdk.noTrace = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex-cli' },
+      context(GATEWAY)
+    );
+    const env = sdk.options!.env as Record<string, string>;
+    expect(result.error).toBeUndefined();
+    expect(result).not.toHaveProperty('artifacts');
+    expect(result.telemetry!.rolloutTrace).toEqual({
+      bundles: 0,
+      notKept: expect.stringMatching(/no rollout trace.*0\.124/),
+    });
+    expect(existsSync(join(env.CODEX_ROLLOUT_TRACE_ROOT!, '..'))).toBe(false);
+  });
+
+  it('keeps the trace of a trial that timed out', async () => {
+    sdk.hang = true;
+    const result = await CODEX_CLIENT.run!(
+      { prompt: 'x', servers: [] },
+      { type: 'codex-cli', timeout: 50 },
+      context(GATEWAY)
+    );
+    try {
+      expect(result.error).toMatch(/timed out/);
+      expect(result.artifacts?.include).toEqual([CODEX_ROLLOUT_TRACE_DIR]);
+      expect(result.telemetry!.rolloutTrace).toMatchObject({ bundles: 1 });
+    } finally {
+      if (result.artifacts)
+        await rm(result.artifacts.dir, { recursive: true, force: true });
+    }
   });
 
   it('uses the built-in OpenAI provider without a base URL', async () => {
@@ -682,4 +1022,245 @@ describe('codex-cli client run', () => {
     expect(result.ending).toBeUndefined();
     expect(result.diagnostics).toEqual({ failureKind: 'process' });
   });
+});
+
+describe('codex-cli rollout trace', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mst-codex-trace-test-'));
+    await writeTraceBundle(join(dir, CODEX_ROLLOUT_TRACE_DIR), 'thread-9');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const bundle = () => join(dir, CODEX_ROLLOUT_TRACE_DIR, 'trace-t1-thread-9');
+  const copied = async (
+    trace: Awaited<ReturnType<typeof codexRolloutTrace>>,
+    file: string
+  ) =>
+    readFile(
+      join(
+        trace.artifacts!.dir,
+        CODEX_ROLLOUT_TRACE_DIR,
+        'trace-t1-thread-9',
+        file
+      ),
+      'utf8'
+    );
+
+  it('keeps a copy of a trace that fits what the copy of a trial artifacts may hold', async () => {
+    const trace = await codexRolloutTrace(dir);
+    try {
+      expect(trace).toEqual({
+        artifacts: {
+          dir: expect.any(String),
+          include: [CODEX_ROLLOUT_TRACE_DIR],
+          temporary: true,
+        },
+        telemetry: { bundles: 1, files: 3, bytes: expect.any(Number) },
+      });
+      expect(trace.artifacts!.dir).not.toBe(dir);
+      expect(JSON.parse(await copied(trace, 'payloads/1.json'))).toMatchObject({
+        model: 'gpt-5.5',
+      });
+      expect(
+        statSync(
+          join(
+            trace.artifacts!.dir,
+            CODEX_ROLLOUT_TRACE_DIR,
+            'trace-t1-thread-9',
+            'trace.jsonl'
+          )
+        ).mode & 0o077
+      ).toBe(0);
+    } finally {
+      await rm(trace.artifacts!.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('replaces secrets as written and as JSON escapes them, and counts the bytes it wrote', async () => {
+    const quoted = 'pa"ss\\word-1234';
+    await writeFile(
+      join(bundle(), 'payloads', '2.json'),
+      JSON.stringify({ header: 'Bearer sk-secret-123456', quoted })
+    );
+    const trace = await codexRolloutTrace(dir, {
+      secrets: ['sk-secret-123456', quoted],
+    });
+    try {
+      expect(JSON.parse(await copied(trace, 'payloads/2.json'))).toEqual({
+        header: 'Bearer [REDACTED]',
+        quoted: '[REDACTED]',
+      });
+      // Codex's files are the caller's, as they were.
+      expect(
+        await readFile(join(bundle(), 'payloads', '2.json'), 'utf8')
+      ).toContain('sk-secret-123456');
+      let written = 0;
+      for (const file of [
+        'manifest.json',
+        'trace.jsonl',
+        'payloads/1.json',
+        'payloads/2.json',
+      ])
+        written += Buffer.byteLength(await copied(trace, file));
+      expect(trace.telemetry).toEqual({ bundles: 1, files: 4, bytes: written });
+    } finally {
+      await rm(trace.artifacts!.dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps no trace with a hard link, which would copy what it links to', async () => {
+    await writeFile(join(dir, 'config.toml'), 'api_key = "sk-secret"');
+    await link(
+      join(dir, 'config.toml'),
+      join(bundle(), 'payloads', 'config.toml')
+    );
+    expect(await codexRolloutTrace(dir)).toEqual({
+      telemetry: {
+        bundles: 1,
+        notKept:
+          "The rollout trace holds an entry MST doesn't copy: trace-t1-thread-9/payloads/config.toml is a hard link.",
+      },
+    });
+  });
+
+  it('keeps no trace whose root is a symbolic link, which could lead anywhere', async () => {
+    const root = join(dir, CODEX_ROLLOUT_TRACE_DIR);
+    await rename(root, join(dir, 'elsewhere'));
+    await symlink(join(dir, 'elsewhere'), root);
+    expect(await codexRolloutTrace(dir)).toEqual({
+      telemetry: {
+        bundles: 1,
+        notKept:
+          "The rollout trace holds an entry MST doesn't copy: the trace root is a symbolic link.",
+      },
+    });
+  });
+
+  it('says Codex wrote no trace only when the trace root is missing', async () => {
+    await rm(join(dir, CODEX_ROLLOUT_TRACE_DIR), { recursive: true });
+    expect(await codexRolloutTrace(dir)).toEqual({
+      telemetry: {
+        bundles: 0,
+        notKept: expect.stringMatching(/no rollout trace.*0\.124/),
+      },
+    });
+  });
+
+  it("says MST couldn't read a trace root that isn't a directory", async () => {
+    const root = join(dir, CODEX_ROLLOUT_TRACE_DIR);
+    await rm(root, { recursive: true });
+    await writeFile(root, '');
+    expect(await codexRolloutTrace(dir)).toEqual({
+      telemetry: {
+        notKept: expect.stringMatching(
+          /^MST couldn't read the rollout trace: ENOTDIR/
+        ),
+      },
+    });
+  });
+
+  it('leaves out a symbolic link, as the artifact copy does', async () => {
+    await writeFile(join(dir, 'config.toml'), 'api_key = "sk-secret"');
+    await symlink(
+      join(dir, 'config.toml'),
+      join(bundle(), 'payloads', 'config.toml')
+    );
+    const trace = await codexRolloutTrace(dir);
+    try {
+      expect(trace.telemetry).toMatchObject({ bundles: 1, files: 3 });
+      expect(
+        existsSync(
+          join(
+            trace.artifacts!.dir,
+            CODEX_ROLLOUT_TRACE_DIR,
+            'trace-t1-thread-9',
+            'payloads',
+            'config.toml'
+          )
+        )
+      ).toBe(false);
+    } finally {
+      await rm(trace.artifacts!.dir, { recursive: true, force: true });
+    }
+  });
+
+  // Root reads any file, whatever its mode.
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    "says MST couldn't read a trace it couldn't read, not that it was too large",
+    async () => {
+      await chmod(join(bundle(), 'payloads', '1.json'), 0o000);
+      const { artifacts, telemetry } = await codexRolloutTrace(dir);
+      expect(artifacts).toBeUndefined();
+      expect(telemetry).toEqual({
+        bundles: 1,
+        notKept: expect.stringMatching(
+          /^MST couldn't read the rollout trace: EACCES/
+        ),
+      });
+      expect(telemetry.notKept).not.toMatch(/larger/);
+    }
+  );
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    "says MST couldn't read a trace root it couldn't list, not that Codex wrote none",
+    async () => {
+      const root = join(dir, CODEX_ROLLOUT_TRACE_DIR);
+      await chmod(root, 0o000);
+      try {
+        const { artifacts, telemetry } = await codexRolloutTrace(dir);
+        expect(artifacts).toBeUndefined();
+        expect(telemetry).toEqual({
+          notKept: expect.stringMatching(
+            /^MST couldn't read the rollout trace: EACCES/
+          ),
+        });
+      } finally {
+        await chmod(root, 0o700);
+      }
+    }
+  );
+
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    "says MST couldn't read a bundle whose manifest it couldn't look for",
+    async () => {
+      await chmod(bundle(), 0o000);
+      try {
+        const { artifacts, telemetry } = await codexRolloutTrace(dir);
+        expect(artifacts).toBeUndefined();
+        expect(telemetry).toEqual({
+          notKept: expect.stringMatching(
+            /^MST couldn't read the rollout trace: EACCES/
+          ),
+        });
+      } finally {
+        await chmod(bundle(), 0o700);
+      }
+    }
+  );
+
+  it.each([
+    [{ fileBytes: 5 }, /is larger than 5 bytes/],
+    [{ totalBytes: 100 }, /holds more than 100 bytes/],
+    [{ entries: 3 }, /more than 3 entries/],
+    [{ depth: 2 }, /more than 2 directories deep/],
+  ])(
+    'does not keep a trace over a limit (%o), and says which',
+    async (limit, reason) => {
+      const { artifacts, telemetry } = await codexRolloutTrace(dir, {
+        limits: { ...ARTIFACT_LIMITS, ...limit },
+      });
+      expect(artifacts).toBeUndefined();
+      expect(telemetry).toEqual({
+        bundles: 1,
+        notKept: expect.stringMatching(
+          new RegExp(
+            `^The rollout trace is larger than a trial's artifacts may be: .*${reason.source}`
+          )
+        ),
+      });
+    }
+  );
 });

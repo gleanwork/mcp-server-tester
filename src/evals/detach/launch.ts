@@ -12,6 +12,9 @@ import {
   isCredentialStoreReference,
 } from '../../auth/grants/stores.js';
 import { resolveConfigExtends } from '../configExtends.js';
+import { clientOf, clientPatchOf } from '../clientFields.js';
+import { inheritClient } from '../configValidation.js';
+import { isFirstPartyCowork } from '../cowork/firstParty.js';
 import { connectorUses } from '../connectorServers.js';
 import { loadEvalConfig } from '../evalConfig.js';
 import { loadEvalPlugins } from '../evalPlugins.js';
@@ -28,6 +31,9 @@ import { parseRunnerOptions } from '../runners/runnerOptions.js';
 import { loadedNamespaces } from '../../plugins/extensions.js';
 import { settingsFor } from '../../plugins/settings.js';
 import { optionKey } from '../optionKey.js';
+
+const FIRST_PARTY_REFUSAL =
+  '--detach cannot run first-party Cowork: account control requires an attached run with one designated source host.';
 
 export interface DetachOptions {
   command: 'run' | 'grade';
@@ -69,13 +75,26 @@ async function refusal(
     return "--detach needs --runner: a runner whose machines run the shards, and that creates the coordinator's machine.";
   if (options.results?.startsWith('file:'))
     return `--detach needs a result store other machines reach, not ${options.results}.`;
-  const loaded = loadEvalConfig(options.configPath, { rootDir });
+  // Resolve only configuration here. Account work must be refused before
+  // even validating dataset paths, opening stores or reading secrets.
+  const loaded = loadEvalConfig(options.configPath, {
+    rootDir,
+    skipDatasetValidation: true,
+  });
   const namespaces = await loadEvalPlugins({
     configPath: options.configPath,
     evalConfig: loaded,
     rootDir,
   });
   const config = resolveConfigExtends(loaded, namespaces);
+  const base = clientOf(config);
+  const variants = config.variants?.length ? config.variants : [{}];
+  if (
+    variants.some((variant) =>
+      isFirstPartyCowork(inheritClient(base, clientPatchOf(variant) ?? {}))
+    )
+  )
+    return FIRST_PARTY_REFUSAL;
   if (!options.results) {
     const store = config.results?.store;
     if (!store)
@@ -104,10 +123,36 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
     rootDir,
   });
   // As its shared configs (`extends`) set it: the plugins are loaded.
-  const { client } = resolveConfigExtends(
+  const config = resolveConfigExtends(
     loadEvalConfig(options.configPath, { rootDir }),
     loadedNamespaces()
   );
+  const { client } = config;
+  // Case overrides are known only after loading the datasets. Resolve them
+  // as execution does, before opening stores, reading secrets or creating
+  // the coordinator. Config/variant refusal still precedes dataset I/O.
+  const datasets = await loadEvalDatasets({
+    configPath: options.configPath,
+    rootDir,
+  });
+  const base = clientOf(config);
+  for (const variant of config.variants?.length
+    ? config.variants
+    : [{ name: 'default' }]) {
+    const variantClient = inheritClient(base, clientPatchOf(variant) ?? {});
+    for (const dataset of datasets) {
+      for (const evalCase of dataset.cases) {
+        const caseClient = inheritClient(
+          variantClient,
+          clientPatchOf(evalCase) ?? {}
+        );
+        if (isFirstPartyCowork(caseClient))
+          throw new Error(
+            `${FIRST_PARTY_REFUSAL} Case "${evalCase.id}" in variant "${variant.name}" selects first-party Cowork.`
+          );
+      }
+    }
+  }
   const { evalName, store } = await evalResultStore({
     configPath: options.configPath,
     rootDir,
@@ -126,12 +171,6 @@ export async function detach(options: DetachOptions): Promise<DetachResult> {
   const secrets = options.secretsFile
     ? await loadSecretsFile(path.resolve(rootDir, options.secretsFile))
     : undefined;
-
-  // Loaded here, with this machine's dataset credentials, and shipped.
-  const datasets = await loadEvalDatasets({
-    configPath: options.configPath,
-    rootDir,
-  });
 
   const id = newDetachId();
   const createdAt = new Date().toISOString();

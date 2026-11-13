@@ -743,10 +743,11 @@ export function assertClientSupports(
       );
     if (
       options.runner &&
-      !['local', 'mst/runner/local'].includes(options.runner)
+      !['local', 'mst/runner/local'].includes(options.runner) &&
+      options.os !== 'linux'
     )
       throw new Error(
-        `${options.context}: first-party mode currently supports only the local runner with a signed-in account.`
+        `${options.context}: first-party mode requires the local runner on macOS, or a Linux runner with plugin-staged account preflight and source cloud control.`
       );
   }
   const showsToolMetadata =
@@ -887,6 +888,14 @@ function claudeCliClient(
         ...env,
         MCP_CONNECTION_NONBLOCKING: 'false',
         MCP_CONNECT_TIMEOUT_MS: env.MCP_CONNECT_TIMEOUT_MS ?? '30000',
+        // Claude Code assumes 200K for gateway model IDs it doesn't recognize.
+        // Keep its context meter and compaction threshold at 1M; explicit env wins.
+        ...(env.ANTHROPIC_BASE_URL
+          ? {
+              CLAUDE_CODE_MAX_CONTEXT_TOKENS:
+                env.CLAUDE_CODE_MAX_CONTEXT_TOKENS ?? '1000000',
+            }
+          : {}),
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
         ...(provider === 'vertex'

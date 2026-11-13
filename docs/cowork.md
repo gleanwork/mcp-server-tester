@@ -157,15 +157,48 @@ existing connectors instead of MST-managed servers. The default, `third-party`
 (also the result of omitting `mode`), is unchanged: it supports stdio servers
 and proxies through MST's gateway setup. First-party mode only selects existing
 HTTPS account connectors through MST's normal server labels and records those
-sessions. It supports the local macOS runner only, with `concurrency: 1` and no
-sharding.
+sessions. MST implements two paths: the existing local macOS app, and a prepared
+Linux account runtime supplied by a plugin. Both require `concurrency: 1`, an
+attached run, one shard, a dedicated account and one designated source host.
+macOS first-party execution still requires the local runner. Setting `mode`
+alone does not prepare a Linux account runtime, and stock `--runner docker`
+does not provision one. Third-party mode and its detach behavior are unchanged.
 
-First-party mode uses the Claude account that is already signed in to Claude
-Desktop. MST still submits prompts through visible Desktop Computer Use, using
-the Computer Use planner credentials you already configure. It reads session
-events through a separate Chrome recorder profile signed in to the same account
-and mirrors them into MST's native transcript layout. It does not copy cookies,
-provision VMs, or submit tasks through an undocumented API.
+On macOS, first-party mode uses the Claude account already signed in to Claude
+Desktop and submits prompts through visible Desktop Computer Use, using the
+configured planner credentials. On Linux, MST attaches to the plugin-prepared
+signed-in app and submits through accessibility automation, without a planner
+or MST inference credentials. A macOS source host reads account settings and
+session events through its separate Chrome recorder profile signed in to the
+same account. MST mirrors those events into its native transcript layout. Core
+does not import account credentials, provision VMs or submit tasks through an
+undocumented API.
+
+Linux selects separate first-party and third-party adapters; it does not infer
+the mode from environment variables. The first-party driver is TypeScript and
+talks directly to AT-SPI over D-Bus. The managed third-party driver remains
+standalone Python, with its existing setup, readiness and submission flow.
+The first-party implementation follows [ADR 0006](./adr/0006-mst-is-written-in-typescript.md)
+without a Python helper or an ADR exception. Porting the third-party driver
+remains future work.
+
+Before entering a first-party prompt, MST checks the selected Cowork tab and an
+empty composer, and selects and verifies the exact requested model when one is
+configured. It opens the new-task link in the prepared account profile, pastes
+the prompt once, verifies the rendered prompt tail, and activates Start task
+once. Start task appears only after text is entered. An uncertain action is not
+retried; native task binding still checks the complete prompt. Account runtime
+guards reject managed settings, inference credentials and invalid or expired
+profile metadata. The third-party adapter rejects account runtime metadata.
+First-party HITL permits only an explicitly authorized one-time approval, never
+persistent approval controls or inline write cards.
+
+A live smoke check of the TypeScript first-party driver is pending. Offline
+tests and prior Python checks do not establish its live Linux app or account
+compatibility. Each account image needs a reviewed package/ASAR integrity
+contract and an authorized live check of sign-in, accessibility, model
+selection, same-profile URL opening and native model/task evidence. Package
+integrity does not pin the hosted first-party frontend.
 
 Start a dedicated Chrome recorder profile with a loopback DevTools port. Use a
 `--user-data-dir` that no other Chrome uses, and sign in to the same claude.ai
@@ -186,12 +219,70 @@ MCP servers, marketplace plugins, or an inference gateway profile. It does not
 register new connectors or sign in to them. Authenticate each connector in the
 Claude account first.
 
+#### Linux account runtime and source control
+
+A plugin supplies the account image, credential acquisition and renewal,
+versioned profile contract, isolated tmpfs staging, profile-preserving launcher,
+private relay and credential cleanup. MST has no account credential fields or
+login API. Keep credentials out of eval configs, runner options, shard bundles,
+command arguments, logs and result files. This path uses
+`createDockerRunner({ inference: 'plugin', prepareRuntime })`; it must not
+receive MST-managed inference tokens or generic connector credentials. The
+plugin must bind staging to the exact owned container and the same account and
+organization the source controller verifies. Use a rebuilt image with runtime
+preparation protocol 1 and the plugin's reviewed app contract.
+
+MST's public `readShardBundle` (from `./evals`) reads the actual collect bundle.
+The plugin passes that bundle to `createCoworkAccountControl` (from
+`./experimental/clients`) on the macOS source host, along with the expected
+nonsecret `sourceIdentity` (`accountId` and `organizationId`) and explicit
+`authorization` acknowledgements: `attached`, `dedicatedAccount` and
+`designatedSourceHost`, all `true`. The controller snapshots the bundle, checks
+its first-party batches and one-shard restriction, claims the source desktop
+lease and verifies Chrome identity before authorizing preparation. A top-level
+client hint or the presence of credential configuration is not enough: the
+plugin must classify the effective requests, including variants, and refuse
+mixed first-party/third-party work before acquiring credentials or cloud
+resources.
+
+The plugin relays only the fixed `mst.cowork-cloud-control/v1` protocol over its
+existing worker channel and a same-UID private Unix socket. The Linux worker
+uses `MST_COWORK_CLOUD_CONTROL_SOCKET`. This relay exposes no Chrome cookies,
+DevTools access or general HTTP access; the separate credential plugin owns
+explicitly authorized account-session staging. `dispatch` permits only preparation,
+exact authorized prompt/task binding, completion proof, verification,
+restoration and bounded session/event reads. The source owns the server labels,
+connector policies, write declarations, model and prompt sequence from the
+bundle. A worker cannot widen them. The relay must reject unknown properties,
+bound UTF-8 frames to 16 MiB including the newline, and serialize requests.
+
+Keep the source and relay attached through verified restoration and final
+`close()`. Normal worker socket closure after acknowledged restoration allows
+the next sequential batch; it does not end source control. On relay loss, call
+`disconnect()`, not `close()`: retain the source journal and lease. Container or
+credential cleanup never proves a cloud task finished or account permissions
+were restored. Clean up worker credentials independently even if source
+restoration fails. Recovery runs on the designated macOS source host, using its
+journal and Chrome sign-in, not on the worker.
+
+`--detach` refuses effective first-party Cowork clients in the eval config,
+variants and plugin shared configs before opening result stores, reading
+secrets, validating/loading datasets or creating a coordinator. Case-level
+client and option overrides remain supported. MST checks their effective
+settings in every variant immediately after loading the datasets, and refuses
+first-party Cowork cases before opening result stores, reading or forwarding
+secrets, or creating a coordinator. Both checks apply to run, resume and grade
+detach. Omitting account runner configuration does not bypass either check.
+Do not use detach or multiple shards for the Linux account path.
+
 #### Configure remote connectors
 
-These settings are **account-wide**, not per-task. Run variants sequentially.
-Set `concurrency: 1`, and do not edit the same account's permissions during a run.
-The local desktop lock does not coordinate other machines. Authentication
-provisioning and parallel cloud workers are not implemented.
+These settings are **account-wide**, not per-task. Use a dedicated account, run
+variants sequentially and keep one designated macOS source host for that
+account. Set `concurrency: 1`, and do not edit the same account's permissions
+during a run. The source desktop lock does not coordinate other machines.
+Core does not provision authentication; a Linux plugin owns its credential
+lifecycle. Parallel account workers are unsupported.
 
 ```json
 {
@@ -279,13 +370,17 @@ changes its catalog during a task, MST fails the check instead of silently
 accepting new tools. Start a new run to prepare against the changed catalog.
 
 The Chrome recorder profile and Claude Desktop must be on the same account and
-the same active organization. You must make sure they are; MST does not
-verify Desktop's identity automatically. Before changing permissions it checks
+the same active organization. On local macOS, you must make sure they are; MST
+does not verify Desktop's identity automatically. For Linux, the plugin binds
+its staged account identity to the source identity, and MST checks the private
+runtime marker and source authorization before submission. These checks do not
+replace a live app sign-in check. Before changing permissions the source checks
 the Chrome session's account and organization, and it checks them again against
 the recovery journal before restoring. This is not a sandbox guarantee.
 
-One macOS Cowork lease is shared by both modes and every `dataDir`, so only one
-Cowork run drives the app at a time. MST reads at most 10,000 events from a
+One macOS Cowork lease is shared by both modes, every `dataDir` and Linux source
+control, so a local app run cannot overlap account control from that source
+host. MST reads at most 10,000 events from a
 session. A longer session fails with an error that names the cap; MST does not
 truncate it.
 
@@ -297,8 +392,9 @@ applying settings, verifies each write, and restores changed keys on close.
 Keys absent originally are removed, not replaced with explicit allows. A normal
 completed run restores automatically.
 
-A private recovery journal at
-`~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash. MST
+A private recovery journal on the macOS source host at
+`~/.mcp-server-tester/cowork-claude-ai-connectors.json` survives a crash or loss
+of the Linux worker. It never belongs in the container or result bundle. MST
 writes it before the first permission write and before it submits the first
 task. A journal from an earlier development format (`version: 1`, the journal's
 own schema version, not an MST package or `mst.run/v1` version) is unpublished.
@@ -322,8 +418,9 @@ tool inventory while the task runs.
 
 #### Recover connector settings
 
-If a run was killed, restore from the journal without starting an eval. The
-command reads the port only from its own shell, not from the eval config. Export
+If a run was killed or its Linux relay was lost, restore from the journal on
+the designated macOS source host without starting an eval. The command reads
+the port only from its own shell, not from the eval config. Export
 the same port the run used:
 
 ```bash
@@ -501,14 +598,25 @@ and against Linux for `--runner docker`. A plugin's runner checks them on its
 worker, before any app is prepared.
 
 The caller supplies a working Claude Desktop session with the desired model/MCP
-settings. MST accesses that session through X11, D-Bus, and AT-SPI (Python `gi`),
-and `xclip` to paste a prompt longer than a deep link carries.
-Run MST in the prepared desktop's filesystem and session context. `DISPLAY` and `DBUS_SESSION_BUS_ADDRESS` are
-required. `MST_COWORK_PYTHON` can select a prepared system interpreter; MST does not
-install Linux desktop dependencies. The packaged `cowork-linux-runtime` export
-resolves the Python driver independently of the working directory.
+settings. Both modes use X11, D-Bus, AT-SPI and `xclip` for clipboard input.
+Run MST in the prepared desktop's filesystem and session context. `DISPLAY` and
+`DBUS_SESSION_BUS_ADDRESS` are required. MST does not install Linux desktop
+dependencies.
 
-The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
+The package exposes two executable runtime files, resolved independently of the
+working directory:
+
+- `./cowork-linux-first-party-runtime` resolves to
+  `dist/cowork/linuxFirstParty.js`. MST executes it with the Node that runs MST
+  (`process.execPath`). It uses direct AT-SPI D-Bus calls, not Python or GObject
+  bindings. It requires the prepared account runtime and attached source control
+  described in [Cloud sessions](#cloud-sessions).
+- `./cowork-linux-runtime` remains `scripts/cowork_linux.py`, the standalone
+  managed third-party driver using Python `gi`. `MST_COWORK_PYTHON` selects its
+  prepared interpreter; it has no effect on first-party execution.
+
+The following managed settings and owned-desktop behavior apply only to
+`third-party` mode. The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
 `MST_COWORK_SETTINGS_FILE`) and fails if its model, MCP servers, or wildcard
 approval policy disagree with the eval config. Other `policy-only` entries must
 block all tools (`{"*": "blocked"}`). With client `plugins`,
@@ -566,8 +674,7 @@ sole argument. The caller owns protocol registration and application launch flag
 MST does not select an application binary or sandbox policy. The prompt is preserved
 unchanged, and the opener runs without a shell and with a bounded deadline. Claude
 keeps only the first 14,336 characters of a deep link's prompt, so a longer one
-(1–2.5% of the Cortex eval sets' cases, up to 135,000 characters) goes another
-way: an empty new-task link, then the prompt pasted into the composer (`xclip`
+goes another way: an empty new-task link, then the prompt pasted into the composer (`xclip`
 holds it on the clipboard; AT-SPI presses Ctrl+V), checked against the composer's
 text before `Start task`. A bound session whose stored prompt is only the
 prompt's beginning fails as an infrastructure failure (`failureKind: "input"`):
@@ -710,8 +817,12 @@ the bytes present at audit time; notices contain no original digest to authentic
   system `PATH` and a private `TMPDIR`. The ChatGPT controller launches the app
   with the test environment; see [ChatGPT desktop](./chatgpt-desktop.md).
 - `cowork/interaction.ts`: shared receipts, error classifications, and scoped telemetry. New Linux receipts omit `driver`; old receipts remain readable.
-- `cowork/linux.ts`: the Linux entry point, with readiness checks and execution against a caller-owned desktop.
-- `scripts/cowork_linux.py`: bounded semantic UI actions; no lifecycle or answer parsing.
+- `cowork/linux.ts`: separate first-party and third-party adapters, with runtime guards, readiness checks and execution against a caller-owned desktop.
+- `cowork/linuxUi.ts`: the bounded native UI interface and driver receipts.
+- `cowork/linuxAtspi.ts`: TypeScript AT-SPI primitives over D-Bus, with bounded tree reads, native actions and clipboard input.
+- `cowork/linuxFirstPartyDriver.ts`: first-party readiness, model selection, single submission, scoped HITL and diagnostics over the UI interface.
+- `cowork/linuxFirstPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-first-party-runtime`, accepting JSON input and returning a receipt.
+- `scripts/cowork_linux.py`: the standalone managed third-party driver, with bounded semantic UI actions; no lifecycle or answer parsing.
 - `cowork/anthropicComputerUse.ts`: the macOS CU driver entry point, its deadline
   and its error reporting.
 - `cowork/computerUseLoop.ts`: the planner loop: bounded screenshot navigation,
@@ -755,13 +866,17 @@ matches. MST binds within 30 seconds after submission and pins collection to
 the bound session. A failed case is never
 retried or resent. Each case is self-contained: after a submit, binding, HITL, or
 transcript failure, MST records that case's failure and resets the app before the next
-case. On Linux the reset first stops the failed case's task if it still runs (a
+case. On third-party Linux the reset first stops the failed case's task if it still runs (a
 task past its deadline, or one waiting on a prompt): it clicks the task's Stop
 response and waits until it's gone, about 2 seconds. A task that won't stop fails
 the reset (`task_not_stopped`), and the old task's view is left as it is. The
 reset then opens one empty new-task deep link and waits read-only (about 10
-seconds) for the Cowork start surface. What the screen showed is captured before
-the reset (When something fails, in [cowork-docker.md](cowork-docker.md)). On macOS, the Computer Use planner
+seconds) for the Cowork start surface. First-party Linux reset instead refuses
+an active task; it opens a new-task link only when no Stop control is present.
+Before reset, first-party diagnosis captures a bounded accessibility dump, not
+a screenshot. The Linux adapter also collects native log tails and system state.
+Third-party diagnosis includes a screenshot (When something fails, in
+[cowork-docker.md](cowork-docker.md)). On macOS, the Computer Use planner
 stops a task that is still running and declines an open permission prompt, within
 eight actions. The driver refuses typing, drags and key presses other than Escape
 (a refused proposal does nothing, and the planner may try again within the
@@ -833,8 +948,8 @@ API cost. A test assertion or judge failure is distinct from a driver failure.
 
 - `timeToFirstTokenMs` and `timeToFirstTokenStreamMs`: the trial's first turn,
   to its first token and to the first token of the response stream, with
-  `firstRequestAt`. Each model call's own TTFT is in the client's own telemetry
-  ([`telemetry.host`](./telemetry.md#the-clients-own-telemetry)).
+  `firstRequestAt`. Each model call's own TTFT is in host telemetry
+  ([`telemetry.host`](./telemetry.md#host-telemetry)).
 - `permissionRequestCount`, `permissionDenialCount` and `approvalWaitMs`: the
   tool approvals Cowork asked for, the ones refused, and the time from each
   request to its answer. The wait is part of `durationMs`.

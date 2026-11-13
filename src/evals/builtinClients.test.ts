@@ -25,6 +25,33 @@ describe('getBuiltinClientConfig', () => {
     expect(config.cli?.args).toContain('claude-sonnet-4-6');
   });
 
+  it('defaults Claude Code to a one-million-token gateway context window', () => {
+    vi.stubEnv('CLAUDE_CODE_MAX_CONTEXT_TOKENS', undefined);
+    const gatewayEnv = {
+      ANTHROPIC_BASE_URL: 'https://gateway.example.test/anthropic',
+      ANTHROPIC_AUTH_TOKEN: 'gateway-token',
+    };
+    const config = getBuiltinClientConfig('claude-code', { env: gatewayEnv });
+    expect(config.cli?.env).toMatchObject({
+      ...gatewayEnv,
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000',
+    });
+
+    const override = getBuiltinClientConfig('claude-code', {
+      env: { ...gatewayEnv, CLAUDE_CODE_MAX_CONTEXT_TOKENS: '750000' },
+    });
+    expect(override.cli?.env?.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBe('750000');
+  });
+
+  it('does not add the gateway context default to direct Claude Code runs', () => {
+    vi.stubEnv('ANTHROPIC_BASE_URL', undefined);
+    vi.stubEnv('CLAUDE_CODE_MAX_CONTEXT_TOKENS', undefined);
+    const config = getBuiltinClientConfig('claude-code', { env: {} });
+    expect(config.cli?.env).not.toHaveProperty(
+      'CLAUDE_CODE_MAX_CONTEXT_TOKENS'
+    );
+  });
+
   it("gives Claude Code exactly the eval's servers", () => {
     const config = getBuiltinClientConfig('claude-code', {}, [
       {

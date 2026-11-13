@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PairwiseJudgeInput } from '../pairwiseContract.js';
+import {
+  builtinJudgeSlot,
+  configuredJudgeModel,
+} from '../judgeModelDefaults.js';
 import type { AgentJudgeRuntime, AgentJudgeTask } from './runtime.js';
 import {
   aIsCandidate,
@@ -359,6 +363,23 @@ describe('stagedPairwiseJudge', () => {
       kind: 'agentJudge',
       key: 'claude-agent',
     });
+    expect(bundle(['m1', undefined]).defaultModel).toBeUndefined();
+  });
+
+  it("takes a configured model over its defaults' model, and names that model as its own", () => {
+    const judge = stagedPairwiseJudge({
+      schemaVersion: 1,
+      name: 'own-default',
+      defaults: { runtime: 'codex', model: 'own-model' },
+      stages: [{ id: 's', prompt: [{ text: 's' }], output: 'verdict' }],
+      result: { overall: 's' },
+    });
+    expect(judge.modelSlot?.({})).toEqual({ kind: 'agentJudge', key: 'codex' });
+    expect(judge.defaultModel?.({})).toBe('own-model');
+    expect(builtinJudgeSlot(judge, {})).toBeUndefined();
+    expect(
+      configuredJudgeModel(judge, {}, { agentJudge: { codex: 'configured' } })
+    ).toBe('configured');
   });
 
   it('rejects a bundle with a bad graph or reference when it is defined', () => {

@@ -45,12 +45,10 @@ import {
 } from './managedSettings.js';
 
 export {
-  COWORK_HEADLESS_DISABLED_BUILTIN_TOOLS,
   COWORK_MANAGED_ONLY,
   coworkHeadlessSettings,
   coworkHeadlessSettingsMatch,
   coworkManagedPluginSettings,
-  coworkMcpSettingsMatch,
   coworkPluginSettingsMatch,
 } from './managedSettings.js';
 import {
@@ -59,6 +57,7 @@ import {
   CoworkHitlError,
   CoworkUserQuestionError,
   type CoworkDriverOptions,
+  type CoworkHitlReceipt,
   type CoworkPendingQuestion,
   type SemanticDesktopTelemetry,
 } from './interaction.js';
@@ -68,10 +67,10 @@ import {
  * its first option (from when HITL first sees the question) before the case
  * fails as unanswered.
  */
-export const QUESTION_ANSWER_TIMEOUT_MS = 60_000;
+const QUESTION_ANSWER_TIMEOUT_MS = 60_000;
 
 /** The most one UI submission may take, within the case deadline. */
-export const SUBMIT_TIMEOUT_MS = 10 * 60_000;
+const SUBMIT_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * Cowork's egress on MST's Linux desktop when neither the eval
@@ -79,7 +78,7 @@ export const SUBMIT_TIMEOUT_MS = 10 * 60_000;
  * host, as a user's Cowork reaches. Claude Desktop blocks private and local
  * addresses whatever the list says.
  */
-export const DEFAULT_EGRESS_HOSTS: readonly string[] = ['*'];
+const DEFAULT_EGRESS_HOSTS: readonly string[] = ['*'];
 
 const SESSION_ENV = [
   'PATH',
@@ -90,6 +89,14 @@ const SESSION_ENV = [
   'AT_SPI_BUS_ADDRESS',
   'XDG_RUNTIME_DIR',
   'XDG_CONFIG_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_DATA_HOME',
+  'TMPDIR',
+  // Nonsecret launcher context. Never forward credentials to the UI driver.
+  'MST_COWORK_ACCOUNT_OWNER',
+  'MST_COWORK_ACCOUNT_MARKER',
+  'MST_COWORK_ACCOUNT_PROFILE',
+  'MST_COWORK_SETTINGS_FILE',
   'MST_COWORK_URL_OPENER',
   'LANG',
   'LC_ALL',
@@ -515,10 +522,13 @@ function receipt(stdout: string): Receipt | undefined {
   }
 }
 
+type LinuxCoworkMode = 'third-party' | 'first-party';
+
 async function execute(
   mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'answer' | 'diagnose',
   payload: object,
-  options: CoworkDriverOptions
+  options: CoworkDriverOptions,
+  driverMode: LinuxCoworkMode = 'third-party'
 ): Promise<Receipt> {
   const started = Date.now();
   const remaining = options.deadlineAt - started;
@@ -540,7 +550,11 @@ async function execute(
     );
   const script = createRequire(
     typeof __filename === 'string' ? __filename : import.meta.url
-  ).resolve('@gleanwork/mcp-server-tester/cowork-linux-runtime');
+  ).resolve(
+    driverMode === 'first-party'
+      ? '@gleanwork/mcp-server-tester/cowork-linux-first-party-runtime'
+      : '@gleanwork/mcp-server-tester/cowork-linux-runtime'
+  );
   // A hard query's UI submission can take minutes on a cold desktop; the
   // case deadline still bounds it.
   const timeout = Math.min(
@@ -559,7 +573,9 @@ async function execute(
   const result = await new Promise<{ failed: boolean; stdout: string }>(
     (resolve) => {
       const child = execFile(
-        env.MST_COWORK_PYTHON ?? 'python3',
+        driverMode === 'first-party'
+          ? process.execPath
+          : (env.MST_COWORK_PYTHON ?? 'python3'),
         [
           script,
           '--mode',
@@ -736,7 +752,178 @@ export async function installedCoworkApp() {
   return installedDebApp('claude-desktop', 'Claude');
 }
 
-export const coworkLinux: CoworkDesktop = {
+const ACCOUNT_ROOT = '/run/mst/cowork-account';
+const TMPFS_MAGIC = 0x01021994;
+
+/**
+ * Attach to a plugin-staged account profile, not a managed/gateway desktop.
+ * The marker is a nonsecret assertion; source cloud control independently
+ * verifies its account and organization before changing connector policy.
+ * Never read Cookies or import authentication into MST.
+ */
+async function checkAccountRuntime(
+  env: Record<string, string | undefined>
+): Promise<void> {
+  try {
+    const owner = env.MST_COWORK_ACCOUNT_OWNER;
+    if (
+      !owner ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(
+        owner
+      )
+    )
+      throw new Error('owner');
+    const root = join(ACCOUNT_ROOT, owner);
+    const profile = join(root, 'config', 'Claude');
+    const marker = join(root, 'owner.json');
+    if (
+      env.MST_COWORK_ACCOUNT_PROFILE !== profile ||
+      env.MST_COWORK_ACCOUNT_MARKER !== marker ||
+      env.XDG_CONFIG_HOME !== join(root, 'config') ||
+      !env.HOME?.startsWith(`${root}/`) ||
+      !env.MST_COWORK_URL_OPENER ||
+      !isAbsolute(env.MST_COWORK_URL_OPENER) ||
+      env.MST_COWORK_WARM_VM !== '0' ||
+      Object.entries(env).some(
+        ([key, value]) => key.startsWith('MST_INFERENCE_') && value
+      ) ||
+      ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'].some(
+        (key) => env[key]
+      )
+    )
+      throw new Error('profile');
+    const runtimeDirectories = [
+      env.HOME,
+      env.TMPDIR,
+      env.XDG_CACHE_HOME,
+      env.XDG_DATA_HOME,
+    ];
+    for (const path of runtimeDirectories) {
+      if (!path?.startsWith(`${root}/`))
+        throw new Error('private runtime path');
+      await privateDirectory(path);
+    }
+    if (env.CLAUDE_CONFIG_DIR) {
+      if (!env.CLAUDE_CONFIG_DIR.startsWith(`${root}/`))
+        throw new Error('private runtime path');
+      await privateDirectory(env.CLAUDE_CONFIG_DIR);
+    }
+    for (const path of [root, join(root, 'config'), profile])
+      await privateDirectory(path);
+    if ((await statfs(root)).type !== TMPFS_MAGIC) throw new Error('tmpfs');
+    const file = await open(
+      marker,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    );
+    try {
+      const info = await file.stat();
+      if (
+        !info.isFile() ||
+        info.uid !== process.getuid?.() ||
+        info.nlink !== 1 ||
+        (info.mode & 0o777) !== 0o600 ||
+        info.size > 16 * 1024
+      )
+        throw new Error('marker');
+      const value = JSON.parse(await file.readFile('utf8')) as Record<
+        string,
+        unknown
+      >;
+      const keys = [
+        'version',
+        'owner',
+        'expiresAt',
+        'accountId',
+        'organizationId',
+        'profileDir',
+        'schemaVersion',
+        'mode',
+      ];
+      const expires =
+        typeof value.expiresAt === 'string' ? Date.parse(value.expiresAt) : NaN;
+      if (
+        Object.keys(value).length !== keys.length ||
+        !keys.every((key) => Object.hasOwn(value, key)) ||
+        value.version !== 1 ||
+        value.owner !== owner ||
+        value.mode !== 'first-party' ||
+        value.profileDir !== profile ||
+        value.schemaVersion !== 24 ||
+        !Number.isFinite(expires) ||
+        new Date(expires).toISOString() !== value.expiresAt ||
+        expires <= Date.now() ||
+        expires > Date.now() + 120 * 60_000 ||
+        ![value.accountId, value.organizationId].every(
+          (id) =>
+            typeof id === 'string' &&
+            /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/.test(id)
+        )
+      )
+        throw new Error('marker');
+    } finally {
+      await file.close();
+    }
+    const settingsFile =
+      env.MST_COWORK_SETTINGS_FILE ??
+      '/etc/claude-desktop/managed-settings.json';
+    if (!isAbsolute(settingsFile)) throw new Error('settings');
+    for (const path of new Set([
+      settingsFile,
+      '/etc/claude-desktop/managed-settings.json',
+      '/run/mst/settings/managed-settings.json',
+    ])) {
+      const settings = await readSettingsText(path);
+      if (settings !== undefined && !coworkJsonEqual(JSON.parse(settings), {}))
+        throw new Error('managed settings');
+    }
+    // Metadata only: never open a gateway token or any account credential.
+    try {
+      await lstat('/run/mst/inference-token');
+      throw new Error('gateway token');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const socket = env.MST_COWORK_CLOUD_CONTROL_SOCKET;
+    if (!socket || !isAbsolute(socket)) throw new Error('socket');
+    await privateDirectory(dirname(socket));
+    const info = await lstat(socket);
+    if (
+      !info.isSocket() ||
+      info.uid !== process.getuid?.() ||
+      (info.mode & 0o077) !== 0 ||
+      (await realpath(socket)) !== socket
+    )
+      throw new Error('socket');
+  } catch {
+    // Do not include marker content, raw filesystem errors or environment values.
+    throw new Error(
+      'First-party Linux Cowork requires a private, unexpired plugin-staged tmpfs account profile, an empty unmanaged settings file, a profile-preserving URL opener and MST_COWORK_CLOUD_CONTROL_SOCKET. Managed/gateway runtimes are unsupported.'
+    );
+  }
+}
+
+async function diagnoseLinux(
+  { dir, dataDir, env }: Parameters<NonNullable<CoworkDesktop['diagnose']>>[0],
+  driverMode: LinuxCoworkMode
+): Promise<void> {
+  // Read-only: capture the desktop, native logs and machine state.
+  await execute(
+    'diagnose',
+    { dir },
+    { deadlineAt: Date.now() + 20_000, maxActions: 1, env },
+    driverMode
+  ).catch(() => {
+    // Partial is still useful: the driver records what it couldn't capture.
+  });
+  await copyLogTails(join(dirname(dataDir), 'logs'), join(dir, 'logs'));
+  await writeFile(
+    join(dir, 'system.json'),
+    `${JSON.stringify(await systemState(dataDir), null, 2)}\n`,
+    { mode: 0o600 }
+  );
+}
+
+const coworkLinuxThirdParty: CoworkDesktop = {
   dataDirectory: (options) =>
     options.dataDir ??
     join(
@@ -752,6 +939,14 @@ export const coworkLinux: CoworkDesktop = {
     stdioPaths = {},
     otlpSettings,
   }) {
+    if (
+      env.MST_COWORK_ACCOUNT_OWNER ||
+      env.MST_COWORK_ACCOUNT_PROFILE ||
+      env.MST_COWORK_ACCOUNT_MARKER
+    )
+      throw new Error(
+        'The managed third-party driver cannot prepare an account runtime. Select first-party mode; no settings were changed.'
+      );
     const settingsFile =
       env.MST_COWORK_SETTINGS_FILE ??
       '/etc/claude-desktop/managed-settings.json';
@@ -896,23 +1091,8 @@ export const coworkLinux: CoworkDesktop = {
       'Linux desktop recovery belongs to the runtime owner, not the MST driver.'
     );
   },
-  async diagnose({ dir, dataDir, env }) {
-    // Read-only: the screen and the app's accessible controls (the driver's
-    // diagnose mode), Cowork's own logs, and the machine's state.
-    await execute(
-      'diagnose',
-      { dir },
-      { deadlineAt: Date.now() + 20_000, maxActions: 1, env }
-    ).catch(() => {
-      // Partial is still useful: the driver records what it couldn't capture.
-    });
-    // Cowork keeps its logs beside its session data (Claude-3p/logs).
-    await copyLogTails(join(dirname(dataDir), 'logs'), join(dir, 'logs'));
-    await writeFile(
-      join(dir, 'system.json'),
-      `${JSON.stringify(await systemState(dataDir), null, 2)}\n`,
-      { mode: 0o600 }
-    );
+  async diagnose(options) {
+    await diagnoseLinux(options, 'third-party');
   },
   async reset(options) {
     // Stop the failed case's task if it still runs (its Stop response), then
@@ -929,116 +1109,196 @@ export const coworkLinux: CoworkDesktop = {
     };
   },
   async handleHitl(options) {
-    if (!options.isComplete)
-      throw new Error('Linux HITL requires a bound native completion check.');
-    const started = Date.now();
-    let actions = 0;
-    // Passes whose scan couldn't finish (they saw no prompt, and HITL went
-    // on), and folder requests HITL denied.
-    const counts = {
-      incompleteScans: 0,
-      folderRequestsDenied: 0,
-      questionsAnswered: 0,
-    };
-    // Set while the driver runs: a failure then may have acted on the app.
-    let driving = false;
-    const budget = options.maxActions ?? 12;
-    // Each question HITL has seen (by tool call), and since when.
-    const questionsSeen = new Map<string, number>();
-    try {
-      while (Date.now() < options.deadlineAt) {
-        if (await options.isComplete())
-          return {
-            status: 'hitl_checked',
-            action_count: actions,
-            telemetry: telemetry(started, actions, 'complete', counts),
-          };
-        const question = options.pendingQuestion
-          ? await options.pendingQuestion()
-          : (await options.awaitingUser?.())
-            ? ({ questions: [] } satisfies CoworkPendingQuestion)
-            : undefined;
-        if (question) {
-          if (!question.questions.length)
-            throw new CoworkUserQuestionError(
-              options.pendingQuestion
-                ? 'Cowork is waiting for an answer to a question (AskUserQuestion) that offers no usable options. No resubmission attempted.'
-                : 'Cowork is waiting for an answer to a question (AskUserQuestion); a headless run cannot answer it. No resubmission attempted.',
-              telemetry(started, actions, 'partial', counts)
-            );
-          const key = question.id ?? JSON.stringify(question.questions);
-          const since = questionsSeen.get(key) ?? Date.now();
-          questionsSeen.set(key, since);
-          if (Date.now() - since > QUESTION_ANSWER_TIMEOUT_MS)
-            throw new CoworkUserQuestionError(
-              `Cowork's question (AskUserQuestion) didn't take its first option within ${QUESTION_ANSWER_TIMEOUT_MS / 1000} s. No resubmission attempted.`,
-              telemetry(started, actions, 'partial', counts)
-            );
-          if (actions >= budget)
-            throw new CoworkHitlBudgetError(
-              'Linux HITL action budget exhausted.',
-              telemetry(started, actions, 'partial', counts)
-            );
-          // One page per pass: the first option, or the page's Submit/Next
-          // once a multi-select option is checked. A pass that finds no
-          // unambiguous control acts on nothing and the next looks again.
-          driving = true;
-          const result = await execute(
-            'answer',
-            { questions: question.questions },
-            { ...options, maxActions: Math.min(1, budget - actions) }
+    return handleLinuxHitl(options, 'third-party');
+  },
+};
+
+/** Compatibility name: always the managed third-party adapter. */
+export const coworkLinux = coworkLinuxThirdParty;
+
+async function handleLinuxHitl(
+  options: CoworkDriverOptions,
+  driverMode: LinuxCoworkMode
+): Promise<CoworkHitlReceipt> {
+  if (!options.isComplete)
+    throw new Error('Linux HITL requires a bound native completion check.');
+  const started = Date.now();
+  let actions = 0;
+  // Passes whose scan couldn't finish (they saw no prompt, and HITL went
+  // on), and folder requests HITL denied.
+  const counts = {
+    incompleteScans: 0,
+    folderRequestsDenied: 0,
+    questionsAnswered: 0,
+  };
+  // Set while the driver runs: a failure then may have acted on the app.
+  let driving = false;
+  const budget = options.maxActions ?? 12;
+  // Each question HITL has seen (by tool call), and since when.
+  const questionsSeen = new Map<string, number>();
+  try {
+    while (Date.now() < options.deadlineAt) {
+      if (await options.isComplete())
+        return {
+          status: 'hitl_checked',
+          action_count: actions,
+          telemetry: telemetry(started, actions, 'complete', counts),
+        };
+      const question = options.pendingQuestion
+        ? await options.pendingQuestion()
+        : (await options.awaitingUser?.())
+          ? ({ questions: [] } satisfies CoworkPendingQuestion)
+          : undefined;
+      if (question) {
+        if (!question.questions.length)
+          throw new CoworkUserQuestionError(
+            options.pendingQuestion
+              ? 'Cowork is waiting for an answer to a question (AskUserQuestion) that offers no usable options. No resubmission attempted.'
+              : 'Cowork is waiting for an answer to a question (AskUserQuestion); a headless run cannot answer it. No resubmission attempted.',
+            telemetry(started, actions, 'partial', counts)
           );
-          driving = false;
-          actions += result.action_count;
-          if (result.answered) counts.questionsAnswered += 1;
-          if (result.scanIncomplete) counts.incompleteScans += 1;
-          await delay(
-            Math.min(1_000, Math.max(0, options.deadlineAt - Date.now()))
+        const key = question.id ?? JSON.stringify(question.questions);
+        const since = questionsSeen.get(key) ?? Date.now();
+        questionsSeen.set(key, since);
+        if (Date.now() - since > QUESTION_ANSWER_TIMEOUT_MS)
+          throw new CoworkUserQuestionError(
+            `Cowork's question (AskUserQuestion) didn't take its first option within ${QUESTION_ANSWER_TIMEOUT_MS / 1000} s. No resubmission attempted.`,
+            telemetry(started, actions, 'partial', counts)
           );
-          continue;
-        }
         if (actions >= budget)
           throw new CoworkHitlBudgetError(
             'Linux HITL action budget exhausted.',
             telemetry(started, actions, 'partial', counts)
           );
+        // One page per pass: the first option, or the page's Submit/Next
+        // once a multi-select option is checked. A pass that finds no
+        // unambiguous control acts on nothing and the next looks again.
         driving = true;
         const result = await execute(
-          'hitl',
-          { approveWriteTools: options.approveWriteTools === true },
-          { ...options, maxActions: budget - actions }
+          'answer',
+          { questions: question.questions },
+          { ...options, maxActions: Math.min(1, budget - actions) },
+          driverMode
         );
         driving = false;
         actions += result.action_count;
+        if (result.answered) counts.questionsAnswered += 1;
         if (result.scanIncomplete) counts.incompleteScans += 1;
-        if (result.deniedFolderRequest) counts.folderRequestsDenied += 1;
         await delay(
-          Math.min(500, Math.max(0, options.deadlineAt - Date.now()))
+          Math.min(1_000, Math.max(0, options.deadlineAt - Date.now()))
         );
+        continue;
       }
-    } catch (error) {
-      if (
-        error instanceof CoworkHitlBudgetError ||
-        error instanceof CoworkUserQuestionError
-      )
-        throw error;
-      const partialActions =
-        error instanceof CoworkDriverError
-          ? (error.telemetry?.action_count ?? 0)
-          : 0;
-      // A driver call that failed without a receipt may have acted.
-      const unknown =
-        driving &&
-        !(error instanceof CoworkDriverError && error.telemetry !== undefined);
-      throw new CoworkHitlError(
-        `Linux HITL failed for the bound native session: ${error instanceof Error ? error.message : String(error)}`,
-        telemetry(started, actions + partialActions, 'partial', counts),
-        actions + partialActions > 0 || unknown
+      if (actions >= budget)
+        throw new CoworkHitlBudgetError(
+          'Linux HITL action budget exhausted.',
+          telemetry(started, actions, 'partial', counts)
+        );
+      driving = true;
+      const result = await execute(
+        'hitl',
+        {
+          approveWriteTools: options.approveWriteTools === true,
+        },
+        { ...options, maxActions: budget - actions },
+        driverMode
       );
+      driving = false;
+      actions += result.action_count;
+      if (result.scanIncomplete) counts.incompleteScans += 1;
+      if (result.deniedFolderRequest) counts.folderRequestsDenied += 1;
+      await delay(Math.min(500, Math.max(0, options.deadlineAt - Date.now())));
     }
-    throw new CoworkDriverError(
-      'Linux HITL deadline exceeded.',
-      telemetry(started, actions, 'partial', counts)
+  } catch (error) {
+    if (
+      error instanceof CoworkHitlBudgetError ||
+      error instanceof CoworkUserQuestionError
+    )
+      throw error;
+    const partialActions =
+      error instanceof CoworkDriverError
+        ? (error.telemetry?.action_count ?? 0)
+        : 0;
+    // A driver call that failed without a receipt may have acted.
+    const unknown =
+      driving &&
+      !(error instanceof CoworkDriverError && error.telemetry !== undefined);
+    throw new CoworkHitlError(
+      `Linux HITL failed for the bound native session: ${error instanceof Error ? error.message : String(error)}`,
+      telemetry(started, actions + partialActions, 'partial', counts),
+      actions + partialActions > 0 || unknown
     );
+  }
+  throw new CoworkDriverError(
+    'Linux HITL deadline exceeded.',
+    telemetry(started, actions, 'partial', counts)
+  );
+}
+
+/** Account mode attaches only. Managed 3P preparation must never run here. */
+export const coworkLinuxFirstParty: CoworkDesktop = {
+  async recover() {
+    throw new Error(
+      'First-party Linux Cowork recovery requires its account source runtime; managed desktop recovery is unsupported.'
+    );
+  },
+  async diagnose(options) {
+    await diagnoseLinux(options, 'first-party');
+  },
+  dataDirectory: () => {
+    const profile = process.env.MST_COWORK_ACCOUNT_PROFILE;
+    if (!profile)
+      throw new Error(
+        'First-party Linux Cowork needs a staged account profile.'
+      );
+    return join(profile, 'local-agent-mode-sessions');
+  },
+  async prepare({ env, plugins = [], otlpSettings, appVersion }) {
+    if (plugins.length || otlpSettings || appVersion)
+      throw new Error(
+        'First-party Linux Cowork cannot install managed plugins or telemetry settings, or pin appVersion.'
+      );
+    await checkAccountRuntime(env);
+    // Read-only readiness. In particular, no managed restart or warmup task.
+    await execute(
+      'probe',
+      {},
+      { deadlineAt: Date.now() + 15_000, maxActions: 1, env },
+      'first-party'
+    );
+    const app = await installedCoworkApp();
+    return {
+      ...(app ? { app } : {}),
+      async dispose() {
+        // The plugin owns the profile and its cleanup; source control owns policy.
+      },
+    };
+  },
+  async handleHitl(options) {
+    await checkAccountRuntime(options.env ?? process.env);
+    // Account `ask` must not become a persistent account permission in the UI.
+    return handleLinuxHitl(options, 'first-party');
+  },
+  async reset(options) {
+    await checkAccountRuntime(options.env ?? process.env);
+    await execute('reset', {}, { ...options, maxActions: 2 }, 'first-party');
+  },
+  async submit(query, options) {
+    await checkAccountRuntime(options.env ?? process.env);
+    const started = Date.now();
+    const result = await execute(
+      'submit',
+      {
+        prompt: query,
+        ...(options.targetModel ? { targetModel: options.targetModel } : {}),
+      },
+      options,
+      'first-party'
+    );
+    return {
+      status: 'submitted',
+      action_count: result.action_count,
+      telemetry: telemetry(started, result.action_count, 'complete'),
+    };
   },
 };

@@ -196,7 +196,9 @@ Cowork evaluation clients, including Cowork on macOS and Linux. Cowork also
 supports private file-backed native proxies and mixed HTTP/stdio server sets.
 See [evaluation client transport support](./docs/transports.md#evaluation-client-support)
 for client-specific fields, environment rules, and setup ownership.
-Cowork's `mode: "first-party"` is separate: it runs on existing HTTPS connectors in a signed-in Claude account (local macOS only) rather than on servers MST configures. See [Cowork cloud sessions](./docs/cowork.md#cloud-sessions).
+Cowork's `mode: "first-party"` uses existing HTTPS connectors in a signed-in Claude account, locally on macOS or through a plugin-prepared Linux runtime with attached macOS source control. Account runs require one shard, sequential trials and a dedicated account. Linux first-party automation uses TypeScript over AT-SPI D-Bus; managed third-party automation remains Python. A live smoke check of the TypeScript first-party driver is pending; offline tests do not establish app or account compatibility. See [Cowork cloud sessions](./docs/cowork.md#cloud-sessions).
+
+**Known 1P recovery limitation:** MST saves the original connector permission values, applies eval restrictions, and restores those values afterward. A UI failure before submission can still leave a pending-task marker that blocks automatic restoration. Keep the saved values and verify that no eval task or permission write remains active before manually restoring them. Verify the restored settings before archiving the resolved journal. Automatic recovery for proven pre-submission failures is follow-up work. See [Recover connector settings](./docs/cowork.md#recover-connector-settings).
 
 ## Documentation
 
@@ -219,7 +221,7 @@ Cowork's `mode: "first-party"` is separate: it runs on existing HTTPS connectors
 - [Architecture decisions](./docs/adr/) — why MST is built as it is, including [detached runs](./docs/adr/0007-detached-runs-move-the-coordinator.md): a run on a runner that keeps going with the laptop off
 - [Glossary](./CONTEXT.md) — the terms MST uses
 - [The run report](./docs/ui-reporter.md): the report every eval run writes
-- [Development](./docs/development.md) — contributing and building
+- [Contributing](./CONTRIBUTING.md) — setting up, building and testing, and the pull request process
 - [Migration Guide (v1.x → v2.0)](./docs/migrations/migration-2.0.md) — MCP SDK v2 and protocol versions
 - [Migration Guide (v0.12 → v1.0)](./docs/migrations/migration-1.0.md) — upgrading from pre-1.0 releases
 
