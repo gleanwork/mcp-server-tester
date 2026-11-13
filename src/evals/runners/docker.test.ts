@@ -282,10 +282,12 @@ describe('ChatGPT in the docker runner', () => {
     for (const file of [
       'Dockerfile',
       'bin/desktop-session',
-      'bin/chatgpt-package',
+      'bin/chatgpt-package.mjs',
     ])
       await expect(fs.stat(path.join(dir, file))).resolves.toBeTruthy();
     const dockerfile = await fs.readFile(path.join(dir, 'Dockerfile'), 'utf8');
+    // The driver is MST's Node code: the image needs no Python (ADR 0006).
+    expect(dockerfile).not.toMatch(/python/i);
     // The Linux client's contract, from the image's ENV.
     for (const key of [
       'AT_SPI_BUS_ADDRESS',

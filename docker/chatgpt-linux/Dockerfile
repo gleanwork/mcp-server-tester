@@ -23,16 +23,15 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates curl tini procps \
     xvfb x11-utils x11-apps xdotool dbus dbus-x11 at-spi2-core libglib2.0-bin \
-    python3 python3-gi gir1.2-atspi-2.0 \
     gnome-keyring libsecret-1-0 fonts-dejavu-core \
   && rm -rf /var/lib/apt/lists/*
 
 # The app, from OpenAI's apt repository: the package the repository's index
 # lists for this architecture, checked against the index's SHA-256 and size.
 # The repository isn't added to apt, so nothing updates the app afterwards.
-COPY --chmod=755 bin/chatgpt-package /opt/mst/bin/chatgpt-package
+COPY --chmod=755 bin/chatgpt-package.mjs /opt/mst/bin/chatgpt-package.mjs
 RUN set -e; \
-  /opt/mst/bin/chatgpt-package "${CHATGPT_REPOSITORY}" "${CHATGPT_VERSION}" /tmp/chatgpt.deb; \
+  /opt/mst/bin/chatgpt-package.mjs "${CHATGPT_REPOSITORY}" "${CHATGPT_VERSION}" /tmp/chatgpt.deb; \
   printf 'repo_add_once="false"\n' > /etc/default/chatgpt; \
   apt-get update; \
   apt-get install -y --no-install-recommends /tmp/chatgpt.deb; \
@@ -91,7 +90,6 @@ ENV DISPLAY=:99 \
   TMPDIR=/run/mst/tmp \
   MST_CHATGPT_APP_PATH=/usr/bin/chatgpt \
   MST_CHATGPT_CODEX_PATH=/usr/lib/chatgpt/resources/codex \
-  MST_CHATGPT_PYTHON=/usr/bin/python3 \
   MST_CHATGPT_EVIDENCE_DIR=/run/mst/evidence \
   MST_TOKENS_DIR=/run/mst/tokens \
   MST_PLUGIN_DIR=/opt/mst/plugins \

@@ -175,12 +175,10 @@ does not import account credentials, provision VMs or submit tasks through an
 undocumented API.
 
 Linux selects separate first-party and third-party adapters; it does not infer
-the mode from environment variables. The first-party driver is TypeScript and
-talks directly to AT-SPI over D-Bus. The managed third-party driver remains
-standalone Python, with its existing setup, readiness and submission flow.
-The first-party implementation follows [ADR 0006](./adr/0006-mst-is-written-in-typescript.md)
-without a Python helper or an ADR exception. Porting the third-party driver
-remains future work.
+the mode from environment variables. Both drivers are TypeScript and talk
+directly to AT-SPI over D-Bus, as
+[ADR 0006](./adr/0006-mst-is-written-in-typescript.md) requires; neither needs
+Python.
 
 Before entering a first-party prompt, MST checks the selected Cowork tab and an
 empty composer, and selects and verifies the exact requested model when one is
@@ -193,9 +191,8 @@ profile metadata. The third-party adapter rejects account runtime metadata.
 First-party HITL permits only an explicitly authorized one-time approval, never
 persistent approval controls or inline write cards.
 
-A live smoke check of the TypeScript first-party driver is pending. Offline
-tests and prior Python checks do not establish its live Linux app or account
-compatibility. Each account image needs a reviewed package/ASAR integrity
+Live smoke checks of the TypeScript Linux drivers are pending. Offline tests do
+not establish their live Linux app or account compatibility. Each account image needs a reviewed package/ASAR integrity
 contract and an authorized live check of sign-in, accessibility, model
 selection, same-profile URL opening and native model/task evidence. Package
 integrity does not pin the hosted first-party frontend.
@@ -611,9 +608,9 @@ working directory:
   (`process.execPath`). It uses direct AT-SPI D-Bus calls, not Python or GObject
   bindings. It requires the prepared account runtime and attached source control
   described in [Cloud sessions](#cloud-sessions).
-- `./cowork-linux-runtime` remains `scripts/cowork_linux.py`, the standalone
-  managed third-party driver using Python `gi`. `MST_COWORK_PYTHON` selects its
-  prepared interpreter; it has no effect on first-party execution.
+- `./cowork-linux-runtime` resolves to `dist/cowork/linuxThirdParty.js`, the
+  managed third-party driver. MST runs it the same way, with the same direct
+  AT-SPI D-Bus calls.
 
 The following managed settings and owned-desktop behavior apply only to
 `third-party` mode. The driver reads `/etc/claude-desktop/managed-settings.json` (or the absolute
@@ -822,7 +819,9 @@ the bytes present at audit time; notices contain no original digest to authentic
 - `cowork/linuxAtspi.ts`: TypeScript AT-SPI primitives over D-Bus, with bounded tree reads, native actions and clipboard input.
 - `cowork/linuxFirstPartyDriver.ts`: first-party readiness, model selection, single submission, scoped HITL and diagnostics over the UI interface.
 - `cowork/linuxFirstPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-first-party-runtime`, accepting JSON input and returning a receipt.
-- `scripts/cowork_linux.py`: the standalone managed third-party driver, with bounded semantic UI actions; no lifecycle or answer parsing.
+- `cowork/linuxThirdPartyDriver.ts`: managed third-party readiness, reset, single submission, HITL and clarifying-question answers over the UI interface; no lifecycle or answer parsing.
+- `cowork/linuxThirdPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-runtime`, including the read-only diagnosis capture.
+- `linuxAtspiBus.ts`: the one AT-SPI client over D-Bus that every Linux driver uses (Cowork and ChatGPT).
 - `cowork/anthropicComputerUse.ts`: the macOS CU driver entry point, its deadline
   and its error reporting.
 - `cowork/computerUseLoop.ts`: the planner loop: bounded screenshot navigation,

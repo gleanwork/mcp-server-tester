@@ -572,10 +572,9 @@ async function execute(
   );
   const result = await new Promise<{ failed: boolean; stdout: string }>(
     (resolve) => {
+      // Both drivers run on the Node that runs MST.
       const child = execFile(
-        driverMode === 'first-party'
-          ? process.execPath
-          : (env.MST_COWORK_PYTHON ?? 'python3'),
+        process.execPath,
         [
           script,
           '--mode',

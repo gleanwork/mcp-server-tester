@@ -74,7 +74,7 @@ beforeEach(async () => {
   child.exec.mockReset();
   child.payloads.length = 0;
   child.responses.length = 0;
-  child.exec.mockImplementation((_python, args, _options, callback) => ({
+  child.exec.mockImplementation((_command, args, _options, callback) => ({
     stdin: {
       on: vi.fn(),
       end: (payload: string) => {
@@ -797,7 +797,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     // The restart, then the usual probe.
     expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
       RESTART,
-      'python3',
+      process.execPath,
     ]);
     expect(child.exec.mock.calls[1]![1]).toContain('probe');
 
@@ -1101,7 +1101,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
       expect(child.exec.mock.calls.map((call) => String(call[0]))).toEqual([
         RESTART,
         RESTART,
-        'python3',
+        process.execPath,
       ]);
       expect(String(stderr.mock.calls.at(-1)?.[0])).toContain(
         'desktop restart failed'

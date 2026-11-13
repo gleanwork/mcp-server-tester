@@ -11,8 +11,8 @@ import { promisify } from 'node:util';
  * environment it sees and how its output is bounded, so every client applies one
  * policy. Receipt schemas and error wording stay with each controller.
  *
- * The Linux Python helpers do not use this module: Cowork's is one execFile
- * call and ChatGPT's is a streaming request/response protocol.
+ * The Linux drivers do not use this module: they are MST's own Node entry
+ * points (dist/cowork, dist/chatgpt), run on the Node that runs MST.
  */
 
 const exec = promisify(execFile);

@@ -147,7 +147,6 @@ helper, socket, opener, or attestation variable.
 | `MST_CHATGPT_INFERENCE_TOKEN_FILE`                   | 0600 file the caller keeps fresh       | As the API key file. Read by the app's token command, never written to the config.    |
 | `MST_CHATGPT_MCP_TOKEN_<n>`                          | Set by MST from `mcpServers[].auth`    | Config uses `bearer_token_env_var`; never written to disk.                            |
 | `MST_CHATGPT_EVIDENCE_DIR`                           | 0700 dir that the caller uploads       | Owned, mode 0700. Each session writes to its own `session-*` subdirectory.            |
-| `MST_CHATGPT_PYTHON` (optional)                      | `/usr/bin/python3`                     | Absolute path. Needs PyGObject with `gi.repository.Atspi` 2.0.                        |
 | Process isolation (no variable)                      | Disposable no-new-privileges container | Not checked. Required: MST turns off the native sandbox (see below).                  |
 
 Any violation fails the case before a prompt with `environment_invalid: <NAME>`
@@ -298,14 +297,15 @@ recorded.
 ### Draft hand-off
 
 MST opens drafts by launching the same app binary briefly with
-`codex://new?path=<workspace>&prompt=<text>` (both components encoded like Python
-`quote(value, safe='')`; the empty setup draft omits `prompt`). The hand-off process
+`codex://new?path=<workspace>&prompt=<text>` (both components percent-encoded as
+UTF-8, with every byte outside `A-Za-z0-9_.~-` escaped; the empty setup draft
+omits `prompt`). The hand-off process
 gets no MCP tokens, runs in its own group with a 20-second limit, and must exit 0.
 MST then verifies that the original app process is still alive. The URL is one
 argv element, so prompts are limited to 120 KiB after encoding (`prompt_too_large`).
 Exit 0 acknowledges the hand-off only; it is not a submission.
 
-The AT-SPI script does not open drafts itself. When it needs a draft, it writes
+The AT-SPI driver does not open drafts itself. When it needs a draft, it writes
 `{"open": "<sha256 of the UTF-8 draft>"}` on the socket passed as `--open-fd 3`.
 MST accepts one request per invocation, only when the hash matches the draft it
 expects (empty for setup, the unchanged prompt for submission), performs the
@@ -337,12 +337,13 @@ exact prompt before the one send.
 ### Native UI protocol and limits
 
 The Node adapter uses only the `prepare` and `submit` modes of the packaged
-`chatgpt-runtime` script.
+`./chatgpt-linux-runtime` driver (`dist/chatgpt/linuxDriver.js`), which it runs
+with the Node that runs MST. The driver reads AT-SPI directly over D-Bus.
 It accepts `--timeout-ms` and `--max-actions`, with JSON stdin containing `surface`
 and, only for submission, `prompt`. A successful receipt contains `status`
 (`ready` or `submitted`), `surface`, `action_count`, and `duration_ms`. The Node
 adapter caps each invocation at 60 seconds and validates the receipt. It forwards
-only desktop environment variables, not model or MCP credentials, to Python.
+only desktop environment variables, not model or MCP credentials, to the driver.
 
 The English selectors come from ChatGPT 26.915.31945 observations. Preparation can
 select Engineering, advance Continue, skip the specific example-introduction
@@ -355,7 +356,7 @@ available. The only mouse command is `xdotool mousemove x y click 1`, with no
 enabled Continue on the observed profession page; a stale checked bit does not
 block it. Unknown onboarding and ambiguous controls fail closed.
 
-Preparation selects the surface and calls `open_prompt('')` exactly once to open
+Preparation selects the surface and requests the empty draft exactly once to open
 the canonical new chat. After the 5-second read-only settle described in
 [Draft hand-off](#draft-hand-off), it verifies the requested surface, one available
 editable composer, and one visible Send control (which can be disabled). If the
@@ -381,21 +382,19 @@ the draft is lost.
 The composer must be unique, visible, showing, enabled, sensitive, have EDITABLE
 state, an allowed non-password role, and a real Text interface. Nested editable
 paragraphs belong to their containing editor; independent fields stay ambiguous.
-Readback uses unbound `Atspi.Text.get_character_count` and
-`Atspi.Text.get_text(node, 0, count)` to avoid the PyGObject Accessible/Text binding
-collision. Bare and `org.a11y.atspi.*` interface advertisements are supported.
-For each U+FFFC object character, an advertised Hypertext interface can supply an
-explicit reference through `Atspi.Hypertext.get_link_index(node, offset)` and
-`get_link(node, index)`. Only a link with exactly one anchor is expanded through
-`Atspi.Hyperlink.get_object(link, 0)` and recursive unbound Text reads. An empty
+Readback reads the Text interface's `CharacterCount` and `GetText(0, count)`, and
+requires exactly `count` characters back. For each U+FFFC object character, an
+advertised Hypertext interface can supply an explicit reference through
+`Hypertext.GetLinkIndex(offset)` and `GetLink(index)`. Only a link with exactly
+one anchor is expanded through `Hyperlink.GetObject(0)` and recursive Text reads. An empty
 linked paragraph therefore reads as empty. Invalid or ambiguous links fail closed;
 they do not trigger a structural fallback.
 
 If Hypertext is not advertised or its link index is -1, a narrow structural
 fallback applies only when the **entire Text value is one U+FFFC**. Starting at the
 owned editable composer, each expanded node must have exactly one direct child.
-That child must be a `paragraph` or `text` with a real Text interface, read with the
-same unbound methods. A paragraph can instead contain one visible, showing leaf
+That child must be a `paragraph` or `text` with a real Text interface, read the
+same way. A paragraph can instead contain one visible, showing leaf
 with role `static` or `static text` and no children. Only that leaf's accessible
 name may supply content when it has no Text interface. Text remains preferred
 when available. This fallback follows direct composer descendants only; a
@@ -431,13 +430,14 @@ of a submission. Read-only polls do not increment the action count.
 
 An acknowledged action without an observed state change gets bounded resnapshots,
 not another click. Read-only snapshot traversal can restart at most twice on
-transient GLib errors; partial trees never authorize actions. Authentication and
+transient D-Bus errors (an error reply, a defunct node, or a malformed reply);
+partial trees never authorize actions. Authentication and
 permission requests are not handled automatically.
 
-Failed receipts retain `status: 'failed'` and an allowlisted `error` code. Unexpected
-AttributeError, TypeError, and GLib.Error map to `desktop_attribute_error`,
-`desktop_type_error`, and `desktop_glib_error`; other exceptions map to
-`desktop_driver_failed`. Raw exception text is never returned. Hand-off failures
+Failed receipts retain `status: 'failed'` and an allowlisted `error` code.
+Accessibility bus failures keep their fixed codes, such as
+`accessibility_dbus_error` and `accessibility_node_defunct`; other exceptions map
+to `desktop_driver_failed`. Raw exception text is never returned. Hand-off failures
 are `helper_missing` (no `--open-fd`), `helper_failed`, and `helper_timeout`;
 MST adds `open=<code>` to its error when its own hand-off failed; invalid profession
 geometry returns `profession_geometry_invalid`. Fixed composer failure steps are
