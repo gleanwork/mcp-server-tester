@@ -2,7 +2,7 @@
 
 > **The connector contract.** It specifies step 4 of the [walkthrough](./README.md) ("Authenticate once"), the `connectors` extension kind and the credential store. It extends the [explainer](./explainer.md). Terms follow [`CONTEXT.md`](../../CONTEXT.md).
 >
-> **Built:** connectors, `mst auth` / `status` / `revoke`, `mst/credential-store/local`, plugin credential stores (`--store <namespace>/credential-store/<name>`), run preflight, delivery, renewal and cleanup (on this machine, and to a shard's worker over `mst.shard/v1`), the [dry-run proxy](../cowork.md#dry-run-proxy) and its [simulated writes](../cowork.md#simulated-writes).
+> **Built:** connectors, `mst auth` / `status` / `revoke`, the local credential store, plugin credential stores (`--store <namespace>/credential-store/<name>`), run preflight, delivery, renewal and cleanup (on this machine, and to a shard's worker over `mst.shard/v1`), the [dry-run proxy](../cowork.md#dry-run-proxy) and its [simulated writes](../cowork.md#simulated-writes).
 
 ## Goal
 
@@ -17,7 +17,7 @@ The connector contract is done when the walkthrough's three variants (`current`,
 | OAuth engine: discovery, PKCE, DCR, device flow, refresh, revocation | MST                                      |
 | `mst auth`, `mst auth status`, `mst auth revoke`                     | MST                                      |
 | Run lifecycle: preflight, staging, renewal, teardown                 | MST                                      |
-| Local credential store                                               | MST (`mst/credential-store/local`)       |
+| Local credential store                                               | MST (`localStore.ts`)                    |
 | Vendor facts: URL, client ID and secret, scopes, flow, quirks        | Plugin `connector` extension             |
 | How the client reaches the server (direct, or through a proxy)       | Plugin `connector` extension             |
 | Tool policy (read-only allowlist, writes blocked)                    | Plugin `connector` extension (its proxy) |
@@ -171,7 +171,7 @@ interface StoredGrant {
 }
 ```
 
-MST ships `mst/credential-store/local`. It stores files at `~/.mcp-server-tester/grants/<namespace>.<grant>.json` (or `$MST_CREDENTIALS_DIR`, or `--store <dir>`), with a 0700 directory, 0600 files and a lock file. The key is per user, not per eval config, so one sign-in serves every config that uses the connector. A plugin can add stores that implement the same interface, such as a cloud secret manager, in its `credentialStores`: `mst auth`, `run` and `grade` take one as `--store <namespace>/credential-store/<name>`. A store's definition has `create()`, which takes no options (the plugin reads its own configuration), and `shared: true` when other machines reach the same grants. Keep one copy of each grant: a provider that rotates refresh tokens invalidates any other copy at the first refresh.
+MST ships a local credential store (`src/auth/grants/localStore.ts`), the default when `--store` is unset or names a directory. It stores files at `~/.mcp-server-tester/grants/<namespace>.<grant>.json` (or `$MST_CREDENTIALS_DIR`, or `--store <dir>`), with a 0700 directory, 0600 files and a lock file. The key is per user, not per eval config, so one sign-in serves every config that uses the connector. A plugin can add stores that implement the same interface, such as a cloud secret manager, in its `credentialStores`: `mst auth`, `run` and `grade` take one as `--store <namespace>/credential-store/<name>`. A store's definition has `create()`, which takes no options (the plugin reads its own configuration), and `shared: true` when other machines reach the same grants. Keep one copy of each grant: a provider that rotates refresh tokens invalidates any other copy at the first refresh.
 
 ## Security rules
 

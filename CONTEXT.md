@@ -369,7 +369,7 @@ The long-lived sign-in `mst auth` saves for a connector, which a run exchanges f
 _Avoid_: credential, login, refresh token (that is part of it)
 
 **Credential store**:
-Where refresh grants are kept. MST ships `mst/credential-store/local`, files in `~/.mcp-server-tester/grants`; a plugin can provide others, chosen with `--store <namespace>/credential-store/<name>`.
+Where refresh grants are kept. MST's own store keeps grants as files in `~/.mcp-server-tester/grants`, or in the directory `--store <dir>` names; a plugin can provide others, chosen with `--store <namespace>/credential-store/<name>`.
 _Avoid_: keychain, vault, secret store
 
 **Dry-run proxy**:
