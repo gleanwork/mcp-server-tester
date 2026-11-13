@@ -353,7 +353,7 @@ The first part of a plugin extension's name, `<namespace>/<kind>/<name>` (for ex
 _Avoid_: scope, prefix
 
 **Extension**:
-One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`), runner (`runner`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
+One named thing a plugin contributes, of one kind: a dataset source (`dataset`), client (`client`), judge (`judge`), pairwise judge (`pairwise-judge`), metric (`metric`), result store (`result-store`), connector (`connector`), runner (`runner`), credential store (`credential-store`) or shared config (`config`). Its name says its kind: `acme/judge/completeness` is a judge.
 _Avoid_: contribution, registration, capability
 
 **Built-in**:
@@ -369,7 +369,7 @@ The long-lived sign-in `mst auth` saves for a connector, which a run exchanges f
 _Avoid_: credential, login, refresh token (that is part of it)
 
 **Credential store**:
-Where refresh grants are kept. MST ships `mst/credential-store/local`, files in `~/.mcp-server-tester/grants`; stores from plugins are planned.
+Where refresh grants are kept. MST ships `mst/credential-store/local`, files in `~/.mcp-server-tester/grants`; a plugin can provide others, chosen with `--store <namespace>/credential-store/<name>`.
 _Avoid_: keychain, vault, secret store
 
 **Dry-run proxy**:

@@ -43,7 +43,7 @@ npx mst plugins --plugins @acme/mst-plugin
   judge              acme/judge/correctness, acme/judge/completeness, acme/judge/groundedness
   pairwise-judge     acme/pairwise-judge/preference
   connector          acme/connector/acme, acme/connector/slack, acme/connector/github, …
-  credential-store   acme/credential-store/secret-manager   (planned kind)
+  credential-store   acme/credential-store/secret-manager
   setup              acme/setup/reset-test-tenant           (planned kind)
   runner             acme/runner/cloud-vm
   result-store       acme/result-store/eval-results
@@ -189,7 +189,7 @@ slack    oauth           → opening browser for consent…  ✓ saved
 github   github-app      ✓ client credentials (no consent needed)
 ```
 
-Each run refreshes these grants and hands short-lived tokens to the client, then removes them when it finishes. Leave out `--store` to keep grants on your machine only. Remote runs and CI need a shared credential store. Today `--store` takes a directory; plugin credential stores such as `acme/credential-store/secret-manager` are planned.
+Each run refreshes these grants and hands short-lived tokens to the client, then removes them when it finishes. Leave out `--store` to keep grants on your machine only. Remote runs and CI need a shared credential store: `--store` takes a directory or a plugin's credential store, such as `acme/credential-store/secret-manager`.
 
 ```bash
 npx mst auth status --config evals/cowork-tool-descriptions.json
