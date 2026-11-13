@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,15 +82,16 @@ async function serve(packages: Package[]): Promise<void> {
 
 async function pick(
   version: string,
-  repository = REPOSITORY
+  repository = REPOSITORY,
+  /** Without the fetch stub, with this environment: the script's real fetch. */
+  realFetch?: NodeJS.ProcessEnv
 ): Promise<{ code: number; stdout: string; stderr: string; deb?: string }> {
   const output = path.join(dir, 'chatgpt.deb');
   return new Promise((resolve) => {
     execFile(
       process.execPath,
       [
-        '--import',
-        path.join(dir, 'fetch-stub.mjs'),
+        ...(realFetch ? [] : ['--import', path.join(dir, 'fetch-stub.mjs')]),
         SCRIPT,
         repository,
         version,
@@ -101,6 +103,7 @@ async function pick(
           PATH: `${dir}${path.delimiter}${process.env.PATH ?? ''}`,
           FETCH_FIXTURES: path.join(dir, 'routes.json'),
           FETCH_LOG: path.join(dir, 'fetch.log'),
+          ...realFetch,
         },
       },
       async (error, stdout, stderr) => {
@@ -179,5 +182,39 @@ describe('chatgpt-package.mjs', () => {
     const result = await pick('', 'http://packages.example.com/chatgpt/deb');
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('Refusing a non-HTTPS URL');
+  });
+
+  it("goes through a build's HTTPS proxy, as the image runs it", async () => {
+    // The image runs the script with NODE_USE_ENV_PROXY=1; without it, Node's
+    // fetch ignores HTTPS_PROXY.
+    const dockerfile = await readFile(
+      fileURLToPath(
+        new URL('../../../docker/chatgpt-linux/Dockerfile', import.meta.url)
+      ),
+      'utf8'
+    );
+    expect(dockerfile).toContain(
+      'NODE_USE_ENV_PROXY=1 /opt/mst/bin/chatgpt-package.mjs '
+    );
+    // A proxy that records each tunnel request and refuses it.
+    const requests: string[] = [];
+    const proxy = createServer((socket) => {
+      socket.once('data', (data) => {
+        requests.push(String(data).split('\r\n')[0]!);
+        socket.end('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n');
+      });
+    });
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = proxy.address() as AddressInfo;
+      const result = await pick('', REPOSITORY, {
+        NODE_USE_ENV_PROXY: '1',
+        HTTPS_PROXY: `http://127.0.0.1:${port}`,
+      });
+      expect(result.code).not.toBe(0);
+      expect(requests).toEqual(['CONNECT packages.example.com:443 HTTP/1.1']);
+    } finally {
+      await new Promise((resolve) => proxy.close(resolve));
+    }
   });
 });

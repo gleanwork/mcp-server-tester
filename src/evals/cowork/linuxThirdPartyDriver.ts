@@ -190,33 +190,9 @@ class ThirdPartyDriver {
     await operation();
   }
 
-  /** One complete snapshot, bounded by the scan deadline. Read-only, so a transient failure rescans. */
+  /** One complete snapshot, bounded by the scan deadline. */
   async scan(): Promise<readonly LinuxUiNode[]> {
-    for (let attempt = 1; ; attempt++) {
-      if (Date.now() >= this.scanDeadline)
-        throw new LinuxUiError('accessibility_scan_timeout');
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        return await Promise.race([
-          this.ui.snapshot(),
-          new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(
-              () => reject(new LinuxUiError('accessibility_scan_timeout')),
-              this.scanDeadline - Date.now()
-            );
-          }),
-        ]);
-      } catch (error) {
-        if (
-          attempt >= SCAN_ATTEMPTS ||
-          !(error instanceof LinuxUiError) ||
-          !TRANSIENT.has(error.code)
-        )
-          throw error;
-      } finally {
-        clearTimeout(timer);
-      }
-    }
+    return scanLinuxUi(this.ui, this.scanDeadline);
   }
 
   /**
@@ -579,6 +555,42 @@ export async function runThirdPartyLinux(
 }
 
 /** The accessibility dump a failed case keeps: every showing, named node, indented by depth. */
+/**
+ * One complete snapshot by `deadline`. A snapshot only reads, so a transient
+ * failure rescans, at most SCAN_ATTEMPTS times: the driver's scans and the
+ * failure diagnosis both read a tree that may still be changing.
+ */
+export async function scanLinuxUi(
+  ui: LinuxUi,
+  deadline: number
+): Promise<readonly LinuxUiNode[]> {
+  for (let attempt = 1; ; attempt++) {
+    if (Date.now() >= deadline)
+      throw new LinuxUiError('accessibility_scan_timeout');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        ui.snapshot(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new LinuxUiError('accessibility_scan_timeout')),
+            deadline - Date.now()
+          );
+        }),
+      ]);
+    } catch (error) {
+      if (
+        attempt >= SCAN_ATTEMPTS ||
+        !(error instanceof LinuxUiError) ||
+        !TRANSIENT.has(error.code)
+      )
+        throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export function accessibilityText(nodes: readonly LinuxUiNode[]): string {
   const depth = new Map<string, number>();
   const lines: string[] = [];

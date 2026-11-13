@@ -9,6 +9,7 @@ import { connectLinuxUi } from './linuxAtspi.js';
 import {
   accessibilityText,
   runThirdPartyLinux,
+  scanLinuxUi,
   thirdPartyFailureCode,
   type ThirdPartyReceipt,
 } from './linuxThirdPartyDriver.js';
@@ -125,7 +126,7 @@ async function diagnose(
     ui = await connectLinuxUi(process.env, deadlineAt);
     await writePrivate(
       join(directory, 'accessibility.txt'),
-      accessibilityText(await ui.snapshot())
+      accessibilityText(await scanLinuxUi(ui, deadlineAt))
     );
     files.push('accessibility.txt');
   } catch (error) {

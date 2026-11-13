@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   accessibilityText,
   runThirdPartyLinux,
+  scanLinuxUi,
   type ThirdPartyPayload,
 } from './linuxThirdPartyDriver.js';
 import { LinuxUiError, type LinuxUi, type LinuxUiNode } from './linuxUi.js';
@@ -853,5 +854,34 @@ describe('accessibility dump', () => {
     expect(accessibilityText(nodes)).toBe(
       'application: Claude\n  button: Start task [disabled]\n    label: line one\n'
     );
+  });
+
+  it('rescans the tree for diagnosis as the driver does, at most three times', async () => {
+    const deadline = Date.now() + 5_000;
+    const settles = new FakeUi();
+    let once = true;
+    settles.snapshotError = () =>
+      once
+        ? ((once = false), new LinuxUiError('accessibility_tree_invalid'))
+        : undefined;
+    expect(accessibilityText(await scanLinuxUi(settles, deadline))).toContain(
+      'application: Claude'
+    );
+    expect(settles.scans).toBe(2);
+
+    const churning = new FakeUi();
+    churning.snapshotError = () =>
+      new LinuxUiError('accessibility_node_defunct');
+    await expect(scanLinuxUi(churning, deadline)).rejects.toThrow(
+      'accessibility_node_defunct'
+    );
+    expect(churning.scans).toBe(3);
+
+    const closed = new FakeUi();
+    closed.snapshotError = () => new LinuxUiError('accessibility_bus_closed');
+    await expect(scanLinuxUi(closed, deadline)).rejects.toThrow(
+      'accessibility_bus_closed'
+    );
+    expect(closed.scans).toBe(1);
   });
 });

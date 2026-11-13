@@ -3,7 +3,9 @@
 // repository, checked against the repository index's SHA-256 and size.
 //
 // Usage: chatgpt-package.mjs <repository> <version or ""> <output>
-// An empty version takes the newest the index lists.
+// An empty version takes the newest the index lists. Run it with
+// NODE_USE_ENV_PROXY=1, as the Dockerfile does, so fetch honors HTTPS_PROXY
+// and NO_PROXY in a proxied build, as the Python helper's urllib did.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
@@ -11,7 +13,9 @@ import { once } from 'node:events';
 
 const [repositoryArg, version, output] = process.argv.slice(2);
 if (!repositoryArg || version === undefined || !output) {
-  console.error('Usage: chatgpt-package.mjs <repository> <version or ""> <output>');
+  console.error(
+    'Usage: chatgpt-package.mjs <repository> <version or ""> <output>'
+  );
   process.exit(2);
 }
 const repository = repositoryArg.replace(/\/+$/, '');
@@ -24,15 +28,33 @@ function fail(message) {
   process.exit(1);
 }
 
+/** Ten minutes without data ends a request, as urllib's socket timeout did; a slow download still finishes. */
+const IDLE_MS = 600_000;
+
+/** The response, and `progress`, which a reader calls on each chunk to restart the idle timer. */
 async function fetchOk(url) {
   if (!url.startsWith('https://')) fail(`Refusing a non-HTTPS URL: ${url}`);
+  const controller = new AbortController();
+  let timer;
+  const progress = () => {
+    clearTimeout(timer);
+    timer = setTimeout(
+      () =>
+        controller.abort(
+          new Error(`${url} sent nothing for ${IDLE_MS / 1000} s.`)
+        ),
+      IDLE_MS
+    );
+    timer.unref();
+  };
+  progress();
   // The CDN refuses generic user agents.
   const response = await fetch(url, {
     headers: { 'User-Agent': 'mst-chatgpt-image/1' },
-    signal: AbortSignal.timeout(600_000),
+    signal: controller.signal,
   });
   if (!response.ok) fail(`${url} returned HTTP ${response.status}.`);
-  return response;
+  return { response, progress };
 }
 
 /** Version parts compared numerically when both are digits, else as text. */
@@ -57,7 +79,7 @@ function compareVersions(a, b) {
 
 const index = await (
   await fetchOk(`${repository}/dists/stable/main/binary-${arch}/Packages`)
-).text();
+).response.text();
 let entries = index
   .split('\n\n')
   .map((stanza) =>
@@ -71,7 +93,9 @@ let entries = index
         })
     )
   )
-  .filter((fields) => fields.Package === 'chatgpt' && fields.Architecture === arch);
+  .filter(
+    (fields) => fields.Package === 'chatgpt' && fields.Architecture === arch
+  );
 if (version) entries = entries.filter((entry) => entry.Version === version);
 if (!entries.length)
   fail(`No chatgpt ${version || 'package'} for ${arch} in ${repository}.`);
@@ -82,7 +106,9 @@ const entry = entries.reduce((best, next) =>
 const digest = createHash('sha256');
 let size = 0;
 const file = createWriteStream(output);
-for await (const chunk of (await fetchOk(`${repository}/${entry.Filename}`)).body) {
+const download = await fetchOk(`${repository}/${entry.Filename}`);
+for await (const chunk of download.response.body) {
+  download.progress();
   digest.update(chunk);
   size += chunk.length;
   if (!file.write(chunk)) await once(file, 'drain');
@@ -90,5 +116,7 @@ for await (const chunk of (await fetchOk(`${repository}/${entry.Filename}`)).bod
 file.end();
 await once(file, 'finish');
 if (digest.digest('hex') !== entry.SHA256 || size !== Number(entry.Size))
-  fail(`chatgpt ${entry.Version} didn't match the repository index's checksum.`);
+  fail(
+    `chatgpt ${entry.Version} didn't match the repository index's checksum.`
+  );
 console.log(`chatgpt ${entry.Version} (${arch}), SHA-256 ${entry.SHA256}`);

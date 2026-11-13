@@ -29,9 +29,10 @@ RUN apt-get update \
 # The app, from OpenAI's apt repository: the package the repository's index
 # lists for this architecture, checked against the index's SHA-256 and size.
 # The repository isn't added to apt, so nothing updates the app afterwards.
+# NODE_USE_ENV_PROXY: Node's fetch honors a build's HTTPS_PROXY only with it.
 COPY --chmod=755 bin/chatgpt-package.mjs /opt/mst/bin/chatgpt-package.mjs
 RUN set -e; \
-  /opt/mst/bin/chatgpt-package.mjs "${CHATGPT_REPOSITORY}" "${CHATGPT_VERSION}" /tmp/chatgpt.deb; \
+  NODE_USE_ENV_PROXY=1 /opt/mst/bin/chatgpt-package.mjs "${CHATGPT_REPOSITORY}" "${CHATGPT_VERSION}" /tmp/chatgpt.deb; \
   printf 'repo_add_once="false"\n' > /etc/default/chatgpt; \
   apt-get update; \
   apt-get install -y --no-install-recommends /tmp/chatgpt.deb; \
