@@ -359,10 +359,18 @@ describe('snapshot', () => {
 
   it('retries only a transient read, at most three times', async () => {
     const bus = new FakeBus([chatgpt().app]);
-    let failures = 1;
-    bus.hooks.applications = () =>
-      failures-- > 0 ? new AtspiError('accessibility_dbus_error') : undefined;
-    expect((await desktopFor(bus).snapshot()).length).toBe(4);
+    for (const transient of [
+      'accessibility_dbus_error',
+      'accessibility_node_defunct',
+      'accessibility_invalid_reply',
+      // A node that moved under a new parent mid-scan is seen twice.
+      'accessibility_tree_invalid',
+    ] as const) {
+      let failures = 2;
+      bus.hooks.applications = () =>
+        failures-- > 0 ? new AtspiError(transient) : undefined;
+      expect((await desktopFor(bus).snapshot()).length).toBe(4);
+    }
     let calls = 0;
     bus.hooks.applications = () => {
       calls += 1;

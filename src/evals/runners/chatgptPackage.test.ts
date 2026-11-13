@@ -17,12 +17,15 @@ const REPOSITORY = 'https://packages.example.com/chatgpt/deb';
 
 /**
  * Loaded with --import before the script: answers fetch from a fixture file,
- * so the real script runs without a network or a TLS server.
+ * so the real script runs without a network or a TLS server, and logs each
+ * request's URL and User-Agent.
  */
 const FETCH_STUB = `
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 const routes = JSON.parse(readFileSync(process.env.FETCH_FIXTURES, 'utf8'));
-globalThis.fetch = async (url) => {
+globalThis.fetch = async (url, init) => {
+  const userAgent = new Headers(init?.headers).get('user-agent');
+  appendFileSync(process.env.FETCH_LOG, JSON.stringify({ url: String(url), userAgent }) + '\\n');
   const route = routes[String(url)];
   if (!route) return new Response('missing', { status: 404 });
   return new Response(Buffer.from(route.body, 'base64'), { status: 200 });
@@ -97,6 +100,7 @@ async function pick(
         env: {
           PATH: `${dir}${path.delimiter}${process.env.PATH ?? ''}`,
           FETCH_FIXTURES: path.join(dir, 'routes.json'),
+          FETCH_LOG: path.join(dir, 'fetch.log'),
         },
       },
       async (error, stdout, stderr) => {
@@ -123,6 +127,21 @@ describe('chatgpt-package.mjs', () => {
     expect(result.code).toBe(0);
     expect(result.deb).toBe('newest');
     expect(result.stdout).toContain('chatgpt 26.10.0 (amd64), SHA-256 ');
+    // The image's requests name themselves, as the Python helper's did.
+    const requests = (await readFile(path.join(dir, 'fetch.log'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { url: string; userAgent: string });
+    expect(requests).toEqual([
+      {
+        url: `${REPOSITORY}/dists/stable/main/binary-amd64/Packages`,
+        userAgent: 'mst-chatgpt-image/1',
+      },
+      {
+        url: `${REPOSITORY}/pool/main/c/chatgpt/chatgpt_26.10.0_amd64.deb`,
+        userAgent: 'mst-chatgpt-image/1',
+      },
+    ]);
   });
 
   it('downloads a pinned version', async () => {

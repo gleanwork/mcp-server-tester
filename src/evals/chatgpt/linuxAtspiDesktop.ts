@@ -49,11 +49,15 @@ const TEXT_DEPTH_LIMIT = 16;
 const OUTPUT_LIMIT = 1024;
 const OPEN_TIMEOUT_MS = 30_000;
 const SNAPSHOT_ATTEMPTS = 3;
-/** A read that fails while the tree changes under a scan. Only the read-only scan repeats. */
+/**
+ * A read that fails while the tree changes under a scan, such as a node moved
+ * under a new parent and so seen twice. Only the read-only scan repeats.
+ */
 const TRANSIENT = new Set([
   'accessibility_dbus_error',
   'accessibility_node_defunct',
   'accessibility_invalid_reply',
+  'accessibility_tree_invalid',
 ]);
 const SESSION_KEYS: readonly string[] = [
   ...LINUX_CHATGPT_SESSION_ENVIRONMENT,

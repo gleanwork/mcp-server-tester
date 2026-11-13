@@ -226,17 +226,35 @@ function reference(item: unknown): AtspiRef {
     !/^:[0-9]+\.[0-9]+$/.test(item[0]) ||
     typeof item[1] !== 'string' ||
     !/^\/(?:[A-Za-z0-9_]+\/?)*$/.test(item[1]) ||
-    item[1] === '/org/a11y/atspi/null'
+    item[1] === ATSPI_NULL_PATH
   )
     throw invalid();
   return { destination: item[0], path: item[1] };
 }
 
-function references(value: unknown): AtspiRef[] {
+const ATSPI_NULL_PATH = '/org/a11y/atspi/null';
+
+/**
+ * A child list. AT-SPI sends the null reference for a child it can't produce
+ * (at-spi2-atk's spi_object_append_null_reference); libatspi, and so the
+ * Python drivers this replaced, skipped it, and so does this. Anything else
+ * malformed still fails the read.
+ */
+function childReferences(value: unknown): AtspiRef[] {
   if (!Array.isArray(value)) throw invalid();
   if (value.length > ATSPI_MAX_NODES)
     throw new AtspiError('accessibility_tree_budget');
-  return value.map(reference);
+  return value
+    .filter(
+      (item) =>
+        !(
+          Array.isArray(item) &&
+          item.length === 2 &&
+          typeof item[0] === 'string' &&
+          item[1] === ATSPI_NULL_PATH
+        )
+    )
+    .map(reference);
 }
 
 /** dbus-native's low-level variant: [signature AST, array of values]. */
@@ -321,7 +339,7 @@ export class AtspiBus {
   }
 
   async children(ref: AtspiRef): Promise<AtspiRef[]> {
-    return references(
+    return childReferences(
       await this.call({
         ...ref,
         interface: ATSPI_ACCESSIBLE,
