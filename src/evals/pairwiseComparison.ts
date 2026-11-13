@@ -101,6 +101,10 @@ export interface ComparePairwiseOptions {
   concurrency?: number;
   /** The eval's plugin settings; each judge gets its plugin's (ADR 0008). */
   settings?: SettingsSections;
+  mixedWriteSkipReason?: (
+    baseline: EvalCaseResult,
+    candidate: EvalCaseResult
+  ) => string | undefined;
   /**
    * Where each case is compared: called with the case's id, the pairwise
    * judges' names (one preference each, in order), and `judge`, which runs
@@ -123,6 +127,7 @@ export interface PairwiseCasePreference {
   /** Mean strength toward the preferred side, 0 to 1. */
   strength?: number;
   skipped?: boolean;
+  skipReason?: 'mixed-write-evidence';
   error?: string;
   reasoning?: string;
   /** Whether the swapped-order preference agreed, when the judge ran both orders. */
@@ -491,6 +496,18 @@ export async function comparePairwise(
   const cases = await mapLimited(ids, options.concurrency ?? 4, async (id) => {
     const b = baseline.get(id)!;
     const c = candidate.get(id)!;
+    const skipReason = options.mixedWriteSkipReason?.(b, c);
+    if (skipReason)
+      return {
+        id,
+        preferences: resolved.map((judge) => ({
+          judge: judge.label,
+          skipped: true,
+          skipReason: 'mixed-write-evidence' as const,
+          reasoning: skipReason,
+          ...judge.identity,
+        })),
+      };
     const judgeCase0: JudgeCase = buildJudgeCase(
       caseSource(b, options.cases?.get(id))
     );

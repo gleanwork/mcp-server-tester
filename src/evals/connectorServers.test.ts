@@ -11,7 +11,7 @@ import {
   it,
 } from 'vitest';
 import { z } from 'zod';
-import { runEval } from './runEval.js';
+import { gradeRun, runEval } from './runEval.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import type { MCPConfig, StdioMCPConfig } from '../config/mcpConfig.js';
@@ -844,5 +844,166 @@ describe('write records (ADR 0014)', () => {
     ).rejects.toThrow(
       'Connector server "careless" doesn\'t pass the launch context\'s writes to its dry-run proxy'
     );
+  }, 60_000);
+
+  it('compares mixed stopped-write modes only by opt-in and skips write cases', async () => {
+    const key = '_server_planned';
+    const compared: string[] = [];
+    const plugin: Plugin = {
+      meta: { name: 'mixed-write-plugin', namespace: 'mixed' },
+      connectors: {
+        planned: {
+          url: 'https://notes.example/mcp',
+          auth: { type: 'none' },
+          launch: (context) =>
+            notesProxyServer({
+              label: context.label,
+              ...(context.writes ? { writes: context.writes } : {}),
+            }),
+        },
+        serverPlanned: {
+          url: 'https://notes.example/mcp',
+          auth: { type: 'none' },
+          plannedWriteKey: key,
+          launch: (context) =>
+            notesProxyServer({
+              label: context.label,
+              marks: key,
+              forwardWrites: true,
+              ...(context.writes ? { writes: context.writes } : {}),
+            }),
+        },
+      },
+      clients: {
+        exercise: {
+          schema: z.object({ type: z.string() }).strict(),
+          evidence: 'structured',
+          run: async (input) => {
+            const server = input.servers[0]!;
+            const client = await createMCPClientForConfig(server);
+            const name = input.prompt === 'write' ? 'create_note' : 'lookup';
+            const args = name === 'create_note' ? { text: 'hi' } : {};
+            try {
+              const output = await client.callTool({ name, arguments: args });
+              return {
+                finalText: input.prompt,
+                events: [
+                  {
+                    kind: 'tool_call',
+                    source: 'mcp',
+                    server: server.label,
+                    name,
+                    arguments: args,
+                    output: JSON.stringify(output.content),
+                  },
+                ],
+              };
+            } finally {
+              await closeMCPClient(client);
+            }
+          },
+        },
+      },
+      pairwiseJudges: {
+        prefer: {
+          schema: z.object({}).strict(),
+          swapPositions: false,
+          compare: async (input) => {
+            compared.push(input.case.id ?? 'missing');
+            return { preference: 'tie' };
+          },
+        },
+      },
+    };
+    const configPath = path.join(dir, 'mixed.json');
+    const config = {
+      name: 'mixed',
+      datasets: ['./mixed-cases.json'],
+      client: 'mixed/client/exercise',
+      servers: {
+        planned: { connector: 'mixed/connector/planned' },
+        serverPlanned: { connector: 'mixed/connector/serverPlanned' },
+      },
+      variants: [
+        { name: 'baseline', servers: ['planned'] },
+        { name: 'candidate', servers: ['serverPlanned'] },
+      ],
+      pairwiseJudges: ['mixed/pairwise-judge/prefer'],
+      concurrency: 1,
+    };
+    await fs.writeFile(
+      path.join(dir, 'mixed-cases.json'),
+      JSON.stringify({
+        name: 'cases',
+        cases: [
+          { id: 'read', input: 'read' },
+          { id: 'write', input: 'write' },
+        ],
+      })
+    );
+    await fs.writeFile(configPath, JSON.stringify(config));
+    const options = {
+      configPath,
+      rootDir: dir,
+      plugins: [plugin],
+      credentialStore: store,
+      report: false,
+    };
+    await expect(runEval(options)).rejects.toThrow(
+      /different replies to a write/
+    );
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ ...config, allowMixedWriteModes: true })
+    );
+    const result = await runEval(options);
+    const pairwise = result.summary.variants.find(
+      (variant) => variant.name === 'candidate'
+    )!.pairwise!;
+    expect(compared).toEqual(['read']);
+    expect(pairwise.summary[0]).toMatchObject({ compared: 1, skipped: 1 });
+    expect(
+      pairwise.cases.find((entry) => entry.id === 'write')!.preferences[0]
+    ).toMatchObject({
+      skipped: true,
+      skipReason: 'mixed-write-evidence',
+      reasoning: 'Mixed write modes: a trial attempted a write.',
+    });
+    const runRecord = JSON.parse(
+      await fs.readFile(path.join(result.outputDir, 'run.json'), 'utf8')
+    );
+    expect(
+      runRecord.variants.map(
+        (variant: { writeModes: unknown }) => variant.writeModes
+      )
+    ).toEqual([{ planned: 'planned' }, { serverPlanned: 'server-planned' }]);
+    const report = buildRunReport(await readRunDirectory(result.outputDir));
+    expect(report.preferences.candidate!.write![0]).toMatchObject({
+      reasoning: expect.stringContaining('comparison skipped'),
+    });
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({
+        ...config,
+        allowMixedWriteModes: true,
+        redactStoredResponses: false,
+      })
+    );
+    const unredacted = await runEval(options);
+    const regraded = await gradeRun({ ...options, run: unredacted.outputDir });
+    const regradedPairwise = regraded.summary.variants.find(
+      (variant) => variant.name === 'candidate'
+    )!.pairwise!;
+    expect(regradedPairwise.summary[0]).toMatchObject({
+      compared: 1,
+      skipped: 1,
+    });
+    expect(
+      regradedPairwise.cases.find((entry) => entry.id === 'write')!
+        .preferences[0]
+    ).toMatchObject({
+      skipped: true,
+      skipReason: 'mixed-write-evidence',
+    });
   }, 60_000);
 });

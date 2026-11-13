@@ -56,6 +56,38 @@ function longer(calls: PairwiseJudgeInput[] = []): PairwiseJudgeDefinition {
 afterEach(() => resetPluginsForTests());
 
 describe('comparePairwise', () => {
+  it('records skipped pairs without calling a judge or reusing a stored verdict', async () => {
+    const calls: PairwiseJudgeInput[] = [];
+    install({ longer: longer(calls) });
+    let storedCalls = 0;
+    const out = await comparePairwise({
+      baseline: {
+        caseResults: [result('clean', 'short'), result('write', 'short')],
+      },
+      candidate: {
+        caseResults: [result('clean', 'longer'), result('write', 'longer')],
+      },
+      judges: [{ type: 'p/pairwise-judge/longer' }],
+      mixedWriteSkipReason: (baseline) =>
+        baseline.id === 'write'
+          ? 'Mixed write modes: a trial attempted a write.'
+          : undefined,
+      judgeCase: async (_caseId, _judges, judge) => {
+        storedCalls++;
+        return judge();
+      },
+    });
+    expect(calls).toHaveLength(2);
+    expect(storedCalls).toBe(1);
+    expect(
+      out.cases.find((entry) => entry.id === 'write')?.preferences[0]
+    ).toMatchObject({
+      skipped: true,
+      skipReason: 'mixed-write-evidence',
+      reasoning: 'Mixed write modes: a trial attempted a write.',
+    });
+    expect(out.summary[0]).toMatchObject({ compared: 1, skipped: 1 });
+  });
   it('compares matched cases in both orders and reports a candidate win rate', async () => {
     const calls: PairwiseJudgeInput[] = [];
     install({ longer: longer(calls) });
