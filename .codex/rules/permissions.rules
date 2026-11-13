@@ -8,6 +8,8 @@ prefix_rule(pattern=["gh","issue","create"], decision="prompt", justification="r
 prefix_rule(pattern=["gh","issue","comment"], decision="prompt", justification="repo rule ask: Bash(gh issue comment *)")
 prefix_rule(pattern=["gh","issue","close"], decision="prompt", justification="repo rule ask: Bash(gh issue close *)")
 prefix_rule(pattern=["gh","release"], decision="prompt", justification="repo rule ask: Bash(gh release *)")
+prefix_rule(pattern=["gh","workflow","run","release.yml"], decision="prompt", justification="repo rule ask: Bash(gh workflow run release.yml)")
+prefix_rule(pattern=["npx","release-it"], decision="prompt", justification="repo rule ask: Bash(npx release-it)")
 prefix_rule(pattern=["npm","publish"], decision="prompt", justification="repo rule ask: Bash(npm publish *)")
 prefix_rule(pattern=["pnpm","publish"], decision="prompt", justification="repo rule ask: Bash(pnpm publish *)")
 prefix_rule(pattern=["yarn","npm","publish"], decision="prompt", justification="repo rule ask: Bash(yarn npm publish *)")

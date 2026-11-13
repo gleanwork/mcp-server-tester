@@ -220,7 +220,7 @@ Cowork's `mode: "first-party"` uses existing HTTPS connectors in a signed-in Cla
 - [Architecture decisions](./docs/adr/) — why MST is built as it is, including [detached runs](./docs/adr/0007-detached-runs-move-the-coordinator.md): a run on a runner that keeps going with the laptop off
 - [Glossary](./CONTEXT.md) — the terms MST uses
 - [The run report](./docs/ui-reporter.md): the report every eval run writes
-- [Development](./docs/development.md) — contributing and building
+- [Contributing](./CONTRIBUTING.md) — setting up, building and testing, and the pull request process
 - [Migration Guide (v1.x → v2.0)](./docs/migrations/migration-2.0.md) — MCP SDK v2 and protocol versions
 - [Migration Guide (v0.12 → v1.0)](./docs/migrations/migration-1.0.md) — upgrading from pre-1.0 releases
 

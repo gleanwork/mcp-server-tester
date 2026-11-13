@@ -2,6 +2,8 @@
 
 This file provides guidance to coding agents when working with code in this repository.
 
+It is the one home for this repo's conventions, checks and recipes for adding things. `CONTRIBUTING.md` covers setup for people and links here; `CONTEXT.md` defines the domain terms; `REVIEW.md` has the review rules. Usage of the library is documented in `docs/` and the shipped skills in `skills/`, not here. `tests/agentFiles.test.ts` fails when a path or package export these files name no longer exists.
+
 ## Project Overview
 
 `@gleanwork/mcp-server-tester` is a Playwright-based testing and evaluation framework for Model Context Protocol (MCP) servers. It provides Playwright fixtures for automated testing and data-driven eval datasets with optional LLM-as-a-judge scoring.
@@ -36,60 +38,37 @@ npm run format:check        # Check formatting
 - **`config/`** - `MCPConfig` types and Zod validation for stdio/HTTP transports, `protocolMatrix()`
 - **`mcp/`** - Client factory (`createMCPClientForConfig`), fixtures (`MCPFixtureApi`), protocol selection (`protocol.ts`), wire tap, and response normalization. Built on the MCP TypeScript SDK v2 (`@modelcontextprotocol/client`). `mcp/connection.ts` is the one record of what MST knows about a client it created (requested protocol, connection target for raw probes, wire tap, owned undici agent); read it with `connectionOf(client)`, and add new per-connection facts there rather than in a new side table
 - **`skills/`** - Agent Skills over MCP (SEP-2640): wire schemas, entry validation, and a skills client (the SDK has no skills API yet)
-- **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities. `auth/grants/` holds connectors and refresh grants: connector lookup and grant grouping (`connectors.ts`), sign-in, refresh and revocation (`grants.ts`), and the built-in credential store `mst/credential-store/local` (`localStore.ts`). A run stages and renews connector tokens in `evals/connectorServers.ts`
+- **`auth/`** - OAuth 2.1 with PKCE (`PlaywrightOAuthClientProvider`) and static token utilities. `auth/grants/` holds connectors and refresh grants: connector lookup and grant grouping (`connectors.ts`), sign-in, refresh and revocation (`grants.ts`), the local credential store, grant files on this machine (`localStore.ts`), and `credentialStoreFor()` (`stores.ts`), which resolves `--store`: no value is the default local directory, a path is another local directory, and `<namespace>/credential-store/<name>` is a plugin's store. The local store is not an extension, so no `--store` reference names it. A run stages and renews connector tokens in `evals/connectorServers.ts`
 - **`assertions/`** - Unified assertion architecture (see below)
-- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `api` client on a Playwright test's connection, an eval's client, a custom `executeCase`) returns a typed `CaseExecution` (`completed` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTranscript` view, resolves judge settings (including the eval config's judges), then calls the validators. Built-in and plugin clients collect through `open()` sessions in `evals/desktopBatch.ts` (`collectClientBatch`, one loop for readiness, reset, diagnosis, limits, reporting and close). Run-only local clients keep their concurrent per-case path; workers wrap them in one-shot sessions. The desktop helper owns leases, the native-session ledger across resets, existing reset retries and cleanup; a desktop client supplies prepare, one case, reset, optional diagnose and dispose. MST checks every client's servers once per batch, before its first trial (ADR 0011): `evals/readinessCheck.ts` owns which servers, the retries (10 s, then 30 s; `MST_MCP_READINESS_RETRY_S`) and the failure, a retryable `setup` ending for each trial of the batch, over the probe and rule in `evals/mcpReadiness.ts` (`checkMcpServers`, `isMcpServerReady`). The local dispatch (`caseExecution.ts`, `prepareClientBatch.ts`) and the worker (`environments/collect.ts`) call `readyBatch`, with the client each trial runs on; a desktop client whose servers resolve only after `prepare` (Cowork) is marked `checksServersAfterPrepare`, and `desktopBatch.ts` checks its servers after `prepare` instead. How a desktop client runs follows from `process.platform` on the machine that runs the trial, read when its batch starts, never from a config option (ADR 0011, `evals/desktopOS.ts`); its options that one OS uses, and `maxActions` against that OS's range, are checked there (`coworkOptionIssues`, `chatgptOptionIssues`) and, through `assertClientSupports`, when the config loads, against `runnerOS` (`runners/builtinRunners.ts`). The client boundary selects concrete `cowork/{macos,linux}.ts`, `chatgpt/{macos,linux}.ts` or `codex-app/{macos,linux}.ts` entry points; there is no platform-selector module. Codex app reuses ChatGPT's desktop operations with its own product identity. `cowork/interaction.ts` holds native receipts and typed failures; new receipts omit driver identities, while readers keep accepting old ones. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
+- **`evals/`** - Dataset types, loader, and runner (uses validators internally). `evals/caseExecution.ts` is the only place a case runs: every path (the `api` client on a Playwright test's connection, an eval's client, a custom `executeCase`) returns a typed `CaseExecution` (`completed` or `failed`), and the runner reads its fields instead of inspecting `response`. `caseExecution.golden.test.ts` pins the resulting `EvalCaseResult` for every path. `evals/grading.ts` grades a case's `assertions` block: it decides once whether the evidence can support tool-call assertions (`toolEvidenceGap`), builds the `toolCallTranscript` view, resolves judge settings (including the eval config's judges), then calls the validators. Built-in and plugin clients collect through `open()` sessions in `evals/desktopBatch.ts` (`collectClientBatch`, one loop for readiness, reset, diagnosis, limits, reporting and close). Run-only local clients keep their concurrent per-case path; workers wrap them in one-shot sessions. The desktop helper owns leases, the native-session ledger across resets, existing reset retries and cleanup; a desktop client supplies prepare, one case, reset, optional diagnose and dispose. MST checks every client's servers once per batch, before its first trial (ADR 0011): `evals/readinessCheck.ts` owns which servers, the retries (10 s, then 30 s; `MST_MCP_READINESS_RETRY_S`) and the failure, a retryable `setup` ending for each trial of the batch, over the probe and rule in `evals/mcpReadiness.ts` (`checkMcpServers`, `isMcpServerReady`). The local dispatch (`caseExecution.ts`, `prepareClientBatch.ts`) and the worker (`runners/collect.ts`) call `readyBatch`, with the client each trial runs on; a desktop client whose servers resolve only after `prepare` (Cowork) is marked `checksServersAfterPrepare`, and `desktopBatch.ts` checks its servers after `prepare` instead. How a desktop client runs follows from `process.platform` on the machine that runs the trial, read when its batch starts, never from a config option (ADR 0011, `evals/desktopOS.ts`); its options that one OS uses, and `maxActions` against that OS's range, are checked there (`coworkOptionIssues`, `chatgptOptionIssues`) and, through `assertClientSupports`, when the config loads, against `runnerOS` (`runners/builtinRunners.ts`). The client boundary selects concrete `cowork/{macos,linux}.ts`, `chatgpt/{macos,linux}.ts` or `codex-app/{macos,linux}.ts` entry points; there is no platform-selector module. Codex app reuses ChatGPT's desktop operations with its own product identity. `cowork/interaction.ts` holds native receipts and typed failures; new receipts omit driver identities, while readers keep accepting old ones. macOS Swift controllers build and run through `evals/nativeHelper.ts`, which owns their environment policy
 - **`llm/`** - `resolveLLMEndpoint()`: the one place MST's own LLM calls (SDK client, judges) get their base URL and credential, including gateway bearer tokens and `MST_LLM_AUTH_COMMAND`. New LLM consumers resolve through it rather than reading `*_API_KEY` themselves. See `docs/llm-gateways.md`. `llm/modelDefaults.ts` holds `BUILTIN_MODELS`, the one table of default model IDs (api client, LLM judges, agentic judges, Computer Use planner), and the `models` block that `mst.config.json` files and eval configs override it with (ADR 0015). Never hardcode a model ID elsewhere: `INIT_MODELS` (what `mst init` writes) sits beside it. A judge names the entry it takes its model from with `modelSlot`. A run warns about, and records in `run.json` as `builtinModels`, every built-in model it falls back on
 - **`evals/runFormat.ts`** - The `mst.run/v1` run directory: run IDs, paths, the writer and the Zod schemas `schema/run/v1/` is generated from (`npm run schema:generate`)
 - **`evals/runHistory.ts`** - An eval's history (`history.json`, `mst.history/v1`, ADR 0012): a row per run, built from the run's files and cached; eras and each variant's change since the previous run are derived from all rows on every write. Every run writes it locally and in its result store; `mst history` reads it
 - **`judge/`** - LLM-as-a-judge. `llmJudge.ts` is the one core (prompt, verdict parser, output guard); each provider in `JUDGE_PROVIDER_KINDS` (`anthropic`, `vertex-anthropic`, `anthropic-agent-sdk`, `openai`, `google`) is a completion adapter mapped in `judgeClient.ts`. `questionJudge.ts` is the yes-or-no judge core (ADR 0009): `defineQuestionJudge` asks one question per model call about the transcript that `judgeTranscript.ts` renders, and each answer is yes, no or `unknown`; the prompts are files in `judge/prompts/`, and a judge's version covers them and the transcript format. `judge/agentic/` holds agentic judges (`agenticJudge`, `agenticPairwiseJudge`), which run an agent over a workspace of the trial's evidence on the `claude-agent` or `codex` runtime, and `stagedPairwiseJudge` (`stagedJudge.ts`), which runs a staged judge: a serialized bundle of files, prepare programs and agent stages. `builtinJudges.ts` has the built-in `rubric` judge
 - **`proxy/`** - The dry-run proxy (`dryRunProxyServer()`), which a connector's `launch` puts in front of a vendor server to let reads through and block writes, and simulated writes (`simulatedWrites.ts`), which answer blocked writes with a success reply when an eval config sets `simulateWrites`. The proxy appends every write it stops to a JSONL write record (`writeRecordWriter.ts`; MST reads it with `writeRecordLines.ts`; the format name is in `writeRecordFormat.ts`, so neither bundle carries the other). In `evals/`, `writeModes.ts` resolves each server's write mode and runs the load check (ADR 0014), `writeRecord.ts` cuts each trial's part of the record and matches it with the transcript (also in batches and on workers), and the `writes` grader is `assertions/validators/writes.ts`. The readiness check refuses a server with no write mode that lists a write tool
-- **`evals/runners/`** - Where trials are collected (ADR 0004; ADR 0013 renamed environments to runners): the `runner` kind's built-ins `local` (`builtinRunners.ts`) and `docker` (`docker.ts`: containers from the Linux Cowork image in `docker/cowork-linux/`, one per Docker context at a time, over the Docker CLI; `dockerContainers.ts` removes them when MST exits or its process is gone; `mst runner setup docker` builds the image), the channel helper `machineRunner` (`channel.ts`), the `mst.shard/v1` messages (`protocol.ts`), the coordinator's sharded collect (`shardedCollect.ts`), the worker behind the hidden `mst collect` (`collect.ts`), and the run-wide `limits` (`limiter.ts`)
+- **`evals/runners/`** - Where trials are collected (ADR 0004; ADR 0013 renamed environments to runners): the `runner` kind's built-ins `local` (`builtinRunners.ts`) and `docker` (`docker.ts`: containers from the Linux Cowork image in `docker/cowork-linux/`, or for `chatgpt` and `codex-app` the Linux ChatGPT image in `docker/chatgpt-linux/`, one per Docker context at a time, over the Docker CLI; `dockerContainers.ts` removes them when MST exits or its process is gone; `mst runner setup docker` builds the images), the channel helper `machineRunner` (`channel.ts`), the `mst.shard/v1` messages (`protocol.ts`), the coordinator's sharded collect (`shardedCollect.ts`), the worker behind the hidden `mst collect` (`collect.ts`), the grade worker behind the hidden `mst grade-shard` (`gradeShard.ts`), and the run-wide `limits` (`limiter.ts`)
 - **`plugins/`** - ESLint-style plugins: the `Plugin` shape and validation (`plugin.ts`), the process-wide extension table keyed by `<namespace>/<kind>/<name>` (names parsed and kind-checked in `plugin.ts` and `extensions.ts`), where each kind's lookup (next to its built-ins) adds them under bare names (`extensions.ts`), and the loader (`loadPlugins.ts`). `evals/evalPlugins.ts` loads an eval's plugins and checks it only references namespaces it loads. Domain terms are in `CONTEXT.md`; decisions in `docs/adr/`
 - **`spec/`** - Conformance check registry (`checks/core.ts`, `checks/modern.ts`, `checks/skills.ts`), raw probe channel, and cross-era checks
 - **`reporters/`** - The run report UI (React) and the MCP Playwright reporter, which reports evals only: each Playwright run's eval results are a `mst.run/v1` run (a variant per project) with the same report `mst run` writes (`evals/runReport.ts`). Tests and conformance checks are in Playwright's own reporter. `reporters/channel.ts` owns every attachment the reporter reads (names, payload types, read-side Zod schemas). Write with `attachReporterData(testInfo, { kind, data })`, never `testInfo.attach('mcp-...')` directly
-- **`cli/`** - The CLI, shipped as `mst` and `mcp-server-tester` (the same binary): `init`, `generate`, `login`, `token`, `auth`, `datasets`, `judges`, `run`, `grade`, `batch`, `cowork`, `open`, `history`, and the hidden `collect` that a worker runs
+- **`cli/`** - The CLI, shipped as `mst` and `mcp-server-tester` (the same binary). `src/cli/index.ts` defines every command, one directory each in `src/cli/commands/`; `mst --help` lists them. The hidden commands are the ones a coordinator or worker runs: `collect`, `grade-shard`, `coordinate` and `env`. `docs/cli.md` documents the public ones
 
 ### Assertions Module (`src/assertions/`)
 
 The assertion architecture provides a single API for both inline tests and data-driven evals:
 
-- **`validators/`** - Pure validation functions: `validateText`, `validateSchema`, `validatePattern`, `validateError`, `validateSize`, `validateResponse`, `validateToolCalls`, `validateToolCallCount`, `validateJudge`, `validateSnapshot`, `validatePredicate`
-- **`matchers/`** - Playwright custom matchers (see table below). Each is a thin adapter over a validator: it returns the validator's `pass` and lets Playwright apply `.not` (never negate inside a matcher)
+- **`validators/`** - Pure validation functions: `validateText`, `validateSchema`, `validatePattern`, `validateError`, `validateSize`, `validateResponse`, `validateToolCalls`, `validateToolCallCount`, `validateJudge`, `validateSnapshot`, `validatePredicate`, `validateWrites`
+- **`matchers/`** - Playwright custom matchers, all added in the one `assertions.extend({})` call in `matchers/index.ts` and documented in `docs/assertions.md`. Each is a thin adapter over a validator: it returns the validator's `pass` and lets Playwright apply `.not` (never negate inside a matcher)
 
-```typescript
-// Inline test usage
-import { expect } from '@gleanwork/mcp-server-tester';
+### Library Usage
 
-test('weather tool', async ({ mcp }) => {
-  const result = await mcp.callTool('get_weather', { city: 'London' });
-  expect(result).toContainToolText('temperature');
-  expect(result).toMatchToolSchema(WeatherSchema);
-  expect(result).not.toBeToolError();
-});
+How to use the library is in the user docs. Read the page before you change the behavior it describes, and update it in the same PR:
 
-// Programmatic validation
-import { validateText } from '@gleanwork/mcp-server-tester';
+- Matchers, validators, snapshots and sanitizers, rubrics: `docs/assertions.md`
+- Eval cases, trials and `passThreshold`, tool-call assertions, concurrency: `docs/evals-guide.md` and `docs/evaluation-framework.md`
+- Judges in evals, juries, pairwise judges and calibration with `mst judges check`: `docs/evaluation-framework.md`; the built-in judges' measured accuracy: `docs/judges.md`
+- Fixtures (`createMCPFixture`, `closeMCPClient`, the auth fixture) and every export: `docs/api-reference.md`
 
-const result = validateText(response, ['temperature']);
-if (!result.pass) console.log(result.message);
-```
-
-### Available Matchers
-
-| Matcher                                  | Purpose                                 |
-| ---------------------------------------- | --------------------------------------- |
-| `toMatchToolResponse(expected)`          | Exact response match (deep equal)       |
-| `toContainToolText(text)`                | Response contains text substring(s)     |
-| `toMatchToolPattern(pattern)`            | Response matches regex pattern(s)       |
-| `toMatchToolSchema(schema)`              | Response validates against Zod schema   |
-| `toMatchToolSnapshot(name, sanitizers?)` | Response matches saved snapshot         |
-| `toBeToolError(expected?)`               | Response is (or is not) an error        |
-| `toPassToolJudge(rubric, options?)`      | Response passes LLM-as-judge evaluation |
-| `toHaveToolResponseSize(options)`        | Response size is within bounds          |
-| `toSatisfyToolPredicate(fn, desc?)`      | Response satisfies custom predicate     |
-| `toHaveToolCalls(assertion)`             | The client called the expected tools    |
-| `toHaveToolCallCount(options)`           | The client made N tool calls            |
+This repo's own snapshots live in `tests/__snapshots__/` (platform-free `snapshotPathTemplate`), exercised by `tests/snapshot.spec.ts`; update them with `npx playwright test --update-snapshots`. The `toMatchToolSnapshot` matcher runs `validateSnapshot` against `playwrightSnapshotStore(expect)`; unit tests pass their own `SnapshotStore`.
 
 ### Playwright Fixtures (`src/fixtures/mcp.ts`)
 
@@ -115,8 +94,9 @@ The public API is tiered. Each name is exported from exactly one of these entry 
 - `./auth` (`src/entries/auth.ts`) - Low-level OAuth: discovery, token storage, client credentials
 - `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop-run metadata types, Cowork settings and audit, client plugins (may change between minors)
 - `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
-- `./cowork-linux-runtime`, `./cowork-linux-first-party-runtime`, `./chatgpt-linux-runtime` - The Linux desktop drivers' Node entry points (`dist/cowork/linuxThirdParty.js`, `dist/cowork/linuxFirstParty.js`, `dist/chatgpt/linuxDriver.js`), exported as files rather than code; MST runs them with `process.execPath`
-- `./cowork-linux-image` - The Linux Cowork image's Dockerfile (`docker/cowork-linux/`, with its scripts and seccomp profile), exported as a file so `mst runner setup docker` finds the directory
+- `./cowork-linux-runtime` (`src/evals/cowork/linuxThirdPartyMain.ts`), `./chatgpt-linux-runtime` (`src/evals/chatgpt/linuxDriverMain.ts`) - The Node entry points of the managed Cowork and ChatGPT Linux desktop drivers, exported as files rather than code; MST runs them with `process.execPath`
+- `./cowork-linux-first-party-runtime` (`src/evals/cowork/linuxFirstPartyMain.ts`) - The Node entry point of the account-backed Linux desktop driver that Cowork's first-party mode runs in a plugin-prepared Linux runtime
+- `./cowork-linux-image`, `./chatgpt-linux-image` - The Linux Cowork and ChatGPT images' Dockerfiles (`docker/cowork-linux/`, with its scripts and seccomp profile, and `docker/chatgpt-linux/`), exported as files so `mst runner setup docker` finds the directories
 
 The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`), so module state (the extension table, classes) is one instance across them. The CommonJS root and the fixtures/reporter bundles are separate copies; only `Symbol.for` state (the extension table and the plugin-load cache) is shared with those. New public names go in the narrowest tier that fits. `npm run knip` (in CI) fails on files, exports or dependencies nothing uses, so delete dead code rather than leaving it exported. `src/publicApi.test.ts` pins each entry point's runtime exports: after a deliberate change, update it with `npx vitest run src/publicApi.test.ts -u` and note any removal in the migration guides. Tests count as users, so an export only a test imports is not flagged.
 
@@ -128,101 +108,20 @@ The subpaths are ESM only and share chunks with the ESM root (tsup `splitting`),
 
 `website/` is a Docusaurus site with its own `package.json`. It renders the pages in `docs/` where they are (one copy, read the same on GitHub), and serves them and `skills/` to AI agents over MCP at `/mcp` through `docusaurus-plugin-mcp-server` (`website/api/mcp.mjs`). Write pages in `docs/` as GitHub Markdown: the site parses `.md` as CommonMark, not MDX. A page links to repo files outside `docs/` with relative paths as usual; `website/src/remark/repoLinks.mts` points them at GitHub and fails the build when the target is missing. A new page needs a place in `website/sidebars.ts`. `tests/site/` tests the MCP endpoint with MST (`npm run test:site`, after a site build); the main Playwright config ignores it. The site deploys only when a release is tagged: `.github/workflows/deploy-website.yml` runs on `v*` tags (or by hand for a tag), builds with the Vercel CLI and uploads the prebuilt output to production. Pull requests and pushes to `main` don't deploy; `website/vercel.json` sets `git.deploymentEnabled: false`, so Vercel's Git integration makes no previews or production builds. The workflow needs the `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` secrets. The Vercel project (`glean-developers/mcp-server-tester`) has `website` as its Root Directory, so Vercel reads `website/vercel.json` and runs `website/api/`, and the CLI runs from the repo root; with the repo root as Root Directory, Vercel builds the library instead and fails. The site's URL, `https://mcp-server-tester-docs.vercel.app`, is set in `website/docusaurus.config.ts`; change it there if the production domain changes.
 
-### Trials and Pass Rate
-
-Eval cases can run several trials to compute a pass rate:
-
-```json
-{
-  "id": "search-trigger",
-  "input": "Find recent docs about planning",
-  "trials": 5,
-  "passThreshold": 0.8,
-  "assertions": {
-    "toolsTriggered": {
-      "calls": [{ "name": "search", "required": true }]
-    }
-  }
-}
-```
-
-- `trials`: Run case N times (default: 1). When > 1, result has `passRate` (0-1) and `trialResults[]`
-- `passThreshold`: Minimum share of trials that must pass (default: 1.0)
-
-### Concurrency
-
-Run multiple eval cases in parallel:
-
-```typescript
-await runEvalDataset(
-  { dataset, client: 'api', model: 'claude-haiku-4-5', concurrency: 4 },
-  { mcp, testInfo }
-);
-```
-
-### Tool Call Assertions
-
-```json
-"assertions": {
-  "toolsTriggered": {
-    "calls": [{ "name": "search", "required": true }],
-    "order": "any",
-    "exclusive": false
-  },
-  "toolCallCount": { "min": 1, "max": 5 }
-}
-```
-
-Validators: `validateToolCalls(response, assertion)`, `validateToolCallCount(response, options)`
-
 ### Tests and Evals
 
 - **Tool tests** are Playwright tests: `mcp.callTool(name, args)` (or `mcp.request(method, params, schema)`) and the matchers. Fast, deterministic, free. Use for regression testing. `mst generate` writes them as a spec. There are no direct eval cases: `toolName`, `args`, `request` and `mode` on a case fail with what replaces them, as do the tool-response assertions (`response`, `schema`, `snapshot`, `isError`, `responseSize`).
 - **Evals** run every case (`input` + `assertions`) on a client and its model. Non-deterministic, costs money, measures tool description quality. In a Playwright test, `runEvalDataset({ dataset, client: 'api', model })` runs cases on the `api` client over the test's connection; other clients (`claude-code`, `codex-cli`, `cowork`, `chatgpt`, `codex-app`, plugins) run in evals (`mst run`). A case can set its own `client`, `model` and `clientOptions`; on the desktop clients, which run a variant's cases in one app, a case that changes the variant's settings fails when its dataset loads (`assertCaseClients` in `evals/runEval.ts`). The `api` client's `skills: 'catalog' | 'preload'` option offers the server's Agent Skills (skills the model loads are `kind: 'skill'` events for `toolsTriggered`; preloads are not).
 
-### Snapshot Testing
-
-`toMatchToolSnapshot(name, sanitizers?)` compares tool responses against saved baselines. Requires Playwright `testInfo` (destructure from second arg: `async ({ mcp }, testInfo)`). The matcher runs `validateSnapshot` against `playwrightSnapshotStore(expect)`; unit tests pass their own `SnapshotStore`. This repo's own snapshots live in `tests/__snapshots__/` (platform-free `snapshotPathTemplate`), exercised by `tests/snapshot.spec.ts`.
-
-Built-in sanitizers: `'uuid'`, `'iso-date'`, `'timestamp'`, `'jwt'`, `'objectId'`
-
-Custom sanitizers:
-
-- Field removal: `{ remove: ['createdAt', 'requestId'] }`
-- Regex replacement: `{ pattern: /token_[a-z0-9]+/, replacement: '[TOKEN]' }`
-
-Update snapshots: `npx playwright test --update-snapshots`
-
 ### The api and claude-code Clients
 
 `runApiClient()` and `runClaudeCodeClient()` (internal, in `src/evals/mstClient/run.ts`) return `ClientRunResult` directly: the API client drives a model through the Vercel AI SDK over the test's MCP connection; Claude Code runs as a CLI with its own connection. `clientTranscript.ts` derives the assertion/report view once at the runner boundary; native parsers use its `toolCallEvents` helper for event attribution, not a second result envelope. Tests and evals reach it only through `runEvalDataset`/`runEvalCase` or an eval. The ChatGPT app's clients (`chatgpt`, `codex-app`) are ordinary client code: `chatgptClient.ts` runs each trial through `src/evals/chatgpt/turn.ts` (check settings, use the batch's app session, snapshot native sessions, submit once, capture and attribute the native turn). `./experimental/clients` exports only the metadata types results carry (`src/evals/clientTelemetryTypes.ts`).
-
-Provider packages are dynamically imported — install `ai` + `@ai-sdk/<provider>` (e.g., `npm install ai @ai-sdk/anthropic`).
-
-Multiple trials: set `trials` and `passThreshold` on an eval case. The runner executes N times, computes `passRate` (0–1), and passes if rate >= threshold.
-
-### Fixture Composition
-
-- **Standard**: `import { test, expect } from '@gleanwork/mcp-server-tester/fixtures/mcp'` — provides `mcp: MCPFixtureApi` and `mcpClient: Client`
-- **Manual**: `createMCPFixture(client, testInfo?, options?)` — for custom fixture hierarchies or non-Playwright usage
-- **Auth**: `import { test } from '@gleanwork/mcp-server-tester/fixtures/mcpAuth'` — adds OAuth/token auth setup
-- Always call `closeMCPClient(client)` in teardown when using manual fixtures
 
 ### Conformance Checking
 
 `runConformanceChecks(mcp)` validates MCP protocol compliance for the negotiated era. Checks are definitions in `src/spec/checks/` with `eras`, `severity` ('must' fails the result, 'should' is a warning), and `specRef`. Legacy connections run the core checks unchanged from 1.x; 2026-07-28 connections add the modern checks (some send raw probes via `src/spec/probe.ts`; `probe: false` skips them); servers declaring the skills extension get the skills checks in every era. `runCrossEraChecks(config)` compares what a server serves across protocols. Attach results to the reporter via `testInfo`.
 
 To add a check: add a `ConformanceCheckDefinition` to the right file in `src/spec/checks/`, and prove it with a failing server. `tests/mocks/rawModernServer.mjs` (`FAULTS=...`) and `tests/mocks/mockSkills.ts` (`MOCK_SKILL_FAULTS=...`) switch on individual spec violations.
-
-### Judge / Rubrics
-
-`toPassToolJudge(rubric, options?)` sends the tool response to an LLM for quality evaluation. Requires `await`.
-
-Built-in rubrics: `'correctness'`, `'completeness'`, `'groundedness'`, `'instruction-following'`, `'conciseness'`
-
-Custom rubrics: pass a string prompt or `{ text: '...' }` object. Use `judgeReps` (case-level) or `reps` (assertion-level) for variance reduction — scores are averaged across repetitions.
-
-Custom judges come from plugins: a plugin's `judges: { completeness: { schema, evaluate } }` is used as `{ judge: 'acme/judge/completeness' }` in `toPassToolJudge`, or listed in a case's `judges` (`"acme/judge/completeness"` or `{ "type": "acme/judge/completeness", ...options }`). Pass plugins with `test.use({ mcpPlugins: [plugin] })`, `runEvalDataset({ dataset, plugins })`, or an eval config's `plugins`.
 
 ### Debugging
 
@@ -309,19 +208,15 @@ npm run test:playwright     # Integration tests (Playwright)
 npm run test:site           # The site's MCP server, tested with MST
 ```
 
-If `format:check` or `lint` fails, run `npm run format` or `npm run lint:fix` to auto-fix, then re-check. If `docs:check` fails with "content-mismatch", update the snippet line range in the markdown file to match the current source. If `build:check` fails with `... is imported from external module ... but never used in "dist/..."`, a bundle uses part of a module whose other code needs that import: move that code into its own module (as `toolSurfaceProxyServer.ts` and `simulatedWriteRecords.ts` are) rather than silencing the warning.
+If `format:check` or `lint` fails, run `npm run format` or `npm run lint:fix` to auto-fix, then re-check. If `docs:check` fails with "content-mismatch", update the snippet line range in the markdown file to match the current source. If `build:check` fails with `... is imported from external module ... but never used in "dist/..."`, a bundle uses part of a module whose other code needs that import: move that code into its own module (as `toolSurfaceProxyServer.ts` and `writeRecordFormat.ts` are) rather than silencing the warning.
 
 **Keep in sync:** If `.github/workflows/ci.yml` changes, update this checklist to match.
-
-## Commit Messages
-
-Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`
 
 ## Adding New Features
 
 ### New Built-in Extension (dataset source, client, judge, metric, result store, runner)
 
-Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSources()`, `builtinClientDefinitions()`, `builtinJudges()` (`src/judge/builtinJudges.ts`), `BUILT_IN_METRICS`, `builtinResultStores()`, or `builtinRunners()` (`src/evals/runners/builtinRunners.ts`). Pairwise judges and connectors have no built-ins: their lookups start empty. Each kind's lookup (`getClient`, `getJudge`, ...) lives next to that record and installs it on first use; the extension table (`src/plugins/extensions.ts`) knows no built-ins. Organization-specific extensions belong in a plugin, not here.
+Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSources()`, `builtinClientDefinitions()`, `builtinJudges()` (`src/judge/builtinJudges.ts`), `BUILT_IN_METRICS`, `builtinResultStores()`, or `builtinRunners()` (`src/evals/runners/builtinRunners.ts`). Pairwise judges, connectors and credential stores have no built-ins: their lookups start empty. The local credential store is not an extension; `credentialStoreFor()` in `src/auth/grants/stores.ts` uses it when `--store` is unset or a directory. Each kind's lookup (`getClient`, `getJudge`, ...) lives next to that record and installs it on first use; the extension table (`src/plugins/extensions.ts`) knows no built-ins. Organization-specific extensions belong in a plugin, not here.
 
 ### New Validator
 
@@ -356,10 +251,10 @@ Supported `LLMProvider` values for the `api` client's `provider` option (defined
 
 To add a new provider:
 
-1. Add to `LLMProvider` union in `src/evals/mstClient/types.ts`
+1. Add to `LLMProvider` union in `src/evals/mstClient/types.ts`, with the package to install in its doc comment
 2. Add to `ProviderSchema` in `src/evals/mstClient/clientOptions.ts` (the dataset schema and the API client's supported set derive from it)
-3. Create an adapter in `src/evals/mstClient/adapters/`
-4. Register in `src/evals/mstClient/adapter.ts`
+3. Add a `case` to `loadModel()` in `src/evals/mstClient/adapters/vercel.ts` that dynamically imports the provider's AI SDK package. For an Anthropic- or OpenAI-shaped API, resolve the endpoint with `resolveLLMEndpoint`, as the `anthropic` and `openai` cases do, so gateways work
+4. If MST should pick a model when a variant names none, add one to `BUILTIN_MODELS.api` in `src/llm/modelDefaults.ts`
 
 ### New Transport Type
 
@@ -376,7 +271,7 @@ To add a new provider:
 
 ## Ask first
 
-Agents ask a person in the current conversation before running these commands or tools in this repository. The rules live in `.claude/settings.json` (the `self-merge` preset); edit them there and run `configure-agents review` to update this section.
+Agents ask a person in the current conversation before running these commands or tools in this repository. The rules live in `.claude/settings.json`; edit them there and run `configure-agents review` to update this section.
 
 - `Bash(gh pr comment *)`
 - `Bash(gh pr review *)`
@@ -385,7 +280,9 @@ Agents ask a person in the current conversation before running these commands or
 - `Bash(gh issue comment *)`
 - `Bash(gh issue close *)`
 - `Bash(gh release *)`
+- `Bash(gh workflow run release.yml)`
 - `Bash(gh workflow run release.yml*)`
+- `Bash(npx release-it)`
 - `Bash(npx release-it*)`
 - `Bash(npm publish *)`
 - `Bash(pnpm publish *)`
