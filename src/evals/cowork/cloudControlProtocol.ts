@@ -10,6 +10,8 @@ import {
 export const COWORK_CLOUD_CONTROL_PROTOCOL = 'mst.cowork-cloud-control/v1';
 /** Includes the JSONL newline. Oversized evidence fails rather than truncates. */
 export const COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES = 16 * 1024 * 1024;
+/** Longest `error` a response may carry, in UTF-16 code units. */
+export const COWORK_CLOUD_CONTROL_MAX_ERROR_LENGTH = 1024;
 const header = {
   protocol: z.literal(COWORK_CLOUD_CONTROL_PROTOCOL),
   id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
@@ -40,7 +42,11 @@ export type CoworkCloudControlRequest = z.infer<
 export const CoworkCloudControlResponseSchema = z.discriminatedUnion('ok', [
   z.object({ ...header, ok: z.literal(true), result: z.unknown() }).strict(),
   z
-    .object({ ...header, ok: z.literal(false), error: z.string().max(1024) })
+    .object({
+      ...header,
+      ok: z.literal(false),
+      error: z.string().max(COWORK_CLOUD_CONTROL_MAX_ERROR_LENGTH),
+    })
     .strict(),
 ]);
 export type CoworkCloudControlResponse = z.infer<
