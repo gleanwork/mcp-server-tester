@@ -261,7 +261,10 @@ describe('plugin-staged first-party Linux desktop', () => {
       deadlineAt: Date.now() + 10_000,
       env,
     });
-    expect(runtime.exec.mock.calls[0]![1][0]).toMatch(/\/cowork_linux\.py$/);
+    expect(runtime.exec.mock.calls[0]![0]).toBe(process.execPath);
+    expect(runtime.exec.mock.calls[0]![1][0]).toMatch(
+      /\/cowork\/linuxThirdParty\.js$/
+    );
     expect(runtime.payloads).toEqual([{ prompt: 'query' }]);
   });
 

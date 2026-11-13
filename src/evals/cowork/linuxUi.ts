@@ -19,16 +19,13 @@ export interface LinuxUi {
   /** One clipboard paste into the specified entry. The driver verifies the result. */
   paste(node: LinuxUiNode, text: string): Promise<void>;
   openCowork(): Promise<void>;
+  /** One new-task link with `prompt` as its draft (empty for a blank task). Never sends. */
+  openNewTask(prompt: string): Promise<void>;
   /** Stop input, then allow at most one extra second solely for modifier cleanup. */
   close(): void | Promise<void>;
 }
 
-export class LinuxUiError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = 'LinuxUiError';
-  }
-}
+export { AtspiError as LinuxUiError } from '../linuxAtspiBus.js';
 
 export type LinuxDriverOperation =
   | 'probe'

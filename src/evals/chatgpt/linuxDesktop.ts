@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
 import type { Duplex } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -18,6 +17,7 @@ import {
   LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
   pickEnvironment,
 } from './linuxContract.js';
+import { linuxChatgptRuntime } from './linuxRuntime.js';
 
 const FailurePhase = z.enum([
   'waiting-for-initial-ui',
@@ -146,11 +146,9 @@ export async function runLinuxChatgptDesktop(
       'Linux ChatGPT deadline exceeded; no action attempted.'
     );
   const desktop = chatgptDesktopEnvironment(config);
-  let python: string | undefined;
   let env: Record<string, string>;
   try {
     const linux = readLinuxChatgptEnvironment(desktop);
-    python = linux.python;
     // The profile installed by setup, never an inherited CLI profile.
     env = {
       ...pickEnvironment(desktop, LINUX_CHATGPT_RUNTIME_ENVIRONMENT),
@@ -178,15 +176,14 @@ export async function runLinuxChatgptDesktop(
     throw new NativeChatgptDriverError(
       'Linux ChatGPT input exceeds the control message limit.'
     );
-  const script = createRequire(
-    typeof __filename === 'string' ? __filename : import.meta.url
-  ).resolve('@gleanwork/mcp-server-tester/chatgpt-linux-runtime');
+  const script = linuxChatgptRuntime();
   let openFailure: string | undefined;
   let handoff: Promise<void> | undefined;
   const result = await new Promise<{ failed: boolean; stdout: string }>(
     (resolveResult) => {
       const child = spawn(
-        python ?? 'python3',
+        // The driver runs on the Node that runs MST.
+        process.execPath,
         [
           script,
           '--mode',

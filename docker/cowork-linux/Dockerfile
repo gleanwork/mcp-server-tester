@@ -25,8 +25,7 @@ RUN arch="$(dpkg --print-architecture)" \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg tini procps sudo \
-    xvfb x11-utils x11-apps dbus dbus-x11 at-spi2-core libglib2.0-bin \
-    python3 python3-gi gir1.2-atspi-2.0 xclip \
+    xvfb x11-utils x11-apps dbus dbus-x11 at-spi2-core libglib2.0-bin xclip \
     fonts-dejavu-core virtiofsd ipxe-qemu ${vm_packages} \
   && curl -fsSLo /usr/share/keyrings/claude-desktop.asc \
     https://downloads.claude.ai/claude-desktop/key.asc \
@@ -112,7 +111,6 @@ ENV DISPLAY=:99 \
   MST_COWORK_SETTINGS_FILE=/run/mst/settings/managed-settings.json \
   MST_COWORK_HELPER_DIR=/home/mst/.mst/cowork-helpers \
   MST_COWORK_URL_OPENER=/opt/mst/bin/open-url \
-  MST_COWORK_PYTHON=/usr/bin/python3 \
   MST_TOKENS_DIR=/run/mst/tokens \
   MST_PLUGIN_DIR=/opt/mst/plugins \
   MST_JUDGE_SANDBOX=container \

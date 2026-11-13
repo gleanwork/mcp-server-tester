@@ -94,7 +94,7 @@ The public API is tiered. Each name is exported from exactly one of these entry 
 - `./auth` (`src/entries/auth.ts`) - Low-level OAuth: discovery, token storage, client credentials
 - `./experimental/clients` (`src/entries/experimentalClients.ts`) - Desktop-run metadata types, Cowork settings and audit, client plugins (may change between minors)
 - `./fixtures/mcp`, `./fixtures/mcpAuth`, `./reporters/mcpReporter` - Playwright fixtures and the reporter
-- `./cowork-linux-runtime`, `./chatgpt-linux-runtime` - The Linux desktop drivers' Python scripts, exported as files rather than code
+- `./cowork-linux-runtime` (`src/evals/cowork/linuxThirdPartyMain.ts`), `./chatgpt-linux-runtime` (`src/evals/chatgpt/linuxDriverMain.ts`) - The Node entry points of the managed Cowork and ChatGPT Linux desktop drivers, exported as files rather than code; MST runs them with `process.execPath`
 - `./cowork-linux-first-party-runtime` (`src/evals/cowork/linuxFirstPartyMain.ts`) - The Node entry point of the account-backed Linux desktop driver that Cowork's first-party mode runs in a plugin-prepared Linux runtime
 - `./cowork-linux-image`, `./chatgpt-linux-image` - The Linux Cowork and ChatGPT images' Dockerfiles (`docker/cowork-linux/`, with its scripts and seccomp profile, and `docker/chatgpt-linux/`), exported as files so `mst runner setup docker` finds the directories
 
@@ -167,7 +167,7 @@ authType?: 'oauth' | 'api-token' | 'none';  // Don't do this!
 
 ## Code Style
 
-- Write TypeScript. Use Swift only for a macOS API that Node can't reach, compiled with `nativeHelper.ts`, and keep it to JSON-in, JSON-out primitives with no eval logic. New shell is only for an image's entry points and one-line glue. Don't add Python or any other language, including a script inside a TypeScript string or in an image (ADR 0006, `docs/adr/0006-mst-is-written-in-typescript.md`). Fixing the existing Python that ADR 0006 lists is fine. The one exception is `python/`, the verifiers harness and its smoke taskset (ADR 0015), which calls MST only through its CLI: no client logic and no grading there, and it keeps its own checks
+- Write TypeScript. Use Swift only for a macOS API that Node can't reach, compiled with `nativeHelper.ts`, and keep it to JSON-in, JSON-out primitives with no eval logic. New shell is only for an image's entry points and one-line glue. Don't add Python or any other language, including a script inside a TypeScript string or in an image (ADR 0006, `docs/adr/0006-mst-is-written-in-typescript.md`). Linux drivers read AT-SPI over D-Bus through `src/evals/linuxAtspiBus.ts`. The one exception is `python/`, the verifiers harness and its smoke taskset (ADR 0015), which calls MST only through its CLI: no client logic and no grading there, and it keeps its own checks
 - Use function declarations, not arrow function expressions for exports
 - Use explicit `null` in ternaries instead of short-circuit (`condition ? 'value' : null`)
 - Descriptive type names (e.g., `EvalDataset`, `MCPFixtureApi`, `Judge`, `ValidationResult`)

@@ -80,6 +80,9 @@ class AccountUi implements LinuxUi {
     this.actions.push('open cowork');
     if (!this.keepDraft) this.prompt = '';
   }
+  async openNewTask(): Promise<void> {
+    throw new Error('the first-party driver never opens a new-task link');
+  }
   async activate(target: LinuxUiNode): Promise<void> {
     this.actions.push(target.name);
     if (target.name === this.uncertain)
