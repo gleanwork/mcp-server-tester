@@ -365,6 +365,10 @@ tool's availability. It saves the check as `connector-policy.json` beside the
 audit log, including the prepared tool list when validation fails. If the server
 changes its catalog during a task, MST fails the check instead of silently
 accepting new tools. Start a new run to prepare against the changed catalog.
+Claude's tool list for a connector can also be behind its live server. A tool
+the server offers but the list lacks has no permission MST can set, so every
+task that finds it fails the check, and a new run does not help. The error
+names the tool and says that Claude's list did not have it.
 
 The Chrome recorder profile and Claude Desktop must be on the same account and
 the same active organization. On local macOS, you must make sure they are; MST

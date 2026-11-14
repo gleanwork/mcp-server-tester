@@ -8,6 +8,9 @@ import {
   type CoworkCloudControlCommand,
 } from './cloudControlProtocol.js';
 
+/** How long the worker waits for the source to answer one request. */
+const REPLY_TIMEOUT_MS = 120_000;
+
 /** Worker-only, fixed domain RPC. Never falls back to local Chrome or permissions. */
 export function createCoworkCloudControlClient(
   env: Record<string, string | undefined>
@@ -20,6 +23,7 @@ export function createCoworkCloudControlClient(
   let pending:
     | {
         id: number;
+        method: CoworkCloudControlCommand['method'];
         resolve(value: unknown): void;
         reject(error: Error): void;
         timer: NodeJS.Timeout;
@@ -27,9 +31,11 @@ export function createCoworkCloudControlClient(
     | undefined;
   let chunks: Buffer[] = [];
   let byteLength = 0;
-  function fail(): void {
+  // The first cause is the one reported: later failures (the close after a
+  // timeout, a call after loss) only repeat it.
+  function fail(cause: string): void {
     failure ??= new Error(
-      'Cowork source cloud control disconnected or sent invalid evidence; no local/gateway fallback is permitted. Source recovery state must be retained.'
+      `Cowork source cloud control disconnected or sent invalid evidence (${cause}); no local/gateway fallback is permitted. Source recovery state must be retained.`
     );
     if (pending) {
       clearTimeout(pending.timer);
@@ -62,14 +68,25 @@ export function createCoworkCloudControlClient(
       );
     socket = createConnection(path);
     socket.unref();
-    socket.on('error', fail);
-    socket.on('close', fail);
+    socket.on('error', (error: NodeJS.ErrnoException) =>
+      fail(`socket error${error.code ? ` ${error.code}` : ''}`)
+    );
+    socket.on('close', () =>
+      fail(
+        pending
+          ? `socket closed while waiting for ${pending.method}`
+          : 'socket closed'
+      )
+    );
     socket.on('data', (chunk: Buffer) => {
-      if (
-        !pending ||
-        byteLength + chunk.length > COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES
-      ) {
-        fail();
+      if (!pending) {
+        fail('data arrived with no request pending');
+        return;
+      }
+      if (byteLength + chunk.length > COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES) {
+        fail(
+          `the ${pending.method} reply exceeds ${COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES} bytes`
+        );
         return;
       }
       chunks.push(chunk);
@@ -77,7 +94,7 @@ export function createCoworkCloudControlClient(
       const newline = chunk.indexOf(10);
       if (newline < 0) return;
       if (newline !== chunk.length - 1) {
-        fail();
+        fail(`bytes followed the ${pending.method} reply`);
         return;
       }
       try {
@@ -87,7 +104,7 @@ export function createCoworkCloudControlClient(
           JSON.parse(bytes.subarray(0, byteLength - 1).toString('utf8'))
         );
         if (response.id !== pending.id) {
-          fail();
+          fail(`a reply to request ${response.id} came for ${pending.id}`);
           return;
         }
         const completed = pending;
@@ -98,7 +115,9 @@ export function createCoworkCloudControlClient(
         if (response.ok) completed.resolve(response.result);
         else completed.reject(new Error(response.error));
       } catch {
-        fail();
+        fail(
+          `the ${pending?.method ?? 'request'} reply is not a cloud-control response`
+        );
       }
     });
     const connected = socket;
@@ -126,9 +145,21 @@ export function createCoworkCloudControlClient(
               'Cowork cloud control request exceeds its frame limit.'
             );
           return await new Promise<unknown>((resolve, reject) => {
-            pending = { id, resolve, reject, timer: setTimeout(fail, 120_000) };
+            pending = {
+              id,
+              method: command.method,
+              resolve,
+              reject,
+              timer: setTimeout(
+                () =>
+                  fail(
+                    `no ${command.method} reply within ${REPLY_TIMEOUT_MS / 1000} s`
+                  ),
+                REPLY_TIMEOUT_MS
+              ),
+            };
             connected.write(frame, (error) => {
-              if (error) fail();
+              if (error) fail(`sending ${command.method} failed`);
             });
           });
         } catch (error) {

@@ -268,6 +268,70 @@ describe('first-party Linux workflow', () => {
     ).toHaveLength(1);
   });
 
+  it('scans again when opening a task destroys the previous view mid-walk', async () => {
+    const ui = new AccountUi();
+    let defunct = 3;
+    ui.onSnapshot = () => {
+      if (ui.actions.includes('open cowork') && defunct-- > 0)
+        throw new LinuxUiError('accessibility_node_defunct');
+    };
+    expect(await submit(ui)).toMatchObject({
+      status: 'submitted',
+      action_count: 5,
+      duration_ms: 300,
+    });
+    expect(ui.actions).toEqual([
+      'open cowork',
+      'Model: Opus 5.5 Medium',
+      'Sonnet 5.5 Most efficient for simpler tasks',
+      'paste',
+      'Start task',
+    ]);
+  });
+
+  it('scans again while the pasted draft re-renders, without pasting again', async () => {
+    const ui = new AccountUi();
+    let defunct = 2;
+    ui.onSnapshot = () => {
+      if (ui.actions.includes('paste') && defunct-- > 0)
+        throw new LinuxUiError('accessibility_node_defunct');
+    };
+    expect(await submit(ui)).toMatchObject({
+      status: 'submitted',
+      action_count: 5,
+    });
+    expect(ui.actions.filter((action) => action === 'paste')).toHaveLength(1);
+    expect(ui.actions.at(-1)).toBe('Start task');
+  });
+
+  it('fails a stage whose tree never settles as defunct, before any paste', async () => {
+    const ui = new AccountUi();
+    ui.onSnapshot = () => {
+      if (ui.actions.includes('open cowork'))
+        throw new LinuxUiError('accessibility_node_defunct');
+    };
+    expect(await submit(ui)).toMatchObject({
+      status: 'failed',
+      error: 'accessibility_node_defunct',
+      action_count: 1,
+      duration_ms: 10_000,
+    });
+    expect(ui.actions).toEqual(['open cowork']);
+  });
+
+  it('does not rescan a defunct tree outside a bounded poll', async () => {
+    const ui = new AccountUi();
+    ui.onSnapshot = () => {
+      throw new LinuxUiError('accessibility_node_defunct');
+    };
+    expect(await run('probe', ui)).toMatchObject({
+      status: 'failed',
+      error: 'accessibility_node_defunct',
+      action_count: 0,
+    });
+    expect(ui.scans).toBe(1);
+  });
+
   it.each([
     '',
     ' ',

@@ -206,6 +206,16 @@ export class CloudPermissionWriteNotSentError extends Error {
   override name = 'CloudPermissionWriteNotSentError';
 }
 
+/**
+ * A cloud session's tools or approvals don't match the prepared plan. The
+ * message names only tools and counts, which the worker already has from
+ * preparation and the session's events, so first-party source control passes
+ * it on to the worker (`cloudControl.ts`) instead of a generic failure.
+ */
+export class CloudConnectorVerificationError extends Error {
+  override name = 'CloudConnectorVerificationError';
+}
+
 export interface CloudConnectorIO {
   inspect(): Promise<CloudConnectorSnapshot>;
   read(): Promise<CloudPermissionState>;
@@ -611,7 +621,9 @@ export function verifyCloudConnectorEvents(
     .filter((e) => e.payload?.type === 'system' && e.payload.subtype === 'init')
     .at(-1)?.payload;
   if (!init || !Array.isArray(init.tools))
-    throw new Error('Cloud session has no tool inventory to verify.');
+    throw new CloudConnectorVerificationError(
+      'Cloud session has no tool inventory to verify.'
+    );
   const observed = new Set(
     init.tools.filter((tool): tool is string => typeof tool === 'string')
   );
@@ -693,12 +705,18 @@ export function verifyCloudConnectorEvents(
       (e.payload.request as { subtype?: unknown } | undefined)?.subtype ===
         'can_use_tool'
   ).length;
+  // A managed server's tool that preparation neither allowed nor blocked: its
+  // connector's tool list in Claude didn't have it, so it has no permission.
+  const unlisted = unexpected.filter((tool) => !blocked.has(tool));
   if (unexpected.length || missing.length)
-    throw new Error(
-      `Cloud connector configuration mismatch: ${unexpected.length} unexpected tools, ${missing.length} missing tools. Unexpected: ${unexpected.join(', ') || 'none'}. Missing: ${missing.join(', ') || 'none'}. The connector catalog may have changed since preparation.`
+    throw new CloudConnectorVerificationError(
+      `Cloud connector configuration mismatch: ${unexpected.length} unexpected tools, ${missing.length} missing tools. Unexpected: ${unexpected.join(', ') || 'none'}. Missing: ${missing.join(', ') || 'none'}. ` +
+        (unlisted.length
+          ? `Claude's tool list for the connector had no ${unlisted.join(', ')} when MST prepared the run, so MST could not set a permission for it: the connector's catalog changed since preparation, or Claude's list is behind the server.`
+          : 'The connector catalog may have changed since preparation.')
     );
   if (plan.failOnApproval && approvals)
-    throw new Error(
+    throw new CloudConnectorVerificationError(
       `Cloud requested ${approvals} tool approvals despite the always-allow policy.`
     );
   return {

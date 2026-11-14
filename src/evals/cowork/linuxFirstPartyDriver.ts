@@ -186,19 +186,35 @@ class FirstPartyDriver {
     inspect: (nodes: readonly LinuxUiNode[], until: number) => Promise<T | null>
   ): Promise<T> {
     const until = Math.min(this.deadlineAt, Date.now() + milliseconds);
+    let defunct = false;
     while (Date.now() < until) {
       this.check(until, code);
-      const nodes = await this.bounded(() => this.ui.snapshot(), until, code);
-      const result = await inspect(nodes, until);
+      let nodes: readonly LinuxUiNode[] | undefined;
+      try {
+        nodes = await this.bounded(() => this.ui.snapshot(), until, code);
+      } catch (error) {
+        // Claude destroys a view's nodes while navigating (for example, from a
+        // finished task to a new one), so a walk can reach a node that is
+        // gone. A snapshot is read-only: scan again rather than fail the stage.
+        if (
+          !(error instanceof LinuxUiError) ||
+          error.code !== 'accessibility_node_defunct'
+        )
+          throw error;
+      }
+      defunct = nodes === undefined;
+      const result = nodes ? await inspect(nodes, until) : null;
       if (result !== null) return result;
       this.check(until, code);
       await new Promise<void>((resolve) =>
         setTimeout(resolve, Math.min(100, until - Date.now()))
       );
     }
-    throw new DriverFailure(
-      Date.now() >= this.deadlineAt ? 'deadline_exceeded' : code
-    );
+    if (Date.now() >= this.deadlineAt)
+      throw new DriverFailure('deadline_exceeded');
+    // A tree that never settled is the cause, not the stage's own condition.
+    if (defunct) throw new LinuxUiError('accessibility_node_defunct');
+    throw new DriverFailure(code);
   }
 
   async surface(
