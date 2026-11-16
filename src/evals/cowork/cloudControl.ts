@@ -31,6 +31,7 @@ import {
   COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES,
   COWORK_CLOUD_CONTROL_PROTOCOL,
   CoworkCloudControlRequestSchema,
+  cloudEventsAfter,
   type CoworkAccountIdentity,
   type CoworkCloudControlRequest,
   type CoworkCloudControlResponse,
@@ -381,12 +382,16 @@ export async function createCoworkAccountControl(
         if (currentTask?.sessionId) readableSessions.add(currentTask.sessionId);
         return sessions;
       }
-      case 'events':
+      case 'events': {
         if (!readableSessions.has(request.sessionId))
           throw new Error(
             'Session is not source-observed or owned by this controller.'
           );
-        return fetchCloudEvents(port, request.sessionId);
+        // The source still reads the whole session from claude.ai; with a
+        // cursor, only the events the worker lacks cross the relay.
+        const events = await fetchCloudEvents(port, request.sessionId);
+        return request.after ? cloudEventsAfter(events, request.after) : events;
+      }
     }
   }
   return {

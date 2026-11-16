@@ -2303,6 +2303,37 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
     );
 
     it.skipIf(!relayRoot)(
+      'real relay carries an events cursor and sends back only the later events',
+      async () => {
+        const { control } = await controller();
+        const { worker } = await relayFixture(control);
+        let id = 0;
+        const call = (method: string, extra?: Record<string, unknown>) =>
+          drive(worker.call(method, extra, ++id));
+        expect((await call('prepare')).ok).toBe(true);
+        expect((await call('beginTask', { prompt: PROMPT })).ok).toBe(true);
+        const events = promptEvents({ tools: [SEARCH] });
+        events.forEach((event, index) =>
+          Object.assign(event, { event_id: `ev${index}` })
+        );
+        const session = addTrial(events);
+        expect((await call('listSessions')).ok).toBe(true);
+        const count = events.length - 1;
+        expect(
+          await call('events', {
+            sessionId: session.id,
+            after: { count, eventId: `ev${count - 1}` },
+          })
+        ).toMatchObject({
+          ok: true,
+          result: { offset: count, events: [events[count]] },
+        });
+        await drive(worker.close());
+        await control.disconnect();
+      }
+    );
+
+    it.skipIf(!relayRoot)(
       'real relay releases a zero-dispatch bridge failure without implying restoration',
       async () => {
         const { control } = await controller();
@@ -2665,6 +2696,41 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
         (await call({ method: 'bindTask', sessionId: 'cse_trial1' })).ok
       ).toBe(false);
       expect((await saved()).pendingTask).not.toHaveProperty('sessionId');
+      await control.disconnect();
+    });
+
+    it('sends a worker only the events after its cursor, or all when that prefix is gone', async () => {
+      const { control, call } = await controller();
+      await call({ method: 'prepare' });
+      await call({ method: 'beginTask', prompt: PROMPT });
+      const events = promptEvents({ tools: [SEARCH] });
+      events.forEach((event, index) =>
+        Object.assign(event, { event_id: `ev${index}` })
+      );
+      const session = addTrial(events);
+      expect((await call({ method: 'listSessions' })).ok).toBe(true);
+      const count = events.length - 1;
+      expect(count).toBeGreaterThan(0);
+      expect(
+        await call({ method: 'events', sessionId: session.id })
+      ).toMatchObject({ ok: true, result: events });
+      expect(
+        await call({
+          method: 'events',
+          sessionId: session.id,
+          after: { count, eventId: `ev${count - 1}` },
+        })
+      ).toMatchObject({
+        ok: true,
+        result: { offset: count, events: [events[count]] },
+      });
+      expect(
+        await call({
+          method: 'events',
+          sessionId: session.id,
+          after: { count, eventId: 'ev-gone' },
+        })
+      ).toMatchObject({ ok: true, result: { offset: 0, events } });
       await control.disconnect();
     });
 

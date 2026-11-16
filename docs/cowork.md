@@ -248,9 +248,12 @@ uses `MST_COWORK_CLOUD_CONTROL_SOCKET`. This relay exposes no Chrome cookies,
 DevTools access or general HTTP access; the separate credential plugin owns
 explicitly authorized account-session staging. `dispatch` permits only preparation,
 exact authorized prompt/task binding, completion proof, verification,
-restoration and bounded session/event reads. The source owns the server labels,
-connector policies, write declarations, model and prompt sequence from the
-bundle. A worker cannot widen them. The relay must reject unknown properties,
+restoration and bounded session/event reads. An `events` read can name the
+events the worker already holds (`after: { count, eventId }`). The source then
+sends only later events as `{ offset, events }`, or all of them again from
+offset 0 if the session no longer starts with those events. The source owns the
+server labels, connector policies, write declarations, model and prompt sequence
+from the bundle. A worker cannot widen them. The relay must reject unknown properties,
 bound UTF-8 frames to 16 MiB including the newline, and serialize requests.
 
 Keep the source and relay attached through verified restoration and final

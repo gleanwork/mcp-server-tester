@@ -24,7 +24,12 @@ import { join } from 'node:path';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import { z } from 'zod';
 import { createCoworkCloudControlClient } from './cloudControlClient.js';
-import { CoworkCloudPreparationSchema } from './cloudControlProtocol.js';
+import {
+  COWORK_CLOUD_MAX_SESSION_EVENTS,
+  CoworkCloudPreparationSchema,
+  cloudEventCursor,
+  mergeCloudEvents,
+} from './cloudControlProtocol.js';
 import type { CoworkDesktop } from './desktop.js';
 import { parseClaudeTranscript } from './transcript.js';
 import { describeError } from '../../utils/describeError.js';
@@ -854,6 +859,20 @@ export function coworkClaudeAi(
         };
         await rm(dir, { recursive: true, force: true });
         await mkdir(dir, { recursive: true, mode: 0o700 });
+        const CloudEventSchema = z
+          .object({
+            source: z.string().optional(),
+            created_at: z.string().optional(),
+            payload: z.record(z.string(), z.unknown()).optional(),
+          })
+          .passthrough();
+        const CloudEventsSchema = z
+          .array(CloudEventSchema)
+          .max(COWORK_CLOUD_MAX_SESSION_EVENTS);
+        // Each session's events as last read. A read names them by a cursor,
+        // so the source sends only later events: a long session no longer
+        // crosses the relay whole on every change.
+        const held = new Map<string, CloudSessionEvent[]>();
         mirror = mirrorCloudSessions({
           port: 0,
           dir,
@@ -877,18 +896,30 @@ export function coworkClaudeAi(
               .parse(await control.call({ method: 'listSessions' }));
           },
           async events(sessionId) {
-            return z
-              .array(
-                z
-                  .object({
-                    source: z.string().optional(),
-                    created_at: z.string().optional(),
-                    payload: z.record(z.string(), z.unknown()).optional(),
-                  })
-                  .passthrough()
-              )
-              .max(10_000)
-              .parse(await control.call({ method: 'events', sessionId }));
+            const previous = held.get(sessionId) ?? [];
+            const after = cloudEventCursor(previous);
+            // A failed or invalid read starts the session over next time.
+            held.delete(sessionId);
+            const reply = await control.call({
+              method: 'events',
+              sessionId,
+              ...(after ? { after } : {}),
+            });
+            const events = after
+              ? mergeCloudEvents(
+                  previous,
+                  after,
+                  z
+                    .object({
+                      offset: z.number().int().nonnegative(),
+                      events: CloudEventsSchema,
+                    })
+                    .strict()
+                    .parse(reply)
+                )
+              : CloudEventsSchema.parse(reply);
+            held.set(sessionId, events);
+            return events;
           },
         });
         const recorder = mirror;
