@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -198,6 +198,21 @@ describe('FileEvalResultStore', () => {
     expect(
       (await store.listArtifacts('eval-runner-result')).map(({ id }) => id)
     ).toEqual(['current']);
+  });
+
+  it("fails a listing on a file it can't read, rather than leaving it out", async () => {
+    await store.saveArtifact(
+      createStoredEvalArtifact({
+        kind: 'eval-runner-result',
+        id: 'current',
+        data: { caseResults: [] },
+      })
+    );
+    // Reading a directory fails with EISDIR: an I/O error, not bad JSON.
+    await mkdir(join(tmpDir, 'eval-runs', 'unreadable.json'));
+    await expect(store.listArtifacts('eval-runner-result')).rejects.toThrow(
+      /EISDIR/
+    );
   });
 
   it('fails on a summary or comparison whose case results an rc.0 MST wrote, and leaves it out of listings', async () => {
@@ -462,6 +477,42 @@ describe('GCSEvalResultStore', () => {
     expect(
       (await store.listArtifacts('eval-runner-result')).map(({ id }) => id)
     ).toEqual(['current']);
+  });
+
+  it("fails a listing on an object it can't read, rather than leaving it out", async () => {
+    const current = createStoredEvalArtifact({
+      kind: 'eval-runner-result',
+      id: 'current',
+      data: { total: 1 },
+    });
+    nock('http://storage.test')
+      .persist()
+      .get(/.*/)
+      .query(true)
+      .reply(function (uri) {
+        if (uri.includes('current.json')) return [200, current];
+        if (uri.includes('denied.json'))
+          return [403, { error: { code: 403, message: 'Forbidden' } }];
+        if (uri.includes('?prefix=') || uri.includes('&prefix='))
+          return [
+            200,
+            {
+              items: [
+                { name: 'prefix/eval-runs/current.json' },
+                { name: 'prefix/eval-runs/denied.json' },
+              ],
+            },
+          ];
+        return [404, {}];
+      });
+    const store = new GCSEvalResultStore({
+      provider: 'gcs',
+      bucket: 'bucket',
+      prefix: 'prefix',
+    });
+    await expect(store.listArtifacts('eval-runner-result')).rejects.toThrow(
+      /Forbidden|403/
+    );
   });
 });
 
