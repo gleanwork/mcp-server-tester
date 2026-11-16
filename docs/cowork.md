@@ -912,8 +912,9 @@ very long one: Claude logs a message only when it ends, so the transcript can't
 tell which. Set a longer `timeout` in the eval config for long tasks. The case
 is a trial that failed, and it counts in the pass rate
 ([ADR 0010](./adr/0010-a-trial-ending-is-decided-where-it-ends.md)). It is a
-retryable infrastructure failure instead when MST's session recorder failed or
-the bound session went away.
+retryable infrastructure failure instead when MST's session recorder failed, the
+bound session went away, or MST's HITL check stopped (the task may have waited
+on an approval nobody gave; the check's failure decides what broke).
 
 On macOS the driver acts only while Claude is the frontmost app. A click that
 misses Claude's window (on the desktop, say) brings another app forward; before

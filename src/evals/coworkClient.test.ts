@@ -1976,6 +1976,47 @@ describe('V2 Cowork client', () => {
       finalText: 'answer',
     });
   });
+  // ADR 0010: the task may have waited on an approval MST's HITL check
+  // never gave, so the check's failure decides the ending, not the model.
+  it.each([
+    {
+      stopped: 'on the planner provider',
+      error: new ComputerUseDriverError('planner rate limited', undefined, {
+        code: 'provider_rate_limit',
+        aborted: false,
+      }),
+      broke: 'provider',
+    },
+    {
+      stopped: 'untyped',
+      error: new Error('HITL timed out'),
+      broke: 'client-app',
+    },
+  ])(
+    'ends a session left pending after HITL stopped ($stopped) as infrastructure',
+    async ({ error, broke }) => {
+      mocks.hitl.mockRejectedValueOnce(error);
+      mocks.transcript.mockRejectedValueOnce(
+        new NativeTranscriptError(
+          'timeout',
+          'Timed out waiting for Claude session local_1 to complete'
+        )
+      );
+      const [result] = await collectClientBatch(
+        COWORK_CLIENT,
+        [requests()[0]!],
+        readOnlyContext
+      );
+      expect(result!.error).toContain(
+        `The HITL check had stopped: ${error.message}`
+      );
+      expect(result!.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke,
+        retryable: true,
+      });
+    }
+  );
   it('never resubmits or runs HITL for a missing or ambiguous native binding; resets and runs the next case', async () => {
     mocks.bind.mockRejectedValueOnce(
       new Error('Ambiguous exact prompt sessions')

@@ -625,6 +625,8 @@ async function desktopAdapter(
       const startedAtMs = Date.now();
       const deadlineAt = startedAtMs + config.timeout;
       let hitlError: string | undefined;
+      // Why the first HITL check stopped, typed for the case's ending.
+      let hitlFailure: unknown;
       // The HITL check failed without acting on the app (CoworkHitlError).
       let hitlUntouched = false;
       let hitlWarning: string | undefined;
@@ -773,6 +775,7 @@ async function desktopAdapter(
             : {}),
         };
         const message = safeError(error);
+        hitlFailure = error;
         if (
           error instanceof CoworkDriverError &&
           error.kind === 'hitl-budget-exhausted'
@@ -988,14 +991,27 @@ async function desktopAdapter(
         // that failed (ADR 0010), as on every client. Any other error here
         // is the trial's too.
         const recorderFailed = Boolean(session?.recordingError?.());
+        const timedOut =
+          error instanceof NativeTranscriptError &&
+          error.failureKind === 'timeout';
         const lostSession =
           error instanceof NativeTranscriptError &&
           (error.failureKind === 'no_matching_session' ||
-            (error.failureKind === 'timeout' && recorderFailed));
+            (timedOut && recorderFailed));
+        // MST's HITL check stopped, so nothing answered an approval the task
+        // may have waited on until the deadline: the check's own failure
+        // decides the ending, as it does for a submission.
+        const hitlStopped =
+          timedOut && !lostSession && hitlFailure !== undefined;
+        const reason = hitlStopped
+          ? `${message} The HITL check had stopped: ${hitlError ?? hitlWarning}`
+          : message;
         const ending = lostSession
           ? infrastructureEnding('client-app', message)
-          : undefined;
-        result = { ...result, error: message, ...(ending ? { ending } : {}) };
+          : hitlStopped
+            ? computerUseEnding(hitlFailure, reason)
+            : undefined;
+        result = { ...result, error: reason, ...(ending ? { ending } : {}) };
         if (Date.now() >= deadlineAt) {
           // Past the deadline the task may still be running: keep what
           // its bound session did by now, as a failed case's evidence.
