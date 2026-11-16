@@ -1,4 +1,8 @@
-import { RUN_FORMAT, olderResultsError } from './resultFormat.js';
+import { RUN_FORMAT } from './resultFormat.js';
+import {
+  parseStoredArtifact,
+  type STORED_ARTIFACT_KINDS,
+} from './runFileSchemas.js';
 import { loadGCSStorage } from './gcsStorage.js';
 import { isHostContentAttribute } from './telemetry/hostContent.js';
 import type { ProtocolEra } from '../types/index.js';
@@ -14,10 +18,8 @@ import {
 } from '../utils/jsonFile.js';
 import { join } from 'path';
 
-export type StoredArtifactKind =
-  | 'eval-runner-result'
-  | 'eval-run-summary'
-  | 'eval-run-comparison';
+/** `eval-runner-result`, `eval-run-summary` or `eval-run-comparison`. */
+export type StoredArtifactKind = (typeof STORED_ARTIFACT_KINDS)[number];
 
 export interface StoredEvalArtifactMetadata {
   datasetName?: string;
@@ -244,7 +246,10 @@ function stripResponses(value: unknown): void {
     const request = value.request;
     if (isJsonObject(request) && isJsonObject(request.assertions))
       delete request.assertions.response;
+    // A 2.0 release candidate called a transcript `trace`. Readers reject
+    // it; redaction strips it too, so no store keeps one's content.
     stripTranscript(value.transcript);
+    stripTranscript(value.trace);
     stripWriteRecord(value.writeRecord);
     stripScoreMetadata(value.scores);
     stripClientTelemetry(value.clientTelemetry);
@@ -252,6 +257,7 @@ function stripResponses(value: unknown): void {
       for (const trial of value.trialResults)
         if (isJsonObject(trial)) {
           stripTranscript(trial.transcript);
+          stripTranscript(trial.trace);
           stripWriteRecord(trial.writeRecord);
           stripScoreMetadata(trial.scores);
           stripClientTelemetry(trial.clientTelemetry);
@@ -353,7 +359,7 @@ export class FileEvalResultStore implements EvalResultStore {
     const raw = await readJsonFile(
       join(this.dir, KIND_DIRS[kind], `${id}.json`)
     );
-    return currentArtifact<T>(raw, `Stored ${kind} '${id}'`);
+    return currentArtifact<T>(raw, `Stored ${kind} '${id}'`, kind);
   }
 
   async loadLatestArtifact<T>(
@@ -363,7 +369,7 @@ export class FileEvalResultStore implements EvalResultStore {
       const raw = await readJsonFile(
         join(this.dir, KIND_DIRS[kind], 'latest.json')
       );
-      return currentArtifact<T>(raw, `The latest stored ${kind}`);
+      return currentArtifact<T>(raw, `The latest stored ${kind}`, kind);
     } catch (error) {
       if (isMissingFileError(error)) {
         return null;
@@ -389,13 +395,15 @@ export class FileEvalResultStore implements EvalResultStore {
     const summaries = await Promise.all(
       files
         .filter((f) => f.endsWith('.json') && f !== 'latest.json')
-        .map(async (file) => {
-          const raw = await readJsonFile(join(this.dir, KIND_DIRS[kind], file));
-          return raw as StoredEvalArtifact<unknown>;
-        })
+        .map((file) =>
+          listedSummary(kind, () =>
+            readJsonFile(join(this.dir, KIND_DIRS[kind], file))
+          )
+        )
     );
 
-    return currentSummaries(summaries)
+    return summaries
+      .filter((summary) => summary !== null)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, options.limit);
   }
@@ -453,7 +461,8 @@ export class GCSEvalResultStore implements EvalResultStore {
     );
     return currentArtifact<T>(
       await parseChunked(file.createReadStream()),
-      `Stored ${kind} '${id}'`
+      `Stored ${kind} '${id}'`,
+      kind
     );
   }
 
@@ -467,7 +476,8 @@ export class GCSEvalResultStore implements EvalResultStore {
 
     return currentArtifact<T>(
       await parseChunked(file.createReadStream()),
-      `The latest stored ${kind}`
+      `The latest stored ${kind}`,
+      kind
     );
   }
 
@@ -485,14 +495,13 @@ export class GCSEvalResultStore implements EvalResultStore {
         .filter(
           (f) => f.name.endsWith('.json') && !f.name.endsWith('/latest.json')
         )
-        .map(async (file) => {
-          return (await parseChunked(
-            file.createReadStream()
-          )) as StoredEvalArtifact<unknown>;
-        })
+        .map((file) =>
+          listedSummary(kind, () => parseChunked(file.createReadStream()))
+        )
     );
 
-    return currentSummaries(summaries)
+    return summaries
+      .filter((summary) => summary !== null)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, options.limit);
   }
@@ -508,24 +517,45 @@ export class GCSEvalResultStore implements EvalResultStore {
   }
 }
 
-/** An artifact an explicit load asked for: older formats fail clearly. */
+/**
+ * An artifact an explicit load asked for: an older format, older field
+ * names or a malformed artifact fail, saying what to do.
+ */
 function currentArtifact<T>(
   value: unknown,
-  what: string
+  what: string,
+  kind: StoredArtifactKind
 ): StoredEvalArtifact<T> {
-  const artifact = value as StoredEvalArtifact<T>;
-  if (artifact?.format !== RUN_FORMAT)
-    throw olderResultsError(what, artifact?.format);
-  return artifact;
+  return parseStoredArtifact(value, what, kind) as StoredEvalArtifact<T>;
 }
 
-/** History listings skip artifacts in an older result format. */
-function currentSummaries(
-  artifacts: Array<StoredEvalArtifact<unknown>>
-): StoredArtifactSummary[] {
-  return artifacts
-    .filter((artifact) => artifact?.format === RUN_FORMAT)
-    .map(toSummary);
+/**
+ * A listed artifact's summary, or null for one an explicit load would fail
+ * on: one that isn't JSON (a half-written file) or isn't a current artifact
+ * of `kind`. A failure to read it, such as a denied permission, still throws.
+ */
+async function listedSummary(
+  kind: StoredArtifactKind,
+  read: () => Promise<unknown>
+): Promise<StoredArtifactSummary | null> {
+  let value: unknown;
+  try {
+    value = await read();
+  } catch (error) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+  try {
+    return toSummary(
+      parseStoredArtifact(
+        value,
+        'A listed artifact',
+        kind
+      ) as StoredEvalArtifact<unknown>
+    );
+  } catch {
+    return null;
+  }
 }
 
 function toSummary(

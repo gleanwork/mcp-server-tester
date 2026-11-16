@@ -145,6 +145,10 @@ export function compareEvalRuns(
   options: CompareEvalRunsOptions
 ): EvalRunComparisonResult {
   const { baseline, candidate, labels } = options;
+  // A result an earlier MST wrote, read some other way, fails here too: its
+  // fields would compare, and be stored, as if they were current.
+  assertCurrentRunResult(baseline, 'The baseline run');
+  assertCurrentRunResult(candidate, 'The candidate run');
   const candidateMap = new Map<string, EvalCaseResult>(
     candidate.caseResults.map((result) => [result.id, result])
   );
