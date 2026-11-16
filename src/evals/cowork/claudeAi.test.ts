@@ -633,7 +633,10 @@ async function drive<T>(promise: Promise<T>): Promise<T> {
 
 async function eventually<T>(check: () => Promise<T>): Promise<T> {
   let last: unknown;
-  for (let step = 0; step < 200; step++) {
+  // At least 200 steps and 10 s of real time: the mirror's file writes are
+  // real I/O, which a loaded machine can hold for more than 200 steps.
+  const deadline = Date.now() + 10_000;
+  for (let step = 0; step < 200 || Date.now() < deadline; step++) {
     try {
       return await check();
     } catch (error) {
@@ -652,6 +655,24 @@ async function eventually<T>(check: () => Promise<T>): Promise<T> {
 /** Lets the mirror run a few more polls. */
 async function pollMirror(): Promise<void> {
   for (let step = 0; step < 60; step++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(100);
+  }
+}
+
+/**
+ * Run the mirror's polls until `done` holds. Its file writes are real I/O, so
+ * a loaded machine can need more than `pollMirror`'s fixed steps; the bound is
+ * real time (only `setTimeout` is faked).
+ */
+async function pollMirrorUntil(
+  done: () => boolean,
+  what: string
+): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!done()) {
+    if (Date.now() > deadline)
+      throw new Error(`The mirror did not ${what} within 10 s.`);
     await new Promise((resolve) => setImmediate(resolve));
     await vi.advanceTimersByTimeAsync(100);
   }
@@ -1723,14 +1744,22 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       // Let the list lose the task before its result arrives. The synthetic
       // bound summary has no activity timestamp and must still be read.
       const requests = account.requests.length;
-      await pollMirror();
-      expect(
-        account.requests
-          .slice(requests)
-          .some((request) =>
-            request.path.startsWith('/v1/code/sessions/cse_trial1/events?')
-          )
-      ).toBe(true);
+      await pollMirrorUntil(() => {
+        const after = account.requests.slice(requests);
+        const listed = after.findIndex(
+          (request) =>
+            new URL(request.path, 'https://claude.ai').pathname ===
+            '/v1/code/sessions'
+        );
+        return (
+          listed >= 0 &&
+          after
+            .slice(listed + 1)
+            .some((request) =>
+              request.path.startsWith('/v1/code/sessions/cse_trial1/events?')
+            )
+        );
+      }, 'read the bound task after the list lost it');
       events.push(terminal);
       const completed = await mirrored(desktop, startedAtMs);
       expect(completed.candidate.id).toBe('local_cse_trial1');
