@@ -470,11 +470,20 @@ describe('V2 Cowork client', () => {
       })
     );
     expect(mocks.submit).toHaveBeenCalledTimes(2);
-    expect(mocks.hitl).not.toHaveBeenCalled();
     expect(mocks.transcript).toHaveBeenCalledTimes(2);
+    // A pending poll only records the task's state here: it never clicks.
     for (const [options] of mocks.transcript.mock.calls) {
-      expect(options).not.toHaveProperty('onPending');
+      const { sessionPath, onPending } = options as {
+        sessionPath: string;
+        onPending?: (transcript: ClaudeTranscript) => Promise<void>;
+      };
+      await onPending?.({
+        candidate: { metadataPath: sessionPath },
+        toolCalls: [{ name: 'update', arguments: {} }],
+        isComplete: false,
+      } as ClaudeTranscript);
     }
+    expect(mocks.hitl).not.toHaveBeenCalled();
     for (const result of results) {
       expect(result.error).toBeUndefined();
       expect(result).toMatchObject({
@@ -1976,6 +1985,93 @@ describe('V2 Cowork client', () => {
       finalText: 'answer',
     });
   });
+  // ADR 0010: who ran out the clock after MST's HITL check stopped.
+  const hitlStops = [
+    {
+      stopped: 'on the planner provider',
+      error: new ComputerUseDriverError('planner rate limited', undefined, {
+        code: 'provider_rate_limit',
+        aborted: false,
+      }),
+      broke: 'provider',
+    },
+    {
+      stopped: 'untyped',
+      error: new Error('HITL timed out'),
+      broke: 'client-app',
+    },
+    {
+      stopped: 'with its inspection budget spent',
+      error: new ComputerUseHitlBudgetError('inspection budget exhausted'),
+      broke: 'client-app',
+    },
+    {
+      stopped: 'without touching the app',
+      error: new CoworkHitlError(
+        'Linux HITL failed: Bound native session is missing or ambiguous.',
+        undefined,
+        false
+      ),
+      broke: 'client-app',
+    },
+  ];
+  const timeout = new NativeTranscriptError(
+    'timeout',
+    'Timed out waiting for Claude session local_1 to complete'
+  );
+  // The task's last poll before the deadline, then the timeout.
+  function timesOut(toolCall: ClaudeTranscript['toolCalls'][number]) {
+    mocks.transcript.mockImplementationOnce(
+      async (options: {
+        sessionPath: string;
+        onPending?: (transcript: ClaudeTranscript) => Promise<void>;
+      }) => {
+        await options.onPending?.({
+          candidate: { metadataPath: options.sessionPath },
+          toolCalls: [toolCall],
+          isComplete: false,
+        } as ClaudeTranscript);
+        throw timeout;
+      }
+    );
+  }
+  // Nothing could answer the approval the task waited on: the check's own
+  // failure decides the ending, not the model.
+  it.each(hitlStops)(
+    'ends a timeout on an open tool call after HITL stopped ($stopped) as infrastructure',
+    async ({ error, broke }) => {
+      mocks.hitl.mockRejectedValueOnce(error);
+      timesOut({ name: 'update', arguments: {} });
+      const [result] = await collectClientBatch(
+        COWORK_CLIENT,
+        [requests()[0]!],
+        readOnlyContext
+      );
+      expect(result!.error).toContain(
+        `The HITL check had stopped: ${error.message}`
+      );
+      expect(result!.ending).toMatchObject({
+        kind: 'infrastructure',
+        broke,
+        retryable: true,
+      });
+    }
+  );
+  // No tool call was waiting, so the model was only slow.
+  it.each(hitlStops)(
+    'keeps a timeout with no open tool call after HITL stopped ($stopped) a trial',
+    async ({ error }) => {
+      mocks.hitl.mockRejectedValueOnce(error);
+      timesOut({ name: 'search', arguments: {}, output: 'results' });
+      const [result] = await collectClientBatch(
+        COWORK_CLIENT,
+        [requests()[0]!],
+        readOnlyContext
+      );
+      expect(result!.error).toBe(timeout.message);
+      expect(result!.ending).toBeUndefined();
+    }
+  );
   it('never resubmits or runs HITL for a missing or ambiguous native binding; resets and runs the next case', async () => {
     mocks.bind.mockRejectedValueOnce(
       new Error('Ambiguous exact prompt sessions')
@@ -2029,13 +2125,15 @@ describe('V2 Cowork client', () => {
   );
 
   // How a case ended when its transcript couldn't be collected (ADR 0010).
+  // A bound session still running at the deadline ran out of its own time:
+  // a trial, as on every client. A session that went away is the app's.
   it.each([
     [
       new NativeTranscriptError(
         'timeout',
         'Timed out waiting for Claude session local_1 to complete'
       ),
-      { kind: 'infrastructure', broke: 'client-app', retryable: true },
+      undefined,
     ],
     [
       new NativeTranscriptError(

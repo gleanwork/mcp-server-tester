@@ -15,6 +15,7 @@ import {
 import { runChatgptTurn } from './chatgpt/turn.js';
 import type * as ChatgptTurnModule from './chatgpt/turn.js';
 import { clientRunToExecution } from './clientTranscript.js';
+import { TRIAL_ENDING, endingOf } from './trialEnding.js';
 import type { ClientBatchRequest } from './evalFrameworkTypes.js';
 import type { ChatgptDesktop } from './chatgpt/desktop.js';
 import { linuxEnvironment } from './chatgpt/linuxEnvironment.fixture.js';
@@ -332,6 +333,43 @@ describe('ChatGPT V2 batch client', () => {
         }),
         expect.anything(),
         expect.anything()
+      );
+    }
+  );
+
+  // ADR 0010: a client that ran out of its own time is a trial, on every
+  // client. A timeout the turn didn't type (a stall, or no bound session)
+  // stays infrastructure.
+  it.each([
+    { type: 'chatgpt', typed: true, ends: 'a trial' },
+    { type: 'codex-app', typed: true, ends: 'a trial' },
+    { type: 'chatgpt', typed: false, ends: 'infrastructure' },
+  ] as const)(
+    '$type ends a timed-out turn as $ends (typed: $typed)',
+    async ({ type, typed }) => {
+      const client = type === 'chatgpt' ? CHATGPT_CLIENT : CODEX_APP_CLIENT;
+      const error =
+        'Timed out waiting for the native ChatGPT turn to complete.';
+      vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+        success: false,
+        error,
+        toolCalls: [],
+        clientMetadata: { ...metadata, failureKind: 'timeout' },
+        ...(typed ? { ending: TRIAL_ENDING } : {}),
+      });
+      const batch = requests().slice(0, 1);
+      batch[0]!.config = { ...config, type };
+      const [result] = await collectClientBatch(client, batch, context);
+      expect(result!.error).toBe(error);
+      expect(endingOf(result!)).toEqual(
+        typed
+          ? TRIAL_ENDING
+          : {
+              kind: 'infrastructure',
+              broke: 'deadline',
+              retryable: true,
+              reason: error,
+            }
       );
     }
   );

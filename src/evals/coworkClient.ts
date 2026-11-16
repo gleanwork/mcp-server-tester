@@ -625,9 +625,13 @@ async function desktopAdapter(
       const startedAtMs = Date.now();
       const deadlineAt = startedAtMs + config.timeout;
       let hitlError: string | undefined;
+      // Why the first HITL check stopped, typed for the case's ending.
+      let hitlFailure: unknown;
       // The HITL check failed without acting on the app (CoworkHitlError).
       let hitlUntouched = false;
       let hitlWarning: string | undefined;
+      // The task's last poll had a tool call with no output yet.
+      let waitingOnTool = false;
       let awaitingUser = false;
       let sessionPath: string;
       const match = {
@@ -773,6 +777,7 @@ async function desktopAdapter(
             : {}),
         };
         const message = safeError(error);
+        hitlFailure = error;
         if (
           error instanceof CoworkDriverError &&
           error.kind === 'hitl-budget-exhausted'
@@ -826,59 +831,64 @@ async function desktopAdapter(
         process.stderr.write(`[mst:cowork] collecting case ${index + 1}\n`);
         let inspections = 0;
         let nextInspection = 0;
+        const revisit =
+          mac && (!coworkSetup.approveWriteTools || firstParty)
+            ? async (pending: ClaudeTranscript) => {
+                // A tool request can arrive after the initial visual check. Revisit
+                // only a bound transcript with an outstanding native tool call, within
+                // the same per-case action budget. Never resubmit the prompt.
+                if (
+                  hitlError ||
+                  inspections >= 3 ||
+                  hitlActions >= config.hitlMaxActions ||
+                  Date.now() < nextInspection ||
+                  !pending.toolCalls.some((call) => call.output === undefined)
+                )
+                  return;
+                if (pending.candidate.metadataPath !== sessionPath)
+                  throw new Error(
+                    'Native session identity changed before HITL.'
+                  );
+                inspections++;
+                nextInspection = Date.now() + 5_000;
+                try {
+                  const followup = await platform.handleHitl({
+                    deadlineAt: Math.min(deadlineAt, Date.now() + 60_000),
+                    maxActions: config.hitlMaxActions - hitlActions,
+                    model: computerUseModel,
+                    env,
+                    ...(session?.appPath ? { appPath: session.appPath } : {}),
+                    approveWriteTools: coworkSetup.approveWriteTools,
+                    task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks, type, or resubmit a query. If the current task cannot be identified uniquely, stop without an action.`,
+                  });
+                  hitlActions += followup.action_count;
+                  hitlFollowups.push({
+                    status: 'completed',
+                    ...(followup.telemetry
+                      ? { telemetry: followup.telemetry }
+                      : {}),
+                  });
+                } catch (error) {
+                  hitlFollowups.push({
+                    status: 'failed',
+                    ...(error instanceof CoworkDriverError && error.telemetry
+                      ? { telemetry: error.telemetry }
+                      : {}),
+                  });
+                  throw error;
+                }
+              }
+            : undefined;
         const transcript = await waitForClaudeTranscript({
           ...match,
           sessionPath,
           timeoutMs: remaining,
-          ...(mac && (!coworkSetup.approveWriteTools || firstParty)
-            ? {
-                onPending: async (pending) => {
-                  // A tool request can arrive after the initial visual check. Revisit
-                  // only a bound transcript with an outstanding native tool call, within
-                  // the same per-case action budget. Never resubmit the prompt.
-                  if (
-                    hitlError ||
-                    inspections >= 3 ||
-                    hitlActions >= config.hitlMaxActions ||
-                    Date.now() < nextInspection ||
-                    !pending.toolCalls.some((call) => call.output === undefined)
-                  )
-                    return;
-                  if (pending.candidate.metadataPath !== sessionPath)
-                    throw new Error(
-                      'Native session identity changed before HITL.'
-                    );
-                  inspections++;
-                  nextInspection = Date.now() + 5_000;
-                  try {
-                    const followup = await platform.handleHitl({
-                      deadlineAt: Math.min(deadlineAt, Date.now() + 60_000),
-                      maxActions: config.hitlMaxActions - hitlActions,
-                      model: computerUseModel,
-                      env,
-                      ...(session?.appPath ? { appPath: session.appPath } : {}),
-                      approveWriteTools: coworkSetup.approveWriteTools,
-                      task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks, type, or resubmit a query. If the current task cannot be identified uniquely, stop without an action.`,
-                    });
-                    hitlActions += followup.action_count;
-                    hitlFollowups.push({
-                      status: 'completed',
-                      ...(followup.telemetry
-                        ? { telemetry: followup.telemetry }
-                        : {}),
-                    });
-                  } catch (error) {
-                    hitlFollowups.push({
-                      status: 'failed',
-                      ...(error instanceof CoworkDriverError && error.telemetry
-                        ? { telemetry: error.telemetry }
-                        : {}),
-                    });
-                    throw error;
-                  }
-                },
-              }
-            : {}),
+          onPending: async (pending) => {
+            waitingOnTool = pending.toolCalls.some(
+              (call) => call.output === undefined
+            );
+            await revisit?.(pending);
+          },
         });
         if (transcript.candidate.metadataPath !== sessionPath)
           throw new Error(
@@ -981,16 +991,39 @@ async function desktopAdapter(
       } catch (error) {
         // Transcript collection or attribution failed: the app state is unknown.
         const message = recordingFailure(error);
-        // The bound session never finished or went away: the client app
-        // failed, not the model. Any other error here is the trial's.
+        // The bound session went away, or MST's session recorder failed so
+        // the session could never be read as complete: the client app
+        // failed, not the model. A bound session still running at the case's
+        // deadline with its recorder working ran out of its own time, a trial
+        // that failed (ADR 0010), as on every client. Any other error here
+        // is the trial's too.
+        const recorderFailed = Boolean(session?.recordingError?.());
+        const timedOut =
+          error instanceof NativeTranscriptError &&
+          error.failureKind === 'timeout';
         const lostSession =
           error instanceof NativeTranscriptError &&
-          (error.failureKind === 'timeout' ||
-            error.failureKind === 'no_matching_session');
+          (error.failureKind === 'no_matching_session' ||
+            (timedOut && recorderFailed));
+        // MST's HITL check stopped and the task still had a tool call with no
+        // output at the deadline: it waited on an approval nobody could give,
+        // so the check's own failure decides the ending, as it does for a
+        // submission. With no open tool call the model was only slow, and the
+        // timeout stays a trial, as a finished task's HITL warning does.
+        const hitlStopped =
+          timedOut &&
+          !lostSession &&
+          hitlFailure !== undefined &&
+          waitingOnTool;
+        const reason = hitlStopped
+          ? `${message} The HITL check had stopped: ${hitlError ?? hitlWarning}`
+          : message;
         const ending = lostSession
           ? infrastructureEnding('client-app', message)
-          : undefined;
-        result = { ...result, error: message, ...(ending ? { ending } : {}) };
+          : hitlStopped
+            ? computerUseEnding(hitlFailure, reason)
+            : undefined;
+        result = { ...result, error: reason, ...(ending ? { ending } : {}) };
         if (Date.now() >= deadlineAt) {
           // Past the deadline the task may still be running: keep what
           // its bound session did by now, as a failed case's evidence.

@@ -222,6 +222,7 @@ function turnRunResult(
   return {
     finalText: (turn.success ? turn.response : undefined) ?? '',
     error: turn.success ? undefined : turn.error,
+    ...(!turn.success && turn.ending ? { ending: turn.ending } : {}),
     usage: turn.usage,
     ...(turn.modelCalls?.length ? { modelCalls: turn.modelCalls } : {}),
     events: toolCallEvents(turn.toolCalls, servers),

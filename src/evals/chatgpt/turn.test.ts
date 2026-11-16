@@ -731,6 +731,8 @@ describe('bounded native binding wait and failure classification', () => {
         usage: { inputTokens: 100, outputTokens: 10 },
         conversationHistory: [{ role: 'user' }],
       });
+      // The bound turn ran out of the case's time: a trial (ADR 0010).
+      expect(endingOf(result)).toEqual({ kind: 'trial' });
       expect(clock.now).toBe(2500);
       expect(result).not.toHaveProperty('response');
     } finally {
@@ -774,6 +776,11 @@ describe('bounded native binding wait and failure classification', () => {
             }),
           ]),
         },
+      });
+      // A stall is the app's, not the case's time: it stays infrastructure.
+      expect(endingOf(result)).toMatchObject({
+        kind: 'infrastructure',
+        retryable: true,
       });
       // Stops at the 120s silence limit, not the 900s case timeout.
       expect(clock.now - 1000).toBeGreaterThanOrEqual(120_000);

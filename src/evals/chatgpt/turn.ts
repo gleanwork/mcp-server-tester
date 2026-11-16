@@ -39,6 +39,8 @@ import {
 } from './linuxDesktop.js';
 import type { ChatgptDesktop } from './desktop.js';
 import { clientPluginMcpServers } from '../clientPlugins.js';
+import { TRIAL_ENDING } from '../trialEnding.js';
+import type { TrialEnding } from '../../types/trialEnding.js';
 import { CHATGPT_STALL_MS, saveStallScreenshot } from './stallScreenshot.js';
 import type { ChatgptAppConfig } from './config.js';
 import type {
@@ -111,6 +113,11 @@ interface ChatgptTurnFailure {
   conversationHistory?: ChatgptTranscript['conversationHistory'];
   usage?: UsageMetrics;
   clientMetadata: ClientMetadata;
+  /**
+   * How the attempt ended, when the turn decided it where it failed (ADR
+   * 0010). Without it, the failure kind decides.
+   */
+  ending?: TrialEnding;
 }
 
 /**
@@ -629,7 +636,13 @@ export async function captureChatgptTurn(
       'Timed out waiting for the native ChatGPT turn to complete.';
     const result = await withEvidence(
       latest
-        ? partialFailure(state, latest, 'timeout', timeoutError)
+        ? // The bound turn ran out of the case's time: its own time, a trial
+          // that failed (ADR 0010), as on every client. A stalled turn and
+          // one that never bound stay infrastructure.
+          {
+            ...partialFailure(state, latest, 'timeout', timeoutError),
+            ending: TRIAL_ENDING,
+          }
         : failureResult(state, {
             failureKind: matched ? 'timeout' : 'no_matching_session',
             error: matched
@@ -783,7 +796,7 @@ function partialFailure(
   { path, transcript }: { path: string; transcript: ChatgptTranscript },
   failureKind: ExternalClientFailureKind,
   error: string
-): ChatgptTurn {
+): ChatgptTurnFailure {
   const metadata = buildMetadata(state);
   const usageSource = transcript.usage ? 'client-local-transcript' : 'none';
   return {
