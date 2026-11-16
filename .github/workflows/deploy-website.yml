@@ -77,8 +77,12 @@ jobs:
         working-directory: website
         run: npm ci
 
+      # mise's Node keeps global packages in its own prefix, which later steps
+      # don't have on PATH, so add that prefix's bin.
       - name: Install the Vercel CLI
-        run: npm install --global vercel@65
+        run: |
+          npm install --global vercel@65
+          echo "$(npm prefix --global)/bin" >> "$GITHUB_PATH"
 
       - name: Pull Vercel project settings
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
