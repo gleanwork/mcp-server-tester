@@ -268,18 +268,51 @@ describe('first-party Linux workflow', () => {
     ).toHaveLength(1);
   });
 
-  it('scans again when opening a task destroys the previous view mid-walk', async () => {
+  it.each([
+    'accessibility_node_defunct',
+    'accessibility_dbus_error',
+    'accessibility_invalid_reply',
+    'accessibility_tree_invalid',
+  ])(
+    'scans again when opening a task changes the view mid-walk (%s)',
+    async (code) => {
+      const ui = new AccountUi();
+      let defunct = 3;
+      ui.onSnapshot = () => {
+        if (ui.actions.includes('open cowork') && defunct-- > 0)
+          throw new LinuxUiError(code);
+      };
+      expect(await submit(ui)).toMatchObject({
+        status: 'submitted',
+        action_count: 5,
+        duration_ms: 300,
+      });
+      expect(ui.actions).toEqual([
+        'open cowork',
+        'Model: Opus 5.5 Medium',
+        'Sonnet 5.5 Most efficient for simpler tasks',
+        'paste',
+        'Start task',
+      ]);
+    }
+  );
+
+  it('scans again before the paste when the view changes after the model is chosen', async () => {
     const ui = new AccountUi();
-    let defunct = 3;
+    let scans = 0;
     ui.onSnapshot = () => {
-      if (ui.actions.includes('open cowork') && defunct-- > 0)
+      if (ui.actions.at(-1) !== 'Sonnet 5.5 Most efficient for simpler tasks')
+        return;
+      scans += 1;
+      // Scan 1 confirms the model; scans 2-4 are the read before the paste.
+      if (scans >= 2 && scans <= 4)
         throw new LinuxUiError('accessibility_node_defunct');
     };
     expect(await submit(ui)).toMatchObject({
       status: 'submitted',
       action_count: 5,
-      duration_ms: 300,
     });
+    expect(scans).toBeGreaterThan(4);
     expect(ui.actions).toEqual([
       'open cowork',
       'Model: Opus 5.5 Medium',
@@ -315,6 +348,41 @@ describe('first-party Linux workflow', () => {
       error: 'accessibility_node_defunct',
       action_count: 1,
       duration_ms: 10_000,
+    });
+    expect(ui.actions).toEqual(['open cowork']);
+  });
+
+  it('reports the last transient scan error when a stage never settles', async () => {
+    const ui = new AccountUi();
+    let scans = 0;
+    ui.onSnapshot = () => {
+      if (!ui.actions.includes('open cowork')) return;
+      throw new LinuxUiError(
+        scans++ % 2 === 0
+          ? 'accessibility_node_defunct'
+          : 'accessibility_tree_invalid'
+      );
+    };
+    const receipt = await submit(ui);
+    expect(receipt).toMatchObject({ status: 'failed', action_count: 1 });
+    expect(receipt.error).toBe(
+      scans % 2 === 0
+        ? 'accessibility_tree_invalid'
+        : 'accessibility_node_defunct'
+    );
+    expect(ui.actions).toEqual(['open cowork']);
+  });
+
+  it('fails a stage at once on a scan error that is not transient', async () => {
+    const ui = new AccountUi();
+    ui.onSnapshot = () => {
+      if (ui.actions.includes('open cowork'))
+        throw new LinuxUiError('accessibility_bus_closed');
+    };
+    expect(await submit(ui)).toMatchObject({
+      status: 'failed',
+      error: 'accessibility_bus_closed',
+      action_count: 1,
     });
     expect(ui.actions).toEqual(['open cowork']);
   });
