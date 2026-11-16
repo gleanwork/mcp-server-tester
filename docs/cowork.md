@@ -913,8 +913,10 @@ tell which. Set a longer `timeout` in the eval config for long tasks. The case
 is a trial that failed, and it counts in the pass rate
 ([ADR 0010](./adr/0010-a-trial-ending-is-decided-where-it-ends.md)). It is a
 retryable infrastructure failure instead when MST's session recorder failed, the
-bound session went away, or MST's HITL check stopped (the task may have waited
-on an approval nobody gave; the check's failure decides what broke).
+bound session went away, or MST's HITL check stopped and the task still had a
+tool call with no output at the deadline. That task waited on an approval nobody
+could give, so the check's failure decides what broke. When no tool call was
+open, the model was only slow, and the timeout stays a trial.
 
 On macOS the driver acts only while Claude is the frontmost app. A click that
 misses Claude's window (on the desktop, say) brings another app forward; before
