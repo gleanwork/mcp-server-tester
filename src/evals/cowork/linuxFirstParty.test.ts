@@ -183,6 +183,76 @@ describe('plugin-staged first-party Linux desktop', () => {
     }
   );
 
+  function replyInOrder(...replies: Array<Record<string, unknown>>) {
+    runtime.exec.mockImplementation((_command, _args, _options, callback) => ({
+      stdin: {
+        on: vi.fn(),
+        end(payload: string) {
+          runtime.payloads.push(JSON.parse(payload) as Record<string, unknown>);
+          callback(null, JSON.stringify(replies.shift()));
+        },
+      },
+    }));
+  }
+  const modes = () =>
+    runtime.exec.mock.calls.map((call) => {
+      const args = call[1] as string[];
+      return args[args.indexOf('--mode') + 1];
+    });
+
+  it('opens one empty Cowork task when a later batch finds the last task on screen', async () => {
+    replyInOrder(
+      {
+        status: 'failed',
+        error: 'first_party_cowork_not_ready',
+        action_count: 0,
+        duration_ms: 1,
+      },
+      { status: 'ready', action_count: 1, duration_ms: 1 }
+    );
+    const session = await prepare();
+    await session.dispose();
+    expect(modes()).toEqual(['probe', 'reset']);
+    const resetArgs = runtime.exec.mock.calls[1]![1] as string[];
+    expect(resetArgs[resetArgs.indexOf('--max-actions') + 1]).toBe('2');
+    expect(runtime.payloads).toEqual([{}, {}]);
+  });
+
+  it.each(['first_party_task_running', 'accessibility_dbus_error'])(
+    'does not reset when the probe fails with %s',
+    async (error) => {
+      replyInOrder({
+        status: 'failed',
+        error,
+        action_count: 0,
+        duration_ms: 1,
+      });
+      await expect(prepare()).rejects.toThrow(`(${error})`);
+      expect(modes()).toEqual(['probe']);
+    }
+  );
+
+  it('fails preparation when that one reset fails', async () => {
+    replyInOrder(
+      {
+        status: 'failed',
+        error: 'composer_missing_or_ambiguous',
+        action_count: 0,
+        duration_ms: 1,
+      },
+      {
+        status: 'failed',
+        error: 'first_party_task_running',
+        action_count: 0,
+        duration_ms: 1,
+      }
+    );
+    await expect(prepare()).rejects.toThrow(
+      'Linux desktop reset failed or its receipt was uncertain (first_party_task_running)'
+    );
+    expect(modes()).toEqual(['probe', 'reset']);
+  });
+
   it('preserves exact model/prompt and the action budget through one first-party submission', async () => {
     const prompt = '  Find 中文 & "quotes"\nunchanged  ';
     await coworkLinuxFirstParty.submit(prompt, {

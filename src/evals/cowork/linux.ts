@@ -617,13 +617,39 @@ async function execute(
     result.failed ||
     record?.status !== expected ||
     record.action_count > (options.maxActions ?? 24)
-  )
-    throw new CoworkDriverError(
-      `Linux desktop ${mode} failed or its receipt was uncertain (${record?.errorCode ?? 'missing_or_invalid_receipt'}); no retry attempted.`,
+  ) {
+    const code = record?.errorCode ?? 'missing_or_invalid_receipt';
+    throw new LinuxDriverError(
+      `Linux desktop ${mode} failed or its receipt was uncertain (${code}); no retry attempted.`,
+      code,
       record ? telemetry(started, record.action_count, 'partial') : undefined
     );
+  }
   return record;
 }
+
+/** A failed or uncertain driver run, with the code from its receipt. */
+class LinuxDriverError extends CoworkDriverError {
+  constructor(
+    message: string,
+    readonly code: string,
+    telemetry?: ConstructorParameters<typeof CoworkDriverError>[1]
+  ) {
+    super(message, telemetry);
+  }
+}
+
+/**
+ * First-party probe failures that mean only "not on an empty Cowork task"
+ * (the driver's `waitEmpty` waits through the same ones). A running task,
+ * an accessibility error or any other failure is not among them.
+ */
+const FIRST_PARTY_NOT_ON_EMPTY_TASK = new Set([
+  'first_party_cowork_not_ready',
+  'composer_missing_or_ambiguous',
+  'model_control_missing_or_ambiguous',
+  'composer_not_empty',
+]);
 
 async function privateDirectory(path: string): Promise<void> {
   const info = await lstat(path);
@@ -1258,13 +1284,32 @@ export const coworkLinuxFirstParty: CoworkDesktop = {
         'First-party Linux Cowork cannot install managed plugins or telemetry settings, or pin appVersion.'
       );
     await checkAccountRuntime(env);
-    // Read-only readiness. In particular, no managed restart or warmup task.
-    await execute(
-      'probe',
-      {},
-      { deadlineAt: Date.now() + 15_000, maxActions: 1, env },
-      'first-party'
-    );
+    // Readiness: no managed restart or warmup task, and at most the one
+    // reset below, which never types or sends.
+    try {
+      await execute(
+        'probe',
+        {},
+        { deadlineAt: Date.now() + 15_000, maxActions: 1, env },
+        'first-party'
+      );
+    } catch (error) {
+      // The plugin starts the app once per runtime, so a later batch (the
+      // next variant) finds the last batch's finished task on screen rather
+      // than an empty Cowork task. Open one, as `reset` does between cases:
+      // it never types or sends, and it refuses while a task still runs.
+      if (
+        !(error instanceof LinuxDriverError) ||
+        !FIRST_PARTY_NOT_ON_EMPTY_TASK.has(error.code)
+      )
+        throw error;
+      await execute(
+        'reset',
+        {},
+        { deadlineAt: Date.now() + 15_000, maxActions: 2, env },
+        'first-party'
+      );
+    }
     const app = await installedCoworkApp();
     return {
       ...(app ? { app } : {}),
