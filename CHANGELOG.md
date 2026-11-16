@@ -1,3 +1,65 @@
+
+## v2.0.0-rc.1 (2026-11-16)
+
+#### :boom: Breaking Change
+* [#598](https://github.com/gleanwork/mcp-server-tester/pull/598) fix(evals)!: a desktop turn that runs out of time is a trial ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#577](https://github.com/gleanwork/mcp-server-tester/pull/577) fix(store)!: check stored results, baselines and artifacts ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#595](https://github.com/gleanwork/mcp-server-tester/pull/595) refactor(linux)!: port the Linux desktop drivers and image helpers to TypeScript ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#592](https://github.com/gleanwork/mcp-server-tester/pull/592) feat(judges)!: a judge can fall back on its own model and still take a configured one ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#574](https://github.com/gleanwork/mcp-server-tester/pull/574) fix(run-format)!: record what produced a run, and give schemas versioned IDs ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#573](https://github.com/gleanwork/mcp-server-tester/pull/573) fix(run-format)!: keep what a newer MST wrote, and publish transcript schemas ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#568](https://github.com/gleanwork/mcp-server-tester/pull/568) fix(evals)!: score keys are assertion keys; freeze the runner interfaces ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#567](https://github.com/gleanwork/mcp-server-tester/pull/567) fix(history)!: compare what the runs show: servers, write modes, plugins, option keys, judge identities ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#564](https://github.com/gleanwork/mcp-server-tester/pull/564) fix(writes)!: keep failed trials' records, claim lines once, hold read-only servers to their tools ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#562](https://github.com/gleanwork/mcp-server-tester/pull/562) feat!: every write is accounted for (ADR 0014) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#561](https://github.com/gleanwork/mcp-server-tester/pull/561) refactor!: traces are transcripts (ADR 0013) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#560](https://github.com/gleanwork/mcp-server-tester/pull/560) refactor!: environments are runners (ADR 0013) ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#557](https://github.com/gleanwork/mcp-server-tester/pull/557) fix(cli)!: drop Ink so init, generate, login and token run without a terminal ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :rocket: Enhancement
+* [#591](https://github.com/gleanwork/mcp-server-tester/pull/591) feat(evals): default Claude Code gateway context to 1M ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#571](https://github.com/gleanwork/mcp-server-tester/pull/571) feat(evals): codex-cli keeps Codex's rollout trace (rolloutTrace) ([@jay-zhang-glean](https://github.com/jay-zhang-glean))
+* [#581](https://github.com/gleanwork/mcp-server-tester/pull/581) feat: add source-controlled Linux Cowork first-party runs ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#580](https://github.com/gleanwork/mcp-server-tester/pull/580) feat: add plugin-owned Docker runtime preparation ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#583](https://github.com/gleanwork/mcp-server-tester/pull/583) feat(models): set default models in config files, and warn about built-in ones ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#576](https://github.com/gleanwork/mcp-server-tester/pull/576) feat(cowork): support local first-party account sessions ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#555](https://github.com/gleanwork/mcp-server-tester/pull/555) feat(report): the history page ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#554](https://github.com/gleanwork/mcp-server-tester/pull/554) feat(evals): an eval's history of runs ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#521](https://github.com/gleanwork/mcp-server-tester/pull/521) feat(judges): show each judge's version in mst judges ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#559](https://github.com/gleanwork/mcp-server-tester/pull/559) feat(skills): add run-mcp-eval and calibrate-mcp-judge, shorten the guide ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :bug: Bug Fix
+* [#585](https://github.com/gleanwork/mcp-server-tester/pull/585) fix(codex): persist opt-in auth caches across trials ([@haowei-zhang-glean](https://github.com/haowei-zhang-glean))
+* [#582](https://github.com/gleanwork/mcp-server-tester/pull/582) fix(cowork): run on Claude Desktop's current Linux UI ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+* [#575](https://github.com/gleanwork/mcp-server-tester/pull/575) fix(detach): start no command after a cancel the coordinator already saw ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :memo: Documentation
+* [#599](https://github.com/gleanwork/mcp-server-tester/pull/599) docs: mark the experimental and internal parts of the client contract ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#596](https://github.com/gleanwork/mcp-server-tester/pull/596) docs(agents): make AGENTS.md the one home for conventions, fix stale agent files, and test them ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#572](https://github.com/gleanwork/mcp-server-tester/pull/572) docs(telemetry): call the client's OpenTelemetry host telemetry ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#566](https://github.com/gleanwork/mcp-server-tester/pull/566) docs: use ADR 0013 vocabulary on the site and in the docs ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#563](https://github.com/gleanwork/mcp-server-tester/pull/563) docs(site): add a Docusaurus docs site that serves the docs over MCP ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :house: Internal
+* [#602](https://github.com/gleanwork/mcp-server-tester/pull/602) test(cowork): wait on the claude.ai mirror by real time, not a step count ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#594](https://github.com/gleanwork/mcp-server-tester/pull/594) ci: label every pull request for the changelog ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#590](https://github.com/gleanwork/mcp-server-tester/pull/590) fix(docker): pack MST even when an npm dry run started it ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#586](https://github.com/gleanwork/mcp-server-tester/pull/586) fix(deps): bump fast-xml-parser from 5.8.0 to 5.12.0 ([@dependabot[bot]](https://github.com/apps/dependabot))
+* [#589](https://github.com/gleanwork/mcp-server-tester/pull/589) docs(changelog): release-it writes the changelog; stop hand-written Unreleased entries ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#584](https://github.com/gleanwork/mcp-server-tester/pull/584) ci(website): deploy the docs site only on release tags ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#588](https://github.com/gleanwork/mcp-server-tester/pull/588) docs(agents): require a test for each new behavior ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#570](https://github.com/gleanwork/mcp-server-tester/pull/570) docs(release): describe the inputs, not commands to copy ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#569](https://github.com/gleanwork/mcp-server-tester/pull/569) docs(release): agents release when a person asks ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#565](https://github.com/gleanwork/mcp-server-tester/pull/565) fix(site): deploy the docs site with Vercel's Git integration ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#558](https://github.com/gleanwork/mcp-server-tester/pull/558) docs(adr): Anthropic's eval vocabulary, and graders that check outcomes ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#556](https://github.com/gleanwork/mcp-server-tester/pull/556) docs(changelog): the full v2.0.0-rc.0 section, from the now-labeled pull requests ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### Committers: 4
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Jay Zhang ([@jay-zhang-glean](https://github.com/jay-zhang-glean))
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+- [@haowei-zhang-glean](https://github.com/haowei-zhang-glean)
+
 ## v2.0.0-rc.0 (2026-11-06)
 
 #### :boom: Breaking Change
