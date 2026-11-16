@@ -6,8 +6,8 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-  # The Harness.launch() contract and `env.agent.harness` config of verifiers 0.4.
-  "verifiers>=0.4.1,<0.5",
+  # The Harness.launch() contract of verifiers 0.2, the line downstream tasksets pin.
+  "verifiers>=0.2.1,<0.3",
 ]
 
 [project.urls]

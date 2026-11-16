@@ -6,21 +6,22 @@ from typing import Any, cast
 
 import pytest
 from verifiers.v1.clients import ModelContext
+from verifiers.v1.loaders import harness_class, harness_config_type
 from verifiers.v1.runtimes import ProgramResult, Runtime
 from verifiers.v1.task import TaskData
 from verifiers.v1.trace import Trace
-from verifiers.v1.utils.loaders import harness_class, harness_config_type
 
-from mst_harness import MSTHarness, MSTHarnessConfig
+from mst_harness import MSTHarness, MSTHarnessConfig, cowork_container
 from mst_harness.harness import (
     TrialRequest,
     dataset,
     eval_config,
-    parse_mst_version,
     parse_trial,
 )
 
 ENDPOINT = "http://127.0.0.1:8765/rollout/abc/v1"
+# The runtime's working directory, where relative paths resolve.
+CWD = "/app"
 
 
 def trial_file(**overrides: Any) -> bytes:
@@ -56,6 +57,7 @@ class FakeRuntime:
         self.files[path] = data
 
     async def read(self, path: str, max_bytes: int | None = None) -> bytes:
+        path = path.removeprefix(f"{CWD}/")
         if path in self.files:
             return self.files[path]
         assert self.trial is not None
@@ -65,8 +67,10 @@ class FakeRuntime:
         self.runs.append((argv, env))
         if argv[:2] == ["mst", "run"]:
             return ProgramResult(self.exit_code, "mst summary", "mst log")
+        if argv[0] == "sh" and argv[2].endswith("&& pwd"):
+            return ProgramResult(0, f"{CWD}/{argv[2].split('cd ', 1)[1].split(' &&', 1)[0]}\n", "")
         if argv[0] == "sh" and "find . -type f" in argv[2]:
-            root = argv[2].split("cd ", 1)[1].split(" &&", 1)[0]
+            root = argv[2].split("cd ", 1)[1].split(" ", 1)[0].removeprefix(f"{CWD}/")
             listed = [f"./{p.removeprefix(root + '/')}" for p in self.files if p.startswith(root)]
             return ProgramResult(0, "\n".join(listed) + "\n", "")
         if argv[0] == "sh" and self.trial is not None:
@@ -77,29 +81,25 @@ class FakeRuntime:
         return next((argv, env) for argv, env in self.runs if argv[:2] == ["mst", "run"])
 
 
-AnyTrace = Trace[Any, Any, Any]
-
-
-def fake_trace(calls: list[object] | None = None) -> AnyTrace:
-    """A trace whose interception recorded `calls` (one model call by default)."""
-    recorded = [object()] if calls is None else calls
-    return cast(AnyTrace, SimpleNamespace(id="t-1", info={}, calls=recorded))
+AnyTrace = Trace[Any, Any]
 
 
 def task_data(**fields: Any) -> TaskData:
-    return TaskData.model_validate(fields)
+    return TaskData.model_validate({"idx": 0, **fields})
+
+
+def fake_trace(calls: list[object] | None = None, data: TaskData | None = None) -> AnyTrace:
+    """A trace whose interception recorded `calls` (one model call by default)."""
+    recorded = [object()] if calls is None else calls
+    task = SimpleNamespace(data=data or task_data(prompt="Write the brief."))
+    return cast(AnyTrace, SimpleNamespace(id="t-1", info={}, calls=recorded, task=task))
 
 
 def harness(**config: Any) -> MSTHarness:
     return MSTHarness(MSTHarnessConfig(**config))
 
 
-async def launch(
-    h: MSTHarness,
-    runtime: FakeRuntime,
-    trace: AnyTrace,
-    data: TaskData | None = None,
-) -> ProgramResult:
+async def launch(h: MSTHarness, runtime: FakeRuntime, trace: AnyTrace) -> ProgramResult:
     ctx = cast(ModelContext, SimpleNamespace(model="claude-sonnet-4-6"))
     return await h.launch(
         ctx,
@@ -108,7 +108,6 @@ async def launch(
         ENDPOINT,
         "secret-1",
         {"acme": "http://x/mcp/acme"},
-        data or task_data(prompt="Write the brief."),
     )
 
 
@@ -158,9 +157,8 @@ def test_parse_trial_reads_the_answer_and_ending() -> None:
 
 async def test_launch_runs_one_trial_against_the_interception_endpoint() -> None:
     runtime = FakeRuntime(trial_file())
-    trace = fake_trace()
-    data = task_data(prompt="Write the brief.", system_prompt="Be brief.")
-    result = await launch(harness(env={"KEEP": "1"}), runtime, trace, data)
+    trace = fake_trace(data=task_data(prompt="Write the brief.", system_prompt="Be brief."))
+    result = await launch(harness(env={"KEEP": "1"}), runtime, trace)
 
     assert result.exit_code == 0
     assert result.stdout == "The answer."
@@ -192,8 +190,36 @@ async def test_workdir_runs_the_client_there_and_returns_its_files() -> None:
     mkdir = next(argv for argv, _ in runtime.runs if argv[0] == "mkdir")
     assert mkdir[2:] == [".vf-mst/t-1/workdir", ".vf-mst/t-1/workdir/answer"]
     written = json.loads(runtime.files[".vf-mst/t-1/eval.json"])
-    assert written["clientOptions"]["cwd"] == ".vf-mst/t-1/workdir"
+    assert written["clientOptions"]["cwd"] == "/app/.vf-mst/t-1/workdir"
     assert trace.info["mst"]["files"] == {"answer/report.md": {"size": 9, "text": "# Report\n"}}
+
+
+async def test_a_containerized_client_reaches_loopback_through_the_host_alias() -> None:
+    runtime = FakeRuntime(trial_file())
+    h = harness(client="cowork", host_alias="host.docker.internal", mst_args=["--runner", "docker"])
+    ctx = cast(ModelContext, SimpleNamespace(model="claude-sonnet-4-6"))
+    await h.launch(
+        ctx,
+        fake_trace(),
+        cast(Runtime, runtime),
+        ENDPOINT,
+        "secret-1",
+        {"tools": "http://127.0.0.1:9001/mcp", "remote": "https://mcp.example.com/mcp"},
+    )
+
+    argv, env = runtime.mst_run()
+    assert argv[-2:] == ["--runner", "docker"]
+    assert env["ANTHROPIC_BASE_URL"] == "http://host.docker.internal:8765/rollout/abc"
+    servers = json.loads(runtime.files[".vf-mst/t-1/eval.json"])["servers"]
+    assert servers["tools"]["serverUrl"] == "http://host.docker.internal:9001/mcp"
+    assert servers["remote"]["serverUrl"] == "https://mcp.example.com/mcp"
+
+
+async def test_the_trials_artifacts_are_located_in_the_run() -> None:
+    runtime = FakeRuntime(trial_file(artifacts="artifacts/default/rollout/1"))
+    trace = fake_trace()
+    await launch(harness(client="cowork"), runtime, trace)
+    assert trace.info["mst"]["artifacts"] == "results/runs/r1/artifacts/default/rollout/1"
 
 
 async def test_workdir_needs_a_client_with_a_cwd_option() -> None:
@@ -208,11 +234,10 @@ async def test_workdir_needs_a_client_with_a_cwd_option() -> None:
     [
         ({"client": "codex-cli"}, True),
         ({"client": "api"}, False),
-        ({"client": "api", "dialect": "chat_completions"}, True),
-        ({"client": "codex-cli", "dialect": "anthropic_messages"}, False),
+        ({"client": "claude-code"}, False),
     ],
 )
-async def test_the_dialect_picks_the_endpoint_variables(
+async def test_the_client_picks_the_endpoint_variables(
     config: dict[str, str], openai: bool
 ) -> None:
     runtime = FakeRuntime(trial_file())
@@ -289,26 +314,6 @@ def test_parse_trial_reads_an_rc0_trace() -> None:
     assert result.info()["transcript"]["events"][0]["name"] == "search"
 
 
-def test_parse_mst_version_orders_prereleases_before_the_release() -> None:
-    beta9, rc0, rc1, final = (
-        parse_mst_version(v) for v in ("2.0.0-beta.9", "2.0.0-rc.0\n", "2.0.0-rc.1", "2.0.0")
-    )
-    assert beta9 is not None and rc0 is not None and rc1 is not None and final is not None
-    assert beta9 < rc0 < rc1 < final
-    assert parse_mst_version("no version") is None
-
-
-class Versioned(FakeRuntime):
-    def __init__(self, version: str) -> None:
-        super().__init__(trial_file())
-        self.version = version
-
-    async def run(self, argv: list[str], env: dict[str, str]) -> ProgramResult:
-        if argv[-1] == "--version":
-            return ProgramResult(0, f"{self.version}\n", "")
-        return await super().run(argv, env)
-
-
 class RejectsWrites(FakeRuntime):
     """An MST from before `writes` (2.0.0-rc.0): it rejects the key and runs nothing."""
 
@@ -347,17 +352,64 @@ async def test_writes_are_declared_to_an_mst_that_takes_them() -> None:
     assert json.loads(runtime.files[".vf-mst/t-1/eval.json"])["writes"] == {"acme": "unguarded"}
 
 
-async def test_setup_rejects_an_mst_older_than_the_harness_reads() -> None:
-    with pytest.raises(RuntimeError, match=r"needs MST 2\.0\.0-rc\.0 or later.*beta\.9"):
-        await harness().setup(cast(Runtime, Versioned("2.0.0-beta.9")))
-
-
 def test_verifiers_loads_the_package_as_a_harness() -> None:
     assert harness_class("mst-harness") is MSTHarness
     assert harness_config_type("mst-harness") is MSTHarnessConfig
 
 
-def test_the_harness_runs_on_the_subprocess_runtime() -> None:
-    # verifiers refuses a NEEDS_CONTAINER harness on `subprocess`; MST isolates its clients.
-    assert MSTHarness.NEEDS_CONTAINER is False
+def test_the_harness_takes_mcp_servers_and_a_system_prompt() -> None:
     assert MSTHarness.SUPPORTS_MCP is True
+    assert MSTHarness.APPENDS_SYSTEM_PROMPT is True
+
+
+def test_host_urls_move_to_the_container_loopback() -> None:
+    forwarding = cowork_container.forward_to_loopback(
+        "http://host.docker.internal:8765/v1",
+        {
+            "tools": "http://127.0.0.1:9001/mcp",
+            "remote": "https://mcp.example.com/mcp",
+        },
+    )
+    assert forwarding.endpoint == "http://127.0.0.1:8765/v1"
+    assert forwarding.mcp_urls == {
+        "tools": "http://127.0.0.1:9001/mcp",
+        "remote": "https://mcp.example.com/mcp",
+    }
+    assert forwarding.ports == (8765, 9001)
+
+
+def test_a_host_url_without_a_port_is_rejected() -> None:
+    with pytest.raises(ValueError, match="explicit port"):
+        cowork_container.forward_to_loopback("http://host.docker.internal/v1", {})
+
+
+def test_the_cowork_container_starts_as_mst_starts_it() -> None:
+    args = cowork_container.docker_run_args(
+        name="r1",
+        image="mst-cowork-linux:2.0.0-rc.0",
+        workdir="/home/mst/work",
+        gateway=cowork_container.gateway_url("http://127.0.0.1:8765/v1"),
+        model="claude-sonnet-4-6",
+        seccomp="unconfined",
+        memory=8,
+    )
+    for device in cowork_container.DEVICES:
+        assert ["--device", device] == args[args.index(device) - 1 : args.index(device) + 1]
+    assert "MST_INFERENCE_GATEWAY_URL=http://127.0.0.1:8765" in args
+    assert "MST_INFERENCE_MODELS=claude-sonnet-4-6" in args
+    assert args[args.index("--memory") : args.index("--memory") + 2] == ["--memory", "8g"]
+    assert args[-1] == "mst-cowork-linux:2.0.0-rc.0"
+
+
+def test_mst_runs_as_the_desktop_user_in_the_workdir() -> None:
+    args = cowork_container.desktop_user_exec_args(
+        "r1", "/home/mst/work", ["mst", "run"], {"A": "1"}
+    )
+    assert args == ["exec", "-u", "mst", "-w", "/home/mst/work", "--env", "A=1", "r1", "mst", "run"]
+
+
+async def test_cowork_container_needs_a_docker_runtime_and_cowork() -> None:
+    with pytest.raises(ValueError, match="Docker runtime"):
+        await launch(
+            harness(client="cowork", cowork_container=True), FakeRuntime(None), fake_trace()
+        )

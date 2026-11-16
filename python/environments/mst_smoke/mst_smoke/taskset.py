@@ -30,9 +30,7 @@ class MstSmokeData(vf.TaskData):
 
 
 class MstSmokeTask(vf.Task[MstSmokeData, vf.State, MstSmokeTaskConfig]):
-    @classmethod
-    def toolsets(cls, config: MstSmokeTaskConfig) -> list[vf.Toolset]:
-        return [MstSmokeToolset(config.tools)]
+    tools = (MstSmokeToolset,)
 
     @vf.reward(weight=1.0)
     async def correct_code(self, trace: vf.Trace) -> float:
@@ -47,7 +45,8 @@ class MstSmokeTaskset(vf.Taskset[MstSmokeTask, MstSmokeConfig]):
     def load(self) -> list[MstSmokeTask]:
         return [
             MstSmokeTask(
-                MstSmokeData(name=project, prompt=prompt, project=project), self.config.task
+                MstSmokeData(idx=idx, name=project, prompt=prompt, project=project),
+                self.config.task,
             )
-            for project, prompt in PROMPTS.items()
+            for idx, (project, prompt) in enumerate(PROMPTS.items())
         ]

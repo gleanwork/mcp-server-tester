@@ -1,4 +1,4 @@
-# MST's Python: verifiers plugins that run MST clients (ADR 0015). It is its own uv
+# MST's Python: verifiers plugins that run MST clients. It is its own uv
 # workspace, separate from the TypeScript package: it calls MST only through the `mst`
 # CLI that is installed where a rollout runs.
 #

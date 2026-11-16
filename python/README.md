@@ -1,6 +1,6 @@
 # Run MST clients under verifiers
 
-> **Experimental.** This follows [ADR 0015](../docs/adr/0015-mst-clients-run-as-verifiers-harnesses.md), which is proposed. Names and settings can change.
+> **Experimental.** Names and settings can change.
 
 [verifiers](https://github.com/PrimeIntellect-ai/verifiers) is a Python library for evaluation and RL environments. If your tasks are already a verifiers taskset, you can run them on MST's clients without rewriting them as MST datasets. verifiers runs the eval and MST runs the client:
 
@@ -20,7 +20,7 @@ python/
   tests/                         the harness's unit tests
 ```
 
-Each package exports its one plugin class through `__all__`: `MSTHarness`, a `Harness`, and `MstSmokeTaskset`, a `Taskset`. verifiers imports a package by its id, with `-` as `_`, and takes that class. The harness targets verifiers 0.4 (`verifiers>=0.4.1,<0.5`) and MST 2.0.0-rc.0 or later.
+Each package exports its one plugin class through `__all__`: `MSTHarness`, a `Harness`, and `MstSmokeTaskset`, a `Taskset`. verifiers imports a package by its id, with `-` as `_`, and takes that class. The harness targets verifiers 0.2 (`verifiers>=0.2.1,<0.3`) and MST 2.0.0-rc.0 or later.
 
 ## How a rollout runs
 
@@ -49,35 +49,39 @@ taskset ── task ──► MSTHarness.launch() ──► mst run --no-grade �
 Install `mst-harness` next to verifiers and your taskset, from this directory:
 
 ```bash
-uv pip install ./python/verifiers/mst_harness   # brings verifiers>=0.4.1,<0.5
+uv pip install ./python/verifiers/mst_harness   # brings verifiers>=0.2.1,<0.3
 ```
 
-Then select the harness by its id, with verifiers' own `vf-run`. The rollout's runtime needs `mst` on its `PATH`.
+Then select the harness by its id, with verifiers' own eval command. The rollout's runtime needs `mst` on its `PATH`. verifiers 0.2 ships its v1 eval and validate commands as modules, without console scripts, so the examples run them through Python:
+
+```bash
+VF_EVAL='from verifiers.v1.cli.eval.main import main; main()'
+```
 
 **In a container.** Build the runtime image, which installs MST from Glean's npm registry on Artifact Registry. Pass an `.npmrc` with the registry's token as a build secret (`tools/npm-registry-auth.sh` in Scio writes one), or `--build-arg NPM_REGISTRY=https://registry.npmjs.org/` for public npm:
 
 ```bash
 docker build -t mst-verifiers-runtime --secret id=npmrc,src=$HOME/.npmrc python/
-ANTHROPIC_API_KEY=... vf-run acme-tasks -m claude-sonnet-4-6 \
-  --env.agent.harness.id mst-harness --env.agent.harness.client api \
-  --env.agent.runtime.type docker --env.agent.runtime.image mst-verifiers-runtime \
+ANTHROPIC_API_KEY=... python -c "$VF_EVAL" acme-tasks -m claude-sonnet-4-6 \
+  --harness.id mst-harness --harness.client api \
+  --harness.runtime.type docker --harness.runtime.image mst-verifiers-runtime \
   --client.base-url https://api.anthropic.com --client.api-key-var ANTHROPIC_API_KEY
 ```
 
 `--build-arg MST_VERSION=<version>` pins MST (default: the `rc` dist-tag), and `--build-arg CLIENT_PACKAGES=@openai/codex-sdk` adds a client's SDK (`@anthropic-ai/claude-agent-sdk` for `claude-code`). verifiers runs the taskset, its tool servers and the interception server on the host, and routes the container to them.
 
-**On this machine.** With MST installed (`npm install -g @gleanwork/mcp-server-tester@rc`), use the `subprocess` runtime instead: `--env.agent.runtime.type subprocess`.
+**On this machine.** With MST installed (`npm install -g @gleanwork/mcp-server-tester@rc`), use the `subprocess` runtime instead: `--harness.runtime.type subprocess`.
 
-Or in a config file, run with `vf-run acme-tasks @ acme.toml`:
+Or in a config file, run with `python -c "$VF_EVAL" acme-tasks @ acme.toml`:
 
 ```toml
 model = "claude-sonnet-4-6"
 
-[env.agent.harness]
+[harness]
 id = "mst-harness"
 client = "api"
 
-[env.agent.runtime]
+[harness.runtime]
 type = "docker"
 image = "mst-verifiers-runtime"
 
@@ -86,17 +90,20 @@ base_url = "https://api.anthropic.com"
 api_key_var = "ANTHROPIC_API_KEY"
 ```
 
-`vf-validate acme-tasks --runtime.type subprocess` checks the taskset without a model, as for any harness. [`environments/mst_smoke`](environments/mst_smoke/README.md) is a small taskset that checks the path end to end.
+`python -m verifiers.v1.cli.validate acme-tasks --runtime.type subprocess` checks the taskset without a model, as for any harness. [`environments/mst_smoke`](environments/mst_smoke/README.md) is a small taskset that checks the path end to end.
 
-| Setting          | Default         | Meaning                                                                                                                                              |
-| ---------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `client`         | `"claude-code"` | The MST client, by its canonical name (`mst clients` lists them). It must be on the supported list below.                                            |
-| `client_options` | `{}`            | The client's options, as in an eval config's `clientOptions`.                                                                                        |
-| `dialect`        | `"auto"`        | The model API the client speaks. `auto` is `responses` for `codex-cli` and `anthropic_messages` for the rest.                                        |
-| `plugins`        | `[]`            | MST plugins to load, for a plugin client.                                                                                                            |
-| `writes`         | `"unguarded"`   | The write mode MST gives the task's servers. The taskset's own proxy decides what reaches a service. An MST without `writes` (2.0.0-rc.0) gets none. |
-| `workdir`        | unset           | Subdirectories to create in a working directory the harness keeps. The files the client leaves there come back in `trace.info["mst"]["files"]`.      |
-| `mst_command`    | `["mst"]`       | How to start MST in the runtime, for example `["npx", "mst"]`.                                                                                       |
+| Setting            | Default         | Meaning                                                                                                                                              |
+| ------------------ | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `client`           | `"claude-code"` | The MST client, by its canonical name (`mst clients` lists them). It must be on the supported list below.                                            |
+| `client_options`   | `{}`            | The client's options, as in an eval config's `clientOptions`.                                                                                        |
+| `dialect`          | `"auto"`        | The model API the client speaks. `auto` is `responses` for `codex-cli` and `anthropic_messages` for the rest.                                        |
+| `plugins`          | `[]`            | MST plugins to load, for a plugin client.                                                                                                            |
+| `writes`           | `"unguarded"`   | The write mode MST gives the task's servers. The taskset's own proxy decides what reaches a service. An MST without `writes` (2.0.0-rc.0) gets none. |
+| `workdir`          | unset           | Subdirectories to create in a working directory the harness keeps. The files the client leaves there come back in `trace.info["mst"]["files"]`.      |
+| `mst_command`      | `["mst"]`       | How to start MST in the runtime, for example `["npx", "mst"]`.                                                                                       |
+| `cowork_container` | `false`         | Run Cowork in the rollout's Docker runtime, whose image is MST's Cowork Linux image (see Cowork below).                                              |
+| `seccomp`          | `"unconfined"`  | The Cowork container's seccomp profile: a path to one (MST's is `docker/cowork-linux/seccomp.json`), or `unconfined`.                                |
+| `ready_timeout_s`  | `1200`          | How long the Cowork container's desktop has to come up, in seconds.                                                                                  |
 
 ## Develop
 
@@ -106,21 +113,46 @@ uv sync --locked
 uv run ruff check . && uv run ruff format --check .
 uv run pyright
 uv run pytest
-uv run vf-validate mst-smoke --runtime.type subprocess
+uv run python -m verifiers.v1.cli.validate mst-smoke --runtime.type subprocess
 ```
 
 ## Supported clients
 
 verifiers records a rollout from the model calls that go through its endpoint. A client is supported only if MST can send its inference to an endpoint chosen for each rollout.
 
-| Client                 | Runtime           | Status        | Why                                                                                         |
-| ---------------------- | ----------------- | ------------- | ------------------------------------------------------------------------------------------- |
-| `api`                  | any               | Supported     | MST makes the model calls itself, to `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL`.             |
-| `codex-cli`            | any               | Supported     | MST gives Codex a provider for `OPENAI_BASE_URL`.                                           |
-| `claude-code`          | any               | Supported     | Takes `ANTHROPIC_BASE_URL`, unless Claude Code's managed settings set it (see below).       |
-| `cowork`, `chatgpt`    | MST's Linux image | Not yet       | Take inference from a gateway, but the image needs a runtime that starts it with VM access. |
-| `cowork`               | macOS             | Not supported | Takes inference from managed preferences, which MST doesn't set per run.                    |
-| `chatgpt`, `codex-app` | macOS             | Not supported | Run signed in to the user's account.                                                        |
+| Client                 | Runtime           | Status        | Why                                                                                   |
+| ---------------------- | ----------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `api`                  | any               | Supported     | MST makes the model calls itself, to `ANTHROPIC_BASE_URL` or `OPENAI_BASE_URL`.       |
+| `codex-cli`            | any               | Supported     | MST gives Codex a provider for `OPENAI_BASE_URL`.                                     |
+| `claude-code`          | any               | Supported     | Takes `ANTHROPIC_BASE_URL`, unless Claude Code's managed settings set it (see below). |
+| `cowork`               | MST's Linux image | Supported     | With `cowork_container`: the harness starts the image with VM access (see below).     |
+| `chatgpt`              | MST's Linux image | Not yet       | Takes inference from a gateway, but no runtime starts its image yet.                  |
+| `cowork`               | macOS             | Not supported | Takes inference from managed preferences, which MST doesn't set per run.              |
+| `chatgpt`, `codex-app` | macOS             | Not supported | Run signed in to the user's account.                                                  |
+
+**Cowork.** Claude Desktop takes an inference gateway only over https or loopback http, and verifiers serves its endpoint and MCP servers over http on the host. With `cowork_container = true` and a Docker runtime whose image is MST's Cowork Linux image (`mst runner setup docker` builds `mst-cowork-linux`), the harness replaces the rollout's container with one MST's Docker runner would start: Cowork's VM devices (`/dev/kvm`, `/dev/vhost-vsock`, `/dev/vhost-net`, `/dev/net/tun`), a `/run/mst` tmpfs, and a gateway on the container's loopback. A forwarder in the container passes the endpoint's and MCP servers' ports to the host, the rollout's secret goes to the image's credential helper, and `mst run` runs in the container as its desktop user. See `mst_harness/cowork_container.py`.
+
+```toml
+max_concurrent = 1
+
+[harness]
+id = "mst-harness"
+client = "cowork"
+cowork_container = true
+
+[harness.eval_config.coworkSetup]
+approveWriteTools = true
+
+[harness.runtime]
+type = "docker"
+image = "mst-cowork-linux:<version>"
+workdir = "/home/mst/work"
+```
+
+- Nobody answers Cowork's approval prompts in a container, so set `coworkSetup.approveWriteTools`, or a tool call waits until the trial times out.
+- Cowork's VM takes a host-wide vsock port: run one rollout at a time per Docker host (`max_concurrent = 1`).
+- After MST restarts the desktop, it warms Cowork's VM with one-line tasks. They go through the rollout's endpoint, so they are in the trace as extra conversations.
+- The files Cowork writes stay in the container, which the runtime removes when the rollout ends.
 
 **Managed settings win.** Claude Code's managed settings (`/Library/Application Support/ClaudeCode/managed-settings.json` on macOS) override `ANTHROPIC_BASE_URL`. On such a machine, Claude Code's model calls skip verifiers. The harness fails each such rollout and names the cause, rather than scoring a reply verifiers never saw. Use `api` or `codex-cli` there.
 
@@ -152,6 +184,6 @@ verifiers and MST name the same things differently. In this mode, verifiers' nam
 
 ## Limits
 
-- **One turn per rollout.** A multi-turn env, such as a simulated user, needs a session MST keeps open across turns, which `mst run` doesn't. ADR 0015 names the path: an `mst acp` command and verifiers' `ACPHarness`.
-- **verifiers 0.4.** `mst-harness` implements 0.4's `Harness.launch()` contract, and pins `<0.5`.
+- **One turn per rollout.** A multi-turn env, such as a simulated user, needs a session MST keeps open across turns, which `mst run` doesn't.
+- **verifiers 0.2.** `mst-harness` implements 0.2's `Harness.launch()` contract, and pins `<0.3`.
 - **One client start per rollout.** Each rollout runs `mst run` once.
