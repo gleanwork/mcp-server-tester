@@ -58,10 +58,10 @@ Then select the harness by its id, with verifiers' own eval command. The rollout
 VF_EVAL='from verifiers.v1.cli.eval.main import main; main()'
 ```
 
-**In a container.** Build the runtime image, which installs MST from Glean's npm registry on Artifact Registry. Pass an `.npmrc` with the registry's token as a build secret (`tools/npm-registry-auth.sh` in Scio writes one), or `--build-arg NPM_REGISTRY=https://registry.npmjs.org/` for public npm:
+**In a container.** Build the runtime image, which installs MST from public npm. For a private registry, add `--build-arg NPM_REGISTRY=<url>` and pass an `.npmrc` with the registry's token as a build secret (`--secret id=npmrc,src=$HOME/.npmrc`):
 
 ```bash
-docker build -t mst-verifiers-runtime --secret id=npmrc,src=$HOME/.npmrc python/
+docker build -t mst-verifiers-runtime python/
 ANTHROPIC_API_KEY=... python -c "$VF_EVAL" acme-tasks -m claude-sonnet-4-6 \
   --harness.id mst-harness --harness.client api \
   --harness.runtime.type docker --harness.runtime.image mst-verifiers-runtime \
