@@ -2029,13 +2029,15 @@ describe('V2 Cowork client', () => {
   );
 
   // How a case ended when its transcript couldn't be collected (ADR 0010).
+  // A bound session still running at the deadline ran out of its own time:
+  // a trial, as on every client. A session that went away is the app's.
   it.each([
     [
       new NativeTranscriptError(
         'timeout',
         'Timed out waiting for Claude session local_1 to complete'
       ),
-      { kind: 'infrastructure', broke: 'client-app', retryable: true },
+      undefined,
     ],
     [
       new NativeTranscriptError(

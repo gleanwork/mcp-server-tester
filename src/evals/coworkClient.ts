@@ -981,12 +981,17 @@ async function desktopAdapter(
       } catch (error) {
         // Transcript collection or attribution failed: the app state is unknown.
         const message = recordingFailure(error);
-        // The bound session never finished or went away: the client app
-        // failed, not the model. Any other error here is the trial's.
+        // The bound session went away, or MST's session recorder failed so
+        // the session could never be read as complete: the client app
+        // failed, not the model. A bound session still running at the case's
+        // deadline with its recorder working ran out of its own time, a trial
+        // that failed (ADR 0010), as on every client. Any other error here
+        // is the trial's too.
+        const recorderFailed = Boolean(session?.recordingError?.());
         const lostSession =
           error instanceof NativeTranscriptError &&
-          (error.failureKind === 'timeout' ||
-            error.failureKind === 'no_matching_session');
+          (error.failureKind === 'no_matching_session' ||
+            (error.failureKind === 'timeout' && recorderFailed));
         const ending = lostSession
           ? infrastructureEnding('client-app', message)
           : undefined;

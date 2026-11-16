@@ -553,7 +553,11 @@ A bound turn that times out or aborts still fails (`timeout` or
 `client_run_failed`). The result keeps the recorded tool calls, usage, and
 conversation, with `telemetry.partial: true`, `transcriptConfidence: 'low'`, and the
 limitation "Turn did not complete; tool calls and usage are partial." Partial
-usage duration is the native elapsed time so far.
+usage duration is the native elapsed time so far. A bound turn that runs out of
+the case's `timeout` is a trial that failed, and it counts in the pass rate
+([ADR 0010](./adr/0010-a-trial-ending-is-decided-where-it-ends.md)). A turn whose
+transcript stalls, or one that never binds to a native session, is a retryable
+infrastructure failure.
 
 Each case is self-contained. After a case fails for a native, controller, or
 evidence reason, MST records that failure, then stops and restarts the owned app
