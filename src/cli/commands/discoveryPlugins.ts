@@ -11,10 +11,7 @@ import { installPlugins } from '../../plugins/extensions.js';
 import { loadPlugins } from '../../plugins/loadPlugins.js';
 import { parseExtensionReference } from '../../plugins/plugin.js';
 import { evalSettings, type SettingsSections } from '../../plugins/settings.js';
-import {
-  findSettingsFile,
-  readSettingsFile,
-} from '../../plugins/settingsFile.js';
+import { fileSettings } from '../../plugins/settingsFile.js';
 
 export interface DiscoveryOptions {
   config?: string;
@@ -64,11 +61,7 @@ export async function loadDiscoveryPlugins(options: DiscoveryOptions): Promise<{
   const namespaces = [
     ...new Set(plugins.map((plugin) => plugin.meta.namespace)),
   ].sort();
-  const settingsFile = findSettingsFile(rootDir);
-  const settings = evalSettings(
-    settingsFile ? readSettingsFile(settingsFile) : undefined,
-    namespaces
-  );
+  const settings = evalSettings(fileSettings(rootDir), namespaces);
   return { namespaces, rootDir, ...(settings ? { settings } : {}) };
 }
 

@@ -76,7 +76,7 @@ const REQUIRED_BUSES = [
   'DBUS_SESSION_BUS_ADDRESS',
   'AT_SPI_BUS_ADDRESS',
 ] as const;
-const OPTIONAL_PATHS = ['XAUTHORITY', 'MST_CHATGPT_PYTHON'] as const;
+const OPTIONAL_PATHS = ['XAUTHORITY'] as const;
 const UNDER_HOME = [
   'XDG_CONFIG_HOME',
   'XDG_DATA_HOME',
@@ -117,7 +117,6 @@ export interface LinuxChatgptEnvironment {
   codexPath: string;
   inference: LinuxChatgptInference;
   evidenceDir: string;
-  python?: string;
   /** Only the allowlisted session variables, with CODEX_HOME. */
   session: Record<string, string>;
 }
@@ -185,7 +184,6 @@ export function readLinuxChatgptEnvironment(
     codexPath: env.MST_CHATGPT_CODEX_PATH!,
     inference,
     evidenceDir: env.MST_CHATGPT_EVIDENCE_DIR!,
-    python: env.MST_CHATGPT_PYTHON,
     session,
   };
 }

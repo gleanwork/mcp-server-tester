@@ -11,3 +11,7 @@ for (const name of [
 ]) {
   delete process.env[name];
 }
+
+// Nor on their own ~/.mcp-server-tester/mst.config.json (ADR 0015): empty
+// reads none. A test that needs one names it.
+process.env.MST_USER_CONFIG = '';

@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   NativeChatgptDriverError,
   runLinuxChatgptDesktop,
@@ -9,6 +9,12 @@ import {
 import { validateLinuxChatgptConfig } from '../chatgptSetup/linuxProfile.js';
 import { linuxEnvironment } from './linuxEnvironment.fixture.js';
 import type { ChatgptAppConfig } from './config.js';
+
+/** The driver script the adapter runs on Node; each test writes its own fixture. */
+const runtime = vi.hoisted(() => ({ path: '' }));
+vi.mock('./linuxRuntime.js', () => ({
+  linuxChatgptRuntime: () => runtime.path,
+}));
 
 let root: string;
 let config: ChatgptAppConfig;
@@ -33,7 +39,8 @@ function opener(calls: string[], fail = false) {
 }
 
 async function helper(mode = 'valid', receipt?: unknown) {
-  const path = join(root, 'python-fixture.mjs');
+  const path = join(root, 'driver-fixture.mjs');
+  runtime.path = path;
   await writeFile(
     path,
     `#!/usr/bin/env node
@@ -62,7 +69,6 @@ console.log(JSON.stringify({status: prepare ? 'ready' : 'submitted', surface: ${
   );
   config.options!.desktopEnvironment = {
     ...(config.options!.desktopEnvironment as object),
-    MST_CHATGPT_PYTHON: path,
     ANTHROPIC_API_KEY: 'private-key',
   };
 }
@@ -224,9 +230,9 @@ describe('Linux ChatGPT runtime adapter', () => {
       'helper_failed',
       'helper_timeout',
       'profession_geometry_invalid',
-      'desktop_attribute_error',
-      'desktop_type_error',
-      'desktop_glib_error',
+      'accessibility_dbus_error',
+      'accessibility_node_defunct',
+      'desktop_driver_failed',
     ].map((error) => ({ error })),
     {},
   ] as Array<{ step?: string; draftState?: object; error?: string }>)(

@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PairwiseJudgeInput } from '../pairwiseContract.js';
+import {
+  builtinJudgeSlot,
+  configuredJudgeModel,
+} from '../judgeModelDefaults.js';
 import type { AgentJudgeRuntime, AgentJudgeTask } from './runtime.js';
 import {
   aIsCandidate,
@@ -337,6 +341,45 @@ describe('stagedPairwiseJudge', () => {
     const pref = await judge.compare(pair(), {});
     expect(pref).toMatchObject({ preference: 'baseline', strength: 1 });
     expect(tasks[0]!.task.prompt).toBe('o\nc1');
+  });
+
+  it('takes a default model only for stages that name none', () => {
+    const bundle = (models: Array<string | undefined>) =>
+      stagedPairwiseJudge({
+        schemaVersion: 1,
+        name: 'models',
+        stages: models.map((model, i) => ({
+          id: `s${i}`,
+          ...(i > 0 && { after: [`s${i - 1}`] }),
+          prompt: [{ text: 's' }],
+          ...(i === models.length - 1 && { output: 'verdict' as const }),
+          ...(model && { model }),
+        })),
+        result: { overall: `s${models.length - 1}` },
+      });
+    // So MST neither writes a model in nor warns about one it never calls.
+    expect(bundle(['m1', 'm2']).modelSlot).toBeUndefined();
+    expect(bundle(['m1', undefined]).modelSlot?.({})).toEqual({
+      kind: 'agentJudge',
+      key: 'claude-agent',
+    });
+    expect(bundle(['m1', undefined]).defaultModel).toBeUndefined();
+  });
+
+  it("takes a configured model over its defaults' model, and names that model as its own", () => {
+    const judge = stagedPairwiseJudge({
+      schemaVersion: 1,
+      name: 'own-default',
+      defaults: { runtime: 'codex', model: 'own-model' },
+      stages: [{ id: 's', prompt: [{ text: 's' }], output: 'verdict' }],
+      result: { overall: 's' },
+    });
+    expect(judge.modelSlot?.({})).toEqual({ kind: 'agentJudge', key: 'codex' });
+    expect(judge.defaultModel?.({})).toBe('own-model');
+    expect(builtinJudgeSlot(judge, {})).toBeUndefined();
+    expect(
+      configuredJudgeModel(judge, {}, { agentJudge: { codex: 'configured' } })
+    ).toBe('configured');
   });
 
   it('rejects a bundle with a bad graph or reference when it is defined', () => {

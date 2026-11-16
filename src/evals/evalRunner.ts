@@ -37,11 +37,13 @@ import {
 } from './toolSurface.js';
 import type { Tool } from '@modelcontextprotocol/client';
 import {
+  caseJudgesWithModels,
   gradeTrial,
   gradingErrorOf,
   isWriteCase,
   type GradingOutcome,
 } from './grading.js';
+import { processModelDefaults } from '../llm/modelDefaults.js';
 import type {
   MCPProtocolInfo,
   SkillLoad,
@@ -932,6 +934,14 @@ export async function runEvalCase(
 ): Promise<EvalCaseResult> {
   rejectRenamedOptions(options, RENAMED_RUN_OPTIONS, 'runEvalCase');
   if (options.plugins) installPlugins(options.plugins);
+  // Outside an eval config (whose models `mst run` has written in already),
+  // the Playwright fixtures' model defaults (ADR 0015).
+  const models = processModelDefaults();
+  if (models && evalCase.judges?.length)
+    evalCase = {
+      ...evalCase,
+      judges: caseJudgesWithModels(evalCase.judges, models),
+    };
   const trials = evalCase.trials ?? 1;
 
   if (trials === 1) {

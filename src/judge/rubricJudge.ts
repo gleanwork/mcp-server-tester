@@ -10,6 +10,7 @@ import {
   DEFAULT_JUDGE_MAX_TOKENS,
   DEFAULT_JUDGE_MODELS,
   DEFAULT_JUDGE_TEMPERATURE,
+  llmJudgeModelSlot,
 } from './adapterSupport.js';
 import { createJudge, preflightJudge } from './judgeClient.js';
 import { contentHash } from './judgeIdentity.js';
@@ -61,6 +62,7 @@ export const RUBRIC_JUDGE: JudgeDefinition = {
     "An LLM grades the answer against a rubric: a built-in one or your own text, with the case's expected answer as reference.",
   schema: RubricJudgeOptionsSchema,
   version: RUBRIC_JUDGE_VERSION,
+  modelSlot: llmJudgeModelSlot,
   async evaluate({ case: evalCase, trial }, options) {
     const { rubric, ...config } = RubricJudgeOptionsSchema.parse(options);
     const result = await createJudge(config).evaluate(

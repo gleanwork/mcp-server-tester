@@ -1,0 +1,51 @@
+name: Changelog label
+
+# Every pull request needs exactly one changelog label (`breaking`,
+# `enhancement`, `bug`, `documentation` or `internal`): at release,
+# lerna-changelog leaves out a pull request with none and lists one with two
+# under both headings. This sets the label from the conventional commit title
+# and moves a label it set when the title changes. A label a person set stays.
+# It fails when the pull request has no changelog label and the title implies
+# none, or has more than one. See scripts/changelog-label.ts for the rules.
+#
+# pull_request_target, so pull requests from forks and Dependabot get a token
+# that can label them. It runs the script from main, never code from the pull
+# request, and installs nothing.
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize, labeled, unlabeled]
+
+permissions: {}
+
+# One run at a time per pull request, so two runs never change its labels at
+# once. GitHub keeps one queued run and drops an older one, so each run reads
+# the title, labels and label history when it starts, not from its event.
+# Cancelling the running one instead could stop it before it adds the label.
+concurrency:
+  group: changelog-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  label:
+    name: Changelog label
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # mise.toml's major. Node runs the script's TypeScript itself
+          # (type stripping, from 22.18).
+          node-version: '22'
+
+      - name: Label the pull request
+        run: node scripts/changelog-label.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

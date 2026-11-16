@@ -493,8 +493,15 @@ async function coordinate(options: {
         [process.argv[1]!, ...args],
         {
           cwd: paths.workDir,
-          // The secrets file's values, as a laptop's environment would hold them.
-          env: { ...process.env, ...secrets, ...optionKeyEnv },
+          // The secrets file's values, as a laptop's environment would hold
+          // them. The bundled eval config holds the launching machine's
+          // models, so this machine's own user file adds none (ADR 0015).
+          env: {
+            ...process.env,
+            ...secrets,
+            ...optionKeyEnv,
+            MST_USER_CONFIG: '',
+          },
           stdio: ['ignore', 'pipe', 'pipe'],
         }
       );

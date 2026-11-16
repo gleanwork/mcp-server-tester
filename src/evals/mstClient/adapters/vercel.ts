@@ -28,6 +28,7 @@ import type * as AI from 'ai';
 import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import { z } from 'zod';
 import { resolveLLMEndpoint } from '../../../llm/endpoint.js';
+import { defaultApiModel } from '../../../llm/modelDefaults.js';
 import type { TrialEnding } from '../../../types/trialEnding.js';
 import {
   TRIAL_ENDING,
@@ -400,21 +401,6 @@ async function loadModel(
   }
 }
 
-function defaultModel(provider: LLMProvider): string {
-  switch (provider) {
-    case 'openai':
-      return 'gpt-4o';
-    case 'anthropic':
-      return 'claude-3-5-sonnet-20241022';
-    case 'google':
-      return 'gemini-1.5-pro';
-    case 'mistral':
-      return 'mistral-large-latest';
-    default:
-      return 'default';
-  }
-}
-
 /** The options the simulator passes to generateText/streamText. */
 interface AgentLoopOptions {
   model: AI.LanguageModel;
@@ -624,7 +610,9 @@ export async function runVercelClient(
       throw new Error('provider is required for SDK client type');
     }
 
-    const modelId = config.model ?? defaultModel(config.provider);
+    // The api client resolves the model, configured defaults included
+    // (ADR 0015); a direct caller that names none gets the built-in one.
+    const modelId = config.model ?? defaultApiModel(config.provider, undefined);
     const { model, providerOptions, streams } = await withinDeadline(
       loadModel(config.provider, modelId, config)
     );

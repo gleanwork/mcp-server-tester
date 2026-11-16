@@ -11,6 +11,7 @@ import { join, resolve } from 'node:path';
 import {
   getDatasetTemplate,
   getGitignoreTemplate,
+  getMstConfigTemplate,
   getPackageJsonTemplate,
   getPlaywrightConfigTemplate,
   getTestFileTemplate,
@@ -202,6 +203,7 @@ async function createProject(answers: InitAnswers): Promise<void> {
     ['.gitignore', getGitignoreTemplate()],
     ['package.json', getPackageJsonTemplate(answers.projectName)],
     ['tsconfig.json', getTsconfigTemplate()],
+    ['mst.config.json', getMstConfigTemplate()],
   ];
   for (const [path, content] of files) {
     await writeFile(join(projectPath, path), content);

@@ -117,6 +117,45 @@ export function redactClientSecrets(
   return replaceAll(text, credentials(secrets));
 }
 
+const REDACTED_BYTES = Buffer.from(REDACTED, 'utf8');
+
+/**
+ * `data` (a file's bytes) with every secret replaced, longest first: as
+ * written, and as a JSON string escapes it, since the files a client keeps
+ * (such as a rollout trace's payloads) are mostly JSON. Works on bytes, so a
+ * file that isn't UTF-8 keeps every other byte as it was.
+ */
+export function redactClientSecretBytes(
+  data: Buffer,
+  secrets: readonly string[]
+): Buffer {
+  const needles = [
+    ...new Set(
+      credentials(secrets).flatMap((secret) => [
+        secret,
+        JSON.stringify(secret).slice(1, -1),
+      ])
+    ),
+  ]
+    .map((needle) => Buffer.from(needle, 'utf8'))
+    .sort((a, b) => b.length - a.length);
+  let redacted = data;
+  for (const needle of needles) {
+    let at = redacted.indexOf(needle);
+    if (at === -1) continue;
+    const parts: Buffer[] = [];
+    let from = 0;
+    while (at !== -1) {
+      parts.push(redacted.subarray(from, at), REDACTED_BYTES);
+      from = at + needle.length;
+      at = redacted.indexOf(needle, from);
+    }
+    parts.push(redacted.subarray(from));
+    redacted = Buffer.concat(parts);
+  }
+  return redacted;
+}
+
 /**
  * Where a result names files on this machine (a Cowork session folder): a
  * path, not content, and rewriting it would lose the files.

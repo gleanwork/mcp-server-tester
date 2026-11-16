@@ -8,6 +8,7 @@ import {
   signalGroup,
   stopGroup,
 } from '../codexSetup/native.js';
+import { hasLoneSurrogate, percentEncodeUtf8 } from '../urlComponent.js';
 
 /** Fixed Chromium flags for an isolated X11/AT-SPI desktop. Never caller-chosen. */
 export const LINUX_CHATGPT_APP_FLAGS = [
@@ -66,20 +67,11 @@ export interface LinuxChatgptAppController extends ChatgptApplicationController 
   openPrompt(prompt: string): Promise<void>;
 }
 
-/** Python's quote(value, safe='') for the codex:// URL contract. */
+/** Every UTF-8 byte but `A-Za-z0-9_.~-` percent-encoded, for the codex:// URL contract. */
 export function quoteUrlComponent(value: string): string {
   // Lone surrogates cannot be encoded as strict UTF-8.
-  if (
-    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(
-      value
-    )
-  )
-    throw new CodexSetupError('prompt_invalid');
-  return Array.from(Buffer.from(value, 'utf8'), (byte) =>
-    /[A-Za-z0-9_.~-]/.test(String.fromCharCode(byte))
-      ? String.fromCharCode(byte)
-      : `%${byte.toString(16).toUpperCase().padStart(2, '0')}`
-  ).join('');
+  if (hasLoneSurrogate(value)) throw new CodexSetupError('prompt_invalid');
+  return percentEncodeUtf8(value);
 }
 
 export function chatgptDraftUrl(workspace: string, prompt: string): string {

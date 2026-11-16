@@ -14,9 +14,12 @@ export const ProviderSchema = z.enum([
 /** `clientOptions.skills` values. */
 export const ClientSkillsModeSchema = z.enum(['off', 'catalog', 'preload']);
 
-/** Defaults shared by runtime resolution and the client options catalogue. */
+/**
+ * Defaults shared by runtime resolution and the client options catalogue.
+ * The model depends on the provider: `defaultApiModel` in
+ * `src/llm/modelDefaults.ts`.
+ */
 export const API_CLIENT_DEFAULTS = {
-  model: 'claude-sonnet-4-20250514',
   provider: 'anthropic',
   maxToolCalls: 5,
   temperature: 0,

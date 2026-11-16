@@ -2,10 +2,15 @@
 
 Thank you for your interest in contributing! MST is in active development (2.0 is a release candidate), and community input shapes it. We welcome all types of contributions. For a security issue, see [SECURITY.md](./SECURITY.md) instead of opening an issue.
 
-## Architecture
+## Where to Find Things
 
-Before contributing, read [docs/architecture.md](./docs/architecture.md) to understand the
-module structure and design decisions.
+This file covers setup and the pull request process. The rest has one home each, which people and coding agents both follow:
+
+- [AGENTS.md](./AGENTS.md): the code style, the checks CI runs (the pre-push checklist), the tests each change needs, and how to add a validator, matcher, assertion type, judge provider, client provider, transport or built-in extension
+- [CONTEXT.md](./CONTEXT.md): what each term means (eval, case, trial, grader, runner and the rest)
+- [REVIEW.md](./REVIEW.md): what a review checks
+- [docs/architecture.md](./docs/architecture.md) and [docs/adr/](./docs/adr): the module structure and the design decisions
+- [RELEASE.md](./RELEASE.md): how releases work
 
 ## Ways to Contribute
 
@@ -64,161 +69,42 @@ npm run test:watch
 npm run test:playwright
 ```
 
-### Code Quality
+Before you push, run the checks in the pre-push checklist in [AGENTS.md](./AGENTS.md#pre-push-checklist). They are the checks CI runs.
 
-Before submitting a PR, ensure:
+### The Docs Site
+
+The docs site in `website/` renders the pages in `docs/`, and serves them and the skills in `skills/` over MCP at `/mcp`. To preview it:
 
 ```bash
-npm run typecheck   # TypeScript validation
-npm run lint        # ESLint checks
-npm run format      # Prettier formatting
-npm test            # All tests pass
-npm run build       # Build succeeds
+cd website
+npm ci
+npm start        # http://localhost:3000, reloads as you edit docs/
 ```
+
+A new page needs an entry in `website/sidebars.ts`. `npm run build` fails on a broken link, including a relative link to a repo file that doesn't exist. After a build, `npm run test:site` (at the repo root) tests the site's MCP server with MST.
 
 ### Making Changes
 
-1. Create a feature branch:
+1. Create a branch named for the change, such as `fix/report-columns`.
+2. Follow the code style in [AGENTS.md](./AGENTS.md#code-style).
+3. Add a test for each new behavior. [AGENTS.md](./AGENTS.md#tests-for-new-behavior) says what that means for flags, options and branches.
+4. Update the docs that describe what you changed.
+5. Commit with [Conventional Commits](https://www.conventionalcommits.org/) messages, `type(scope): summary`:
 
    ```bash
-   git checkout -b feature/your-feature-name
+   git commit -m "feat(judges): add a Mistral judge provider"
+   git commit -m "fix(cli): report the missing config path"
+   git commit -m "docs: explain judge calibration"
    ```
 
-2. Make your changes following our [code style](#code-style)
+6. Push and open a pull request.
 
-3. Add tests for new functionality
+### Testing Guidelines
 
-4. Update documentation as needed
-
-5. Commit with conventional commit messages:
-
-   ```bash
-   git commit -m "feat: add new expectation type"
-   git commit -m "fix: resolve transport timeout issue"
-   git commit -m "docs: improve API reference"
-   ```
-
-   Commit types:
-   - `feat:` - New feature
-   - `fix:` - Bug fix
-   - `docs:` - Documentation changes
-   - `test:` - Test changes
-   - `refactor:` - Code refactoring
-   - `chore:` - Build/tooling changes
-
-6. Push and create a pull request
-
-## Code Style
-
-This project enforces specific code conventions:
-
-### 1. Function Declarations
-
-```typescript
-// ✓ Good
-export function createClient() {}
-
-// ✗ Avoid
-export const createClient = () => {};
-```
-
-### 2. Explicit null
-
-```typescript
-// ✓ Good
-condition ? 'value' : null;
-
-// ✗ Avoid
-condition && 'value';
-```
-
-### 3. Descriptive Type Names
-
-```typescript
-// ✓ Good
-(EvalDataset, MCPFixtureApi, LLMJudgeClient);
-
-// ✗ Avoid
-(Data, Api, Client);
-```
-
-### 4. TypeScript Strict Mode
-
-- No `any` types
-- Prefer type safety
-- Use proper null checks
-
-### 5. Async Function Style
-
-- Keep `async` keyword for consistency
-- Even if no `await` currently used
-
-## Project Structure
-
-```
-mcp-server-tester/
-├── src/
-│   ├── config/       # MCPConfig types + validation
-│   ├── mcp/          # Client factory, fixtures
-│   ├── evals/        # Dataset types, runner, expectations
-│   ├── judge/        # LLM-as-a-judge implementations
-│   ├── spec/         # Protocol conformance checks
-│   └── index.ts      # Public API exports
-├── tests/
-│   ├── fixtures/     # Playwright fixtures
-│   ├── mocks/        # Mock MCP server
-│   └── *.spec.ts     # Integration tests
-├── docs/             # Documentation
-└── examples/         # Example projects
-```
-
-## Adding Features
-
-### New Expectation Type
-
-1. Create `src/evals/expectations/myExpectation.ts`
-2. Export function returning `EvalExpectation`
-3. Add to `src/index.ts` exports
-4. Add unit tests
-5. Update `docs/assertions.md`
-
-Example:
-
-```typescript
-// src/evals/expectations/myExpectation.ts
-import type { EvalExpectation } from '../evalTypes';
-
-export function createMyExpectation(): EvalExpectation {
-  return async (context, evalCase, response) => {
-    // Implementation
-    return { pass: true, details: 'Success' };
-  };
-}
-```
-
-### New LLM Judge Provider
-
-1. Add provider to `LLMProviderKind` in `src/judge/judgeTypes.ts`
-2. Create `src/judge/myProviderJudge.ts` implementing `LLMJudgeClient`
-3. Add to `createLLMJudgeClient()` switch in `src/judge/index.ts`
-4. Use environment variables for API keys
-5. Add tests
-6. Update `docs/assertions.md`
-
-### New Transport Type
-
-1. Add to `MCPConfig` discriminated union in `src/config/mcpConfig.ts`
-2. Update `createMCPClientForConfig()` in `src/mcp/createClient.ts`
-3. Add Zod schema in `src/config/mcpConfigSchema.ts`
-4. Add tests
-5. Update `docs/transports.md`
-
-## Testing Guidelines
-
-- **Unit tests**: Mock MCP interactions, test logic in isolation
-- **Integration tests**: Use mock server with real MCP SDK
-- **Conformance tests**: Validate against MCP protocol spec
-- Never skip tests without marking explicitly (`test.skip()`)
+- **Unit tests** (Vitest) are `*.test.ts` files, mostly next to the code they test in `src/`, plus repo-wide ones in `tests/`.
+- **Integration tests** (Playwright) in `tests/` run against the mock servers in `tests/mocks/` with the real MCP SDK.
+- **Conformance checks** are proved with a server that breaks the rule (see "Conformance Checking" in [AGENTS.md](./AGENTS.md)).
+- Never skip a test without marking it explicitly (`test.skip()`).
 
 ## Documentation
 
@@ -234,7 +120,18 @@ When adding features:
 1. Update documentation for any changed functionality
 2. Add tests for new features
 3. Ensure all tests pass
-4. Update CHANGELOG.md (if maintaining one)
+4. Give the pull request one changelog label: `breaking`, `enhancement`,
+   `bug`, `documentation` or `internal`. The Changelog label workflow sets it
+   from the title: `feat:` and `perf:` are `enhancement`, `fix:` is `bug`,
+   `docs:` is `documentation`, `!` is `breaking`, and `build:`, `chore:`,
+   `ci:`, `refactor:`, `style:` and `test:` are `internal`, as are dependency
+   bumps (`fix(deps):`). Change it when the title's type doesn't fit: a label
+   you set stays, and one the workflow set follows the title. The
+   workflow fails when the pull request has no changelog label and the title
+   gives none, or when it has more than one. A title with `!` always gets
+   `breaking`. Don't edit CHANGELOG.md:
+   release-it generates each release's section from the merged pull requests'
+   titles and labels. Put upgrade steps in `docs/migrations/`.
 5. Request review from maintainers
 
 ### PR Title Format
@@ -243,7 +140,7 @@ Use conventional commit format:
 
 - `feat: add HTTP SSE support`
 - `fix: resolve connection timeout issue`
-- `docs: improve expectations guide`
+- `docs: improve the assertions guide`
 
 ### PR Description
 

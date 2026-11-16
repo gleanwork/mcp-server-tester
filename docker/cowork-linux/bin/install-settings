@@ -9,7 +9,8 @@ target=/etc/claude-desktop/managed-settings.json
 
 [ -f "${staging}" ] && [ ! -L "${staging}" ] || { echo "no staged settings" >&2; exit 1; }
 [ "$(stat -c %s "${staging}")" -le 1048576 ] || { echo "staged settings too large" >&2; exit 1; }
-python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "${staging}" \
+# Exit without printing the parse error: it quotes the settings' text.
+node -e 'try { JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")) } catch { process.exit(1) }' "${staging}" \
   || { echo "staged settings aren't JSON" >&2; exit 1; }
 install -o root -g root -m 0644 "${staging}" "${target}.new"
 mv -f "${target}.new" "${target}"

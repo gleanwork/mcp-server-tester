@@ -28,8 +28,9 @@
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
-    "./cowork-linux-runtime": "./scripts/cowork_linux.py",
-    "./chatgpt-linux-runtime": "./scripts/chatgpt_linux.py",
+    "./cowork-linux-runtime": "./dist/cowork/linuxThirdParty.js",
+    "./cowork-linux-first-party-runtime": "./dist/cowork/linuxFirstParty.js",
+    "./chatgpt-linux-runtime": "./dist/chatgpt/linuxDriver.js",
     "./evals": {
       "types": "./dist/evals.d.ts",
       "import": "./dist/evals.js"
@@ -72,9 +73,6 @@
   },
   "files": [
     "dist",
-    "scripts/cowork_linux.py",
-    "scripts/chatgpt_linux.py",
-    "scripts/chatgpt_linux_contract.json",
     "schema",
     "docker",
     "skills"
@@ -115,12 +113,14 @@
   },
   "dependencies": {
     "@discoveryjs/json-ext": "^1.1.0",
+    "@homebridge/dbus-native": "^0.7.9",
     "@modelcontextprotocol/client": "^2.2.0",
     "@modelcontextprotocol/server": "^2.2.0",
     "commander": "^14.0.2",
     "debug": "^4.4.3",
     "import-meta-resolve": "^4.2.0",
     "ndjson": "^2.0.0",
+    "npm-packlist": "^8.0.2",
     "oauth4webapi": "^3.0.0",
     "open": "^10.1.0",
     "smol-toml": "^1.4.2",

@@ -136,9 +136,9 @@ describe('first-party Cowork configuration', () => {
     expect(() =>
       validateEvalConfig(
         loadEvalConfigFromObject(input, { skipDatasetValidation: true }),
-        { os: 'linux', runner: 'docker' }
+        { os: 'win32', runner: 'local' }
       )
-    ).toThrow('requires macOS');
+    ).toThrow(/supported OS|requires macOS/);
   });
 
   it('rejects tool-metadata proxies on the eval config and on a variant', () => {
@@ -155,7 +155,7 @@ describe('first-party Cowork configuration', () => {
     expect(() => validate({ variants: [{ name: 'plain' }] })).not.toThrow();
   });
 
-  it('rejects a runner other than local on macOS, with a reason distinct from the OS rule', () => {
+  it('requires local macOS or a preflighted Linux runner without special-casing plugin names', () => {
     const run = (runner: string, os: NodeJS.Platform) => () =>
       validateEvalConfig(
         loadEvalConfigFromObject(input, { skipDatasetValidation: true }),
@@ -172,16 +172,36 @@ describe('first-party Cowork configuration', () => {
         return undefined;
       })();
       expect(error?.message, runner).toContain(
-        'first-party mode currently supports only the local runner'
+        'first-party mode requires the local runner on macOS'
       );
       expect(error?.message, runner).not.toContain('requires macOS');
     }
     // Local runners on macOS pass.
     expect(run('local', 'darwin')).not.toThrow();
     expect(run('mst/runner/local', 'darwin')).not.toThrow();
-    // A Linux runner fails the OS rule first, with its own reason.
-    expect(run('docker', 'linux')).toThrow('requires macOS');
-    expect(run('docker', 'linux')).not.toThrow(/only the local runner/);
+    // Linux has a separate runtime preflight: config loading cannot claim
+    // a marker/socket exists on the future worker. The worker must check it.
+    for (const runner of ['docker', 'mst/runner/docker', 'test/runner/linux']) {
+      expect(run(runner, 'linux')).not.toThrow();
+      expect(() =>
+        validateEvalConfig(
+          loadEvalConfigFromObject(
+            { ...input, concurrency: 2 },
+            { skipDatasetValidation: true }
+          ),
+          { os: 'linux', runner }
+        )
+      ).toThrow('concurrency: 1');
+      expect(() =>
+        validateEvalConfig(
+          loadEvalConfigFromObject(
+            { ...input, tools: { search: { description: 'override' } } },
+            { skipDatasetValidation: true }
+          ),
+          { os: 'linux', runner }
+        )
+      ).toThrow('cannot apply tool-metadata proxies');
+    }
   });
 });
 

@@ -66,7 +66,7 @@ export interface UsageMetrics {
 }
 
 /** Every LLM judge provider. The type, the dataset schema and the provider table derive from this list. */
-const JUDGE_PROVIDER_KINDS = [
+export const JUDGE_PROVIDER_KINDS = [
   'anthropic',
   'vertex-anthropic',
   'anthropic-agent-sdk',

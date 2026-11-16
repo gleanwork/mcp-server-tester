@@ -18,6 +18,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { z } from 'zod';
 import { loadJudgeSdk } from '../adapterSupport.js';
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
+import { BUILTIN_MODELS } from '../../llm/modelDefaults.js';
 import { commandTool, type AgentJudgeTool } from './commands.js';
 import {
   runtimeEnv,
@@ -53,7 +54,8 @@ interface ClaudeSdk {
   ) => unknown;
 }
 
-const DEFAULT_CLAUDE_AGENT_JUDGE_MODEL = 'claude-sonnet-4-5';
+const DEFAULT_CLAUDE_AGENT_JUDGE_MODEL =
+  BUILTIN_MODELS.agentJudge['claude-agent'];
 const READ_TOOLS = ['Read', 'Grep', 'Glob'] as const;
 const TOOL_SERVER = 'judge';
 

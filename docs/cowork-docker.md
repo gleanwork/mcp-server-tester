@@ -14,6 +14,14 @@ Grade shards run in the eval client's image, without a desktop.
 
 MST provides the image as a Dockerfile that you build yourself (`mst runner setup docker`). It installs Claude Desktop from Anthropic's Linux package repository at build time; MST doesn't publish an image with Claude Desktop in it.
 
+This page describes default third-party mode. First-party Linux mode attaches
+to a separately prepared plugin account image; stock `--runner docker` does not
+stage an account. It requires one attached shard, a dedicated account, one
+designated macOS source host and a private source-control relay, with no
+MST-managed inference credential. Its native Linux behavior has only offline
+fixture validation. See [Linux account runtime and source control](./cowork.md#linux-account-runtime-and-source-control)
+for the implemented boundary and remaining live-validation requirements.
+
 ## What you need
 
 - A Docker host with KVM, and `/dev/vhost-vsock`, `/dev/vhost-net` and `/dev/net/tun`. Cowork runs its agent in a VM, so the container needs hardware virtualization:
@@ -35,6 +43,8 @@ npx mst runner setup docker --runner-option contexts=colima-mst-kvm
 This builds `mst-cowork-linux:<MST version>` on each Docker context you name (default: the current one). The image installs the same MST version you run, because a worker must run the same MST as `mst run`. From a source checkout, it packs and installs the checkout. Pin Claude Desktop with `--runner-option claudeDesktopVersion=<version>`. Rebuild after upgrading MST.
 
 If the eval loads plugins, add `--config eval.json`: the image then installs them (see [Plugins](#plugins)).
+
+Plugins that use `createDockerRunner` runtime preparation need a rebuilt image, even when its existing tag matches this MST version. Deferred startup checks the versioned image capability before creating a container and refuses older images. Re-run setup on each context with the same eval config. Custom images must implement the [runtime preparation protocol](./evaluation-framework.md#plugins), including `/usr/bin/tini`, `sleep infinity`, settings initialization and supervised prepared startup, before advertising support.
 
 The build also downloads Cowork's VM bundle (1.2 GB), which Claude Desktop would otherwise download in every new container. It reads the bundle's files and SHA-256 checksums from the Claude Desktop package, downloads them from the same place Claude Desktop does, and checks them. If the package's manifest can't be read, the build goes on without the bundle and Claude Desktop downloads it on first use.
 

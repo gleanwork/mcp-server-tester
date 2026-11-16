@@ -2,11 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  ARTIFACT_LIMITS,
-  copyArtifacts,
-  withCopiedArtifacts,
-} from './trialArtifacts.js';
+import { ARTIFACT_LIMITS } from './allArtifacts.js';
+import { copyArtifacts, withCopiedArtifacts } from './trialArtifacts.js';
 import { trialArtifactsPath } from './runFormat.js';
 import type { CaseExecution } from './caseExecution.js';
 import type { EvalCase } from './datasetTypes.js';

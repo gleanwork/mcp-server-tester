@@ -6,6 +6,17 @@
  */
 
 import { builtinShortName } from '../../plugins/extensions.js';
+import { getJudge } from '../../judge/builtinJudges.js';
+import {
+  builtinJudgeSlot,
+  configuredJudgeModel,
+  juryBuiltinSlots,
+  juryWithConfiguredModels,
+} from '../../judge/judgeModelDefaults.js';
+import {
+  processModelDefaults,
+  warnBuiltinSlots,
+} from '../../llm/modelDefaults.js';
 import type { SettingsSections } from '../../plugins/settings.js';
 import type { ValidationResult } from './types.js';
 import type { ProviderKind } from '../../judge/judgeTypes.js';
@@ -106,9 +117,29 @@ export async function validateJudge(
   run: JudgeRun = {}
 ): Promise<ValidationResult> {
   const request = judgeRequest(config);
-  return typeof request === 'string'
-    ? judgeError(request)
-    : evaluateJudge(response, request, run);
+  if (typeof request === 'string') return judgeError(request);
+  warnBuiltinJudgeModels(request);
+  return evaluateJudge(response, request, run);
+}
+
+/**
+ * Warns, once per process, when the judge runs on one of MST's built-in
+ * models because nothing set one (ADR 0015). An eval run has warned about
+ * its judges already, so this is for Playwright tests and grade workers.
+ */
+function warnBuiltinJudgeModels(request: JudgeRequest): void {
+  let definition: ReturnType<typeof getJudge>;
+  try {
+    definition = getJudge(request.judge);
+  } catch {
+    return;
+  }
+  warnBuiltinSlots(
+    request.jury !== undefined
+      ? juryBuiltinSlots(definition, request.options, request.jury)
+      : [builtinJudgeSlot(definition, request.options)],
+    `judge ${request.judge}`
+  );
 }
 
 /**
@@ -153,8 +184,48 @@ export function judgeIdentityOf(
   }
 }
 
-/** The judge request an assertion means, or why it names no judge. */
+/**
+ * The judge request an assertion means, or why it names no judge, with the
+ * process's configured default model (the Playwright fixtures') written
+ * into options that name none. An eval run's cases already have the eval
+ * config's written in (ADR 0015).
+ */
 function judgeRequest(config: JudgeValidatorConfig): JudgeRequest | string {
+  const request = writtenJudgeRequest(config);
+  return typeof request === 'string' ? request : withProcessModels(request);
+}
+
+function withProcessModels(request: JudgeRequest): JudgeRequest {
+  const models = processModelDefaults();
+  if (!models) return request;
+  let definition: ReturnType<typeof getJudge>;
+  try {
+    definition = getJudge(request.judge);
+  } catch {
+    // An unknown judge fails where it runs, with its own message.
+    return request;
+  }
+  if (request.jury !== undefined) {
+    const jury = juryWithConfiguredModels(
+      definition,
+      request.options,
+      request.jury,
+      models
+    );
+    return jury
+      ? { ...request, jury: jury as NonNullable<JudgeRequest['jury']> }
+      : request;
+  }
+  const model = configuredJudgeModel(definition, request.options, models);
+  return model === undefined
+    ? request
+    : { ...request, options: { ...request.options, model } };
+}
+
+/** The judge request an assertion means as written, or why it names no judge. */
+function writtenJudgeRequest(
+  config: JudgeValidatorConfig
+): JudgeRequest | string {
   const assertion = {
     reference: config.reference ?? undefined,
     threshold: config.threshold ?? DEFAULT_JUDGE_THRESHOLD,

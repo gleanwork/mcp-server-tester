@@ -30,6 +30,10 @@ Before the package is installed (for example, running `init` in a new directory)
 - [cowork restore-connectors - Restore Cloud Connector Settings](#cowork-restore-connectors---restore-cloud-connector-settings)
 - [runner setup - Prepare a Runner](#runner-setup---prepare-a-runner)
 
+## Global options
+
+`--mst-config <path>` names an `mst.config.json` that every command reads over your own and the repo's. Its `models` go over each eval config's own, entry by entry, and its `settings` sections replace the repo's. Give it before or after the command: `npx mst --mst-config ./ci.mst.config.json run --config ./eval.json`. See [Default models](./evaluation-framework.md#default-models).
+
 ## `init` - Initialize Project
 
 Create a complete project structure with configuration, tests, and example datasets.
@@ -92,8 +96,11 @@ my-mcp-tests/
 ├── data/
 │   └── example-dataset.json  # Example eval cases, run on a model
 ├── package.json           # Dependencies and scripts
-└── tsconfig.json          # TypeScript configuration
+├── tsconfig.json          # TypeScript configuration
+└── mst.config.json        # The models evals and judges use
 ```
+
+`mst.config.json` pins the models the example eval and its judges use, so they don't change when MST's built-in defaults do. Change them there. See [Default models](./evaluation-framework.md#default-models).
 
 ### Example Files
 
@@ -1134,6 +1141,19 @@ A candidate is clearly better when its metric went up and a paired sign-flip tes
 ## `runs` - Detached Runs
 
 `mst run --detach` and `mst grade --detach` run the coordinator on a machine the runner creates, so the machine you typed them on can go offline ([ADR 0007](./adr/0007-detached-runs-move-the-coordinator.md)). The coordinator runs `mst run`, then `mst run --resume` once if the run is partial, then `mst grade --runner` with `--grade-runner`, and keeps the run in the result store.
+
+First-party Cowork cannot detach: its account control requires an attached
+macOS source host, including when the app runs on Linux. MST refuses effective
+first-party clients in the eval config, variants and plugin shared configs
+before opening result stores, reading secrets, validating/loading datasets or
+creating a coordinator. Case-level overrides remain supported, but MST must
+load the datasets to inspect them. Immediately after loading, MST resolves
+each case's effective client and options in every variant and refuses any
+first-party Cowork case before opening result stores, reading or forwarding
+secrets, or creating a coordinator. Omitting account runner configuration does
+not bypass either check. Both checks apply to run, resume and grade detach;
+default third-party Cowork detach is unchanged. See
+[Cloud sessions](./cowork.md#cloud-sessions).
 
 ```bash
 npx mst run --config ./eval.json --runner acme/runner/cloud-vm --runner-option shards=20 --grade-runner \

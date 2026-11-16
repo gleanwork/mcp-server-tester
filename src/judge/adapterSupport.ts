@@ -1,5 +1,6 @@
 /** Shared plumbing for judge completion adapters. */
-import type { ProviderKind } from './judgeTypes.js';
+import { DEFAULT_JUDGE_PROVIDER, type ProviderKind } from './judgeTypes.js';
+import { BUILTIN_MODELS, type JudgeModelSlot } from '../llm/modelDefaults.js';
 import {
   hasLLMCredential,
   type LLMApiFamily,
@@ -14,23 +15,37 @@ export const DEFAULT_JUDGE_MAX_TOKENS = 4096;
 /** Judges are deterministic unless configured otherwise. */
 export const DEFAULT_JUDGE_TEMPERATURE = 0;
 /** The Claude model Anthropic-family judges use unless configured. */
-export const DEFAULT_CLAUDE_JUDGE_MODEL = 'claude-sonnet-4-6';
+export const DEFAULT_CLAUDE_JUDGE_MODEL = BUILTIN_MODELS.judge.anthropic;
 /** The model the OpenAI judge uses unless configured. */
-export const DEFAULT_OPENAI_JUDGE_MODEL = 'gpt-4o';
+export const DEFAULT_OPENAI_JUDGE_MODEL = BUILTIN_MODELS.judge.openai;
 /** The model the Google judge uses unless configured. */
-export const DEFAULT_GOOGLE_JUDGE_MODEL = 'gemini-2.0-flash';
+export const DEFAULT_GOOGLE_JUDGE_MODEL = BUILTIN_MODELS.judge.google;
 
 /**
- * Each provider's default model. A judge that relies on a default grades
- * differently when the default changes, so its version covers these.
+ * Each provider's built-in default model. A judge that relies on a default
+ * grades differently when the default changes, so its version covers these.
+ * A configured default (`models.judge`) is written into the judge's options
+ * instead, so its identity covers that one.
  */
-export const DEFAULT_JUDGE_MODELS: Readonly<Record<ProviderKind, string>> = {
-  anthropic: DEFAULT_CLAUDE_JUDGE_MODEL,
-  'vertex-anthropic': DEFAULT_CLAUDE_JUDGE_MODEL,
-  'anthropic-agent-sdk': DEFAULT_CLAUDE_JUDGE_MODEL,
-  openai: DEFAULT_OPENAI_JUDGE_MODEL,
-  google: DEFAULT_GOOGLE_JUDGE_MODEL,
-};
+export const DEFAULT_JUDGE_MODELS: Readonly<Record<ProviderKind, string>> =
+  BUILTIN_MODELS.judge;
+
+/**
+ * `JudgeDefinition.modelSlot` for judges that take the LLM settings
+ * (`JudgeLLMSchema`): `models.judge` for the provider their options name,
+ * or the default provider.
+ */
+export function llmJudgeModelSlot(
+  options: Record<string, unknown>
+): JudgeModelSlot {
+  return {
+    kind: 'judge',
+    key:
+      typeof options.provider === 'string'
+        ? (options.provider as ProviderKind)
+        : DEFAULT_JUDGE_PROVIDER,
+  };
+}
 
 /**
  * Loads a judge's optional SDK. Pass the import as a thunk with a literal

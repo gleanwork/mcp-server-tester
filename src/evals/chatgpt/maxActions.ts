@@ -9,7 +9,7 @@ interface ActionBudget {
 /**
  * `maxActions` on the ChatGPT app (`chatgpt`, `codex-app`), by the OS the
  * trial runs on: Computer Use's budget on macOS, the accessibility
- * automation's on Linux (its contract with `scripts/chatgpt_linux.py`). The
+ * automation's on Linux (`NATIVE_MAX_ACTIONS` in `linuxContract.ts`). The
  * least is 1 on both.
  */
 export const CHATGPT_MAX_ACTIONS: Readonly<

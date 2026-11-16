@@ -1,6 +1,6 @@
 # ChatGPT in Docker
 
-> **Design record.** Implemented: see [ChatGPT in Docker](../chatgpt-docker.md) for how to use it. Two details differ from this proposal: the provider's token command is `/bin/cat <token file>`, and the gateway's provider is chosen by `MST_CHATGPT_INFERENCE_BASE_URL` in the container, which `mst run` sets from `OPENAI_BASE_URL`.
+> **Design record.** Implemented: see [ChatGPT in Docker](../chatgpt-docker.md) for how to use it. Three details differ from this proposal: the provider's token command is `/bin/cat <token file>`; the gateway's provider is chosen by `MST_CHATGPT_INFERENCE_BASE_URL` in the container, which `mst run` sets from `OPENAI_BASE_URL`; and the image installs no Python (`python3-gi`, `gir1.2-atspi-2.0`), because the driver reads AT-SPI over D-Bus from TypeScript (ADR 0006).
 
 ## Goal
 

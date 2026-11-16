@@ -140,6 +140,19 @@
         "additionalProperties": {}
       }
     },
+    "builtinModels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "setting": { "type": "string" },
+          "model": { "type": "string" },
+          "usedBy": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["setting", "model", "usedBy"],
+        "additionalProperties": {}
+      }
+    },
     "plugins": {
       "type": "array",
       "items": {

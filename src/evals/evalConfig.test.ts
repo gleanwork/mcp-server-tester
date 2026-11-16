@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { z } from 'zod';
 import { MCPConfigSchema } from '../config/mcpConfig.js';
+import { ModelDefaultsSchema } from '../llm/modelDefaults.js';
 import { describe, expect, it } from 'vitest';
 import type { ToolOverrideVariant } from '../types/index.js';
 import {
@@ -311,6 +312,24 @@ describe('EvalConfigSchema', () => {
       ).toThrow();
     }
   );
+
+  it('keeps the editor schema models block synchronized with ModelDefaultsSchema', () => {
+    const schema = JSON.parse(
+      fs.readFileSync(
+        new URL('../../schema/eval-config.schema.json', import.meta.url),
+        'utf8'
+      )
+    ) as {
+      definitions: { modelDefaults: unknown };
+      properties: { models: unknown };
+    };
+    expect(schema.definitions.modelDefaults).toEqual(
+      z.toJSONSchema(ModelDefaultsSchema, { target: 'draft-7', io: 'input' })
+    );
+    expect(schema.properties.models).toEqual({
+      $ref: '#/definitions/modelDefaults',
+    });
+  });
 
   it('shares the tool metadata definition and array-valued maps in the editor schema', () => {
     const schema = JSON.parse(

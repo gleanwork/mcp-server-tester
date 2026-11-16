@@ -20,6 +20,10 @@ import type { EvalCaseResult } from '../../types/reporter.js';
 import { comparePairwise } from '../../evals/pairwiseComparison.js';
 import type { JudgeInput } from '../judgeContract.js';
 import { agenticJudge, agenticPairwiseJudge } from './agenticJudge.js';
+import {
+  builtinJudgeSlot,
+  configuredJudgeModel,
+} from '../judgeModelDefaults.js';
 import type {
   AgentJudgeRuntime,
   AgentJudgeStep,
@@ -362,6 +366,48 @@ describe('agenticJudge', () => {
     });
     expect(() => judge.schema.parse({ runtime: 'shell' })).toThrow();
     expect(() => judge.schema.parse({ apiKey: 'k' })).toThrow();
+  });
+
+  it("takes a configured model over its defaults' model, and names that model as its own", async () => {
+    const seen: { task?: AgentJudgeTask } = {};
+    runtimes.codex = fakeRuntime(() => ({}), seen);
+    const defaults = { runtime: 'codex' as const, model: 'own-model' };
+    const spec = { buildPrompt: () => ({ prompt: 'p' }), defaults };
+    const pointwise = agenticJudge({
+      ...spec,
+      parseScore: () => ({ score: 1 }),
+    });
+    const pairwise = agenticPairwiseJudge({
+      ...spec,
+      parsePreference: () => ({ preference: 'tie' as const }),
+    });
+    const models = { agentJudge: { codex: 'configured' } };
+    for (const judge of [pointwise, pairwise]) {
+      expect(judge.modelSlot?.({})).toEqual({
+        kind: 'agentJudge',
+        key: 'codex',
+      });
+      expect(judge.defaultModel?.({})).toBe('own-model');
+      expect(builtinJudgeSlot(judge, {})).toBeUndefined();
+      expect(configuredJudgeModel(judge, {}, models)).toBe('configured');
+    }
+    // MST writes the configured model into the options; it wins.
+    await pointwise.evaluate(input, { model: 'configured' });
+    expect(seen.task?.model).toBe('configured');
+    await pointwise.evaluate(input, {});
+    expect(seen.task?.model).toBe('own-model');
+  });
+
+  it('falls back on the built-in model when its defaults name none', () => {
+    const judge = agenticJudge({
+      buildPrompt: () => ({ prompt: 'p' }),
+      parseScore: () => ({ score: 1 }),
+    });
+    expect(judge.defaultModel).toBeUndefined();
+    expect(builtinJudgeSlot(judge, {})).toEqual({
+      kind: 'agentJudge',
+      key: 'claude-agent',
+    });
   });
 });
 

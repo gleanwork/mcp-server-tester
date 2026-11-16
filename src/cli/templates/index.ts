@@ -3,6 +3,7 @@
  */
 import packageJson from '../../../package.json' with { type: 'json' };
 import { splitCommandLine } from '../utils/commandLine.js';
+import { INIT_MODELS } from '../../llm/modelDefaults.js';
 
 interface ProjectAnswers {
   projectName: string;
@@ -120,12 +121,13 @@ test.describe('MCP Server Tests', () => {
 
   // An eval: a model gets your tools and each case's input, and the
   // assertions check what it did. It calls a paid model API, so it needs a key
-  // (and \`npm install ai @ai-sdk/anthropic\`).
+  // (and \`npm install ai @ai-sdk/anthropic\`). The model comes from
+  // mst.config.json ("models"); change it there.
   test('a model picks the right tools', async ({ mcp }, testInfo) => {
     test.skip(!process.env.ANTHROPIC_API_KEY, 'Set ANTHROPIC_API_KEY to run evals');
     const dataset = await loadEvalDataset('./data/example-dataset.json');
     const result = await runEvalDataset(
-      { dataset, client: 'api', model: 'claude-haiku-4-5' },
+      { dataset, client: 'api' },
       { mcp, testInfo }
     );
     expect(result.passed).toBe(result.total);
@@ -157,6 +159,14 @@ export function getDatasetTemplate(_answers: ProjectAnswers): string {
   }
 }
 `;
+}
+
+/**
+ * A new project's mst.config.json: the models its evals and judges use,
+ * pinned so they don't change when MST's built-in defaults do (ADR 0015).
+ */
+export function getMstConfigTemplate(): string {
+  return `${JSON.stringify({ models: INIT_MODELS }, null, 2)}\n`;
 }
 
 export function getGitignoreTemplate(): string {

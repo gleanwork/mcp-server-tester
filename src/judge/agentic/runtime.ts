@@ -52,7 +52,7 @@ export interface WorkspaceCommand {
   /** Tool name, such as `transcript`. */
   name: string;
   description: string;
-  /** Program and leading arguments, such as `['python3', 'scripts/transcript.py']`. */
+  /** Program and leading arguments, such as `['node', 'scripts/transcript.mjs']`. */
   argv: readonly string[];
   /** Per-call limit. Default 60 s. */
   timeoutMs?: number;

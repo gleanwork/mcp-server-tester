@@ -1,3 +1,4 @@
+import { BUILTIN_MODELS } from '../../llm/modelDefaults.js';
 import {
   COMPUTER_USE_TOKEN_FIELDS as TOKEN_FIELDS,
   type ComputerUseTelemetry,
@@ -15,7 +16,7 @@ import {
 /** The planner's screen size; the desktop scales coordinates from it. */
 export const DISPLAY_WIDTH = 1280;
 export const DISPLAY_HEIGHT = 800;
-export const DEFAULT_COMPUTER_USE_MODEL = 'claude-sonnet-4-6';
+export const DEFAULT_COMPUTER_USE_MODEL = BUILTIN_MODELS.computerUse;
 
 /** Blocker codes the planner (or the desktop) may report. */
 const BLOCKER_CODES = [

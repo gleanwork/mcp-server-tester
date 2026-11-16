@@ -43,6 +43,14 @@ import {
   matchToolCalls,
 } from '../assertions/validators/toolCalls.js';
 import { judgeOwnOptions } from '../judge/evaluateJudge.js';
+import { getJudge } from '../judge/builtinJudges.js';
+import {
+  builtinJudgeSlot,
+  configuredJudgeModel,
+  juryBuiltinSlots,
+  juryWithConfiguredModels,
+} from '../judge/judgeModelDefaults.js';
+import type { JudgeModelSlot, ModelDefaults } from '../llm/modelDefaults.js';
 import { recordEvidence } from './writeEvidence.js';
 import {
   judgeIdentityOf,
@@ -96,6 +104,98 @@ function caseAnswer(evalCase: Pick<EvalCase, 'expected'>): unknown {
 /** A case judge (`"acme/judge/x"` or `{ type, ...settings }`) with its settings. */
 function caseJudgeConfig(entry: CaseJudge): CaseJudgeConfig {
   return typeof entry === 'string' ? { type: entry } : entry;
+}
+
+/**
+ * Case judges with the eval's configured default models written in
+ * (ADR 0015): each judge whose options name no `model` gets the one its
+ * `modelSlot` names in `models`, where `judgeRequest` reads its options
+ * (in `options` when the entry has them, else flat). A jury's members each
+ * get their own. Entries that change nothing, and judges that aren't loaded
+ * here, are returned as they are.
+ */
+export function caseJudgesWithModels(
+  judges: readonly CaseJudge[],
+  models: ModelDefaults | undefined
+): CaseJudge[] {
+  if (!models) return [...judges];
+  return judges.map((entry) => caseJudgeWithModel(entry, models));
+}
+
+/**
+ * A case judge's definition and the options `judgeRequest` reads (in
+ * `options` when the entry has them, else flat). Undefined when the judge
+ * isn't loaded here.
+ */
+function caseJudgeParts(entry: CaseJudge):
+  | {
+      config: CaseJudgeConfig;
+      definition: ReturnType<typeof getJudge>;
+      options: Record<string, unknown>;
+      inOptions: boolean;
+    }
+  | undefined {
+  const config = caseJudgeConfig(entry);
+  let definition: ReturnType<typeof getJudge>;
+  try {
+    definition = getJudge(config.type);
+  } catch {
+    return undefined;
+  }
+  // As judgeRequest: the rubric shorthand merges flat fields and `options`;
+  // any other judge's `options`, when given, is its whole option set.
+  const shorthand = config.type === 'rubric' && config.rubric !== undefined;
+  const inOptions = !shorthand && config.options !== undefined;
+  const options = shorthand
+    ? { ...judgeOwnOptions(config), ...config.options }
+    : (config.options ?? judgeOwnOptions(config));
+  return { config, definition, options, inOptions };
+}
+
+/**
+ * The slots of MST's built-in models a case's judges run on, because no
+ * option or configured default names a model for them (ADR 0015). Read
+ * after `caseJudgesWithModels`.
+ */
+export function caseJudgeBuiltinSlots(
+  judges: readonly CaseJudge[]
+): Array<{ judge: string; slot: JudgeModelSlot }> {
+  return judges.flatMap((entry) => {
+    const parts = caseJudgeParts(entry);
+    if (!parts) return [];
+    const { config, definition, options } = parts;
+    const judge = config.type;
+    const slots =
+      config.jury !== undefined
+        ? juryBuiltinSlots(definition, options, config.jury)
+        : [builtinJudgeSlot(definition, options)].filter(
+            (slot): slot is JudgeModelSlot => slot !== undefined
+          );
+    return slots.map((slot) => ({ judge, slot }));
+  });
+}
+
+function caseJudgeWithModel(
+  entry: CaseJudge,
+  models: ModelDefaults
+): CaseJudge {
+  const parts = caseJudgeParts(entry);
+  if (!parts) return entry;
+  const { config, definition, options, inOptions } = parts;
+  if (config.jury !== undefined) {
+    const jury = juryWithConfiguredModels(
+      definition,
+      options,
+      config.jury,
+      models
+    );
+    return jury ? { ...config, jury: jury as CaseJudgeConfig['jury'] } : entry;
+  }
+  const model = configuredJudgeModel(definition, options, models);
+  if (model === undefined) return entry;
+  return inOptions
+    ? { ...config, options: { ...config.options, model } }
+    : { ...config, model };
 }
 
 /**

@@ -67,6 +67,7 @@ import {
   type ClientConfig,
   type ModelPricing,
   type ConnectorServerConfig,
+  type ExtensionConfig,
   transportServers,
 } from './evalConfig.js';
 import {
@@ -75,7 +76,7 @@ import {
   clientOf,
   clientPatchOf,
 } from './clientFields.js';
-import { bareClientName } from './clientNames.js';
+import { bareClientName, resolveClientName } from './clientNames.js';
 import type {
   EvaluationVariantResult,
   EvaluationSummary,
@@ -97,11 +98,24 @@ import {
   createEvalCaseExecutor,
 } from './caseExecution.js';
 import {
+  caseJudgeBuiltinSlots,
+  caseJudgesWithModels,
   judgeEntryIdentity,
   mergeEvalJudges,
   preflightCaseJudges,
   storedJudgesCurrent,
 } from './grading.js';
+import {
+  builtinJudgeSlot,
+  configuredJudgeModel,
+} from '../judge/judgeModelDefaults.js';
+import {
+  apiBuiltinSlot,
+  BuiltinModelUses,
+  warnBuiltinModels,
+  type BuiltinModelUse,
+  type ModelDefaults,
+} from '../llm/modelDefaults.js';
 import type { CaseJudge } from './datasetTypes.js';
 import {
   contentHash,
@@ -492,7 +506,8 @@ function resolveClient(
         { env }
       ),
     },
-    servers
+    servers,
+    evalConfig.models
   );
   return { definition, declaration, config };
 }
@@ -620,7 +635,9 @@ async function comparePairwiseVariants(
   cases: readonly EvalCase[],
   grading: GradingSource
 ): Promise<Partial<UsageMetrics> | undefined> {
-  const judges = (evalConfig.pairwiseJudges ?? []).map(pairwiseJudgeSpec);
+  const judges = (evalConfig.pairwiseJudges ?? [])
+    .map((entry) => pairwiseJudgeWithModel(entry, evalConfig.models))
+    .map(pairwiseJudgeSpec);
   if (judges.length === 0) return undefined;
   // Validation put the baseline first.
   const baselineName = evalConfig.variants?.[0]?.name ?? 'default';
@@ -742,23 +759,126 @@ function collectedSetup(
 /**
  * A case's judges as its variant grades them: the case's and the variant's
  * eval config judges (a variant's replace the config's), the case's
- * settings winning for a judge in both. `rawJudges` are the config judges
- * as written. Empty when the eval config has none: the case's stand.
+ * settings winning for a judge in both, with the eval's configured default
+ * models written in (ADR 0015). `rawJudges` are the config judges as
+ * written. Empty when neither changes the case's judges.
  */
 function variantCaseJudges(
   evalCase: EvalCase,
   configJudges: EvalConfig['judges'],
-  rawJudges: EvalConfig['judges']
+  rawJudges: EvalConfig['judges'],
+  models: ModelDefaults | undefined
 ): Pick<EvalCase, 'judges'> {
-  return configJudges?.length
-    ? {
-        judges: mergeEvalJudges(
-          evalCase,
-          configJudges,
-          (rawJudges ?? []) as Array<Record<string, unknown>>
-        ),
+  const judges = configJudges?.length
+    ? mergeEvalJudges(
+        evalCase,
+        configJudges,
+        (rawJudges ?? []) as Array<Record<string, unknown>>
+      )
+    : models
+      ? evalCase.judges
+      : undefined;
+  return judges ? { judges: caseJudgesWithModels(judges, models) } : {};
+}
+
+/** The clients that drive a desktop app with the macOS Computer Use planner. */
+const PLANNER_CLIENTS = new Set(['cowork', 'chatgpt', 'codex-app']);
+
+/**
+ * MST's built-in models a run uses because no option, eval config or
+ * `mst.config.json` sets one (ADR 0015), from the clients and judges each
+ * case runs on, the eval config's pairwise judges, and a regrade's source
+ * run's client entries.
+ */
+function runBuiltinModels(input: {
+  evalConfig: EvalConfig;
+  cases: ReadonlyArray<{
+    client: ClientConfig | undefined;
+    judges: readonly CaseJudge[];
+  }>;
+  pairwise: boolean;
+  plannerHere: boolean;
+  env: Record<string, string | undefined>;
+  source?: readonly BuiltinModelUse[];
+}): BuiltinModelUse[] {
+  const models = input.evalConfig.models;
+  const uses = new BuiltinModelUses();
+  const clients = new Set<string>();
+  for (const { client, judges } of input.cases) {
+    for (const { judge, slot } of caseJudgeBuiltinSlots(judges))
+      uses.add(slot, `judge ${judge}`);
+    if (!client) continue;
+    // Each declaration once: most cases share their variant's.
+    const key = JSON.stringify(client);
+    if (clients.has(key)) continue;
+    clients.add(key);
+    const type = bareClientName(resolveClientName(client.type));
+    if (type === 'api') {
+      const slot = apiBuiltinSlot(
+        client as { model?: unknown; provider?: unknown },
+        models
+      );
+      if (slot) uses.add(slot, 'api client');
+    }
+    const clientEnv = client.env as Record<string, unknown> | undefined;
+    if (
+      PLANNER_CLIENTS.has(type) &&
+      input.plannerHere &&
+      client.computerUseModel === undefined &&
+      models?.computerUse === undefined &&
+      (clientEnv?.MST_COWORK_CUA_MODEL ?? input.env.MST_COWORK_CUA_MODEL) ===
+        undefined
+    )
+      uses.add({ kind: 'computerUse' }, `${type} client`);
+  }
+  if (input.pairwise)
+    for (const entry of input.evalConfig.pairwiseJudges ?? []) {
+      const filled = pairwiseJudgeWithModel(entry, models);
+      let definition: ReturnType<typeof getPairwiseJudge>;
+      try {
+        definition = getPairwiseJudge(filled.type);
+      } catch {
+        continue;
       }
-    : {};
+      const slot = builtinJudgeSlot(
+        definition,
+        pairwiseJudgeSpec(filled).options
+      );
+      if (slot) uses.add(slot, `pairwise judge ${filled.type}`);
+    }
+  const own = uses.list();
+  // A regrade grades again; its clients' entries are its source's.
+  const fromSource = (input.source ?? []).filter(
+    (use) =>
+      !use.setting.startsWith('models.judge.') &&
+      !use.setting.startsWith('models.agentJudge.')
+  );
+  return [...fromSource, ...own].sort((a, b) =>
+    a.setting.localeCompare(b.setting)
+  );
+}
+
+/**
+ * An eval config pairwise judge entry with the configured default model
+ * written in, when its options name none (ADR 0015).
+ */
+function pairwiseJudgeWithModel(
+  entry: ExtensionConfig,
+  models: ModelDefaults | undefined
+): ExtensionConfig {
+  if (!models) return entry;
+  let definition: ReturnType<typeof getPairwiseJudge>;
+  try {
+    definition = getPairwiseJudge(entry.type);
+  } catch {
+    return entry;
+  }
+  const model = configuredJudgeModel(
+    definition,
+    pairwiseJudgeSpec(entry).options,
+    models
+  );
+  return model === undefined ? entry : { ...entry, model };
 }
 
 /** A URL without its credentials, query and fragment; undefined when it isn't one. */
@@ -907,15 +1027,21 @@ function assertResumable(
 function entryIdentity(
   level: string,
   entry: unknown,
-  settings: SettingsSections | undefined
+  settings: SettingsSections | undefined,
+  models: ModelDefaults | undefined
 ): string | undefined {
   const config = (typeof entry === 'string' ? { type: entry } : entry) as {
     type: string;
   } & Record<string, unknown>;
   if (level !== 'pairwise')
-    return judgeEntryIdentity(config as CaseJudge, settings);
+    return judgeEntryIdentity(
+      caseJudgesWithModels([config as CaseJudge], models)[0]!,
+      settings
+    );
   try {
-    const { type, options, reps } = pairwiseJudgeSpec(config);
+    const { type, options, reps } = pairwiseJudgeSpec(
+      pairwiseJudgeWithModel(config, models)
+    );
     return judgeIdentity(
       type,
       getPairwiseJudge(type),
@@ -974,7 +1100,8 @@ function judgeRecords(
       const identity = entryIdentity(
         level,
         raw?.[index] ?? entry,
-        evalConfig.settings
+        evalConfig.settings,
+        evalConfig.models
       );
       return {
         type,
@@ -1757,6 +1884,9 @@ async function evaluate(
   const judgesRunHere =
     !options.grading?.elsewhere &&
     (options.grading?.source?.judgesRunHere ?? true);
+  // MST's built-in models the run uses because nothing set one (ADR 0015),
+  // worked out before it collects anything; run.json records them.
+  let builtinModels: BuiltinModelUse[] = [];
   let grading: GradingSource = options.grading?.source ?? LOCAL_GRADING;
   let gradedElsewhere: GradedElsewhere | undefined;
   const ambientEnv = Object.fromEntries(
@@ -2088,7 +2218,8 @@ async function evaluate(
         ...variantCaseJudges(
           evalCase,
           configJudges,
-          rawVariant?.judges ?? rawConfig.judges
+          rawVariant?.judges ?? rawConfig.judges,
+          evalConfig.models
         ),
       },
       stored,
@@ -2143,12 +2274,14 @@ async function evaluate(
       throw new Error('Only a regrade of a stored run grades elsewhere.');
     gradedElsewhere = await options.grading.elsewhere({
       // As written, not as loaded: a worker loads it as this process did,
-      // with the settings this process merged in (ADR 0008).
+      // with the settings and models this process merged in (ADR 0008,
+      // ADR 0015). The worker reads no mst.config.json of its own.
       configFile: {
         ...(JSON.parse(
           await fs.readFile(path.resolve(options.configPath), 'utf8')
         ) as PreparedGrading['configFile']),
         ...(loadedConfig.settings ? { settings: loadedConfig.settings } : {}),
+        ...(loadedConfig.models ? { models: loadedConfig.models } : {}),
       },
       ...(resolvedConfig.client ? { client: resolvedConfig.client } : {}),
       datasets: canonicalDatasets.map(({ dataset }) => dataset),
@@ -2240,6 +2373,19 @@ async function evaluate(
       runner.name
     );
 
+    // What a variant's cases are, with no side effects: its config, and its
+    // raw variant and client as written.
+    const variantShapeOf = (variant: EvalVariant) => {
+      const effectiveConfig = variantEvalConfig(evalConfig, variant);
+      const rawVariant = rawConfig.variants?.find(
+        (candidate) => candidate.name === variant.name
+      ) ?? { name: variant.name };
+      const rawDeclaration = inheritClient(
+        clientOf(rawConfig),
+        clientPatchOf(rawVariant) ?? {}
+      );
+      return { effectiveConfig, rawVariant, rawDeclaration };
+    };
     // A variant's servers, client and settings, worked out once.
     const setups = new Map<string, ReturnType<typeof variantSetupOf>>();
     const variantSetupOf = (variant: EvalVariant) => {
@@ -2257,21 +2403,11 @@ async function evaluate(
         variant === sourceVariant
           ? sourceClient
           : resolveClient(evalConfig, variant, resolvedServers, env);
-      const effectiveConfig = variantEvalConfig(evalConfig, variant);
-      const rawVariant = rawConfig.variants?.find(
-        (candidate) => candidate.name === variant.name
-      ) ?? { name: variant.name };
-      const rawDeclaration = inheritClient(
-        clientOf(rawConfig),
-        clientPatchOf(rawVariant) ?? {}
-      );
       return {
         servers,
         resolvedServers,
         clientConfig,
-        effectiveConfig,
-        rawVariant,
-        rawDeclaration,
+        ...variantShapeOf(variant),
       };
     };
     const setupVariant = (variant: EvalVariant) => {
@@ -2282,7 +2418,7 @@ async function evaluate(
     /** A dataset's cases as `variant` runs them; undefined when it runs none. */
     const variantDataset = (
       variant: EvalVariant,
-      setup: ReturnType<typeof variantSetupOf>,
+      setup: ReturnType<typeof variantShapeOf>,
       dataset: EvalDataset
     ) => {
       const { effectiveConfig, rawVariant, rawDeclaration } = setup;
@@ -2308,7 +2444,8 @@ async function evaluate(
           ...variantCaseJudges(
             evalCase,
             effectiveConfig.judges,
-            rawVariant.judges ?? rawConfig.judges
+            rawVariant.judges ?? rawConfig.judges,
+            evalConfig.models
           ),
           ...(template && evalCase.input
             ? { input: template.replaceAll('{{input}}', evalCase.input) }
@@ -2539,6 +2676,38 @@ async function evaluate(
       });
       for (const { variant, modes } of checked) writeModes.set(variant, modes);
     }
+
+    builtinModels = runBuiltinModels({
+      evalConfig,
+      // A regrade's clients ran in its source run, which recorded theirs.
+      cases: variants.flatMap((variant) => {
+        const shape = variantShapeOf(variant);
+        const declaration = (clientPatchOf(variant) ??
+          clientPatchOf(evalConfig) ?? {
+            type: DEFAULT_CLIENT,
+          }) as ClientConfig;
+        return canonicalDatasets.flatMap(
+          ({ dataset }) =>
+            variantDataset(variant, shape, dataset)?.effectiveDataset.cases.map(
+              (evalCase) => ({
+                client: replay
+                  ? undefined
+                  : ((clientPatchOf(evalCase) as ClientConfig | undefined) ??
+                    declaration),
+                judges: options.grade === false ? [] : (evalCase.judges ?? []),
+              })
+            ) ?? []
+        );
+      }),
+      pairwise: options.grade !== false && !options.skipPairwise,
+      // Only a Mac has the planner; a runner's machines may not be one.
+      plannerHere: process.platform === 'darwin' && !onMachines,
+      env,
+      ...(regrade?.run.builtinModels
+        ? { source: regrade.run.builtinModels }
+        : {}),
+    });
+    warnBuiltinModels(builtinModels);
 
     if (options.beforeCollect && !replay)
       options.beforeCollect({
@@ -3136,6 +3305,7 @@ async function evaluate(
       // Judges by name, with a hash of their options: options can hold
       // settings that shouldn't be stored.
       judges: judgeRecords(evalConfig, rawConfig),
+      ...(builtinModels.length > 0 ? { builtinModels } : {}),
       // A regrade's are its source's: the plugins that collected its
       // transcripts. Its judges' plugins are in their identities.
       ...(regrade

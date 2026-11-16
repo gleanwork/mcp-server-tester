@@ -13,10 +13,7 @@ import {
   settingsFor,
   type SettingsSections,
 } from '../../../plugins/settings.js';
-import {
-  findSettingsFile,
-  readSettingsFile,
-} from '../../../plugins/settingsFile.js';
+import { fileSettings } from '../../../plugins/settingsFile.js';
 
 export interface RunnerSetupOptions {
   /** `--runner-option key=value`, each time it was given. */
@@ -41,10 +38,9 @@ export async function setupRunner(
     : undefined;
   const plugins = fromConfig?.packages;
   // The eval config's settings, else the mst.config.json above rootDir's.
-  const settingsFile = fromConfig ? undefined : findSettingsFile(rootDir);
-  const settings: SettingsSections | undefined =
-    fromConfig?.settings ??
-    (settingsFile ? readSettingsFile(settingsFile) : undefined);
+  const settings: SettingsSections | undefined = fromConfig
+    ? fromConfig.settings
+    : fileSettings(rootDir);
   // The eval's client picks the image a runner builds (docker:
   // Cowork's or ChatGPT's), as its shared configs (`extends`) set it.
   const client = fromConfig?.client;

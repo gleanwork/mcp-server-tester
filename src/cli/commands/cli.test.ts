@@ -16,6 +16,7 @@ import packageJson from '../../../package.json' with { type: 'json' };
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { StoredTokens } from '../../auth/types.js';
 import { generateServerKey } from '../../auth/storage.js';
+import { INIT_MODELS } from '../../llm/modelDefaults.js';
 import { READINESS_SERVER } from '../../../tests/mocks/readyServers.js';
 
 /** A stdio server with one tool, `tool_1`, that answers "ok". */
@@ -687,10 +688,15 @@ describe('mst CLI', () => {
         'data/example-dataset.json',
         'package.json',
         'tsconfig.json',
+        'mst.config.json',
         '.gitignore',
       ]) {
         expect(existsSync(path.join(dir, file)), file).toBe(true);
       }
+      // The project owns its models from the start (ADR 0015).
+      expect(
+        JSON.parse(readFileSync(path.join(dir, 'mst.config.json'), 'utf8'))
+      ).toEqual({ models: INIT_MODELS });
       expect(
         readFileSync(path.join(dir, 'playwright.config.ts'), 'utf8')
       ).toContain("serverUrl: 'http://localhost:3000/mcp'");
