@@ -2,13 +2,15 @@
 
 This directory holds the [JSON Schemas (draft-07)](https://json-schema.org/draft-07/json-schema-release-notes.html) of the files MST reads and writes. The package publishes them, so they are in `node_modules/@gleanwork/mcp-server-tester/schema/` and on unpkg.
 
-| File                             | Describes                                                              |
-| -------------------------------- | ---------------------------------------------------------------------- |
-| `eval-config.schema.json`        | An eval config (`eval.json`)                                           |
-| `eval-dataset.schema.json`       | An eval dataset                                                        |
-| `run/v1/<kind>.schema.json`      | Each file of a run directory in the `mst.run/v1` format, by its `kind` |
-| `run/v1/manifest.schema.json`    | A stored run's `manifest.json` in a result store                       |
-| `history/v1/history.schema.json` | An eval's `history.json` (`mst.history/v1`)                            |
+| File                             | Describes                                                                               |
+| -------------------------------- | --------------------------------------------------------------------------------------- |
+| `eval-config.schema.json`        | An eval config (`eval.json`)                                                            |
+| `eval-dataset.schema.json`       | An eval dataset                                                                         |
+| `run/v1/<kind>.schema.json`      | Each file of a run directory in the `mst.run/v1` format, by its `kind`                  |
+| `run/v1/manifest.schema.json`    | A stored run's `manifest.json` in a result store                                        |
+| `run/v1/baseline.schema.json`    | A file `saveBaseline` writes                                                            |
+| `run/v1/artifact.schema.json`    | An `EvalResultStore` artifact, which `runEvalDataset` and the Playwright reporter store |
+| `history/v1/history.schema.json` | An eval's `history.json` (`mst.history/v1`)                                             |
 
 `run/v1/` and `history/v1/` are generated from MST's Zod schemas with `npm run schema:generate`; the tests fail when the committed files differ. The eval config and dataset schemas are written by hand. Tests check their fields and transports against the Zod schemas in `src/evals/evalConfig.ts` and `src/evals/datasetTypes.ts`, so a new field or type there needs the schema updated too.
 

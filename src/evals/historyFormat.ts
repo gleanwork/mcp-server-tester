@@ -6,7 +6,8 @@
  * schema's output as a `HistoryIndex`, so the compiler keeps the two in step.
  */
 import { z } from 'zod';
-import { RUN_ID_PATTERN, WriteModeSchema } from './runFormat.js';
+import { RUN_ID_PATTERN } from './runFormat.js';
+import { WriteModeSchema } from './runFileSchemas.js';
 import { schemaId } from '../schemaIds.js';
 
 /** The history format. Readers ignore fields they don't know. */

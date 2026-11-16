@@ -1,4 +1,4 @@
-import { RUN_FORMAT } from './resultFormat.js';
+import { RUN_FORMAT, assertCurrentSummaryResults } from './resultFormat.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -169,6 +169,11 @@ export async function findPreviousRun(options: {
         const artifact = await options.store.loadArtifact(
           'eval-run-summary',
           candidate.id
+        );
+        // MST's own stores check this on load; a custom store may not.
+        assertCurrentSummaryResults(
+          artifact.data,
+          `Stored run summary "${candidate.id}"`
         );
         if (
           isComparable(

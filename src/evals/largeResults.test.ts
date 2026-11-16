@@ -29,6 +29,7 @@ function caseResult(index: number) {
     id: `case-${index}`,
     datasetName: 'large',
     pass: true,
+    durationMs: 1,
     scores: {},
     response: OUTPUT,
     transcript: { finalText: OUTPUT, events: [] },
@@ -99,7 +100,12 @@ describe('large results never become one string', () => {
   it('reads a baseline back without one string', async () => {
     const file = join(root, 'baseline.json');
     await saveBaseline(
-      { format: RUN_FORMAT, caseResults: CASES } as unknown as EvalRunnerResult,
+      {
+        total: CASES.length,
+        passed: CASES.length,
+        failed: 0,
+        caseResults: CASES,
+      } as unknown as EvalRunnerResult,
       file,
       { omitResponses: false }
     );

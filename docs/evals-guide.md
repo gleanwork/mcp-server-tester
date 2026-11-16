@@ -509,7 +509,7 @@ const saved = await loadBaseline('.mcp-test-results/baseline.json');
 console.log(`Baseline: ${saved.passed}/${saved.total} passing`);
 ```
 
-`saveBaseline` serializes the entire `EvalRunnerResult` as JSON. `loadBaseline` reads and deserializes it. Both accept any file path; `saveBaseline` creates intermediate directories.
+`saveBaseline` writes the entire `EvalRunnerResult` as JSON, in the run format: with `"format": "mst.run/v1"` and `"kind": "baseline"` (`schema/run/v1/baseline.schema.json`). `loadBaseline` reads it, checks it against that schema, and returns the result. A file an earlier MST saved fails and says to save it again. Both accept any file path; `saveBaseline` creates intermediate directories.
 
 ### Practical workflow
 

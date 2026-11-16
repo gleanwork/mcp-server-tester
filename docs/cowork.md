@@ -223,7 +223,8 @@ versioned profile contract, isolated tmpfs staging, profile-preserving launcher,
 private relay and credential cleanup. MST has no account credential fields or
 login API. Keep credentials out of eval configs, runner options, shard bundles,
 command arguments, logs and result files. This path uses
-`createDockerRunner({ inference: 'plugin', prepareRuntime })`; it must not
+`createDockerRunner({ inference: 'plugin', prepareRuntime })`, which is
+experimental and may change between minor versions; it must not
 receive MST-managed inference tokens or generic connector credentials. The
 plugin must bind staging to the exact owned container and the same account and
 organization the source controller verifies. Use a rebuilt image with runtime

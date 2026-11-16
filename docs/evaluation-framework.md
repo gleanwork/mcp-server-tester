@@ -187,7 +187,7 @@ export default plugin;
   - **`runShard`** creates a host for the shard and a Docker context for it. It opens `dockerRunner` with that context only and runs the shard on it, in a `try`. The docker runner limits each container to the host's memory (`docker info`): a Cowork container to all the host can spare, a grade container to 2 GiB. Pass `memory` (and `cpus`) on to `dockerRunner.open` to change that, for example when a grade shard runs agentic judges side by side. The docker runner reports a shard's failures (a bundle it couldn't copy, a worker it couldn't start, a silent worker) in the shard's result (its `ShardOutcome`), not as a throw; the `try` is for your own host management (opening the docker runner, the host API). A throw from it counts as a result that isn't `ok`. In the `finally` it closes the docker runner, then deletes the host and its context, unless `context.keep` keeps them: `'always'`, or `'failed'` when the result isn't `ok`. Catch a host or context deletion that fails there and add it to the result (`note` on a good shard, `reason` on a failed one), as MST's own machine runners do: a `runShard` that rejects after a good shard turns its collected trials into a failed shard. The docker runner keeps the container by the same rule, and prints a `docker --context <context> exec` command that works only while the host and its context exist.
   - **`close`** deletes the hosts and contexts of shards that are still running.
 
-  **Runtime preparation.** A plugin that must prepare a desktop runtime before it starts can compose `createDockerRunner` (from `./evals`) instead of `dockerRunner`. This is an in-process factory, not a new extension kind or a runner-option schema:
+  **Runtime preparation.** A plugin that must prepare a desktop runtime before it starts can compose `createDockerRunner` (from `./evals`) instead of `dockerRunner`. This is an in-process factory, not a new extension kind or a runner-option schema. It is experimental and may change between minor versions ([API reference](./api-reference.md#entry-points)):
 
   ```ts
   import { createDockerRunner } from '@gleanwork/mcp-server-tester/evals';
@@ -945,6 +945,8 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 | `plugins`          | no marketplace plugins                                                                                            |
 
 <!-- clients:end -->
+
+A client's `timeout` doesn't start at the same point on every client yet. `api`, `claude-code` and `codex-cli` count from when the client starts, so their time includes connecting to the MCP servers. `chatgpt`, `codex-app` and `cowork` count from just before they submit the prompt, after the app is open and its servers are checked. Compare timeouts across clients with that in mind.
 
 Each client has its own guide: [mst-client.md](./mst-client.md) for `api` and `claude-code`, [codex.md](./codex.md), [cowork.md](./cowork.md) and [cowork-docker.md](./cowork-docker.md), and [chatgpt-desktop.md](./chatgpt-desktop.md) and [chatgpt-docker.md](./chatgpt-docker.md) for `chatgpt` and `codex-app`.
 
