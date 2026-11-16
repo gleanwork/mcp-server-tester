@@ -115,14 +115,16 @@ export interface ClientRunContext extends SettingsContext {
   /** Runtime-only environment isolated per eval. */
   env?: Record<string, string | undefined>;
   /**
-   * MST's collection callback: save a trial as soon as it finishes, with its
-   * index in the collection batch. Session operations return their result;
-   * MST calls this callback, then finalizes lifecycle metadata after close.
+   * MST-internal: MST's collection callback, which saves a trial as soon as
+   * it finishes, with its index in the collection batch. A client never calls
+   * it; session operations return their result, MST calls this callback,
+   * then finalizes lifecycle metadata after close. It may change in a minor.
    */
   reportResult?: (index: number, result: ClientRunResult) => Promise<void>;
   /**
-   * MST waits for room under the run's limits before trial `index` starts
-   * (ADR 0004). Session operations do not acquire or schedule trials.
+   * MST-internal: MST waits for room under the run's limits before trial
+   * `index` starts (ADR 0004). A client never calls it; session operations
+   * do not acquire or schedule trials. It may change in a minor.
    */
   acquire?: (index: number) => Promise<void>;
 }
@@ -432,10 +434,12 @@ export interface ClientSessionReadiness {
 }
 
 /**
- * One configured client, kept open across trials. MST owns readiness, reset
- * retries, diagnosis policy, reporting and limits; these operations do not
- * schedule or resubmit trials. Calls are sequential. Always close, even when
- * a trial throws. An open that throws cleans up its own partial setup.
+ * One configured client, kept open across trials. MST owns readiness,
+ * diagnosis policy, reporting and limits; these operations do not schedule
+ * or resubmit trials. After a trial that asks for a reset, MST calls `reset`
+ * once, before the next trial; a session that should retry a failed reset retries inside `reset` (MST's
+ * built-in desktop sessions do). Calls are sequential. Always close, even
+ * when a trial throws. An open that throws cleans up its own partial setup.
  */
 export interface ClientSession {
   /** MST checks these after open, before the first trial. */

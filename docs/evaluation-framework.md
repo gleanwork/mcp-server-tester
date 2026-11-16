@@ -946,6 +946,8 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 
 <!-- clients:end -->
 
+A client's `timeout` doesn't start at the same point on every client yet. `api`, `claude-code` and `codex-cli` count from when the client starts, so their time includes connecting to the MCP servers. `chatgpt`, `codex-app` and `cowork` count from just before they submit the prompt, after the app is open and its servers are checked. Compare timeouts across clients with that in mind.
+
 Each client has its own guide: [mst-client.md](./mst-client.md) for `api` and `claude-code`, [codex.md](./codex.md), [cowork.md](./cowork.md) and [cowork-docker.md](./cowork-docker.md), and [chatgpt-desktop.md](./chatgpt-desktop.md) and [chatgpt-docker.md](./chatgpt-docker.md) for `chatgpt` and `codex-app`.
 
 Set the model beside the client. The `api` client infers which API serves it from the model id (`claude-*`, `gpt-*`, `gemini-*` and so on; a `claude-*@date` id is Vertex). Set `provider` only to override that, for example to route through Vertex or a gateway.
