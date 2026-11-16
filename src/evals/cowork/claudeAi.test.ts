@@ -538,8 +538,11 @@ const devtools = {
     webSocketDebuggerUrl?: string;
   }>,
   sockets: [] as string[],
-  /** False: page sockets never finish their handshake. */
-  opens: true,
+  /**
+   * False: page sockets never finish their handshake. 'closes': Chrome closes
+   * them before the handshake finishes.
+   */
+  opens: true as boolean | 'closes',
   closed: 0,
 };
 
@@ -551,7 +554,8 @@ class FakeDevtoolsSocket {
   >();
   constructor(readonly url: string) {
     devtools.sockets.push(url);
-    if (devtools.opens) setImmediate(() => this.emit('open', {}));
+    if (devtools.opens === 'closes') setImmediate(() => this.emit('close', {}));
+    else if (devtools.opens) setImmediate(() => this.emit('open', {}));
   }
   addEventListener(
     type: string,
@@ -1466,6 +1470,21 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
         })
       )
     ).rejects.toThrow('claude.ai request timed out');
+    expect(devtools.sockets).toHaveLength(1);
+    expect(devtools.closed).toBe(1);
+    expect(account.requests).toEqual([]);
+    expect(host.commands).toEqual([]);
+  });
+
+  it('fails at once when Chrome closes a DevTools socket before its handshake', async () => {
+    devtools.opens = 'closes';
+    // Not driven: no timer advances, so only the close can settle the request.
+    await expect(
+      adapter().prepare({
+        evalConfig: { name: 'acme-1p', datasets: [], servers: [SERVER] },
+        env,
+      })
+    ).rejects.toThrow('Chrome DevTools socket closed');
     expect(devtools.sockets).toHaveLength(1);
     expect(devtools.closed).toBe(1);
     expect(account.requests).toEqual([]);

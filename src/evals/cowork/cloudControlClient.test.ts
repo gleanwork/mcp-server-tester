@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import * as net from 'node:net';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,10 @@ import {
   COWORK_CLOUD_CONTROL_PROTOCOL,
   type CoworkCloudControlRequest,
 } from './cloudControlProtocol.js';
+
+vi.mock('node:net', async (original) => ({
+  ...(await original<typeof net>()),
+}));
 
 describe('worker cloud-control domain RPC (offline Unix socket)', () => {
   let directory: string;
@@ -70,6 +75,35 @@ describe('worker cloud-control domain RPC (offline Unix socket)', () => {
     ).rejects.toThrow(lost);
     // Later calls repeat the first cause rather than a new one.
     await expect(client.call({ method: 'restore' })).rejects.toThrow(lost);
+  });
+
+  it('names the socket error that ends a connection mid-request', async () => {
+    // A peer that closes shows up as a close; an error such as a reset after
+    // connecting carries its own code, so the cause names it.
+    const connect = net.createConnection;
+    const connections: Socket[] = [];
+    const spy = vi.spyOn(net, 'createConnection').mockImplementation(((
+      ...args: Parameters<typeof net.createConnection>
+    ) => {
+      const socket = connect(...args);
+      connections.push(socket);
+      return socket;
+    }) as typeof net.createConnection);
+    let received!: () => void;
+    const request = new Promise<void>((resolve) => (received = resolve));
+    const { client } = await serve(() => received());
+    const call = client.call({ method: 'prepare' });
+    await request;
+    expect(connections).toHaveLength(1);
+    connections[0]!.destroy(
+      Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
+    );
+    const reset =
+      /disconnected or sent invalid evidence \(socket error ECONNRESET\)/;
+    await expect(call).rejects.toThrow(reset);
+    // Later calls repeat the first cause, not the close that follows it.
+    await expect(client.call({ method: 'restore' })).rejects.toThrow(reset);
+    spy.mockRestore();
   });
 
   it('names the request whose reply never came', async () => {
