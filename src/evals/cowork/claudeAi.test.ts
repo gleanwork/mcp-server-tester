@@ -2679,10 +2679,11 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
         protocol: COWORK_CLOUD_CONTROL_PROTOCOL,
         id: expect.any(Number),
         ok: false,
-        error: `Cowork source verify failed: Cloud connector configuration mismatch: 1 unexpected tools, 0 missing tools. Unexpected: ${SEND}. Missing: none. The connector catalog may have changed since preparation.`,
+        error: `Cowork source verify failed: Cloud connector configuration mismatch: 1 unexpected tools, 0 missing tools. The connector catalog may have changed since preparation. Unexpected: ${SEND}. Missing: none.`,
       });
       // A tool Claude's list never had is named as such, and a long list is
-      // cut to the response's error limit rather than failing the frame.
+      // cut to the response's error limit, after the reason, rather than
+      // failing the frame.
       const unlisted = Array.from(
         { length: 60 },
         (_, index) => `mcp__Acme_Search__new_tool_${index}`
@@ -2695,10 +2696,18 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       const error = (long as { error: string }).error;
       expect(error).toHaveLength(COWORK_CLOUD_CONTROL_MAX_ERROR_LENGTH);
       expect(error).toMatch(
-        /^Cowork source verify failed: Cloud connector configuration mismatch: 60 unexpected tools, 0 missing tools\. Unexpected: mcp__Acme_Search__new_tool_0, /
+        /^Cowork source verify failed: Cloud connector configuration mismatch: 60 unexpected tools, 0 missing tools\. 60 tools were not in Claude's tool list for the connector when MST prepared the run, so MST could not set a permission for them: the connector's catalog changed since preparation, or Claude's list is behind the server\. Not in Claude's list: mcp__Acme_Search__new_tool_0, /
       );
       expect(error.endsWith('\u2026')).toBe(true);
       expect(() => CoworkCloudControlResponseSchema.parse(long)).not.toThrow();
+      // Next to a blocked tool, only the unlisted one is named as unlisted.
+      account.sessions[0]!.events = promptEvents({
+        tools: [SEARCH, SEND, unlisted[0]!],
+      });
+      expect(await call({ method: 'verify' })).toMatchObject({
+        ok: false,
+        error: `Cowork source verify failed: Cloud connector configuration mismatch: 2 unexpected tools, 0 missing tools. 1 tool was not in Claude's tool list for the connector when MST prepared the run, so MST could not set a permission for it: the connector's catalog changed since preparation, or Claude's list is behind the server. Not in Claude's list: ${unlisted[0]}. Unexpected: ${SEND}, ${unlisted[0]}. Missing: none.`,
+      });
       account.sessions[0]!.events = promptEvents({ tools: [SEARCH] });
       expect(await call({ method: 'verify' })).toMatchObject({
         ok: true,

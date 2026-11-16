@@ -982,9 +982,12 @@ describe('cloud connector configuration', () => {
         // A tool with no prepared permission is named; a blocked one is not.
         expect(
           message.includes(
-            `Claude's tool list for the connector had no ${tool} when MST prepared the run`
+            `1 unexpected tools, 0 missing tools. 1 tool was not in Claude's tool list for the connector when MST prepared the run`
           )
         ).toBe(unlisted);
+        expect(message.includes(`Not in Claude's list: ${tool}.`)).toBe(
+          unlisted
+        );
         expect(message.includes('may have changed since preparation')).toBe(
           !unlisted
         );
