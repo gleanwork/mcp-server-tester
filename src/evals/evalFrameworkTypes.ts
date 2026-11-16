@@ -437,9 +437,9 @@ export interface ClientSessionReadiness {
  * One configured client, kept open across trials. MST owns readiness,
  * diagnosis policy, reporting and limits; these operations do not schedule
  * or resubmit trials. After a trial that asks for a reset, MST calls `reset`
- * once, before the next trial; a session that should retry a failed reset retries inside `reset` (MST's
- * built-in desktop sessions do). Calls are sequential. Always close, even
- * when a trial throws. An open that throws cleans up its own partial setup.
+ * once, before the next trial. A session that should retry a failed reset
+ * retries inside `reset`, as MST's Linux Cowork session does. Calls are
+ * sequential. Always close, even when a trial throws. An open that throws cleans up its own partial setup.
  */
 export interface ClientSession {
   /** MST checks these after open, before the first trial. */
