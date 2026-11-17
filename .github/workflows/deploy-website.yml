@@ -73,31 +73,26 @@ jobs:
 
       - uses: jdx/mise-action@v2
 
+      # Includes the Vercel CLI, a devDependency of the site. The vercel steps
+      # run it from the repo root, where the project's Root Directory applies.
       - name: Install site dependencies
         working-directory: website
         run: npm ci
 
-      # mise's Node keeps global packages in its own prefix, which later steps
-      # don't have on PATH, so add that prefix's bin.
-      - name: Install the Vercel CLI
-        run: |
-          npm install --global vercel@65
-          echo "$(npm prefix --global)/bin" >> "$GITHUB_PATH"
-
       - name: Pull Vercel project settings
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: website/node_modules/.bin/vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       # Runs website/vercel.json's install and build commands (postbuild runs
       # docusaurus-mcp-verify) and bundles api/mcp.mjs.
       - name: Build
-        run: vercel build --prod --token="$VERCEL_TOKEN"
+        run: website/node_modules/.bin/vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Smoke-test the MCP endpoint
         working-directory: website
         run: npm run smoke
 
       - name: Deploy
-        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        run: website/node_modules/.bin/vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
 
       - name: Check the production endpoint
         run: |
