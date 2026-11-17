@@ -24,7 +24,12 @@ import { join } from 'node:path';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import { z } from 'zod';
 import { createCoworkCloudControlClient } from './cloudControlClient.js';
-import { CoworkCloudPreparationSchema } from './cloudControlProtocol.js';
+import {
+  COWORK_CLOUD_MAX_SESSION_EVENTS,
+  CoworkCloudPreparationSchema,
+  cloudEventCursor,
+  mergeCloudEvents,
+} from './cloudControlProtocol.js';
 import type { CoworkDesktop } from './desktop.js';
 import { parseClaudeTranscript } from './transcript.js';
 import { describeError } from '../../utils/describeError.js';
@@ -221,7 +226,17 @@ async function inClaudePage(
       `No claude.ai page is open in the Chrome on port ${port}. ${CLAUDE_AI_SIGN_IN_HELP}`
     );
   const socket = new WebSocket(url);
-  try {
+  // One deadline covers the DevTools handshake and the page program. A
+  // handshake that never completes would otherwise hold the source, and
+  // first-party cloud control behind it, forever.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('claude.ai request timed out')),
+      timeoutMs
+    );
+  });
+  const exchange = (async () => {
     await new Promise<void>((resolve, reject) => {
       socket.addEventListener('open', () => resolve(), { once: true });
       socket.addEventListener(
@@ -229,16 +244,16 @@ async function inClaudePage(
         () => reject(new Error('Chrome DevTools socket failed')),
         { once: true }
       );
-    });
-    const reply = await new Promise<DevtoolsReply>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error('claude.ai request timed out')),
-        timeoutMs
+      socket.addEventListener(
+        'close',
+        () => reject(new Error('Chrome DevTools socket closed')),
+        { once: true }
       );
+    });
+    return new Promise<DevtoolsReply>((resolve) => {
       socket.addEventListener('message', (message) => {
         const data = JSON.parse(String(message.data)) as DevtoolsReply;
         if (data.id !== 1) return;
-        clearTimeout(timer);
         resolve(data);
       });
       socket.send(
@@ -253,12 +268,18 @@ async function inClaudePage(
         })
       );
     });
+  })();
+  // Settles after the deadline wins when the socket closes; nothing awaits it.
+  exchange.catch(() => {});
+  try {
+    const reply = await Promise.race([exchange, deadline]);
     if (reply.error || reply.result?.exceptionDetails || !reply.result?.result)
       throw new Error(
         `claude.ai page script failed: ${JSON.stringify(reply.error ?? reply.result?.exceptionDetails?.text ?? 'no result')}`
       );
     return reply.result.result.value as PageResult;
   } finally {
+    clearTimeout(timer);
     socket.close();
   }
 }
@@ -519,12 +540,22 @@ function mirrorCloudSessions(options: {
   intervalMs?: number;
   listSessions?: () => Promise<CloudSessionSummary[]>;
   events?: (sessionId: string) => Promise<CloudSessionEvent[]>;
+  /**
+   * Skip reading a session's events again while the list shows the same
+   * `last_event_at`, for at most this long. Every read returns all of a
+   * session's events, so polling an idle session resends the whole session.
+   * Two events can share a timestamp, so a session is read again at least
+   * this often anyway. Unset: every poll reads every session.
+   */
+  refreshMs?: number;
 }): {
   stop(): Promise<void>;
   bindSession(sessionId?: string): void;
   lastError(): string | undefined;
 } {
   const written = new Map<string, number>();
+  // Each session's `last_event_at` when its events were last read, and when.
+  const read = new Map<string, { lastEventAt: string; atMs: number }>();
   let stopped = false;
   let listError: string | undefined;
   let sessionErrors = new Map<string, string>();
@@ -560,10 +591,26 @@ function mirrorCloudSessions(options: {
       )
         continue;
       if (!/^cse_[0-9A-Za-z_]+$/.test(session.id)) continue;
+      const previous = read.get(session.id);
+      if (
+        options.refreshMs !== undefined &&
+        previous !== undefined &&
+        session.last_event_at === previous.lastEventAt &&
+        Date.now() - previous.atMs < options.refreshMs
+      )
+        // Unchanged since a read that was written without error.
+        continue;
+      read.delete(session.id);
       try {
+        const readAtMs = Date.now();
         const events = await (options.events
           ? options.events(session.id)
           : fetchCloudEvents(options.port, session.id));
+        if (session.last_event_at !== undefined)
+          read.set(session.id, {
+            lastEventAt: session.last_event_at,
+            atMs: readAtMs,
+          });
         if (written.get(session.id) === events.length) continue;
         const metadata = cloudTrialMetadata(session, events, options.sinceMs);
         if (!metadata) continue;
@@ -579,6 +626,8 @@ function mirrorCloudSessions(options: {
         );
         written.set(session.id, events.length);
       } catch (error) {
+        // A failed read or write is read again on the next poll.
+        read.delete(session.id);
         const message = describeError(error);
         errors.set(
           session.id,
@@ -613,6 +662,9 @@ function mirrorCloudSessions(options: {
 }
 
 const APP_PATH = '/Applications/Claude.app';
+
+/** How stale a first-party Linux mirror of an idle session can get. */
+const CLOUD_CONTROL_EVENTS_REFRESH_MS = 30_000;
 
 /**
  * Where 1P keeps its mirrored sessions and its connector-permission journal.
@@ -807,10 +859,27 @@ export function coworkClaudeAi(
         };
         await rm(dir, { recursive: true, force: true });
         await mkdir(dir, { recursive: true, mode: 0o700 });
+        const CloudEventSchema = z
+          .object({
+            source: z.string().optional(),
+            created_at: z.string().optional(),
+            payload: z.record(z.string(), z.unknown()).optional(),
+          })
+          .passthrough();
+        const CloudEventsSchema = z
+          .array(CloudEventSchema)
+          .max(COWORK_CLOUD_MAX_SESSION_EVENTS);
+        // Each session's events as last read. A read names them by a cursor,
+        // so the source sends only later events: a long session no longer
+        // crosses the relay whole on every change.
+        const held = new Map<string, CloudSessionEvent[]>();
         mirror = mirrorCloudSessions({
           port: 0,
           dir,
           sinceMs: Date.now(),
+          // Each read crosses the source relay whole; resending idle sessions
+          // every poll can stall it (no `events` reply within 120 s).
+          refreshMs: CLOUD_CONTROL_EVENTS_REFRESH_MS,
           async listSessions() {
             return z
               .array(
@@ -827,18 +896,30 @@ export function coworkClaudeAi(
               .parse(await control.call({ method: 'listSessions' }));
           },
           async events(sessionId) {
-            return z
-              .array(
-                z
-                  .object({
-                    source: z.string().optional(),
-                    created_at: z.string().optional(),
-                    payload: z.record(z.string(), z.unknown()).optional(),
-                  })
-                  .passthrough()
-              )
-              .max(10_000)
-              .parse(await control.call({ method: 'events', sessionId }));
+            const previous = held.get(sessionId) ?? [];
+            const after = cloudEventCursor(previous);
+            // A failed or invalid read starts the session over next time.
+            held.delete(sessionId);
+            const reply = await control.call({
+              method: 'events',
+              sessionId,
+              ...(after ? { after } : {}),
+            });
+            const events = after
+              ? mergeCloudEvents(
+                  previous,
+                  after,
+                  z
+                    .object({
+                      offset: z.number().int().nonnegative(),
+                      events: CloudEventsSchema,
+                    })
+                    .strict()
+                    .parse(reply)
+                )
+              : CloudEventsSchema.parse(reply);
+            held.set(sessionId, events);
+            return events;
           },
         });
         const recorder = mirror;

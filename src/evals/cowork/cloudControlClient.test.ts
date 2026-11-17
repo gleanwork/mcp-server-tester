@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import * as net from 'node:net';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,10 @@ import {
   COWORK_CLOUD_CONTROL_PROTOCOL,
   type CoworkCloudControlRequest,
 } from './cloudControlProtocol.js';
+
+vi.mock('node:net', async (original) => ({
+  ...(await original<typeof net>()),
+}));
 
 describe('worker cloud-control domain RPC (offline Unix socket)', () => {
   let directory: string;
@@ -63,12 +68,65 @@ describe('worker cloud-control domain RPC (offline Unix socket)', () => {
       /requires private/
     );
     const { client } = await serve((_request, socket) => socket.destroy());
+    const lost =
+      /disconnected or sent invalid evidence \(socket closed while waiting for beginTask\)/;
     await expect(
       client.call({ method: 'beginTask', prompt: 'authorized' })
-    ).rejects.toThrow(/disconnected/);
-    await expect(client.call({ method: 'restore' })).rejects.toThrow(
-      /disconnected/
+    ).rejects.toThrow(lost);
+    // Later calls repeat the first cause rather than a new one.
+    await expect(client.call({ method: 'restore' })).rejects.toThrow(lost);
+  });
+
+  it('names the socket error that ends a connection mid-request', async () => {
+    // A peer that closes shows up as a close; an error such as a reset after
+    // connecting carries its own code, so the cause names it.
+    const connect = net.createConnection;
+    const connections: Socket[] = [];
+    const spy = vi.spyOn(net, 'createConnection').mockImplementation(((
+      ...args: Parameters<typeof net.createConnection>
+    ) => {
+      const socket = connect(...args);
+      connections.push(socket);
+      return socket;
+    }) as typeof net.createConnection);
+    let received!: () => void;
+    const request = new Promise<void>((resolve) => (received = resolve));
+    const { client } = await serve(() => received());
+    const call = client.call({ method: 'prepare' });
+    await request;
+    expect(connections).toHaveLength(1);
+    connections[0]!.destroy(
+      Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })
     );
+    const reset =
+      /disconnected or sent invalid evidence \(socket error ECONNRESET\)/;
+    await expect(call).rejects.toThrow(reset);
+    // Later calls repeat the first cause, not the close that follows it.
+    await expect(client.call({ method: 'restore' })).rejects.toThrow(reset);
+    spy.mockRestore();
+  });
+
+  it('names the request whose reply never came', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let received!: () => void;
+      const request = new Promise<void>((resolve) => {
+        received = resolve;
+      });
+      const { client } = await serve(() => received());
+      const call = client.call({ method: 'listSessions' });
+      const rejected = expect(call).rejects.toThrow(
+        /\(no listSessions reply within 120 s\)/
+      );
+      await request;
+      vi.advanceTimersByTime(120_000);
+      await rejected;
+      await expect(client.call({ method: 'restore' })).rejects.toThrow(
+        /no listSessions reply within 120 s/
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects non-sockets and world-accessible paths before sending', async () => {
@@ -178,17 +236,24 @@ describe('worker cloud-control domain RPC (offline Unix socket)', () => {
       }
       send();
     });
+    const tooLong = new RegExp(
+      `\\(the listSessions reply exceeds ${COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES} bytes\\)`
+    );
     await expect(client.call({ method: 'listSessions' })).rejects.toThrow(
-      /disconnected/
+      tooLong
     );
-    await expect(client.call({ method: 'restore' })).rejects.toThrow(
-      /disconnected/
-    );
+    await expect(client.call({ method: 'restore' })).rejects.toThrow(tooLong);
   });
 
-  it.each(['id', 'protocol', 'extra-frame', 'oversize', 'malformed'] as const)(
-    'fails closed on %s responses',
-    async (fault) => {
+  it.each([
+    ['id', /\(a reply to request 2 came for 1\)/],
+    ['protocol', /\(the listSessions reply is not a cloud-control response\)/],
+    ['extra-frame', /\(bytes followed the listSessions reply\)/],
+    ['oversize', /\(the listSessions reply exceeds \d+ bytes\)/],
+    ['malformed', /\(the listSessions reply is not a cloud-control response\)/],
+  ] as const)(
+    'fails closed on %s responses and names the fault',
+    async (fault, cause) => {
       const { client } = await serve((request, socket) => {
         if (fault === 'id')
           socket.write(reply({ ...request, id: request.id + 1 }, null));
@@ -203,11 +268,9 @@ describe('worker cloud-control domain RPC (offline Unix socket)', () => {
         if (fault === 'malformed') socket.write('not JSON\n');
       });
       await expect(client.call({ method: 'listSessions' })).rejects.toThrow(
-        /disconnected/
+        cause
       );
-      await expect(client.call({ method: 'restore' })).rejects.toThrow(
-        /disconnected/
-      );
+      await expect(client.call({ method: 'restore' })).rejects.toThrow(cause);
     }
   );
 

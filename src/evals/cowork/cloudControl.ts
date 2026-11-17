@@ -20,15 +20,18 @@ import {
   isFirstPartyCowork,
 } from './firstParty.js';
 import {
+  CloudConnectorVerificationError,
   CloudConnectorsSchema,
   configureCloudConnectors,
   verifyCloudConnectorEvents,
   type CloudPermissionState,
 } from './claudeAiConnectors.js';
 import {
+  COWORK_CLOUD_CONTROL_MAX_ERROR_LENGTH,
   COWORK_CLOUD_CONTROL_MAX_FRAME_BYTES,
   COWORK_CLOUD_CONTROL_PROTOCOL,
   CoworkCloudControlRequestSchema,
+  cloudEventsAfter,
   type CoworkAccountIdentity,
   type CoworkCloudControlRequest,
   type CoworkCloudControlResponse,
@@ -53,6 +56,20 @@ export interface CoworkAccountControl {
   disconnect(): Promise<void>;
   /** An account transaction requires verified restoration before lease release. */
   close(): Promise<void>;
+}
+
+/**
+ * What the worker learns about a failed request. Only a verification
+ * mismatch, which names tools the worker already has, says why; every other
+ * source error stays generic, so no source detail leaves the host.
+ */
+function sourceFailure(method: string, error: unknown): string {
+  if (!(error instanceof CloudConnectorVerificationError))
+    return `Cowork source ${method} failed; no task completion or account cleanup is implied. Inspect retained source recovery state.`;
+  const text = `Cowork source ${method} failed: ${error.message}`;
+  return text.length <= COWORK_CLOUD_CONTROL_MAX_ERROR_LENGTH
+    ? text
+    : `${text.slice(0, COWORK_CLOUD_CONTROL_MAX_ERROR_LENGTH - 1)}…`;
 }
 
 /** Source-host only. No credentials leave Chrome or enter this interface. */
@@ -365,12 +382,16 @@ export async function createCoworkAccountControl(
         if (currentTask?.sessionId) readableSessions.add(currentTask.sessionId);
         return sessions;
       }
-      case 'events':
+      case 'events': {
         if (!readableSessions.has(request.sessionId))
           throw new Error(
             'Session is not source-observed or owned by this controller.'
           );
-        return fetchCloudEvents(port, request.sessionId);
+        // The source still reads the whole session from claude.ai; with a
+        // cursor, only the events the worker lacks cross the relay.
+        const events = await fetchCloudEvents(port, request.sessionId);
+        return request.after ? cloudEventsAfter(events, request.after) : events;
+      }
     }
   }
   return {
@@ -401,12 +422,12 @@ export async function createCoworkAccountControl(
             throw new Error('Oversized response.');
           // A direct in-process relay must not receive mutable controller state.
           return structuredClone(response);
-        } catch {
+        } catch (error) {
           return {
             protocol: COWORK_CLOUD_CONTROL_PROTOCOL,
             id,
             ok: false as const,
-            error: `Cowork source ${method} failed; no task completion or account cleanup is implied. Inspect retained source recovery state.`,
+            error: sourceFailure(method, error),
           };
         }
       });

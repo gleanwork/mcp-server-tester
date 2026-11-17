@@ -1,4 +1,11 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import type * as Os from 'node:os';
@@ -8,7 +15,9 @@ import { parseClaudeTranscript } from './transcript.js';
 import type { CoworkDesktop } from './desktop.js';
 import {
   COWORK_CLOUD_CONTROL_PROTOCOL,
+  cloudEventsAfter,
   type CoworkCloudControlRequest,
+  type CoworkCloudEventCursor,
   type CoworkCloudPreparation,
 } from './cloudControlProtocol.js';
 
@@ -37,12 +46,19 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
   let base: CoworkDesktop;
   let preparation: CoworkCloudPreparation;
   let methods: string[];
+  let listed: Array<{ id: string; created_at: string; last_event_at: string }>;
+  // Each session's events on the source, and what each `events` read sent.
+  let sessionEvents: Map<string, Array<Record<string, unknown>>>;
+  let eventReads: Array<{ after?: CoworkCloudEventCursor; sent: number }>;
   let rejectMethod: string | undefined;
   let dispose: (() => Promise<void>) | undefined;
   const actions: string[] = [];
   beforeEach(async () => {
     host.home = await mkdtemp('/tmp/mst-1p-worker-');
     methods = [];
+    listed = [];
+    sessionEvents = new Map();
+    eventReads = [];
     actions.length = 0;
     rejectMethod = undefined;
     dispose = undefined;
@@ -113,12 +129,26 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
           pending = pending.slice(newline + 1);
           methods.push(request.method);
           actions.push(request.method);
-          const result =
+          let result: unknown =
             request.method === 'prepare'
               ? preparation
               : request.method === 'listSessions'
-                ? []
+                ? listed
                 : null;
+          if (request.method === 'events') {
+            // As the source controller replies.
+            const all = sessionEvents.get(request.sessionId) ?? [
+              { payload: { type: 'system', subtype: 'init' } },
+            ];
+            const tail = request.after
+              ? cloudEventsAfter(all, request.after)
+              : undefined;
+            result = tail ?? all;
+            eventReads.push({
+              ...(request.after ? { after: request.after } : {}),
+              sent: (tail?.events ?? all).length,
+            });
+          }
           const outcome =
             request.method === rejectMethod
               ? {
@@ -239,6 +269,152 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
       settingsVerified: true,
     });
   }, 10_000);
+
+  it('reads an idle session again only when its last event changes, or after 30 s', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    // Fake timers fire the mirror's polls; the socket round trips are real.
+    const elapse = async (ms: number) => {
+      for (let step = 0; step < ms; step += 100) {
+        await vi.advanceTimersByTimeAsync(100);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    };
+    try {
+      const reads = () => methods.filter((method) => method === 'events');
+      await prepared(desktop());
+      const at = (offsetMs: number) =>
+        new Date(Date.now() + offsetMs).toISOString();
+      listed = [{ id: 'cse_idle', created_at: at(0), last_event_at: at(0) }];
+      await elapse(20_000);
+      expect(reads()).toHaveLength(1);
+      expect(
+        methods.filter((m) => m === 'listSessions').length
+      ).toBeGreaterThan(5);
+
+      listed = [{ ...listed[0]!, last_event_at: at(0) }];
+      await elapse(3_000);
+      expect(reads()).toHaveLength(2);
+
+      // Unchanged, but two events can share a timestamp: read again by 30 s.
+      await elapse(25_000);
+      expect(reads()).toHaveLength(2);
+      await elapse(8_000);
+      expect(reads()).toHaveLength(3);
+    } finally {
+      // The mirror's next poll waits on a fake timer: stop it under them.
+      const stop = dispose;
+      dispose = undefined;
+      if (stop) {
+        let stopped = false;
+        const stopping = stop()
+          .catch(() => undefined)
+          .finally(() => (stopped = true));
+        while (!stopped) await elapse(100);
+        await stopping;
+      }
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+  it('asks only for events after the ones it holds, and still records the whole session', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const elapse = async (ms: number) => {
+      for (let step = 0; step < ms; step += 100) {
+        await vi.advanceTimersByTimeAsync(100);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    };
+    try {
+      const wrapper = desktop();
+      await prepared(wrapper);
+      const at = () => new Date(Date.now()).toISOString();
+      const event = (id: string, payload: Record<string, unknown>) => ({
+        event_id: id,
+        created_at: at(),
+        source: payload.type === 'user' ? 'client' : 'cloud',
+        payload: { uuid: id, ...payload },
+      });
+      const user = (id: string) =>
+        event(id, {
+          type: 'user',
+          message: { role: 'user', content: PROMPT },
+          parent_tool_use_id: null,
+        });
+      const reply = (id: string) =>
+        event(id, {
+          type: 'assistant',
+          message: { role: 'assistant', content: [{ type: 'text', text: id }] },
+        });
+      const recorded = async () =>
+        (
+          await readFile(
+            join(wrapper.dataDirectory({}), 'local_cse_long', 'audit.jsonl'),
+            'utf8'
+          )
+        )
+          .trim()
+          .split('\n')
+          .map((line) => (JSON.parse(line) as { uuid?: string }).uuid);
+      // Polls make real socket round trips and file writes, so wait in real
+      // time (performance.now isn't faked), moving fake time along.
+      const eventually = async (done: () => Promise<boolean> | boolean) => {
+        const until = performance.now() + 10_000;
+        while (!(await done()) && performance.now() < until) await elapse(100);
+      };
+      const recordedAs = async (expected: string[]) => {
+        await eventually(
+          async () =>
+            JSON.stringify(await recorded().catch(() => [])) ===
+            JSON.stringify(expected)
+        );
+        expect(await recorded()).toEqual(expected);
+      };
+      const changed = () => {
+        listed = [{ id: 'cse_long', created_at: at(), last_event_at: at() }];
+      };
+      const readOf = async (expected: (typeof eventReads)[number]) => {
+        await eventually(() =>
+          eventReads.some(
+            (read) => JSON.stringify(read) === JSON.stringify(expected)
+          )
+        );
+        expect(eventReads).toContainEqual(expected);
+      };
+
+      sessionEvents.set('cse_long', [user('e1'), reply('e2')]);
+      changed();
+      await readOf({ sent: 2 });
+      await recordedAs(['e1', 'e2']);
+
+      sessionEvents.get('cse_long')!.push(reply('e3'), reply('e4'));
+      changed();
+      // A poll already under way can add an empty read; none resends.
+      await readOf({ after: { count: 2, eventId: 'e2' }, sent: 2 });
+      await recordedAs(['e1', 'e2', 'e3', 'e4']);
+
+      // A session that no longer starts with the held events is sent whole.
+      sessionEvents.set('cse_long', [user('x1'), reply('x2'), reply('x3')]);
+      changed();
+      await readOf({ after: { count: 4, eventId: 'e4' }, sent: 3 });
+      await recordedAs(['x1', 'x2', 'x3']);
+      expect(eventReads.filter((read) => !read.after)).toHaveLength(1);
+      expect(
+        eventReads.filter((read) => read.after && read.sent > 0)
+      ).toHaveLength(2);
+    } finally {
+      const stop = dispose;
+      dispose = undefined;
+      if (stop) {
+        let stopped = false;
+        const stopping = stop()
+          .catch(() => undefined)
+          .finally(() => (stopped = true));
+        while (!stopped) await elapse(100);
+        await stopping;
+      }
+      vi.useRealTimers();
+    }
+  }, 20_000);
 
   it('rejects managed/gateway preflight before source account mutations', async () => {
     base.prepare = vi.fn(async () => {

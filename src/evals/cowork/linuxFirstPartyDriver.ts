@@ -18,6 +18,18 @@ const SCAN_INCOMPLETE = new Set([
   'accessibility_tree_budget',
   'accessibility_scan_timeout',
 ]);
+/**
+ * Reads that fail while the tree changes under a scan: a node gone mid-read, a
+ * child reference that is already null, or a node that moved under another
+ * parent and so appears twice. The managed driver treats the same codes as
+ * transient. Inside a bounded poll the scan is repeated, never an action.
+ */
+const TRANSIENT_SCAN = new Set([
+  'accessibility_dbus_error',
+  'accessibility_node_defunct',
+  'accessibility_invalid_reply',
+  'accessibility_tree_invalid',
+]);
 const TRANSPORT_ERRORS = new Set([
   ...SCAN_INCOMPLETE,
   'desktop_missing_or_ambiguous',
@@ -186,19 +198,33 @@ class FirstPartyDriver {
     inspect: (nodes: readonly LinuxUiNode[], until: number) => Promise<T | null>
   ): Promise<T> {
     const until = Math.min(this.deadlineAt, Date.now() + milliseconds);
+    let unsettled: string | undefined;
     while (Date.now() < until) {
       this.check(until, code);
-      const nodes = await this.bounded(() => this.ui.snapshot(), until, code);
-      const result = await inspect(nodes, until);
+      let nodes: readonly LinuxUiNode[] | undefined;
+      try {
+        nodes = await this.bounded(() => this.ui.snapshot(), until, code);
+        unsettled = undefined;
+      } catch (error) {
+        // Claude destroys a view's nodes while navigating (for example, from a
+        // finished task to a new one), so a walk can reach a node that is
+        // gone. A snapshot is read-only: scan again rather than fail the stage.
+        if (!(error instanceof LinuxUiError) || !TRANSIENT_SCAN.has(error.code))
+          throw error;
+        unsettled = error.code;
+      }
+      const result = nodes ? await inspect(nodes, until) : null;
       if (result !== null) return result;
       this.check(until, code);
       await new Promise<void>((resolve) =>
         setTimeout(resolve, Math.min(100, until - Date.now()))
       );
     }
-    throw new DriverFailure(
-      Date.now() >= this.deadlineAt ? 'deadline_exceeded' : code
-    );
+    if (Date.now() >= this.deadlineAt)
+      throw new DriverFailure('deadline_exceeded');
+    // A tree that never settled is the cause, not the stage's own condition.
+    if (unsettled) throw new LinuxUiError(unsettled);
+    throw new DriverFailure(code);
   }
 
   async surface(
@@ -325,7 +351,13 @@ class FirstPartyDriver {
     await this.action(() => this.ui.openCowork());
     const initial = await this.waitEmpty();
     if (target !== undefined) await this.selectModel(target, initial);
-    const nodes = await this.bounded(() => this.ui.snapshot());
+    // Claude can still be tearing down the previous view here. Nothing has
+    // been pasted yet, so a transient scan error is read again, never acted on.
+    const nodes = await this.poll(
+      10_000,
+      'first_party_cowork_not_ready',
+      async (snapshot) => snapshot
+    );
     const before = await this.surface(nodes, true);
     if (controls(nodes, () => true, ['radio menu item']).length)
       throw new DriverFailure('model_selection_not_confirmed');

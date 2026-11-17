@@ -249,9 +249,12 @@ uses `MST_COWORK_CLOUD_CONTROL_SOCKET`. This relay exposes no Chrome cookies,
 DevTools access or general HTTP access; the separate credential plugin owns
 explicitly authorized account-session staging. `dispatch` permits only preparation,
 exact authorized prompt/task binding, completion proof, verification,
-restoration and bounded session/event reads. The source owns the server labels,
-connector policies, write declarations, model and prompt sequence from the
-bundle. A worker cannot widen them. The relay must reject unknown properties,
+restoration and bounded session/event reads. An `events` read can name the
+events the worker already holds (`after: { count, eventId }`). The source then
+sends only later events as `{ offset, events }`, or all of them again from
+offset 0 if the session no longer starts with those events. The source owns the
+server labels, connector policies, write declarations, model and prompt sequence
+from the bundle. A worker cannot widen them. The relay must reject unknown properties,
 bound UTF-8 frames to 16 MiB including the newline, and serialize requests.
 
 Keep the source and relay attached through verified restoration and final
@@ -366,6 +369,10 @@ tool's availability. It saves the check as `connector-policy.json` beside the
 audit log, including the prepared tool list when validation fails. If the server
 changes its catalog during a task, MST fails the check instead of silently
 accepting new tools. Start a new run to prepare against the changed catalog.
+Claude's tool list for a connector can also be behind its live server. A tool
+the server offers but the list lacks has no permission MST can set, so every
+task that finds it fails the check, and a new run does not help. The error
+names the tool and says that Claude's list did not have it.
 
 The Chrome recorder profile and Claude Desktop must be on the same account and
 the same active organization. On local macOS, you must make sure they are; MST
