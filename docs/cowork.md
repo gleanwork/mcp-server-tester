@@ -355,8 +355,13 @@ not a dry-run proxy; planned/simulated-write assertions are unsupported.
 
 `failOnApproval` defaults to `true`, which disables automatic human-in-the-loop
 handling: MST performs no automatic approval clicks and rejects recorded
-approval requests. Set it to `false` for an `ask` policy; MST then delegates to
-the existing one-time approval handling. It is not a manual-only ask mode.
+approval requests for MCP tools. An approval prompt for one of Claude's built-in
+tools, such as a web fetch asking to open a URL, is outside the connector
+policy: MST still doesn't answer it, and records the tool's name in
+`builtinApprovalRequests` in `connector-policy.json` instead of failing the
+trial. A request that names no tool counts as an MCP tool's. Set it to `false`
+for an `ask` policy; MST then delegates to the existing one-time approval
+handling. It is not a manual-only ask mode.
 `coworkSetup.approveWriteTools` enables one-time approval of writable tools only
 with an explicit `writes` declaration and `failOnApproval: false`; with
 `failOnApproval: true` nothing is handled automatically. MST verifies saved permission keys and checks the session's initial

@@ -1569,6 +1569,34 @@ describe('connector catalog drift', () => {
     ).toThrow('Missing: mcp__Task_Board__read');
   });
 
+  const prompt = (tool_name: string) => ({
+    payload: {
+      type: 'control_request',
+      request: { subtype: 'can_use_tool', tool_name },
+    },
+  });
+
+  it('records an approval prompt for a built-in tool without failing the policy', () => {
+    const result = verifyCloudConnectorEvents(readOnly(), [
+      init(['mcp__Acme_Documents__search', 'WebFetch']),
+      prompt('WebFetch'),
+    ]);
+    expect(result.approvalRequests).toBe(0);
+    expect(result.builtinApprovalRequests).toEqual(['WebFetch']);
+  });
+
+  it.each(['mcp__Acme_Documents__search', 'mcp__Other_Server__lookup'])(
+    'fails on an approval prompt for MCP tool %s',
+    (tool) => {
+      expect(() =>
+        verifyCloudConnectorEvents(readOnly(), [
+          init(['mcp__Acme_Documents__search']),
+          prompt(tool),
+        ])
+      ).toThrow('Cloud requested 1 tool approvals');
+    }
+  );
+
   it('reads a prepared plan from a source that predates the setting as fail', () => {
     const { catalogDrift: _omitted, ...legacy } = readOnly('record');
     expect(

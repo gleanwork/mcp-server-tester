@@ -722,12 +722,25 @@ export function verifyCloudConnectorEvents(
     ? loadedMissing.filter((tool) => loadedServers.has(serverOf(tool) ?? ''))
     : [];
   const missing = loadedMissing.filter((tool) => !unloaded.includes(tool));
-  const approvals = events.filter(
-    (e) =>
-      e.payload?.type === 'control_request' &&
-      (e.payload.request as { subtype?: unknown } | undefined)?.subtype ===
-        'can_use_tool'
-  ).length;
+  // The connector policy covers MCP tools only; Claude's built-in tools (a web
+  // fetch's URL prompt, say) are outside its scope. Record their prompts as
+  // client behavior rather than as a policy failure. A request that names no
+  // tool counts against the policy.
+  const requests = events
+    .filter(
+      (e) =>
+        e.payload?.type === 'control_request' &&
+        (e.payload.request as { subtype?: unknown } | undefined)?.subtype ===
+          'can_use_tool'
+    )
+    .map((e) => (e.payload!.request as { tool_name?: unknown }).tool_name);
+  const builtinApprovalRequests = requests
+    .filter(
+      (name): name is string =>
+        typeof name === 'string' && !name.startsWith('mcp__')
+    )
+    .sort();
+  const approvals = requests.length - builtinApprovalRequests.length;
   if (unexpected.length || missing.length)
     throw new Error(
       `Cloud connector configuration mismatch: ${unexpected.length} unexpected tools, ${missing.length} missing tools. Unexpected: ${unexpected.join(', ') || 'none'}. Missing: ${missing.join(', ') || 'none'}. The connector catalog may have changed since preparation.`
@@ -748,5 +761,6 @@ export function verifyCloudConnectorEvents(
     catalogComplete: pendingServers.length === 0,
     catalogDrift: { unlisted, unloaded },
     approvalRequests: approvals,
+    builtinApprovalRequests,
   };
 }
