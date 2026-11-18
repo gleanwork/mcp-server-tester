@@ -39,6 +39,10 @@ interface FixtureNode {
   children: string[];
   state: number[];
   text?: string;
+  /** Hypertext: the object path behind each U+FFFC in `text`, in order. */
+  links?: string[];
+  /** Anchors on each of this node's hyperlinks (default 1). */
+  anchors?: number;
 }
 class FakeSocket extends EventEmitter {
   destroy = vi.fn(() => {
@@ -101,6 +105,15 @@ function reply(message: Message): unknown {
   if (message.member === 'GetAddress') return accessibilityAddress;
   if (message.path === ROOT) return apps.map((path) => [':1.20', path]);
   if (message.member === 'GenerateKeyboardEvent') return undefined;
+  const hyperlink = /^(.*)\/hyperlink([0-9]+)$/.exec(message.path);
+  if (hyperlink) {
+    const owner = nodes.get(hyperlink[1]!)!;
+    if (message.member === 'Get')
+      return [[{ type: 'n', child: [] }], [owner.anchors ?? 1]];
+    if (message.member === 'GetObject')
+      return [':1.20', owner.links![Number(hyperlink[2])]];
+    throw new Error(`Unexpected hyperlink member: ${message.member}`);
+  }
   const value = nodes.get(message.path);
   if (!value) throw new Error(`Missing fixture: ${message.path}`);
   switch (message.member) {
@@ -113,7 +126,22 @@ function reply(message: Message): unknown {
     case 'GetChildren':
       return value.children.map((path) => [':1.20', path]);
     case 'GetInterfaces':
-      return value.text !== undefined ? ['org.a11y.atspi.Text'] : [];
+      return [
+        ...(value.text !== undefined ? ['org.a11y.atspi.Text'] : []),
+        ...(value.links ? ['org.a11y.atspi.Hypertext'] : []),
+      ];
+    case 'GetLinkIndex': {
+      const offset = message.body![0] as number;
+      const characters = [...(value.text ?? '')];
+      return characters[offset] === '\ufffc'
+        ? characters.slice(0, offset).filter((char) => char === '\ufffc').length
+        : -1;
+    }
+    case 'GetLink':
+      return [
+        ':1.20',
+        `${message.path}/hyperlink${message.body![0] as number}`,
+      ];
     case 'GetText':
       return value.text;
     case 'DoAction':
@@ -396,11 +424,21 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
     expect(fields(await ui.snapshot())).toEqual(expected);
   });
 
-  it('rejects defunct nodes and cycles', async () => {
+  it('omits a node that went defunct mid-scan, with its subtree, and keeps the rest', async () => {
     const ui = await connect();
-    nodes.get('/line1')!.state = [1 << 6, 0];
+    const names = async () => (await ui.snapshot()).map((node) => node.name);
+    expect(await names()).toContain('second');
+    nodes.get('/group')!.state = [1 << 6, 0];
+    const scanned = await names();
+    expect(scanned).toEqual(expect.arrayContaining(['first', 'Send']));
+    expect(scanned).not.toContain('second');
+  });
+
+  it('rejects a defunct app root and cycles', async () => {
+    const ui = await connect();
+    nodes.get('/app')!.state = [1 << 6, 0];
     await expect(ui.snapshot()).rejects.toThrow('accessibility_node_defunct');
-    nodes.get('/line1')!.state = [...normalStates];
+    nodes.get('/app')!.state = [...normalStates];
     nodes.get('/line1')!.children = ['/app'];
     await expect(ui.snapshot()).rejects.toThrow('accessibility_tree_invalid');
   });
@@ -462,6 +500,108 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
     nodes.set('/paragraph2', { ...node('', 'paragraph'), text: 'second' });
     const ui = await connect();
     expect(await ui.readText(await entry(ui))).toBe('first\nsecond');
+  });
+
+  /** An entry whose one paragraph holds `text`, its markers backed by `links`. */
+  function paragraph(text: string, links: string[]) {
+    nodes.get('/entry')!.text = '\ufffc';
+    nodes.get('/entry')!.children = ['/paragraph'];
+    nodes.set('/paragraph', {
+      ...node('', 'paragraph', links),
+      text,
+      links,
+    });
+  }
+  function link(path: string, text: string, links?: string[]) {
+    nodes.set(path, { ...node('', 'link', links), text, links });
+  }
+
+  it('reads inline links back into their paragraph at their character offsets', async () => {
+    // The non-BMP character checks offsets are counted in characters.
+    paragraph('see \u{1F4C4} \ufffc and \ufffc.', ['/link1', '/link2']);
+    link('/link1', 'https://example.com/acme/doc.md');
+    link('/link2', 'https://example.com/acme/other');
+    const ui = await connect();
+    expect(await ui.readText(await entry(ui))).toBe(
+      'see \u{1F4C4} https://example.com/acme/doc.md and https://example.com/acme/other.'
+    );
+  });
+
+  it('reads an object nested inside an inline link', async () => {
+    paragraph('open \ufffc', ['/link1']);
+    link('/link1', 'https://example.com/\ufffc', ['/inner']);
+    nodes.set('/inner', { ...node('', 'static'), text: 'acme' });
+    const ui = await connect();
+    expect(await ui.readText(await entry(ui))).toBe(
+      'open https://example.com/acme'
+    );
+  });
+
+  it('reads a paragraph that is only a link', async () => {
+    nodes.get('/entry')!.text = '\ufffc';
+    nodes.get('/entry')!.children = ['/paragraph'];
+    nodes.set('/paragraph', {
+      ...node('', 'paragraph', ['/link']),
+      text: '\ufffc',
+    });
+    link('/link', 'https://example.com/acme');
+    const ui = await connect();
+    expect(await ui.readText(await entry(ui))).toBe('https://example.com/acme');
+  });
+
+  it.each([
+    {
+      name: 'a paragraph without hypertext',
+      setup: () => {
+        paragraph('see \ufffc', ['/link1']);
+        delete nodes.get('/paragraph')!.links;
+      },
+    },
+    {
+      name: 'a marker with no hyperlink',
+      setup: () => {
+        paragraph('see \ufffc', ['/link1']);
+        override = (message) =>
+          message.member === 'GetLinkIndex' ? { value: -1 } : undefined;
+      },
+    },
+    {
+      name: 'a hyperlink with two anchors',
+      setup: () => {
+        paragraph('see \ufffc', ['/link1']);
+        nodes.get('/paragraph')!.anchors = 2;
+      },
+    },
+    {
+      name: 'an image',
+      setup: () => {
+        paragraph('see \ufffc', ['/object']);
+        nodes.set('/object', { ...node('', 'image'), text: '' });
+      },
+    },
+    {
+      name: 'a button',
+      setup: () => {
+        paragraph('see \ufffc', ['/object']);
+        nodes.set('/object', { ...node('', 'push button'), text: 'Remove' });
+      },
+    },
+    {
+      name: 'links nested past the depth limit',
+      setup: () => {
+        paragraph('see \ufffc', ['/link0']);
+        for (let depth = 0; depth < 12; depth++)
+          link(`/link${depth}`, '\ufffc', [`/link${depth + 1}`]);
+        link('/link12', 'https://example.com/acme');
+      },
+    },
+  ])('refuses inline text through $name', async ({ setup }) => {
+    link('/link1', 'https://example.com/acme');
+    setup();
+    const ui = await connect();
+    await expect(ui.readText(await entry(ui))).rejects.toThrow(
+      'accessibility_text_unavailable'
+    );
   });
 
   it.each([

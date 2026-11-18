@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import { describeError } from '../../utils/describeError.js';
 import { claimDesktopLease } from '../desktopBatch.js';
 import { variantEvalConfig } from '../evalConfig.js';
 import type { ShardBundle } from '../runners/protocol.js';
@@ -401,7 +402,13 @@ export async function createCoworkAccountControl(
             throw new Error('Oversized response.');
           // A direct in-process relay must not receive mutable controller state.
           return structuredClone(response);
-        } catch {
+        } catch (error) {
+          // The worker's reply stays generic: it gets no source-side detail.
+          // The operator of this source host does, on its own stderr;
+          // otherwise a failed call leaves nothing to diagnose it from.
+          process.stderr.write(
+            `[mst:cowork] source ${method} failed: ${describeError(error).slice(0, 2000)}\n`
+          );
           return {
             protocol: COWORK_CLOUD_CONTROL_PROTOCOL,
             id,

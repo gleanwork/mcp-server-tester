@@ -116,6 +116,7 @@ export function bindFirstPartyServers(
   const config: CloudConnectorConfig = {
     default: 'block',
     failOnApproval: requested.failOnApproval,
+    catalogDrift: requested.catalogDrift,
     servers: configured,
   };
   const plan = planCloudConnectors(snapshot, config);

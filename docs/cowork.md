@@ -355,8 +355,13 @@ not a dry-run proxy; planned/simulated-write assertions are unsupported.
 
 `failOnApproval` defaults to `true`, which disables automatic human-in-the-loop
 handling: MST performs no automatic approval clicks and rejects recorded
-approval requests. Set it to `false` for an `ask` policy; MST then delegates to
-the existing one-time approval handling. It is not a manual-only ask mode.
+approval requests for MCP tools. An approval prompt for one of Claude's built-in
+tools, such as a web fetch asking to open a URL, is outside the connector
+policy: MST still doesn't answer it, and records the tool's name in
+`builtinApprovalRequests` in `connector-policy.json` instead of failing the
+trial. A request that names no tool counts as an MCP tool's. Set it to `false`
+for an `ask` policy; MST then delegates to the existing one-time approval
+handling. It is not a manual-only ask mode.
 `coworkSetup.approveWriteTools` enables one-time approval of writable tools only
 with an explicit `writes` declaration and `failOnApproval: false`; with
 `failOnApproval: true` nothing is handled automatically. MST verifies saved permission keys and checks the session's initial
@@ -367,6 +372,19 @@ tool's availability. It saves the check as `connector-policy.json` beside the
 audit log, including the prepared tool list when validation fails. If the server
 changes its catalog during a task, MST fails the check instead of silently
 accepting new tools. Start a new run to prepare against the changed catalog.
+
+The account's tool inventory and the tools a session loads can disagree
+persistently: a connector can offer a session a tool its inventory doesn't
+list, or list a tool the session never loads. A new run can't fix that, so
+`catalogDrift: "record"` lets a run proceed. It records each listed tool that
+had no rule in the plan and that the agent never called (`unlisted`), and each
+allowed tool a session didn't load from a connector that loaded its other
+allowed tools (`unloaded`), under `catalogDrift` in `connector-policy.json`.
+It still fails the trial when the agent calls an unplanned tool, when a blocked
+tool is listed, and when a connector loads none of its allowed tools. A called
+unplanned tool has already run when the check fails, so use `record` only with
+connectors whose unplanned tools are safe to run. The default, `"fail"`, keeps
+the strict check.
 
 The Chrome recorder profile and Claude Desktop must be on the same account and
 the same active organization. On local macOS, you must make sure they are; MST

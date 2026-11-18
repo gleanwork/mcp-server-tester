@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import {
   ATSPI_COMPONENT,
+  ATSPI_HYPERTEXT,
   ATSPI_REGISTRY,
   ATSPI_STATE,
   ATSPI_TEXT,
@@ -10,12 +11,16 @@ import {
   remainingMs,
   walkAtspi,
   type AtspiRef,
+  type AtspiStates,
 } from '../linuxAtspiBus.js';
 import { hasLoneSurrogate, percentEncodeUtf8 } from '../urlComponent.js';
 import { LinuxUiError, type LinuxUi, type LinuxUiNode } from './linuxUi.js';
 
 const SKIPPED_ROLES = new Set(['table', 'tree table']);
 const TEXT_ROLES = new Set(['static', 'text', 'label', 'paragraph', 'heading']);
+/** Roles whose text can stand for an embedded-object marker in a composer. */
+const INLINE_ROLES = new Set([...TEXT_ROLES, 'link']);
+const MAX_INLINE_DEPTH = 8;
 
 /** Claude Desktop's accessible application names, compared case-insensitively. */
 function isClaude(name: string): boolean {
@@ -164,11 +169,27 @@ export async function connectLinuxUi(
           matches[0]!.ref,
           async ({ ref, parentId }) => {
             const role = await bus.role(ref);
-            const [label, has, descendants] = await Promise.all([
-              bus.name(ref),
-              bus.states(ref),
-              SKIPPED_ROLES.has(role) ? Promise.resolve([]) : bus.children(ref),
-            ]);
+            let label: string, has: AtspiStates, descendants: AtspiRef[];
+            try {
+              [label, has, descendants] = await Promise.all([
+                bus.name(ref),
+                bus.states(ref),
+                SKIPPED_ROLES.has(role)
+                  ? Promise.resolve([])
+                  : bus.children(ref),
+              ]);
+            } catch (error) {
+              // The app re-renders while the tree is read, so a node can go
+              // defunct between listing and reading it. It can't be acted on;
+              // omit it rather than lose the whole scan. The app root can't.
+              if (
+                parentId &&
+                error instanceof LinuxUiError &&
+                error.code === 'accessibility_node_defunct'
+              )
+                return null;
+              throw error;
+            }
             refs.set(atspiId(ref), ref);
             return {
               value: {
@@ -201,7 +222,7 @@ export async function connectLinuxUi(
         const interfaces = await bus.interfaces(ref);
         if (embeddedChildren.has(atspiId(ref))) {
           const role = await bus.role(ref);
-          if (!TEXT_ROLES.has(role) || !interfaces.includes(ATSPI_TEXT))
+          if (!INLINE_ROLES.has(role) || !interfaces.includes(ATSPI_TEXT))
             throw new LinuxUiError('accessibility_text_unavailable');
         }
         if (interfaces.includes(ATSPI_TEXT)) {
@@ -209,10 +230,10 @@ export async function connectLinuxUi(
           if (text.includes('\ufffc')) {
             // Chromium represents editor paragraphs as embedded objects, even
             // when empty. Resolve their text instead of discarding the markers.
-            // Mixed literals/objects need hyperlink-offset reconstruction; fail
-            // closed rather than lose literal text or guess its reading order.
+            // Text mixed with objects (a pasted URL becomes an inline link)
+            // is read through each marker's hyperlink; see inlineText.
             if (text.replace(/[\ufffc\r\n]/g, '') !== '')
-              throw new LinuxUiError('accessibility_text_unavailable');
+              return { value: await inlineText(ref, text, 0), children: [] };
             const descendants = await bus.children(ref);
             const markers = [...text].filter(
               (char) => char === '\ufffc'
@@ -232,6 +253,50 @@ export async function connectLinuxUi(
         };
       });
       return pieces.filter(Boolean).join('\n');
+
+      /**
+       * Replace each U+FFFC in `text` with the text of the object it stands
+       * for, found through the hyperlink at that character offset. A marker
+       * with no hyperlink, a hyperlink without exactly one anchor, or an
+       * object that isn't text-like fails closed rather than guess.
+       */
+      async function inlineText(
+        ref: AtspiRef,
+        text: string,
+        depth: number
+      ): Promise<string> {
+        const unavailable = () =>
+          new LinuxUiError('accessibility_text_unavailable');
+        if (depth > MAX_INLINE_DEPTH) throw unavailable();
+        if (!(await bus.interfaces(ref)).includes(ATSPI_HYPERTEXT))
+          throw unavailable();
+        const characters = [...text];
+        const parts: string[] = [];
+        for (let offset = 0; offset < characters.length; offset++) {
+          if (characters[offset] !== '\ufffc') {
+            parts.push(characters[offset]!);
+            continue;
+          }
+          const index = await bus.linkIndex(ref, offset);
+          if (index < 0) throw unavailable();
+          const hyperlink = await bus.link(ref, index);
+          if ((await bus.anchorCount(hyperlink)) !== 1) throw unavailable();
+          const object = await bus.linkObject(hyperlink, 0);
+          const [role, interfaces] = await Promise.all([
+            bus.role(object),
+            bus.interfaces(object),
+          ]);
+          if (!INLINE_ROLES.has(role) || !interfaces.includes(ATSPI_TEXT))
+            throw unavailable();
+          const inner = await bus.text(object, 0, -1);
+          parts.push(
+            inner.includes('\ufffc')
+              ? await inlineText(object, inner, depth + 1)
+              : inner
+          );
+        }
+        return parts.join('');
+      }
     },
     async activate(node) {
       const ref = reference(node);

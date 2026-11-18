@@ -84,6 +84,8 @@ export const CoworkCloudPreparationSchema = z
         managedServers: z.array(z.string()),
         serverDisplayNames: z.record(z.string(), z.string()),
         failOnApproval: z.boolean(),
+        // A source from before this setting sends none; it checked strictly.
+        catalogDrift: z.enum(['fail', 'record']).default('fail'),
       })
       .strict(),
     serverLabels: z.record(z.string(), z.string()),

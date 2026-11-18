@@ -23,9 +23,17 @@ export const CloudConnectorsSchema = z
       )
       .default({}),
     failOnApproval: z.boolean().default(true),
+    /**
+     * How the session check treats a connector catalog that differs from the
+     * one the run prepared against. `fail` (the default) fails the trial;
+     * `record` records listed-only and unloaded tools and fails only on what
+     * the policy can't vouch for (see `verifyCloudConnectorEvents`).
+     */
+    catalogDrift: z.enum(['fail', 'record']).default('fail'),
   })
   .strict();
 export type CloudConnectorConfig = z.input<typeof CloudConnectorsSchema>;
+type CatalogDriftMode = z.output<typeof CloudConnectorsSchema>['catalogDrift'];
 export type PermissionPatch = Record<string, boolean | null>;
 export const CloudPermissionStateSchema = z.object({
   accountId: z.string().min(1),
@@ -67,6 +75,7 @@ export interface CloudConnectorPlan {
   managedServers: string[];
   serverDisplayNames: Record<string, string>;
   failOnApproval: boolean;
+  catalogDrift: CatalogDriftMode;
 }
 
 /** Resolve names once; every permission is set with the server's actual keys. */
@@ -192,6 +201,7 @@ export function planCloudConnectors(
       snapshot.servers.map((server) => [server.nativeName, server.name])
     ),
     failOnApproval: config.failOnApproval,
+    catalogDrift: config.catalogDrift,
   };
 }
 
@@ -622,6 +632,7 @@ export function verifyCloudConnectorEvents(
     )
     .map((server) => server.name);
   const searchIds = new Set<string>();
+  const invoked = new Set<string>();
   for (const event of events) {
     const payload = event.payload;
     const content = (payload?.message as { content?: unknown } | undefined)
@@ -633,6 +644,7 @@ export function verifyCloudConnectorEvents(
         typeof block.name === 'string'
       ) {
         observed.add(block.name);
+        invoked.add(block.name);
         if (block.name === 'ToolSearch' && typeof block.id === 'string')
           searchIds.add(block.id);
       }
@@ -661,13 +673,23 @@ export function verifyCloudConnectorEvents(
   const tools = [...observed];
   const allowed = new Set(plan.allowedTools);
   const blocked = new Set(plan.blockedTools);
+  const record = plan.catalogDrift === 'record';
+  const serverOf = (tool: string) =>
+    plan.managedServers.find((server) => tool.startsWith(`mcp__${server}__`));
+  // A managed server's tool with no rule in the plan: the catalog changed
+  // after preparation. Recording it is safe only while the agent never called
+  // it; a blocked tool, or a called unplanned one, always fails.
+  const unplanned = (tool: string) =>
+    serverOf(tool) !== undefined && !allowed.has(tool) && !blocked.has(tool);
+  const unlisted = record
+    ? tools.filter((tool) => unplanned(tool) && !invoked.has(tool)).sort()
+    : [];
   const unexpected = tools.filter(
     (tool) =>
       blocked.has(tool) ||
-      (plan.managedServers.some((server) =>
-        tool.startsWith(`mcp__${server}__`)
-      ) &&
-        !allowed.has(tool))
+      (serverOf(tool) !== undefined &&
+        !allowed.has(tool) &&
+        !unlisted.includes(tool))
   );
   const unobservedAllowedTools = plan.allowedTools.filter(
     (tool) => !observed.has(tool)
@@ -683,16 +705,42 @@ export function verifyCloudConnectorEvents(
     .map(([nativeName]) => nativeName);
   // Cowork can leave init's MCP servers pending even after ToolSearch loads them.
   // Do not claim that this partial snapshot proves the full exposed inventory.
-  const missing = unobservedAllowedTools.filter(
+  const loadedMissing = unobservedAllowedTools.filter(
     (tool) =>
       !pendingNativeNames.some((server) => tool.startsWith(`mcp__${server}__`))
   );
-  const approvals = events.filter(
-    (e) =>
-      e.payload?.type === 'control_request' &&
-      (e.payload.request as { subtype?: unknown } | undefined)?.subtype ===
-        'can_use_tool'
-  ).length;
+  // In record mode, an allowed tool that a server's catalog listed but the
+  // session never loaded is drift when that server loaded other allowed
+  // tools. A server with none of its allowed tools loaded still fails.
+  const loadedServers = new Set(
+    plan.allowedTools
+      .filter((tool) => observed.has(tool))
+      .map(serverOf)
+      .filter((server): server is string => server !== undefined)
+  );
+  const unloaded = record
+    ? loadedMissing.filter((tool) => loadedServers.has(serverOf(tool) ?? ''))
+    : [];
+  const missing = loadedMissing.filter((tool) => !unloaded.includes(tool));
+  // The connector policy covers MCP tools only; Claude's built-in tools (a web
+  // fetch's URL prompt, say) are outside its scope. Record their prompts as
+  // client behavior rather than as a policy failure. A request that names no
+  // tool counts against the policy.
+  const requests = events
+    .filter(
+      (e) =>
+        e.payload?.type === 'control_request' &&
+        (e.payload.request as { subtype?: unknown } | undefined)?.subtype ===
+          'can_use_tool'
+    )
+    .map((e) => (e.payload!.request as { tool_name?: unknown }).tool_name);
+  const builtinApprovalRequests = requests
+    .filter(
+      (name): name is string =>
+        typeof name === 'string' && !name.startsWith('mcp__')
+    )
+    .sort();
+  const approvals = requests.length - builtinApprovalRequests.length;
   if (unexpected.length || missing.length)
     throw new Error(
       `Cloud connector configuration mismatch: ${unexpected.length} unexpected tools, ${missing.length} missing tools. Unexpected: ${unexpected.join(', ') || 'none'}. Missing: ${missing.join(', ') || 'none'}. The connector catalog may have changed since preparation.`
@@ -711,6 +759,8 @@ export function verifyCloudConnectorEvents(
     unobservedAllowedTools,
     pendingServers,
     catalogComplete: pendingServers.length === 0,
+    catalogDrift: { unlisted, unloaded },
     approvalRequests: approvals,
+    builtinApprovalRequests,
   };
 }

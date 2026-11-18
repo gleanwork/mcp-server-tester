@@ -1029,6 +1029,10 @@ describe('safe receipts and bounded diagnosis', () => {
       new LinuxUiError('accessibility_bus_disconnected'),
       'accessibility_bus_disconnected',
     ],
+    [
+      new LinuxUiError('accessibility_text_unavailable'),
+      'accessibility_text_unavailable',
+    ],
   ])(
     'sanitizes transport errors into an allowlisted receipt: %s',
     async (error, expected) => {

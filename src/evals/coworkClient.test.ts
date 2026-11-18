@@ -2762,7 +2762,12 @@ describe('Linux first-party Cowork platform dispatch', () => {
   });
 
   it('wraps the separate attach base, preserving model, connectors, writes and server labels', async () => {
-    const connectors = { default: 'block', failOnApproval: true, servers: {} };
+    const connectors = {
+      default: 'block',
+      failOnApproval: true,
+      catalogDrift: 'fail',
+      servers: {},
+    };
     const work = batch();
     work[0]!.config.connectors = connectors;
     const result = await collectClientBatch(COWORK_CLIENT, work, {

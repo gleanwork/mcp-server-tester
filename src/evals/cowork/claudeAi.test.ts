@@ -2397,6 +2397,18 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       }
     );
 
+    it('reports a failed call generically to the worker and with its cause on the source host', async () => {
+      const { call } = await controller();
+      const stderr = vi.mocked(process.stderr.write);
+      stderr.mockClear();
+      const reply = await call({ method: 'beginTask', prompt: PROMPT });
+      expect(reply).toMatchObject({ ok: false });
+      expect(JSON.stringify(reply)).not.toContain('Prepare the authorized');
+      expect(stderr).toHaveBeenCalledWith(
+        '[mst:cowork] source beginTask failed: Prepare the authorized batch first.\n'
+      );
+    });
+
     it('uses the existing Mac lease, immutable host policies, and synced journal before each acknowledgment', async () => {
       const input = bundle();
       const { control, call } = await controller(input);
