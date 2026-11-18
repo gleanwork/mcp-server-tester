@@ -93,12 +93,7 @@ function pad(text: string, width: number): string {
   return text.length >= width ? text : text + ' '.repeat(width - text.length);
 }
 
-/**
- * What a live check of a grant found. `rejected` means the credential itself
- * is bad, so signing in again can fix it. `unverified` means the check failed
- * for a reason a new sign-in cannot change (a permissions refusal, an outage,
- * too few tools), so the saved grant is kept.
- */
+/** `rejected` can be fixed by signing in again. `unverified` keeps the grant. */
 type Verification =
   | { outcome: 'ok' }
   | { outcome: 'rejected'; problem: string }
@@ -168,11 +163,7 @@ function printNotes(target: Target, print: (line: string) => void): void {
   if (notes) print(`    ${notes}`);
 }
 
-/**
- * `mst auth`: sign in to every grant that has none or that its server rejects,
- * or to all of them with --force. A grant that fails the live check for any
- * other reason is kept, so repeating the command never replaces a good grant.
- */
+/** `mst auth`: sign in where there is no grant, or the server rejected it. */
 export async function auth(
   options: AuthOptions,
   io: {

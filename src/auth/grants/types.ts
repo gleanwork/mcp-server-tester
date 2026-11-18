@@ -90,10 +90,7 @@ export interface ConnectorLaunchContext extends SettingsContext {
 export interface ConnectorDefinition {
   /** Default endpoint (streamable HTTP). An eval config may override it. */
   url: string;
-  /**
-   * Sent on the direct connection, including the sign-in check. Absent means
-   * no extra headers. A connector with `launch` sends its own.
-   */
+  /** Extra headers for the direct connection and the sign-in check. */
   headers?: Readonly<Record<string, string>>;
   /** Connectors with the same grant share one sign-in. Default: the connector's name. */
   grant?: string;
