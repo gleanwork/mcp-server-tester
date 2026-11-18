@@ -38,6 +38,10 @@ _Avoid_: canonical answer, golden, target, reference
 The MCP client application an eval tests, named canonically: `claude-code`, `codex-cli` (the Codex CLI; it was `codex`), `cowork`, `chatgpt`, `codex-app` (the Codex surface of the ChatGPT desktop app; it was `chatgpt` with `surface: "codex"`), or `api` (the model alone, through its provider's API, with the servers' tools; it was `mst`). One client is one product: no option changes which product it is. How MST drives it (a CLI, desktop automation, an SDK) is not part of its name. Desktop execution uses the product's `macos.ts` or `linux.ts` entry point, selected on the machine running the trial. New results record no driver identity; old stored results keep theirs. A client returns a transcript, never a score. Built-in and plugin clients return the same `ClientRunResult`: a final answer, ordered events and optional usage, diagnostics and telemetry. MST derives the assertion/report view from it. `mst clients` lists each client's requirements, options and defaults from its definition and schema. It describes OS-dependent defaults without resolving them on the coordinator. A client with its model is an agent harness.
 _Avoid_: host, harness (unqualified), agent, runner, solver, provider. One exception: **host telemetry**.
 
+**Claude Desktop**:
+The application the `cowork` client drives. Anthropic is merging Chat and Cowork into one Claude experience: where that has rolled out, the app has no Cowork mode to choose, and a message from its home screen starts a **Cowork session**, which is what a trial runs. Say "Claude Desktop" for the app and the product, and "the `cowork` client" for what MST does. Say "Cowork" only where Anthropic still does: a Cowork session, Cowork's VM, Cowork settings and keys such as `coworkTabEnabled`. The client name, the `mst cowork` command, the `MST_COWORK_*` variables and the image name `mst-cowork-linux` keep their names.
+_Avoid_: Cowork (for the app, the product or the client), Cowork mode, Claude Cowork
+
 **Client auth cache**:
 Authentication state a client application's own helper keeps, separate from MST connector grants and credential stores. The `codex-cli` option `authCacheDirectories` links dedicated private cache directories into otherwise fresh trial homes; it does not reuse operator configuration or import existing credentials.
 _Avoid_: shared client home
@@ -67,11 +71,11 @@ A vendor MCP server the service publishes itself, such as the one Slack runs for
 _Avoid_: native server, first-party server
 
 **Client's own connector**:
-A connector a user adds inside the client, such as one from Cowork's connector directory, hosted by the client's maker. In `third-party` Cowork, MST doesn't configure or observe it. In `first-party` mode it is the account connector MST selects, sets tool permissions on, restores, and records calls of. Unrelated to an MST connector.
+A connector a user adds inside the client, such as one from Claude Desktop's connector directory, hosted by the client's maker. In the `cowork` client's `third-party` mode, MST doesn't configure or observe it. In `first-party` mode it is the account connector MST selects, sets tool permissions on, restores, and records calls of. Unrelated to an MST connector.
 _Avoid_: native connector, built-in connector
 
 **First-party mode**:
-A Cowork option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). It runs locally on macOS or in a plugin-prepared Linux runtime with attached macOS source control, one trial at a time on one shard with a dedicated account. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
+A `cowork` client option (`clientOptions.mode: "first-party"`) that runs trials on HTTPS connectors already connected in the signed-in Claude account, selected by MST server label, instead of servers MST configures (the default `third-party` mode). It runs locally on macOS or in a plugin-prepared Linux runtime with attached macOS source control, one trial at a time on one shard with a dedicated account. It reuses the one `caseExecution` path. Unrelated to an official MCP server.
 _Avoid_: claude-ai mode, account mode
 
 **Variant**:
@@ -103,7 +107,7 @@ What a client did in one trial, in order: tool calls (MCP or the client's own), 
 _Avoid_: trace, trajectory, log, response
 
 **Client artifacts**:
-A bounded copy of the files a client kept for one trial (such as Cowork's session folder, or the Codex CLI's rollout trace), taken from the paths the client names as evidence, for judges to read. A run that keeps full transcripts stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
+A bounded copy of the files a client kept for one trial (such as a Cowork session's folder, or the Codex CLI's rollout trace), taken from the paths the client names as evidence, for judges to read. A run that keeps full transcripts stores the copy at `artifacts/<variant>/<case-id>/<trial>/`.
 _Avoid_: attachments, session dump
 
 **Failure diagnosis**:
@@ -309,7 +313,7 @@ The machine where `mst run` or `mst grade` was typed (your machine or a CI job).
 _Avoid_: controller, host, driver
 
 **Runner**:
-Where a run's trials are collected, chosen with `--runner`: `local` (in the `mst run` process, the default), `docker` (containers from MST's Linux Cowork or ChatGPT image), or a runner extension that creates machines, such as containers or VMs (`acme/runner/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)). ADR 0004 and 0005 call it an environment; [ADR 0013](docs/adr/0013-mst-uses-anthropics-eval-vocabulary.md) renamed it, because Anthropic's environment is what the client acts on. The OS of the machine that runs a trial decides how a desktop client runs: Computer Use on macOS, the accessibility automation on Linux ([ADR 0011](docs/adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md)); each shard's machine records its OS. At eval load, MST checks client OS requirements when the runner's OS is known: the executing machine for `local`, Linux for built-in `docker`, or a runner definition's optional `os: 'macos' | 'linux'`. The check includes case clients. An undeclared OS stays unknown; validation never opens a machine to discover it.
+Where a run's trials are collected, chosen with `--runner`: `local` (in the `mst run` process, the default), `docker` (containers from MST's Linux Claude Desktop or ChatGPT image), or a runner extension that creates machines, such as containers or VMs (`acme/runner/cloud-vm`). Never part of an eval config ([ADR 0004](docs/adr/0004-environments-run-shards-over-a-channel.md)). ADR 0004 and 0005 call it an environment; [ADR 0013](docs/adr/0013-mst-uses-anthropics-eval-vocabulary.md) renamed it, because Anthropic's environment is what the client acts on. The OS of the machine that runs a trial decides how a desktop client runs: Computer Use on macOS, the accessibility automation on Linux ([ADR 0011](docs/adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md)); each shard's machine records its OS. At eval load, MST checks client OS requirements when the runner's OS is known: the executing machine for `local`, Linux for built-in `docker`, or a runner definition's optional `os: 'macos' | 'linux'`. The check includes case clients. An undeclared OS stays unknown; validation never opens a machine to discover it.
 _Avoid_: environment (that is what the client acts on), sandbox, backend, target
 
 **Shard**:

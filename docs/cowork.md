@@ -1,6 +1,7 @@
-# Cowork in MST
+# Claude Desktop in MST
 
-Cowork is the `cowork` client. `mst run --config <eval.json>` runs an eval config
+Claude Desktop is the `cowork` client. Each trial runs in a Cowork session, which
+is where the client's name comes from. `mst run --config <eval.json>` runs an eval config
 on it, as for any client, and `mst batch` runs several configs. A platform-specific
 desktop driver submits each case, and MST builds each transcript from Claude's own
 session records. macOS uses managed application setup and Anthropic Computer Use.
@@ -13,7 +14,7 @@ This section is for the default `third-party` mode. In `first-party` mode, do
 not run `mst cowork setup`: it uses the signed-in installed app and no MST
 profile (see [Cloud sessions](#cloud-sessions)).
 
-Run this once on a new Mac before the first default-mode Cowork evaluation:
+Run this once on a new Mac before the first default-mode `cowork` evaluation:
 
 ```bash
 node --import tsx src/cli/index.ts cowork setup
@@ -29,7 +30,7 @@ The command creates the minimal empty Claude 3P profile only when the profile
 library is missing. It never overwrites an existing profile. After it completes,
 launch Claude Desktop, sign in through the normal user-controlled flow, open one
 normal conversation, and quit Claude Desktop. The next `batch` run manages a
-temporary Cowork profile and restores the empty base profile afterward.
+temporary Claude Desktop profile and restores the empty base profile afterward.
 
 If the profile already exists but is not empty, setup stops without changing it.
 Use a dedicated Claude Desktop user/profile or contact the MST owner; do not
@@ -101,7 +102,7 @@ modified.
 
 Two separate model clients run during a macOS case:
 
-- **Cowork's inference** (the model under test). By default, MST stages
+- **Claude Desktop's inference** (the model under test). By default, MST stages
   `ANTHROPIC_API_KEY` for the temporary profile through a private credential
   helper. When managed preferences set `inferenceProvider` (for example, an LLM
   gateway with its own credential helper), they take precedence over the
@@ -117,9 +118,9 @@ So on a Mac whose managed preferences route Claude Desktop through a gateway,
 setting the gateway variables for the planner is enough; no API key is needed.
 
 The temporary profile turns on tool search (`toolSearchEnabled`), as on the
-Linux desktop: Cowork loads an MCP tool's definition when the model searches for
+Linux desktop: Claude Desktop loads an MCP tool's definition when the model searches for
 it. Set `coworkSetup.toolSearch: false` to send every tool in every request. See
-[Cowork in Docker](./cowork-docker.md).
+[Claude Desktop in Docker](./cowork-docker.md).
 
 `MST_COWORK_APP_PATH=/absolute/path/to/Claude.app` runs an app installed
 somewhere other than `/Applications`. MST neither downloads nor deletes
@@ -263,12 +264,12 @@ were restored. Clean up worker credentials independently even if source
 restoration fails. Recovery runs on the designated macOS source host, using its
 journal and Chrome sign-in, not on the worker.
 
-`--detach` refuses effective first-party Cowork clients in the eval config,
+`--detach` refuses effective first-party `cowork` clients in the eval config,
 variants and plugin shared configs before opening result stores, reading
 secrets, validating/loading datasets or creating a coordinator. Case-level
 client and option overrides remain supported. MST checks their effective
 settings in every variant immediately after loading the datasets, and refuses
-first-party Cowork cases before opening result stores, reading or forwarding
+first-party `cowork` cases before opening result stores, reading or forwarding
 secrets, or creating a coordinator. Both checks apply to run, resume and grade
 detach. Omitting account runner configuration does not bypass either check.
 Do not use detach or multiple shards for the Linux account path.
@@ -359,7 +360,7 @@ the existing one-time approval handling. It is not a manual-only ask mode.
 `coworkSetup.approveWriteTools` enables one-time approval of writable tools only
 with an explicit `writes` declaration and `failOnApproval: false`; with
 `failOnApproval: true` nothing is handled automatically. MST verifies saved permission keys and checks the session's initial
-catalog, discovered tool references, and actual calls against the policy. Cowork
+catalog, discovered tool references, and actual calls against the policy. Claude Desktop
 can load connectors after reporting them as pending in its initial catalog.
 MST records that catalog as incomplete rather than claiming it proves every
 tool's availability. It saves the check as `connector-policy.json` beside the
@@ -376,7 +377,7 @@ replace a live app sign-in check. Before changing permissions the source checks
 the Chrome session's account and organization, and it checks them again against
 the recovery journal before restoring. This is not a sandbox guarantee.
 
-One macOS Cowork lease is shared by both modes, every `dataDir` and Linux source
+One macOS Claude Desktop lease is shared by both modes, every `dataDir` and Linux source
 control, so a local app run cannot overlap account control from that source
 host. MST reads at most 10,000 events from a
 session. A longer session fails with an error that names the cap; MST does not
@@ -492,10 +493,10 @@ bundled. Use the normal file/GCS dataset sources and plugins. Configure custom
 judges according to their plugin's requirements.
 `--dry-run` checks configuration, not GUI execution or model behavior.
 
-Use client `cowork`. The earlier names `cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` fail validation, naming `cowork`. `model` selects the Cowork
+Use client `cowork`. The earlier names `cowork_cu` and `anthropic.claude.cowork.desktop-app.macos` fail validation, naming `cowork`. `model` selects Claude Desktop's
 inference model; `clientOptions.computerUseModel` independently selects the planner.
 The inference provider is `anthropic`, and no option changes it:
-`clientOptions.provider` fails validation. How Cowork runs follows from the OS of
+`clientOptions.provider` fails validation. How the `cowork` client runs follows from the OS of
 the machine that runs the trial, and no option selects it: on macOS, Computer
 Use, with `computerUseModel` as its planner; on Linux, the accessibility
 automation, with no planner. A config that set `clientOptions.computerUseProvider`
@@ -509,14 +510,14 @@ inspections after its prompt is sent (approving its tool calls, checking that
 its task finished): 1 to 24, default 12. `timeout` is the trial's time limit in
 ms, default 900000.
 
-Cowork runs a variant's cases in one app, with one set of settings. A case that
+The `cowork` client runs a variant's cases in one app, with one set of settings. A case that
 sets its own `model` or a `clientOptions` value that differs from its variant's
 fails when its dataset loads, before anything runs, and so does a case that
 names another client. Use a variant for a different setting.
 
 MST applies a fixed inference model list with discovery disabled. On macOS,
 managed settings can override that profile. The submission driver therefore
-selects and verifies the requested model in Cowork's visible model picker before
+selects and verifies the requested model in Claude Desktop's visible model picker before
 entering the prompt. If the exact model is unavailable or cannot be confirmed,
 the case stops without submission; it never substitutes another model. Native
 telemetry must still report the requested exact model ID; a mismatch or missing
@@ -553,7 +554,7 @@ never resubmitted. Follow-up usage is recorded under
 `clientTelemetry.computerUse.hitlFollowups`.
 
 In `third-party` mode, MST does not configure or observe connectors added from
-Cowork's own connector directory (the client's own connectors), so disconnect any
+Claude Desktop's own connector directory (the client's own connectors), so disconnect any
 that could write to real accounts before a run, or use test accounts.
 `first-party` mode does configure and observe the account connectors it selects
 (see [Cloud sessions](#cloud-sessions)).
@@ -587,7 +588,7 @@ when installing the normal published package.
 
 ## Attach to a prepared Linux desktop
 
-Use `client: "cowork"` with `mst run` (or `batch`) on the Linux machine. Cowork
+Use `client: "cowork"` with `mst run` (or `batch`) on the Linux machine. The client
 runs there with the accessibility automation, because the machine runs Linux.
 `computerUseModel` and `appVersion` are macOS options and fail: there is no LLM
 desktop planner, and the prepared desktop is the app that runs. MST checks them
@@ -655,7 +656,7 @@ the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
 stays read-only.
 
 **In a runner.** A plugin runner (`mst run --runner <namespace>/runner/<name>`)
-can run Cowork shards on Linux workers in owned-desktop mode. Connector servers
+can run `cowork` shards on Linux workers in owned-desktop mode. Connector servers
 and variants with tool metadata work there as they do locally: the worker
 launches each connector with its own paths and gets its access token from the
 coordinator, and runs the tool-variant proxy itself. The worker image must
@@ -663,7 +664,7 @@ install the plugin packages the eval loads, at the versions the coordinator
 runs, where the worker resolves them (`MST_PLUGIN_DIR`); a worker with another
 version refuses to run. The built-in `docker` runner runs shards in
 containers from MST's own image, and installs the eval's plugins in it: see
-[Cowork in Docker](./cowork-docker.md).
+[Claude Desktop in Docker](./cowork-docker.md).
 
 Submission opens the native deep link through the prepared environment's `xdg-open`
 handler, then attempts one semantic `Start task` action. Alternatively, set
@@ -681,7 +682,7 @@ uncertain action. The shared native collector still requires a new exact-prompt
 session. HITL only operates on approval controls while that bound session is pending;
 it never types, creates tasks, or continues onboarding. Unclassified approval prompts
 fail closed unless `coworkSetup.approveWriteTools` explicitly permits approval.
-Built-in Cowork tools ignore managed MCP `toolPolicy` and confirm with an inline
+Claude Desktop's built-in tools ignore managed MCP `toolPolicy` and confirm with an inline
 card whose primary action names the write (`Create`/`Update` for artifacts;
 `Schedule`/`Update`/`Run`/`Delete` for scheduled tasks) beside `Cancel`. The 3p
 desktop offers no Skip all approvals mode, so under `approveWriteTools` HITL
@@ -691,7 +692,7 @@ fails closed.
 A task can ask for a folder of the user's computer (`request_cowork_directory`,
 often for code it can't find): a card with `Choose folder` beside `Deny`. Nobody
 can choose one in a headless run, and managed settings can't remove the tool
-(`disabledBuiltinTools` doesn't apply to Cowork's own MCP tools), so HITL clicks
+(`disabledBuiltinTools` doesn't apply to Claude Desktop's own MCP tools), so HITL clicks
 `Deny`, under either policy, since denying grants nothing. The model is told the
 user rejected it and answers with the tools it has; the case is graded on that
 answer. `computerUse.hitl.telemetry.folder_requests_denied` counts them.
@@ -699,7 +700,7 @@ answer. `computerUse.hitl.telemetry.folder_requests_denied` counts them.
 A task can ask a clarifying question (`AskUserQuestion`). By default
 (`coworkSetup.clarifyingQuestions: "first-option"`), HITL answers it the way ACE
 does: it reads the question's options from the bound task's transcript and clicks
-the first option of the question on screen (Cowork shows one per page, marked
+the first option of the question on screen (Claude Desktop shows one per page, marked
 `2 of 3`). A control matches by its exact label, or by the label followed by its
 description, unless a longer option label claims it. Once a multi-select
 option is checked, HITL presses the page's one `Submit`/`Next` control. HITL acts
@@ -810,8 +811,8 @@ the bytes present at audit time; notices contain no original digest to authentic
 - `cowork/macos.ts`: the macOS entry point, using the existing setup, recovery, and Computer Use functions.
 - `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
   Its `macController.ts` handles only application start/stop, not UI automation.
-- `nativeHelper.ts`: builds and runs the macOS Swift controllers for Cowork and
-  ChatGPT with one environment policy. The Cowork controller runs with only the
+- `nativeHelper.ts`: builds and runs the macOS Swift controllers for Claude Desktop and
+  ChatGPT with one environment policy. The Claude Desktop controller runs with only the
   system `PATH` and a private `TMPDIR`. The ChatGPT controller launches the app
   with the test environment; see [ChatGPT desktop](./chatgpt-desktop.md).
 - `cowork/interaction.ts`: shared receipts, error classifications, and scoped telemetry. New Linux receipts omit `driver`; old receipts remain readable.
@@ -822,7 +823,7 @@ the bytes present at audit time; notices contain no original digest to authentic
 - `cowork/linuxFirstPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-first-party-runtime`, accepting JSON input and returning a receipt.
 - `cowork/linuxThirdPartyDriver.ts`: managed third-party readiness, reset, single submission, HITL and clarifying-question answers over the UI interface; no lifecycle or answer parsing.
 - `cowork/linuxThirdPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-runtime`, including the read-only diagnosis capture.
-- `linuxAtspiBus.ts`: the one AT-SPI client over D-Bus that every Linux driver uses (Cowork and ChatGPT).
+- `linuxAtspiBus.ts`: the one AT-SPI client over D-Bus that every Linux driver uses (Claude Desktop and ChatGPT).
 - `cowork/anthropicComputerUse.ts`: the macOS CU driver entry point, its deadline
   and its error reporting.
 - `cowork/computerUseLoop.ts`: the planner loop: bounded screenshot navigation,
@@ -892,7 +893,7 @@ repeated identical prompts. Use a dedicated desktop: do not manually create or
 switch tasks during evaluation.
 
 The case's answer is the last turn's assistant text from its longest text block
-on. Cowork often writes its answer, then saves memory or files and ends with a
+on. Claude often writes its answer, then saves memory or files and ends with a
 short message ("Saved the context…"); the native result holds only that last
 message, so grading it would grade the wrap-up. Shorter text before the longest
 block, the narration between tool calls, is left out. The transcript's
@@ -951,21 +952,21 @@ to …/tool-results/mcp-<server>-<tool>-<time>.txt`) isn't read back yet.
 Results include `clientUsage`, `clientTelemetry`, and `telemetry.totalClientUsage`.
 These describe native Claude execution, not the separate Computer Use planner's
 API cost. A test assertion or judge failure is distinct from a driver failure.
-`clientTelemetry` also has, from Cowork's results and audit log:
+`clientTelemetry` also has, from the Cowork session's results and audit log:
 
 - `timeToFirstTokenMs` and `timeToFirstTokenStreamMs`: the trial's first turn,
   to its first token and to the first token of the response stream, with
   `firstRequestAt`. Each model call's own TTFT is in host telemetry
   ([`telemetry.host`](./telemetry.md#host-telemetry)).
 - `permissionRequestCount`, `permissionDenialCount` and `approvalWaitMs`: the
-  tool approvals Cowork asked for, the ones refused, and the time from each
+  tool approvals Claude Desktop asked for, the ones refused, and the time from each
   request to its answer. The wait is part of `durationMs`.
 - `finalContextTokens`: the context the last model call read (its input,
   cache-read and cache-write tokens).
 - `webSearchRequests`: the server-side web searches the results count.
 
 A model call's `reasoningText` is its thinking summaries, when the transcript
-has them. Cowork on MST's Linux image has none: its thinking blocks carry only
+has them. Claude Desktop on MST's Linux image has none: its thinking blocks carry only
 a signature, and Claude Code's `showThinkingSummaries` in the desktop user's
 `~/.claude/settings.json` doesn't reach the agent in Cowork's VM. Each
 result's thinking-token count (`reasoningOutputTokens`) is still recorded.
@@ -1001,7 +1002,7 @@ the cases before it keep their results and the rest are recorded as not submitte
 
 The config has two independent parts:
 
-- `clientOptions.plugins[]` installs plugins (their skills). On Cowork, a plugin can
+- `clientOptions.plugins[]` installs plugins (their skills). On the `cowork` client, a plugin can
   also block its own MCP servers with `blockMcpServers`.
 - `servers` is the MCP servers under test, keyed by label. Both plain stdio and
   client-resolved stdio entries are supported on macOS and Linux, alongside HTTP.
@@ -1057,7 +1058,7 @@ The config has two independent parts:
 
 ### Stdio eval servers
 
-Cowork accepts plain stdio `servers` entries without a URL, plugin, or proxy:
+The `cowork` client accepts plain stdio `servers` entries without a URL, plugin, or proxy:
 
 ```json
 {
@@ -1081,12 +1082,12 @@ path. Desktop has no `cwd` field, so MST converts it to a fixed `/bin/sh` wrappe
 with cwd, command, and arguments passed as separate argv values, never
 interpolated into shell source. `inheritEnv: true` is unsupported: declare all
 required server environment variables in `env`. Omitting `inheritEnv` has the
-same Cowork behavior as `false`.
+same behavior as `false`.
 
 Client-resolved entries can also set `url`, `auth.accessTokenEnv`, `files`, and
 `minTools` (default 1). The readiness client accepts `connectTimeoutMs`,
 `requestTimeoutMs`, `callTimeoutMs`, and `quiet`; these are not Desktop settings.
-Unknown keys fail; Cowork does not currently accept the general MCP client's
+Unknown keys fail; the `cowork` client does not currently accept the general MCP client's
 `protocol` or `probe` options. Supported placeholders are:
 
 - `${url}`: the declared `url`; allowed in command, args, env, cwd, and files.
@@ -1114,7 +1115,7 @@ For the Linux example above, a Mac config must omit `pluginRoots` and
 with a known local adapter path. The private files and URL/env substitutions
 remain supported, including in mixed HTTP/stdio server sets.
 
-ChatGPT (`chatgpt` and `codex-app`) and direct MCP clients support plain stdio, but not Cowork's
+ChatGPT (`chatgpt` and `codex-app`) and direct MCP clients support plain stdio, but not the `cowork` client's
 client-resolved fields. For ChatGPT plugin overrides, use `plugins[].mcp` as
 described in [chatgpt-desktop.md](chatgpt-desktop.md#linux-runtime-contract).
 
@@ -1366,37 +1367,37 @@ callers.
 ### Readiness
 
 MST runs the same [readiness check](evaluation-framework.md#server-readiness)
-for Cowork as for every client, with one difference: Cowork's stdio servers
+for the `cowork` client as for every client, with one difference: its stdio servers
 resolve only once the app is prepared, so MST checks them after preparation and
 before the first prompt, not before the batch starts. It launches each stdio
 eval server itself, with the same resolved command, args, env, and data dir
 (when used), but without the parent environment. On macOS it uses the paths
 returned by the setup transaction; on Linux it uses the caller-owned paths
-checked during prepare. HTTP servers get the same headers Cowork uses. Every
+checked during prepare. HTTP servers get the same headers Claude Desktop uses. Every
 server, stdio or HTTP, must connect and list at least one tool, and at least its
 `minTools`. When one doesn't, no prompt is sent: each trial of the batch ends as
 a retryable setup failure whose reason names the server, for example
 `fake-eval listed 1 tool, fewer than its minTools (4)`. When a variant gives
-Cowork tool metadata, its servers go through MST's tool-variant proxy, which MST
+the client tool metadata, its servers go through MST's tool-variant proxy, which MST
 launches itself: MST checks them as declared before the proxy starts, as for any
-client, and Cowork doesn't check them again after preparation. An adapter with a bad
+client, and the `cowork` client doesn't check them again after preparation. An adapter with a bad
 token, for example, may list only its static tools. Desktop-side readiness (for example, a
 caller's own log check) should also compare each server's `toolCount` with
 `minTools`.
 
 ### Plugin marketplaces
 
-Cowork installs each plugin from a managed `allowedPluginMarketplaces` entry,
+Claude Desktop installs each plugin from a managed `allowedPluginMarketplaces` entry,
 pinned and required. An `owner/repo` source becomes `source: "github"`; an HTTPS
 Git URL becomes `source: "git"` with `url`. Local paths are rejected, because
-Cowork cannot read them. On macOS, MST writes these entries and the blocked
+Claude Desktop cannot read them. On macOS, MST writes these entries and the blocked
 `policy-only` entries into the MST-owned profile. On Linux, the caller writes
 them, and MST checks them before any UI action. Extra keys such as
 `expectedName` are allowed.
 
-### Why not `plugins[].mcp` on Cowork
+### Why not `plugins[].mcp` on the `cowork` client
 
-Cowork rejects `plugins[].mcp` overrides with `plugin_unsupported` before any UI
+The `cowork` client rejects `plugins[].mcp` overrides with `plugin_unsupported` before any UI
 action. Claude Desktop 2.7032.0 has no managed way to give a plugin's own MCP
 server a custom endpoint, credential, or data directory:
 

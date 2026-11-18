@@ -1,14 +1,14 @@
-# Cowork in Docker
+# Claude Desktop in Docker
 
-`mst run --runner docker` runs Cowork evals in Linux containers instead of on your own desktop. Each shard gets a container with its own Claude Desktop, and Cowork's VM runs inside it. Your machine stays usable while the eval runs.
+`mst run --runner docker` runs `cowork` evals in Linux containers instead of on your own desktop. Each shard gets a container with its own Claude Desktop, and Cowork's VM runs inside it. Your machine stays usable while the eval runs.
 
 **Which image a shard runs.** The eval's client picks it:
 
-| Client                                                                      | Image                             | Container                                                                          |
-| --------------------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
-| Cowork (the default)                                                        | `mst-cowork-linux:<MST version>`  | Claude Desktop and Cowork's VM, with Cowork inference (`ANTHROPIC_*`)              |
-| `chatgpt`, `codex-app`                                                      | `mst-chatgpt-linux:<MST version>` | The ChatGPT desktop app; see [ChatGPT in Docker](./chatgpt-docker.md)              |
-| Headless: `codex-cli`, `api`, `claude-code`, plugin clients with `headless` | `mst-cowork-linux:<MST version>`  | No desktop, VM devices or Cowork inference ([Headless clients](#headless-clients)) |
+| Client                                                                      | Image                             | Container                                                                   |
+| --------------------------------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------- |
+| `cowork` (the default)                                                      | `mst-cowork-linux:<MST version>`  | Claude Desktop and Cowork's VM, with inference (`ANTHROPIC_*`)              |
+| `chatgpt`, `codex-app`                                                      | `mst-chatgpt-linux:<MST version>` | The ChatGPT desktop app; see [ChatGPT in Docker](./chatgpt-docker.md)       |
+| Headless: `codex-cli`, `api`, `claude-code`, plugin clients with `headless` | `mst-cowork-linux:<MST version>`  | No desktop, VM devices or inference ([Headless clients](#headless-clients)) |
 
 Grade shards run in the eval client's image, without a desktop.
 
@@ -32,7 +32,7 @@ for the implemented boundary and remaining live-validation requirements.
     colima start mst-kvm --vm-type vz --nested-virtualization --cpu 6 --memory 12 --disk 40
     ```
 
-- Inference for Cowork: MST's [LLM gateway settings](./llm-gateways.md), `ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`, or `ANTHROPIC_API_KEY`.
+- Inference for Claude Desktop: MST's [LLM gateway settings](./llm-gateways.md), `ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`, or `ANTHROPIC_API_KEY`.
 
 ## Build the image
 
@@ -54,40 +54,40 @@ The build also downloads Cowork's VM bundle (1.2 GB), which Claude Desktop would
 npx mst run --config eval.json --runner docker --runner-option contexts=colima-mst-kvm
 ```
 
-The eval config needs nothing Docker-specific. The container runs Linux, so Cowork runs there with the accessibility automation, whatever OS you run `mst run` on. MST checks the eval's Cowork options against Linux when the config loads: `computerUseModel` and `appVersion` are macOS options and fail. Set `coworkSetup.approveWriteTools: true` unless every server's tools need no approval: no one is there to click **Allow**.
+The eval config needs nothing Docker-specific. The container runs Linux, so the `cowork` client runs there with the accessibility automation, whatever OS you run `mst run` on. MST checks the eval's `cowork` options against Linux when the config loads: `computerUseModel` and `appVersion` are macOS options and fail. Set `coworkSetup.approveWriteTools: true` unless every server's tools need no approval: no one is there to click **Allow**.
 
-Cowork can reach any public host: its web fetch, and the commands it runs in its VM. That's Claude Desktop's `coworkEgressAllowedHosts`, `["*"]` in the image. Set `coworkSetup.egressAllowedHosts` (in the eval or a variant) to name hosts instead, or `[]` for none. It's one list for both, by host, so it can't allow reads only: a host Cowork may fetch from, its commands may also send to. Private and local addresses are blocked whatever the list says. MCP servers aren't affected: they go through MST, and the dry-run proxy still blocks their writes. WebSearch runs on the model provider's side and needs no hosts.
+A Cowork session can reach any public host: its web fetch, and the commands it runs in its VM. That's Claude Desktop's `coworkEgressAllowedHosts`, `["*"]` in the image. Set `coworkSetup.egressAllowedHosts` (in the eval or a variant) to name hosts instead, or `[]` for none. It's one list for both, by host, so it can't allow reads only: a host a session may fetch from, its commands may also send to. Private and local addresses are blocked whatever the list says. MCP servers aren't affected: they go through MST, and the dry-run proxy still blocks their writes. WebSearch runs on the model provider's side and needs no hosts.
 
-To turn off Cowork built-in tools, set `coworkSetup.disabledBuiltinTools` (in the eval or a variant; a variant's list replaces the eval's), e.g. `["WebSearch"]` when the model's provider can't run Anthropic's server-side web search, as with an LLM gateway that serves Claude through Snowflake, Bedrock or Vertex: every search returns a 400 there. That's Claude Desktop's `disabledBuiltinTools`; the eval's tools are added to the image's own, which stay off. Cowork's model doesn't see a disabled tool.
+To turn off Claude Desktop's built-in tools, set `coworkSetup.disabledBuiltinTools` (in the eval or a variant; a variant's list replaces the eval's), e.g. `["WebSearch"]` when the model's provider can't run Anthropic's server-side web search, as with an LLM gateway that serves Claude through Snowflake, Bedrock or Vertex: every search returns a 400 there. That's Claude Desktop's `disabledBuiltinTools`; the eval's tools are added to the image's own, which stay off. The model doesn't see a disabled tool.
 
-Cowork can ask a clarifying question (`AskUserQuestion`). MST answers each one with its first option, as ACE does; set `coworkSetup.clarifyingQuestions: "disabled"` to turn the tool off instead, so the model proceeds on its best assumption. See [Cowork in MST](./cowork.md).
+Claude can ask a clarifying question (`AskUserQuestion`). MST answers each one with its first option, as ACE does; set `coworkSetup.clarifyingQuestions: "disabled"` to turn the tool off instead, so the model proceeds on its best assumption. See [Claude Desktop in MST](./cowork.md).
 
-Tool search is on, here and in the macOS eval profile: Cowork lists each MCP server's tools by name and loads a tool's definition when the model searches for it, rather than sending every connector's tools in every request. That's Claude Desktop's `toolSearchEnabled` (Claude Desktop 1.21459.0 or later), which Desktop leaves off in gateway mode unless the settings turn it on; Cowork signed in to claude.ai has it on. Set `coworkSetup.toolSearch: false` (in the eval or a variant; a variant's value wins) to send every tool in every request, as before. The gateway must accept what tool search adds to each request, such as the `tool-search-tool-2025-10-19` beta, or every request fails with HTTP 400. A transcript with tool search on shows `ToolSearch` calls, and `tool_search_hit_rate` counts them.
+Tool search is on, here and in the macOS eval profile: Claude Desktop lists each MCP server's tools by name and loads a tool's definition when the model searches for it, rather than sending every connector's tools in every request. That's Claude Desktop's `toolSearchEnabled` (Claude Desktop 1.21459.0 or later), which Desktop leaves off in gateway mode unless the settings turn it on; Claude Desktop signed in to claude.ai has it on. Set `coworkSetup.toolSearch: false` (in the eval or a variant; a variant's value wins) to send every tool in every request, as before. The gateway must accept what tool search adds to each request, such as the `tool-search-tool-2025-10-19` beta, or every request fails with HTTP 400. A transcript with tool search on shows `ToolSearch` calls, and `tool_search_hit_rate` counts them.
 
 Options (`--runner-option key=value`):
 
-| Option                 | Meaning                                                                                                                      |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `shards`               | How many containers. A case's variants and trials all run in one.                                                            |
-| `contexts`             | Docker contexts, comma-separated. Each runs one Cowork container at a time (see below). Default: the current one.            |
-| `image`                | Another image, such as one your organization builds. Default: `mst-cowork-linux:<MST version>`.                              |
-| `readyTimeout`         | Seconds a new container's desktop has to come up. Default: 1200.                                                             |
-| `memory`               | Each container's memory, in Docker's syntax (`8g`, `512m`). Default: all the context can spare for Cowork, `2g` for grading. |
-| `cpus`                 | Each container's CPUs (`1.5`, `4`), at most the context's. Default: no limit.                                                |
-| `keep`                 | `never` (default), `failed` or `always`: keep containers to look at afterwards.                                              |
-| `claudeDesktopVersion` | `mst runner setup` only: the Claude Desktop package to install.                                                              |
+| Option                 | Meaning                                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `shards`               | How many containers. A case's variants and trials all run in one.                                                                    |
+| `contexts`             | Docker contexts, comma-separated. Each runs one Claude Desktop container at a time (see below). Default: the current one.            |
+| `image`                | Another image, such as one your organization builds. Default: `mst-cowork-linux:<MST version>`.                                      |
+| `readyTimeout`         | Seconds a new container's desktop has to come up. Default: 1200.                                                                     |
+| `memory`               | Each container's memory, in Docker's syntax (`8g`, `512m`). Default: all the context can spare for Claude Desktop, `2g` for grading. |
+| `cpus`                 | Each container's CPUs (`1.5`, `4`), at most the context's. Default: no limit.                                                        |
+| `keep`                 | `never` (default), `failed` or `always`: keep containers to look at afterwards.                                                      |
+| `claudeDesktopVersion` | `mst runner setup` only: the Claude Desktop package to install.                                                                      |
 
-**One container per Docker host at a time.** Claude Desktop's VM service listens on a fixed vsock port for the whole host, and containers don't separate vsock. So two Cowork containers can't run on one Docker host. To run shards side by side, give each its own host: several Colima VMs on a Mac, or remote Docker hosts, listed in `contexts`. With more shards than contexts, the extra shards wait for a free context. A plugin runner that creates its own hosts (VMs, say) can hand their contexts to this one: see `dockerRunner` in [the evaluation framework](./evaluation-framework.md#plugins).
+**One container per Docker host at a time.** Claude Desktop's VM service listens on a fixed vsock port for the whole host, and containers don't separate vsock. So two Claude Desktop containers can't run on one Docker host. To run shards side by side, give each its own host: several Colima VMs on a Mac, or remote Docker hosts, listed in `contexts`. With more shards than contexts, the extra shards wait for a free context. A plugin runner that creates its own hosts (VMs, say) can hand their contexts to this one: see `dockerRunner` in [the evaluation framework](./evaluation-framework.md#plugins).
 
 ### Memory and CPUs
 
 `shards` decides how a run's cases are split, not how much memory it uses. MST reads each context's memory and CPUs (`docker info`), and limits each container to its share:
 
 ```text
-[mst] colima-mst-kvm has 11.7 GiB and 6 CPUs: 1 Cowork container at a time, 10.7 GiB each
+[mst] colima-mst-kvm has 11.7 GiB and 6 CPUs: 1 Claude Desktop container at a time, 10.7 GiB each
 ```
 
-- **A Cowork container** is alone on its context, so it may use all the context can spare: its memory less 1 GiB for Docker itself, or half its memory on a context under 2 GiB. Claude Desktop gives Cowork's VM 4 GB, which it fills only as it needs: one shard with one remote server peaked at 2.5 GiB for the whole container, with about two CPUs busy.
+- **A Claude Desktop container** is alone on its context, so it may use all the context can spare: its memory less 1 GiB for Docker itself, or half its memory on a context under 2 GiB. Claude Desktop gives Cowork's VM 4 GB, which it fills only as it needs: one shard with one remote server peaked at 2.5 GiB for the whole container, with about two CPUs busy.
 - **Grade containers** share a context: as many run at once as fit in 2 GiB each (or `memory`), and in `cpus` each when you set it. The rest wait. A grade shard whose judges run their own agents (Claude Code, Codex) at `concurrency` above 1 needs more: raise `memory`.
 - **Out of memory**, the kernel stops a process in that container, not the Docker daemon or another shard's. MST says so: a shard whose worker was stopped fails with `Container … ran out of memory`, and so does one whose desktop ran out while it started (`Couldn't create a machine for shard …: Container … ran out of memory`). A shard whose desktop or VM was stopped later, mid-run, ends `done, but Container … ran out of memory`, its trials failed as infrastructure.
 
@@ -108,7 +108,7 @@ The image holds one set of plugins: setting it up for another eval replaces them
 
 ## Headless clients
 
-The image also runs clients that need no desktop: the [`codex-cli` client](./codex.md), whose SDK and CLI the image installs, MST's `api` and `claude-code` clients, and plugin clients that declare `headless: true` (a plugin that runs another app, such as an Electron app with no window, adds it to the image in its own runner's setup). A shard whose clients are all headless starts as a grade container does, without a desktop, VM devices or Cowork inference, so `ANTHROPIC_*` settings aren't needed and several shards share one Docker context. The client's own credentials (for `codex`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for a gateway) reach the worker in the run's `--secrets-file`. The image sets `MST_JUDGE_SANDBOX=container`, so Codex runs its shell without its own sandbox, confined by the container.
+The image also runs clients that need no desktop: the [`codex-cli` client](./codex.md), whose SDK and CLI the image installs, MST's `api` and `claude-code` clients, and plugin clients that declare `headless: true` (a plugin that runs another app, such as an Electron app with no window, adds it to the image in its own runner's setup). A shard whose clients are all headless starts as a grade container does, without a desktop, VM devices or inference, so `ANTHROPIC_*` settings aren't needed and several shards share one Docker context. The client's own credentials (for `codex`, `OPENAI_API_KEY`, and `OPENAI_BASE_URL` for a gateway) reach the worker in the run's `--secrets-file`. The image sets `MST_JUDGE_SANDBOX=container`, so Codex runs its shell without its own sandbox, confined by the container.
 
 ## What happens
 
@@ -120,13 +120,13 @@ For each shard, MST:
 4. Copies the shard's bundle in, and runs `mst collect` as the desktop user. For each variant, MST writes its servers and model into Claude Desktop's managed settings and restarts it ([owned-desktop mode](./cowork.md#attach-to-a-prepared-linux-desktop)). The restart boots Cowork's VM, and returns once the VM is ready.
 5. Copies results and each trial's Cowork session folder back as trials finish, then removes the container.
 
-**Containers don't outlive their run.** A Cowork container holds its unpacked VM, about 10 GB, so a leftover one can leave the next run's container without the disk Cowork's VM install needs. When MST exits, or gets SIGTERM or SIGHUP, it removes its containers before it goes; Ctrl-C stops the shards first and removes them as usual. If it's killed outright (SIGKILL, a crash), the next `--runner docker` run on the same machine removes them: each container is labeled with the machine and process that started it (`mst.owner.host`, `mst.owner.pid`), and a container whose process is gone is removed before a new one starts. Containers another machine started are left alone, and so are kept ones (`keep`), which MST renames `<name>-kept`; remove those yourself with `docker rm -f <name>-kept`.
+**Containers don't outlive their run.** A Claude Desktop container holds its unpacked VM, about 10 GB, so a leftover one can leave the next run's container without the disk Cowork's VM install needs. When MST exits, or gets SIGTERM or SIGHUP, it removes its containers before it goes; Ctrl-C stops the shards first and removes them as usual. If it's killed outright (SIGKILL, a crash), the next `--runner docker` run on the same machine removes them: each container is labeled with the machine and process that started it (`mst.owner.host`, `mst.owner.pid`), and a container whose process is gone is removed before a new one starts. Containers another machine started are left alone, and so are kept ones (`keep`), which MST renames `<name>-kept`; remove those yourself with `docker rm -f <name>-kept`.
 
 ## Each variant costs a VM boot
 
 Claude Desktop reads its managed settings, and lists each MCP server's tools, only when it starts. It keeps the tool list for its whole run: a server's `notifications/tools/list_changed` doesn't refresh it. So each variant on a shard is a restart, and a restart stops Cowork's VM and boots a new one. A shard runs all of one variant's cases before the next variant's, so it restarts once per variant. A variant's datasets share that restart: MST skips a restart when the settings are the ones the desktop already runs with. Variants with tool metadata are the exception: their servers are a proxy with a URL of its own for each batch, so each of their datasets restarts too.
 
-On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest takes 1.5 to 2.5 minutes to start, while Claude Desktop gives it 60 seconds and fails that task. After each restart, the image starts one-line warm-up tasks ("Reply with OK.") until a VM startup completes, so a case finds it running. The guest connecting isn't enough: Cowork then installs its SDK in the guest within 30 seconds, and when that times out, the startup fails with the VM still connected. Another warm-up task retries the install. Claude Desktop reinstalls the VM after a failed start unless the bundle is marked as reinstalled already, and clears that mark once a start succeeds. The image marks the seeded bundle again before each restart, so a variant's restart doesn't reinstall it. You'll see those tasks in the container's Cowork history. Measured on an M5 Pro: a fresh container to a finished one-case run took 2 min 39 s. A Linux host with KVM, without nesting, should boot the VM much faster; that hasn't been measured yet.
+On a Mac, under nested virtualization, a boot takes about 2 minutes: the guest takes 1.5 to 2.5 minutes to start, while Claude Desktop gives it 60 seconds and fails that task. After each restart, the image starts one-line warm-up tasks ("Reply with OK.") until a VM startup completes, so a case finds it running. The guest connecting isn't enough: Cowork then installs its SDK in the guest within 30 seconds, and when that times out, the startup fails with the VM still connected. Another warm-up task retries the install. Claude Desktop reinstalls the VM after a failed start unless the bundle is marked as reinstalled already, and clears that mark once a start succeeds. The image marks the seeded bundle again before each restart, so a variant's restart doesn't reinstall it. You'll see those tasks in the container's task history. Measured on an M5 Pro: a fresh container to a finished one-case run took 2 min 39 s. A Linux host with KVM, without nesting, should boot the VM much faster; that hasn't been measured yet.
 
 ## When something fails
 

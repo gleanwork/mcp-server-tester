@@ -17,7 +17,7 @@ MST provides the image as a Dockerfile that you build yourself (`mst runner setu
 npx mst runner setup docker --config chatgpt-eval.json --runner-option contexts=colima-mst-kvm
 ```
 
-With a ChatGPT eval (`"client": "chatgpt"`) or a Codex app eval (`"client": "codex-app"`), this builds `mst-chatgpt-linux:<MST version>` on each Docker context you name, and installs the eval's plugins, as for [Cowork](./cowork-docker.md#plugins). The build downloads the `chatgpt` package for the host's architecture and checks it against the SHA-256 and size in the repository's index. Pin a version with `--runner-option chatgptVersion=<version>`; the default is the newest. Rebuild after upgrading MST.
+With a ChatGPT eval (`"client": "chatgpt"`) or a Codex app eval (`"client": "codex-app"`), this builds `mst-chatgpt-linux:<MST version>` on each Docker context you name, and installs the eval's plugins, as for [Claude Desktop](./cowork-docker.md#plugins). The build downloads the `chatgpt` package for the host's architecture and checks it against the SHA-256 and size in the repository's index. Pin a version with `--runner-option chatgptVersion=<version>`; the default is the newest. Rebuild after upgrading MST.
 
 ## Run
 
@@ -27,7 +27,7 @@ export MST_LLM_AUTH_COMMAND=…
 npx mst run --config chatgpt-eval.json --runner docker --runner-option contexts=colima-mst-kvm
 ```
 
-The eval config is the one you'd run on Linux. Two macOS-only things don't belong in it: the Computer Use planner (`computerUseModel`), which fails when the config loads, since the container runs Linux, and `configPath`. `maxActions` is Linux's action budget here (1 to 64, default 24). Options are as for [Cowork](./cowork-docker.md#run) (`shards`, `contexts`, `image`, `readyTimeout`, `keep`), except that a Docker host isn't limited to one container: several shards can share a context.
+The eval config is the one you'd run on Linux. Two macOS-only things don't belong in it: the Computer Use planner (`computerUseModel`), which fails when the config loads, since the container runs Linux, and `configPath`. `maxActions` is Linux's action budget here (1 to 64, default 24). Options are as for [Claude Desktop](./cowork-docker.md#run) (`shards`, `contexts`, `image`, `readyTimeout`, `keep`), except that a Docker host isn't limited to one container: several shards can share a context.
 
 ## What happens
 
@@ -37,7 +37,7 @@ For each shard, MST:
 2. Writes the gateway token, or the API key, into the tmpfs over `docker exec`'s stdin, and refreshes it every 4 minutes. It is never in the image, on a command line, in an environment variable, or in the app's config. The container's environment says only which it is and, for a gateway, its URL.
 3. Waits for the desktop session: an X server, the session bus, AT-SPI, and an unlocked keyring (without one, the app waits on a password prompt).
 4. Copies the shard's bundle in, and runs `mst collect` as the desktop user. For each variant, the [Linux ChatGPT client](./chatgpt-desktop.md#linux-runtime-contract) creates `$HOME/.codex`, writes the variant's servers and model, starts the app and goes through its first-run screens, runs the cases, then stops the app and removes `$HOME/.codex`, so the next variant starts fresh.
-5. Copies the results back and removes the container, as for Cowork.
+5. Copies the results back and removes the container, as for Claude Desktop.
 
 Each session's evidence (the app's log, its runtime config, and a screenshot of a failed setup) is in `/run/mst/evidence/session-*` in the container. Keep a failed shard's container with `--runner-option keep=failed` to read it; it's on a tmpfs, so read it with `docker exec`, not `docker cp`.
 

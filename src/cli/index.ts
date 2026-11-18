@@ -762,7 +762,9 @@ optimizeTarget(
 // Cowork setup and recovery commands
 const coworkCommand = program
   .command('cowork')
-  .description('Prepare or recover the local macOS Cowork desktop');
+  .description(
+    'Prepare or recover Claude Desktop on macOS for the cowork client'
+  );
 coworkCommand
   .command('setup')
   .description('Initialize or validate the empty Claude 3P profile')

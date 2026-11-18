@@ -1514,7 +1514,7 @@ export function createDockerRunner(
     schema: DockerOptionsSchema,
     os: 'linux',
     description:
-      "Run shards in containers from MST's Linux Cowork image (one Cowork container per Docker context at a time, grade containers as many as fit) or, for a ChatGPT or Codex app eval, its Linux ChatGPT image.",
+      "Run shards in containers from MST's Linux Claude Desktop image (one Claude Desktop container per Docker context at a time, grade containers as many as fit) or, for a ChatGPT or Codex app eval, its Linux ChatGPT image.",
     async open(options, context) {
       return openDocker(options as DockerOptions, context, runtime);
     },

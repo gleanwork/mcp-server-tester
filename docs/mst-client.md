@@ -158,7 +158,7 @@ await runEvalDataset(
 
 **Servers:** the `api` and `claude-code` clients run with the eval config's `servers` (or a variant's), and in a Playwright test with the test's MCP connection. `clientOptions.server` and `clientOptions.servers` fail validation. A server's token goes in its own `auth` (`accessToken` or `accessTokenEnv`); Claude Code's `apiToken`, `pluginDir` and `pluginMcpUrl` fail validation too. To test a plugin's MCP server, add it to `servers`.
 
-**Protocol:** in a Playwright test the `api` client uses the test's MCP connection, so it follows `mcpConfig.protocol`. Claude Code, Cowork and ChatGPT open their own connections. See [Protocol Versions](./protocol-versions.md).
+**Protocol:** in a Playwright test the `api` client uses the test's MCP connection, so it follows `mcpConfig.protocol`. Claude Code, Claude Desktop and ChatGPT open their own connections. See [Protocol Versions](./protocol-versions.md).
 
 ## Claude Code isolation
 
