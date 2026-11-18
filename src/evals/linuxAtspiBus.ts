@@ -14,7 +14,7 @@ const ATSPI_ACCESSIBLE = 'org.a11y.atspi.Accessible';
 export const ATSPI_ACTION = 'org.a11y.atspi.Action';
 export const ATSPI_COMPONENT = 'org.a11y.atspi.Component';
 export const ATSPI_TEXT = 'org.a11y.atspi.Text';
-const ATSPI_HYPERTEXT = 'org.a11y.atspi.Hypertext';
+export const ATSPI_HYPERTEXT = 'org.a11y.atspi.Hypertext';
 const ATSPI_HYPERLINK = 'org.a11y.atspi.Hyperlink';
 export const ATSPI_EDITABLE_TEXT = 'org.a11y.atspi.EditableText';
 export const ATSPI_REGISTRY = 'org.a11y.atspi.Registry';
@@ -572,15 +572,17 @@ export interface AtspiVisited<T> {
 
 /**
  * Bounded parallel fetch, then depth-first order independent of reply timing.
- * A repeated node is an error, as is a tree over ATSPI_MAX_NODES.
+ * A repeated node is an error, as is a tree over ATSPI_MAX_NODES. A visit that
+ * returns null omits that node and its subtree (one that went defunct while
+ * the tree was read, say); the root can't be omitted.
  */
 export async function walkAtspi<T>(
   root: AtspiRef,
-  visit: (item: AtspiTreeItem) => Promise<AtspiVisited<T>>
+  visit: (item: AtspiTreeItem) => Promise<AtspiVisited<T> | null>
 ): Promise<T[]> {
   const queue: AtspiTreeItem[] = [{ ref: root, depth: 0 }];
   const seen = new Set([atspiId(root)]);
-  const records = new Map<string, AtspiVisited<T>>();
+  const records = new Map<string, AtspiVisited<T> | null>();
   for (let offset = 0; offset < queue.length; ) {
     const batch = queue.slice(offset, offset + CONCURRENCY);
     offset += batch.length;
@@ -589,7 +591,10 @@ export async function walkAtspi<T>(
       const parent = batch[index]!;
       const parentId = atspiId(parent.ref);
       const result = results[index]!;
+      if (result === null && parent.depth === 0)
+        throw new AtspiError('accessibility_tree_invalid');
       records.set(parentId, result);
+      if (result === null) continue;
       for (const ref of result.children) {
         const childId = atspiId(ref);
         if (seen.has(childId))
@@ -604,7 +609,8 @@ export async function walkAtspi<T>(
   const output: T[] = [];
   const pending = [root];
   while (pending.length) {
-    const record = records.get(atspiId(pending.pop()!))!;
+    const record = records.get(atspiId(pending.pop()!));
+    if (!record) continue;
     output.push(record.value);
     pending.push(...record.children.slice().reverse());
   }

@@ -37,6 +37,8 @@ const TRANSPORT_ERRORS = new Set([
   'accessibility_node_defunct',
   'accessibility_tree_invalid',
   'accessibility_unknown_node',
+  'accessibility_text_unavailable',
+  'invalid_prompt',
   'open_cowork_failed',
 ]);
 const PERSISTENT = [
