@@ -85,11 +85,12 @@ A new page needs an entry in `website/sidebars.ts`. `npm run build` fails on a b
 
 ### Making Changes
 
-1. Create a branch named for the change, such as `fix/report-columns`.
-2. Follow the code style in [AGENTS.md](./AGENTS.md#code-style).
-3. Add a test for each new behavior. [AGENTS.md](./AGENTS.md#tests-for-new-behavior) says what that means for flags, options and branches.
-4. Update the docs that describe what you changed.
-5. Commit with [Conventional Commits](https://www.conventionalcommits.org/) messages, `type(scope): summary`:
+1. Check where the change belongs: its own repo, a plugin, one product's code, or core. [Where a change goes](./docs/architecture.md#where-a-change-goes) has the four questions. A new contract, mode or protocol needs an accepted ADR first, so open that pull request before the code.
+2. Create a branch named for the change, such as `fix/report-columns`.
+3. Follow the code style in [AGENTS.md](./AGENTS.md#code-style).
+4. Add a test for each new behavior. [AGENTS.md](./AGENTS.md#tests-for-new-behavior) says what that means for flags, options and branches.
+5. Update the docs that describe what you changed.
+6. Commit with [Conventional Commits](https://www.conventionalcommits.org/) messages, `type(scope): summary`:
 
    ```bash
    git commit -m "feat(judges): add a Mistral judge provider"
@@ -97,7 +98,7 @@ A new page needs an entry in `website/sidebars.ts`. `npm run build` fails on a b
    git commit -m "docs: explain judge calibration"
    ```
 
-6. Push and open a pull request.
+7. Push and open a pull request.
 
 ### Testing Guidelines
 

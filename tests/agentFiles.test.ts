@@ -13,13 +13,13 @@
  * - every relative link resolves, and its `#anchor` names a heading there;
  * - AGENTS.md names every package export, and CONTEXT.md every extension kind.
  */
-import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import packageJson from '../package.json' with { type: 'json' };
 import { KIND_SEGMENTS } from '../src/plugins/plugin.js';
+import { ROOT_DIRECTORIES, trackedFiles } from './repoShape.js';
 
 const REPO = fileURLToPath(new URL('../', import.meta.url));
 
@@ -39,31 +39,13 @@ const NOT_REPO_PATHS = new Set([
   'scores/containsText/',
 ]);
 
-/**
- * The repo's top-level directories. A path that starts with one is matched
- * from the root only, so `skills/` can't pass on `src/skills/` once the
- * top-level `skills/` is gone. This is a fixed list, not read from the
- * checkout, for that reason; a test below fails when a new top-level
+/*
+ * A path that starts with a top-level directory (`ROOT_DIRECTORIES`) is
+ * matched from the root only, so `skills/` can't pass on `src/skills/` once
+ * the top-level `skills/` is gone. That list is fixed, not read from the
+ * checkout, for that reason; `repoShape.test.ts` fails when a new top-level
  * directory is missing from it.
  */
-const ROOT_DIRECTORIES = new Set([
-  '.claude',
-  '.claude-plugin',
-  '.codex',
-  '.github',
-  'assets',
-  'data',
-  'docker',
-  'docs',
-  'examples',
-  'schema',
-  'scripts',
-  'skills',
-  'snippets',
-  'src',
-  'tests',
-  'website',
-]);
 
 /** File extensions a bare file name (no directory) is checked for. */
 const SOURCE_FILE = /\.(ts|tsx|mts|mjs|cjs|js|swift)$/;
@@ -73,17 +55,6 @@ const REPO_FILE = /\.(ts|tsx|mts|mjs|cjs|js|swift|json|md|yml|yaml)$/;
 
 function read(file: string): string {
   return readFileSync(path.join(REPO, file), 'utf8');
-}
-
-/** Tracked files, and new ones not yet added that git doesn't ignore. */
-function trackedFiles(): string[] {
-  return execFileSync(
-    'git',
-    ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
-    { cwd: REPO, encoding: 'utf8' }
-  )
-    .split('\0')
-    .filter((file) => file !== '' && existsSync(path.join(REPO, file)));
 }
 
 /** `cowork/{macos,linux}.ts` is `cowork/macos.ts` and `cowork/linux.ts`. */
@@ -182,19 +153,7 @@ describe('existsInRepo', () => {
 });
 
 describe('agent files', () => {
-  const files = trackedFiles();
-
-  it('lists every top-level directory in ROOT_DIRECTORIES', () => {
-    const directories = new Set(
-      files
-        .filter((file) => file.includes('/'))
-        .map((file) => file.split('/')[0])
-    );
-    const unlisted = [...directories].filter(
-      (directory) => directory && !ROOT_DIRECTORIES.has(directory)
-    );
-    expect(unlisted, 'add these to ROOT_DIRECTORIES').toEqual([]);
-  });
+  const files = trackedFiles(REPO);
 
   describe.each(AGENT_FILES)('%s', (file) => {
     const markdown = read(file);
