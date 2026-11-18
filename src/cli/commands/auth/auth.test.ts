@@ -55,7 +55,7 @@ async function project(): Promise<string> {
 export default {
   meta: { name: 'acme-plugin', namespace: 'acme' },
   connectors: {
-    jira: { url: '${auth.origin}/mcp', auth: { type: 'oauth' }, minTools: 4, headers: { 'X-Glean-Eval-Id': 'mst' } },
+    jira: { url: '${auth.origin}/mcp', auth: { type: 'oauth' }, minTools: 4, headers: { 'X-Request-Tag': 'mst' } },
     gmail: { url: '${auth.origin}/mcp', grant: 'google', auth: { type: 'oauth', scopes: ['gmail'] } },
     gcal: { url: '${auth.origin}/mcp', grant: 'google', auth: { type: 'oauth', scopes: ['calendar'] } },
   },
@@ -109,7 +109,7 @@ describe('mst auth', () => {
     expect(createMCPClientForConfig).toHaveBeenCalledWith(
       expect.objectContaining({
         serverUrl: `${auth.origin}/mcp`,
-        headers: { 'X-Glean-Eval-Id': 'mst' },
+        headers: { 'X-Request-Tag': 'mst' },
       })
     );
     expect(lines.join('\n')).toMatch(/gmail, gcal\s+✓ signed in/);

@@ -91,8 +91,8 @@ export interface ConnectorDefinition {
   /** Default endpoint (streamable HTTP). An eval config may override it. */
   url: string;
   /**
-   * Sent on every request, including the sign-in check. For a server that
-   * refuses traffic it cannot attribute, such as Glean's `/eval` path.
+   * Sent on the direct connection, including the sign-in check. Absent means
+   * no extra headers. A connector with `launch` sends its own.
    */
   headers?: Readonly<Record<string, string>>;
   /** Connectors with the same grant share one sign-in. Default: the connector's name. */

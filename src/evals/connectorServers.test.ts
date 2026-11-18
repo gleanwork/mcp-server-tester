@@ -92,7 +92,7 @@ function testPlugin(): Plugin {
       acme: {
         url: acmeUrl,
         auth: { type: 'oauth' },
-        headers: { 'X-Glean-Eval-Id': 'mst' },
+        headers: { 'X-Request-Tag': 'mst' },
       },
       slack: {
         url: 'https://slack.example/mcp',
@@ -207,7 +207,7 @@ describe('connector servers in a run', () => {
         transport: 'http',
         label: 'acme',
         serverUrl: acmeUrl,
-        headers: { 'X-Glean-Eval-Id': 'mst' },
+        headers: { 'X-Request-Tag': 'mst' },
         auth: { accessToken: 'acme-token' },
       },
     ]);

@@ -39,6 +39,9 @@ interface ConnectorDefinition {
 
   auth: ConnectorAuth;
 
+  /** Sent on the direct connection and the sign-in check. A `launch` sends its own. */
+  headers?: Record<string, string>;
+
   /** How the client reaches the server. Default: the client connects to `url` directly with a bearer token. */
   launch?(ctx: LaunchContext): MCPServerEntry | Promise<MCPServerEntry>;
 
@@ -88,7 +91,7 @@ The rules:
 
 - **Secrets stay in the plugin.** `client()` and `token()` run at call time. For example, a plugin can read a client secret from a cloud secret manager. MST never stores client secrets.
 - **Shared grants.** `mst auth` asks for consent once for each `grant`, using the union of every member's scopes. Gmail, Drive and Calendar can share one Google grant.
-- **`launch` is optional.** Without it, MST passes the client `url` and the current access token. With it, the plugin returns a server entry, for example a stdio proxy that reads `tokenFile`. This is where a plugin adds a dry-run proxy that blocks writes, with no MST interceptor kind needed.
+- **`launch` is optional.** Without it, MST passes the client `url`, `headers`, and the current access token. With it, the plugin returns a server entry, for example a stdio proxy that reads `tokenFile`, and that entry sends its own headers. This is where a plugin adds a dry-run proxy that blocks writes, with no MST interceptor kind needed.
 - **`runId` tags a run's requests.** `mst run` and each shard it starts launch connectors with the run's ID, so a connector can send it to a server that attributes eval traffic (for example, as a request header through `dryRunProxyServer`'s `headers`).
 - **Tool policy belongs to the connector.** MST doesn't know which tools are writes. A connector that wants writes blocked must launch a proxy that blocks them.
 
