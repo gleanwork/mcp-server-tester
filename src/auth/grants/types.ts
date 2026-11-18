@@ -90,6 +90,11 @@ export interface ConnectorLaunchContext extends SettingsContext {
 export interface ConnectorDefinition {
   /** Default endpoint (streamable HTTP). An eval config may override it. */
   url: string;
+  /**
+   * Sent on every request, including the sign-in check. For a server that
+   * refuses traffic it cannot attribute, such as Glean's `/eval` path.
+   */
+  headers?: Readonly<Record<string, string>>;
   /** Connectors with the same grant share one sign-in. Default: the connector's name. */
   grant?: string;
   auth: ConnectorAuth;

@@ -119,13 +119,15 @@ mst auth revoke --config <file> --server <label> [--store <ref>]
 
 `mst auth` takes every server in every variant, resolves connectors, and groups them by grant. For each grant:
 
-| State                             | Action                                                                    | Output                         |
-| --------------------------------- | ------------------------------------------------------------------------- | ------------------------------ |
-| Valid refresh grant in store      | Nothing                                                                   | `✓ valid`                      |
-| Valid, shared with another server | Nothing                                                                   | `✓ valid (shares gmail grant)` |
-| Missing, expired or `--force`     | `authorization-code`: open the browser. `device`: print the code and URL. | `→ opening browser… ✓ saved`   |
-| `client-credentials`              | Mint one token to prove the client works                                  | `✓ client credentials`         |
-| `static` / `none`                 | Call `token()` once / nothing                                             | `✓ static` / `– no auth`       |
+| State                                                                                           | Action                                                                    | Output                         |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------ |
+| Valid refresh grant in store                                                                    | Nothing                                                                   | `✓ valid`                      |
+| Valid, shared with another server                                                               | Nothing                                                                   | `✓ valid (shares gmail grant)` |
+| Valid, but the server rejects it (HTTP 401) or the provider revoked it                          | Sign in again, as below                                                   | `! … signing in again`         |
+| Valid, but the check fails for another reason (a permissions refusal, an outage, too few tools) | Nothing; the grant is kept and the command exits 1                        | `! … keeping the saved grant`  |
+| Missing, expired or `--force`                                                                   | `authorization-code`: open the browser. `device`: print the code and URL. | `→ opening browser… ✓ saved`   |
+| `client-credentials`                                                                            | Mint one token to prove the client works                                  | `✓ client credentials`         |
+| `static` / `none`                                                                               | Call `token()` once / nothing                                             | `✓ static` / `– no auth`       |
 
 After consent, MST connects once and checks `minTools`, so an under-scoped grant fails here and not halfway through a run.
 

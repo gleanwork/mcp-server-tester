@@ -8,6 +8,7 @@
 import path from 'node:path';
 import {
   grantState,
+  MissingGrantError,
   revokeGrant,
   signIn,
   accessToken,
@@ -27,6 +28,11 @@ import {
   closeMCPClient,
   createMCPClientForConfig,
 } from '../../../mcp/clientFactory.js';
+import {
+  classifyMCPConnectionFailure,
+  formatMCPConnectionFailure,
+  MCPHttpConnectionError,
+} from '../../../mcp/connectionDiagnostics.js';
 
 export interface AuthOptions {
   config: string;
@@ -88,35 +94,85 @@ function pad(text: string, width: number): string {
 }
 
 /**
+ * What a live check of a grant found. `rejected` means the credential itself
+ * is bad, so signing in again can fix it. `unverified` means the check failed
+ * for a reason a new sign-in cannot change (a permissions refusal, an outage,
+ * too few tools), so the saved grant is kept.
+ */
+type Verification =
+  | { outcome: 'ok' }
+  | { outcome: 'rejected'; problem: string }
+  | { outcome: 'unverified'; problem: string };
+
+function refused(label: string, error: unknown): Verification {
+  const statuses =
+    error instanceof MCPHttpConnectionError
+      ? [error.streamableHttpFailure, error.sseFailure]
+      : [classifyMCPConnectionFailure(error)];
+  const problem = `${label}: ${formatMCPConnectionFailure(error)}`;
+  return statuses.includes('http_401')
+    ? { outcome: 'rejected', problem }
+    : { outcome: 'unverified', problem };
+}
+
+/**
  * Connect once with a fresh token and list tools, so an under-scoped or
  * unapproved sign-in fails now rather than in the middle of a run.
  */
 async function verify(
   target: Target,
   store: CredentialStore
-): Promise<string | undefined> {
-  const { accessToken: token } = await accessToken(target, store);
+): Promise<Verification> {
+  let token: string;
+  try {
+    token = (await accessToken(target, store)).accessToken;
+  } catch (error) {
+    return error instanceof MissingGrantError
+      ? { outcome: 'rejected', problem: error.message }
+      : refused(target.name, error);
+  }
   for (const server of target.servers) {
-    const client = await createMCPClientForConfig({
-      transport: 'http',
-      serverUrl: server.url,
-      auth: { accessToken: token },
-      connectTimeoutMs: 30_000,
-    }).catch(() => undefined);
-    if (!client) return `${server.label}: cannot connect with the new token`;
+    let client: Awaited<ReturnType<typeof createMCPClientForConfig>>;
+    try {
+      client = await createMCPClientForConfig({
+        transport: 'http',
+        serverUrl: server.url,
+        auth: { accessToken: token },
+        connectTimeoutMs: 30_000,
+        ...(server.connector.headers
+          ? { headers: { ...server.connector.headers } }
+          : {}),
+      });
+    } catch (error) {
+      return refused(server.label, error);
+    }
     try {
       const { tools } = await client.listTools();
       const min = server.connector.minTools ?? 1;
       if (tools.length < min)
-        return `${server.label}: ${tools.length} tools, expected at least ${min} (missing scopes or approval?)`;
+        return {
+          outcome: 'unverified',
+          problem: `${server.label}: ${tools.length} tools, expected at least ${min} (missing scopes or approval?)`,
+        };
+    } catch (error) {
+      return refused(server.label, error);
     } finally {
       await closeMCPClient(client);
     }
   }
-  return undefined;
+  return { outcome: 'ok' };
 }
 
-/** `mst auth`: sign in to every grant that has none (or all, with --force). */
+function printNotes(target: Target, print: (line: string) => void): void {
+  const notes = target.servers.find((s) => s.connector.notes)?.connector.notes;
+  if (notes) print(`    ${notes}`);
+}
+
+/**
+ * `mst auth`: sign in to every grant that has none or that its server rejects,
+ * or to all of them with --force. A grant that fails the live check for any
+ * other reason is kept, so repeating the command never replaces a good grant.
+ */
 export async function auth(
   options: AuthOptions,
   io: {
@@ -138,6 +194,7 @@ export async function auth(
   }
   const width = Math.max(...targets.map((target) => labels(target).length));
   const failed: string[] = [];
+  const unverified: string[] = [];
   for (const target of targets) {
     const name = pad(labels(target), width);
     const state = await grantState(target, store);
@@ -156,38 +213,44 @@ export async function auth(
       continue;
     }
     if (state.state === 'valid' && !options.force) {
-      const problem = await verify(target, store).catch(
-        (error: unknown) => (error as Error).message
-      );
-      if (!problem) {
+      const check = await verify(target, store);
+      if (check.outcome === 'ok') {
         print(
           `${name}  ✓ valid${target.servers.length > 1 ? ` (one ${target.name} grant)` : ''}`
         );
         continue;
       }
-      print(`${name}  ! ${problem}; signing in again`);
+      if (check.outcome === 'unverified') {
+        unverified.push(target.name);
+        print(`${name}  ! ${check.problem}; keeping the saved grant`);
+        printNotes(target, print);
+        continue;
+      }
+      print(`${name}  ! ${check.problem}; signing in again`);
     }
     try {
       await signIn(target, store, { print, openUrl });
-      const problem = await verify(target, store);
-      if (problem) {
+      const check = await verify(target, store);
+      if (check.outcome === 'ok') print(`${name}  ✓ signed in`);
+      else {
         failed.push(target.name);
-        print(`${name}  ✗ signed in, but ${problem}`);
-        const notes = target.servers.find((s) => s.connector.notes)?.connector
-          .notes;
-        if (notes) print(`    ${notes}`);
-      } else print(`${name}  ✓ signed in`);
+        print(`${name}  ✗ signed in, but ${check.problem}`);
+        printNotes(target, print);
+      }
     } catch (error) {
       failed.push(target.name);
       print(`${name}  ✗ ${(error as Error).message}`);
-      const notes = target.servers.find((s) => s.connector.notes)?.connector
-        .notes;
-      if (notes) print(`    ${notes}`);
+      printNotes(target, print);
     }
   }
   print(`Grants: ${store.describe()}`);
-  if (failed.length)
-    throw new Error(`Sign-in failed for ${failed.join(', ')}.`);
+  const problems: string[] = [];
+  if (failed.length) problems.push(`Sign-in failed for ${failed.join(', ')}.`);
+  if (unverified.length)
+    problems.push(
+      `Could not verify ${unverified.join(', ')}; the saved grant was kept. Run with --force to sign in again.`
+    );
+  if (problems.length) throw new Error(problems.join(' '));
 }
 
 /** `mst auth status`: what is signed in. Exits non-zero when anything is missing. */

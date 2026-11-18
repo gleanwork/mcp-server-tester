@@ -89,7 +89,11 @@ function testPlugin(): Plugin {
   return {
     meta: { name: 'acme-plugin', namespace: 'acme' },
     connectors: {
-      acme: { url: acmeUrl, auth: { type: 'oauth' } },
+      acme: {
+        url: acmeUrl,
+        auth: { type: 'oauth' },
+        headers: { 'X-Glean-Eval-Id': 'mst' },
+      },
       slack: {
         url: 'https://slack.example/mcp',
         auth: { type: 'oauth', refreshScope: null },
@@ -203,6 +207,7 @@ describe('connector servers in a run', () => {
         transport: 'http',
         label: 'acme',
         serverUrl: acmeUrl,
+        headers: { 'X-Glean-Eval-Id': 'mst' },
         auth: { accessToken: 'acme-token' },
       },
     ]);
