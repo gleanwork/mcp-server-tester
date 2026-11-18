@@ -1,4 +1,21 @@
 
+
+## v2.0.0-rc.2 (2026-11-18)
+
+#### :bug: Bug Fix
+* [#608](https://github.com/gleanwork/mcp-server-tester/pull/608) fix(cowork): make first-party Linux runs survive connector drift, URL prompts and re-renders ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :memo: Documentation
+* [#606](https://github.com/gleanwork/mcp-server-tester/pull/606) docs: say Claude Desktop for the app the cowork client drives ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :house: Internal
+* [#604](https://github.com/gleanwork/mcp-server-tester/pull/604) ci(website): pin the Vercel CLI as a site devDependency ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#603](https://github.com/gleanwork/mcp-server-tester/pull/603) ci(website): put the globally installed Vercel CLI on PATH ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### Committers: 2
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
 ## v2.0.0-rc.1 (2026-11-16)
 
 #### :boom: Breaking Change
