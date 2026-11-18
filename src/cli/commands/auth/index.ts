@@ -159,7 +159,8 @@ async function verify(
 }
 
 function printNotes(target: Target, print: (line: string) => void): void {
-  const notes = target.servers.find((s) => s.connector.notes)?.connector.notes;
+  const notes = target.servers.find((server) => server.connector.notes)
+    ?.connector.notes;
   if (notes) print(`    ${notes}`);
 }
 
