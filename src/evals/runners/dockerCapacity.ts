@@ -129,7 +129,7 @@ export function planContext(
   const has = capacity
     ? `${formatMemory(capacity.memory)} and ${capacity.cpus} CPUs`
     : "an unknown size (docker info didn't say)";
-  const kind = work === 'collect' ? 'Cowork' : 'grade';
+  const kind = work === 'collect' ? 'Claude Desktop' : 'grade';
   const short = [
     ...(memory !== undefined && usable !== undefined && memory > usable
       ? [`more memory than it can spare (${formatMemory(usable)})`]

@@ -8,7 +8,7 @@
 
 An author runs `mst auth` once. After that, every local `mst run` on any client reaches every server in every variant with a fresh token. The author doesn't edit `.env` or copy tokens, and no secret ever goes into a config or a result.
 
-The connector contract is done when the walkthrough's three variants (`current`, `rewritten`, `rewritten-terse`) authenticate and run one case each in local Cowork on macOS.
+The connector contract is done when the walkthrough's three variants (`current`, `rewritten`, `rewritten-terse`) authenticate and run one case each in local Claude Desktop on macOS.
 
 ## Who owns what
 
@@ -145,7 +145,7 @@ preflight ─► stage ─► collect (renew as needed) ─► teardown
 3. **Renew**: for each token file whose token expires before the run can end, MST refreshes it `renewBefore` ahead of expiry (default 20 minutes) and atomically rewrites it. The proxy reads the new token on its next request; MCP sessions don't restart. A direct HTTP connection can't be renewed mid-run: use `launch` for servers whose tokens are short-lived. If renewal keeps failing and the token expires, the proxy logs `CONNECTOR_AUTH_EXPIRED` and the affected calls fail.
 4. **Teardown**, also on failure: the run removes the token directory when it stops. On Ctrl-C, SIGTERM, SIGHUP or exit without stopping, a process-wide guard removes it synchronously, then lets the signal stop the process as before. A run killed outright (SIGKILL, a crash) can't clean up: each directory records its owner's pid, and the next run removes directories whose owner is gone. Refresh grants stay in the store.
 
-Staging happens before any client starts and is the same for every client: expanded connector servers are plain `stdio` or `http` entries, so Cowork, Claude Code and the `api` client need no changes.
+Staging happens before any client starts and is the same for every client: expanded connector servers are plain `stdio` or `http` entries, so Claude Desktop, Claude Code and the `api` client need no changes.
 
 ## The credential store
 
@@ -186,9 +186,9 @@ MST ships a local credential store (`src/auth/grants/localStore.ts`), the defaul
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Unit (MST)     | A fake authorization server covering authorization code with PKCE, DCR, device flow, client credentials, rotating refresh, revocation and under-scoped grants. Also: grant grouping and scope union, a lock that allows one redemption under concurrency, renewal rewriting `tokenFile`, expiry becoming an infrastructure error, and the preflight message. |
 | Contract (MST) | A fixture plugin with connectors and a fake vendor MCP server. `mst auth`, `status`, `revoke`, then `mst run` on the `api` client: the token reaches the server and renews. A scan of the run directory and the logs finds no token.                                                                                                                         |
-| Cowork (MST)   | Platform doubles: token files staged in the transaction, removed on success, on failure and on cancel.                                                                                                                                                                                                                                                       |
+| `cowork` (MST) | Platform doubles: token files staged in the transaction, removed on success, on failure and on cancel.                                                                                                                                                                                                                                                       |
 | Plugin (acme)  | Connectors for two servers behind the dry-run proxy and one direct HTTP server. `launch` returns the dry-run proxy. Writes are blocked: zero write calls reach a fake vendor.                                                                                                                                                                                |
-| Live (manual)  | `mst auth` against all 3 servers. Then 1 case × 3 variants in local Cowork. Then one run longer than an hour, to show token renewal.                                                                                                                                                                                                                         |
+| Live (manual)  | `mst auth` against all 3 servers. Then 1 case × 3 variants in local Claude Desktop. Then one run longer than an hour, to show token renewal.                                                                                                                                                                                                                 |
 
 ## Out of scope
 

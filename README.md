@@ -48,7 +48,7 @@ Available matchers:
 
 ## Eval Datasets
 
-Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `api` client, or with `mst run` on any client (Claude Code, the Codex CLI, Cowork, ChatGPT and the ChatGPT app's Codex surface). Checks on a single tool's response belong in Playwright tests, above.
+Eval datasets define cases as JSON: an `input` the client under test acts on, and assertions about what it did. Run them with `runEvalDataset()` in a Playwright test, on the `api` client, or with `mst run` on any client (Claude Code, the Codex CLI, Claude Desktop, ChatGPT and the ChatGPT app's Codex surface). Checks on a single tool's response belong in Playwright tests, above.
 
 ```json snippet=snippets/eval-dataset.json
 {
@@ -192,11 +192,11 @@ export default defineConfig({
 For HTTP servers, set `transport: 'http'` and `serverUrl`. For servers that require OAuth, see the [Transports Guide](./docs/transports.md) and [CLI Guide](./docs/cli.md) for authentication setup, including CI/CD token management.
 
 Plain stdio is supported by Claude CLI, Vercel AI SDK, ChatGPT (`chatgpt` and `codex-app`), and
-Cowork evaluation clients, including Cowork on macOS and Linux. Cowork also
+Claude Desktop (`cowork`) evaluation clients, including Claude Desktop on macOS and Linux. The `cowork` client also
 supports private file-backed native proxies and mixed HTTP/stdio server sets.
 See [evaluation client transport support](./docs/transports.md#evaluation-client-support)
 for client-specific fields, environment rules, and setup ownership.
-Cowork's `mode: "first-party"` uses existing HTTPS connectors in a signed-in Claude account, locally on macOS or through a plugin-prepared Linux runtime with attached macOS source control. Account runs require one shard, sequential trials and a dedicated account. Linux automation, first-party and managed third-party, uses TypeScript over AT-SPI D-Bus. A live smoke check of the TypeScript first-party driver is pending; offline tests do not establish app or account compatibility. See [Cowork cloud sessions](./docs/cowork.md#cloud-sessions).
+The `cowork` client's `mode: "first-party"` uses existing HTTPS connectors in a signed-in Claude account, locally on macOS or through a plugin-prepared Linux runtime with attached macOS source control. Account runs require one shard, sequential trials and a dedicated account. Linux automation, first-party and managed third-party, uses TypeScript over AT-SPI D-Bus. A live smoke check of the TypeScript first-party driver is pending; offline tests do not establish app or account compatibility. See [Cloud sessions](./docs/cowork.md#cloud-sessions).
 
 **Known 1P recovery limitation:** MST saves the original connector permission values, applies eval restrictions, and restores those values afterward. A UI failure before submission can still leave a pending-task marker that blocks automatic restoration. Keep the saved values and verify that no eval task or permission write remains active before manually restoring them. Verify the restored settings before archiving the resolved journal. Automatic recovery for proven pre-submission failures is follow-up work. See [Recover connector settings](./docs/cowork.md#recover-connector-settings).
 
@@ -214,7 +214,7 @@ Cowork's `mode: "first-party"` uses existing HTTPS connectors in a signed-in Cla
 - [CLI Commands](./docs/cli.md) — init, generate, login, token, auth, datasets, judges, run, grade, batch, open, cowork
 - [Evaluation Framework](./docs/evaluation-framework.md) — eval configs, plugins and their extension kinds, the run format
 - [Built-in Judges](./docs/judges.md) — the built-in judges measured on MST's calibration set
-- [Cowork](./docs/cowork.md) and [ChatGPT Desktop](./docs/chatgpt-desktop.md) — running evals on desktop clients
+- [Claude Desktop](./docs/cowork.md) and [ChatGPT Desktop](./docs/chatgpt-desktop.md) — running evals on desktop clients
 - [Codex CLI](./docs/codex.md) — running evals on the Codex CLI (`codex-cli`), headless
 - [Design walkthrough](./docs/design/README.md) and [explainer](./docs/design/explainer.md) — how evals are meant to run end to end, and what is built so far
 - [Architecture decisions](./docs/adr/) — why MST is built as it is, including [detached runs](./docs/adr/0007-detached-runs-move-the-coordinator.md): a run on a runner that keeps going with the laptop off

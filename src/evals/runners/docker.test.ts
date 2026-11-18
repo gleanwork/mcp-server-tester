@@ -699,7 +699,7 @@ describe('a run in docker (a fake Docker CLI)', () => {
     for (const run of runs)
       expect(run.args[run.args.indexOf('--memory') + 1]).toBe('7168m');
     expect(lines).toContain(
-      '[mst] ctx-a has 8 GiB and 4 CPUs: 1 Cowork container at a time, 7 GiB each'
+      '[mst] ctx-a has 8 GiB and 4 CPUs: 1 Claude Desktop container at a time, 7 GiB each'
     );
     // Every trial's artifacts are in the run, copied from the worker.
     for (const id of ['alpha', 'bravo', 'charlie'])
