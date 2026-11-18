@@ -57,6 +57,7 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
         managedServers: [],
         serverDisplayNames: {},
         failOnApproval: true,
+        catalogDrift: 'fail',
       },
       serverLabels: { Search: 'search' },
       remoteServerNames: ['Search'],

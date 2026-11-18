@@ -368,6 +368,19 @@ audit log, including the prepared tool list when validation fails. If the server
 changes its catalog during a task, MST fails the check instead of silently
 accepting new tools. Start a new run to prepare against the changed catalog.
 
+The account's tool inventory and the tools a session loads can disagree
+persistently: a connector can offer a session a tool its inventory doesn't
+list, or list a tool the session never loads. A new run can't fix that, so
+`catalogDrift: "record"` lets a run proceed. It records each listed tool that
+had no rule in the plan and that the agent never called (`unlisted`), and each
+allowed tool a session didn't load from a connector that loaded its other
+allowed tools (`unloaded`), under `catalogDrift` in `connector-policy.json`.
+It still fails the trial when the agent calls an unplanned tool, when a blocked
+tool is listed, and when a connector loads none of its allowed tools. A called
+unplanned tool has already run when the check fails, so use `record` only with
+connectors whose unplanned tools are safe to run. The default, `"fail"`, keeps
+the strict check.
+
 The Chrome recorder profile and Claude Desktop must be on the same account and
 the same active organization. On local macOS, you must make sure they are; MST
 does not verify Desktop's identity automatically. For Linux, the plugin binds
