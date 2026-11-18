@@ -201,11 +201,15 @@ export async function assertWriteModes(check: WriteModeCheck): Promise<void> {
     const byMode = new Map<StoppedWriteMode, string[]>();
     for (const { variant, modes } of check.variants)
       for (const [label, mode] of Object.entries(modes))
-        if (isStoppedMode(mode))
-          byMode.set(mode, [
-            ...(byMode.get(mode) ?? []),
+        if (isStoppedMode(mode)) {
+          // A server-planned server answers a stopped write as a dry-run proxy
+          // does, with a planned-write mark rather than a success.
+          const reply = mode === 'server-planned' ? 'planned' : mode;
+          byMode.set(reply, [
+            ...(byMode.get(reply) ?? []),
             `${label} (${variant})`,
           ]);
+        }
     if (byMode.size > 1)
       throw new Error(
         `The variants compared get different replies to a write: ${[...byMode]

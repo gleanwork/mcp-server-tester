@@ -1085,7 +1085,7 @@ MST doesn't sit between a `read-only` server and its client, so it checks each t
 The run also doesn't start when:
 
 - a server is `live` without `--allow-live-writes`, or a case lists writes on a run with a `live` server: a live write case needs an outcome check, which MST doesn't have yet;
-- compared variants' servers stop writes in different ways (`planned`, `simulated`, `server-planned`), so the same request gets different replies;
+- compared variants' servers stop writes in different ways (`planned` or `server-planned`, against `simulated`), so the same request gets different replies. `planned` and `server-planned` servers compare: both answer with a planned-write mark;
 - a case lists writes on a server whose writes MST doesn't record;
 - a connector's launch doesn't pass `context.writes` to its proxy, or changes whether it simulates;
 - `writes` names a server that isn't in a variant, or one whose proxy already gives it a mode.

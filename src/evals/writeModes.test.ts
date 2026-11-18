@@ -231,6 +231,27 @@ describe('assertWriteModes', () => {
     ).rejects.toThrow(/different replies to a write/);
   });
 
+  it('compares server-planned servers with planned ones', async () => {
+    const variants = (other: WriteMode): WriteModeCheck['variants'] => [
+      {
+        variant: 'a',
+        modes: { notes: 'planned' },
+        servers: [server('notes')],
+      },
+      {
+        variant: 'b',
+        modes: { notes: 'planned', wiki: other },
+        servers: [server('notes'), server('wiki')],
+      },
+    ];
+    await expect(
+      assertWriteModes({ ...check({}), variants: variants('server-planned') })
+    ).resolves.toBeUndefined();
+    await expect(
+      assertWriteModes({ ...check({}), variants: variants('simulated') })
+    ).rejects.toThrow(/simulated on wiki \(b\)/);
+  });
+
   it('refuses a declaration that names no server', async () => {
     await expect(
       assertWriteModes(
