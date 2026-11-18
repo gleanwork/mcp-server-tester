@@ -214,6 +214,17 @@ If `format:check` or `lint` fails, run `npm run format` or `npm run lint:fix` to
 
 ## Adding New Features
 
+### Where a Change Goes
+
+Before you add anything, find its home ([ADR 0016](docs/adr/0016-mst-holds-only-what-every-mst-user-needs.md)). Take the first that fits:
+
+1. Its own repo, when it uses MST only through the `mst` command or the public exports. Don't add it here, in any language.
+2. An organization's plugin, when one organization needs it.
+3. One client product's code (its directory and client file under `src/evals/`), when one product needs it. Core doesn't import product code: when core must treat a client differently, add a general property to the client definition and read that, as `checksServersAfterPrepare` does. Don't write `if` on a product or one of its modes in core.
+4. Core, when every user of MST needs it.
+
+A new contract, mode or protocol needs an accepted ADR before its code merges. Stop and ask the person you work for rather than writing the code first. `tests/repoShape.test.ts` fails on another language, a second `package.json`, a new top-level directory, and a new import of product code from core; its lists are in `tests/repoShape.ts`. Don't add an entry there to make it pass unless an ADR allows the change.
+
 ### New Built-in Extension (dataset source, client, judge, metric, result store, runner)
 
 Add it to the kind's built-in record, keyed by its bare name: `builtinDatasetSources()`, `builtinClientDefinitions()`, `builtinJudges()` (`src/judge/builtinJudges.ts`), `BUILT_IN_METRICS`, `builtinResultStores()`, or `builtinRunners()` (`src/evals/runners/builtinRunners.ts`). Pairwise judges, connectors and credential stores have no built-ins: their lookups start empty. The local credential store is not an extension; `credentialStoreFor()` in `src/auth/grants/stores.ts` uses it when `--store` is unset or a directory. Each kind's lookup (`getClient`, `getJudge`, ...) lives next to that record and installs it on first use; the extension table (`src/plugins/extensions.ts`) knows no built-ins. Organization-specific extensions belong in a plugin, not here.
