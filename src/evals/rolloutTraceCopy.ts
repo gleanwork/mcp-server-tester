@@ -17,6 +17,15 @@
  * checks can still have it read a file elsewhere that MST's user owns. It
  * copies into a directory of its own, within `ARTIFACT_LIMITS` as the
  * artifact copy counts them (trialArtifacts.ts), so what it returns fits.
+ *
+ * Codex may still be writing the trace: a desktop turn that ran out of time
+ * runs until MST restarts or stops the app. Codex only appends to a bundle's
+ * files, and a bundle it is still writing can be read as it stands, so a file
+ * that grows while MST reads it is copied as it was when MST opened it. In
+ * each directory the copy reads the files before the subdirectories, so a
+ * bundle's `trace.jsonl` is read before the payloads its events refer to,
+ * which Codex writes before the events. A file that gets shorter or is
+ * rewritten while MST reads it keeps the trace from being kept.
  */
 import { constants, type BigIntStats } from 'node:fs';
 import {
@@ -47,12 +56,13 @@ export type ArtifactLimits = {
 
 /**
  * Why a trace can't be kept, in words that are safe to report: it is over
- * one of the artifact limits (`limit`), or it holds a file MST won't copy
- * (`unsafe`). Any other error is a failure to read the trace.
+ * one of the artifact limits (`limit`), it holds a file MST won't copy
+ * (`unsafe`), or a file in it got shorter or was rewritten while MST read it
+ * (`changed`). Any other error is a failure to read the trace.
  */
 export class RolloutTraceError extends Error {
   constructor(
-    readonly kind: 'limit' | 'unsafe',
+    readonly kind: 'limit' | 'unsafe' | 'changed',
     message: string
   ) {
     super(message);
@@ -68,10 +78,16 @@ function isMissingPath(error: unknown): boolean {
   return errorCode(error) === 'ENOENT';
 }
 
+const NOT_KEPT: Record<RolloutTraceError['kind'], string> = {
+  limit: "The rollout trace is larger than a trial's artifacts may be",
+  unsafe: "The rollout trace holds an entry MST doesn't copy",
+  changed: 'The rollout trace changed while MST copied it',
+};
+
 /**
  * Why a trace wasn't kept, from what selecting or copying it threw: a limit,
- * an entry MST doesn't copy, or a failure to read it, with the error. Every
- * value in `secrets` is redacted.
+ * an entry MST doesn't copy, a file that changed under the copy, or a failure
+ * to read it, with the error. Every value in `secrets` is redacted.
  */
 function rolloutTraceNotKept(
   error: unknown,
@@ -83,9 +99,7 @@ function rolloutTraceNotKept(
   );
   if (!(error instanceof RolloutTraceError))
     return `MST couldn't read the rollout trace: ${reason}`;
-  return error.kind === 'limit'
-    ? `The rollout trace is larger than a trial's artifacts may be: ${reason}.`
-    : `The rollout trace holds an entry MST doesn't copy: ${reason}.`;
+  return `${NOT_KEPT[error.kind]}: ${reason}.`;
 }
 
 function checkOwner(stats: BigIntStats): void {
@@ -138,7 +152,10 @@ async function checkTraceDir(dir: string, id: DirId): Promise<void> {
     throw error;
   });
   if (!stats?.isDirectory() || stats.dev !== id.dev || stats.ino !== id.ino)
-    throw new RolloutTraceError('unsafe', 'changed while it was copied');
+    throw new RolloutTraceError(
+      'unsafe',
+      'was moved or replaced while it was copied'
+    );
 }
 
 /** `fn`, with `name` before the message of a {@link RolloutTraceError}. */
@@ -154,8 +171,9 @@ async function labelled<T>(name: string, fn: () => Promise<T>): Promise<T> {
 
 /**
  * The bytes of `file`, a regular file with one link that MST's user owns,
- * of at most `maxBytes`. Never opens a symbolic link, and doesn't block on a
- * pipe. Fails when the file changes while it is read.
+ * of at most `maxBytes`, as it was when MST opened it. Never opens a symbolic
+ * link, and doesn't block on a pipe. A file that grows while it is read is
+ * read to the size it had; one that gets shorter or is rewritten fails.
  */
 async function readTraceFile(file: string, maxBytes: number): Promise<Buffer> {
   let handle;
@@ -187,13 +205,15 @@ async function readTraceFile(file: string, maxBytes: number): Promise<Buffer> {
         buffer.length - offset,
         offset
       );
-      if (!bytesRead)
-        throw new RolloutTraceError('unsafe', 'changed while it was copied');
+      if (!bytesRead) throw new RolloutTraceError('changed', 'got shorter');
       offset += bytesRead;
     }
+    // Codex only appends, so a file that grew begins with what was read.
     const after = await handle.stat({ bigint: true });
-    if (after.size !== before.size || after.mtimeNs !== before.mtimeNs)
-      throw new RolloutTraceError('unsafe', 'changed while it was copied');
+    if (after.size < before.size)
+      throw new RolloutTraceError('changed', 'got shorter');
+    if (after.size === before.size && after.mtimeNs !== before.mtimeNs)
+      throw new RolloutTraceError('changed', 'was rewritten');
     return buffer;
   } finally {
     await handle.close();
@@ -206,8 +226,9 @@ async function readTraceFile(file: string, maxBytes: number): Promise<Buffer> {
  * replaced in every file. Entries other than directories and regular files
  * are left out, as the artifact copy leaves them out; `root` and `bundles`
  * themselves must be directories. Fails, leaving no directory, with a
- * {@link RolloutTraceError} for a limit or an entry MST won't copy, or with
- * the error that kept it from reading the trace.
+ * {@link RolloutTraceError} for a limit, an entry MST won't copy or a file
+ * that changed under the copy, or with the error that kept it from reading
+ * the trace.
  */
 export async function copyRolloutTrace(
   root: string,
@@ -249,12 +270,14 @@ export async function copyRolloutTrace(
     const listed = await readdir(source, { withFileTypes: true });
     // What it listed is the directory it opened.
     await labelled(dirName, () => checkTraceDir(source, id));
+    // Read after the files, as the header says.
+    const subdirectories: string[] = [];
     for (const entry of listed) {
       countEntry();
       const from = path.join(source, entry.name);
       const at = [...segments, entry.name];
       if (entry.isDirectory()) {
-        await walk(from, at);
+        subdirectories.push(entry.name);
         continue;
       }
       if (!entry.isFile()) continue;
@@ -283,6 +306,8 @@ export async function copyRolloutTrace(
       });
       files += 1;
     }
+    for (const name of subdirectories)
+      await walk(path.join(source, name), [...segments, name]);
   };
   try {
     const rootId = await labelled('the trace root', () => openTraceDir(root));
@@ -406,7 +431,8 @@ export interface KeptRolloutTrace {
  * bundle; one whose root is shared (a desktop backend's, across a batch)
  * passes the trial's `rootThreadId`, and only bundles whose manifest names it
  * are kept. A trace not written (`noTrace` says why), over a limit, with an
- * entry MST doesn't copy, or that MST couldn't read is not kept, and
+ * entry MST doesn't copy, that changed while MST copied it, or that MST
+ * couldn't read is not kept, and
  * `telemetry.notKept` says why: the trial is still graded, where a copy over
  * a limit would make it an infrastructure failure. `root` stays the
  * caller's to remove.
