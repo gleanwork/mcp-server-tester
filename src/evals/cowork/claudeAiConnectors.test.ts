@@ -616,6 +616,57 @@ describe('fail-closed cloud permission transactions', () => {
 });
 
 describe('durable cloud task ownership', () => {
+  it('ends a task left running, then restores only after completion is proved', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      await session.beginTask();
+      await session.bindTask('cse_held');
+      let running = true;
+      io.assertTaskComplete = vi.fn(async () => {
+        if (running) throw new Error('task still running');
+      });
+      io.settleTask = vi.fn(async () => {
+        running = false;
+      });
+      await session.restore();
+      expect(io.settleTask).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'cse_held' })
+      );
+      expect(io.assertTaskComplete).toHaveBeenCalledTimes(2);
+      expect(state.permissions).toEqual({});
+      await expect(journalAt(path)).rejects.toThrow();
+    });
+  });
+
+  it('keeps the journal and both reasons when the task cannot be ended', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      await session.beginTask();
+      await session.bindTask('cse_held');
+      io.assertTaskComplete = vi.fn(async () => {
+        throw new Error('task still running');
+      });
+      io.settleTask = vi.fn(async () => {
+        throw new Error('Stop did not take');
+      });
+      await expect(session.restore()).rejects.toThrow(
+        /task still running.*Stop did not take/s
+      );
+      expect(state.permissions['docs:search']).toBe(true);
+      expect((await journalAt(path)).pendingTask?.sessionId).toBe('cse_held');
+    });
+  });
+
   it('persists the task before submit, binds once, and gates restoration on provider proof', async () => {
     await withJournal(async (path) => {
       const { state, io } = permissionFixture();

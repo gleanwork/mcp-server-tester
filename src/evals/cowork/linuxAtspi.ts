@@ -256,18 +256,73 @@ export async function connectLinuxUi(
 
       /**
        * Replace each U+FFFC in `text` with the text of the object it stands
-       * for, found through the hyperlink at that character offset. A marker
-       * with no hyperlink, a hyperlink without exactly one anchor, or an
-       * object that isn't text-like fails closed rather than guess.
+       * for, found through the hyperlink at that character offset. Where the
+       * hyperlink route fails, the node's children stand in, in order, one
+       * per marker, as Chromium embeds them. A child count that differs
+       * from the markers, or an object that isn't text-like, fails closed
+       * rather than guess.
        */
       async function inlineText(
         ref: AtspiRef,
         text: string,
         depth: number
       ): Promise<string> {
+        if (depth > MAX_INLINE_DEPTH)
+          throw new LinuxUiError('accessibility_text_unavailable');
+        try {
+          return await viaHyperlinks(ref, text, depth);
+        } catch {
+          return await viaChildren(ref, text, depth);
+        }
+      }
+
+      async function viaChildren(
+        ref: AtspiRef,
+        text: string,
+        depth: number
+      ): Promise<string> {
         const unavailable = () =>
           new LinuxUiError('accessibility_text_unavailable');
-        if (depth > MAX_INLINE_DEPTH) throw unavailable();
+        const characters = [...text];
+        const children = await bus.children(ref);
+        if (
+          children.length !==
+          characters.filter((char) => char === '\ufffc').length
+        )
+          throw unavailable();
+        const parts: string[] = [];
+        let next = 0;
+        for (const character of characters) {
+          if (character !== '\ufffc') {
+            parts.push(character);
+            continue;
+          }
+          const object = children[next++]!;
+          const [role, interfaces] = await Promise.all([
+            bus.role(object),
+            bus.interfaces(object),
+          ]);
+          if (!INLINE_ROLES.has(role) || !interfaces.includes(ATSPI_TEXT))
+            throw unavailable();
+          const inner = await bus.text(object, 0, -1);
+          // A link always has text; an empty object is not evidence of one.
+          if (!inner) throw unavailable();
+          parts.push(
+            inner.includes('\ufffc')
+              ? await inlineText(object, inner, depth + 1)
+              : inner
+          );
+        }
+        return parts.join('');
+      }
+
+      async function viaHyperlinks(
+        ref: AtspiRef,
+        text: string,
+        depth: number
+      ): Promise<string> {
+        const unavailable = () =>
+          new LinuxUiError('accessibility_text_unavailable');
         if (!(await bus.interfaces(ref)).includes(ATSPI_HYPERTEXT))
           throw unavailable();
         const characters = [...text];

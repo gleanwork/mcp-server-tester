@@ -1264,7 +1264,7 @@ export MST_CLAUDE_AI_DEBUG_PORT=9222   # if the recorder port is not the default
 npx mst cowork restore-connectors [--recover-stale-lock]
 ```
 
-Restores the account connector permissions that a killed first-party `cowork` run left in its recovery journal, on macOS. It runs no eval and does not drive the app. It reads the recorder port from the shell, not from an eval config. It restores only after the account, concurrent-edit, write-outcome and task-completion checks pass, and otherwise keeps the journal and desktop lock. `--recover-stale-lock` removes a desktop lease only when its local owner is provably dead; it does not prove a cloud task finished or a write settled. See [Recover connector settings](./cowork.md#recover-connector-settings).
+Restores the account connector permissions that a killed first-party `cowork` run left in its recovery journal, on macOS. It runs no eval and does not drive the app. It reads the recorder port from the shell, not from an eval config. It restores only after the account, concurrent-edit, write-outcome and task-completion checks pass, and otherwise keeps the journal and desktop lock. A task still running is first ended from claude.ai (Skip on an open question, then Stop; never an answer or approval), and a transient claude.ai refusal is retried with a page reload. `--recover-stale-lock` removes a desktop lease only when its local owner is provably dead; it does not prove a cloud task finished or a write settled. See [Recover connector settings](./cowork.md#recover-connector-settings).
 
 ## `runner setup` - Prepare a Runner
 

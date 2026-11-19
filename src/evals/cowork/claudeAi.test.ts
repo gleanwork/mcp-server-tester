@@ -42,7 +42,16 @@ import {
   cloudTrialMetadata,
   coworkClaudeAi,
   restoreClaudeAiConnectors,
+  setClaudePageRetryDelaysForTests,
+  settleTask,
 } from './claudeAi.js';
+
+// Transient-refusal retries are real behavior; their waits are not.
+let restoreRetryDelays: () => void;
+beforeEach(() => {
+  restoreRetryDelays = setClaudePageRetryDelaysForTests([1, 1, 1]);
+});
+afterEach(() => restoreRetryDelays());
 import type { CoworkDesktop } from './desktop.js';
 import { findMatchingClaudeSessions } from './sessions.js';
 import type { ClaudeTranscript } from './transcript.js';
@@ -1422,6 +1431,46 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       expect(account.patches()).toEqual([]);
     }
   );
+
+  it('treats a 4xx PATCH refusal as not applied, so recovery stays automatic', async () => {
+    account.patchStatus = 403;
+    await expect(
+      drive(
+        adapter().prepare({
+          evalConfig: { name: 'refused', datasets: [], servers: [SERVER] },
+          env,
+        })
+      )
+    ).rejects.toThrow('HTTP 403');
+    const retained = await readFile(journal(), 'utf8').catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      }
+    );
+    if (retained) expect(JSON.parse(retained).pendingWrite).toBeUndefined();
+    // Nothing was applied; a later restore needs no manual resolution.
+    expect(account.permissions).toEqual(account.original);
+    account.patchStatus = 202;
+    await expect(drive(restoreClaudeAiConnectors(env))).resolves.not.toThrow();
+  });
+
+  it('retries a transient claude.ai refusal instead of failing the run', async () => {
+    let bootstraps = 0;
+    account.beforeRequest = (request) => {
+      if (request.path !== '/api/bootstrap') return;
+      // One browser check, then claude.ai answers again.
+      account.bootstrapStatus = ++bootstraps === 1 ? 403 : 200;
+    };
+    const prepared = await drive(
+      adapter().prepare({
+        evalConfig: { name: 'transient', datasets: [], servers: [SERVER] },
+        env,
+      })
+    );
+    expect(prepared).toBeDefined();
+    expect(bootstraps).toBeGreaterThan(1);
+  });
 
   it('retains an unknown permission write after a generic post-dispatch abort instead of accepting matching readback', async () => {
     account.afterPatch = () => {
@@ -3050,5 +3099,52 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       })
     ).rejects.toThrow('requires private MST_COWORK_CLOUD_CONTROL_SOCKET');
     expect(devtools.sockets).toEqual([]);
+  });
+});
+
+describe('settling a task after its case', () => {
+  function task(completeAfter: 'desktop' | 'claude.ai' | 'never') {
+    let done = false;
+    const calls: string[] = [];
+    return {
+      calls,
+      configuration: {
+        async confirmTaskComplete() {
+          calls.push('confirm');
+          if (!done) throw new Error('task still running');
+        },
+        async settleTask() {
+          calls.push('claude.ai');
+          if (completeAfter === 'never') throw new Error('Stop did not take');
+          done = true;
+        },
+      },
+      base: {
+        async stopTask() {
+          calls.push('desktop');
+          if (completeAfter === 'desktop') done = true;
+          else throw new Error('task_not_stopped');
+        },
+      },
+    };
+  }
+
+  it('stops from the desktop when it can', async () => {
+    const t = task('desktop');
+    await settleTask(t.configuration, t.base, undefined, 1);
+    expect(t.calls).toEqual(['confirm', 'desktop', 'confirm']);
+  });
+
+  it('ends the task from claude.ai when the desktop stop fails, then confirms', async () => {
+    const t = task('claude.ai');
+    await settleTask(t.configuration, t.base, undefined, 1);
+    expect(t.calls).toEqual(['confirm', 'desktop', 'claude.ai', 'confirm']);
+  });
+
+  it('reports every failure when the task cannot be ended', async () => {
+    const t = task('never');
+    await expect(
+      settleTask(t.configuration, t.base, undefined, 1)
+    ).rejects.toThrow(/task_not_stopped.*Stop did not take/s);
   });
 });

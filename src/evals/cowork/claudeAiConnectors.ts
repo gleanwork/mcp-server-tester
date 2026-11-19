@@ -226,6 +226,12 @@ export interface CloudConnectorIO {
   ): Promise<void>;
   /** Provider evidence must prove this exact bound task is no longer running. */
   assertTaskComplete?(task: CloudConnectorTask): Promise<void>;
+  /**
+   * Ends this bound task when it has no terminal result (skipping a question
+   * that holds it, then stopping it), without approving or answering.
+   * Completion is still proved separately by `assertTaskComplete`.
+   */
+  settleTask?(task: CloudConnectorTask): Promise<void>;
 }
 
 const PermissionPatchSchema = z.record(z.string(), z.boolean().nullable());
@@ -376,7 +382,9 @@ async function writePermissions(
 async function completePendingTask(
   io: CloudConnectorIO,
   path: string,
-  journal: Journal
+  journal: Journal,
+  /** End a task left running before proving completion (recovery only). */
+  settle = false
 ): Promise<Journal> {
   assertNoPendingWrite(journal, path);
   if (!journal.pendingTask) return journal;
@@ -389,7 +397,22 @@ async function completePendingTask(
     throw new Error(
       `Cloud task completion proof is unavailable. Journal retained at ${path}; manual resolution is required to establish completion before restoring permissions.`
     );
-  await io.assertTaskComplete({ ...journal.pendingTask });
+  try {
+    await io.assertTaskComplete({ ...journal.pendingTask });
+  } catch (error) {
+    // A task left running (often held by a question) is ended, then its
+    // completion is proved again; restoration never relies on settling alone.
+    if (!settle || !io.settleTask) throw error;
+    try {
+      await io.settleTask({ ...journal.pendingTask });
+    } catch (settleError) {
+      throw new Error(
+        `${describeError(error)} Ending the task from claude.ai failed: ${describeError(settleError)}`,
+        { cause: error }
+      );
+    }
+    await io.assertTaskComplete({ ...journal.pendingTask });
+  }
   sameIdentity(await io.read(), journal);
   const completed = { ...journal };
   delete completed.pendingTask;
@@ -444,7 +467,9 @@ export async function recoverCloudConnectorSettings(
   const saved = await readJournal(journalPath);
   if (!saved) return false;
   assertNoPendingWrite(saved, journalPath);
-  const journal = await completePendingTask(io, journalPath, saved);
+  // Recovery runs after the case is over: a task still running (often held
+  // by a question) is ended first, so one stuck task cannot block recovery.
+  const journal = await completePendingTask(io, journalPath, saved, true);
   const current = await io.read();
   sameIdentity(current, journal);
   const patch: PermissionPatch = {};
@@ -598,6 +623,20 @@ export async function configureCloudConnectors(
           io,
           journalPath,
           await requireJournal(journalPath)
+        );
+      });
+    },
+    /**
+     * After a case is over: end its task if it is still running, from the
+     * provider (claude.ai) rather than the desktop, then prove completion.
+     */
+    async settleTask(): Promise<void> {
+      await exclusive(async () => {
+        await completePendingTask(
+          io,
+          journalPath,
+          await requireJournal(journalPath),
+          true
         );
       });
     },

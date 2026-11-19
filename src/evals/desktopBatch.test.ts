@@ -835,6 +835,40 @@ describe('runDesktopBatch', () => {
     expect(results[1]?.ending).toEqual(deadline);
   });
 
+  it('keeps a trial that proved its own evidence when a later case breaks cleanup', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const results: ClientRunResult[] = await runDesktopBatch(
+      fakeClient({
+        async runCase(_session, request) {
+          return {
+            result: {
+              finalText: `answer to ${request.caseId}`,
+              events: [],
+              ending: { kind: 'trial' },
+            },
+            continuation: 'continue',
+            // Only the first proved its task finished and its settings held.
+            ...(request.caseId === 'case-1' ? { verified: true } : {}),
+          };
+        },
+        async dispose() {
+          throw new Error('restore failed');
+        },
+      }),
+      requests(2)
+    );
+    expect(results[0]).toMatchObject({
+      finalText: 'answer to case-1',
+      ending: { kind: 'trial' },
+      telemetry: { batchFailure: { kind: 'cleanup_failed' } },
+    });
+    expect(results[0]?.error).toBeUndefined();
+    // An unverified trial still does not count: the desktop's state is unknown.
+    expect(results[1]).toMatchObject({
+      ending: { kind: 'infrastructure', broke: 'client-app' },
+    });
+  });
+
   it('reports both an execution failure and a cleanup failure', async () => {
     const failure = await runDesktopBatch(
       fakeClient({

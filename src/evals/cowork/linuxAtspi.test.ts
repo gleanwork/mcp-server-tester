@@ -43,6 +43,8 @@ interface FixtureNode {
   links?: string[];
   /** Anchors on each of this node's hyperlinks (default 1). */
   anchors?: number;
+  /** NAnchors' variant type: the spec's int16, or at-spi2-atk's int32. */
+  anchorType?: 'n' | 'i';
 }
 class FakeSocket extends EventEmitter {
   destroy = vi.fn(() => {
@@ -109,7 +111,10 @@ function reply(message: Message): unknown {
   if (hyperlink) {
     const owner = nodes.get(hyperlink[1]!)!;
     if (message.member === 'Get')
-      return [[{ type: 'n', child: [] }], [owner.anchors ?? 1]];
+      return [
+        [{ type: owner.anchorType ?? 'n', child: [] }],
+        [owner.anchors ?? 1],
+      ];
     if (message.member === 'GetObject')
       return [':1.20', owner.links![Number(hyperlink[2])]];
     throw new Error(`Unexpected hyperlink member: ${message.member}`);
@@ -537,6 +542,18 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
     );
   });
 
+  it("reads a hyperlink whose anchor count is at-spi2-atk's int32", async () => {
+    paragraph('see \ufffc', ['/link1']);
+    link('/link1', 'https://example.com/acme');
+    nodes.get('/paragraph')!.anchorType = 'i';
+    // No children: only the hyperlink route can read it.
+    nodes.get('/paragraph')!.children = [];
+    const ui = await connect();
+    expect(await ui.readText(await entry(ui))).toBe(
+      'see https://example.com/acme'
+    );
+  });
+
   it('reads a paragraph that is only a link', async () => {
     nodes.get('/entry')!.text = '\ufffc';
     nodes.get('/entry')!.children = ['/paragraph'];
@@ -572,6 +589,19 @@ describe('Linux AT-SPI transport at the native D-Bus seam', () => {
         nodes.get('/paragraph')!.anchors = 2;
       },
     },
+  ])(
+    "reads inline text through the paragraph's children for $name",
+    async ({ setup }) => {
+      link('/link1', 'https://example.com/acme');
+      setup();
+      const ui = await connect();
+      expect(await ui.readText(await entry(ui))).toBe(
+        'see https://example.com/acme'
+      );
+    }
+  );
+
+  it.each([
     {
       name: 'an image',
       setup: () => {

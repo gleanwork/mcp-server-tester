@@ -585,6 +585,10 @@ async function desktopAdapter(
         'Cowork submission was not attempted.'
       );
       let continuation: DesktopContinuation = 'continue';
+      // Set once the platform proved the task finished and checked its
+      // settings (`validateTranscript`), so the case survives a later
+      // batch cleanup failure.
+      let verified = false;
       // The sessions the task's own telemetry names, once bound.
       let hostSessions: string[] = [];
       const finishCase = async (): Promise<DesktopCaseOutcome> => {
@@ -618,7 +622,11 @@ async function desktopAdapter(
             },
           },
         };
-        return { result, continuation };
+        return {
+          result,
+          continuation,
+          ...(verified && !result.error ? { verified: true } : {}),
+        };
       };
       // Bind each fresh task before another submission can create an identical prompt.
       const snapshot = await snapshotClaudeSessions(dataDir);
@@ -949,7 +957,10 @@ async function desktopAdapter(
         };
         // Validation may write its own audit receipt and then reject the task.
         // Keep the completed native evidence even when that happens early.
-        await platform.validateTranscript?.(transcript);
+        if (platform.validateTranscript) {
+          await platform.validateTranscript(transcript);
+          verified = true;
+        }
         process.stderr.write(
           `[mst:cowork] case ${index + 1}: native completion found (${transcript.toolCalls.length} tool calls)\n`
         );

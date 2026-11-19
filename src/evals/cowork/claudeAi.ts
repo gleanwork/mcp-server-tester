@@ -93,6 +93,219 @@ interface PageResult {
 }
 
 /**
+ * Statuses claude.ai answers transiently: a browser check or session refresh
+ * (403), a rate limit (429) or an outage (5xx). 401 is a real sign-out.
+ */
+const TRANSIENT_STATUSES = new Set([403, 429, 500, 502, 503, 504]);
+/** Waits before each retry; the claude.ai tab is reloaded between attempts. */
+let pageRetryDelaysMs: readonly number[] = [5_000, 15_000, 40_000];
+/** Time for a reloaded claude.ai tab to load before the next attempt. */
+let pageReloadSettleMs = 5_000;
+
+/** Test seam: retry waits, so tests need not sleep through real backoff. */
+export function setClaudePageRetryDelaysForTests(
+  delays: readonly number[],
+  reloadSettleMs = 0
+): () => void {
+  const previous = [pageRetryDelaysMs, pageReloadSettleMs] as const;
+  pageRetryDelaysMs = delays;
+  pageReloadSettleMs = reloadSettleMs;
+  return () => {
+    [pageRetryDelaysMs, pageReloadSettleMs] = previous;
+  };
+}
+
+/**
+ * A response proves claude.ai did not apply a permission write when page
+ * preflight refused before sending it, or when claude.ai answered the PATCH
+ * with a 4xx: the request was rejected, not processed. Only a missing
+ * response or a 5xx leaves the outcome unknown.
+ */
+function permissionWriteRejected(result: PageResult): boolean {
+  return (
+    result.permissionWrite === 'not-sent' ||
+    (typeof result.status === 'number' &&
+      result.status >= 400 &&
+      result.status < 500)
+  );
+}
+
+/**
+ * One-shot account operations, where a single refusal would fail a run or
+ * leave an account change unrestored. Session list and event reads are
+ * already polled by their callers, which report their own errors.
+ */
+const RETRIED_ACTIONS = new Set([
+  'permissions',
+  'connectors',
+  'patch-permissions',
+]);
+
+function retriable(action: unknown, result: PageResult): boolean {
+  if (
+    typeof action !== 'string' ||
+    !RETRIED_ACTIONS.has(action) ||
+    typeof result.status !== 'number' ||
+    !TRANSIENT_STATUSES.has(result.status)
+  )
+    return false;
+  // A write is retried only when it provably was not applied; the retry's
+  // preflight checks the expected values again.
+  return action !== 'patch-permissions' || permissionWriteRejected(result);
+}
+
+/**
+ * The page program, retried through transient refusals with a page reload
+ * between attempts, so one browser check or rate limit does not fail a run
+ * or leave an account change unrestored.
+ */
+async function inClaudePage(
+  port: number,
+  argument: Record<string, unknown>,
+  timeoutMs = 30_000
+): Promise<PageResult> {
+  let result = await inClaudePageOnce(port, argument, timeoutMs);
+  for (const delay of pageRetryDelaysMs) {
+    if (!retriable(argument.action, result)) return result;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    await reloadClaudePage(port).catch(() => undefined);
+    result = await inClaudePageOnce(port, argument, timeoutMs);
+  }
+  return result;
+}
+
+function loopbackSocket(url: string | undefined): string | undefined {
+  return url && /^ws:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(url)
+    ? url
+    : undefined;
+}
+
+/** Sends one DevTools command and returns its result. */
+async function devtoolsCommand(
+  url: string,
+  method: string,
+  params: Record<string, unknown>,
+  timeoutMs: number
+): Promise<DevtoolsReply> {
+  const socket = new WebSocket(url);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve(), { once: true });
+      socket.addEventListener(
+        'error',
+        () => reject(new Error('Chrome DevTools socket failed')),
+        { once: true }
+      );
+    });
+    return await new Promise<DevtoolsReply>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`Chrome DevTools ${method} timed out`)),
+        timeoutMs
+      );
+      socket.addEventListener('message', (message) => {
+        const data = JSON.parse(String(message.data)) as DevtoolsReply;
+        if (data.id !== 1) return;
+        clearTimeout(timer);
+        resolve(data);
+      });
+      socket.send(JSON.stringify({ id: 1, method, params }));
+    });
+  } finally {
+    socket.close();
+  }
+}
+
+async function devtoolsTargets(port: number): Promise<DevtoolsTarget[]> {
+  const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
+    signal: AbortSignal.timeout(5_000),
+  });
+  return (await response.json()) as DevtoolsTarget[];
+}
+
+/** Reloads the claude.ai tab, which refreshes its session and browser check. */
+async function reloadClaudePage(port: number): Promise<void> {
+  const page = (await devtoolsTargets(port)).find(
+    (t) => t.type === 'page' && t.url.startsWith('https://claude.ai/')
+  );
+  const url = loopbackSocket(page?.webSocketDebuggerUrl);
+  if (!url) return;
+  await devtoolsCommand(url, 'Page.reload', {}, 10_000);
+  await new Promise((resolve) => setTimeout(resolve, pageReloadSettleMs));
+}
+
+/**
+ * Runs in a claude.ai tab showing one Cowork task. Presses only Skip on an
+ * open question, else Stop: never an option, approval, permission or send.
+ */
+const SETTLE_PROGRAM = `(() => {
+  const name = (b) => (b.getAttribute('aria-label') || b.textContent || '').trim();
+  const buttons = [...document.querySelectorAll('button')].filter((b) => b.offsetParent !== null && !b.disabled);
+  const skip = buttons.filter((b) => name(b) === 'Skip');
+  if (skip.length === 1) { skip[0].click(); return 'skip'; }
+  const stop = buttons.filter((b) => /^Stop( response| task)?$/i.test(name(b)));
+  if (stop.length === 1) { stop[0].click(); return 'stop'; }
+  return 'none';
+})()`;
+
+/**
+ * Ends a bound Cowork task that has no terminal result, from claude.ai's own
+ * task page in the Chrome on `port`, so recovery does not depend on the
+ * desktop that ran it. A question holds the task and blocks Stop's interrupt,
+ * so open questions are skipped first. Returns once the task's terminal
+ * result is proved; throws when it cannot be within the deadline.
+ */
+export async function settleCloudTaskInBrowser(
+  port: number,
+  task: CloudConnectorTask,
+  timeoutMs = 180_000
+): Promise<void> {
+  const sessionId = task.sessionId;
+  if (!sessionId || !/^cse_[0-9A-Za-z_]+$/.test(sessionId))
+    throw new Error(
+      'Cloud task is unbound; it cannot be stopped from claude.ai.'
+    );
+  const opened = await fetch(
+    `http://127.0.0.1:${port}/json/new?${encodeURI(`https://claude.ai/cowork/${sessionId}`)}`,
+    { method: 'PUT', signal: AbortSignal.timeout(5_000) }
+  );
+  const tab = (await opened.json()) as DevtoolsTarget & { id?: string };
+  const url = loopbackSocket(tab.webSocketDebuggerUrl);
+  try {
+    if (!url) throw new Error('Chrome did not open the Cowork task page.');
+    const deadline = Date.now() + timeoutMs;
+    let skips = 0;
+    let lastStop = 0;
+    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    while (Date.now() < deadline) {
+      try {
+        await assertCloudTaskComplete(port, task);
+        return;
+      } catch {
+        // Not terminal yet: skip or stop below.
+      }
+      if (skips < 6 || Date.now() - lastStop > 20_000) {
+        const reply = await devtoolsCommand(
+          url,
+          'Runtime.evaluate',
+          { expression: SETTLE_PROGRAM, returnByValue: true },
+          10_000
+        ).catch(() => undefined);
+        const pressed = reply?.result?.result?.value;
+        if (pressed === 'skip') skips++;
+        if (pressed === 'stop') lastStop = Date.now();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+    await assertCloudTaskComplete(port, task);
+  } finally {
+    if (tab.id)
+      await fetch(`http://127.0.0.1:${port}/json/close/${tab.id}`, {
+        signal: AbortSignal.timeout(5_000),
+      }).catch(() => undefined);
+  }
+}
+
+/**
  * Runs inside the signed-in claude.ai page, so the page's own cookies and
  * active organization authorize the request. Plain JavaScript: it is sent as
  * source text.
@@ -196,7 +409,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** Evaluates the page program in the claude.ai tab of the Chrome on `port`. */
-async function inClaudePage(
+async function inClaudePageOnce(
   port: number,
   argument: Record<string, unknown>,
   timeoutMs = 30_000
@@ -353,7 +566,7 @@ async function patchCloudPermissions(
   try {
     requireOk(result, 'updating connector permissions');
   } catch (error) {
-    if (result.permissionWrite === 'not-sent')
+    if (permissionWriteRejected(result))
       throw new CloudPermissionWriteNotSentError(describeError(error));
     throw error;
   }
@@ -637,6 +850,7 @@ export function cloudConnectorIO(port: () => number): CloudConnectorIO {
     patch: (identity, patch, expected) =>
       patchCloudPermissions(port(), identity, patch, expected),
     assertTaskComplete: (task) => assertCloudTaskComplete(port(), task),
+    settleTask: (task) => settleCloudTaskInBrowser(port(), task),
   };
 }
 
@@ -683,6 +897,68 @@ async function installedVersion(appPath: string): Promise<string> {
 }
 
 /**
+ * Proves the bound task finished. One not yet proven, such as a case that
+ * timed out or waits on a question, is stopped on screen first: its task is
+ * the one the app shows, since MST opens no other, and stopping only skips
+ * or stops, never submits. (Through a source host the worker sees only a
+ * generic failure, so any failed proof gets one stop.) Completion is still
+ * proven from the cloud task's own result, never from the screen.
+ */
+export async function settleTask(
+  configuration: {
+    confirmTaskComplete(): Promise<void>;
+    settleTask?(): Promise<void>;
+  },
+  base: Pick<CoworkDesktop, 'stopTask'>,
+  env: NodeJS.ProcessEnv | undefined,
+  pollMs = 2_000
+): Promise<void> {
+  let last: unknown;
+  try {
+    await configuration.confirmTaskComplete();
+    return;
+  } catch (error) {
+    last = error;
+  }
+  // 1. The desktop that ran the task: skip a held question, then Stop.
+  for (let attempt = 0; base.stopTask && attempt < 2; attempt++) {
+    try {
+      await base.stopTask({
+        deadlineAt: Date.now() + 35_000,
+        ...(env ? { env } : {}),
+      });
+    } catch (error) {
+      // A failed desktop stop is not final: claude.ai can still end it.
+      last = error;
+      break;
+    }
+    const until = Date.now() + 15 * pollMs;
+    for (;;) {
+      try {
+        await configuration.confirmTaskComplete();
+        return;
+      } catch (error) {
+        last = error;
+      }
+      if (Date.now() >= until) break;
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+  // 2. claude.ai itself, from the source host, independent of the desktop.
+  if (!configuration.settleTask) throw last;
+  try {
+    await configuration.settleTask();
+  } catch (error) {
+    throw new Error(
+      `${describeError(last)} Ending the task from claude.ai also failed: ${describeError(error)}`,
+      { cause: last }
+    );
+  }
+  // Settling is not proof by itself: completion must still be confirmed.
+  await configuration.confirmTaskComplete();
+}
+
+/**
  * The 1P desktop: Claude Desktop as it is, signed in to claude.ai. MST
  * installs no profile, servers or credential; the variant is the account's
  * connectors. Submission, HITL and reset are macOS Computer Use, unchanged.
@@ -708,10 +984,14 @@ export function coworkClaudeAi(
   let worker: ReturnType<typeof createCoworkCloudControlClient> | undefined;
   let linuxSession: Awaited<ReturnType<CoworkDesktop['prepare']>> | undefined;
   let remotePreparationAttempted = false;
+  // The last case's driver environment, for stopping its task at close.
+  let driverEnv: NodeJS.ProcessEnv | undefined;
   async function dispose(): Promise<void> {
     await mirror?.stop();
     if (configuration) {
-      // restore re-reads the persisted task and refuses unfinished/unbound work.
+      // A last case that timed out may still run. restore re-reads the
+      // persisted task and refuses unfinished/unbound work either way.
+      await settleTask(configuration, base, driverEnv).catch(() => undefined);
       await configuration.restore();
       configuration = undefined;
       submittedPrompt = undefined;
@@ -803,6 +1083,9 @@ export function coworkClaudeAi(
           },
           async confirmTaskComplete() {
             await control.call({ method: 'confirmTaskComplete' });
+          },
+          async settleTask() {
+            await control.call({ method: 'settleTask' });
           },
         };
         await rm(dir, { recursive: true, force: true });
@@ -936,7 +1219,8 @@ export function coworkClaudeAi(
     ...(base.reset
       ? {
           async reset(options) {
-            await configuration?.confirmTaskComplete();
+            if (configuration)
+              await settleTask(configuration, base, options.env);
             await base.reset!(options);
           },
         }
@@ -950,6 +1234,7 @@ export function coworkClaudeAi(
           'Prepare the cloud connector transaction before submitting.'
         );
       await configuration.confirmTaskComplete();
+      driverEnv = options.env;
       // Record intent before any UI action that might create a cloud task.
       // Even a rejected/timed-out submit stays unbound until proven otherwise.
       submittedPrompt = query;
@@ -1023,10 +1308,24 @@ export function coworkClaudeAi(
       }
     },
     // Approvals go to automatic HITL only inside a prepared session whose
-    // policy asks for them; anything else fails closed.
+    // policy asks for them; anything else fails closed. A clarifying
+    // question is not an approval: where the platform can answer it (Linux,
+    // `clarifyingQuestions: first-option`), it takes its first option even
+    // under a fail-on-approval policy, so the task doesn't wait forever.
     handleHitl: (options) =>
-      !configuration || configuration.plan.failOnApproval
+      !configuration
         ? Promise.resolve({ status: 'hitl_checked' as const, action_count: 0 })
-        : base.handleHitl(options),
+        : !configuration.plan.failOnApproval
+          ? base.handleHitl(options)
+          : options.pendingQuestion
+            ? base.handleHitl({
+                ...options,
+                approveWriteTools: false,
+                questionsOnly: true,
+              })
+            : Promise.resolve({
+                status: 'hitl_checked' as const,
+                action_count: 0,
+              }),
   };
 }

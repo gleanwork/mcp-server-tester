@@ -422,6 +422,12 @@ export type ClientContinuation =
 export interface ClientSessionResult {
   result: ClientRunResult;
   continuation: ClientContinuation;
+  /**
+   * The trial proved its own evidence before it ended: its task finished and
+   * the settings it ran with were checked. A later batch cleanup failure is
+   * then recorded on it but does not discard it.
+   */
+  verified?: boolean;
 }
 
 /** Servers that MST can check only after the client opens its app. */
