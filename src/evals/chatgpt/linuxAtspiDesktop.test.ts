@@ -915,12 +915,13 @@ describe('profession click', () => {
     ]);
   });
 
-  it('clicks a Work surface control at its observed geometry without an AT-SPI action', async () => {
+  it('clicks an observed control at its geometry without an AT-SPI action', async () => {
     for (const [index, [name, role]] of (
       [
         ['Switch mode, current mode: Codex', 'button'],
         ['ChatGPT Work Create, learn, and explore', 'menu item'],
         ['Switch to Work', 'button'],
+        ['Send', 'button'],
       ] as const
     ).entries()) {
       const log = join(root, `surface-${index}`);
@@ -931,7 +932,7 @@ describe('profession click', () => {
       fixture.choice.actions = [];
       const desktop = desktopFor(fixture.bus, { xdotool: helper });
       const nodes = await desktop.snapshot();
-      await desktop.clickSurfaceControl(
+      await desktop.clickObservedControl(
         nodes,
         nodes.find((node) => node.name === name)!
       );

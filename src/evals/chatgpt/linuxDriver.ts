@@ -94,8 +94,8 @@ export interface ChatgptLinuxDesktop<N extends ChatgptNode = ChatgptNode> {
   openPrompt(prompt: string): Promise<void>;
   /** One real mouse click on the profession choice, at its live geometry. */
   selectProfession(nodes: readonly N[], choice: N): Promise<void>;
-  /** One real mouse click on a selected Work surface control, at its live geometry. */
-  clickSurfaceControl(nodes: readonly N[], control: N): Promise<void>;
+  /** One real mouse click on a selected control, at its live geometry. */
+  clickObservedControl(nodes: readonly N[], control: N): Promise<void>;
 }
 
 export interface DriverClock {
@@ -407,7 +407,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       'mode_missing_or_ambiguous'
     );
     this.step = 'mode-open';
-    await this.action(() => this.desktop.clickSurfaceControl(nodes, toggle));
+    await this.action(() => this.desktop.clickObservedControl(nodes, toggle));
     const menu = await this.wait(
       (ns) => controls(ns, [MENU_LABELS[surface]], ['menu item']).length > 0
     );
@@ -416,7 +416,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       'surface_item_ambiguous'
     );
     this.step = 'mode-select';
-    await this.action(() => this.desktop.clickSurfaceControl(menu, item));
+    await this.action(() => this.desktop.clickObservedControl(menu, item));
     return this.wait(
       (ns) =>
         this.selected(ns, surface) ||
@@ -546,7 +546,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       if (workAccess.length) {
         this.step = 'work-access';
         await this.action(() =>
-          this.desktop.clickSurfaceControl(
+          this.desktop.clickObservedControl(
             nodes,
             unique(workAccess, 'surface_item_ambiguous')
           )
@@ -569,7 +569,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       if (workAccess.length) {
         this.step = 'work-access';
         await this.action(() =>
-          this.desktop.clickSurfaceControl(
+          this.desktop.clickObservedControl(
             nodes,
             unique(workAccess, 'surface_item_ambiguous')
           )
@@ -684,8 +684,11 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     );
     // Exactly one send. No retry, Enter fallback, or resubmission on a missing transcript.
     this.step = 'send';
-    await this.click(
-      unique(controls(nodes, ['Send']), 'send_missing_or_ambiguous')
+    await this.action(() =>
+      this.desktop.clickObservedControl(
+        nodes,
+        unique(controls(nodes, ['Send']), 'send_missing_or_ambiguous')
+      )
     );
     this.step = undefined;
     return this.receipt('submitted', surface);

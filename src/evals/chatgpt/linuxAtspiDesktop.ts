@@ -459,7 +459,7 @@ export class AtspiChatgptDesktop implements ChatgptLinuxDesktop<AtspiChatgptNode
     return this.clickObserved(nodes, choice);
   }
 
-  async clickSurfaceControl(
+  async clickObservedControl(
     nodes: readonly AtspiChatgptNode[],
     control: AtspiChatgptNode
   ): Promise<void> {

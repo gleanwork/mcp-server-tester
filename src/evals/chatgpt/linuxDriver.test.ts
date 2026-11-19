@@ -135,7 +135,7 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
     if (!this.staleChecked) choice.selected = true;
   }
 
-  async clickSurfaceControl(_: readonly FakeNode[], control: FakeNode) {
+  async clickObservedControl(_: readonly FakeNode[], control: FakeNode) {
     await this.activate(control, ['click']);
   }
 
