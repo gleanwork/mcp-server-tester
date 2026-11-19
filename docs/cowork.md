@@ -227,9 +227,9 @@ its state in a private temporary directory that MST removes after each
 operation.
 
 These were checked live against Claude Desktop 6.6395.1, calling the macOS
-entry point directly: readiness, one submitted task with the model already
-selected (three actions, under four seconds), a HITL pass with nothing to
-approve, and a reset after the task finished. A live check of an approval, a
+entry point directly: readiness, seven submitted tasks with the model already
+selected (three actions each, under four seconds), a HITL pass with nothing to
+approve, and a reset after each task finished. A live check of an approval, a
 model change, a reset while a task runs, and a whole `mst run` in first-party
 mode is pending; offline tests cover them.
 
