@@ -145,6 +145,7 @@ describe('Linux ChatGPT runtime adapter', () => {
       { step: 'private_step_text' },
       { step: null },
       { step: 'draft-open', phase: 'surface' },
+      { step: 'work-access', phase: 'composer' },
       { step: 'draft-open', phase: undefined },
       { step: 'draft-open', status: 'ready', phase: undefined },
       { step: 'draft-open', status: 'submitted', phase: 'composer' },

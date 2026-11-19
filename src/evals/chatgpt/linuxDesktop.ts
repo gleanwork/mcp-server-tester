@@ -28,6 +28,9 @@ const FailurePhase = z.enum([
   'composer',
 ]);
 const FailureStep = z.enum([
+  'work-access',
+  'mode-open',
+  'mode-select',
   'draft-open',
   'draft-surface',
   'draft-readback',
@@ -102,7 +105,18 @@ const Receipt = z
   .refine(
     (receipt) =>
       receipt.step === undefined ||
-      (receipt.status === 'failed' && receipt.phase === 'composer')
+      (receipt.status === 'failed' &&
+        ((receipt.phase === 'surface' &&
+          ['work-access', 'mode-open', 'mode-select'].includes(receipt.step)) ||
+          (receipt.phase === 'composer' &&
+            [
+              'mode-open',
+              'mode-select',
+              'draft-open',
+              'draft-surface',
+              'draft-readback',
+              'send',
+            ].includes(receipt.step))))
   );
 
 /** Failure-only fields from a validated receipt. Never raw helper output. */

@@ -353,6 +353,25 @@ describe('draft state (failure receipts)', () => {
 });
 
 describe('setup (prepare)', () => {
+  it('accepts one observed action for each mode control', async () => {
+    const desktop = new FakeDesktop(ready(CODEX));
+    const activate = desktop.activate.bind(desktop);
+    desktop.activate = async (control, allowed) => {
+      const observed = control.name.startsWith('Switch mode')
+        ? 'click'
+        : control.name.startsWith(WORK_ITEM)
+          ? 'press'
+          : 'click';
+      if (!allowed.includes(observed))
+        throw new DriverFailure('action_missing_or_ambiguous');
+      await activate(control, allowed);
+    };
+    const receipt = await driverFor(desktop).prepare('chatgpt-work');
+    expect(receipt.status).toBe('ready');
+    expect(desktop.names()).toContain(SWITCH_CODEX);
+    expect(desktop.names()).toContain(WORK_ITEM);
+  });
+
   it('opens one empty chat without readback or send', async () => {
     for (const [surface, label, count] of [
       ['chatgpt-work', WORK, 1],

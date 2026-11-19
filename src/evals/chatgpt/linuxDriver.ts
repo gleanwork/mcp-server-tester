@@ -404,7 +404,8 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       controls(nodes, ALL_MODE_LABELS),
       'mode_missing_or_ambiguous'
     );
-    await this.click(toggle, ['open']);
+    this.step = 'mode-open';
+    await this.click(toggle, ['open', 'click', 'press']);
     const menu = await this.wait(
       (ns) => controls(ns, [MENU_LABELS[surface]], ['menu item']).length > 0
     );
@@ -412,7 +413,8 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       controls(menu, [MENU_LABELS[surface]], ['menu item']),
       'surface_item_ambiguous'
     );
-    await this.click(item, ['select']);
+    this.step = 'mode-select';
+    await this.click(item, ['select', 'click', 'press']);
     return this.wait(
       (ns) =>
         this.selected(ns, surface) ||
@@ -540,6 +542,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     if (surface === 'chatgpt-work') {
       const workAccess = controls(nodes, ['Switch to Work']);
       if (workAccess.length) {
+        this.step = 'work-access';
         await this.click(unique(workAccess, 'surface_item_ambiguous'));
         nodes = await this.wait(
           (ns) => controls(ns, ALL_MODE_LABELS).length > 0
@@ -556,10 +559,13 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         DRAFT_POLLS
       );
       const workAccess = controls(nodes, ['Switch to Work']);
-      if (workAccess.length)
+      if (workAccess.length) {
+        this.step = 'work-access';
         await this.click(unique(workAccess, 'surface_item_ambiguous'));
+      }
     }
     this.phase = 'composer';
+    this.step = undefined;
     await this.wait((ns) => this.draftable(ns, surface));
     this.step = 'draft-open';
     await this.action(() => this.desktop.openPrompt(''));
