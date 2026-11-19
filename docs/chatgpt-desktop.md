@@ -61,6 +61,10 @@ including API keys. Launch credentials that MST adds travel on stdin, never in
 process arguments. Run ChatGPT evaluations from an environment that holds only
 the credentials the run needs. Narrowing the helper to an allowlist is planned,
 once it is confirmed on a real Mac that ChatGPT still launches and signs in.
+When a run ends, MST starts ChatGPT again only if it was running before, and
+then with none of the test process's variables, as it starts at login. The app
+never gets an operator's own `CODEX_ROLLOUT_TRACE_ROOT`: only MST's batch sets
+one ([The native rollout trace](#the-native-rollout-trace)).
 
 Example Linux client settings (in an eval config):
 
