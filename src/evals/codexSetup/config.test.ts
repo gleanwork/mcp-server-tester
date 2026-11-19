@@ -241,7 +241,6 @@ describe('Codex configuration lifecycle', () => {
         accountAppsPolicy: {
           appId: 'glean',
           allowedTools: ['search', 'read_document'],
-          allowPages: true,
         },
       }
     );
@@ -265,7 +264,6 @@ describe('Codex configuration lifecycle', () => {
             read_document: { enabled: true },
           },
         },
-        chatgpt_space: { enabled: true, default_tools_enabled: true },
       },
     });
     expect(installed.apps).not.toHaveProperty('other');

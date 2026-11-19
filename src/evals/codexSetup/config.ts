@@ -210,7 +210,6 @@ export interface CodexConfigInstallOptions {
   accountAppsPolicy?: {
     appId: string;
     allowedTools: string[];
-    allowPages?: true;
   };
   stagedLocalGlean?: { allowedTools: string[] };
   accountMcpPolicy?: {
@@ -474,9 +473,6 @@ export async function installCodexConfig(
             apps.allowedTools.map((tool) => [tool, { enabled: true }])
           ),
         },
-        ...(apps.allowPages
-          ? { chatgpt_space: { enabled: true, default_tools_enabled: true } }
-          : {}),
       };
     }
     const selectedAppPolicy = stagedLocalGlean

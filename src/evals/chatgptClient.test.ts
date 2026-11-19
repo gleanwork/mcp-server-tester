@@ -1350,7 +1350,6 @@ describe('ChatGPT V2 batch client', () => {
         workLocation: 'cloud',
         source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
         allowedTools: ['search', 'chat'],
-        allowPages: true,
         acknowledgeToolPolicyIsNotASandbox: true,
       },
     };

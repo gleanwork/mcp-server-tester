@@ -45,8 +45,6 @@ export interface ChatgptAppConfig {
         source: ChatgptWebIdentitySource;
         expectedWorkspace?: string;
         allowedTools?: string[];
-        /** Keep ChatGPT's Pages app available without counting it as Glean. */
-        allowPages?: true;
         acknowledgeToolPolicyIsNotASandbox: true;
       };
   /** Client plugins that MST installs into the fresh native profile before start. */

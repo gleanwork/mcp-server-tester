@@ -148,7 +148,6 @@ const schemaOf = (product: DesktopProduct) =>
                 .strict(),
               expectedWorkspace: z.string().trim().min(1).optional(),
               allowedTools: firstPartyAllowedTools.optional(),
-              allowPages: z.literal(true).optional(),
               acknowledgeToolPolicyIsNotASandbox: z.literal(true),
             })
             .strict(),
@@ -465,10 +464,6 @@ function desktopAdapter(
       const mcpCalls = result.toolCalls.filter(
         (call) => call.source !== 'builtin'
       );
-      const allowPages =
-        config.firstParty &&
-        'serverName' in config.firstParty &&
-        config.firstParty.allowPages === true;
       // ChatGPT reports account apps through its codex_apps transport. The
       // qualified tool name identifies the app; the transport alone does not.
       const selectedServerOf = (call: (typeof mcpCalls)[number]) => {
@@ -503,11 +498,6 @@ function desktopAdapter(
           call.server === 'codex_apps' &&
           builtinWorkApps.has(selectedServerOf(call) ?? '')
       );
-      const pageCalls = allowPages
-        ? builtinAppCalls.filter((call) =>
-            call.name.startsWith('chatgpt_space.')
-          )
-        : [];
       const unexpectedServers = [
         ...new Set(
           mcpCalls
@@ -583,7 +573,6 @@ function desktopAdapter(
             required: config.requireMcpCalls === true,
             selectedServers: [...serverLabels],
             configuredMcpCallCount: selectedCalls.length,
-            ...(allowPages ? { pagesCallCount: pageCalls.length } : {}),
             externalMcpCallCount: mcpCalls.length - builtinAppCalls.length,
             builtinAppCallCount: builtinAppCalls.length,
             builtinToolCallCount:

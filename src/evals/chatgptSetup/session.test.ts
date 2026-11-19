@@ -372,7 +372,7 @@ async function turnOf(
 }
 
 describe('ChatGPT batch app lifecycle', () => {
-  it('routes Local Work through a Glean and Pages app policy', async () => {
+  it('routes Local Work through a Glean tool policy while retaining Work apps', async () => {
     const session = new ChatgptAppSession(chatgptMacos);
     const firstParty = {
       serverName: 'glean_default',
@@ -381,7 +381,6 @@ describe('ChatGPT batch app lifecycle', () => {
       expectedOrganizationId: 'org-example123456',
       source: { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9222' },
       allowedTools: ['search'],
-      allowPages: true as const,
       acknowledgeToolPolicyIsNotASandbox: true as const,
     };
     try {
@@ -803,7 +802,6 @@ describe('ChatGPT Linux native lifecycle', () => {
           source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
           workLocation: 'local',
           allowedTools: ['search'],
-          allowPages: true,
           acknowledgeToolPolicyIsNotASandbox: true,
         },
         codexSetup: { servers: [] },
