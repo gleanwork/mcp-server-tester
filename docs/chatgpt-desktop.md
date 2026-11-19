@@ -103,11 +103,12 @@ session. MST reads manifest versions 1 and 2 (Codex 0.167, bundled with
 ChatGPT 26.1103, writes 2); a bundle of the trial's thread in another version
 is not kept, and `notKept` names the version. It never gives a judge the batch
 directory or a bundle selected only by its filename. A failed but bound turn
-can keep its partial trace, as can a turn whose evidence failed a later check;
-an unbound or duplicate session cannot. A turn that ran out of time keeps
-running until MST restarts or stops the app, so the backend may still be
-writing its bundle while MST copies it: MST keeps each file as it was when MST
-opened it.
+can keep its partial trace, as can a turn whose evidence failed a later check.
+A turn keeps no trace when it is unbound, or when an earlier trial of the batch
+claimed its session, whether that earlier turn completed or failed. A turn that
+ran out of time keeps running until MST restarts or stops the app, so the
+backend may still be writing its bundle while MST copies it: MST keeps each
+file as it was when MST opened it.
 The copy survives app/profile teardown, and the batch source is removed after
 the app stops.
 

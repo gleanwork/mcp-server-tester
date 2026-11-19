@@ -352,6 +352,100 @@ describe('ChatGPT and Codex app sessions', () => {
     }
   });
 
+  it('does not collect a failed turn trace for a session an earlier trial claimed', async () => {
+    lifecycle.traceRoot = join(home.value, 'native-traces');
+    const dir = join(lifecycle.traceRoot, 'earlier-bundle');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ schema_version: 1, root_thread_id: 'session' })
+    );
+    vi.mocked(runChatgptTurn)
+      .mockResolvedValueOnce({
+        success: true,
+        response: 'answer',
+        toolCalls: [],
+        clientMetadata: metadata,
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'timed out',
+        toolCalls: [],
+        clientMetadata: metadata,
+      });
+    const session = await CHATGPT_CLIENT.open!(
+      { config, input: { servers: [] } },
+      context
+    );
+    const kept: ClientArtifacts[] = [];
+    try {
+      const first = await session.run({
+        caseId: 'one',
+        trial: 0,
+        input: { prompt: 'query' },
+      });
+      if (first.result.artifacts) kept.push(first.result.artifacts);
+      expect(first.result.telemetry).toMatchObject({
+        rolloutTrace: { bundles: 1 },
+      });
+      const { result } = await session.run({
+        caseId: 'two',
+        trial: 0,
+        input: { prompt: 'query' },
+      });
+      if (result.artifacts) kept.push(result.artifacts);
+      // The failure stands; only the earlier trial's trace is withheld.
+      expect(result.error).toBe('timed out');
+      expect(result.artifacts).toBeUndefined();
+      expect(result.telemetry).toMatchObject({
+        rolloutTrace: {
+          notKept: 'No unique native thread was attributed to this trial.',
+        },
+      });
+    } finally {
+      await session.close();
+      for (const artifacts of kept)
+        await rm(artifacts.dir, { recursive: true, force: true });
+    }
+  });
+
+  it("claims a failed bound turn's session, so a later turn bound to it is refused", async () => {
+    vi.mocked(runChatgptTurn)
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'timed out',
+        toolCalls: [],
+        clientMetadata: metadata,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        response: 'answer',
+        toolCalls: [],
+        clientMetadata: metadata,
+      });
+    const session = await CHATGPT_CLIENT.open!(
+      { config, input: { servers: [] } },
+      context
+    );
+    try {
+      await session.run({
+        caseId: 'one',
+        trial: 0,
+        input: { prompt: 'query' },
+      });
+      // A failed case restarts the app before the next one.
+      await session.reset();
+      const { result } = await session.run({
+        caseId: 'two',
+        trial: 0,
+        input: { prompt: 'query' },
+      });
+      expect(result.error).toMatch(/refusing duplicate attribution/);
+    } finally {
+      await session.close();
+    }
+  });
+
   it.each([
     ['chatgpt', CHATGPT_CLIENT, 'chatgpt-work'],
     ['codex-app', CODEX_APP_CLIENT, 'codex'],

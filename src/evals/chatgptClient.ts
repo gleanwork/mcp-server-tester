@@ -374,11 +374,11 @@ function desktopAdapter(
       const transcript = turnRunResult(result, requests[0]!.input.servers);
       if (transcript.error)
         transcript.error = redactClientSecrets(transcript.error, secrets);
-      // A completed turn is attributed only to a distinct native session and
-      // turn that no earlier trial of the batch claimed.
+      // A bound turn, completed or failed, is attributed only to a distinct
+      // native session and turn that no earlier trial of the batch claimed.
       const { id: sessionId, turnId } = result.clientMetadata.session;
-      const refused =
-        result.success && !(sessionId && turnId && ledger.claim(sessionId));
+      const claimed = Boolean(sessionId && turnId && ledger.claim(sessionId));
+      const refused = result.success && !claimed;
       if (refused)
         transcript.error = `${label} requires a distinct native session and turn for each fresh query; refusing duplicate attribution.`;
       if (transcript.usage) {
@@ -430,11 +430,11 @@ function desktopAdapter(
               clientMetadata: result.clientMetadata,
             }));
       // The batch's backend writes every chat's trace in one root, so a
-      // trial keeps only its bound native thread's bundles. A failed bound
-      // turn, or a claimed one whose evidence failed a later check, may
-      // still have requests worth preserving; a turn the ledger refused must
-      // never collect another chat's prompts.
-      const traceThread = refused ? undefined : session?.id;
+      // trial keeps only the bundles of the native thread it claimed. A
+      // failed bound turn, or a claimed one whose evidence failed a later
+      // check, may still have requests worth preserving; a thread an earlier
+      // trial claimed must never give this trial that trial's prompts.
+      const traceThread = claimed ? sessionId : undefined;
       const trace = !appSession.rolloutTraceRoot
         ? undefined
         : traceThread
