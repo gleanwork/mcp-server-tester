@@ -92,7 +92,9 @@ describe('ChatGPT web identity source', () => {
       }
     );
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
-      expect(String(url)).toBe('http://127.0.0.1:9222/json/list');
+      const requested =
+        typeof url === 'string' ? url : url instanceof URL ? url.href : url.url;
+      expect(requested).toBe('http://127.0.0.1:9222/json/list');
       return new Response(
         JSON.stringify([
           {

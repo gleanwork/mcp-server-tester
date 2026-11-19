@@ -303,19 +303,30 @@ describe('Codex configuration lifecycle', () => {
       accountAppsPolicy: { appId: 'glean_default', allowedTools: ['search'] },
       stagedLocalGlean: { allowedTools: ['search'] },
     };
-    const installation = await installCodexConfig({ configPath, servers: [] }, options);
+    const installation = await installCodexConfig(
+      { configPath, servers: [] },
+      options
+    );
     const installed = parse(await readFile(configPath, 'utf8'));
-    expect(installed.mcp_servers).toEqual({ glean_default: {
-      url: 'https://scio-prod-be.glean.com/mcp/default',
-      enabled: true,
-      enabled_tools: ['search'],
-      bearer_token_env_var: 'MST_CHATGPT_GLEAN_ACCESS_TOKEN',
-      http_headers: { 'X-Glean-Metadata': 'mdm' },
-    } });
+    expect(installed.mcp_servers).toEqual({
+      glean_default: {
+        url: 'https://scio-prod-be.glean.com/mcp/default',
+        enabled: true,
+        enabled_tools: ['search'],
+        bearer_token_env_var: 'MST_CHATGPT_GLEAN_ACCESS_TOKEN',
+        http_headers: { 'X-Glean-Metadata': 'mdm' },
+      },
+    });
     await installation.restore();
-    await expect(installCodexConfig({ configPath, servers: [] }, {
-      ...options, stagedLocalGlean: { allowedTools: ['write'] },
-    })).rejects.toThrow('Invalid staged local Glean MCP policy');
+    await expect(
+      installCodexConfig(
+        { configPath, servers: [] },
+        {
+          ...options,
+          stagedLocalGlean: { allowedTools: ['write'] },
+        }
+      )
+    ).rejects.toThrow('Invalid staged local Glean MCP policy');
   });
   it('installs requested model/effort alongside MCP and restores original settings exactly', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mst-chatgpt-model-'));

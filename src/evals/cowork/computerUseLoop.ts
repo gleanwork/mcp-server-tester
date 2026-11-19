@@ -699,8 +699,7 @@ async function loop(
     });
     tools.push({
       name: focusWorkComposerTool,
-      description:
-        `After confirming ${locationLabel} and closing the location menu with Escape, click the empty Work composer using coordinates from a fresh screenshot.`,
+      description: `After confirming ${locationLabel} and closing the location menu with Escape, click the empty Work composer using coordinates from a fresh screenshot.`,
       input_schema: {
         type: 'object',
         properties: {
@@ -947,10 +946,7 @@ async function loop(
             });
             continue;
           }
-        } else if (
-          requireWorkLocation &&
-          toolName === focusWorkComposerTool
-        ) {
+        } else if (requireWorkLocation && toolName === focusWorkComposerTool) {
           const coordinate = action.coordinate;
           if (
             !workLocationConfirmed ||

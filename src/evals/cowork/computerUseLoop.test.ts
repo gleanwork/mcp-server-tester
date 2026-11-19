@@ -755,15 +755,18 @@ describe('ChatGPT Cloud Work confirmation', () => {
   });
 
   it('requires fresh Cloud confirmation before filling and submitting', async () => {
-    const run = await runActions([CONFIRM_CLOUD, ESCAPE, { action: 'screenshot' }], {
-      application: 'chatgpt',
-      requiredWorkLocation: 'cloud',
-      budget: 8,
-      plans: [
-        [FOCUS_CLOUD_COMPOSER, FILL, { action: 'screenshot' }],
-        [ENTER],
-      ],
-    });
+    const run = await runActions(
+      [CONFIRM_CLOUD, ESCAPE, { action: 'screenshot' }],
+      {
+        application: 'chatgpt',
+        requiredWorkLocation: 'cloud',
+        budget: 8,
+        plans: [
+          [FOCUS_CLOUD_COMPOSER, FILL, { action: 'screenshot' }],
+          [ENTER],
+        ],
+      }
+    );
     expect(run.result?.status).toBe('submitted');
     expect(run.executed.map((action) => action.action)).toEqual([
       'key',

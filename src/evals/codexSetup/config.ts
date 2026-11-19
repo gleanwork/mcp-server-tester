@@ -207,7 +207,11 @@ export interface CodexConfigInstallOptions {
   executionPolicy?: CodexExecutionPolicy;
   /** Rendered as `[plugins."<id>"] enabled = false` and `web_search`. */
   builtinToolPolicy?: CodexBuiltinToolPolicy;
-  accountAppsPolicy?: { appId: string; allowedTools: string[]; allowPages?: true };
+  accountAppsPolicy?: {
+    appId: string;
+    allowedTools: string[];
+    allowPages?: true;
+  };
   stagedLocalGlean?: { allowedTools: string[] };
   accountMcpPolicy?: {
     serverName: string;
@@ -309,9 +313,14 @@ export async function installCodexConfig(
   const apps = options.accountAppsPolicy;
   const stagedLocalGlean = options.stagedLocalGlean;
   const accountMcp = options.accountMcpPolicy;
-  if (stagedLocalGlean && (accountMcp || !apps || apps.appId !== 'glean_default' ||
+  if (
+    stagedLocalGlean &&
+    (accountMcp ||
+      !apps ||
+      apps.appId !== 'glean_default' ||
       stagedLocalGlean.allowedTools.length === 0 ||
-      stagedLocalGlean.allowedTools.join('\0') !== apps.allowedTools.join('\0')))
+      stagedLocalGlean.allowedTools.join('\0') !== apps.allowedTools.join('\0'))
+  )
     throw new Error('Invalid staged local Glean MCP policy.');
   if (
     apps !== undefined &&

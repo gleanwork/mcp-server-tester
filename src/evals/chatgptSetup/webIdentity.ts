@@ -74,16 +74,17 @@ async function readBoundedResponse(response: Response): Promise<string> {
       throw new Error(PROBE_ERROR);
     return text;
   }
-  const reader = response.body.getReader();
+  const reader: ReadableStreamDefaultReader<Uint8Array> =
+    response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
+    for (;;) {
+      const result = await reader.read();
+      if (result.done) break;
+      size += result.value.byteLength;
       if (size > MAX_RESPONSE_BYTES) throw new Error(PROBE_ERROR);
-      chunks.push(value);
+      chunks.push(result.value);
     }
   } finally {
     reader.releaseLock();

@@ -1297,7 +1297,11 @@ describe('ChatGPT V2 batch client', () => {
         },
       ],
     });
-    const [withGlean] = await collectClientBatch(CHATGPT_CLIENT, batch, context);
+    const [withGlean] = await collectClientBatch(
+      CHATGPT_CLIENT,
+      batch,
+      context
+    );
     expect(withGlean!.error).toBeUndefined();
     expect(withGlean!.telemetry?.mcpSelection).toMatchObject({
       status: 'passed',
@@ -1312,7 +1316,11 @@ describe('ChatGPT V2 batch client', () => {
       clientMetadata: metadata,
       toolCalls: [pageCall],
     });
-    const [pagesOnly] = await collectClientBatch(CHATGPT_CLIENT, batch, context);
+    const [pagesOnly] = await collectClientBatch(
+      CHATGPT_CLIENT,
+      batch,
+      context
+    );
     expect(pagesOnly!.error).toContain('without calling');
     expect(pagesOnly!.telemetry?.mcpSelection).toMatchObject({
       status: 'failed',

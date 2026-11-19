@@ -215,8 +215,17 @@ describe('Linux ChatGPT environment contract', () => {
       workLocation: 'cloud' as const,
       acknowledgeToolPolicyIsNotASandbox: true as const,
     };
-    const profile = await createLinuxChatgptProfile(accountEnvironment, 'linux');
-    await profile.beforeStart({ ...setup, servers: [] }, {}, [], {}, firstParty);
+    const profile = await createLinuxChatgptProfile(
+      accountEnvironment,
+      'linux'
+    );
+    await profile.beforeStart(
+      { ...setup, servers: [] },
+      {},
+      [],
+      {},
+      firstParty
+    );
     expect(probeAppServerAccountIdentity).toHaveBeenCalledWith(
       env.MST_CHATGPT_CODEX_PATH,
       expect.objectContaining({ CODEX_HOME: join(home, '.codex') }),
@@ -230,7 +239,10 @@ describe('Linux ChatGPT environment contract', () => {
       status: 'unavailable',
       reason: 'account-mismatch',
     });
-    const mismatch = await createLinuxChatgptProfile(accountEnvironment, 'linux');
+    const mismatch = await createLinuxChatgptProfile(
+      accountEnvironment,
+      'linux'
+    );
     await expect(
       mismatch.beforeStart({ ...setup, servers: [] }, {}, [], {}, firstParty)
     ).rejects.toMatchObject({ code: 'login_failed' });

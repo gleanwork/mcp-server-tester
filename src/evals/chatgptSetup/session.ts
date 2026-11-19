@@ -237,7 +237,12 @@ export class ChatgptAppSession {
       if (platform.permissionNotice)
         process.stderr.write(platform.permissionNotice);
       let accountMcpPolicy:
-        | { serverName: string; allowedTools: string[]; restrictAccountApps?: true; allowPages?: true }
+        | {
+            serverName: string;
+            allowedTools: string[];
+            restrictAccountApps?: true;
+            allowPages?: true;
+          }
         | undefined;
       let localAccountAppsPolicy:
         | { appId: string; allowedTools: string[]; allowPages?: true }
@@ -259,7 +264,9 @@ export class ChatgptAppSession {
             localAccountAppsPolicy = {
               appId: settings.firstParty.serverName,
               allowedTools: settings.firstParty.allowedTools,
-              ...(settings.firstParty.allowPages === true ? { allowPages: true } : {}),
+              ...(settings.firstParty.allowPages === true
+                ? { allowPages: true }
+                : {}),
             };
           this.record('setup', 'account_source_verified_by_runner');
         } else {
@@ -320,7 +327,9 @@ export class ChatgptAppSession {
             ...(settings.firstParty.workLocation !== 'cloud'
               ? { restrictAccountApps: true as const }
               : {}),
-            ...(settings.firstParty.allowPages === true ? { allowPages: true as const } : {}),
+            ...(settings.firstParty.allowPages === true
+              ? { allowPages: true as const }
+              : {}),
           };
           this.record('setup', 'probe_account_and_mcp');
         }
@@ -373,9 +382,15 @@ export class ChatgptAppSession {
                 ...(accountMcpPolicy ? { accountMcpPolicy } : {}),
               }
             : {}),
-          ...(localAccountAppsPolicy ? { accountAppsPolicy: localAccountAppsPolicy } : {}),
+          ...(localAccountAppsPolicy
+            ? { accountAppsPolicy: localAccountAppsPolicy }
+            : {}),
           ...(localAccountAppsPolicy && this.#profile
-            ? { stagedLocalGlean: { allowedTools: localAccountAppsPolicy.allowedTools } }
+            ? {
+                stagedLocalGlean: {
+                  allowedTools: localAccountAppsPolicy.allowedTools,
+                },
+              }
             : {}),
           ...this.#profile?.install,
         });

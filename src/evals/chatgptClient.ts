@@ -153,7 +153,11 @@ const schemaOf = (product: DesktopProduct) =>
             })
             .strict(),
         ])
-        .optional(),
+        .optional()
+        .meta({
+          'x-defaultDescription':
+            'off (requires explicit signed-in account setup)',
+        }),
       /** Gone: the surface is the client (`chatgpt` or `codex-app`). */
       surface: z
         .never({ error: (issue) => surfaceGone(product, issue.input) })

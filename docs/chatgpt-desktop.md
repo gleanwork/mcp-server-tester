@@ -85,6 +85,56 @@ to display labels such as `5.6 Terra Medium`. Linux rejects `clientOptions.confi
 
 ## macOS runs in your own profile
 
+### First-party ChatGPT Work
+
+`chatgpt` can use the existing signed-in Work account with an opt-in
+`clientOptions.firstParty` setting. It selects one existing MCP server by name,
+pins the expected email, ChatGPT account ID and organization ID, and chooses
+`workLocation: "local"` or `"cloud"` in the app. The source is one signed-in
+`chatgpt.com` page exposed through a loopback-only Chrome DevTools endpoint.
+MST reads only account ID, organization ID and email from that page and checks
+them against the pins; it does not export browser cookies or tokens. It also
+checks the native app's email and optional workspace, and the selected server's
+tool inventory before changing the app config. An explicit `allowedTools` list
+can only narrow tools annotated read-only. Eval MCP servers and client plugins
+cannot be mixed with this mode.
+
+```json
+{
+  "client": "chatgpt",
+  "clientOptions": {
+    "firstParty": {
+      "serverName": "glean_default",
+      "expectedEmail": "eval@example.com",
+      "expectedAccountId": "account-id",
+      "expectedOrganizationId": "org-example",
+      "workLocation": "local",
+      "source": { "kind": "cdp", "endpoint": "http://127.0.0.1:9223" },
+      "allowedTools": ["search"],
+      "allowPages": true,
+      "acknowledgeToolPolicyIsNotASandbox": true
+    }
+  }
+}
+```
+
+For Local Work, MST temporarily stages the selected MCP server, the allowed
+tools, and Pages in the desktop config, then restores the prior config. For
+Cloud Work, the account's Global Agent Security policy controls which apps
+can be called before they run. MST audits the native trace after calls and
+fails a case that used an off-list app or tool. The local config and audit are
+not a pre-call security boundary. Use server-side read-only permissions when
+write prevention must be guaranteed. `codex-app` does not support first-party
+Work mode.
+
+On Linux, a caller-owned account runtime must provide the native access token
+in `MST_CHATGPT_ACCOUNT_AUTH_FILE` inside a disposable profile. The browser
+session token cannot sign in the native client. The caller remains responsible
+for staging, cleanup, source-account continuity and account policy. MST checks
+the staged token and the VM's native identity before a prompt. The Glean MST
+plugin provides one such attached, one-shard GCE runtime; stock Docker does
+not stage an account. `--detach` refuses this first-party mode.
+
 On macOS, ChatGPT runs signed in as you, with your configuration. For the length
 of a run, MST swaps the MCP servers in `~/.codex/config.toml` for the eval's
 servers and turns off everything else that could answer instead of them. It

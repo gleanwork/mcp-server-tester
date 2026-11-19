@@ -394,7 +394,11 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     return switches.length === 1 && switches[0]!.name === MODE_LABELS[surface];
   }
 
-  async selectSurface(nodes: N[], surface: ChatgptSurface): Promise<N[]> {
+  async selectSurface(
+    nodes: N[],
+    surface: ChatgptSurface,
+    allowWorkDialog = false
+  ): Promise<N[]> {
     if (this.selected(nodes, surface)) return nodes;
     const toggle = unique(
       controls(nodes, ALL_MODE_LABELS),
@@ -409,7 +413,13 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       'surface_item_ambiguous'
     );
     await this.click(item, ['select']);
-    return this.wait((ns) => this.selected(ns, surface));
+    return this.wait(
+      (ns) =>
+        this.selected(ns, surface) ||
+        (allowWorkDialog &&
+          surface === 'chatgpt-work' &&
+          controls(ns, ['Switch to Work']).length > 0)
+    );
   }
 
   /** Only in a snapshot already taken, so it adds no polls; one click, never retried. */
@@ -434,6 +444,17 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     return true;
   }
 
+  /** A new Work chat may show Voice until a draft makes Send visible. */
+  draftable(nodes: readonly N[], surface: ChatgptSurface): boolean {
+    if (!this.selected(nodes, surface)) return false;
+    const editors = editorRoots(nodes);
+    if (!editors.length) return false;
+    unique(editors, 'composer_missing_or_ambiguous');
+    if (controls(nodes, ['Send'], BUTTONS, false).length > 1)
+      throw new DriverFailure('send_missing_or_ambiguous');
+    return true;
+  }
+
   /** Python's `any(...)`: stops at the first surface that is ready. */
   readyAny(nodes: readonly N[]): boolean {
     return (Object.keys(SURFACES) as ChatgptSurface[]).some((candidate) =>
@@ -449,6 +470,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       'Leave a note on my Desktop',
       'Go to ChatGPT',
       ANNOUNCEMENT_KEEP,
+      'Switch to Work',
       ...ALL_MODE_LABELS,
     ];
     let nodes = await this.wait(
@@ -515,9 +537,30 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     this.phase = 'announcement';
     nodes = await this.dismissAnnouncement(nodes);
     this.phase = 'surface';
-    await this.selectSurface(nodes, surface);
+    if (surface === 'chatgpt-work') {
+      const workAccess = controls(nodes, ['Switch to Work']);
+      if (workAccess.length) {
+        await this.click(unique(workAccess, 'surface_item_ambiguous'));
+        nodes = await this.wait(
+          (ns) => controls(ns, ALL_MODE_LABELS).length > 0
+        );
+      }
+    }
+    nodes = await this.selectSurface(nodes, surface, true);
+    if (surface === 'chatgpt-work') {
+      // The plan dialog can appear after the mode switch acknowledges selection.
+      nodes = await this.wait(
+        (ns) =>
+          controls(ns, ['Switch to Work']).length > 0 ||
+          this.draftable(ns, surface),
+        DRAFT_POLLS
+      );
+      const workAccess = controls(nodes, ['Switch to Work']);
+      if (workAccess.length)
+        await this.click(unique(workAccess, 'surface_item_ambiguous'));
+    }
     this.phase = 'composer';
-    await this.wait((ns) => this.ready(ns, surface));
+    await this.wait((ns) => this.draftable(ns, surface));
     this.step = 'draft-open';
     await this.action(() => this.desktop.openPrompt(''));
     this.step = 'draft-surface';
@@ -528,14 +571,17 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     // placeholder as Text; ready means controls and surface, not verified
     // emptiness.
     nodes = await this.wait(
-      (ns) => this.readyAny(ns) || controls(ns, [ANNOUNCEMENT_KEEP]).length > 0,
+      (ns) =>
+        (Object.keys(SURFACES) as ChatgptSurface[]).some((candidate) =>
+          this.draftable(ns, candidate)
+        ) || controls(ns, [ANNOUNCEMENT_KEEP]).length > 0,
       DRAFT_POLLS
     );
     // The announcement can open late, over the draft: the settle has seen it by now.
     nodes = await this.dismissAnnouncement(nodes);
     await this.selectSurface(nodes, surface);
     this.step = 'draft-readback';
-    await this.wait((ns) => this.ready(ns, surface));
+    await this.wait((ns) => this.draftable(ns, surface));
     this.step = undefined;
     return this.receipt('ready', surface);
   }

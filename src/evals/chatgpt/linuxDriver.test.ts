@@ -104,6 +104,7 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
   uncertainSend = false;
   staleChecked = false;
   announcement = false;
+  workAccess = false;
   snapshots = 0;
 
   constructor(public nodes: FakeNode[] = ready()) {}
@@ -152,6 +153,7 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
         ? [node('Continue with current model'), node('Try the new model now')]
         : ready(CODEX);
     else if (name === 'Continue with current model') this.nodes = ready(CODEX);
+    else if (name === 'Switch to Work') this.nodes = ready(WORK);
     else if (name.startsWith('Switch mode'))
       this.nodes = [
         ...this.nodes,
@@ -163,6 +165,8 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
         ? await this.text(composer(this.nodes))
         : '';
       this.nodes = ready(name.startsWith(CODEX) ? CODEX : WORK, text);
+      if (this.workAccess && name.startsWith(WORK_ITEM))
+        this.nodes = [node('Switch to Work')];
     } else if (name === 'Send' && this.uncertainSend)
       throw new DriverFailure('action_acknowledgement_uncertain');
   }
@@ -390,12 +394,11 @@ describe('setup (prepare)', () => {
     expect(composer(desktop.nodes).text).toBe('prior draft');
   });
 
-  it('still requires the surface, one composer and one Send after the open', async () => {
+  it('requires the surface and one composer, and rejects ambiguous Send after the open', async () => {
     const mutations: Record<string, (nodes: FakeNode[]) => void> = {
       surface: (ns) => void (ns[0]!.name = 'unknown mode'),
       'composer-missing': (ns) => void ns.pop(),
       'composer-ambiguous': (ns) => void ns.push(editor('other', 'entry')),
-      'send-missing': (ns) => void ns.splice(1, 1),
       'send-ambiguous': (ns) => void ns.push(node('Send')),
     };
     for (const mutate of Object.values(mutations)) {
@@ -406,6 +409,42 @@ describe('setup (prepare)', () => {
       );
       expect(desktop.actions).toEqual([['open', '']]);
     }
+  });
+
+  it('allows a fresh Work composer before Send exists', async () => {
+    const desktop = new FakeDesktop(ready(WORK));
+    desktop.nodes.splice(1, 1);
+    desktop.openPrompt = async (prompt) => {
+      desktop.actions.push(['open', prompt]);
+      desktop.nodes = ready(WORK);
+      desktop.nodes.splice(1, 1);
+    };
+    expect((await driverFor(desktop).prepare('chatgpt-work')).status).toBe(
+      'ready'
+    );
+    expect(desktop.actions).toEqual([['open', '']]);
+  });
+
+  it('enters Work from an initial plan-access dialog', async () => {
+    const desktop = new FakeDesktop([node('Switch to Work')]);
+    expect((await driverFor(desktop).prepare('chatgpt-work')).status).toBe(
+      'ready'
+    );
+    expect(desktop.names()).toEqual(['Switch to Work', 'open']);
+  });
+
+  it('enters Work when plan access appears after selecting the mode', async () => {
+    const desktop = new FakeDesktop(ready(CODEX));
+    desktop.workAccess = true;
+    expect((await driverFor(desktop).prepare('chatgpt-work')).status).toBe(
+      'ready'
+    );
+    expect(desktop.names()).toEqual([
+      SWITCH_CODEX,
+      WORK_ITEM,
+      'Switch to Work',
+      'open',
+    ]);
   });
 
   it('skips the known intro, then opens one empty chat', async () => {
@@ -553,8 +592,8 @@ describe('setup (prepare)', () => {
     const desktop = new FakeDesktop();
     await driverFor(desktop).prepare('chatgpt-work');
     expect(desktop.actions).toEqual([['open', '']]);
-    // 1 initial + 1 surface/composer + settle + draft-surface + readback.
-    expect(desktop.snapshots).toBe(3 + SETUP_SETTLE_POLLS + 1);
+    // Initial, surface, Work dialog check, composer, settle, draft, readback.
+    expect(desktop.snapshots).toBe(4 + SETUP_SETTLE_POLLS + 1);
     const driver = driverFor(new FakeDesktop(), { timeout: 2_000 });
     expect(await failure(driver.prepare('chatgpt-work'))).toBe(
       'deadline_exceeded'

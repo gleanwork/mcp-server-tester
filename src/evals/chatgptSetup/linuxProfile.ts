@@ -79,6 +79,16 @@ const GATEWAY_PROVIDER_ID = 'mst_gateway';
 const GATEWAY_CHECK_TIMEOUT_MS = 15_000;
 const STAGED_GLEAN_TOKEN = '/run/mst/chatgpt-account/glean-access-token';
 const GLEAN_TOKEN_ENV = 'MST_CHATGPT_GLEAN_ACCESS_TOKEN';
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseRecord(text: string): Record<string, unknown> {
+  const value: unknown = JSON.parse(text);
+  if (!record(value)) throw new Error('invalid account credential');
+  return value;
+}
 const REQUIRED_BUSES = [
   'DBUS_SESSION_BUS_ADDRESS',
   'AT_SPI_BUS_ADDRESS',
@@ -345,25 +355,33 @@ export async function importAccountAuth(
       throw new Error();
     const read = await handle.read(bytes, 0, bytes.length, 0);
     if (read.bytesRead > 32 * 1024) throw new Error();
-    const auth = JSON.parse(bytes.subarray(0, read.bytesRead).toString('utf8'));
-    const token = auth?.tokens?.access_token;
+    const auth = parseRecord(
+      bytes.subarray(0, read.bytesRead).toString('utf8')
+    );
+    const tokens = auth.tokens;
+    if (!record(tokens)) throw new Error();
+    const token = tokens.access_token;
     if (
-      auth?.auth_mode !== 'chatgptAuthTokens' ||
-      auth?.tokens?.account_id !== firstParty.expectedAccountId ||
-      auth?.tokens?.id_token !== token ||
-      auth?.tokens?.refresh_token !== '' ||
+      auth.auth_mode !== 'chatgptAuthTokens' ||
+      tokens.account_id !== firstParty.expectedAccountId ||
+      tokens.id_token !== token ||
+      tokens.refresh_token !== '' ||
       typeof token !== 'string' ||
       !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
     )
       throw new Error();
-    const claims = JSON.parse(
+    const claims = parseRecord(
       Buffer.from(token.split('.')[1]!, 'base64url').toString('utf8')
     );
+    const account = claims['https://api.openai.com/auth'];
+    const profile = claims['https://api.openai.com/profile'];
     if (
-      claims?.['https://api.openai.com/auth']?.chatgpt_account_id !==
-        firstParty.expectedAccountId ||
-      claims?.['https://api.openai.com/profile']?.email?.toLowerCase() !==
-        firstParty.expectedEmail.toLowerCase() ||
+      !record(account) ||
+      account.chatgpt_account_id !== firstParty.expectedAccountId ||
+      !record(profile) ||
+      typeof profile.email !== 'string' ||
+      profile.email.toLowerCase() !== firstParty.expectedEmail.toLowerCase() ||
+      typeof claims.exp !== 'number' ||
       !Number.isSafeInteger(claims.exp) ||
       claims.exp * 1000 <= Date.now() + 60_000
     )
@@ -503,21 +521,37 @@ export async function createLinuxChatgptProfile(
       }
       // MST checked the servers before the batch started. The app-server
       // status probe below gets their bearer tokens, by env var name.
-      const localGlean = inference.mode === 'account' && firstParty &&
-        'serverName' in firstParty && firstParty.workLocation !== 'cloud';
+      const localGlean =
+        inference.mode === 'account' &&
+        firstParty &&
+        'serverName' in firstParty &&
+        firstParty.workLocation !== 'cloud';
       if (localGlean) {
         if (firstParty.serverName !== 'glean_default')
           throw fail('mcp_server_not_ready');
         const info = await lstat(STAGED_GLEAN_TOKEN);
-        if (!info.isFile() || info.nlink !== 1 || (info.mode & 0o777) !== 0o600 ||
-            info.size < 100 || info.size > 16384)
+        if (
+          !info.isFile() ||
+          info.nlink !== 1 ||
+          (info.mode & 0o777) !== 0o600 ||
+          info.size < 100 ||
+          info.size > 16384
+        )
           throw fail('mcp_server_not_ready');
         const token = await readFile(STAGED_GLEAN_TOKEN, 'utf8');
         const parts = token.split('.');
         if (parts.length !== 3) throw fail('mcp_server_not_ready');
-        const claims = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
-        if (claims.email?.toLowerCase() !== firstParty.expectedEmail.toLowerCase() ||
-            !Number.isSafeInteger(claims.exp) || claims.exp * 1000 < Date.now() + 60_000)
+        const claims = parseRecord(
+          Buffer.from(parts[1]!, 'base64url').toString('utf8')
+        );
+        if (
+          typeof claims.email !== 'string' ||
+          claims.email.toLowerCase() !==
+            firstParty.expectedEmail.toLowerCase() ||
+          typeof claims.exp !== 'number' ||
+          !Number.isSafeInteger(claims.exp) ||
+          claims.exp * 1000 < Date.now() + 60_000
+        )
           throw fail('mcp_server_not_ready');
         native[GLEAN_TOKEN_ENV] = token;
         launch[GLEAN_TOKEN_ENV] = token;
@@ -554,8 +588,14 @@ export async function createLinuxChatgptProfile(
       if (readiness.mcpStatus.status !== 'available')
         throw fail('mcp_status_unavailable');
       for (const [index, server] of readiness.mcpStatus.servers.entries()) {
-        if (localGlean && index === setup.servers.length + pluginTargets.length) {
-          if (!appServerServerReady(server, 'bearerToken') || server.toolCount! < 1)
+        if (
+          localGlean &&
+          index === setup.servers.length + pluginTargets.length
+        ) {
+          if (
+            !appServerServerReady(server, 'bearerToken') ||
+            server.toolCount! < 1
+          )
             throw fail('mcp_server_not_ready');
           continue;
         }
