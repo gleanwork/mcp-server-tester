@@ -400,12 +400,9 @@ describe('ChatGPT batch app lifecycle', () => {
           accountMcpPolicy: {
             serverName: 'glean_default',
             allowedTools: ['search'],
-            restrictAccountApps: true,
-            allowPages: true,
+            limitAccountAppTools: true,
           },
-          builtinToolPolicy: expect.objectContaining({
-            disabledFeatures: ['apps', 'in_app_browser'],
-          }),
+          builtinToolPolicy: { disabledPlugins: [] },
         })
       );
     } finally {
@@ -457,7 +454,7 @@ describe('ChatGPT batch app lifecycle', () => {
           accountMcpPolicy: {
             serverName: 'glean_default',
             allowedTools: ['search', 'read_document'],
-            restrictAccountApps: true,
+            limitAccountAppTools: true,
           },
         })
       );
@@ -788,7 +785,7 @@ describe('ChatGPT Linux native lifecycle', () => {
     }
   });
 
-  it('installs a Glean and Pages app policy for VM Local Work', async () => {
+  it('stages only the Glean MCP server for VM Local Work', async () => {
     const environment = linuxEnvironment(home);
     delete environment.MST_CHATGPT_API_KEY_FILE;
     environment.MST_CHATGPT_ACCOUNT_AUTH_FILE =
@@ -815,12 +812,12 @@ describe('ChatGPT Linux native lifecycle', () => {
       expect(installCodexConfig).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          accountAppsPolicy: {
-            appId: 'glean_default',
-            allowedTools: ['search'],
-            allowPages: true,
-          },
+          stagedLocalGlean: { allowedTools: ['search'] },
         })
+      );
+      expect(installCodexConfig).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ accountAppsPolicy: expect.anything() })
       );
     } finally {
       await session.dispose();

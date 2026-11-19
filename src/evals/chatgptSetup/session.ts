@@ -119,13 +119,7 @@ const MAC_DISABLED_BUILTINS = new Set([
 ]);
 const PLUGIN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9._-]+$/;
 
-/**
- * macOS runs in the user's own profile, so turn off what would answer
- * instead of the servers under test, for the run only (the config is
- * restored after): ChatGPT's account connectors (`apps`, the `codex_apps`
- * server), web search and the in-app browser, computer use, and every plugin the
- * user installed (their skills and MCP servers).
- */
+/** Disable user-installed plugins for first-party runs; preserve Work built-ins. */
 async function macBuiltinToolPolicy(
   configPath: string,
   firstParty: boolean
@@ -140,23 +134,18 @@ async function macBuiltinToolPolicy(
   } catch {
     // No readable config: nothing installed to turn off.
   }
+  const userPlugins = plugins.filter(
+    (id) =>
+      PLUGIN_ID.test(id) &&
+      !OPENAI_MARKETPLACES.has(id.slice(id.indexOf('@') + 1))
+  );
+  if (firstParty) return { disabledPlugins: userPlugins };
   return {
     webSearch: 'disabled',
-    disabledPlugins: [
-      ...new Set([
-        ...MAC_DISABLED_BUILTINS,
-        ...plugins.filter(
-          (id) =>
-            PLUGIN_ID.test(id) &&
-            !OPENAI_MARKETPLACES.has(id.slice(id.indexOf('@') + 1))
-        ),
-      ]),
-    ],
+    disabledPlugins: [...new Set([...MAC_DISABLED_BUILTINS, ...userPlugins])],
     // The in-app browser is a second way to the web, and its New tab sits
     // where the planner looks for New chat.
-    disabledFeatures: firstParty
-      ? ['in_app_browser']
-      : ['apps', 'in_app_browser'],
+    disabledFeatures: ['apps', 'in_app_browser'],
   };
 }
 
@@ -240,13 +229,10 @@ export class ChatgptAppSession {
         | {
             serverName: string;
             allowedTools: string[];
-            restrictAccountApps?: true;
-            allowPages?: true;
+            limitAccountAppTools?: true;
           }
         | undefined;
-      let localAccountAppsPolicy:
-        | { appId: string; allowedTools: string[]; allowPages?: true }
-        | undefined;
+      let localAllowedTools: string[] | undefined;
       if (settings.firstParty && 'serverName' in settings.firstParty) {
         if (!settings.setup)
           throw new Error('ChatGPT account MCP setup is unavailable.');
@@ -254,20 +240,13 @@ export class ChatgptAppSession {
           // The source host verified browser/native identity before staging.
           // Linux's fresh profile imports the staged native token in beforeStart.
           // Work Cloud app availability follows cloud orchestrator policy.
-          // This explicit read-only list is audited after the turn. The
-          // account's Global policy must enforce it before any call.
+          // This explicit read-only list is audited after the turn.
           if (!settings.firstParty.allowedTools?.length)
             throw new Error(
               'Linux ChatGPT account runs require an explicit tool allowlist.'
             );
           if (settings.firstParty.workLocation !== 'cloud')
-            localAccountAppsPolicy = {
-              appId: settings.firstParty.serverName,
-              allowedTools: settings.firstParty.allowedTools,
-              ...(settings.firstParty.allowPages === true
-                ? { allowPages: true }
-                : {}),
-            };
+            localAllowedTools = settings.firstParty.allowedTools;
           this.record('setup', 'account_source_verified_by_runner');
         } else {
           if (
@@ -325,10 +304,7 @@ export class ChatgptAppSession {
             serverName: settings.firstParty.serverName,
             allowedTools,
             ...(settings.firstParty.workLocation !== 'cloud'
-              ? { restrictAccountApps: true as const }
-              : {}),
-            ...(settings.firstParty.allowPages === true
-              ? { allowPages: true as const }
+              ? { limitAccountAppTools: true as const }
               : {}),
           };
           this.record('setup', 'probe_account_and_mcp');
@@ -373,8 +349,7 @@ export class ChatgptAppSession {
                 builtinToolPolicy: await macBuiltinToolPolicy(
                   settings.codexSetup.configPath ??
                     join(defaultChatgptConfigHome(), 'config.toml'),
-                  settings.firstParty !== undefined &&
-                    'appId' in settings.firstParty
+                  settings.firstParty !== undefined
                 ),
                 ...(settings.firstParty && 'appId' in settings.firstParty
                   ? { accountAppsPolicy: settings.firstParty }
@@ -382,13 +357,10 @@ export class ChatgptAppSession {
                 ...(accountMcpPolicy ? { accountMcpPolicy } : {}),
               }
             : {}),
-          ...(localAccountAppsPolicy
-            ? { accountAppsPolicy: localAccountAppsPolicy }
-            : {}),
-          ...(localAccountAppsPolicy && this.#profile
+          ...(localAllowedTools && this.#profile
             ? {
                 stagedLocalGlean: {
-                  allowedTools: localAccountAppsPolicy.allowedTools,
+                  allowedTools: localAllowedTools,
                 },
               }
             : {}),

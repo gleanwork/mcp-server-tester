@@ -91,7 +91,7 @@ export interface CodexExecutionPolicy {
 export interface CodexBuiltinToolPolicy {
   /** Bundled plugin IDs, e.g. `unified-computer-use@openai-bundled`. */
   disabledPlugins: readonly string[];
-  webSearch: 'disabled';
+  webSearch?: 'disabled';
   /** Codex feature flags rendered as `[features] <name> = false`. */
   disabledFeatures?: readonly string[];
 }
@@ -216,9 +216,8 @@ export interface CodexConfigInstallOptions {
   accountMcpPolicy?: {
     serverName: string;
     allowedTools: string[];
-    /** Local Work only: hide other account apps before the turn. */
-    restrictAccountApps?: true;
-    allowPages?: true;
+    /** Local Work: narrow this app's tools without changing other apps. */
+    limitAccountAppTools?: true;
   };
   /**
    * Send turns to an OpenAI-compatible gateway instead of a signed-in account:
@@ -316,10 +315,17 @@ export async function installCodexConfig(
   if (
     stagedLocalGlean &&
     (accountMcp ||
-      !apps ||
-      apps.appId !== 'glean_default' ||
       stagedLocalGlean.allowedTools.length === 0 ||
-      stagedLocalGlean.allowedTools.join('\0') !== apps.allowedTools.join('\0'))
+      stagedLocalGlean.allowedTools.length > 50 ||
+      new Set(stagedLocalGlean.allowedTools).size !==
+        stagedLocalGlean.allowedTools.length ||
+      !stagedLocalGlean.allowedTools.every((tool) =>
+        /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(tool)
+      ) ||
+      (apps !== undefined &&
+        (apps.appId !== 'glean_default' ||
+          stagedLocalGlean.allowedTools.join('\0') !==
+            apps.allowedTools.join('\0'))))
   )
     throw new Error('Invalid staged local Glean MCP policy.');
   if (
@@ -434,7 +440,7 @@ export async function installCodexConfig(
       settings.sandbox_mode = policy.sandboxMode;
     }
     if (tools !== undefined) {
-      settings.web_search = tools.webSearch;
+      if (tools.webSearch !== undefined) settings.web_search = tools.webSearch;
       const plugins = isTable(settings.plugins) ? settings.plugins : {};
       for (const id of tools.disabledPlugins)
         plugins[id] = {
@@ -473,22 +479,27 @@ export async function installCodexConfig(
           : {}),
       };
     }
-    if (accountMcp?.restrictAccountApps) {
+    const selectedAppPolicy = stagedLocalGlean
+      ? { name: 'glean_default', tools: stagedLocalGlean.allowedTools }
+      : accountMcp?.limitAccountAppTools
+        ? { name: accountMcp.serverName, tools: accountMcp.allowedTools }
+        : undefined;
+    if (selectedAppPolicy) {
       const features = isTable(settings.features) ? settings.features : {};
       features.apps = true;
       settings.features = features;
+      const existingApps = isTable(settings.apps) ? settings.apps : {};
+      const existingApp = existingApps[selectedAppPolicy.name];
       settings.apps = {
-        _default: { enabled: false },
-        [accountMcp.serverName]: {
+        ...existingApps,
+        [selectedAppPolicy.name]: {
+          ...(isTable(existingApp) ? existingApp : {}),
           enabled: true,
           default_tools_enabled: false,
           tools: Object.fromEntries(
-            accountMcp.allowedTools.map((tool) => [tool, { enabled: true }])
+            selectedAppPolicy.tools.map((tool) => [tool, { enabled: true }])
           ),
         },
-        ...(accountMcp.allowPages
-          ? { chatgpt_space: { enabled: true, default_tools_enabled: true } }
-          : {}),
       };
     }
     if (provider !== undefined) {

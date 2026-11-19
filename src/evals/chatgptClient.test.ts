@@ -1259,7 +1259,7 @@ describe('ChatGPT V2 batch client', () => {
       unexpectedServers: [],
     });
   });
-  it('keeps Pages calls separate from required Glean calls', async () => {
+  it('keeps Work built-in app calls separate from required Glean calls', async () => {
     const batch = requests().slice(0, 1);
     batch[0]!.input.servers = [];
     batch[0]!.config = {
@@ -1273,7 +1273,6 @@ describe('ChatGPT V2 batch client', () => {
         workLocation: 'cloud',
         source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
         allowedTools: ['search'],
-        allowPages: true,
         acknowledgeToolPolicyIsNotASandbox: true,
       },
     };
@@ -1289,6 +1288,12 @@ describe('ChatGPT V2 batch client', () => {
       clientMetadata: metadata,
       toolCalls: [
         pageCall,
+        {
+          name: 'openai_library.search',
+          source: 'mcp',
+          server: 'codex_apps',
+          arguments: {},
+        },
         {
           name: 'glean_default.search',
           source: 'mcp',
@@ -1306,7 +1311,8 @@ describe('ChatGPT V2 batch client', () => {
     expect(withGlean!.telemetry?.mcpSelection).toMatchObject({
       status: 'passed',
       configuredMcpCallCount: 1,
-      pagesCallCount: 1,
+      builtinAppCallCount: 2,
+      externalMcpCallCount: 1,
       unexpectedServers: [],
     });
 
@@ -1325,7 +1331,8 @@ describe('ChatGPT V2 batch client', () => {
     expect(pagesOnly!.telemetry?.mcpSelection).toMatchObject({
       status: 'failed',
       configuredMcpCallCount: 0,
-      pagesCallCount: 1,
+      builtinAppCallCount: 1,
+      externalMcpCallCount: 0,
       unexpectedServers: [],
     });
   });
@@ -1353,7 +1360,7 @@ describe('ChatGPT V2 batch client', () => {
       clientMetadata: metadata,
       toolCalls: [
         {
-          name: 'other.search',
+          name: 'github.search',
           source: 'mcp',
           server: 'codex_apps',
           arguments: {},
@@ -1369,7 +1376,7 @@ describe('ChatGPT V2 batch client', () => {
     expect(transcript!.telemetry?.mcpSelection).toMatchObject({
       status: 'failed',
       configuredMcpCallCount: 0,
-      unexpectedServers: ['codex_apps'],
+      unexpectedServers: ['github'],
     });
   });
   it('fails a selected account app call outside its tool allowlist', async () => {

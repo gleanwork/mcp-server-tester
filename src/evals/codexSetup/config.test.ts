@@ -132,7 +132,7 @@ describe('Codex configuration lifecycle', () => {
     expect(await readFile(configPath, 'utf8')).toBe(original);
   });
 
-  it('temporarily allows only Glean and Pages account apps for Local Work', async () => {
+  it('leaves Work app settings intact while narrowing the selected MCP server', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mst-local-apps-'));
     temporaryDirectories.push(directory);
     const configPath = join(directory, 'config.toml');
@@ -146,26 +146,23 @@ describe('Codex configuration lifecycle', () => {
         accountMcpPolicy: {
           serverName: 'glean_default',
           allowedTools: ['search'],
-          restrictAccountApps: true,
-          allowPages: true,
+          limitAccountAppTools: true,
         },
       }
     );
     const installed = parse(await readFile(configPath, 'utf8'));
     expect(installed).toMatchObject({
-      features: { apps: true },
       mcp_servers: { glean_default: { enabled_tools: ['search'] } },
       apps: {
-        _default: { enabled: false },
+        github: { enabled: true },
         glean_default: {
           enabled: true,
           default_tools_enabled: false,
           tools: { search: { enabled: true } },
         },
-        chatgpt_space: { enabled: true, default_tools_enabled: true },
       },
     });
-    expect(installed.apps).not.toHaveProperty('github');
+    expect(installed.apps).not.toHaveProperty('_default');
     await installation.restore();
     expect(await readFile(configPath, 'utf8')).toBe(original);
   });
@@ -295,12 +292,13 @@ describe('Codex configuration lifecycle', () => {
       expect(await readFile(configPath, 'utf8')).toBe(original);
     }
   });
-  it('stages only the pinned local Glean MCP server with the same read tool list', async () => {
+  it('stages only the pinned local Glean MCP server and preserves Work apps', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mst-local-glean-'));
     temporaryDirectories.push(directory);
     const configPath = join(directory, 'config.toml');
+    const original = '[apps.chatgpt_space]\nenabled = true\n';
+    await writeFile(configPath, original, { mode: 0o600 });
     const options = {
-      accountAppsPolicy: { appId: 'glean_default', allowedTools: ['search'] },
       stagedLocalGlean: { allowedTools: ['search'] },
     };
     const installation = await installCodexConfig(
@@ -317,13 +315,22 @@ describe('Codex configuration lifecycle', () => {
         http_headers: { 'X-Glean-Metadata': 'mdm' },
       },
     });
+    expect(installed.apps).toEqual({
+      chatgpt_space: { enabled: true },
+      glean_default: {
+        enabled: true,
+        default_tools_enabled: false,
+        tools: { search: { enabled: true } },
+      },
+    });
     await installation.restore();
+    expect(await readFile(configPath, 'utf8')).toBe(original);
     await expect(
       installCodexConfig(
         { configPath, servers: [] },
         {
           ...options,
-          stagedLocalGlean: { allowedTools: ['write'] },
+          stagedLocalGlean: { allowedTools: ['search', 'search'] },
         }
       )
     ).rejects.toThrow('Invalid staged local Glean MCP policy');

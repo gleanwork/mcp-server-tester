@@ -475,23 +475,37 @@ function desktopAdapter(
         if (
           call.server === 'codex_apps' &&
           config.firstParty &&
-          'serverName' in config.firstParty &&
-          call.name.startsWith(`${config.firstParty.serverName}.`) &&
-          call.name.length > config.firstParty.serverName.length + 1
-        )
-          return config.firstParty.serverName;
+          'serverName' in config.firstParty
+        ) {
+          const dot = call.name.indexOf('.');
+          if (dot > 0 && dot < call.name.length - 1)
+            return call.name.slice(0, dot);
+        }
         return call.server;
       };
       const selectedCalls = mcpCalls.filter((call) => {
         const server = selectedServerOf(call);
         return server && serverLabels.has(server);
       });
+      // Work's own apps share the codex_apps transport with connected apps.
+      // These reserved app IDs are product tools, not evaluation connectors.
+      const builtinWorkApps = new Set([
+        'automations',
+        'chatgpt_space',
+        'openai_library',
+        'personal_context',
+        'plugin_management',
+        'sites',
+        'work_pets',
+      ]);
+      const builtinAppCalls = mcpCalls.filter(
+        (call) =>
+          call.server === 'codex_apps' &&
+          builtinWorkApps.has(selectedServerOf(call) ?? '')
+      );
       const pageCalls = allowPages
-        ? mcpCalls.filter(
-            (call) =>
-              call.server === 'codex_apps' &&
-              call.name.startsWith('chatgpt_space.') &&
-              call.name.length > 'chatgpt_space.'.length
+        ? builtinAppCalls.filter((call) =>
+            call.name.startsWith('chatgpt_space.')
           )
         : [];
       const unexpectedServers = [
@@ -501,7 +515,7 @@ function desktopAdapter(
               const server = selectedServerOf(call);
               return (
                 (!server || !serverLabels.has(server)) &&
-                !pageCalls.includes(call)
+                !builtinAppCalls.includes(call)
               );
             })
             .map((call) => selectedServerOf(call) ?? '(unattributed)')
@@ -570,10 +584,11 @@ function desktopAdapter(
             selectedServers: [...serverLabels],
             configuredMcpCallCount: selectedCalls.length,
             ...(allowPages ? { pagesCallCount: pageCalls.length } : {}),
-            externalMcpCallCount: mcpCalls.length,
-            builtinToolCallCount: result.toolCalls.filter(
-              (call) => call.source === 'builtin'
-            ).length,
+            externalMcpCallCount: mcpCalls.length - builtinAppCalls.length,
+            builtinAppCallCount: builtinAppCalls.length,
+            builtinToolCallCount:
+              result.toolCalls.filter((call) => call.source === 'builtin')
+                .length + builtinAppCalls.length,
             unexpectedServers,
             ...(accountPolicy?.allowedTools ? { unexpectedTools } : {}),
             ...(measurementError ? { error: measurementError } : {}),

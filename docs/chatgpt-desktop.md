@@ -111,20 +111,21 @@ cannot be mixed with this mode.
       "workLocation": "local",
       "source": { "kind": "cdp", "endpoint": "http://127.0.0.1:9223" },
       "allowedTools": ["search"],
-      "allowPages": true,
       "acknowledgeToolPolicyIsNotASandbox": true
     }
   }
 }
 ```
 
-For Local Work, MST temporarily stages the selected MCP server, the allowed
-tools, and Pages in the desktop config, then restores the prior config. For
-Cloud Work, the account's Global Agent Security policy controls which apps
+For Local Work, MST temporarily stages the selected MCP server and allowed
+tools in the desktop config, then restores the prior config. Built-in Work apps
+remain available. Keep only the selected external connector on the dedicated
+eval account. For Cloud Work, the account's app settings control which apps
 can be called before they run. MST audits the native trace after calls and
-fails a case that used an off-list app or tool. The local config and audit are
-not a pre-call security boundary. Use server-side read-only permissions when
-write prevention must be guaranteed. `codex-app` does not support first-party
+fails a case that used an off-list external app or tool. Known Work apps are
+excluded from that audit; unknown app IDs fail the case. The local config and
+audit are not a pre-call security boundary. Use server-side read-only
+permissions when write prevention must be guaranteed. `codex-app` does not support first-party
 Work mode.
 
 On Linux, a caller-owned account runtime must provide the native access token
