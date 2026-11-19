@@ -915,22 +915,31 @@ describe('profession click', () => {
     ]);
   });
 
-  it('clicks a mode toggle at its observed geometry without an AT-SPI action', async () => {
-    const log = join(root, 'mode-argv');
-    const helper = await xdotool(`echo "$@" > ${log}`);
-    const fixture = geometry();
-    fixture.choice.name = 'Switch mode, current mode: Codex';
-    fixture.choice.actions = [];
-    const desktop = desktopFor(fixture.bus, { xdotool: helper });
-    const nodes = await desktop.snapshot();
-    await desktop.clickModeToggle(
-      nodes,
-      nodes.find((node) => node.name === fixture.choice.name)!
-    );
-    expect((await readFile(log, 'utf8')).trim()).toBe(
-      'mousemove 370 260 click 1'
-    );
-    expect(fixture.bus.count('doAction')).toBe(0);
+  it('clicks a Work surface control at its observed geometry without an AT-SPI action', async () => {
+    for (const [index, [name, role]] of (
+      [
+        ['Switch mode, current mode: Codex', 'button'],
+        ['ChatGPT Work Create, learn, and explore', 'menu item'],
+        ['Switch to Work', 'button'],
+      ] as const
+    ).entries()) {
+      const log = join(root, `surface-${index}`);
+      const helper = await xdotool(`echo "$@" > ${log}`);
+      const fixture = geometry();
+      fixture.choice.name = name;
+      fixture.choice.role = role;
+      fixture.choice.actions = [];
+      const desktop = desktopFor(fixture.bus, { xdotool: helper });
+      const nodes = await desktop.snapshot();
+      await desktop.clickSurfaceControl(
+        nodes,
+        nodes.find((node) => node.name === name)!
+      );
+      expect((await readFile(log, 'utf8')).trim()).toBe(
+        'mousemove 370 260 click 1'
+      );
+      expect(fixture.bus.count('doAction')).toBe(0);
+    }
   });
 
   it('never clicks on invalid geometry, a missing frame or component, or a missed hit test', async () => {
