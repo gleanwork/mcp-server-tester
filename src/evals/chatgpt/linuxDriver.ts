@@ -94,6 +94,8 @@ export interface ChatgptLinuxDesktop<N extends ChatgptNode = ChatgptNode> {
   openPrompt(prompt: string): Promise<void>;
   /** One real mouse click on the profession choice, at its live geometry. */
   selectProfession(nodes: readonly N[], choice: N): Promise<void>;
+  /** One real mouse click on a visible mode toggle, at its live geometry. */
+  clickModeToggle(nodes: readonly N[], toggle: N): Promise<void>;
 }
 
 export interface DriverClock {
@@ -405,7 +407,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       'mode_missing_or_ambiguous'
     );
     this.step = 'mode-open';
-    await this.click(toggle, ['open', 'click', 'press']);
+    await this.action(() => this.desktop.clickModeToggle(nodes, toggle));
     const menu = await this.wait(
       (ns) => controls(ns, [MENU_LABELS[surface]], ['menu item']).length > 0
     );

@@ -915,6 +915,24 @@ describe('profession click', () => {
     ]);
   });
 
+  it('clicks a mode toggle at its observed geometry without an AT-SPI action', async () => {
+    const log = join(root, 'mode-argv');
+    const helper = await xdotool(`echo "$@" > ${log}`);
+    const fixture = geometry();
+    fixture.choice.name = 'Switch mode, current mode: Codex';
+    fixture.choice.actions = [];
+    const desktop = desktopFor(fixture.bus, { xdotool: helper });
+    const nodes = await desktop.snapshot();
+    await desktop.clickModeToggle(
+      nodes,
+      nodes.find((node) => node.name === fixture.choice.name)!
+    );
+    expect((await readFile(log, 'utf8')).trim()).toBe(
+      'mousemove 370 260 click 1'
+    );
+    expect(fixture.bus.count('doAction')).toBe(0);
+  });
+
   it('never clicks on invalid geometry, a missing frame or component, or a missed hit test', async () => {
     const log = join(root, 'argv');
     const helper = await xdotool(`echo "$@" >> ${log}`);

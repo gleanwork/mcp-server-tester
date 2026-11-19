@@ -456,6 +456,20 @@ export class AtspiChatgptDesktop implements ChatgptLinuxDesktop<AtspiChatgptNode
     nodes: readonly AtspiChatgptNode[],
     choice: AtspiChatgptNode
   ): Promise<void> {
+    return this.clickObserved(nodes, choice);
+  }
+
+  async clickModeToggle(
+    nodes: readonly AtspiChatgptNode[],
+    toggle: AtspiChatgptNode
+  ): Promise<void> {
+    return this.clickObserved(nodes, toggle);
+  }
+
+  private async clickObserved(
+    nodes: readonly AtspiChatgptNode[],
+    choice: AtspiChatgptNode
+  ): Promise<void> {
     // The observed radio's WINDOW extents plus its top-level frame's SCREEN
     // origin. Never reuse guessed coordinates.
     try {

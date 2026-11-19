@@ -135,6 +135,10 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
     if (!this.staleChecked) choice.selected = true;
   }
 
+  async clickModeToggle(_: readonly FakeNode[], toggle: FakeNode) {
+    await this.activate(toggle, ['click']);
+  }
+
   async activate(control: FakeNode, allowed: readonly string[]) {
     const name = control.name;
     this.actions.push([name, allowed]);
