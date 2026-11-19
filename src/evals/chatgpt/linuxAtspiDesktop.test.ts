@@ -413,8 +413,28 @@ describe('activate', () => {
     ]);
   });
 
+  it('prefers a specific action when the same control also exposes click', async () => {
+    const { app } = chatgpt();
+    const target = app.children[1]!;
+    target.actions = ['click', 'open'];
+    const bus = new FakeBus([app]);
+    let selected = -1;
+    bus.hooks.doAction = (_, index) => {
+      selected = index;
+    };
+    const { desktop, nodes } = await snapshotFor(bus);
+    await desktop.activate(nodes.find((n) => n.name === 'Send')!, [
+      'open',
+      'click',
+    ]);
+    expect(selected).toBe(1);
+    expect(bus.calls.filter(([m]) => m === 'doAction')).toEqual([
+      ['doAction', 'Send'],
+    ]);
+  });
+
   it('fails without acting on a missing, ambiguous or unavailable action', async () => {
-    for (const actions of [['delete'], ['click', 'press']]) {
+    for (const actions of [['delete'], ['click', 'click']]) {
       const { bus, result } = await send((n) => void (n.actions = actions));
       expect(await result).toBe('action_missing_or_ambiguous');
       expect(bus.count('doAction')).toBe(0);

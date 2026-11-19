@@ -220,14 +220,18 @@ export class AtspiChatgptDesktop implements ChatgptLinuxDesktop<AtspiChatgptNode
     if (!(await this.bus.interfaces(control.ref)).includes(ATSPI_ACTION))
       throw new DriverFailure('action_unavailable');
     const names = await this.bus.actionNames(control.ref);
-    const matches = names.flatMap((name, index) =>
-      allowed.includes(name) ? [index] : []
-    );
-    if (matches.length !== 1)
+    // A control can expose both a specific action and a generic click. The
+    // caller orders these by preference; choose one observed action once.
+    const preferred = allowed
+      .map((name) =>
+        names.flatMap((candidate, index) => (candidate === name ? [index] : []))
+      )
+      .find((indices) => indices.length > 0);
+    if (!preferred || preferred.length !== 1)
       throw new DriverFailure('action_missing_or_ambiguous');
     let accepted = false;
     try {
-      accepted = await this.bus.doAction(control.ref, matches[0]!);
+      accepted = await this.bus.doAction(control.ref, preferred[0]!);
     } catch {
       // Even a failed acknowledgement may have had an effect.
       accepted = false;

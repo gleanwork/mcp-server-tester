@@ -86,7 +86,7 @@ export interface ChatgptLinuxDesktop<N extends ChatgptNode = ChatgptNode> {
   requireHelpers(): void;
   /** One complete snapshot of the single ChatGPT app, or [] while it has none. */
   snapshot(): Promise<N[]>;
-  /** The one action of `control` whose name is in `allowed`. Never retried. */
+  /** The first uniquely observed action in preference order. Never retried. */
   activate(control: N, allowed: readonly string[]): Promise<void>;
   /** The composer's exact text, at most `limit` UTF-8 bytes. Never exported. */
   text(control: N, limit?: number): Promise<string>;
