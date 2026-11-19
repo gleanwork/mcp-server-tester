@@ -374,11 +374,13 @@ function desktopAdapter(
       const transcript = turnRunResult(result, requests[0]!.input.servers);
       if (transcript.error)
         transcript.error = redactClientSecrets(transcript.error, secrets);
-      if (result.success) {
-        const id = result.clientMetadata.session.id;
-        if (!id || !result.clientMetadata.session.turnId || !ledger.claim(id))
-          transcript.error = `${label} requires a distinct native session and turn for each fresh query; refusing duplicate attribution.`;
-      }
+      // A completed turn is attributed only to a distinct native session and
+      // turn that no earlier trial of the batch claimed.
+      const { id: sessionId, turnId } = result.clientMetadata.session;
+      const refused =
+        result.success && !(sessionId && turnId && ledger.claim(sessionId));
+      if (refused)
+        transcript.error = `${label} requires a distinct native session and turn for each fresh query; refusing duplicate attribution.`;
       if (transcript.usage) {
         // Native OpenAI input totals include cache reads; V2 counts cache separately.
         const uncached =
@@ -429,10 +431,10 @@ function desktopAdapter(
             }));
       // The batch's backend writes every chat's trace in one root, so a
       // trial keeps only its bound native thread's bundles. A failed bound
-      // turn may still have requests worth preserving; an unbound/duplicate
-      // turn must never collect another chat's prompts.
-      const traceThread =
-        result.success && !executionTrusted ? undefined : session?.id;
+      // turn, or a claimed one whose evidence failed a later check, may
+      // still have requests worth preserving; a turn the ledger refused must
+      // never collect another chat's prompts.
+      const traceThread = refused ? undefined : session?.id;
       const trace = !appSession.rolloutTraceRoot
         ? undefined
         : traceThread

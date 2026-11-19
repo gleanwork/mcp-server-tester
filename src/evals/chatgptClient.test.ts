@@ -223,6 +223,51 @@ describe('ChatGPT and Codex app sessions', () => {
     }
   });
 
+  it('keeps the trace of a turn the ledger claimed whose evidence failed a later check', async () => {
+    lifecycle.traceRoot = join(home.value, 'native-traces');
+    const dir = join(lifecycle.traceRoot, 'native-bundle');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ schema_version: 1, root_thread_id: 'session' })
+    );
+    vi.mocked(runChatgptTurn).mockResolvedValue({
+      success: true,
+      response: 'answer',
+      toolCalls: [],
+      clientMetadata: metadata,
+      // More cache reads than input: the native totals don't add up.
+      usage: {
+        inputTokens: 1,
+        cacheReadInputTokens: 2,
+        outputTokens: 1,
+        durationMs: 1,
+      },
+    });
+    const session = await CHATGPT_CLIENT.open!(
+      { config, input: { servers: [] } },
+      context
+    );
+    let artifacts: ClientArtifacts | undefined;
+    try {
+      const { result } = await session.run({
+        caseId: 'trace',
+        trial: 0,
+        input: { prompt: 'query' },
+      });
+      artifacts = result.artifacts;
+      expect(result.error).toBe(
+        'Native cached input exceeds total input tokens.'
+      );
+      expect(result.telemetry).toMatchObject({
+        rolloutTrace: { bundles: 1, files: 1 },
+      });
+    } finally {
+      await session.close();
+      if (artifacts) await rm(artifacts.dir, { recursive: true, force: true });
+    }
+  });
+
   it("redacts the batch's credentials in the kept trace, as in the transcript", async () => {
     lifecycle.traceRoot = join(home.value, 'native-traces');
     const dir = join(lifecycle.traceRoot, 'native-bundle');
