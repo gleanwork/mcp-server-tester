@@ -32,7 +32,7 @@ const START_SETTLE_MS = 500;
 const HANDOFF_TIMEOUT_MS = 20_000;
 /** Linux MAX_ARG_STRLEN is 128 KiB; the URL is one argv element. */
 const MAX_URL_BYTES = 120 * 1024;
-const TOKEN_KEY = /^MST_CHATGPT_MCP_TOKEN_\d+$/;
+const TOKEN_KEY = /^(?:MST_CHATGPT_MCP_TOKEN_\d+|MST_CHATGPT_GLEAN_ACCESS_TOKEN)$/;
 
 export interface LinuxChatgptAppOptions {
   appPath: string;

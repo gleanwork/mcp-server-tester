@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
+import { isReadOnlyTool } from '../../proxy/plannedWrite.js';
 import { signalGroup, stopGroup } from './native.js';
 
 /**
@@ -23,7 +24,12 @@ export function appServerTimeoutMs(serverCount: number): number {
 }
 
 /** The only outgoing methods. The probe never answers server requests. */
-const METHODS = new Set(['initialize', 'initialized', 'mcpServerStatus/list']);
+const METHODS = new Set([
+  'initialize',
+  'initialized',
+  'mcpServerStatus/list',
+  'account/read',
+]);
 const AUTH_STATUSES = new Set([
   'unsupported',
   'notLoggedIn',
@@ -42,6 +48,7 @@ export type AppServerFailure =
   | 'http-auth-error'
   | 'http-client-error'
   | 'http-server-error'
+  | 'account-mismatch'
   | 'rpc-error';
 
 export type AppServerAuthStatus =
@@ -61,6 +68,19 @@ export interface AppServerServerStatus {
 /** Sanitized receipt: labels come from MST config, never from native output. */
 export type AppServerStatus =
   | { status: 'available'; servers: AppServerServerStatus[] }
+  | { status: 'unavailable'; reason: AppServerFailure };
+
+export type AppServerReadOnlyInventory =
+  | {
+      status: 'available';
+      authStatus: AppServerAuthStatus;
+      allowedTools: string[];
+      blockedTools: string[];
+    }
+  | { status: 'unavailable'; reason: AppServerFailure };
+
+export type AppServerAccountIdentity =
+  | { status: 'verified' }
   | { status: 'unavailable'; reason: AppServerFailure };
 
 export class AppServerFailureError extends Error {
@@ -210,11 +230,10 @@ async function response(
   }
 }
 
-/** initialize, initialized, then every mcpServerStatus/list page. Nothing else. */
-export async function exchangeAppServerStatus(
+async function appServerRows(
   channel: JsonlChannel,
-  labels: readonly string[]
-): Promise<AppServerServerStatus[]> {
+  serverName?: string
+): Promise<Array<Record<string, unknown>>> {
   await channel.send({
     id: 0,
     method: 'initialize',
@@ -241,6 +260,7 @@ export async function exchangeAppServerStatus(
         detail: 'toolsAndAuthOnly',
         cursor,
         limit: APP_SERVER_LIMITS.pageRows,
+        ...(serverName ? { serverName } : {}),
       },
     });
     const result = await response(channel, id);
@@ -257,6 +277,55 @@ export async function exchangeAppServerStatus(
     cursors.add(next);
     cursor = next;
   }
+  return rows;
+}
+
+export async function exchangeAppServerAccountIdentity(
+  channel: JsonlChannel,
+  expectedEmail: string,
+  expectedWorkspace?: string
+): Promise<void> {
+  if (!expectedEmail || expectedEmail.trim() !== expectedEmail)
+    throw new AppServerFailureError('account-mismatch');
+  await channel.send({
+    id: 0,
+    method: 'initialize',
+    params: {
+      clientInfo: {
+        name: 'mst_account_identity',
+        title: 'MST account identity',
+        version: '1',
+      },
+    },
+  });
+  await response(channel, 0);
+  await channel.send({ method: 'initialized' });
+  await channel.send({
+    id: 1,
+    method: 'account/read',
+    params: { refreshToken: false },
+  });
+  const result = await response(channel, 1);
+  const account = result.account;
+  if (
+    !isObject(account) ||
+    account.type !== 'chatgpt' ||
+    typeof account.email !== 'string' ||
+    account.email.toLowerCase() !== expectedEmail.toLowerCase() ||
+    (expectedWorkspace !== undefined &&
+      (expectedWorkspace.trim() !== expectedWorkspace ||
+        expectedWorkspace.length === 0 ||
+        account.workspaceName !== expectedWorkspace))
+  )
+    throw new AppServerFailureError('account-mismatch');
+}
+
+/** initialize, initialized, then every mcpServerStatus/list page. Nothing else. */
+export async function exchangeAppServerStatus(
+  channel: JsonlChannel,
+  labels: readonly string[]
+): Promise<AppServerServerStatus[]> {
+  const rows = await appServerRows(channel);
   return labels.map((label) => {
     const matches = rows.filter((row) => row.name === label);
     if (matches.length > 1) throw new AppServerFailureError('invalid-response');
@@ -289,6 +358,60 @@ export async function exchangeAppServerStatus(
   });
 }
 
+export async function exchangeAppServerReadOnlyTools(
+  channel: JsonlChannel,
+  label: string
+): Promise<{
+  authStatus: AppServerAuthStatus;
+  allowedTools: string[];
+  blockedTools: string[];
+}> {
+  const rows = await appServerRows(channel, label);
+  const matches = rows.filter((row) => row.name === label);
+  if (matches.length !== 1) throw new AppServerFailureError('invalid-response');
+  const row = matches[0]!;
+  const values = Array.isArray(row.tools)
+    ? row.tools
+    : isObject(row.tools)
+      ? Object.values(row.tools)
+      : undefined;
+  if (!values || !values.every(isObject))
+    throw new AppServerFailureError('invalid-response');
+  const names = new Set<string>();
+  const allowedTools: string[] = [];
+  const blockedTools: string[] = [];
+  for (const tool of values) {
+    if (
+      typeof tool.name !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(tool.name) ||
+      names.has(tool.name)
+    )
+      throw new AppServerFailureError('invalid-response');
+    names.add(tool.name);
+    if (!isObject(tool.annotations)) {
+      blockedTools.push(tool.name);
+      continue;
+    }
+    const { readOnlyHint, destructiveHint } = tool.annotations;
+    if (
+      readOnlyHint === true &&
+      (destructiveHint === undefined || typeof destructiveHint === 'boolean') &&
+      isReadOnlyTool({ annotations: { readOnlyHint, destructiveHint } })
+    )
+      allowedTools.push(tool.name);
+    else blockedTools.push(tool.name);
+  }
+  const auth = row.authStatus;
+  return {
+    authStatus:
+      typeof auth === 'string' && AUTH_STATUSES.has(auth)
+        ? (auth as AppServerAuthStatus)
+        : 'unknown',
+    allowedTools,
+    blockedTools,
+  };
+}
+
 /**
  * A separate read-only config client, not the GUI backend. No inference, tool
  * calls, or server-request handling. The process group is always stopped.
@@ -298,6 +421,51 @@ export async function probeAppServerStatus(
   env: Record<string, string>,
   labels: readonly string[]
 ): Promise<AppServerStatus> {
+  const result = await probeAppServer(
+    codexPath,
+    env,
+    labels.length,
+    (channel) => exchangeAppServerStatus(channel, labels)
+  );
+  return result.status === 'available'
+    ? { status: 'available', servers: result.value }
+    : result;
+}
+
+export async function probeAppServerReadOnlyTools(
+  codexPath: string,
+  env: Record<string, string>,
+  label: string
+): Promise<AppServerReadOnlyInventory> {
+  const result = await probeAppServer(codexPath, env, 1, (channel) =>
+    exchangeAppServerReadOnlyTools(channel, label)
+  );
+  return result.status === 'available'
+    ? { status: 'available', ...result.value }
+    : result;
+}
+
+export async function probeAppServerAccountIdentity(
+  codexPath: string,
+  env: Record<string, string>,
+  expectedEmail: string,
+  expectedWorkspace?: string
+): Promise<AppServerAccountIdentity> {
+  const result = await probeAppServer(codexPath, env, 1, (channel) =>
+    exchangeAppServerAccountIdentity(channel, expectedEmail, expectedWorkspace)
+  );
+  return result.status === 'available' ? { status: 'verified' } : result;
+}
+
+async function probeAppServer<Value>(
+  codexPath: string,
+  env: Record<string, string>,
+  serverCount: number,
+  exchange: (channel: JsonlChannel) => Promise<Value>
+): Promise<
+  | { status: 'available'; value: Value }
+  | { status: 'unavailable'; reason: AppServerFailure }
+> {
   const cwd = env.HOME;
   if (!cwd) return { status: 'unavailable', reason: 'io-error' };
   const child = spawn(codexPath, ['app-server'], {
@@ -314,15 +482,14 @@ export async function probeAppServerStatus(
   try {
     if (!(await spawned) || !child.stdin || !child.stdout)
       return { status: 'unavailable', reason: 'io-error' };
-    const servers = await exchangeAppServerStatus(
+    const value = await exchange(
       new StreamJsonlChannel(
         child.stdin,
         child.stdout,
-        appServerTimeoutMs(labels.length)
-      ),
-      labels
+        appServerTimeoutMs(serverCount)
+      )
     );
-    return { status: 'available', servers };
+    return { status: 'available', value };
   } catch (error) {
     return {
       status: 'unavailable',

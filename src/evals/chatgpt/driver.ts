@@ -33,6 +33,9 @@ export function submitChatgptQuery(
   return runAnthropicComputerUseSubmission(query, {
     application: 'chatgpt',
     chatgptSurface: chatgptSurface(config),
+    ...(config.firstParty && 'serverName' in config.firstParty
+      ? { requiredWorkLocation: config.firstParty.workLocation ?? 'local' }
+      : {}),
     targetModel: config.model,
     reasoningEffort: config.reasoningEffort,
     model: stringOption(config.options, 'computerUseModel'),

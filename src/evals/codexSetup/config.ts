@@ -200,13 +200,22 @@ export interface CodexConfigInstallOptions {
   model?: string;
   reasoningEffort?: string;
   /** Store native CLI credentials in the OS keyring, never in CODEX_HOME files. */
-  credentialStore?: 'keyring';
+  credentialStore?: 'keyring' | 'file';
   /** Trust exactly this one absolute directory; any other project trust is removed. */
   trustedProject?: string;
   /** Rendered as top-level `approval_policy` and `sandbox_mode`. */
   executionPolicy?: CodexExecutionPolicy;
   /** Rendered as `[plugins."<id>"] enabled = false` and `web_search`. */
   builtinToolPolicy?: CodexBuiltinToolPolicy;
+  accountAppsPolicy?: { appId: string; allowedTools: string[]; allowPages?: true };
+  stagedLocalGlean?: { allowedTools: string[] };
+  accountMcpPolicy?: {
+    serverName: string;
+    allowedTools: string[];
+    /** Local Work only: hide other account apps before the turn. */
+    restrictAccountApps?: true;
+    allowPages?: true;
+  };
   /**
    * Send turns to an OpenAI-compatible gateway instead of a signed-in account:
    * rendered as `model_provider` and `[model_providers.<id>]`. The token comes
@@ -264,7 +273,7 @@ export async function installCodexConfig(
     throw new Error('Invalid ChatGPT reasoning effort.');
   if (
     options.credentialStore !== undefined &&
-    options.credentialStore !== 'keyring'
+    !['keyring', 'file'].includes(options.credentialStore)
   )
     throw new Error('Invalid Codex credential store.');
   if (
@@ -297,9 +306,44 @@ export async function installCodexConfig(
   )
     throw new Error('Invalid Codex built-in tool policy.');
   const provider = options.modelProvider;
+  const apps = options.accountAppsPolicy;
+  const stagedLocalGlean = options.stagedLocalGlean;
+  const accountMcp = options.accountMcpPolicy;
+  if (stagedLocalGlean && (accountMcp || !apps || apps.appId !== 'glean_default' ||
+      stagedLocalGlean.allowedTools.length === 0 ||
+      stagedLocalGlean.allowedTools.join('\0') !== apps.allowedTools.join('\0')))
+    throw new Error('Invalid staged local Glean MCP policy.');
+  if (
+    apps !== undefined &&
+    (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(apps.appId) ||
+      apps.allowedTools.length === 0 ||
+      apps.allowedTools.length > 50 ||
+      new Set(apps.allowedTools).size !== apps.allowedTools.length ||
+      !apps.allowedTools.every((tool) =>
+        /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(tool)
+      ) ||
+      provider !== undefined)
+  )
+    throw new Error('Invalid ChatGPT account app policy.');
+  if (
+    accountMcp !== undefined &&
+    (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(accountMcp.serverName) ||
+      accountMcp.allowedTools.length === 0 ||
+      accountMcp.allowedTools.length > 50 ||
+      new Set(accountMcp.allowedTools).size !==
+        accountMcp.allowedTools.length ||
+      !accountMcp.allowedTools.every((tool) =>
+        /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/.test(tool)
+      ) ||
+      apps !== undefined ||
+      provider !== undefined)
+  )
+    throw new Error('Invalid ChatGPT account MCP policy.');
   if (provider !== undefined && !validModelProvider(provider))
     throw new Error('Invalid Codex model provider.');
   const resolved = resolveCodexSetup(setup, options.configName);
+  if (accountMcp && resolved.servers.length)
+    throw new Error('ChatGPT account MCP policy cannot mix eval servers.');
   const target = resolved.configPath;
   const lock = `${target}${LOCK_SUFFIX}`;
   const originalPath = join(lock, 'original.toml');
@@ -326,7 +370,51 @@ export async function installCodexConfig(
     // Keep app preferences and startup hooks. Replacing the whole document makes
     // ChatGPT rewrite defaults during startup and loses the selected Work settings.
     const settings = original ? parse(original.toString('utf8')) : {};
-    settings.mcp_servers = parse(resolved.content).mcp_servers ?? {};
+    if (accountMcp) {
+      const servers = isTable(settings.mcp_servers) ? settings.mcp_servers : {};
+      const server = servers[accountMcp.serverName];
+      if (
+        !isTable(server) ||
+        typeof server.url !== 'string' ||
+        !server.url.startsWith('https://') ||
+        server.enabled === false
+      )
+        throw new Error('Selected ChatGPT account MCP server is unavailable.');
+      for (const key of ['enabled_tools', 'disabled_tools'] as const) {
+        const existing = server[key];
+        if (existing === undefined) continue;
+        if (
+          !Array.isArray(existing) ||
+          !existing.every((tool) => typeof tool === 'string') ||
+          accountMcp.allowedTools.some((tool) =>
+            key === 'enabled_tools'
+              ? !existing.includes(tool)
+              : existing.includes(tool)
+          )
+        )
+          throw new Error(
+            'ChatGPT account MCP policy would widen existing restrictions.'
+          );
+      }
+      settings.mcp_servers = {
+        [accountMcp.serverName]: {
+          ...server,
+          enabled_tools: [...accountMcp.allowedTools],
+        },
+      };
+    } else if (stagedLocalGlean) {
+      settings.mcp_servers = {
+        glean_default: {
+          url: 'https://scio-prod-be.glean.com/mcp/default',
+          enabled: true,
+          enabled_tools: [...stagedLocalGlean.allowedTools],
+          bearer_token_env_var: 'MST_CHATGPT_GLEAN_ACCESS_TOKEN',
+          http_headers: { 'X-Glean-Metadata': 'mdm' },
+        },
+      };
+    } else {
+      settings.mcp_servers = parse(resolved.content).mcp_servers ?? {};
+    }
     if (options.model !== undefined) settings.model = options.model;
     if (options.reasoningEffort !== undefined)
       settings.model_reasoning_effort = options.reasoningEffort;
@@ -350,6 +438,49 @@ export async function installCodexConfig(
         for (const name of tools.disabledFeatures) features[name] = false;
         settings.features = features;
       }
+    }
+    if (apps !== undefined) {
+      const features = isTable(settings.features) ? settings.features : {};
+      features.apps = true;
+      settings.features = features;
+      settings.apps = {
+        _default: {
+          enabled: false,
+          destructive_enabled: false,
+          open_world_enabled: false,
+        },
+        [apps.appId]: {
+          enabled: true,
+          destructive_enabled: false,
+          open_world_enabled: false,
+          default_tools_enabled: false,
+          default_tools_approval_mode: 'prompt',
+          tools: Object.fromEntries(
+            apps.allowedTools.map((tool) => [tool, { enabled: true }])
+          ),
+        },
+        ...(apps.allowPages
+          ? { chatgpt_space: { enabled: true, default_tools_enabled: true } }
+          : {}),
+      };
+    }
+    if (accountMcp?.restrictAccountApps) {
+      const features = isTable(settings.features) ? settings.features : {};
+      features.apps = true;
+      settings.features = features;
+      settings.apps = {
+        _default: { enabled: false },
+        [accountMcp.serverName]: {
+          enabled: true,
+          default_tools_enabled: false,
+          tools: Object.fromEntries(
+            accountMcp.allowedTools.map((tool) => [tool, { enabled: true }])
+          ),
+        },
+        ...(accountMcp.allowPages
+          ? { chatgpt_space: { enabled: true, default_tools_enabled: true } }
+          : {}),
+      };
     }
     if (provider !== undefined) {
       settings.model_provider = provider.id;
@@ -399,7 +530,7 @@ export async function installCodexConfig(
     return {
       configPath: target,
       configName: resolved.configName,
-      serverCount: resolved.servers.length,
+      serverCount: accountMcp ? 1 : resolved.servers.length,
       async restore(options) {
         await restoreCodexConfig(lock, journal, options);
       },

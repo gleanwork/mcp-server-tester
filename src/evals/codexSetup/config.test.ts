@@ -91,6 +91,232 @@ describe('Codex configuration rendering', () => {
 });
 
 describe('Codex configuration lifecycle', () => {
+  it('preserves one existing account MCP server with an allowlist and restores the original bytes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-account-mcp-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const original =
+      '[mcp_servers.glean_default]\nurl = "https://example.test/mcp"\n' +
+      'enabled_tools = ["search", "read_document", "write"]\n' +
+      '[mcp_servers.glean_default.http_headers]\nAuthorization = "fixture-only"\n' +
+      '[mcp_servers.other]\nurl = "https://other.test/mcp"\n';
+    await writeFile(configPath, original, { mode: 0o600 });
+    const installation = await installCodexConfig(
+      { configPath, servers: [] },
+      {
+        builtinToolPolicy: {
+          webSearch: 'disabled',
+          disabledPlugins: [],
+          disabledFeatures: ['apps', 'in_app_browser'],
+        },
+        accountMcpPolicy: {
+          serverName: 'glean_default',
+          allowedTools: ['search', 'read_document'],
+        },
+      }
+    );
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed).toMatchObject({
+      features: { apps: false, in_app_browser: false },
+      mcp_servers: {
+        glean_default: {
+          url: 'https://example.test/mcp',
+          enabled_tools: ['search', 'read_document'],
+          http_headers: { Authorization: 'fixture-only' },
+        },
+      },
+    });
+    expect(installed.mcp_servers).not.toHaveProperty('other');
+    expect(installation.serverCount).toBe(1);
+    await installation.restore();
+    expect(await readFile(configPath, 'utf8')).toBe(original);
+  });
+
+  it('temporarily allows only Glean and Pages account apps for Local Work', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-local-apps-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const original =
+      '[mcp_servers.glean_default]\nurl = "https://example.test/mcp"\n' +
+      '[apps.github]\nenabled = true\n';
+    await writeFile(configPath, original, { mode: 0o600 });
+    const installation = await installCodexConfig(
+      { configPath, servers: [] },
+      {
+        accountMcpPolicy: {
+          serverName: 'glean_default',
+          allowedTools: ['search'],
+          restrictAccountApps: true,
+          allowPages: true,
+        },
+      }
+    );
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed).toMatchObject({
+      features: { apps: true },
+      mcp_servers: { glean_default: { enabled_tools: ['search'] } },
+      apps: {
+        _default: { enabled: false },
+        glean_default: {
+          enabled: true,
+          default_tools_enabled: false,
+          tools: { search: { enabled: true } },
+        },
+        chatgpt_space: { enabled: true, default_tools_enabled: true },
+      },
+    });
+    expect(installed.apps).not.toHaveProperty('github');
+    await installation.restore();
+    expect(await readFile(configPath, 'utf8')).toBe(original);
+  });
+
+  it('rejects missing, disabled or previously restricted account MCP tools without changing the config', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-account-mcp-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const policy = { serverName: 'glean_default', allowedTools: ['search'] };
+    for (const original of [
+      '[mcp_servers.other]\nurl = "https://example.test/mcp"\n',
+      '[mcp_servers.glean_default]\nurl = "https://example.test/mcp"\nenabled = false\n',
+      '[mcp_servers.glean_default]\nurl = "https://example.test/mcp"\nenabled_tools = ["other"]\n',
+      '[mcp_servers.glean_default]\nurl = "https://example.test/mcp"\ndisabled_tools = ["search"]\n',
+      '[mcp_servers.glean_default]\nurl = "http://example.test/mcp"\n',
+    ]) {
+      await writeFile(configPath, original, { mode: 0o600 });
+      await expect(
+        installCodexConfig(
+          { configPath, servers: [] },
+          { accountMcpPolicy: policy }
+        )
+      ).rejects.toThrow();
+      expect(await readFile(configPath, 'utf8')).toBe(original);
+    }
+  });
+
+  it('rejects invalid or mixed account MCP policies', async () => {
+    const { configPath } = await tempConfig();
+    for (const accountMcpPolicy of [
+      { serverName: '_default', allowedTools: ['search'] },
+      { serverName: 'glean_default', allowedTools: [] },
+      { serverName: 'glean_default', allowedTools: ['search', 'search'] },
+      { serverName: 'glean_default', allowedTools: ['search\nmalicious'] },
+    ])
+      await expect(
+        installCodexConfig({ configPath, servers: [] }, { accountMcpPolicy })
+      ).rejects.toThrow('Invalid ChatGPT account MCP policy');
+    await expect(
+      installCodexConfig(
+        {
+          configPath,
+          servers: [
+            {
+              transport: 'http',
+              label: 'other',
+              url: 'https://example.test/mcp',
+            },
+          ],
+        },
+        {
+          accountMcpPolicy: {
+            serverName: 'glean_default',
+            allowedTools: ['search'],
+          },
+        }
+      )
+    ).rejects.toThrow('cannot mix eval servers');
+  });
+
+  it('installs a single account app and explicit tools, then restores the original bytes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-account-app-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const original =
+      '[features]\napps = false\n[apps.other]\nenabled = true\n[apps.glean.tools.send_email]\nenabled = true\n';
+    await writeFile(configPath, original, { mode: 0o600 });
+    const installation = await installCodexConfig(
+      { configPath, servers: [] },
+      {
+        builtinToolPolicy: {
+          webSearch: 'disabled',
+          disabledPlugins: [],
+          disabledFeatures: ['in_app_browser'],
+        },
+        accountAppsPolicy: {
+          appId: 'glean',
+          allowedTools: ['search', 'read_document'],
+          allowPages: true,
+        },
+      }
+    );
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed).toMatchObject({
+      features: { apps: true, in_app_browser: false },
+      apps: {
+        _default: {
+          enabled: false,
+          destructive_enabled: false,
+          open_world_enabled: false,
+        },
+        glean: {
+          enabled: true,
+          default_tools_enabled: false,
+          destructive_enabled: false,
+          open_world_enabled: false,
+          default_tools_approval_mode: 'prompt',
+          tools: {
+            search: { enabled: true },
+            read_document: { enabled: true },
+          },
+        },
+        chatgpt_space: { enabled: true, default_tools_enabled: true },
+      },
+    });
+    expect(installed.apps).not.toHaveProperty('other');
+    expect(installed.apps).not.toHaveProperty('glean.tools.send_email');
+    await installation.restore();
+    expect(await readFile(configPath, 'utf8')).toBe(original);
+  });
+
+  it('rejects invalid account app policies before touching the config', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-account-app-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const original = 'model = "test"\n';
+    await writeFile(configPath, original, { mode: 0o600 });
+    for (const accountAppsPolicy of [
+      { appId: '_default', allowedTools: ['search'] },
+      { appId: 'glean', allowedTools: [] },
+      { appId: 'glean', allowedTools: ['search', 'search'] },
+      { appId: 'glean', allowedTools: ['search\nmalicious'] },
+    ]) {
+      await expect(
+        installCodexConfig({ configPath, servers: [] }, { accountAppsPolicy })
+      ).rejects.toThrow('Invalid ChatGPT account app policy');
+      expect(await readFile(configPath, 'utf8')).toBe(original);
+    }
+  });
+  it('stages only the pinned local Glean MCP server with the same read tool list', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mst-local-glean-'));
+    temporaryDirectories.push(directory);
+    const configPath = join(directory, 'config.toml');
+    const options = {
+      accountAppsPolicy: { appId: 'glean_default', allowedTools: ['search'] },
+      stagedLocalGlean: { allowedTools: ['search'] },
+    };
+    const installation = await installCodexConfig({ configPath, servers: [] }, options);
+    const installed = parse(await readFile(configPath, 'utf8'));
+    expect(installed.mcp_servers).toEqual({ glean_default: {
+      url: 'https://scio-prod-be.glean.com/mcp/default',
+      enabled: true,
+      enabled_tools: ['search'],
+      bearer_token_env_var: 'MST_CHATGPT_GLEAN_ACCESS_TOKEN',
+      http_headers: { 'X-Glean-Metadata': 'mdm' },
+    } });
+    await installation.restore();
+    await expect(installCodexConfig({ configPath, servers: [] }, {
+      ...options, stagedLocalGlean: { allowedTools: ['write'] },
+    })).rejects.toThrow('Invalid staged local Glean MCP policy');
+  });
   it('installs requested model/effort alongside MCP and restores original settings exactly', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mst-chatgpt-model-'));
     temporaryDirectories.push(directory);

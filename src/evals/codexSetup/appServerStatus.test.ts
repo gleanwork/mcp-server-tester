@@ -8,7 +8,11 @@ import {
   AppServerFailureError,
   appServerServerReady,
   appServerTimeoutMs,
+  exchangeAppServerAccountIdentity,
+  exchangeAppServerReadOnlyTools,
   exchangeAppServerStatus,
+  probeAppServerAccountIdentity,
+  probeAppServerReadOnlyTools,
   probeAppServerStatus,
   StreamJsonlChannel,
   type AppServerAuthStatus,
@@ -48,6 +52,166 @@ function status(
 ): AppServerServerStatus {
   return { label, initialized: toolCount !== null, toolCount, authStatus };
 }
+
+describe('app-server account identity', () => {
+  it('verifies the expected ChatGPT account and workspace without refreshing credentials', async () => {
+    const channel = new FakeChannel([
+      initialized,
+      {
+        id: 1,
+        result: {
+          account: {
+            type: 'chatgpt',
+            email: 'test@example.test',
+            workspaceName: 'Evaluation',
+            private: 'do-not-return',
+          },
+        },
+      },
+    ]);
+    await expect(
+      exchangeAppServerAccountIdentity(
+        channel,
+        'test@example.test',
+        'Evaluation'
+      )
+    ).resolves.toBeUndefined();
+    expect(channel.sent.map((message) => message.method)).toEqual([
+      'initialize',
+      'initialized',
+      'account/read',
+    ]);
+    expect(channel.sent[2]).toMatchObject({ params: { refreshToken: false } });
+  });
+
+  it.each([
+    null,
+    { type: 'apiKey' },
+    { type: 'chatgpt', email: null },
+    {
+      type: 'chatgpt',
+      email: 'other@example.test',
+      workspaceName: 'Evaluation',
+    },
+    { type: 'chatgpt', email: 'test@example.test', workspaceName: 'Other' },
+  ])(
+    'fails closed when the account or workspace cannot be verified',
+    async (account) => {
+      const channel = new FakeChannel([
+        initialized,
+        { id: 1, result: { account } },
+      ]);
+      await expect(
+        exchangeAppServerAccountIdentity(
+          channel,
+          'test@example.test',
+          'Evaluation'
+        )
+      ).rejects.toMatchObject({ reason: 'account-mismatch' });
+    }
+  );
+});
+
+describe('app-server read-only inventory', () => {
+  it('allows only positively annotated non-destructive tools from the selected server', async () => {
+    const channel = new FakeChannel([
+      initialized,
+      list([{ name: 'other', tools: [{ name: 'unrelated' }] }], {
+        nextCursor: 'next',
+      }),
+      {
+        id: 2,
+        result: {
+          nextCursor: null,
+          data: [
+            {
+              name: 'glean_default',
+              authStatus: 'oAuth',
+              tools: {
+                search: {
+                  name: 'search',
+                  annotations: { readOnlyHint: true },
+                },
+                read: {
+                  name: 'read_document',
+                  annotations: { readOnlyHint: true, destructiveHint: false },
+                },
+                dispatcher: { name: 'run_tool' },
+                write: { name: 'write', annotations: { readOnlyHint: false } },
+                destructive: {
+                  name: 'delete',
+                  annotations: { readOnlyHint: true, destructiveHint: true },
+                },
+                malformed: {
+                  name: 'bad',
+                  annotations: { readOnlyHint: true, destructiveHint: 'no' },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    await expect(
+      exchangeAppServerReadOnlyTools(channel, 'glean_default')
+    ).resolves.toEqual({
+      authStatus: 'oAuth',
+      allowedTools: ['search', 'read_document'],
+      blockedTools: ['run_tool', 'write', 'delete', 'bad'],
+    });
+    expect(channel.sent.map((message) => message.method)).toEqual([
+      'initialize',
+      'initialized',
+      'mcpServerStatus/list',
+      'mcpServerStatus/list',
+    ]);
+    for (const request of channel.sent.filter(
+      (message) => message.method === 'mcpServerStatus/list'
+    ))
+      expect(request.params).toMatchObject({ serverName: 'glean_default' });
+  });
+
+  it('does not treat unknown annotations or unknown authentication as safe', async () => {
+    const channel = new FakeChannel(
+      listed([
+        {
+          name: 'glean_default',
+          authStatus: 'unexpected',
+          tools: [{ name: 'search', annotations: {} }, { name: 'run_tool' }],
+        },
+      ])
+    );
+    await expect(
+      exchangeAppServerReadOnlyTools(channel, 'glean_default')
+    ).resolves.toEqual({
+      authStatus: 'unknown',
+      allowedTools: [],
+      blockedTools: ['search', 'run_tool'],
+    });
+  });
+
+  it.each([
+    [],
+    [
+      { name: 'glean_default', tools: [] },
+      { name: 'glean_default', tools: [] },
+    ],
+    [
+      {
+        name: 'glean_default',
+        tools: [{ name: 'search' }, { name: 'search' }],
+      },
+    ],
+    [{ name: 'glean_default', tools: [{ name: 'bad name' }] }],
+    [{ name: 'glean_default', tools: [null] }],
+    [{ name: 'glean_default' }],
+  ])('rejects an ambiguous or malformed inventory', async (...rows) => {
+    const channel = new FakeChannel(listed(rows));
+    await expect(
+      exchangeAppServerReadOnlyTools(channel, 'glean_default')
+    ).rejects.toThrow('invalid-response');
+  });
+});
 
 describe('app-server MCP status exchange', () => {
   it('follows every status page, so the server count is never capped', async () => {
@@ -206,7 +370,8 @@ const rl = require('node:readline').createInterface({ input: process.stdin });
 rl.on('line', (line) => {
   const m = JSON.parse(line);
   if (m.method === 'initialize') console.log(JSON.stringify({ id: 0, result: { userAgent: 'private' } }));
-  if (m.method === 'mcpServerStatus/list') console.log(JSON.stringify({ id: 1, result: { data: [{ name: 'acme', tools: [{}], authStatus: 'bearerToken' }], nextCursor: null } }));
+  if (m.method === 'account/read') console.log(JSON.stringify({ id: 1, result: { account: { type: 'chatgpt', email: 'test@example.test', workspaceName: 'Evaluation' } } }));
+  if (m.method === 'mcpServerStatus/list') console.log(JSON.stringify({ id: 1, result: { data: [{ name: 'acme', tools: [{ name: 'search', annotations: { readOnlyHint: true } }], authStatus: 'bearerToken' }], nextCursor: null } }));
 });
 setInterval(() => {}, 1000);
 `,
@@ -221,6 +386,26 @@ setInterval(() => {}, 1000);
         status: 'available',
         servers: [status('acme', 1)],
       });
+      expect(
+        await probeAppServerReadOnlyTools(
+          codex,
+          { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root },
+          'acme'
+        )
+      ).toEqual({
+        status: 'available',
+        authStatus: 'bearerToken',
+        allowedTools: ['search'],
+        blockedTools: [],
+      });
+      expect(
+        await probeAppServerAccountIdentity(
+          codex,
+          { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: root },
+          'test@example.test',
+          'Evaluation'
+        )
+      ).toEqual({ status: 'verified' });
       const missing = await probeAppServerStatus(
         join(root, 'missing'),
         { HOME: root },

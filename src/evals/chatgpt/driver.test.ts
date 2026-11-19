@@ -79,6 +79,29 @@ describe('ChatGPT shared Computer Use adapter', () => {
     );
   });
 
+  it('forwards the configured Work Cloud location', async () => {
+    await submitChatgptQuery(
+      'unchanged',
+      {
+        ...config,
+        firstParty: {
+          serverName: 'glean_default',
+          expectedEmail: 'test@example.com',
+          expectedAccountId: '00000000-0000-4000-8000-000000000001',
+          expectedOrganizationId: 'org-example123456',
+          workLocation: 'cloud',
+          source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9222' },
+          acknowledgeToolPolicyIsNotASandbox: true,
+        },
+      },
+      123
+    );
+    expect(runAnthropicComputerUseSubmission).toHaveBeenCalledWith(
+      'unchanged',
+      expect.objectContaining({ requiredWorkLocation: 'cloud' })
+    );
+  });
+
   it('Linux preflight needs no Anthropic key and rejects planner configuration', () => {
     vi.stubEnv('ANTHROPIC_API_KEY', '');
     const linux = { ...config, os: 'linux' as const };

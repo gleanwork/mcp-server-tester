@@ -34,6 +34,8 @@ import { optionKey } from '../optionKey.js';
 
 const FIRST_PARTY_REFUSAL =
   '--detach cannot run first-party Cowork: account control requires an attached run with one designated source host.';
+const FIRST_PARTY_CHATGPT_REFUSAL =
+  '--detach cannot run first-party ChatGPT: browser and native account staging require an attached macOS source host.';
 
 export interface DetachOptions {
   command: 'run' | 'grade';
@@ -95,6 +97,16 @@ async function refusal(
     )
   )
     return FIRST_PARTY_REFUSAL;
+  if (
+    variants.some((variant) => {
+      const client = inheritClient(base, clientPatchOf(variant) ?? {});
+      return (
+        (client?.type === 'chatgpt' || client?.type === 'mst/client/chatgpt') &&
+        client.firstParty !== undefined
+      );
+    })
+  )
+    return FIRST_PARTY_CHATGPT_REFUSAL;
   if (!options.results) {
     const store = config.results?.store;
     if (!store)

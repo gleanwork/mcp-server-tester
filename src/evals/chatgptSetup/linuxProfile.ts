@@ -5,11 +5,14 @@ import {
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readdir,
+  readFile,
   realpath,
   rename,
   rm,
   stat,
+  writeFile,
 } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
@@ -20,6 +23,7 @@ import {
 import { LINUX_CHATGPT_RUNTIME_ENVIRONMENT } from '../chatgpt/linuxContract.js';
 import {
   appServerServerReady,
+  probeAppServerAccountIdentity,
   probeAppServerStatus,
   type AppServerStatus,
 } from '../codexSetup/appServerStatus.js';
@@ -69,9 +73,12 @@ const REQUIRED_PATHS = [
 const INFERENCE_PATHS = [
   'MST_CHATGPT_API_KEY_FILE',
   'MST_CHATGPT_INFERENCE_TOKEN_FILE',
+  'MST_CHATGPT_ACCOUNT_AUTH_FILE',
 ] as const;
 const GATEWAY_PROVIDER_ID = 'mst_gateway';
 const GATEWAY_CHECK_TIMEOUT_MS = 15_000;
+const STAGED_GLEAN_TOKEN = '/run/mst/chatgpt-account/glean-access-token';
+const GLEAN_TOKEN_ENV = 'MST_CHATGPT_GLEAN_ACCESS_TOKEN';
 const REQUIRED_BUSES = [
   'DBUS_SESSION_BUS_ADDRESS',
   'AT_SPI_BUS_ADDRESS',
@@ -107,7 +114,8 @@ export const LINUX_CHATGPT_ENVIRONMENT_CONTRACT = {
 
 export type LinuxChatgptInference =
   | { mode: 'api-key'; apiKeyFile: string }
-  | { mode: 'gateway'; baseUrl: string; tokenFile: string };
+  | { mode: 'gateway'; baseUrl: string; tokenFile: string }
+  | { mode: 'account'; authFile: string };
 
 export interface LinuxChatgptEnvironment {
   home: string;
@@ -141,11 +149,12 @@ export function readLinuxChatgptEnvironment(
   for (const key of OPTIONAL_PATHS) path(key, false);
   const apiKeyFile = path('MST_CHATGPT_API_KEY_FILE', false);
   const tokenFile = path('MST_CHATGPT_INFERENCE_TOKEN_FILE', false);
+  const accountFile = path('MST_CHATGPT_ACCOUNT_AUTH_FILE', false);
   const baseUrl = env.MST_CHATGPT_INFERENCE_BASE_URL || undefined;
   let inference: LinuxChatgptInference;
-  if (apiKeyFile && !tokenFile && !baseUrl)
+  if (apiKeyFile && !tokenFile && !baseUrl && !accountFile)
     inference = { mode: 'api-key', apiKeyFile };
-  else if (!apiKeyFile && tokenFile && baseUrl) {
+  else if (!apiKeyFile && tokenFile && baseUrl && !accountFile) {
     let url: URL | undefined;
     try {
       url = new URL(baseUrl);
@@ -159,6 +168,10 @@ export function readLinuxChatgptEnvironment(
       baseUrl: baseUrl.replace(/\/+$/, ''),
       tokenFile,
     };
+  } else if (!apiKeyFile && !tokenFile && !baseUrl && accountFile) {
+    if (accountFile !== '/run/mst/chatgpt-account/auth.json')
+      throw invalid('MST_CHATGPT_ACCOUNT_AUTH_FILE');
+    inference = { mode: 'account', authFile: accountFile };
   } else
     throw invalid(
       apiKeyFile ? 'MST_CHATGPT_INFERENCE_BASE_URL' : 'MST_CHATGPT_API_KEY_FILE'
@@ -194,6 +207,13 @@ export function validateLinuxChatgptConfig(
 ): LinuxChatgptEnvironment {
   const desktop = chatgptDesktopEnvironment(config);
   const environment = readLinuxChatgptEnvironment(desktop);
+  if (
+    (environment.inference.mode === 'account') !==
+    (config.firstParty !== undefined)
+  )
+    throw new Error(
+      'Linux ChatGPT first-party mode requires the prepared account runtime.'
+    );
   const launch = readLaunchEnvironment(config.options?.environment);
   for (const key of [
     ...LINUX_CHATGPT_RUNTIME_ENVIRONMENT,
@@ -279,7 +299,8 @@ export interface ChatgptPlatformProfile {
     setup: ResolvedCodexSetup,
     environment: Record<string, string>,
     plugins?: readonly MarketplacePlugin[],
-    credentials?: ClientPluginCredentials
+    credentials?: ClientPluginCredentials,
+    firstParty?: ChatgptAppConfig['firstParty']
   ): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -299,6 +320,66 @@ function bearerTokens(
 }
 
 /** Fresh MST-owned profile inside the caller-provided HOME. Fails closed. */
+export async function importAccountAuth(
+  source: string,
+  target: string,
+  firstParty?: ChatgptAppConfig['firstParty']
+): Promise<void> {
+  if (!firstParty || !('serverName' in firstParty))
+    throw new CodexSetupError('login_failed');
+  let handle;
+  const bytes = Buffer.alloc(32 * 1024 + 1);
+  try {
+    handle = await open(
+      source,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    );
+    const info = await handle.stat();
+    if (
+      !info.isFile() ||
+      info.nlink !== 1 ||
+      info.uid !== process.getuid?.() ||
+      (info.mode & 0o777) !== 0o600 ||
+      info.size > 32 * 1024
+    )
+      throw new Error();
+    const read = await handle.read(bytes, 0, bytes.length, 0);
+    if (read.bytesRead > 32 * 1024) throw new Error();
+    const auth = JSON.parse(bytes.subarray(0, read.bytesRead).toString('utf8'));
+    const token = auth?.tokens?.access_token;
+    if (
+      auth?.auth_mode !== 'chatgptAuthTokens' ||
+      auth?.tokens?.account_id !== firstParty.expectedAccountId ||
+      auth?.tokens?.id_token !== token ||
+      auth?.tokens?.refresh_token !== '' ||
+      typeof token !== 'string' ||
+      !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
+    )
+      throw new Error();
+    const claims = JSON.parse(
+      Buffer.from(token.split('.')[1]!, 'base64url').toString('utf8')
+    );
+    if (
+      claims?.['https://api.openai.com/auth']?.chatgpt_account_id !==
+        firstParty.expectedAccountId ||
+      claims?.['https://api.openai.com/profile']?.email?.toLowerCase() !==
+        firstParty.expectedEmail.toLowerCase() ||
+      !Number.isSafeInteger(claims.exp) ||
+      claims.exp * 1000 <= Date.now() + 60_000
+    )
+      throw new Error();
+    await writeFile(target, bytes.subarray(0, read.bytesRead), {
+      mode: 0o600,
+      flag: 'wx',
+    });
+  } catch {
+    throw new CodexSetupError('login_failed');
+  } finally {
+    bytes.fill(0);
+    await handle?.close();
+  }
+}
+
 export async function createLinuxChatgptProfile(
   environment: LinuxChatgptEnvironment,
   platform: NodeJS.Platform = process.platform
@@ -349,7 +430,7 @@ export async function createLinuxChatgptProfile(
   return {
     configPath: join(environment.codexHome, 'config.toml'),
     install: {
-      credentialStore: 'keyring',
+      credentialStore: inference.mode === 'account' ? 'file' : 'keyring',
       trustedProject: workspace,
       executionPolicy: LINUX_CHATGPT_EXECUTION_POLICY,
       builtinToolPolicy: LINUX_CHATGPT_BUILTIN_TOOL_POLICY,
@@ -375,8 +456,14 @@ export async function createLinuxChatgptProfile(
     }),
     evidenceDir,
     readiness,
-    async beforeStart(setup, launch, plugins = [], credentials = {}) {
-      const native = {
+    async beforeStart(
+      setup,
+      launch,
+      plugins = [],
+      credentials = {},
+      firstParty
+    ) {
+      const native: Record<string, string> = {
         ...environment.session,
         PATH: '/usr/bin:/bin',
         LANG: 'C.UTF-8',
@@ -388,7 +475,25 @@ export async function createLinuxChatgptProfile(
             native,
             inference.apiKeyFile
           );
-        else await checkGateway(inference.baseUrl, inference.tokenFile);
+        else if (inference.mode === 'gateway')
+          await checkGateway(inference.baseUrl, inference.tokenFile);
+        else {
+          if (!firstParty || !('serverName' in firstParty))
+            throw new CodexSetupError('login_failed');
+          await importAccountAuth(
+            inference.authFile,
+            join(environment.codexHome, 'auth.json'),
+            firstParty
+          );
+          const identity = await probeAppServerAccountIdentity(
+            environment.codexPath,
+            native,
+            firstParty.expectedEmail,
+            firstParty.expectedWorkspace
+          );
+          if (identity.status !== 'verified')
+            throw new CodexSetupError('login_failed');
+        }
         readiness.login = 'verified';
       } catch (error) {
         readiness.login = 'failed';
@@ -398,6 +503,25 @@ export async function createLinuxChatgptProfile(
       }
       // MST checked the servers before the batch started. The app-server
       // status probe below gets their bearer tokens, by env var name.
+      const localGlean = inference.mode === 'account' && firstParty &&
+        'serverName' in firstParty && firstParty.workLocation !== 'cloud';
+      if (localGlean) {
+        if (firstParty.serverName !== 'glean_default')
+          throw fail('mcp_server_not_ready');
+        const info = await lstat(STAGED_GLEAN_TOKEN);
+        if (!info.isFile() || info.nlink !== 1 || (info.mode & 0o777) !== 0o600 ||
+            info.size < 100 || info.size > 16384)
+          throw fail('mcp_server_not_ready');
+        const token = await readFile(STAGED_GLEAN_TOKEN, 'utf8');
+        const parts = token.split('.');
+        if (parts.length !== 3) throw fail('mcp_server_not_ready');
+        const claims = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
+        if (claims.email?.toLowerCase() !== firstParty.expectedEmail.toLowerCase() ||
+            !Number.isSafeInteger(claims.exp) || claims.exp * 1000 < Date.now() + 60_000)
+          throw fail('mcp_server_not_ready');
+        native[GLEAN_TOKEN_ENV] = token;
+        launch[GLEAN_TOKEN_ENV] = token;
+      }
       const tokens = bearerTokens(setup.servers, launch);
       // Plugin MCP servers run under their own names and are eval servers too.
       if (plugins.length) {
@@ -419,6 +543,7 @@ export async function createLinuxChatgptProfile(
       const labels = [
         ...setup.servers.map((server) => server.label),
         ...pluginTargets.map((target) => target.label),
+        ...(localGlean ? ['glean_default'] : []),
       ];
       if (!labels.length) return;
       readiness.mcpStatus = await probeAppServerStatus(
@@ -429,6 +554,11 @@ export async function createLinuxChatgptProfile(
       if (readiness.mcpStatus.status !== 'available')
         throw fail('mcp_status_unavailable');
       for (const [index, server] of readiness.mcpStatus.servers.entries()) {
+        if (localGlean && index === setup.servers.length + pluginTargets.length) {
+          if (!appServerServerReady(server, 'bearerToken') || server.toolCount! < 1)
+            throw fail('mcp_server_not_ready');
+          continue;
+        }
         const configured = setup.servers[index];
         if (configured) {
           const auth =

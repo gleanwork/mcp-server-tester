@@ -43,6 +43,23 @@ const CONFIRM_MODEL: Proposal = {
   tool: 'confirm_model',
   input: { model: 'claude-opus-4-6' },
 };
+const CONFIRM_LOCAL: Proposal = {
+  tool: 'confirm_local_work',
+  input: { location: 'local' },
+};
+const CONFIRM_CLOUD: Proposal = {
+  tool: 'confirm_cloud_work',
+  input: { location: 'cloud' },
+};
+const FOCUS_LOCAL_COMPOSER: Proposal = {
+  tool: 'focus_local_composer',
+  input: { coordinate: [100, 100] },
+};
+const FOCUS_CLOUD_COMPOSER: Proposal = {
+  tool: 'focus_cloud_composer',
+  input: { coordinate: [100, 100] },
+};
+const ESCAPE: Proposal = { action: 'key', text: 'Escape' };
 const IMAGE = {
   type: 'image',
   source: { type: 'base64', media_type: 'image/png', data: 'x' },
@@ -64,6 +81,8 @@ interface Scenario {
   targetModel?: string;
   reasoningEffort?: string;
   chatgptSurface?: ComputerUseRun['chatgptSurface'];
+  requireLocalWork?: boolean;
+  requiredWorkLocation?: ComputerUseRun['requiredWorkLocation'];
   /** Frontmost app names, one per check. Without them, the app is always in front. */
   frontmost?: Array<string | undefined>;
   appPath?: string;
@@ -175,6 +194,10 @@ async function runActions(
     mode: scenario.mode ?? 'submit',
     application,
     chatgptSurface: scenario.chatgptSurface ?? 'chatgpt-work',
+    ...(scenario.requireLocalWork ? { requireLocalWork: true } : {}),
+    ...(scenario.requiredWorkLocation
+      ? { requiredWorkLocation: scenario.requiredWorkLocation }
+      : {}),
     ...(scenario.targetModel ? { targetModel: scenario.targetModel } : {}),
     ...(scenario.reasoningEffort
       ? { reasoningEffort: scenario.reasoningEffort }
@@ -534,6 +557,231 @@ describe('Cowork reset', () => {
   it('is not automated for ChatGPT', async () => {
     const run = await runActions([], { mode: 'reset', application: 'chatgpt' });
     expect(run.outcome).toContain('resets are not automated');
+    expect(run.executed).toEqual([]);
+  });
+});
+
+describe('ChatGPT Local Work confirmation', () => {
+  it('describes the observed location menu without inferring the selection from its icon', async () => {
+    const run = await runActions([FILL], {
+      application: 'chatgpt',
+      requireLocalWork: true,
+      budget: 1,
+    });
+    const request = JSON.stringify(run.request);
+    expect(request).toContain('On your computer');
+    expect(request).toContain('In the cloud');
+    expect(request).toContain('check mark');
+    expect(request).toContain('Never infer the selection from its icon alone');
+    expect(run.executed).toEqual([]);
+  });
+
+  it('refuses to fill or submit without confirming Local', async () => {
+    const run = await runActions([FILL, ENTER], {
+      application: 'chatgpt',
+      requireLocalWork: true,
+      budget: 2,
+    });
+    expect(run.error).toBeDefined();
+    expect(run.executed).toEqual([]);
+    expect(run.telemetry.refused_action_count).toBe(2);
+  });
+
+  it('allows one submission after observing Local and the filled composer', async () => {
+    const run = await runActions(
+      [CONFIRM_LOCAL, ESCAPE, { action: 'screenshot' }],
+      {
+        application: 'chatgpt',
+        requireLocalWork: true,
+        budget: 8,
+        plans: [
+          [FOCUS_LOCAL_COMPOSER, FILL, { action: 'screenshot' }],
+          [ENTER],
+        ],
+      }
+    );
+    expect(run.result?.status).toBe('submitted');
+    expect(run.executed.map((action) => action.action)).toEqual([
+      'key',
+      'screenshot',
+      'left_click',
+      'paste',
+      'screenshot',
+      'key',
+    ]);
+  });
+
+  it('does not focus or fill while the location menu is still open', async () => {
+    const run = await runActions([CONFIRM_LOCAL, FOCUS_LOCAL_COMPOSER, FILL], {
+      application: 'chatgpt',
+      requireLocalWork: true,
+      budget: 3,
+    });
+    expect(run.error).toBeDefined();
+    expect(run.executed).toEqual([]);
+    expect(run.telemetry.refused_action_count).toBe(2);
+  });
+
+  it('requires the planner to observe a fresh screenshot before focusing', async () => {
+    const run = await runActions(
+      [
+        CONFIRM_LOCAL,
+        ESCAPE,
+        { action: 'screenshot' },
+        FOCUS_LOCAL_COMPOSER,
+        FILL,
+      ],
+      { application: 'chatgpt', requireLocalWork: true, budget: 5 }
+    );
+    expect(run.error).toBeDefined();
+    expect(run.executed.map((action) => action.action)).toEqual([
+      'key',
+      'screenshot',
+    ]);
+  });
+
+  it.each([
+    [1280, 100],
+    [100, 800],
+    [-1, 100],
+    [1.5, 100],
+  ])('rejects invalid composer coordinates %s', async (x, y) => {
+    const run = await runActions(
+      [CONFIRM_LOCAL, ESCAPE, { action: 'screenshot' }],
+      {
+        application: 'chatgpt',
+        requireLocalWork: true,
+        budget: 5,
+        plans: [
+          [
+            { tool: 'focus_local_composer', input: { coordinate: [x, y] } },
+            FILL,
+          ],
+        ],
+      }
+    );
+    expect(run.error).toBeDefined();
+    expect(run.executed.map((action) => action.action)).toEqual([
+      'key',
+      'screenshot',
+    ]);
+  });
+
+  it('invalidates Local if an ordinary click follows composer focus', async () => {
+    const run = await runActions(
+      [CONFIRM_LOCAL, ESCAPE, { action: 'screenshot' }],
+      {
+        application: 'chatgpt',
+        requireLocalWork: true,
+        budget: 6,
+        plans: [
+          [
+            FOCUS_LOCAL_COMPOSER,
+            { action: 'left_click', coordinate: [10, 10] },
+            FILL,
+          ],
+        ],
+      }
+    );
+    expect(run.error).toBeDefined();
+    expect(run.executed.map((action) => action.action)).toEqual([
+      'key',
+      'screenshot',
+      'left_click',
+      'left_click',
+    ]);
+  });
+
+  it('allows Escape to close a post-fill menu without losing Local confirmation', async () => {
+    const run = await runActions(
+      [CONFIRM_LOCAL, ESCAPE, { action: 'screenshot' }],
+      {
+        application: 'chatgpt',
+        requireLocalWork: true,
+        budget: 10,
+        plans: [
+          [FOCUS_LOCAL_COMPOSER, FILL, { action: 'screenshot' }],
+          [ESCAPE, { action: 'screenshot' }],
+          [ENTER],
+        ],
+      }
+    );
+    expect(run.result?.status).toBe('submitted');
+    expect(
+      run.executed.filter((action) => action.action === 'paste')
+    ).toHaveLength(1);
+  });
+
+  it('invalidates confirmation when navigation changes the UI', async () => {
+    const run = await runActions(
+      [CONFIRM_LOCAL, { action: 'left_click', coordinate: [10, 10] }, FILL],
+      { application: 'chatgpt', requireLocalWork: true, budget: 3 }
+    );
+    expect(run.error).toBeDefined();
+    expect(run.executed.map((action) => action.action)).toEqual(['left_click']);
+  });
+
+  it('refuses to claim Local from an unobserved screenshot', async () => {
+    const run = await runActions(
+      [
+        { action: 'left_click', coordinate: [10, 10] },
+        { action: 'screenshot' },
+        CONFIRM_LOCAL,
+        FILL,
+      ],
+      { application: 'chatgpt', requireLocalWork: true, budget: 4 }
+    );
+    expect(run.error).toBeDefined();
+    expect(run.executed.map((action) => action.action)).toEqual([
+      'left_click',
+      'screenshot',
+    ]);
+  });
+});
+
+describe('ChatGPT Cloud Work confirmation', () => {
+  it('instructs the planner to select and verify the Cloud Work location', async () => {
+    const run = await runActions([FILL], {
+      application: 'chatgpt',
+      requiredWorkLocation: 'cloud',
+      budget: 1,
+    });
+    const request = JSON.stringify(run.request);
+    expect(request).toContain('In the cloud');
+    expect(request).toContain('On your computer');
+    expect(request).toContain('check mark');
+    expect(request).toContain('confirm_cloud_work');
+    expect(run.executed).toEqual([]);
+  });
+
+  it('requires fresh Cloud confirmation before filling and submitting', async () => {
+    const run = await runActions([CONFIRM_CLOUD, ESCAPE, { action: 'screenshot' }], {
+      application: 'chatgpt',
+      requiredWorkLocation: 'cloud',
+      budget: 8,
+      plans: [
+        [FOCUS_CLOUD_COMPOSER, FILL, { action: 'screenshot' }],
+        [ENTER],
+      ],
+    });
+    expect(run.result?.status).toBe('submitted');
+    expect(run.executed.map((action) => action.action)).toEqual([
+      'key',
+      'screenshot',
+      'left_click',
+      'paste',
+      'screenshot',
+      'key',
+    ]);
+  });
+
+  it('does not submit without confirming the requested Cloud location', async () => {
+    const run = await runActions([FILL, ENTER], {
+      application: 'chatgpt',
+      requiredWorkLocation: 'cloud',
+      budget: 2,
+    });
+    expect(run.error).toBeDefined();
     expect(run.executed).toEqual([]);
   });
 });

@@ -253,6 +253,224 @@ describe('ChatGPT and Codex app sessions', () => {
 });
 
 describe('ChatGPT V2 batch client', () => {
+  it('requires an explicit acknowledgement for the selected current-account MCP server', () => {
+    const firstParty = {
+      serverName: 'glean_default',
+      expectedEmail: 'test@example.com',
+      expectedAccountId: '00000000-0000-4000-8000-000000000001',
+      expectedOrganizationId: 'org-example123456',
+      source: { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9222' },
+      allowedTools: ['search', 'read_document'],
+      acknowledgeToolPolicyIsNotASandbox: true,
+    };
+    expect(
+      CHATGPT_CLIENT.schema.parse({ ...config, firstParty })
+    ).toMatchObject({ firstParty });
+    expect(
+      CHATGPT_CLIENT.schema.parse({ ...config, firstParty })
+    ).toMatchObject({ firstParty: { workLocation: 'local' } });
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: { ...firstParty, workLocation: 'remote' },
+      })
+    ).toThrow();
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: { ...firstParty, expectedEmail: 'not-an-email' },
+      })
+    ).toThrow();
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: { ...firstParty, expectedOrganizationId: 'not-an-org' },
+      })
+    ).toThrow();
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: {
+          ...firstParty,
+          source: { kind: 'cdp', endpoint: 'http://0.0.0.0:9222' },
+        },
+      })
+    ).toThrow();
+    expect(
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: { ...firstParty, allowedTools: undefined },
+      })
+    ).toBeDefined();
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: { ...firstParty, appId: 'glean' },
+      })
+    ).toThrow();
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: {
+          ...firstParty,
+          acknowledgeToolPolicyIsNotASandbox: undefined,
+        },
+      })
+    ).toThrow();
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: { ...firstParty, dedicatedAccount: true },
+      })
+    ).toThrow();
+  });
+
+  it('runs first-party on the current account only with explicit policy-risk acknowledgement', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-controller-key');
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+      success: true,
+      response: 'Found one result',
+      toolCalls: [
+        {
+          name: 'search',
+          source: 'mcp',
+          server: 'glean_default',
+          arguments: { query: 'Glean' },
+          output: 'result',
+          durationMs: 10,
+          isError: false,
+        },
+      ],
+      clientMetadata: metadata,
+    });
+    const firstParty = {
+      serverName: 'glean_default',
+      expectedEmail: 'test@example.com',
+      expectedAccountId: '00000000-0000-4000-8000-000000000001',
+      expectedOrganizationId: 'org-example123456',
+      source: { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9222' },
+      allowedTools: ['search'],
+      acknowledgeToolPolicyIsNotASandbox: true as const,
+    };
+    const session = await CHATGPT_CLIENT.open!(
+      {
+        config: {
+          ...config,
+          configPath: join(home.value, 'config.toml'),
+          firstParty,
+        },
+        input: { servers: [] },
+      },
+      context
+    );
+    try {
+      const result = await session.run({
+        caseId: 'first-party-search',
+        trial: 0,
+        input: { prompt: 'Search Glean for one result.' },
+      });
+      expect(result.result.events).toMatchObject([
+        { server: 'glean_default', name: 'search' },
+      ]);
+      expect(lifecycle.prepare).toHaveBeenCalledOnce();
+      expect(runChatgptTurn).toHaveBeenCalledOnce();
+    } finally {
+      await session.close();
+    }
+    expect(lifecycle.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('forwards the configured Cloud Work location to computer-use submission', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-controller-key');
+    const firstParty = {
+      serverName: 'glean_default',
+      expectedEmail: 'test@example.com',
+      expectedAccountId: '00000000-0000-4000-8000-000000000001',
+      expectedOrganizationId: 'org-example123456',
+      workLocation: 'cloud' as const,
+      source: { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9222' },
+      allowedTools: ['search'],
+      acknowledgeToolPolicyIsNotASandbox: true as const,
+    };
+    const session = await CHATGPT_CLIENT.open!(
+      {
+        config: {
+          ...config,
+          configPath: join(home.value, 'config.toml'),
+          firstParty,
+        },
+        input: { servers: [] },
+      },
+      context
+    );
+    try {
+      await session.run({
+        caseId: 'first-party-cloud-search',
+        trial: 0,
+        input: { prompt: 'Search Glean for one result.' },
+      });
+      expect(runChatgptTurn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          firstParty: expect.objectContaining({
+            workLocation: 'cloud',
+          }),
+        }),
+        expect.anything(),
+        expect.anything()
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('accepts only explicit first-party app settings with a dedicated account acknowledgement', () => {
+    const firstParty = {
+      appId: 'glean',
+      allowedTools: ['search'],
+      dedicatedAccount: true,
+    };
+    expect(
+      CHATGPT_CLIENT.schema.parse({ ...config, firstParty })
+    ).toMatchObject({ firstParty });
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: { ...firstParty, dedicatedAccount: false },
+      })
+    ).toThrow();
+    expect(() =>
+      CHATGPT_CLIENT.schema.parse({
+        ...config,
+        firstParty: { ...firstParty, allowedTools: [] },
+      })
+    ).toThrow();
+    expect(chatgptOptionIssues({ firstParty }, 'linux')).toEqual([]);
+    expect(chatgptOptionIssues({ firstParty }, 'win32')).toContain(
+      'ChatGPT first-party mode requires macOS or a prepared Linux account runtime.'
+    );
+  });
+  it('does not treat an account app ID as a supported first-party MCP server', async () => {
+    await expect(
+      CHATGPT_CLIENT.open!(
+        {
+          config: {
+            ...config,
+            firstParty: {
+              appId: 'glean',
+              allowedTools: ['search'],
+              dedicatedAccount: true,
+            },
+          },
+          input: { servers: [] },
+        },
+        context
+      )
+    ).rejects.toThrow(
+      'ChatGPT first-party account-app mode is not implemented'
+    );
+    expect(lifecycle.prepare).not.toHaveBeenCalled();
+  });
   it('keeps the single-run blank prompt check before setup', async () => {
     await expect(
       CHATGPT_CLIENT.run!({ prompt: '  ', servers: [] }, config, context)
@@ -996,6 +1214,197 @@ describe('ChatGPT V2 batch client', () => {
     expect(transcripts[0]!.telemetry?.mcpSelection).toMatchObject({
       status: 'failed',
       unexpectedServers: ['other-plugin'],
+    });
+  });
+  it('accepts another listed read-only tool from the selected app', async () => {
+    const batch = requests().slice(0, 1);
+    batch[0]!.input.servers = [];
+    batch[0]!.config = {
+      ...config,
+      requireMcpCalls: true,
+      firstParty: {
+        serverName: 'glean_default',
+        expectedEmail: 'test@example.com',
+        expectedAccountId: '00000000-0000-4000-8000-000000000001',
+        expectedOrganizationId: 'org-example123456',
+        workLocation: 'cloud',
+        source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+        allowedTools: ['search', 'chat'],
+        acknowledgeToolPolicyIsNotASandbox: true,
+      },
+    };
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+      success: true,
+      response: 'answer',
+      clientMetadata: metadata,
+      toolCalls: [
+        {
+          name: 'glean_default.chat',
+          source: 'mcp',
+          server: 'codex_apps',
+          arguments: {},
+          isError: false,
+        },
+      ],
+    });
+    const [transcript] = await collectClientBatch(
+      CHATGPT_CLIENT,
+      batch,
+      context
+    );
+    expect(transcript!.error).toBeUndefined();
+    expect(transcript!.telemetry?.mcpSelection).toMatchObject({
+      status: 'passed',
+      configuredMcpCallCount: 1,
+      unexpectedServers: [],
+    });
+  });
+  it('keeps Pages calls separate from required Glean calls', async () => {
+    const batch = requests().slice(0, 1);
+    batch[0]!.input.servers = [];
+    batch[0]!.config = {
+      ...config,
+      requireMcpCalls: true,
+      firstParty: {
+        serverName: 'glean_default',
+        expectedEmail: 'test@example.com',
+        expectedAccountId: '00000000-0000-4000-8000-000000000001',
+        expectedOrganizationId: 'org-example123456',
+        workLocation: 'cloud',
+        source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+        allowedTools: ['search'],
+        allowPages: true,
+        acknowledgeToolPolicyIsNotASandbox: true,
+      },
+    };
+    const pageCall = {
+      name: 'chatgpt_space.create_page',
+      source: 'mcp' as const,
+      server: 'codex_apps',
+      arguments: {},
+    };
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+      success: true,
+      response: 'answer',
+      clientMetadata: metadata,
+      toolCalls: [
+        pageCall,
+        {
+          name: 'glean_default.search',
+          source: 'mcp',
+          server: 'codex_apps',
+          arguments: {},
+        },
+      ],
+    });
+    const [withGlean] = await collectClientBatch(CHATGPT_CLIENT, batch, context);
+    expect(withGlean!.error).toBeUndefined();
+    expect(withGlean!.telemetry?.mcpSelection).toMatchObject({
+      status: 'passed',
+      configuredMcpCallCount: 1,
+      pagesCallCount: 1,
+      unexpectedServers: [],
+    });
+
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+      success: true,
+      response: 'answer',
+      clientMetadata: metadata,
+      toolCalls: [pageCall],
+    });
+    const [pagesOnly] = await collectClientBatch(CHATGPT_CLIENT, batch, context);
+    expect(pagesOnly!.error).toContain('without calling');
+    expect(pagesOnly!.telemetry?.mcpSelection).toMatchObject({
+      status: 'failed',
+      configuredMcpCallCount: 0,
+      pagesCallCount: 1,
+      unexpectedServers: [],
+    });
+  });
+  it('rejects another account app while Glean read-only tools are allowed', async () => {
+    const batch = requests().slice(0, 1);
+    batch[0]!.input.servers = [];
+    batch[0]!.config = {
+      ...config,
+      requireMcpCalls: true,
+      firstParty: {
+        serverName: 'glean_default',
+        expectedEmail: 'test@example.com',
+        expectedAccountId: '00000000-0000-4000-8000-000000000001',
+        expectedOrganizationId: 'org-example123456',
+        workLocation: 'cloud',
+        source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+        allowedTools: ['search', 'chat'],
+        allowPages: true,
+        acknowledgeToolPolicyIsNotASandbox: true,
+      },
+    };
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+      success: true,
+      response: 'answer',
+      clientMetadata: metadata,
+      toolCalls: [
+        {
+          name: 'other.search',
+          source: 'mcp',
+          server: 'codex_apps',
+          arguments: {},
+        },
+      ],
+    });
+    const [transcript] = await collectClientBatch(
+      CHATGPT_CLIENT,
+      batch,
+      context
+    );
+    expect(transcript!.error).toContain('outside');
+    expect(transcript!.telemetry?.mcpSelection).toMatchObject({
+      status: 'failed',
+      configuredMcpCallCount: 0,
+      unexpectedServers: ['codex_apps'],
+    });
+  });
+  it('fails a selected account app call outside its tool allowlist', async () => {
+    const batch = requests().slice(0, 1);
+    batch[0]!.input.servers = [];
+    batch[0]!.config = {
+      ...config,
+      firstParty: {
+        serverName: 'glean_default',
+        expectedEmail: 'test@example.com',
+        expectedAccountId: '00000000-0000-4000-8000-000000000001',
+        expectedOrganizationId: 'org-example123456',
+        workLocation: 'cloud',
+        source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+        allowedTools: ['search'],
+        acknowledgeToolPolicyIsNotASandbox: true,
+      },
+    };
+    vi.mocked(runChatgptTurn).mockResolvedValueOnce({
+      success: true,
+      response: 'answer',
+      clientMetadata: metadata,
+      toolCalls: [
+        {
+          name: 'glean_default.delete',
+          source: 'mcp',
+          server: 'codex_apps',
+          arguments: {},
+        },
+      ],
+    });
+    const [transcript] = await collectClientBatch(
+      CHATGPT_CLIENT,
+      batch,
+      context
+    );
+    expect(transcript!.error).toContain(
+      'outside the selected first-party tool allowlist'
+    );
+    expect(transcript!.telemetry?.mcpSelection).toMatchObject({
+      status: 'failed',
+      configuredMcpCallCount: 1,
+      unexpectedTools: ['glean_default.delete'],
     });
   });
   it('measures three cases despite client-tool-only and wrong-server failures', async () => {

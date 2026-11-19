@@ -529,6 +529,20 @@ describe('--detach', () => {
     log: () => {},
   };
 
+  it('refuses first-party ChatGPT before coordinator or credential I/O', async () => {
+    const f = await evalConfig({
+      client: 'chatgpt',
+      clientOptions: { firstParty: { serverName: 'glean_default' } },
+      datasets: ['./unread-dataset.json'],
+    });
+    await expect(
+      detach({ ...base, configPath: f.configPath, rootDir: f.dir })
+    ).rejects.toThrow(
+      /--detach.*first-party ChatGPT.*attached macOS source host/
+    );
+    expect(detachTestState().coordinatorOptions).toBeUndefined();
+  });
+
   it('sends the coordinator machine its plan and eval config, and its secrets over the channel', async () => {
     const f = await evalConfig();
     const result = await detach({

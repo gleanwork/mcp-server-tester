@@ -5,6 +5,7 @@ import type {
   ClientPluginCredentials,
 } from '../clientPlugins.js';
 import type { ExternalClientCorrelationMetadata } from '../clientTelemetryTypes.js';
+import type { ChatgptWebIdentitySource } from '../chatgptSetup/webIdentity.js';
 
 /**
  * What the ChatGPT app (`chatgpt`, `codex-app`) runs a trial with, resolved
@@ -33,6 +34,21 @@ export interface ChatgptAppConfig {
   };
   /** The managed MCP configuration (`config.toml`) MST installs for the run. */
   codexSetup?: CodexSetupConfig;
+  firstParty?:
+    | { appId: string; allowedTools: string[] }
+    | {
+        serverName: string;
+        expectedEmail: string;
+        expectedAccountId: string;
+        expectedOrganizationId: string;
+        workLocation?: 'local' | 'cloud';
+        source: ChatgptWebIdentitySource;
+        expectedWorkspace?: string;
+        allowedTools?: string[];
+        /** Keep ChatGPT's Pages app available without counting it as Glean. */
+        allowPages?: true;
+        acknowledgeToolPolicyIsNotASandbox: true;
+      };
   /** Client plugins that MST installs into the fresh native profile before start. */
   plugins?: MarketplacePlugin[];
   /**

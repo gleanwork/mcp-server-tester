@@ -39,6 +39,8 @@ export interface ComputerUseOptions extends CoworkDriverOptions {
   /** App-specific instructions; the screenshot/action loop remains shared. */
   application?: 'cowork' | 'chatgpt';
   chatgptSurface?: 'chatgpt-work' | 'codex';
+  requireLocalWork?: boolean;
+  requiredWorkLocation?: 'local' | 'cloud';
   reasoningEffort?: string;
   /** ChatGPT Codex: the empty, trusted folder a fresh draft opens in. */
   workspace?: string;
@@ -234,6 +236,10 @@ async function runComputerUseDriver(
         mode,
         application: options.application ?? 'cowork',
         chatgptSurface: options.chatgptSurface ?? 'chatgpt-work',
+        ...(options.requireLocalWork ? { requireLocalWork: true } : {}),
+        ...(options.requiredWorkLocation
+          ? { requiredWorkLocation: options.requiredWorkLocation }
+          : {}),
         ...(options.targetModel ? { targetModel: options.targetModel } : {}),
         ...(options.reasoningEffort
           ? { reasoningEffort: options.reasoningEffort }

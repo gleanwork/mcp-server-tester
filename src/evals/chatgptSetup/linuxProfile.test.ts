@@ -14,7 +14,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loginWithApiKey } from '../codexSetup/auth.js';
 import type * as AuthModule from '../codexSetup/auth.js';
-import { probeAppServerStatus } from '../codexSetup/appServerStatus.js';
+import {
+  probeAppServerAccountIdentity,
+  probeAppServerStatus,
+} from '../codexSetup/appServerStatus.js';
 import type * as AppServerModule from '../codexSetup/appServerStatus.js';
 import type * as PluginsModule from '../codexSetup/plugins.js';
 import type { AppServerAuthStatus } from '../codexSetup/appServerStatus.js';
@@ -24,6 +27,7 @@ import { installCodexPlugins } from '../codexSetup/plugins.js';
 import { linuxEnvironment } from '../chatgpt/linuxEnvironment.fixture.js';
 import {
   createLinuxChatgptProfile,
+  importAccountAuth,
   readLinuxChatgptEnvironment,
 } from './linuxProfile.js';
 import type { ResolvedCodexSetup } from '../codexSetup/config.js';
@@ -34,6 +38,7 @@ vi.mock('../codexSetup/auth.js', async (original) => ({
 }));
 vi.mock('../codexSetup/appServerStatus.js', async (original) => ({
   ...(await original<typeof AppServerModule>()),
+  probeAppServerAccountIdentity: vi.fn(),
   probeAppServerStatus: vi.fn(),
 }));
 vi.mock('../mcpReadiness.js', async (original) => ({
@@ -99,6 +104,9 @@ beforeEach(async () => {
     method: 'api-key',
   });
   appServer(true);
+  vi.mocked(probeAppServerAccountIdentity).mockResolvedValue({
+    status: 'verified',
+  });
 });
 afterEach(async () => {
   await chmod(home, 0o700);
@@ -106,6 +114,130 @@ afterEach(async () => {
 });
 
 describe('Linux ChatGPT environment contract', () => {
+  it('accepts only the fixed account staging file without an API key or gateway', () => {
+    const account = {
+      ...env,
+      MST_CHATGPT_API_KEY_FILE: undefined,
+      MST_CHATGPT_ACCOUNT_AUTH_FILE: '/run/mst/chatgpt-account/auth.json',
+    };
+    expect(readLinuxChatgptEnvironment(account).inference).toEqual({
+      mode: 'account',
+      authFile: '/run/mst/chatgpt-account/auth.json',
+    });
+    expect(() =>
+      readLinuxChatgptEnvironment({
+        ...account,
+        MST_CHATGPT_API_KEY_FILE: '/run/mst/tokens/inference',
+      })
+    ).toThrow();
+  });
+
+  it('imports a pinned account token into the fresh profile without a refresh token', async () => {
+    const encode = (value: unknown) =>
+      Buffer.from(JSON.stringify(value)).toString('base64url');
+    const token = `${encode({ alg: 'RS256' })}.${encode({
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      'https://api.openai.com/auth': { chatgpt_account_id: 'account12345678' },
+      'https://api.openai.com/profile': { email: 'user@example.com' },
+    })}.${encode('signature')}`;
+    const source = join(home, 'staged-auth.json');
+    const target = join(home, 'imported-auth.json');
+    await writeFile(
+      source,
+      JSON.stringify({
+        auth_mode: 'chatgptAuthTokens',
+        tokens: {
+          account_id: 'account12345678',
+          access_token: token,
+          id_token: token,
+          refresh_token: '',
+        },
+      }),
+      { mode: 0o600 }
+    );
+    const firstParty = {
+      serverName: 'glean_default',
+      expectedAccountId: 'account12345678',
+      expectedOrganizationId: 'org-example123456',
+      expectedEmail: 'user@example.com',
+      source: { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9223' },
+      workLocation: 'cloud' as const,
+      acknowledgeToolPolicyIsNotASandbox: true as const,
+    };
+    await importAccountAuth(source, target, firstParty);
+    expect((await stat(target)).mode & 0o777).toBe(0o600);
+    expect(
+      JSON.parse(
+        await (await import('node:fs/promises')).readFile(target, 'utf8')
+      ).tokens.refresh_token
+    ).toBe('');
+    await expect(
+      importAccountAuth(source, join(home, 'wrong-auth.json'), {
+        ...firstParty,
+        expectedAccountId: 'other-account-123',
+      })
+    ).rejects.toMatchObject({ code: 'login_failed' });
+  });
+
+  it('verifies the VM native account and workspace before app start', async () => {
+    const encode = (value: unknown) =>
+      Buffer.from(JSON.stringify(value)).toString('base64url');
+    const token = `${encode({ alg: 'RS256' })}.${encode({
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      'https://api.openai.com/auth': { chatgpt_account_id: 'account12345678' },
+      'https://api.openai.com/profile': { email: 'user@example.com' },
+    })}.${encode('signature')}`;
+    const source = join(home, 'staged-auth.json');
+    await writeFile(
+      source,
+      JSON.stringify({
+        auth_mode: 'chatgptAuthTokens',
+        tokens: {
+          account_id: 'account12345678',
+          access_token: token,
+          id_token: token,
+          refresh_token: '',
+        },
+      }),
+      { mode: 0o600 }
+    );
+    const accountEnvironment = {
+      ...readLinuxChatgptEnvironment(env),
+      inference: { mode: 'account' as const, authFile: source },
+    };
+    const firstParty = {
+      serverName: 'glean_default',
+      expectedAccountId: 'account12345678',
+      expectedOrganizationId: 'org-example123456',
+      expectedEmail: 'user@example.com',
+      expectedWorkspace: 'Eval Workspace',
+      source: { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9223' },
+      workLocation: 'cloud' as const,
+      acknowledgeToolPolicyIsNotASandbox: true as const,
+    };
+    const profile = await createLinuxChatgptProfile(accountEnvironment, 'linux');
+    await profile.beforeStart({ ...setup, servers: [] }, {}, [], {}, firstParty);
+    expect(probeAppServerAccountIdentity).toHaveBeenCalledWith(
+      env.MST_CHATGPT_CODEX_PATH,
+      expect.objectContaining({ CODEX_HOME: join(home, '.codex') }),
+      'user@example.com',
+      'Eval Workspace'
+    );
+    expect(profile.readiness.login).toBe('verified');
+    await profile.dispose();
+
+    vi.mocked(probeAppServerAccountIdentity).mockResolvedValue({
+      status: 'unavailable',
+      reason: 'account-mismatch',
+    });
+    const mismatch = await createLinuxChatgptProfile(accountEnvironment, 'linux');
+    await expect(
+      mismatch.beforeStart({ ...setup, servers: [] }, {}, [], {}, firstParty)
+    ).rejects.toMatchObject({ code: 'login_failed' });
+    expect(mismatch.readiness.login).toBe('failed');
+    await mismatch.dispose();
+  });
+
   it('accepts the caller contract and forwards only session variables', () => {
     const parsed = readLinuxChatgptEnvironment({
       ...env,

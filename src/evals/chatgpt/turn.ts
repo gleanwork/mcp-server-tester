@@ -24,6 +24,7 @@ import {
   nativeTranscriptFailureKind,
 } from '../nativeTranscriptError.js';
 import { resolveCodexSetup } from '../codexSetup/config.js';
+import { selectedChatgptServerLabels } from './selection.js';
 import type { ChatgptAppSession } from '../chatgptSetup/session.js';
 import {
   ComputerUseDriverError,
@@ -530,13 +531,19 @@ export async function captureChatgptTurn(
         'Native telemetry requires a session baseline and a submitted prompt.'
       );
     const mcpServers = [
-      ...(config.codexSetup
-        ? resolveCodexSetup(config.codexSetup, state.configName).servers.map(
-            (server) => server.label
-          )
-        : []),
-      ...clientPluginMcpServers(config.plugins ?? []).map(
-        (target) => target.server
+      ...selectedChatgptServerLabels(
+        [
+          ...(config.codexSetup
+            ? resolveCodexSetup(
+                config.codexSetup,
+                state.configName
+              ).servers.map((server) => server.label)
+            : []),
+          ...clientPluginMcpServers(config.plugins ?? []).map(
+            (target) => target.server
+          ),
+        ],
+        config.firstParty
       ),
     ];
     while (

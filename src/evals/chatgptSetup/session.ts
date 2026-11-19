@@ -14,6 +14,11 @@ import {
   type CodexConfigInstallation,
   type CodexSetupConfig,
 } from '../codexSetup/config.js';
+import {
+  probeAppServerAccountIdentity,
+  probeAppServerReadOnlyTools,
+} from '../codexSetup/appServerStatus.js';
+import { probeChatgptWebIdentity } from './webIdentity.js';
 import type { ChatgptAppConfig } from '../chatgpt/config.js';
 import type { SemanticDesktopTelemetry } from '../cowork/interaction.js';
 import {
@@ -70,7 +75,10 @@ function sessionSettings(
   );
   if (
     setup?.servers.some((server) => isChatgptBuiltinServer(server.label)) ||
-    pluginLabels.some(isChatgptBuiltinServer)
+    pluginLabels.some(isChatgptBuiltinServer) ||
+    (config.firstParty !== undefined &&
+      'serverName' in config.firstParty &&
+      isChatgptBuiltinServer(config.firstParty.serverName))
   )
     throw new Error(
       'ChatGPT MCP server labels must not collide with built-in tool namespaces.'
@@ -91,6 +99,7 @@ function sessionSettings(
     pluginCredentials: config.pluginCredentials ?? {},
     model: config.model,
     reasoningEffort: config.reasoningEffort,
+    firstParty: config.firstParty,
     surface: chatgptSurface(config),
     environment: readLaunchEnvironment(config.options?.environment),
     sessionsRoot: stringOption(config.options, 'chatgptSessionRoot'),
@@ -118,7 +127,8 @@ const PLUGIN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9._-]+$/;
  * user installed (their skills and MCP servers).
  */
 async function macBuiltinToolPolicy(
-  configPath: string
+  configPath: string,
+  firstParty: boolean
 ): Promise<CodexBuiltinToolPolicy> {
   let plugins: string[] = [];
   try {
@@ -144,7 +154,9 @@ async function macBuiltinToolPolicy(
     ],
     // The in-app browser is a second way to the web, and its New tab sits
     // where the planner looks for New chat.
-    disabledFeatures: ['apps', 'in_app_browser'],
+    disabledFeatures: firstParty
+      ? ['in_app_browser']
+      : ['apps', 'in_app_browser'],
   };
 }
 
@@ -224,6 +236,95 @@ export class ChatgptAppSession {
       this.#lease = lease;
       if (platform.permissionNotice)
         process.stderr.write(platform.permissionNotice);
+      let accountMcpPolicy:
+        | { serverName: string; allowedTools: string[]; restrictAccountApps?: true; allowPages?: true }
+        | undefined;
+      let localAccountAppsPolicy:
+        | { appId: string; allowedTools: string[]; allowPages?: true }
+        | undefined;
+      if (settings.firstParty && 'serverName' in settings.firstParty) {
+        if (!settings.setup)
+          throw new Error('ChatGPT account MCP setup is unavailable.');
+        if (platform.createProfile && platform.os === 'linux') {
+          // The source host verified browser/native identity before staging.
+          // Linux's fresh profile imports the staged native token in beforeStart.
+          // Work Cloud app availability follows cloud orchestrator policy.
+          // This explicit read-only list is audited after the turn. The
+          // account's Global policy must enforce it before any call.
+          if (!settings.firstParty.allowedTools?.length)
+            throw new Error(
+              'Linux ChatGPT account runs require an explicit tool allowlist.'
+            );
+          if (settings.firstParty.workLocation !== 'cloud')
+            localAccountAppsPolicy = {
+              appId: settings.firstParty.serverName,
+              allowedTools: settings.firstParty.allowedTools,
+              ...(settings.firstParty.allowPages === true ? { allowPages: true } : {}),
+            };
+          this.record('setup', 'account_source_verified_by_runner');
+        } else {
+          if (
+            !settings.application.appPath ||
+            platform.createProfile ||
+            platform.os !== 'darwin'
+          )
+            throw new Error('ChatGPT account MCP setup is unavailable.');
+          const probeEnvironment = Object.fromEntries(
+            Object.entries({
+              ...process.env,
+              ...settings.environment,
+              CODEX_HOME: dirname(settings.setup.configPath),
+            }).filter(
+              (entry): entry is [string, string] => entry[1] !== undefined
+            )
+          );
+          const codexPath = join(
+            settings.application.appPath,
+            'Contents/Resources/codex-cli/bin/codex'
+          );
+          const identity = await probeAppServerAccountIdentity(
+            codexPath,
+            probeEnvironment,
+            settings.firstParty.expectedEmail,
+            settings.firstParty.expectedWorkspace
+          );
+          if (identity.status !== 'verified')
+            throw new Error('ChatGPT account identity probe failed.');
+          await probeChatgptWebIdentity(settings.firstParty.source, {
+            accountId: settings.firstParty.expectedAccountId,
+            organizationId: settings.firstParty.expectedOrganizationId,
+            email: settings.firstParty.expectedEmail,
+          });
+          const inventory = await probeAppServerReadOnlyTools(
+            codexPath,
+            probeEnvironment,
+            settings.firstParty.serverName
+          );
+          if (
+            inventory.status !== 'available' ||
+            !['oAuth', 'bearerToken'].includes(inventory.authStatus) ||
+            inventory.allowedTools.length === 0
+          )
+            throw new Error('ChatGPT account MCP inventory probe failed.');
+          const allowedTools =
+            settings.firstParty.allowedTools ?? inventory.allowedTools;
+          if (
+            allowedTools.some((tool) => !inventory.allowedTools.includes(tool))
+          )
+            throw new Error(
+              'ChatGPT account MCP policy includes unverified tools.'
+            );
+          accountMcpPolicy = {
+            serverName: settings.firstParty.serverName,
+            allowedTools,
+            ...(settings.firstParty.workLocation !== 'cloud'
+              ? { restrictAccountApps: true as const }
+              : {}),
+            ...(settings.firstParty.allowPages === true ? { allowPages: true as const } : {}),
+          };
+          this.record('setup', 'probe_account_and_mcp');
+        }
+      }
       if (platform.createProfile) {
         this.#profile = await platform.createProfile(settings.application);
         this.telemetry.nativeReadiness = this.#profile.readiness;
@@ -262,9 +363,19 @@ export class ChatgptAppSession {
             ? {
                 builtinToolPolicy: await macBuiltinToolPolicy(
                   settings.codexSetup.configPath ??
-                    join(defaultChatgptConfigHome(), 'config.toml')
+                    join(defaultChatgptConfigHome(), 'config.toml'),
+                  settings.firstParty !== undefined &&
+                    'appId' in settings.firstParty
                 ),
+                ...(settings.firstParty && 'appId' in settings.firstParty
+                  ? { accountAppsPolicy: settings.firstParty }
+                  : {}),
+                ...(accountMcpPolicy ? { accountMcpPolicy } : {}),
               }
+            : {}),
+          ...(localAccountAppsPolicy ? { accountAppsPolicy: localAccountAppsPolicy } : {}),
+          ...(localAccountAppsPolicy && this.#profile
+            ? { stagedLocalGlean: { allowedTools: localAccountAppsPolicy.allowedTools } }
             : {}),
           ...this.#profile?.install,
         });
@@ -296,7 +407,8 @@ export class ChatgptAppSession {
           settings.setup,
           environment,
           settings.plugins,
-          settings.pluginCredentials
+          settings.pluginCredentials,
+          settings.firstParty
         );
         this.record('setup', 'verify_login_and_mcp');
       }

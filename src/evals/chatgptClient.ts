@@ -11,6 +11,7 @@ import type {
 import { toolCallEvents } from './clientTranscript.js';
 import { runChatgptTurn, type ChatgptTurn } from './chatgpt/turn.js';
 import type { ChatgptAppConfig } from './chatgpt/config.js';
+import { selectedChatgptServerLabels } from './chatgpt/selection.js';
 import { ChatgptAppSession } from './chatgptSetup/session.js';
 import { chatgptServers } from './chatgptSetup/config.js';
 import {
@@ -54,6 +55,7 @@ import {
 import { removedClientOptions } from './renamedKeys.js';
 import { DEFAULT_COMPUTER_USE_MODEL } from './cowork/computerUseLoop.js';
 import { withClientApp } from './installedApp.js';
+import { isChatgptIdentityEndpoint } from './chatgptSetup/webIdentity.js';
 
 /**
  * Why `clientOptions.surface` fails: the surface is the client now (ADR
@@ -75,6 +77,15 @@ function surfaceGone(product: DesktopProduct, value: unknown): string {
     ? `${gone} remove it. \`${product.client}\` always drives ${surface}.`
     : `${gone} use the \`${wanted.client}\` client for ${surface}, and remove \`surface\`.`;
 }
+
+const firstPartyAllowedTools = z
+  .array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/))
+  .min(1)
+  .max(50)
+  .refine(
+    (tools) => new Set(tools).size === tools.length,
+    'Tool names must be unique.'
+  );
 
 const schemaOf = (product: DesktopProduct) =>
   z
@@ -109,6 +120,40 @@ const schemaOf = (product: DesktopProduct) =>
           'app profile config.toml on the trial machine (OS-specific)',
       }),
       requireMcpCalls: z.boolean().optional().meta({ default: false }),
+      firstParty: z
+        .union([
+          z
+            .object({
+              appId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
+              allowedTools: firstPartyAllowedTools,
+              dedicatedAccount: z.literal(true),
+            })
+            .strict(),
+          z
+            .object({
+              serverName: z
+                .string()
+                .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
+              expectedEmail: z.email(),
+              expectedAccountId: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/),
+              expectedOrganizationId: z
+                .string()
+                .regex(/^org-[A-Za-z0-9_-]{6,124}$/),
+              workLocation: z.enum(['local', 'cloud']).default('local'),
+              source: z
+                .object({
+                  kind: z.literal('cdp'),
+                  endpoint: z.string().refine(isChatgptIdentityEndpoint),
+                })
+                .strict(),
+              expectedWorkspace: z.string().trim().min(1).optional(),
+              allowedTools: firstPartyAllowedTools.optional(),
+              allowPages: z.literal(true).optional(),
+              acknowledgeToolPolicyIsNotASandbox: z.literal(true),
+            })
+            .strict(),
+        ])
+        .optional(),
       /** Gone: the surface is the client (`chatgpt` or `codex-app`). */
       surface: z
         .never({ error: (issue) => surfaceGone(product, issue.input) })
@@ -180,11 +225,16 @@ export function chatgptOptionIssues(
     computerUseModel?: unknown;
     maxActions?: unknown;
     plugins?: readonly unknown[];
+    firstParty?: unknown;
   },
   os: NodeJS.Platform
 ): string[] {
   const issues: string[] = [];
   const on = osName(os);
+  if (options.firstParty !== undefined && os !== 'darwin' && os !== 'linux')
+    issues.push(
+      'ChatGPT first-party mode requires macOS or a prepared Linux account runtime.'
+    );
   if (os !== 'darwin' && options.computerUseModel !== undefined)
     issues.push(
       `computerUseModel is the planner of Computer Use on macOS, and this trial runs on ${on}, which has no planner.`
@@ -246,6 +296,25 @@ function desktopAdapter(
   const schema = SCHEMAS[product.client];
   const configs = requests.map((request) => schema.parse(request.config));
   requireIdenticalClientSettings(label, configs);
+  if (configs[0]!.firstParty) {
+    const firstParty = configs[0]!.firstParty;
+    if (product.client !== 'chatgpt')
+      throw new Error('First-party app mode requires the chatgpt client.');
+    if (
+      requests.some((request) => request.input.servers.length) ||
+      configs[0]!.plugins?.length
+    )
+      throw new Error(
+        'First-party app mode cannot mix eval MCP servers or plugins.'
+      );
+    if (!('serverName' in firstParty))
+      throw new Error(
+        'ChatGPT first-party account-app mode is not implemented.'
+      );
+    process.stderr.write(
+      '[mst:chatgpt] First-party uses the current signed-in account. The configured tool allowlist is not a security sandbox.\n'
+    );
+  }
   const osIssues = chatgptOptionIssues(configs[0]!, platform.os);
   if (osIssues.length)
     throw new Error(`${label} can't run this trial: ${osIssues.join(' ')}`);
@@ -296,6 +365,7 @@ function desktopAdapter(
         configPath: config.configPath,
         servers: serverConfig.servers,
       },
+      ...(config.firstParty ? { firstParty: config.firstParty } : {}),
       ...(config.plugins?.length
         ? {
             plugins: config.plugins,
@@ -350,12 +420,15 @@ function desktopAdapter(
       const serverConfig = prepared[0]!;
       const started = Date.now();
       // Plugin MCP servers are eval servers under their own names.
-      const serverLabels = new Set([
-        ...serverConfig.servers.map((server) => server.label),
-        ...clientPluginMcpServers(config.plugins ?? []).map(
-          (target) => target.server
-        ),
-      ]);
+      const serverLabels = selectedChatgptServerLabels(
+        [
+          ...serverConfig.servers.map((server) => server.label),
+          ...clientPluginMcpServers(config.plugins ?? []).map(
+            (target) => target.server
+          ),
+        ],
+        config.firstParty
+      );
       // Eval prompts stay unchanged. Server selection is verified from native calls,
       // not enforced by adding evaluator instructions to the model's context.
       const result = await runChatgptTurn(
@@ -388,19 +461,69 @@ function desktopAdapter(
       const mcpCalls = result.toolCalls.filter(
         (call) => call.source !== 'builtin'
       );
-      const selectedCalls = mcpCalls.filter(
-        (call) => call.server && serverLabels.has(call.server)
-      );
+      const allowPages =
+        config.firstParty &&
+        'serverName' in config.firstParty &&
+        config.firstParty.allowPages === true;
+      // ChatGPT reports account apps through its codex_apps transport. The
+      // qualified tool name identifies the app; the transport alone does not.
+      const selectedServerOf = (call: (typeof mcpCalls)[number]) => {
+        if (
+          call.server === 'codex_apps' &&
+          config.firstParty &&
+          'serverName' in config.firstParty &&
+          call.name.startsWith(`${config.firstParty.serverName}.`) &&
+          call.name.length > config.firstParty.serverName.length + 1
+        )
+          return config.firstParty.serverName;
+        return call.server;
+      };
+      const selectedCalls = mcpCalls.filter((call) => {
+        const server = selectedServerOf(call);
+        return server && serverLabels.has(server);
+      });
+      const pageCalls = allowPages
+        ? mcpCalls.filter(
+            (call) =>
+              call.server === 'codex_apps' &&
+              call.name.startsWith('chatgpt_space.') &&
+              call.name.length > 'chatgpt_space.'.length
+          )
+        : [];
       const unexpectedServers = [
         ...new Set(
           mcpCalls
-            .filter((call) => !call.server || !serverLabels.has(call.server))
-            .map((call) => call.server ?? '(unattributed)')
+            .filter((call) => {
+              const server = selectedServerOf(call);
+              return (
+                (!server || !serverLabels.has(server)) &&
+                !pageCalls.includes(call)
+              );
+            })
+            .map((call) => selectedServerOf(call) ?? '(unattributed)')
         ),
       ];
+      const accountPolicy =
+        config.firstParty && 'serverName' in config.firstParty
+          ? config.firstParty
+          : undefined;
+      const unexpectedTools = accountPolicy?.allowedTools
+        ? selectedCalls
+            .filter(
+              (call) =>
+                !accountPolicy.allowedTools!.some(
+                  (tool) =>
+                    call.name === tool ||
+                    call.name === `${accountPolicy.serverName}.${tool}`
+                )
+            )
+            .map((call) => call.name)
+        : [];
       let measurementError: string | undefined;
       if (executionTrusted && unexpectedServers.length)
         measurementError = `${label} called an MCP server outside the configured evaluation server selection.`;
+      else if (executionTrusted && unexpectedTools.length)
+        measurementError = `${label} called an MCP tool outside the selected first-party tool allowlist.`;
       else if (
         executionTrusted &&
         config.requireMcpCalls &&
@@ -442,11 +565,13 @@ function desktopAdapter(
             required: config.requireMcpCalls === true,
             selectedServers: [...serverLabels],
             configuredMcpCallCount: selectedCalls.length,
+            ...(allowPages ? { pagesCallCount: pageCalls.length } : {}),
             externalMcpCallCount: mcpCalls.length,
             builtinToolCallCount: result.toolCalls.filter(
               (call) => call.source === 'builtin'
             ).length,
             unexpectedServers,
+            ...(accountPolicy?.allowedTools ? { unexpectedTools } : {}),
             ...(measurementError ? { error: measurementError } : {}),
           },
           ...withClientApp(appSession.app),

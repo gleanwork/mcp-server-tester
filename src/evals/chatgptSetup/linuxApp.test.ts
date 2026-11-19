@@ -96,6 +96,7 @@ describe('in-process Linux ChatGPT app controller', () => {
     await controller.start({
       CODEX_HOME: join(root, '.codex'),
       MST_CHATGPT_MCP_TOKEN_0: 'fixture-token',
+      MST_CHATGPT_GLEAN_ACCESS_TOKEN: 'glean-fixture-token',
       OPENAI_API_KEY: 'must-not-pass',
     });
     expect(await controller.state()).toEqual({ running: true });
@@ -107,6 +108,7 @@ describe('in-process Linux ChatGPT app controller', () => {
     expect(main!.args).toEqual([...LINUX_CHATGPT_APP_FLAGS]);
     expect(main!.env).toMatchObject({
       MST_CHATGPT_MCP_TOKEN_0: 'fixture-token',
+      MST_CHATGPT_GLEAN_ACCESS_TOKEN: 'glean-fixture-token',
       NO_AT_BRIDGE: '0',
       ACCESSIBILITY_ENABLED: '1',
       GTK_MODULES: 'gail:atk-bridge',
@@ -120,6 +122,7 @@ describe('in-process Linux ChatGPT app controller', () => {
     ]);
     // The hand-off process never receives MCP credentials.
     expect(handoff!.env.MST_CHATGPT_MCP_TOKEN_0).toBeUndefined();
+    expect(handoff!.env.MST_CHATGPT_GLEAN_ACCESS_TOKEN).toBeUndefined();
     const helperPid = () => readFile(join(root, 'helper.pid'), 'utf8');
     await expect.poll(() => helperPid().catch(() => ''), SPAWN).not.toBe('');
     const group = [main!.pid, Number(await helperPid())];

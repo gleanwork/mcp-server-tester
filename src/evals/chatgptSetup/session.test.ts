@@ -28,6 +28,13 @@ import { chatgptLinux } from '../chatgpt/linux.js';
 import type { ChatgptAppConfig } from '../chatgpt/config.js';
 import { getChatgptApplicationController } from './macController.js';
 import {
+  probeAppServerAccountIdentity,
+  probeAppServerReadOnlyTools,
+} from '../codexSetup/appServerStatus.js';
+import type * as AppServerModule from '../codexSetup/appServerStatus.js';
+import { probeChatgptWebIdentity } from './webIdentity.js';
+import type * as WebIdentityModule from './webIdentity.js';
+import {
   installCodexConfig,
   type CodexExecutionPolicy,
 } from '../codexSetup/config.js';
@@ -44,6 +51,15 @@ vi.mock('./macController.js', async (original) => ({
 vi.mock('../codexSetup/config.js', async (original) => ({
   ...(await original<typeof ConfigModule>()),
   installCodexConfig: vi.fn(),
+}));
+vi.mock('../codexSetup/appServerStatus.js', async (original) => ({
+  ...(await original<typeof AppServerModule>()),
+  probeAppServerAccountIdentity: vi.fn(),
+  probeAppServerReadOnlyTools: vi.fn(),
+}));
+vi.mock('./webIdentity.js', async (original) => ({
+  ...(await original<typeof WebIdentityModule>()),
+  probeChatgptWebIdentity: vi.fn(),
 }));
 vi.mock('../cowork/anthropicComputerUse.js', async (original) => ({
   ...(await original<typeof ComputerUseModule>()),
@@ -130,6 +146,18 @@ const plannerUsage: ComputerUseTelemetry = {
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv('ANTHROPIC_API_KEY', 'test-controller-key');
+  vi.mocked(probeAppServerAccountIdentity).mockResolvedValue({
+    status: 'verified',
+  });
+  vi.mocked(probeAppServerReadOnlyTools).mockResolvedValue({
+    status: 'available',
+    authStatus: 'oAuth',
+    allowedTools: ['search', 'read_document'],
+    blockedTools: ['run_tool'],
+  });
+  vi.mocked(probeChatgptWebIdentity).mockImplementation(async () => {
+    events.push('web-identity');
+  });
   events.length = 0;
   vi.mocked(snapshotChatgptSessions).mockImplementation(async () => {
     events.push('snapshot');
@@ -344,6 +372,209 @@ async function turnOf(
 }
 
 describe('ChatGPT batch app lifecycle', () => {
+  it('routes Local Work through a Glean and Pages app policy', async () => {
+    const session = new ChatgptAppSession(chatgptMacos);
+    const firstParty = {
+      serverName: 'glean_default',
+      expectedEmail: 'test@example.com',
+      expectedAccountId: '00000000-0000-4000-8000-000000000001',
+      expectedOrganizationId: 'org-example123456',
+      source: { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9222' },
+      allowedTools: ['search'],
+      allowPages: true as const,
+      acknowledgeToolPolicyIsNotASandbox: true as const,
+    };
+    try {
+      await session.prepare({
+        ...testConfig(),
+        firstParty,
+        codexSetup: {
+          configPath: '/tmp/chatgpt-test/config.toml',
+          servers: [],
+        },
+        options: {},
+      });
+      expect(installCodexConfig).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          accountMcpPolicy: {
+            serverName: 'glean_default',
+            allowedTools: ['search'],
+            restrictAccountApps: true,
+            allowPages: true,
+          },
+          builtinToolPolicy: expect.objectContaining({
+            disabledFeatures: ['apps', 'in_app_browser'],
+          }),
+        })
+      );
+    } finally {
+      await session.dispose();
+    }
+    expect(probeAppServerAccountIdentity).toHaveBeenCalledWith(
+      expect.stringContaining('/Contents/Resources/codex-cli/bin/codex'),
+      expect.objectContaining({ CODEX_HOME: '/tmp/chatgpt-test' }),
+      'test@example.com',
+      undefined
+    );
+    expect(probeAppServerReadOnlyTools).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ CODEX_HOME: '/tmp/chatgpt-test' }),
+      'glean_default'
+    );
+    expect(probeChatgptWebIdentity).toHaveBeenCalledWith(
+      { kind: 'cdp', endpoint: 'http://127.0.0.1:9222' },
+      {
+        accountId: '00000000-0000-4000-8000-000000000001',
+        organizationId: 'org-example123456',
+        email: 'test@example.com',
+      }
+    );
+    expect(restore).toHaveBeenCalledOnce();
+  });
+
+  it('derives the account server allowlist from the read-only inventory', async () => {
+    const session = new ChatgptAppSession(chatgptMacos);
+    try {
+      await session.prepare({
+        ...testConfig(),
+        firstParty: {
+          serverName: 'glean_default',
+          expectedEmail: 'test@example.com',
+          expectedAccountId: '00000000-0000-4000-8000-000000000001',
+          expectedOrganizationId: 'org-example123456',
+          source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9222' },
+          acknowledgeToolPolicyIsNotASandbox: true,
+        },
+        codexSetup: {
+          configPath: '/tmp/chatgpt-test/config.toml',
+          servers: [],
+        },
+      });
+      expect(installCodexConfig).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          accountMcpPolicy: {
+            serverName: 'glean_default',
+            allowedTools: ['search', 'read_document'],
+            restrictAccountApps: true,
+          },
+        })
+      );
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('rejects a first-party server name that collides with built-in tools', async () => {
+    const session = new ChatgptAppSession(chatgptMacos);
+    try {
+      await expect(
+        session.prepare({
+          ...testConfig(),
+          firstParty: {
+            serverName: 'codex',
+            expectedEmail: 'test@example.com',
+            expectedAccountId: '00000000-0000-4000-8000-000000000001',
+            expectedOrganizationId: 'org-example123456',
+            source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9222' },
+            acknowledgeToolPolicyIsNotASandbox: true,
+          },
+          codexSetup: {
+            configPath: '/tmp/chatgpt-test/config.toml',
+            servers: [],
+          },
+        })
+      ).rejects.toThrow('must not collide with built-in tool namespaces');
+      expect(probeAppServerAccountIdentity).not.toHaveBeenCalled();
+      expect(controller.stop).not.toHaveBeenCalled();
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it.each(['identity', 'web identity', 'inventory', 'auth', 'tools'] as const)(
+    'fails the %s probe before stopping the app or installing config',
+    async (failure) => {
+      if (failure === 'identity')
+        vi.mocked(probeAppServerAccountIdentity).mockResolvedValue({
+          status: 'unavailable',
+          reason: 'account-mismatch',
+        });
+      if (failure === 'inventory')
+        vi.mocked(probeAppServerReadOnlyTools).mockResolvedValue({
+          status: 'unavailable',
+          reason: 'invalid-response',
+        });
+      if (failure === 'web identity')
+        vi.mocked(probeChatgptWebIdentity).mockRejectedValueOnce(
+          new Error('ChatGPT web identity probe failed.')
+        );
+      if (failure === 'auth')
+        vi.mocked(probeAppServerReadOnlyTools).mockResolvedValue({
+          status: 'available',
+          authStatus: 'notLoggedIn',
+          allowedTools: ['search'],
+          blockedTools: [],
+        });
+      const session = new ChatgptAppSession(chatgptMacos);
+      try {
+        await expect(
+          session.prepare({
+            ...testConfig(),
+            firstParty: {
+              serverName: 'glean_default',
+              expectedEmail: 'test@example.com',
+              expectedAccountId: '00000000-0000-4000-8000-000000000001',
+              expectedOrganizationId: 'org-example123456',
+              source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9222' },
+              acknowledgeToolPolicyIsNotASandbox: true,
+              ...(failure === 'tools' ? { allowedTools: ['run_tool'] } : {}),
+            },
+            codexSetup: {
+              configPath: '/tmp/chatgpt-test/config.toml',
+              servers: [],
+            },
+          })
+        ).rejects.toThrow('ChatGPT');
+        expect(controller.stop).not.toHaveBeenCalled();
+        expect(installCodexConfig).not.toHaveBeenCalled();
+        expect(controller.start).not.toHaveBeenCalled();
+        expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
+      } finally {
+        await session.dispose();
+      }
+    }
+  );
+
+  it('restores the config when starting the account app fails', async () => {
+    controller.start.mockRejectedValueOnce(new Error('start failed'));
+    const session = new ChatgptAppSession(chatgptMacos);
+    try {
+      await expect(
+        session.prepare({
+          ...testConfig(),
+          firstParty: {
+            serverName: 'glean_default',
+            expectedEmail: 'test@example.com',
+            expectedAccountId: '00000000-0000-4000-8000-000000000001',
+            expectedOrganizationId: 'org-example123456',
+            source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9222' },
+            acknowledgeToolPolicyIsNotASandbox: true,
+          },
+          codexSetup: {
+            configPath: '/tmp/chatgpt-test/config.toml',
+            servers: [],
+          },
+        })
+      ).rejects.toThrow('start failed');
+    } finally {
+      await session.dispose();
+    }
+    expect(restore).toHaveBeenCalledOnce();
+    expect(runAnthropicComputerUseSubmission).not.toHaveBeenCalled();
+  });
+
   it('reads the app it runs once the app has started', async () => {
     const app = vi.fn(async () => ({
       name: 'ChatGPT',
@@ -518,6 +749,109 @@ describe('ChatGPT Linux native lifecycle', () => {
     try {
       await session.prepare({ ...linuxConfig(), plugins });
       expect((beforeStart.mock.calls[0] as unknown[])[2]).toEqual(plugins);
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('passes an account-staged first-party request to the Linux profile', async () => {
+    const environment = linuxEnvironment(home);
+    delete environment.MST_CHATGPT_API_KEY_FILE;
+    environment.MST_CHATGPT_ACCOUNT_AUTH_FILE =
+      '/run/mst/chatgpt-account/auth.json';
+    const firstParty = {
+      serverName: 'glean_default',
+      expectedEmail: 'user@example.com',
+      expectedAccountId: 'account12345678',
+      expectedOrganizationId: 'org-example123456',
+      source: { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9223' },
+      workLocation: 'cloud' as const,
+      allowedTools: ['search'],
+      acknowledgeToolPolicyIsNotASandbox: true as const,
+    };
+    const config = linuxConfig();
+    const session = new ChatgptAppSession(chatgptLinux);
+    try {
+      await session.prepare({
+        ...config,
+        firstParty,
+        codexSetup: { servers: [] },
+        options: { ...config.options, desktopEnvironment: environment },
+      });
+      expect((beforeStart.mock.calls[0] as unknown[])[4]).toEqual(firstParty);
+      expect(installCodexConfig).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.not.objectContaining({ accountAppsPolicy: expect.anything() })
+      );
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('installs a Glean and Pages app policy for VM Local Work', async () => {
+    const environment = linuxEnvironment(home);
+    delete environment.MST_CHATGPT_API_KEY_FILE;
+    environment.MST_CHATGPT_ACCOUNT_AUTH_FILE =
+      '/run/mst/chatgpt-account/auth.json';
+    const config = linuxConfig();
+    const session = new ChatgptAppSession(chatgptLinux);
+    try {
+      await session.prepare({
+        ...config,
+        firstParty: {
+          serverName: 'glean_default',
+          expectedEmail: 'user@example.com',
+          expectedAccountId: 'account12345678',
+          expectedOrganizationId: 'org-example123456',
+          source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+          workLocation: 'local',
+          allowedTools: ['search'],
+          allowPages: true,
+          acknowledgeToolPolicyIsNotASandbox: true,
+        },
+        codexSetup: { servers: [] },
+        options: { ...config.options, desktopEnvironment: environment },
+      });
+      expect(installCodexConfig).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          accountAppsPolicy: {
+            appId: 'glean_default',
+            allowedTools: ['search'],
+            allowPages: true,
+          },
+        })
+      );
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('refuses a Linux account run without a tool allowlist', async () => {
+    const environment = linuxEnvironment(home);
+    delete environment.MST_CHATGPT_API_KEY_FILE;
+    environment.MST_CHATGPT_ACCOUNT_AUTH_FILE =
+      '/run/mst/chatgpt-account/auth.json';
+    const config = linuxConfig();
+    const session = new ChatgptAppSession(chatgptLinux);
+    try {
+      await expect(
+        session.prepare({
+          ...config,
+          firstParty: {
+            serverName: 'glean_default',
+            expectedEmail: 'user@example.com',
+            expectedAccountId: 'account12345678',
+            expectedOrganizationId: 'org-example123456',
+            source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+            workLocation: 'cloud',
+            acknowledgeToolPolicyIsNotASandbox: true,
+          },
+          codexSetup: { servers: [] },
+          options: { ...config.options, desktopEnvironment: environment },
+        })
+      ).rejects.toThrow('explicit tool allowlist');
+      expect(installCodexConfig).not.toHaveBeenCalled();
     } finally {
       await session.dispose();
     }

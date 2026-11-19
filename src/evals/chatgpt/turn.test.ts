@@ -1338,6 +1338,23 @@ describe('what the trial OS decides', () => {
     }
   );
 
+  it('passes the selected first-party server to native transcript parsing', async () => {
+    const state = turnState('/home/synthetic', false, 2_000);
+    state.config.firstParty = {
+      serverName: 'glean_default',
+      expectedEmail: 'dedicated@example.com',
+      expectedAccountId: '00000000-0000-4000-8000-000000000001',
+      expectedOrganizationId: 'org-example123456',
+      source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9222' },
+      allowedTools: ['search'],
+      acknowledgeToolPolicyIsNotASandbox: true,
+    };
+    await captureChatgptTurn(state);
+    expect(vi.mocked(findChatgptTranscript).mock.calls[0]![4]).toMatchObject({
+      mcpServers: ['glean_default'],
+    });
+  });
+
   it('keeps the native failure diagnostics and evidence handling on a failed Linux submission', async () => {
     const draftState = {
       observedSurface: 'chatgpt-work',
