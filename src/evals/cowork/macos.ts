@@ -9,6 +9,7 @@ import {
 import { prepareMacCoworkSession } from '../coworkSetup/macSession.js';
 import { recoverMacCoworkSession } from '../coworkSetup/recoverSession.js';
 import { clientSecretValues, redactClientError } from '../clientSecrets.js';
+import { CoworkDriverError } from './interaction.js';
 import { macDriverAvailable, runMacDriver } from './macDriver.js';
 import { handleSemanticHitl, semanticTelemetry } from './semanticHitl.js';
 
@@ -55,25 +56,26 @@ export const coworkMacos: CoworkDesktop = {
 };
 
 /**
- * Whether a macOS batch needs the Computer Use planner, and so an Anthropic
- * credential. Account mode doesn't when agent-desktop is installed.
+ * Account mode has one driver on macOS. Fails, before any desktop action,
+ * on a machine where agent-desktop is not installed.
  */
-export function coworkMacosUsesPlanner(firstParty: boolean): boolean {
-  return !firstParty || !macDriverAvailable();
+export function requireMacDriver(): void {
+  if (!macDriverAvailable())
+    throw new Error(
+      "First-party Cowork on macOS drives Claude Desktop through agent-desktop, which isn't installed here. MST installs it as an optional dependency: install MST without `--omit=optional`, or run `npm install agent-desktop`."
+    );
 }
 
 /**
- * Account mode (Cowork signed in to claude.ai). With agent-desktop installed,
- * MST reads and presses Claude Desktop's own controls through its
- * accessibility tree, under the same policy as account mode on Linux: no
- * planner, no screenshots. Without it, Computer Use drives the app as before.
- * The choice is made once per operation and never changes after an action.
+ * Account mode (Cowork signed in to claude.ai). MST reads and presses Claude
+ * Desktop's own controls through its accessibility tree, with agent-desktop,
+ * under the same policy as account mode on Linux: no planner, no screenshots.
+ * Computer Use never drives account mode.
  */
 export const coworkMacosFirstParty: CoworkDesktop = {
+  // The session's setup and recovery. Every desktop operation is replaced.
   ...coworkMacos,
   async reset({ restartApp, ...options }) {
-    if (!macDriverAvailable())
-      return coworkMacos.reset!({ restartApp, ...options });
     try {
       await runMacDriver('reset', {}, { ...options, maxActions: 2 });
     } catch (error) {
@@ -93,7 +95,6 @@ export const coworkMacosFirstParty: CoworkDesktop = {
     }
   },
   async submit(query, options) {
-    if (!macDriverAvailable()) return coworkMacos.submit(query, options);
     const started = Date.now();
     const receipt = await runMacDriver(
       'submit',
@@ -110,7 +111,13 @@ export const coworkMacosFirstParty: CoworkDesktop = {
     };
   },
   async handleHitl(options) {
-    if (!macDriverAvailable()) return coworkMacos.handleHitl(options);
+    // This is the user's own Claude Desktop, with their other tasks in it.
+    // Each pass names its task, and the driver presses nothing elsewhere.
+    const { prompt } = options;
+    if (prompt === undefined)
+      throw new CoworkDriverError(
+        'macOS HITL needs the prompt that started its task; no action attempted.'
+      );
     const pass = async (
       mode: 'hitl' | 'answer',
       payload: { approveWriteTools?: boolean; questions?: unknown },
@@ -119,7 +126,7 @@ export const coworkMacosFirstParty: CoworkDesktop = {
       const receipt = await runMacDriver(
         mode,
         mode === 'hitl'
-          ? { approveWrites: payload.approveWriteTools === true }
+          ? { approveWrites: payload.approveWriteTools === true, prompt }
           : (payload as { questions: { labels: string[] }[] }),
         { ...options, maxActions }
       );

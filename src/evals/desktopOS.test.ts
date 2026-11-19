@@ -250,4 +250,31 @@ describe('options only one OS uses', () => {
     await expect(run()).rejects.toThrow('appVersion pins');
     await expect(run({ runner: 'test/runner/vm' })).resolves.toBeDefined();
   });
+
+  // Account mode has no planner on either OS, so no machine can use the option.
+  it.each(
+    (['darwin', 'linux'] as const).flatMap((host) =>
+      LEVELS.map((level) => [host, level] as const)
+    )
+  )(
+    'first-party cowork fails at load with a planner model, on %s, set in the %s',
+    async (host, level) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue(host);
+      const firstParty = await fixture('cowork', level, {
+        mode: 'first-party',
+        computerUseModel: 'planner',
+      });
+      await expect(firstParty()).rejects.toThrow(
+        'First-party mode has no Computer Use planner: MST drives Claude Desktop through its accessibility tree. Remove clientOptions.computerUseModel.'
+      );
+    }
+  );
+
+  it('third-party cowork on macOS keeps its planner model', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+    const run = await fixture('cowork', 'variant', {
+      computerUseModel: 'planner',
+    });
+    await expect(run()).resolves.toBeDefined();
+  });
 });

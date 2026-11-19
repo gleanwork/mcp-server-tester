@@ -174,7 +174,6 @@
     "@openai/codex-sdk": "^0.160.0",
     "@openrouter/ai-sdk-provider": "^2.0.0",
     "@playwright/test": "^1.40.0",
-    "agent-desktop": "^1.3.1",
     "ai": "^6.0.0"
   },
   "peerDependenciesMeta": {
@@ -213,9 +212,6 @@
     },
     "@openai/codex-sdk": {
       "optional": true
-    },
-    "agent-desktop": {
-      "optional": true
     }
   },
   "engines": {
@@ -236,6 +232,7 @@
     "@ai-sdk/xai": "^3.0.0",
     "@google-cloud/storage": "^8.2.0",
     "@openrouter/ai-sdk-provider": "^2.0.0",
+    "agent-desktop": "^1.3.1",
     "ai": "^6.0.97"
   },
   "overrides": {
@@ -247,6 +244,7 @@
     "basic-ftp": "^6.2.6"
   },
   "allowScripts": {
+    "agent-desktop": true,
     "esbuild": true,
     "fsevents": true,
     "@parcel/watcher": true

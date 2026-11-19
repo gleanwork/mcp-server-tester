@@ -798,8 +798,6 @@ function runBuiltinModels(input: {
   }>;
   pairwise: boolean;
   plannerHere: boolean;
-  /** As `plannerHere`, for first-party Cowork, which may have no planner. */
-  firstPartyPlannerHere: boolean;
   env: Record<string, string | undefined>;
   source?: readonly BuiltinModelUse[];
 }): BuiltinModelUse[] {
@@ -825,9 +823,9 @@ function runBuiltinModels(input: {
     const clientEnv = client.env as Record<string, unknown> | undefined;
     if (
       PLANNER_CLIENTS.has(type) &&
-      (isFirstPartyCowork(client)
-        ? input.firstPartyPlannerHere
-        : input.plannerHere) &&
+      input.plannerHere &&
+      // Account mode has no planner: it reads the app's accessibility tree.
+      !isFirstPartyCowork(client) &&
       client.computerUseModel === undefined &&
       models?.computerUse === undefined &&
       (clientEnv?.MST_COWORK_CUA_MODEL ?? input.env.MST_COWORK_CUA_MODEL) ===
@@ -2681,8 +2679,6 @@ async function evaluate(
       for (const { variant, modes } of checked) writeModes.set(variant, modes);
     }
 
-    // Only a Mac has the planner; a runner's machines may not be one.
-    const plannerHere = process.platform === 'darwin' && !onMachines;
     builtinModels = runBuiltinModels({
       evalConfig,
       // A regrade's clients ran in its source run, which recorded theirs.
@@ -2706,11 +2702,8 @@ async function evaluate(
         );
       }),
       pairwise: options.grade !== false && !options.skipPairwise,
-      plannerHere,
-      // The rule the cowork client selects its macOS driver by.
-      firstPartyPlannerHere:
-        plannerHere &&
-        (await import('./cowork/macos.js')).coworkMacosUsesPlanner(true),
+      // Only a Mac has the planner; a runner's machines may not be one.
+      plannerHere: process.platform === 'darwin' && !onMachines,
       env,
       ...(regrade?.run.builtinModels
         ? { source: regrade.run.builtinModels }

@@ -647,6 +647,139 @@ describe('account approval policy', () => {
     expect(ui.scans).toBe(1);
   });
 
+  describe('for the task a prompt started', () => {
+    const prompt = 'Find the launch plan.\nThen  add a comment to it.';
+    /** The app's name for a turn of the user's, as a heading and its text. */
+    const turn = (text: string) => [
+      node(`heading:${text}`, `You said: ${text}`, 'heading'),
+      node(`static:${text}`, `You said: ${text}`, 'static'),
+    ];
+
+    it.each<[string, string, boolean]>([
+      [
+        'the whole prompt',
+        'Find the launch plan. Then add a comment to it.',
+        true,
+      ],
+      ['a shortened prompt', 'Find the launch plan.', true],
+      [
+        'a prompt cut with an ellipsis',
+        'Find the launch plan. Then add…',
+        true,
+      ],
+      ['a turn that is off screen', 'Find the launch plan.', false],
+    ])(
+      'approves once while the app shows %s',
+      async (_name, shown, showing) => {
+        const ui = new AccountUi();
+        ui.extra = [
+          ...turn(shown).map((item) => ({ ...item, showing })),
+          node('once', 'Allow once'),
+        ];
+        expect(
+          await run('hitl', ui, { approveWrites: true, prompt })
+        ).toMatchObject({ status: 'hitl_checked', action_count: 1 });
+        expect(ui.actions).toEqual(['Allow once']);
+      }
+    );
+
+    it.each([
+      ['another task', turn('Delete every draft in the folder.')],
+      ['no task', []],
+      [
+        'a second turn the prompt does not begin with',
+        [...turn('Find the launch plan.'), ...turn('Now delete it.')],
+      ],
+      ['a turn with no text', turn('')],
+      [
+        'the task only in a hidden view',
+        turn('Find the launch plan.').map((item) => ({
+          ...item,
+          visible: false,
+        })),
+      ],
+    ])('approves nothing while the app shows %s', async (_name, shown) => {
+      const ui = new AccountUi();
+      ui.extra = [...shown, node('once', 'Allow once')];
+      expect(
+        await run('hitl', ui, { approveWrites: true, prompt })
+      ).toMatchObject({
+        status: 'failed',
+        error: 'hitl_task_not_shown',
+        action_count: 0,
+      });
+      expect(ui.actions).toEqual([]);
+    });
+
+    // What Claude Desktop 6.6395.1 on macOS named one submitted task.
+    it('knows a task by the names a live app gave it', async () => {
+      const sent =
+        'Reply with exactly one word: axsubmit. Do not use any tools or connectors.';
+      const ui = new AccountUi();
+      ui.extra = [
+        node('title', 'Axsubmit', 'heading'),
+        ...turn('Reply with exactly one word: axsubmit.'),
+        node('text', sent, 'static'),
+        node('answer', 'Claude responded: axsubmit', 'heading'),
+        node('once', 'Allow once'),
+      ];
+      expect(
+        await run('hitl', ui, { approveWrites: true, prompt: sent })
+      ).toMatchObject({ status: 'hitl_checked', action_count: 1 });
+      expect(
+        await run('hitl', ui, {
+          approveWrites: true,
+          prompt: 'Reply with exactly one word: axprobe',
+        })
+      ).toMatchObject({ error: 'hitl_task_not_shown' });
+    });
+
+    it("leaves another task's folder request alone", async () => {
+      const ui = new AccountUi();
+      ui.extra = [
+        ...turn('Organize my downloads.'),
+        node('folder', 'Choose folder'),
+        node('deny', 'Deny'),
+      ];
+      expect(await run('hitl', ui, { prompt })).toMatchObject({
+        status: 'failed',
+        error: 'hitl_task_not_shown',
+        action_count: 0,
+      });
+      ui.extra = [
+        ...turn('Find the launch plan.'),
+        node('folder', 'Choose folder'),
+        node('deny', 'Deny'),
+      ];
+      expect(await run('hitl', ui, { prompt })).toMatchObject({
+        status: 'hitl_checked',
+        denied: 'folder_request',
+      });
+      expect(ui.actions).toEqual(['Deny']);
+    });
+
+    it('finds nothing to do in any view that asks for nothing', async () => {
+      const ui = new AccountUi();
+      ui.extra = turn('Delete every draft in the folder.');
+      expect(
+        await run('hitl', ui, { approveWrites: true, prompt })
+      ).toMatchObject({ status: 'hitl_checked', action_count: 0 });
+    });
+
+    it('reports a missing write policy only for its own task', async () => {
+      const ui = new AccountUi();
+      ui.extra = [...turn('Now delete it.'), node('once', 'Allow once')];
+      expect(await run('hitl', ui, { prompt })).toMatchObject({
+        error: 'hitl_task_not_shown',
+      });
+      ui.extra = [...turn('Find the launch plan.'), node('once', 'Allow once')];
+      expect(await run('hitl', ui, { prompt })).toMatchObject({
+        error: 'approval_requires_explicit_write_policy',
+      });
+      expect(ui.actions).toEqual([]);
+    });
+  });
+
   it.each([
     'Allow',
     'Always allow',

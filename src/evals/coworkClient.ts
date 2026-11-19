@@ -95,7 +95,7 @@ const CoworkSchema = z
       .regex(/^[A-Za-z0-9._:-]+$/)
       .optional()
       .meta({
-        'x-defaultDescription': `macOS: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else ${DEFAULT_COMPUTER_USE_MODEL}; Linux: no planner`,
+        'x-defaultDescription': `macOS third-party mode: models.computerUse (mst.config.json), else MST_COWORK_CUA_MODEL, else ${DEFAULT_COMPUTER_USE_MODEL}; first-party mode and Linux: no planner`,
       }),
     dataDir: z.string().min(1).optional().meta({
       'x-defaultDescription':
@@ -166,6 +166,15 @@ const CoworkSchema = z
     message: 'clientOptions.connectors requires mode: first-party.',
     path: ['connectors'],
   })
+  .refine(
+    (options) =>
+      options.mode !== 'first-party' || options.computerUseModel === undefined,
+    {
+      message:
+        'First-party mode has no Computer Use planner: MST drives Claude Desktop through its accessibility tree. Remove clientOptions.computerUseModel.',
+      path: ['computerUseModel'],
+    }
+  )
   .refine(
     (options) =>
       options.mode !== 'first-party' ||
@@ -369,18 +378,22 @@ async function desktopAdapter(
   const osIssues = coworkOptionIssues(config, os);
   if (osIssues.length)
     throw new Error(`Cowork can't run this trial: ${osIssues.join(' ')}`);
-  // macOS's planner: the option, else the eval's `models.computerUse`
-  // (ADR 0015), else MST_COWORK_CUA_MODEL or the built-in one. Linux has none.
+  const firstParty = config.mode === 'first-party';
+  // Computer Use plans each action with a model. Only third-party mode on
+  // macOS uses it: Linux and account mode drive the app through its
+  // accessibility tree.
+  const planner = mac && !firstParty;
+  // The planner: the option, else the eval's `models.computerUse` (ADR 0015),
+  // else MST_COWORK_CUA_MODEL or the built-in one.
   const computerUseModel =
     config.computerUseModel ??
-    (mac ? context.evalConfig.models?.computerUse : undefined);
+    (planner ? context.evalConfig.models?.computerUse : undefined);
   const coworkSetup = resolveCoworkSetupConfig(context.evalConfig.coworkSetup);
   const approvalTask = `Approve ${coworkSetup.approveWriteTools ? 'read and write' : 'read-only'} calls only using one-time or current-task approval. Never select persistent or always-allow approval, or change settings.`;
   const plugins = config.plugins ?? [];
   // Fail before any desktop action if Cowork cannot apply a plugin as declared.
   assertCoworkClientPlugins(plugins);
   const servers = requests[0]!.input.servers;
-  const firstParty = config.mode === 'first-party';
   if (firstParty) {
     assertFirstPartyServers(servers, config.connectors);
     if (
@@ -439,13 +452,10 @@ async function desktopAdapter(
   const env = { ...process.env, ...context.env, ...config.env };
   // Select the concrete entry point here, on the machine running this batch.
   let platform = selectedDesktop;
-  // Computer Use plans each action with a model. Account mode on macOS has
-  // no planner when it drives the app through its accessibility tree.
-  let planner = mac;
   if (!platform) {
     if (os === 'darwin') {
       const macDesktop = await import('./cowork/macos.js');
-      planner = macDesktop.coworkMacosUsesPlanner(firstParty);
+      if (firstParty) macDesktop.requireMacDriver();
       platform = firstParty
         ? macDesktop.coworkMacosFirstParty
         : macDesktop.coworkMacos;
@@ -731,6 +741,7 @@ async function desktopAdapter(
             env,
             ...(session?.appPath ? { appPath: session.appPath } : {}),
             approveWriteTools: coworkSetup.approveWriteTools,
+            prompt: request.input.prompt,
             isComplete: async () => {
               const current = await findMatchingClaudeSessions({
                 ...match,
@@ -866,6 +877,7 @@ async function desktopAdapter(
                     env,
                     ...(session?.appPath ? { appPath: session.appPath } : {}),
                     approveWriteTools: coworkSetup.approveWriteTools,
+                    prompt: request.input.prompt,
                     task: `Handle only the pending tool approval in the current Cowork task for this exact query: ${request.input.prompt}. ${approvalTask} Do not switch tasks, type, or resubmit a query. If the current task cannot be identified uniquely, stop without an action.`,
                   });
                   hitlActions += followup.action_count;
@@ -1198,7 +1210,7 @@ export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
       credentials: [
         "macOS default third-party: `ANTHROPIC_API_KEY` for Claude Desktop's inference, unless managed preferences set its provider",
         "macOS first-party: Claude Desktop's inference uses the existing signed-in Claude account; MST installs no inference credential",
-        'macOS both modes: `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner',
+        'macOS third-party: `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner; first-party mode has no planner',
         "Linux third-party image: for Claude Desktop's inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`)",
         'Linux first-party: a plugin-staged private account profile and source-host cloud control; no inference credential or Computer Use planner in MST',
       ],

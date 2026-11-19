@@ -11,7 +11,6 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { runEval } from './runEval.js';
-import { setMacDriverRuntime } from './cowork/macDriver.js';
 import {
   BUILTIN_MODELS,
   resetBuiltinModelWarningsForTests,
@@ -21,7 +20,6 @@ import { resetPluginsForTests } from '../plugins/extensions.js';
 const STOPPED_BEFORE_COLLECT = 'stopped before any client started';
 const dirs: string[] = [];
 const listeners: net.Server[] = [];
-const restores: (() => void)[] = [];
 
 beforeEach(() => {
   // First-party mode runs on macOS only; the run's OS is this machine's.
@@ -31,7 +29,6 @@ beforeEach(() => {
 afterEach(async () => {
   resetPluginsForTests();
   resetBuiltinModelWarningsForTests();
-  for (const restore of restores.splice(0)) restore();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
   await Promise.all(
@@ -153,35 +150,19 @@ describe('first-party Cowork in a run', () => {
   // collects, so the warning shows what run.json would record.
   it.each([
     {
-      name: 'names no Computer Use planner when agent-desktop drives the app',
+      name: 'names no Computer Use planner for first-party mode, which has none',
       clientOptions: { mode: 'first-party' },
-      agentDesktop: true,
       planner: false,
     },
     {
-      name: 'names the built-in planner without agent-desktop',
-      clientOptions: { mode: 'first-party' },
-      agentDesktop: false,
-      planner: true,
-    },
-    {
-      name: 'control: names the built-in planner for a third-party variant, which agent-desktop never drives',
+      name: 'control: names the built-in planner for a third-party variant',
       clientOptions: {},
-      agentDesktop: true,
       planner: true,
     },
-  ])('$name', async ({ clientOptions, agentDesktop, planner }) => {
+  ])('$name', async ({ clientOptions, planner }) => {
     // No planner model from this machine's settings.
     vi.stubEnv('MST_USER_CONFIG', '');
     vi.stubEnv('MST_COWORK_CUA_MODEL', undefined);
-    restores.push(
-      setMacDriverRuntime({
-        available: () => agentDesktop,
-        connect: async () => {
-          throw new Error('no run here connects to the desktop');
-        },
-      })
-    );
     const endpoint = await startProbeCounter();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const f = await fixture(endpoint.url, clientOptions);

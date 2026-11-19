@@ -8,13 +8,17 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AgentDesktopError,
   agentDesktop,
   agentDesktopBinary,
   type AgentDesktopCall,
 } from './agentDesktop.js';
+
+// The real lookup, which tests/vitest.setup.ts hides from every other test.
+// Each test here names where it looks, and none runs what it finds.
+vi.unmock('./agentDesktop.js');
 
 const directories: string[] = [];
 afterEach(async () => {

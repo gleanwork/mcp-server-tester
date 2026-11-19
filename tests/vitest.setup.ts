@@ -1,3 +1,6 @@
+import { vi } from 'vitest';
+import type * as AgentDesktop from '../src/evals/agentDesktop.js';
+
 /**
  * Unit tests must not depend on the developer's LLM gateway setup. With these
  * set, credential resolution changes and a real token helper could run.
@@ -15,3 +18,11 @@ for (const name of [
 // Nor on their own ~/.mcp-server-tester/mst.config.json (ADR 0015): empty
 // reads none. A test that needs one names it.
 process.env.MST_USER_CONFIG = '';
+
+// Nor on their desktop. agent-desktop installs with MST, and a test that found
+// it could drive the developer's own Claude Desktop. No unit test finds it; a
+// test of the lookup itself asks for the real module with `vi.unmock`.
+vi.mock('../src/evals/agentDesktop.js', async (original) => ({
+  ...(await original<typeof AgentDesktop>()),
+  agentDesktopBinary: () => undefined,
+}));

@@ -21,8 +21,11 @@ vi.mock('./anthropicComputerUse.js', () => ({
   runAnthropicComputerUseHitl: computerUse.hitl,
   runAnthropicComputerUseReset: computerUse.reset,
 }));
-const { coworkMacos, coworkMacosFirstParty, coworkMacosUsesPlanner } =
+const { coworkMacos, coworkMacosFirstParty, requireMacDriver } =
   await import('./macos.js');
+
+/** The prompt that started the eval's task. */
+const TASK = 'Find the doc';
 
 function node(name: string, role = 'button', selected = false): LinuxUiNode {
   return {
@@ -39,6 +42,8 @@ function node(name: string, role = 'button', selected = false): LinuxUiNode {
 /** The account-mode Cowork surface, as the UI seam reports it. */
 class Surface implements LinuxUi {
   draft = '';
+  /** The prompt of the task the app shows, as it names the user's turn. */
+  task: string | undefined = TASK;
   extra: LinuxUiNode[] = [];
   pressed: string[] = [];
   opened = 0;
@@ -50,6 +55,9 @@ class Surface implements LinuxUi {
       node('Chat', 'radio button'),
       node('Write your prompt to Claude', 'entry'),
       node('Model: Opus 5.5 Medium'),
+      ...(this.task === undefined
+        ? []
+        : [node(`You said: ${this.task}`, 'heading')]),
       ...this.extra,
       ...(this.draft ? [node('Start task')] : []),
     ];
@@ -123,6 +131,12 @@ function options(
   extra: Partial<CoworkDriverOptions> = {}
 ): CoworkDriverOptions {
   return { deadlineAt: Date.now() + 20_000, appPath, ...extra };
+}
+/** A HITL look at the eval's task. */
+function hitl(
+  extra: Partial<CoworkDriverOptions> = {}
+): CoworkDriverOptions & { prompt: string } {
+  return { ...options(extra), prompt: TASK };
 }
 
 describe('runMacDriver', () => {
@@ -208,14 +222,13 @@ describe('runMacDriver', () => {
 });
 
 describe('account mode on macOS', () => {
-  it('needs the Computer Use planner only without agent-desktop', () => {
+  it('needs agent-desktop, and says how to install it', () => {
     expect(macDriverAvailable()).toBe(true);
-    expect(coworkMacosUsesPlanner(true)).toBe(false);
-    // Managed mode is driven by Computer Use either way.
-    expect(coworkMacosUsesPlanner(false)).toBe(true);
+    expect(() => requireMacDriver()).not.toThrow();
     available = false;
-    expect(coworkMacosUsesPlanner(true)).toBe(true);
-    expect(coworkMacosUsesPlanner(false)).toBe(true);
+    expect(() => requireMacDriver()).toThrow(
+      /agent-desktop, which isn't installed here\..*npm install agent-desktop/
+    );
   });
 
   it('keeps managed mode on Computer Use', () => {
@@ -262,19 +275,14 @@ describe('account mode on macOS', () => {
       expect(surface.sent).toEqual([]);
     });
 
-    it('uses Computer Use when agent-desktop is not installed', async () => {
+    it('never uses Computer Use, with or without agent-desktop', async () => {
       available = false;
-      computerUse.submit.mockResolvedValue({
-        status: 'submitted',
-        action_count: 9,
-      });
-      const input = options({ model: 'a-planner-model' });
-      expect(await coworkMacosFirstParty.submit('p', input)).toEqual({
-        status: 'submitted',
-        action_count: 9,
-      });
-      expect(computerUse.submit).toHaveBeenCalledWith('p', input);
-      expect(connections).toEqual([]);
+      connectError = new Error('agent-desktop is not installed.');
+      await expect(
+        coworkMacosFirstParty.submit('p', options({ model: 'a-planner-model' }))
+      ).rejects.toBeInstanceOf(CoworkDriverError);
+      expect(computerUse.submit).not.toHaveBeenCalled();
+      expect(surface.sent).toEqual([]);
     });
   });
 
@@ -283,7 +291,7 @@ describe('account mode on macOS', () => {
       surface.extra = [node('Allow once')];
       let checks = 0;
       const receipt = await coworkMacosFirstParty.handleHitl(
-        options({
+        hitl({
           approveWriteTools: true,
           isComplete: async () => (checks += 1) > 2,
         })
@@ -304,7 +312,7 @@ describe('account mode on macOS', () => {
       surface.extra = [node('Allow once')];
       const error = await rejection<CoworkHitlError>(
         coworkMacosFirstParty.handleHitl(
-          options({ isComplete: async () => false })
+          hitl({ isComplete: async () => false })
         )
       );
       expect(error).toBeInstanceOf(CoworkHitlError);
@@ -319,7 +327,7 @@ describe('account mode on macOS', () => {
       surface.extra = [node('Choose folder'), node('Deny')];
       let checks = 0;
       const receipt = await coworkMacosFirstParty.handleHitl(
-        options({ isComplete: async () => (checks += 1) > 1 })
+        hitl({ isComplete: async () => (checks += 1) > 1 })
       );
       expect(surface.pressed).toEqual(['Deny']);
       expect(receipt.telemetry).toMatchObject({
@@ -331,7 +339,7 @@ describe('account mode on macOS', () => {
     it('fails fast on a question nobody can answer', async () => {
       await expect(
         coworkMacosFirstParty.handleHitl(
-          options({
+          hitl({
             isComplete: async () => false,
             awaitingUser: async () => true,
           })
@@ -343,7 +351,7 @@ describe('account mode on macOS', () => {
     it('makes one pass for a later look that has no completion check', async () => {
       surface.extra = [node('Allow once')];
       const receipt = await coworkMacosFirstParty.handleHitl(
-        options({ approveWriteTools: true, maxActions: 4 })
+        hitl({ approveWriteTools: true, maxActions: 4 })
       );
       expect(receipt).toMatchObject({
         status: 'hitl_checked',
@@ -352,23 +360,45 @@ describe('account mode on macOS', () => {
       });
       expect(connections).toHaveLength(1);
       await expect(
-        coworkMacosFirstParty.handleHitl(options({ maxActions: 4 }))
+        coworkMacosFirstParty.handleHitl(hitl({ maxActions: 4 }))
       ).resolves.toMatchObject({ action_count: 0 });
     });
 
-    it('uses Computer Use when agent-desktop is not installed', async () => {
-      available = false;
-      computerUse.hitl.mockResolvedValue({
-        status: 'hitl_checked',
-        action_count: 2,
-      });
-      const input = options({ isComplete: async () => true });
-      expect(await coworkMacosFirstParty.handleHitl(input)).toEqual({
-        status: 'hitl_checked',
-        action_count: 2,
-      });
-      expect(computerUse.hitl).toHaveBeenCalledWith(input);
+    // This is the user's own app: another of their tasks may be in view.
+    it.each([
+      ['another task', 'Delete every draft in the folder'],
+      ['no task', undefined],
+    ])(
+      'approves nothing while the app shows %s, in the watch and in a later look',
+      async (_name, shown) => {
+        surface.task = shown;
+        surface.extra = [node('Allow once')];
+        const watched = await rejection<CoworkHitlError>(
+          coworkMacosFirstParty.handleHitl(
+            hitl({ approveWriteTools: true, isComplete: async () => false })
+          )
+        );
+        expect(watched).toBeInstanceOf(CoworkHitlError);
+        expect(watched.message).toContain('(hitl_task_not_shown)');
+        expect(watched.touchedUi).toBe(false);
+        await expect(
+          coworkMacosFirstParty.handleHitl(hitl({ approveWriteTools: true }))
+        ).rejects.toThrow('(hitl_task_not_shown)');
+        expect(surface.pressed).toEqual([]);
+      }
+    );
+
+    it('does not look at the app without the prompt of its task', async () => {
+      surface.extra = [node('Allow once')];
+      await expect(
+        coworkMacosFirstParty.handleHitl(
+          options({ approveWriteTools: true, isComplete: async () => false })
+        )
+      ).rejects.toThrow(
+        'macOS HITL needs the prompt that started its task; no action attempted.'
+      );
       expect(connections).toEqual([]);
+      expect(computerUse.hitl).not.toHaveBeenCalled();
     });
   });
 
@@ -429,14 +459,13 @@ describe('account mode on macOS', () => {
       }
     });
 
-    it('uses Computer Use when agent-desktop is not installed', async () => {
+    it('never uses Computer Use, with or without agent-desktop', async () => {
       available = false;
-      computerUse.reset.mockResolvedValue({ status: 'reset', action_count: 1 });
-      const restartApp = vi.fn();
-      await coworkMacosFirstParty.reset!({ ...options(), restartApp });
-      expect(computerUse.reset).toHaveBeenCalledTimes(1);
-      expect(connections).toEqual([]);
-      expect(restartApp).not.toHaveBeenCalled();
+      connectError = new Error('agent-desktop is not installed.');
+      await expect(
+        coworkMacosFirstParty.reset!(options())
+      ).rejects.toBeInstanceOf(CoworkDriverError);
+      expect(computerUse.reset).not.toHaveBeenCalled();
     });
   });
 });

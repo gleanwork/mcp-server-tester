@@ -447,6 +447,8 @@ describe('V2 Cowork client', () => {
         expect(options).toMatchObject({
           approveWriteTools: false,
           maxActions: 12,
+          // The task both looks are for, as its prompt.
+          prompt: 'query one',
           task: expect.stringContaining('Approve read-only calls only'),
         });
         expect(options.task).toContain('one-time or current-task approval');
@@ -2836,7 +2838,10 @@ describe('Linux first-party Cowork platform dispatch', () => {
   });
 
   it.each([
-    [{ computerUseModel: 'planner' }, 'computerUseModel is the planner'],
+    [
+      { computerUseModel: 'planner' },
+      'First-party mode has no Computer Use planner',
+    ],
     [{ appVersion: '1.2.3' }, 'unsupported'],
   ] as const)(
     'retains Linux option rejection for %j',
@@ -2965,22 +2970,28 @@ describe('macOS first-party Cowork platform dispatch', () => {
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 
-  it('needs the credential for account mode when agent-desktop is not installed', async () => {
+  it('rejects a planner model before any setup: account mode has no planner', async () => {
+    macDriver.available = true;
+    const work = batch();
+    work[0]!.config = { ...work[0]!.config, computerUseModel: 'a-planner' };
     await expect(
-      collectClientBatch(COWORK_CLIENT, batch(), noCredential)
-    ).rejects.toThrow(needsCredential);
+      collectClientBatch(COWORK_CLIENT, work, context)
+    ).rejects.toThrow('First-party mode has no Computer Use planner');
     expect(mocks.setup).not.toHaveBeenCalled();
     expect(macDriver.run).not.toHaveBeenCalled();
   });
 
-  it('drives account mode with Computer Use when agent-desktop is not installed', async () => {
-    const result = await collectClientBatch(COWORK_CLIENT, batch(), context);
-    expect(result[0]?.error).toContain('planner boundary reached');
-    expect(mocks.submit).toHaveBeenCalledWith(
-      'an account prompt',
-      expect.objectContaining({ appPath: '/Applications/Claude.app' })
+  // Account mode has one driver. With a planner credential at hand, it still
+  // never falls back to Computer Use.
+  it('fails before any setup when agent-desktop is not installed', async () => {
+    await expect(
+      collectClientBatch(COWORK_CLIENT, batch(), context)
+    ).rejects.toThrow(
+      "drives Claude Desktop through agent-desktop, which isn't installed here"
     );
+    expect(mocks.setup).not.toHaveBeenCalled();
     expect(macDriver.run).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
   });
 
   it('keeps managed mode on Computer Use and its credential, with agent-desktop installed', async () => {
@@ -3936,7 +3947,7 @@ describe('first-party Cowork through client sessions', () => {
       /first-party:.*inference.*signed-in Claude account/
     );
     expect(requirements.credentials?.join('\n')).toMatch(
-      /both modes:.*Computer Use planner/
+      /macOS third-party:.*Computer Use planner; first-party mode has no planner/
     );
     expect(requirements.setup?.join('\n')).toMatch(
       /third-party:.*mst cowork setup/
