@@ -11,11 +11,17 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { runEval } from './runEval.js';
+import { setMacDriverRuntime } from './cowork/macDriver.js';
+import {
+  BUILTIN_MODELS,
+  resetBuiltinModelWarningsForTests,
+} from '../llm/modelDefaults.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 
 const STOPPED_BEFORE_COLLECT = 'stopped before any client started';
 const dirs: string[] = [];
 const listeners: net.Server[] = [];
+const restores: (() => void)[] = [];
 
 beforeEach(() => {
   // First-party mode runs on macOS only; the run's OS is this machine's.
@@ -24,6 +30,9 @@ beforeEach(() => {
 
 afterEach(async () => {
   resetPluginsForTests();
+  resetBuiltinModelWarningsForTests();
+  for (const restore of restores.splice(0)) restore();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   await Promise.all(
     listeners
@@ -138,5 +147,51 @@ describe('first-party Cowork in a run', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("Couldn't list server")
     );
+  });
+
+  // The run warns about the built-in models it falls back on before it
+  // collects, so the warning shows what run.json would record.
+  it.each([
+    {
+      name: 'names no Computer Use planner when agent-desktop drives the app',
+      clientOptions: { mode: 'first-party' },
+      agentDesktop: true,
+      planner: false,
+    },
+    {
+      name: 'names the built-in planner without agent-desktop',
+      clientOptions: { mode: 'first-party' },
+      agentDesktop: false,
+      planner: true,
+    },
+    {
+      name: 'control: names the built-in planner for a third-party variant, which agent-desktop never drives',
+      clientOptions: {},
+      agentDesktop: true,
+      planner: true,
+    },
+  ])('$name', async ({ clientOptions, agentDesktop, planner }) => {
+    // No planner model from this machine's settings.
+    vi.stubEnv('MST_USER_CONFIG', '');
+    vi.stubEnv('MST_COWORK_CUA_MODEL', undefined);
+    restores.push(
+      setMacDriverRuntime({
+        available: () => agentDesktop,
+        connect: async () => {
+          throw new Error('no run here connects to the desktop');
+        },
+      })
+    );
+    const endpoint = await startProbeCounter();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const f = await fixture(endpoint.url, clientOptions);
+    await expect(f.run()).rejects.toThrow(STOPPED_BEFORE_COLLECT);
+    const warned = warn.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes('built-in default'))
+      .join('\n');
+    const line = `models.computerUse: ${BUILTIN_MODELS.computerUse} (cowork client)`;
+    if (planner) expect(warned).toContain(line);
+    else expect(warned).not.toContain('models.computerUse');
   });
 });

@@ -210,8 +210,9 @@ controls, under the same rules as first-party mode on Linux, described below.
 It uses no planner, takes no screenshots, and needs no Anthropic credential
 for MST. The terminal that runs MST needs Accessibility permission. Screen
 Recording is not needed. MST never starts Claude Desktop this way: it drives
-only the running app of the session's bundle, and fails when that app has no
-window or more than one.
+only the running app of the session's bundle. When that app shows no window,
+MST brings it forward once. It fails when the app still shows no window, or
+shows more than one.
 
 MST looks for the package where MST itself is installed, then in the working
 directory's project. It decides once per operation. Without the package, or

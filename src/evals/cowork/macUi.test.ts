@@ -399,6 +399,16 @@ describe('the macOS UI seam', () => {
     });
   });
 
+  it('fails a read that agent-desktop answered with no usable reply, as an invalid reply', async () => {
+    const desktop = new FakeClaude();
+    desktop.snapshot = async () => {
+      throw new AgentDesktopError('NO_REPLY');
+    };
+    await expect((await connect(desktop).ui).snapshot()).rejects.toMatchObject({
+      code: 'accessibility_invalid_reply',
+    });
+  });
+
   it('opens links in the session’s app only', async () => {
     const desktop = new FakeClaude();
     const { ui, opened } = connect(desktop);
