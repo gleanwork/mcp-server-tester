@@ -25,7 +25,7 @@ export interface LinuxUi {
   close(): void | Promise<void>;
 }
 
-export { AtspiError as LinuxUiError } from '../linuxAtspiBus.js';
+export { AtspiError as LinuxUiError } from '../atspiError.js';
 
 export type LinuxDriverOperation =
   | 'probe'

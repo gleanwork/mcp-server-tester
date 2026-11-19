@@ -167,7 +167,11 @@ does not provision one. Third-party mode and its detach behavior are unchanged.
 
 On macOS, first-party mode uses the Claude account already signed in to Claude
 Desktop and submits prompts through visible Desktop Computer Use, using the
-configured planner credentials. On Linux, MST attaches to the plugin-prepared
+configured planner credentials. With the optional
+[`agent-desktop`](https://github.com/vercel-labs/agent-desktop) package
+installed, it submits through accessibility automation instead (see
+[Accessibility automation on macOS](#accessibility-automation-on-macos)). On
+Linux, MST attaches to the plugin-prepared
 signed-in app and submits through accessibility automation, without a planner
 or MST inference credentials. A macOS source host reads account settings and
 session events through its separate Chrome recorder profile signed in to the
@@ -191,6 +195,42 @@ guards reject managed settings, inference credentials and invalid or expired
 profile metadata. The third-party adapter rejects account runtime metadata.
 First-party HITL permits only an explicitly authorized one-time approval, never
 persistent approval controls or inline write cards.
+
+### Accessibility automation on macOS
+
+Install `agent-desktop` in the project that runs MST to drive first-party mode
+without Computer Use:
+
+```bash
+npm install --save-dev agent-desktop
+```
+
+MST then reads Claude Desktop's accessibility tree and presses its own
+controls, under the same rules as first-party mode on Linux, described below.
+It uses no planner, takes no screenshots, and needs no Anthropic credential
+for MST. The terminal that runs MST needs Accessibility permission. Screen
+Recording is not needed. MST never starts Claude Desktop this way: it drives
+only the running app of the session's bundle, and fails when that app has no
+window or more than one.
+
+MST looks for the package where MST itself is installed, then in the working
+directory's project. It decides once per operation. Without the package, or
+when the package's install script did not run (`--ignore-scripts`), MST uses
+Computer Use as before. An operation that fails through `agent-desktop` is
+not retried with Computer Use. Third-party mode on macOS always uses Computer
+Use.
+
+`agent-desktop` runs once per read or action, with only the system and locale
+variables of MST's environment and its own `AGENT_DESKTOP_*` settings. It keeps
+its state in a private temporary directory that MST removes after each
+operation.
+
+These were checked live against Claude Desktop 6.6395.1, calling the macOS
+entry point directly: readiness, one submitted task with the model already
+selected (three actions, under four seconds), a HITL pass with nothing to
+approve, and a reset after the task finished. A live check of an approval, a
+model change, a reset while a task runs, and a whole `mst run` in first-party
+mode is pending; offline tests cover them.
 
 Live smoke checks of the TypeScript Linux drivers are pending. Offline tests do
 not establish their live Linux app or account compatibility. Each account image needs a reviewed package/ASAR integrity
@@ -826,7 +866,11 @@ the bytes present at audit time; notices contain no original digest to authentic
 - `desktopBatch.ts`: the batch lifecycle shared with the ChatGPT client: the desktop lease, per-case reset policy, native-session de-duplication, redaction, and cleanup.
 - `coworkClient.ts`: selects the concrete OS entry point on the trial's machine; owns setup, one case (submit, bind, HITL, native collection), reset, and transcript conversion.
 - `cowork/desktop.ts`: the native operations shared by the two OS entry points, with no selector.
-- `cowork/macos.ts`: the macOS entry point, using the existing setup, recovery, and Computer Use functions.
+- `cowork/macos.ts`: the macOS entry points. Third-party mode uses the existing setup, recovery, and Computer Use functions. First-party mode uses `cowork/macDriver.ts` when `agent-desktop` is installed, else Computer Use.
+- `agentDesktop.ts`: a typed wrapper over the `agent-desktop` CLI: finds the installed executable, runs one command per read or action within a deadline, and keeps each failure's delivery verdict.
+- `cowork/macUi.ts`: Claude Desktop's macOS accessibility tree behind the UI interface in `cowork/linuxUi.ts`, limited to the one window of the session's app bundle.
+- `cowork/macDriver.ts`: runs one first-party driver operation over that interface, with the per-operation limits and a private `agent-desktop` state directory.
+- `cowork/semanticHitl.ts`: the HITL loop of the accessibility drivers on both OSes: bounded passes until the bound native session completes.
 - `coworkSetup/`: profile/MCP settings, private header helpers, and guarded restore.
   Its `macController.ts` handles only application start/stop, not UI automation.
 - `nativeHelper.ts`: builds and runs the macOS Swift controllers for Claude Desktop and
@@ -895,7 +939,9 @@ an active task; it opens a new-task link only when no Stop control is present.
 Before reset, first-party diagnosis captures a bounded accessibility dump, not
 a screenshot. The Linux adapter also collects native log tails and system state.
 Third-party diagnosis includes a screenshot (When something fails, in
-[cowork-docker.md](cowork-docker.md)). On macOS, the Computer Use planner
+[cowork-docker.md](cowork-docker.md)). First-party macOS reset through
+`agent-desktop` follows the first-party Linux rule; when it refuses, MST
+restarts Claude Desktop instead. Otherwise on macOS, the Computer Use planner
 stops a task that is still running and declines an open permission prompt, within
 eight actions. The driver refuses typing, drags and key presses other than Escape
 (a refused proposal does nothing, and the planner may try again within the

@@ -17,7 +17,6 @@ import type { MarketplacePlugin } from '../clientPlugins.js';
 import { createRequire } from 'node:module';
 import { freemem, homedir, loadavg, totalmem, uptime } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkDesktop } from './desktop.js';
 import { installedDebApp } from '../installedApp.js';
 import { transportServers } from '../evalConfig.js';
@@ -53,21 +52,13 @@ export {
 } from './managedSettings.js';
 import {
   CoworkDriverError,
-  CoworkHitlBudgetError,
-  CoworkHitlError,
-  CoworkUserQuestionError,
   type CoworkDriverOptions,
   type CoworkHitlReceipt,
-  type CoworkPendingQuestion,
-  type SemanticDesktopTelemetry,
 } from './interaction.js';
-
-/**
- * How long HITL waits for Cowork's form for one clarifying question to take
- * its first option (from when HITL first sees the question) before the case
- * fails as unanswered.
- */
-const QUESTION_ANSWER_TIMEOUT_MS = 60_000;
+import {
+  handleSemanticHitl,
+  semanticTelemetry as telemetry,
+} from './semanticHitl.js';
 
 /** The most one UI submission may take, within the case deadline. */
 const SUBMIT_TIMEOUT_MS = 10 * 60_000;
@@ -453,37 +444,6 @@ function runRestartCommand(
     child.stdin?.on('error', () => {});
     child.stdin?.end();
   });
-}
-
-function telemetry(
-  started: number,
-  actions: number,
-  accounting: 'complete' | 'partial',
-  hitl: {
-    incompleteScans: number;
-    folderRequestsDenied: number;
-    questionsAnswered?: number;
-  } = {
-    incompleteScans: 0,
-    folderRequestsDenied: 0,
-  }
-): SemanticDesktopTelemetry {
-  return {
-    accounting,
-    duration_ms: Math.max(0, Date.now() - started),
-    action_count: actions,
-    ...(hitl.incompleteScans > 0
-      ? { incomplete_scans: hitl.incompleteScans }
-      : {}),
-    ...(hitl.folderRequestsDenied > 0
-      ? { folder_requests_denied: hitl.folderRequestsDenied }
-      : {}),
-    ...(hitl.questionsAnswered
-      ? { questions_answered: hitl.questionsAnswered }
-      : {}),
-    planner: { status: 'not-applicable' },
-    cost: { status: 'not-applicable' },
-  };
 }
 
 function receipt(stdout: string): Receipt | undefined {
@@ -1119,118 +1079,11 @@ async function handleLinuxHitl(
   options: CoworkDriverOptions,
   driverMode: LinuxCoworkMode
 ): Promise<CoworkHitlReceipt> {
-  if (!options.isComplete)
-    throw new Error('Linux HITL requires a bound native completion check.');
-  const started = Date.now();
-  let actions = 0;
-  // Passes whose scan couldn't finish (they saw no prompt, and HITL went
-  // on), and folder requests HITL denied.
-  const counts = {
-    incompleteScans: 0,
-    folderRequestsDenied: 0,
-    questionsAnswered: 0,
-  };
-  // Set while the driver runs: a failure then may have acted on the app.
-  let driving = false;
-  const budget = options.maxActions ?? 12;
-  // Each question HITL has seen (by tool call), and since when.
-  const questionsSeen = new Map<string, number>();
-  try {
-    while (Date.now() < options.deadlineAt) {
-      if (await options.isComplete())
-        return {
-          status: 'hitl_checked',
-          action_count: actions,
-          telemetry: telemetry(started, actions, 'complete', counts),
-        };
-      const question = options.pendingQuestion
-        ? await options.pendingQuestion()
-        : (await options.awaitingUser?.())
-          ? ({ questions: [] } satisfies CoworkPendingQuestion)
-          : undefined;
-      if (question) {
-        if (!question.questions.length)
-          throw new CoworkUserQuestionError(
-            options.pendingQuestion
-              ? 'Cowork is waiting for an answer to a question (AskUserQuestion) that offers no usable options. No resubmission attempted.'
-              : 'Cowork is waiting for an answer to a question (AskUserQuestion); a headless run cannot answer it. No resubmission attempted.',
-            telemetry(started, actions, 'partial', counts)
-          );
-        const key = question.id ?? JSON.stringify(question.questions);
-        const since = questionsSeen.get(key) ?? Date.now();
-        questionsSeen.set(key, since);
-        if (Date.now() - since > QUESTION_ANSWER_TIMEOUT_MS)
-          throw new CoworkUserQuestionError(
-            `Cowork's question (AskUserQuestion) didn't take its first option within ${QUESTION_ANSWER_TIMEOUT_MS / 1000} s. No resubmission attempted.`,
-            telemetry(started, actions, 'partial', counts)
-          );
-        if (actions >= budget)
-          throw new CoworkHitlBudgetError(
-            'Linux HITL action budget exhausted.',
-            telemetry(started, actions, 'partial', counts)
-          );
-        // One page per pass: the first option, or the page's Submit/Next
-        // once a multi-select option is checked. A pass that finds no
-        // unambiguous control acts on nothing and the next looks again.
-        driving = true;
-        const result = await execute(
-          'answer',
-          { questions: question.questions },
-          { ...options, maxActions: Math.min(1, budget - actions) },
-          driverMode
-        );
-        driving = false;
-        actions += result.action_count;
-        if (result.answered) counts.questionsAnswered += 1;
-        if (result.scanIncomplete) counts.incompleteScans += 1;
-        await delay(
-          Math.min(1_000, Math.max(0, options.deadlineAt - Date.now()))
-        );
-        continue;
-      }
-      if (actions >= budget)
-        throw new CoworkHitlBudgetError(
-          'Linux HITL action budget exhausted.',
-          telemetry(started, actions, 'partial', counts)
-        );
-      driving = true;
-      const result = await execute(
-        'hitl',
-        {
-          approveWriteTools: options.approveWriteTools === true,
-        },
-        { ...options, maxActions: budget - actions },
-        driverMode
-      );
-      driving = false;
-      actions += result.action_count;
-      if (result.scanIncomplete) counts.incompleteScans += 1;
-      if (result.deniedFolderRequest) counts.folderRequestsDenied += 1;
-      await delay(Math.min(500, Math.max(0, options.deadlineAt - Date.now())));
-    }
-  } catch (error) {
-    if (
-      error instanceof CoworkHitlBudgetError ||
-      error instanceof CoworkUserQuestionError
-    )
-      throw error;
-    const partialActions =
-      error instanceof CoworkDriverError
-        ? (error.telemetry?.action_count ?? 0)
-        : 0;
-    // A driver call that failed without a receipt may have acted.
-    const unknown =
-      driving &&
-      !(error instanceof CoworkDriverError && error.telemetry !== undefined);
-    throw new CoworkHitlError(
-      `Linux HITL failed for the bound native session: ${error instanceof Error ? error.message : String(error)}`,
-      telemetry(started, actions + partialActions, 'partial', counts),
-      actions + partialActions > 0 || unknown
-    );
-  }
-  throw new CoworkDriverError(
-    'Linux HITL deadline exceeded.',
-    telemetry(started, actions, 'partial', counts)
+  return handleSemanticHitl(
+    options,
+    (mode, payload, maxActions) =>
+      execute(mode, payload, { ...options, maxActions }, driverMode),
+    'Linux'
   );
 }
 

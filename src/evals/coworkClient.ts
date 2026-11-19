@@ -437,22 +437,29 @@ async function desktopAdapter(
     paths: stdioPaths,
   });
   const env = { ...process.env, ...context.env, ...config.env };
-  if (mac && !hasLLMCredential('anthropic', { env }))
-    throw new Error(
-      'Cowork Computer Use needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'
-    );
   // Select the concrete entry point here, on the machine running this batch.
   let platform = selectedDesktop;
+  // Computer Use plans each action with a model. Account mode on macOS has
+  // no planner when it drives the app through its accessibility tree.
+  let planner = mac;
   if (!platform) {
-    if (os === 'darwin')
-      platform = (await import('./cowork/macos.js')).coworkMacos;
-    else if (os === 'linux') {
+    if (os === 'darwin') {
+      const macDesktop = await import('./cowork/macos.js');
+      planner = macDesktop.coworkMacosUsesPlanner(firstParty);
+      platform = firstParty
+        ? macDesktop.coworkMacosFirstParty
+        : macDesktop.coworkMacos;
+    } else if (os === 'linux') {
       const linuxDesktop = await import('./cowork/linux.js');
       platform = firstParty
         ? linuxDesktop.coworkLinuxFirstParty
         : linuxDesktop.coworkLinux;
     } else throw new Error(`Cowork runs on macOS or Linux, not ${os}.`);
   }
+  if (planner && !hasLLMCredential('anthropic', { env }))
+    throw new Error(
+      'Cowork Computer Use needs ANTHROPIC_API_KEY, or ANTHROPIC_BASE_URL with MST_LLM_AUTH_COMMAND or ANTHROPIC_AUTH_TOKEN for an LLM gateway.'
+    );
   if (firstParty) {
     const { coworkClaudeAi } = await import('./cowork/claudeAi.js');
     platform = coworkClaudeAi(platform, {
