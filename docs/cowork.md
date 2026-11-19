@@ -892,6 +892,9 @@ the reset (`task_not_stopped`), and the old task's view is left as it is. The
 reset then opens one empty new-task deep link and waits read-only (about 10
 seconds) for the Cowork start surface. First-party Linux reset instead refuses
 an active task; it opens a new-task link only when no Stop control is present.
+When a later first-party batch on the same desktop (such as a run's second
+variant) finds the app open but not on an empty Cowork task, preparation runs
+this reset once. Any other probe failure still fails preparation.
 Before reset, first-party diagnosis captures a bounded accessibility dump, not
 a screenshot. The Linux adapter also collects native log tails and system state.
 Third-party diagnosis includes a screenshot (When something fails, in
