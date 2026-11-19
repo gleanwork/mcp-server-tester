@@ -348,6 +348,25 @@ describe('account mode on macOS', () => {
       expect(connections).toEqual([]);
     });
 
+    // An answer names no task to check, so macOS gives none: a question in
+    // view could be another task's.
+    it('answers no question, even one with options to choose from', async () => {
+      surface.extra = [node('Yes'), node('Submit')];
+      await expect(
+        coworkMacosFirstParty.handleHitl(
+          hitl({
+            isComplete: async () => false,
+            awaitingUser: async () => true,
+            pendingQuestion: async () => ({
+              questions: [{ labels: ['Yes', 'No'], multiSelect: false }],
+            }),
+          })
+        )
+      ).rejects.toMatchObject({ kind: 'awaiting-user' });
+      expect(connections).toEqual([]);
+      expect(surface.pressed).toEqual([]);
+    });
+
     it('makes one pass for a later look that has no completion check', async () => {
       surface.extra = [node('Allow once')];
       const receipt = await coworkMacosFirstParty.handleHitl(

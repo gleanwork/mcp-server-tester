@@ -123,11 +123,14 @@ export const coworkMacosFirstParty: CoworkDesktop = {
       payload: { approveWriteTools?: boolean; questions?: unknown },
       maxActions: number
     ) => {
+      // An answer names no task to check, so no pass here gives one.
+      if (mode !== 'hitl')
+        throw new CoworkDriverError(
+          'macOS HITL answers no question; no action attempted.'
+        );
       const receipt = await runMacDriver(
-        mode,
-        mode === 'hitl'
-          ? { approveWrites: payload.approveWriteTools === true, prompt }
-          : (payload as { questions: { labels: string[] }[] }),
+        'hitl',
+        { approveWrites: payload.approveWriteTools === true, prompt },
         { ...options, maxActions }
       );
       return {
@@ -139,8 +142,14 @@ export const coworkMacosFirstParty: CoworkDesktop = {
         ...(receipt.answered ? { answered: true } : {}),
       };
     };
-    // Bound to a native session: watch it until it completes.
-    if (options.isComplete) return handleSemanticHitl(options, pass, 'macOS');
+    // Bound to a native session: watch it until it completes. Without
+    // `pendingQuestion`, the watch fails on a question instead of answering it.
+    if (options.isComplete)
+      return handleSemanticHitl(
+        { ...options, pendingQuestion: undefined },
+        pass,
+        'macOS'
+      );
     // A later look at a task waiting on a tool: one pass.
     const started = Date.now();
     const result = await pass(
