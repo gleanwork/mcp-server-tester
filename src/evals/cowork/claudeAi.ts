@@ -254,7 +254,7 @@ const SETTLE_PROGRAM = `(() => {
  * so open questions are skipped first. Returns once the task's terminal
  * result is proved; throws when it cannot be within the deadline.
  */
-export async function settleCloudTaskInBrowser(
+async function settleCloudTaskInBrowser(
   port: number,
   task: CloudConnectorTask,
   timeoutMs = 180_000
