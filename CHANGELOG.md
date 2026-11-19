@@ -1,5 +1,14 @@
 
 
+
+## v2.0.0-rc.3 (2026-11-19)
+
+#### :bug: Bug Fix
+* [#611](https://github.com/gleanwork/mcp-server-tester/pull/611) fix(cowork): keep one stuck first-party task from failing the batch, later arms and recovery ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### Committers: 1
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
 ## v2.0.0-rc.2 (2026-11-18)
 
 #### :bug: Bug Fix
