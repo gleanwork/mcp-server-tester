@@ -824,6 +824,8 @@ function runBuiltinModels(input: {
     if (
       PLANNER_CLIENTS.has(type) &&
       input.plannerHere &&
+      // Account mode has no planner: it reads the app's accessibility tree.
+      !isFirstPartyCowork(client) &&
       client.computerUseModel === undefined &&
       models?.computerUse === undefined &&
       (clientEnv?.MST_COWORK_CUA_MODEL ?? input.env.MST_COWORK_CUA_MODEL) ===

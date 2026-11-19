@@ -25,7 +25,7 @@ export interface LinuxUi {
   close(): void | Promise<void>;
 }
 
-export { AtspiError as LinuxUiError } from '../linuxAtspiBus.js';
+export { AtspiError as LinuxUiError } from '../atspiError.js';
 
 export type LinuxDriverOperation =
   | 'probe'
@@ -46,6 +46,10 @@ export interface LinuxDriverReceipt {
 }
 
 export interface LinuxDriverPayload {
+  /**
+   * `submit`: the prompt to send. `hitl`: the prompt that started the task,
+   * so the driver presses a control only while the app shows that task.
+   */
   prompt?: string;
   targetModel?: string;
   approveWrites?: boolean;

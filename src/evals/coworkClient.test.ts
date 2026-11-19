@@ -115,6 +115,13 @@ vi.mock('./cowork/anthropicComputerUse.js', async (original) => ({
   runAnthropicComputerUseHitl: mocks.hitl,
   runAnthropicComputerUseReset: mocks.reset,
 }));
+// agent-desktop, as account mode on macOS finds and runs it. Never the real
+// one: it would drive the Claude Desktop of the machine running the tests.
+const macDriver = vi.hoisted(() => ({ available: false, run: vi.fn() }));
+vi.mock('./cowork/macDriver.js', () => ({
+  macDriverAvailable: () => macDriver.available,
+  runMacDriver: macDriver.run,
+}));
 vi.mock('./cowork/sessions.js', async (importOriginal) => ({
   ...(await importOriginal<typeof ClaudeNative>()),
   snapshotClaudeSessions: mocks.snapshot,
@@ -167,6 +174,7 @@ beforeEach(async () => {
   dirs.push(lockHome.value);
   vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
   vi.clearAllMocks();
+  macDriver.available = false;
   mocks.order.length = 0;
   // Ready, resolving each server as the real check does.
   mocks.readinessServer.mockImplementation((server: MCPConfig) => server);
@@ -439,6 +447,8 @@ describe('V2 Cowork client', () => {
         expect(options).toMatchObject({
           approveWriteTools: false,
           maxActions: 12,
+          // The task both looks are for, as its prompt.
+          prompt: 'query one',
           task: expect.stringContaining('Approve read-only calls only'),
         });
         expect(options.task).toContain('one-time or current-task approval');
@@ -2828,7 +2838,10 @@ describe('Linux first-party Cowork platform dispatch', () => {
   });
 
   it.each([
-    [{ computerUseModel: 'planner' }, 'computerUseModel is the planner'],
+    [
+      { computerUseModel: 'planner' },
+      'First-party mode has no Computer Use planner',
+    ],
     [{ appVersion: '1.2.3' }, 'unsupported'],
   ] as const)(
     'retains Linux option rejection for %j',
@@ -2886,6 +2899,116 @@ describe('Linux first-party Cowork platform dispatch', () => {
     ).rejects.toThrow('cannot apply auth');
     expect(cloudWrapper.wrap).not.toHaveBeenCalled();
     expect(linuxAccountPlatform.prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe('macOS first-party Cowork platform dispatch', () => {
+  const accountServer: MCPConfig = {
+    transport: 'http',
+    label: 'primary',
+    serverUrl: 'https://example.com/mcp',
+  };
+  function batch(mode = 'first-party'): ClientBatchRequest[] {
+    return [
+      {
+        caseId: 'mac-account',
+        trial: 0,
+        config: { ...clientConfig, mode, model: 'native-model' },
+        input: { prompt: 'an account prompt', servers: [accountServer] },
+      },
+    ];
+  }
+  // No Anthropic credential, whatever the machine running the tests has.
+  const noCredential: ClientRunContext = {
+    ...context,
+    env: {
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_AUTH_TOKEN: '',
+      ANTHROPIC_BASE_URL: '',
+      MST_LLM_AUTH_COMMAND: '',
+    },
+  };
+  const needsCredential = 'Cowork Computer Use needs ANTHROPIC_API_KEY';
+  beforeEach(() => {
+    // The cloud wrapper is independently tested. This seam pins which macOS
+    // desktop it receives.
+    vi.doMock('./cowork/claudeAi.js', () => ({
+      coworkClaudeAi(base: CoworkPlatform, policy: unknown) {
+        cloudWrapper.wrap(base, policy);
+        return base;
+      },
+    }));
+    mocks.setup.mockImplementation(async () => ({
+      appPath: '/Applications/Claude.app',
+      dispose: mocks.dispose,
+    }));
+    macDriver.run.mockRejectedValue(new Error('submission boundary reached'));
+    mocks.submit.mockRejectedValue(new Error('planner boundary reached'));
+  });
+  afterEach(() => {
+    vi.doUnmock('./cowork/claudeAi.js');
+  });
+
+  it('drives account mode through agent-desktop, with no Anthropic credential', async () => {
+    macDriver.available = true;
+    const result = await collectClientBatch(
+      COWORK_CLIENT,
+      batch(),
+      noCredential
+    );
+    expect(result[0]?.error).toContain('submission boundary reached');
+    const { coworkMacosFirstParty } = await import('./cowork/macos.js');
+    expect(cloudWrapper.wrap).toHaveBeenCalledWith(
+      coworkMacosFirstParty,
+      expect.objectContaining({ servers: [accountServer] })
+    );
+    expect(macDriver.run).toHaveBeenCalledWith(
+      'submit',
+      { prompt: 'an account prompt', targetModel: 'native-model' },
+      expect.objectContaining({ appPath: '/Applications/Claude.app' })
+    );
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a planner model before any setup: account mode has no planner', async () => {
+    macDriver.available = true;
+    const work = batch();
+    work[0]!.config = { ...work[0]!.config, computerUseModel: 'a-planner' };
+    await expect(
+      collectClientBatch(COWORK_CLIENT, work, context)
+    ).rejects.toThrow('First-party mode has no Computer Use planner');
+    expect(mocks.setup).not.toHaveBeenCalled();
+    expect(macDriver.run).not.toHaveBeenCalled();
+  });
+
+  // Account mode has one driver. With a planner credential at hand, it still
+  // never falls back to Computer Use.
+  it('fails before any setup when agent-desktop is not installed', async () => {
+    await expect(
+      collectClientBatch(COWORK_CLIENT, batch(), context)
+    ).rejects.toThrow(
+      "drives Claude Desktop through agent-desktop, which isn't installed here"
+    );
+    expect(mocks.setup).not.toHaveBeenCalled();
+    expect(macDriver.run).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it('keeps managed mode on Computer Use and its credential, with agent-desktop installed', async () => {
+    macDriver.available = true;
+    const work = batch('third-party');
+    work[0]!.input.servers = [server];
+    await expect(
+      collectClientBatch(COWORK_CLIENT, work, {
+        ...noCredential,
+        env: { ...noCredential.env, ACME_API_TOKEN: 'test-secret-token' },
+      })
+    ).rejects.toThrow(needsCredential);
+    const result = await collectClientBatch(COWORK_CLIENT, work, context);
+    expect(result[0]?.error).toContain('planner boundary reached');
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(macDriver.run).not.toHaveBeenCalled();
+    expect(cloudWrapper.wrap).not.toHaveBeenCalled();
   });
 });
 
@@ -3824,7 +3947,7 @@ describe('first-party Cowork through client sessions', () => {
       /first-party:.*inference.*signed-in Claude account/
     );
     expect(requirements.credentials?.join('\n')).toMatch(
-      /both modes:.*Computer Use planner/
+      /macOS third-party:.*Computer Use planner; first-party mode has no planner/
     );
     expect(requirements.setup?.join('\n')).toMatch(
       /third-party:.*mst cowork setup/

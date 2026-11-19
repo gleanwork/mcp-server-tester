@@ -84,6 +84,14 @@ export interface CoworkDesktop {
     options: CoworkDriverOptions
   ): Promise<CoworkSubmissionReceipt>;
   handleHitl(
-    options: CoworkDriverOptions & { task?: string }
+    options: CoworkDriverOptions & {
+      /** What the Computer Use planner is told to do. */
+      task?: string;
+      /**
+       * The prompt that started the task. The macOS accessibility driver
+       * presses a control only while the app shows this task.
+       */
+      prompt?: string;
+    }
   ): Promise<CoworkHitlReceipt>;
 }

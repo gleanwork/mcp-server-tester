@@ -685,7 +685,7 @@ async function installedVersion(appPath: string): Promise<string> {
 /**
  * The 1P desktop: Claude Desktop as it is, signed in to claude.ai. MST
  * installs no profile, servers or credential; the variant is the account's
- * connectors. Submission, HITL and reset are macOS Computer Use, unchanged.
+ * connectors. Submission, HITL and reset are the base desktop's, unchanged.
  */
 export function coworkClaudeAi(
   base: CoworkDesktop,

@@ -11,6 +11,10 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { runEval } from './runEval.js';
+import {
+  BUILTIN_MODELS,
+  resetBuiltinModelWarningsForTests,
+} from '../llm/modelDefaults.js';
 import { resetPluginsForTests } from '../plugins/extensions.js';
 
 const STOPPED_BEFORE_COLLECT = 'stopped before any client started';
@@ -24,6 +28,8 @@ beforeEach(() => {
 
 afterEach(async () => {
   resetPluginsForTests();
+  resetBuiltinModelWarningsForTests();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   await Promise.all(
     listeners
@@ -138,5 +144,35 @@ describe('first-party Cowork in a run', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining("Couldn't list server")
     );
+  });
+
+  // The run warns about the built-in models it falls back on before it
+  // collects, so the warning shows what run.json would record.
+  it.each([
+    {
+      name: 'names no Computer Use planner for first-party mode, which has none',
+      clientOptions: { mode: 'first-party' },
+      planner: false,
+    },
+    {
+      name: 'control: names the built-in planner for a third-party variant',
+      clientOptions: {},
+      planner: true,
+    },
+  ])('$name', async ({ clientOptions, planner }) => {
+    // No planner model from this machine's settings.
+    vi.stubEnv('MST_USER_CONFIG', '');
+    vi.stubEnv('MST_COWORK_CUA_MODEL', undefined);
+    const endpoint = await startProbeCounter();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const f = await fixture(endpoint.url, clientOptions);
+    await expect(f.run()).rejects.toThrow(STOPPED_BEFORE_COLLECT);
+    const warned = warn.mock.calls
+      .map((call) => String(call[0]))
+      .filter((message) => message.includes('built-in default'))
+      .join('\n');
+    const line = `models.computerUse: ${BUILTIN_MODELS.computerUse} (cowork client)`;
+    if (planner) expect(warned).toContain(line);
+    else expect(warned).not.toContain('models.computerUse');
   });
 });

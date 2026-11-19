@@ -104,6 +104,37 @@ function controls(
   );
 }
 
+/** How Claude names a turn of the user's in its accessibility tree. */
+const USER_TURN = /^You said:\s*/;
+
+/**
+ * Whether the app shows the task this prompt started: it names at least one
+ * turn of the user's, and the prompt begins with every one it names. Claude
+ * shortens a long turn's name, so a name need only begin the prompt; tasks
+ * whose prompts begin alike are not told apart.
+ *
+ * A turn counts when it is scrolled off screen (`showing` is false): a long
+ * task's first turn is above the request it is asked about. A turn in a
+ * hidden view (`visible` is false) does not count.
+ */
+function showsTask(nodes: readonly LinuxUiNode[], prompt: string): boolean {
+  const wanted = normalized(prompt);
+  const turns = nodes
+    .filter(
+      (node) =>
+        node.visible &&
+        TEXT_ROLES.includes(node.role) &&
+        USER_TURN.test(node.name)
+    )
+    .map((node) =>
+      normalized(node.name.replace(USER_TURN, '')).replace(/\s*(…|\.{3})$/u, '')
+    );
+  return (
+    turns.length > 0 &&
+    turns.every((turn) => turn.length > 0 && wanted.startsWith(turn))
+  );
+}
+
 function targetLabel(target: string): string {
   const match = /^claude-(opus|sonnet|haiku)-([0-9]+)-([0-9]+)$/.exec(target);
   if (!match || target.length > 128)
@@ -399,9 +430,24 @@ class FirstPartyDriver {
     return this.receipt('submitted');
   }
 
-  async hitl(approveWrites: boolean): Promise<LinuxDriverReceipt> {
+  /**
+   * One look at the task's requests. With `prompt`, the prompt that started
+   * the task, a request is the task's own only while the app shows that
+   * task: a request in any other view fails the pass, and nothing is pressed.
+   */
+  async hitl(
+    approveWrites: boolean,
+    prompt?: string
+  ): Promise<LinuxDriverReceipt> {
     const nodes = await this.bounded(() => this.ui.snapshot());
     const folders = controls(nodes, ['Choose folder']);
+    const once = controls(nodes, ['Allow once']);
+    if (
+      prompt !== undefined &&
+      (folders.length || once.length) &&
+      !showsTask(nodes, prompt)
+    )
+      throw new DriverFailure('hitl_task_not_shown');
     if (folders.length) {
       const denies = controls(nodes, ['Deny']);
       if (folders.length !== 1 || denies.length !== 1)
@@ -409,7 +455,6 @@ class FirstPartyDriver {
       await this.action(() => this.ui.activate(denies[0]!));
       return { ...this.receipt('hitl_checked'), denied: 'folder_request' };
     }
-    const once = controls(nodes, ['Allow once']);
     if (once.length > 1) throw new DriverFailure('approval_control_ambiguous');
     if (once.length) {
       if (!approveWrites)
@@ -652,7 +697,10 @@ export async function runFirstPartyLinux(
       case 'submit':
         return await driver.submit(payload);
       case 'hitl':
-        return await driver.hitl(payload.approveWrites === true);
+        return await driver.hitl(
+          payload.approveWrites === true,
+          payload.prompt
+        );
       case 'answer':
         return await driver.answer(payload.questions);
       case 'diagnose':
