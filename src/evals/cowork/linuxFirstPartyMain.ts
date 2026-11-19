@@ -15,6 +15,7 @@ const operation = z.enum([
   'submit',
   'hitl',
   'answer',
+  'stop',
   'diagnose',
 ]);
 const payloadSchema = z
@@ -70,7 +71,7 @@ async function main(): Promise<void> {
     });
     if (values.help) {
       process.stdout.write(
-        'Linux first-party Cowork: --mode <probe|reset|submit|hitl|answer|diagnose> --timeout-ms <ms> --max-actions <count>\n'
+        'Linux first-party Cowork: --mode <probe|reset|submit|hitl|answer|stop|diagnose> --timeout-ms <ms> --max-actions <count>\n'
       );
       return;
     }

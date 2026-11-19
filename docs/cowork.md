@@ -451,6 +451,18 @@ all of these checks pass: account and organization identity, no concurrent
 permission edits, every write outcome known, and the bound task finished with
 authoritative terminal evidence.
 
+A bound task with no terminal result (a clarifying question can hold one, and
+while it does, Stop's interrupt is not processed) is ended first, from claude.ai
+itself: the command opens the task's page in that Chrome, presses only `Skip` on
+an open question and then `Stop`, never an option, approval or send, and proves
+the terminal result again before it restores. A run's per-case reset does the
+same when the desktop's own Skip and Stop fail, so one stuck task does not end the
+batch. A transient claude.ai refusal of an account read or write (HTTP 403, 429
+or 5xx) is retried three times, over about a minute, with a page reload between
+attempts. A write claude.ai answered with a 4xx was rejected, so its outcome is
+known and recovery stays automatic; only a lost response or a 5xx leaves a write
+outcome unknown.
+
 Recovery takes two files under `~/.mcp-server-tester`: the shared desktop lease
 and a separate recovery guard (`cowork-desktop-macos.lock.recovery`). The guard
 stops two recoveries from racing. An interrupted recovery can leave it behind.
@@ -719,8 +731,13 @@ A task can ask a clarifying question (`AskUserQuestion`). By default
 (`coworkSetup.clarifyingQuestions: "first-option"`), HITL answers it the way ACE
 does: it reads the question's options from the bound task's transcript and clicks
 the first option of the question on screen (Claude Desktop shows one per page, marked
-`2 of 3`). A control matches by its exact label, or by the label followed by its
-description, unless a longer option label claims it. Once a multi-select
+`2 of 3`; without a marker, the page is the one question whose options are all on
+screen). A control matches by its exact label, or by the label followed by its
+description, with or without the shortcut digit Cowork shows before or after it,
+unless a longer option label claims it. The composer's own `Send message` and
+`Stop response` controls show beside every question and do not block an answer;
+any other approval or send control on screen does. A first-party account run
+answers the same way, even when it refuses write approvals. Once a multi-select
 option is checked, HITL presses the page's one `Submit`/`Next` control. HITL acts
 only on one unambiguous control and never types an answer. If the form doesn't
 take the first option within 60 seconds, or the question has no usable options,
@@ -890,8 +907,10 @@ task past its deadline, or one waiting on a prompt): it clicks the task's Stop
 response and waits until it's gone, about 2 seconds. A task that won't stop fails
 the reset (`task_not_stopped`), and the old task's view is left as it is. The
 reset then opens one empty new-task deep link and waits read-only (about 10
-seconds) for the Cowork start surface. First-party Linux reset instead refuses
-an active task; it opens a new-task link only when no Stop control is present.
+seconds) for the Cowork start surface. First-party Linux reset first ends an
+active task, proved by its terminal result: `Skip` on each open question page,
+then `Stop`, and, if the desktop cannot, from claude.ai through the source host.
+It opens a new-task link only when no Stop control is present.
 Before reset, first-party diagnosis captures a bounded accessibility dump, not
 a screenshot. The Linux adapter also collects native log tails and system state.
 Third-party diagnosis includes a screenshot (When something fails, in

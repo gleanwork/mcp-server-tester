@@ -29,6 +29,8 @@ export const CoworkCloudControlRequestSchema = z.discriminatedUnion('method', [
     .strict(),
   z.object({ ...header, method: z.literal('bindTask'), sessionId }).strict(),
   z.object({ ...header, method: z.literal('confirmTaskComplete') }).strict(),
+  // After a case is over: end its task from claude.ai, then prove completion.
+  z.object({ ...header, method: z.literal('settleTask') }).strict(),
   z.object({ ...header, method: z.literal('verify') }).strict(),
   z.object({ ...header, method: z.literal('restore') }).strict(),
   z.object({ ...header, method: z.literal('listSessions') }).strict(),

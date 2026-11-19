@@ -925,6 +925,68 @@ describe('account question safety', () => {
     expect(ui.actions).toEqual(['Continue with defaults']);
   });
 
+  it("answers beside the composer's own Send message and Stop controls", async () => {
+    const ui = questionUi();
+    ui.extra.push(
+      node('send', 'Send message', 'button', { parentId: 'app' }),
+      node('stop', 'Stop response', 'button', { parentId: 'app' })
+    );
+    expect(
+      await run('answer', ui, { questions: formatQuestion })
+    ).toMatchObject({ answered: 'option', action_count: 1 });
+    expect(ui.actions).toEqual(['Table Rows and columns']);
+  });
+
+  it('matches an option whose shortcut digit comes before its label', async () => {
+    const ui = new AccountUi();
+    ui.extra = [
+      node('send', 'Send message'),
+      node('q', 'Question', 'section'),
+      node(
+        'one',
+        '1 Current state (Recommended) Lead with where things stand',
+        'button',
+        { parentId: 'q' }
+      ),
+      node('two', '2 Write it as of mid-July Follow the framing', 'button', {
+        parentId: 'q',
+      }),
+      node('skip', 'Skip', 'button', { parentId: 'q' }),
+    ];
+    expect(
+      await run('answer', ui, {
+        questions: [
+          {
+            labels: ['Current state (Recommended)', 'Write it as of mid-July'],
+          },
+        ],
+      })
+    ).toMatchObject({ answered: 'option', action_count: 1 });
+    expect(ui.actions).toEqual([
+      '1 Current state (Recommended) Lead with where things stand',
+    ]);
+  });
+
+  it('finds the page of a multi-question form without a page marker', async () => {
+    const ui = new AccountUi();
+    ui.extra = [
+      node('send', 'Send message'),
+      node('prev', 'Previous question'),
+      node('next', 'Next question'),
+      node('links', "1 I'll send links Pause until they arrive"),
+      node('go', '2 Go without them Build from what exists'),
+    ];
+    expect(
+      await run('answer', ui, {
+        questions: [
+          { labels: ['Current state', 'Mid-July'] },
+          { labels: ["I'll send links", 'Go without them'] },
+        ],
+      })
+    ).toMatchObject({ answered: 'option', action_count: 1 });
+    expect(ui.actions).toEqual(["1 I'll send links Pause until they arrive"]);
+  });
+
   it('uses the displayed page number for multi-question forms', async () => {
     const ui = new AccountUi();
     ui.extra = [
@@ -987,6 +1049,64 @@ describe('account question safety', () => {
       expect(ui.scans).toBe(0);
     }
   );
+});
+
+describe('stopping a task held by a question', () => {
+  /** Skip moves through the question's pages; Stop shows once they are gone. */
+  class QuestionTaskUi extends AccountUi {
+    pages: number;
+    stopTakes: boolean;
+    constructor(pages: number, stopTakes = true) {
+      super();
+      this.pages = pages;
+      this.stopTakes = stopTakes;
+      this.render();
+    }
+    running = true;
+    render() {
+      this.extra = this.pages
+        ? [node(`skip${this.pages}`, 'Skip'), node('send', 'Send message')]
+        : this.running
+          ? [node('stop', 'Stop response')]
+          : [];
+    }
+    override async activate(target: LinuxUiNode): Promise<void> {
+      await super.activate(target);
+      if (target.name === 'Skip') this.pages -= 1;
+      if (target.name === 'Stop response' && this.stopTakes)
+        this.running = false;
+      this.render();
+    }
+  }
+
+  it('skips each question page before pressing Stop', async () => {
+    const ui = new QuestionTaskUi(2);
+    expect(await run('stop', ui)).toMatchObject({
+      status: 'ready',
+      action_count: 3,
+    });
+    expect(ui.actions).toEqual(['Skip', 'Skip', 'Stop response']);
+  });
+
+  it('presses Stop once and fails when the task keeps running', async () => {
+    const ui = new QuestionTaskUi(0, false);
+    expect(await run('stop', ui)).toMatchObject({
+      status: 'failed',
+      error: 'task_not_stopped',
+      action_count: 1,
+    });
+    expect(ui.actions).toEqual(['Stop response']);
+  });
+
+  it('bounds Skip presses on a question that never leaves', async () => {
+    const ui = new AccountUi();
+    ui.extra = [node('skip', 'Skip')];
+    expect(await run('stop', ui)).toMatchObject({
+      status: 'failed',
+      error: 'task_not_stopped',
+      action_count: 6,
+    });
+  });
 });
 
 describe('safe receipts and bounded diagnosis', () => {

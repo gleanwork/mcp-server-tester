@@ -608,6 +608,8 @@ async function runSessionBatch(
     throw surfaceable(error, secrets, `${name} session could not open.`);
   }
   const results: ClientRunResult[] = [];
+  // Results whose trial proved its own evidence (see `verified`).
+  const verified = new Set<ClientRunResult>();
   let executionError: unknown;
   let executionFailed = false;
   let cleanupError: Error | undefined;
@@ -667,6 +669,7 @@ async function runSessionBatch(
         target?.servers ?? []
       );
       results.push(result);
+      if (outcome.verified === true && !result.error) verified.add(result);
       // A copy: the batch adds to its results when it ends.
       await reportResult?.(index, redactedClientRun(result, secrets));
       if (outcome.continuation === 'stop')
@@ -707,6 +710,15 @@ async function runSessionBatch(
     } catch (error) {
       const message = redact(error, `${name} batch cleanup failed.`);
       for (const result of results) {
+        if (verified.has(result)) {
+          // Its task finished and its settings were checked before cleanup
+          // began: the failure is recorded, but the trial stands.
+          result.telemetry = {
+            ...result.telemetry,
+            batchFailure: { kind: 'cleanup_failed', error: message },
+          };
+          continue;
+        }
         // The desktop's state is unknown, so no case counts; but this is the
         // desktop failing, not the client: an infrastructure failure, a
         // retry collects. One the client already had stands.

@@ -258,13 +258,20 @@ function childReferences(value: unknown): AtspiRef[] {
 }
 
 /** dbus-native's low-level variant: [signature AST, array of values]. */
-function variant(value: unknown, type: string): unknown {
+function variant(value: unknown, type: string | readonly string[]): unknown {
+  const types: readonly string[] = typeof type === 'string' ? [type] : type;
+  const actual = (
+    Array.isArray(value) && Array.isArray(value[0])
+      ? (value[0][0] as { type?: unknown } | undefined)?.type
+      : undefined
+  ) as string | undefined;
   if (
     !Array.isArray(value) ||
     value.length !== 2 ||
     !Array.isArray(value[0]) ||
     value[0].length !== 1 ||
-    (value[0][0] as { type?: unknown } | undefined)?.type !== type ||
+    actual === undefined ||
+    !types.includes(actual) ||
     !Array.isArray(value[1]) ||
     value[1].length !== 1
   )
@@ -308,7 +315,7 @@ export class AtspiBus {
     ref: AtspiRef,
     iface: string,
     name: string,
-    type: string
+    type: string | readonly string[]
   ): Promise<unknown> {
     return variant(
       await this.call({
@@ -429,7 +436,10 @@ export class AtspiBus {
   }
 
   async anchorCount(link: AtspiRef): Promise<number> {
-    return integer(await this.property(link, ATSPI_HYPERLINK, 'NAnchors', 'n'));
+    // The spec says int16; at-spi2-atk (Chromium, Electron) sends int32.
+    return integer(
+      await this.property(link, ATSPI_HYPERLINK, 'NAnchors', ['n', 'i'])
+    );
   }
 
   async linkObject(link: AtspiRef, index: number): Promise<AtspiRef> {

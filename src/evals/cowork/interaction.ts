@@ -24,6 +24,12 @@ export interface CoworkDriverOptions {
    * is `first-option`). The driver picks each question's first option.
    */
   pendingQuestion?: () => Promise<CoworkPendingQuestion | undefined>;
+  /**
+   * Answer `pendingQuestion` only: never act on approval or folder prompts.
+   * For account policies that fail on any approval, where a clarifying
+   * question must still not stall the task.
+   */
+  questionsOnly?: boolean;
 }
 
 /** An unanswered AskUserQuestion, as the model asked it. */

@@ -334,6 +334,10 @@ export async function createCoworkAccountControl(
         if (!configuration) throw new Error('No prepared account transaction.');
         await configuration.confirmTaskComplete();
         return null;
+      case 'settleTask':
+        if (!configuration) throw new Error('No prepared account transaction.');
+        await configuration.settleTask();
+        return null;
       case 'verify': {
         if (!configuration || !currentTask?.sessionId)
           throw new Error('No source-bound transcript to verify.');

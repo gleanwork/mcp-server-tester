@@ -33,6 +33,7 @@ export type LinuxDriverOperation =
   | 'submit'
   | 'hitl'
   | 'answer'
+  | 'stop'
   | 'diagnose';
 
 export interface LinuxDriverReceipt {

@@ -525,7 +525,7 @@ function receipt(stdout: string): Receipt | undefined {
 type LinuxCoworkMode = 'third-party' | 'first-party';
 
 async function execute(
-  mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'answer' | 'diagnose',
+  mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'answer' | 'stop' | 'diagnose',
   payload: object,
   options: CoworkDriverOptions,
   driverMode: LinuxCoworkMode = 'third-party'
@@ -563,7 +563,10 @@ async function execute(
       ? SUBMIT_TIMEOUT_MS
       : mode === 'diagnose'
         ? 20_000
-        : 10_000
+        : mode === 'stop'
+          ? // A skipped question, then Stop and the wait for it to take.
+            30_000
+          : 10_000
   );
   // Reserve time for the bounded driver to return its final receipt.
   const driverTimeout = Math.max(
@@ -606,7 +609,7 @@ async function execute(
   );
   const record = receipt(result.stdout);
   const expected =
-    mode === 'probe' || mode === 'reset'
+    mode === 'probe' || mode === 'reset' || mode === 'stop'
       ? 'ready'
       : mode === 'submit'
         ? 'submitted'
@@ -1188,6 +1191,13 @@ async function handleLinuxHitl(
         );
         continue;
       }
+      if (options.questionsOnly) {
+        // Approvals are the policy's to reject; only questions are answered.
+        await delay(
+          Math.min(1_000, Math.max(0, options.deadlineAt - Date.now()))
+        );
+        continue;
+      }
       if (actions >= budget)
         throw new CoworkHitlBudgetError(
           'Linux HITL action budget exhausted.',
@@ -1281,6 +1291,11 @@ export const coworkLinuxFirstParty: CoworkDesktop = {
   async reset(options) {
     await checkAccountRuntime(options.env ?? process.env);
     await execute('reset', {}, { ...options, maxActions: 2 }, 'first-party');
+  },
+  async stopTask(options) {
+    await checkAccountRuntime(options.env ?? process.env);
+    // Skip on each open question page (the driver caps it at 6), then Stop.
+    await execute('stop', {}, { ...options, maxActions: 7 }, 'first-party');
   },
   async submit(query, options) {
     await checkAccountRuntime(options.env ?? process.env);
