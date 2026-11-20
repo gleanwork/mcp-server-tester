@@ -375,7 +375,10 @@ catalog, discovered tool references, and actual calls against the policy. Claude
 can load connectors after reporting them as pending in its initial catalog.
 MST records that catalog as incomplete rather than claiming it proves every
 tool's availability. It saves the check as `connector-policy.json` beside the
-audit log, including the prepared tool list when validation fails. If the server
+audit log, including the prepared tool list when validation fails. The files
+the task wrote in its cloud VM are saved as the trial's `outputs/`, with
+`outputs.json` beside them (see
+[Client artifacts](evaluation-framework.md#client-artifacts)). If the server
 changes its catalog during a task, MST fails the check instead of silently
 accepting new tools. Start a new run to prepare against the changed catalog.
 

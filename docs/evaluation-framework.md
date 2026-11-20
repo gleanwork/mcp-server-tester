@@ -706,7 +706,14 @@ which paths in it are evidence (`ClientRunResult.artifacts`, `{ dir, include }`)
 The `cowork` client reports its session folder and includes only the audit log
 (`audit.jsonl`), the files the agent wrote (`outputs/`), its transcripts
 (`.claude/projects/*/*.jsonl`) and the tool output it saved to files
-(`.claude/projects/*/*/tool-results`). Before anything grades the trial, MST
+(`.claude/projects/*/*/tool-results`). A first-party (claude.ai) task writes
+its files in Anthropic's cloud VM, under `/mnt/user-data/outputs/`. claude.ai
+lists no task's files, so when the task ends MST reads each output path the
+task named (the files it sent the user, the ones its tools wrote, other output
+paths its events mention) and saves what claude.ai serves as the same
+`outputs/`, up to 10 MiB a file, 50 files and 100 MiB a task. `outputs.json`
+beside it lists each file with its status (`saved`, `missing`, `too_large`,
+`not_a_file` or `error`); a file that can't be read doesn't fail the trial. Before anything grades the trial, MST
 copies what `include` names and nothing else: an allowlist, so a credential
 or setting the client didn't anticipate is never copied. In a pattern, `*`
 matches any characters of one name, but not a leading `.`, as in a shell. A

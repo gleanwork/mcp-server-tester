@@ -230,6 +230,8 @@ const COWORK_SESSION_EVIDENCE = [
   'audit.jsonl',
   'connector-policy.json',
   'outputs',
+  // A first-party task's record of the output files MST read from claude.ai.
+  'outputs.json',
   '.claude/projects/*/*.jsonl',
   '.claude/projects/*/*/tool-results',
 ] as const;
