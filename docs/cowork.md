@@ -741,9 +741,12 @@ the first option of the question on screen (Claude Desktop shows one per page, m
 screen). A control matches by its exact label, or by the label followed by its
 description, with or without the shortcut digit Cowork shows before or after it,
 unless a longer option label claims it. The composer's own `Send message` and
-`Stop response` controls show beside every question and do not block an answer;
-any other approval or send control on screen does. A first-party account run
-answers the same way, even when it refuses write approvals. Once a multi-select
+`Stop response` controls show beside every question and do not block an answer,
+and neither does the app's sidebar (past task titles such as `Update the roadmap`)
+or its `Update available` notice; any other approval or send control on screen
+does. A first-party account run answers the same way, even when it refuses write
+approvals. When the driver refuses a question without acting, the case fails as
+unanswered at once rather than waiting for its deadline. Once a multi-select
 option is checked, HITL presses the page's one `Submit`/`Next` control. HITL acts
 only on one unambiguous control and never types an answer. If the form doesn't
 take the first option within 60 seconds, or the question has no usable options,
