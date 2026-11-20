@@ -69,6 +69,52 @@ function fail(): never {
   throw new Error(ERROR);
 }
 
+/** An LLM gateway for Claude Desktop's own inference. */
+type InferenceGateway = {
+  baseUrl: string;
+  authScheme: 'bearer' | 'x-api-key';
+};
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/**
+ * `MST_INFERENCE_GATEWAY_URL` (and `MST_INFERENCE_AUTH_SCHEME`, default
+ * `bearer`): the gateway Claude Desktop sends inference to, as in MST's
+ * Linux image. HTTPS, or HTTP to a loopback host; no credentials, query or
+ * fragment. Unset, Desktop uses the Anthropic API.
+ */
+function inferenceGateway(
+  env: Record<string, string | undefined>
+): InferenceGateway | undefined {
+  const own = (key: string) => (Object.hasOwn(env, key) ? env[key] : undefined);
+  const url = own('MST_INFERENCE_GATEWAY_URL');
+  const scheme = own('MST_INFERENCE_AUTH_SCHEME');
+  if (!url) {
+    if (scheme) fail();
+    return undefined;
+  }
+  // eslint-disable-next-line no-control-regex
+  if (url.length > 2048 || /[\u0000-\u0020\u007f?#]/.test(url)) fail();
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    fail();
+  }
+  if (
+    !(
+      parsed.protocol === 'https:' ||
+      (parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname))
+    ) ||
+    parsed.username ||
+    parsed.password
+  )
+    fail();
+  const authScheme = scheme || 'bearer';
+  if (authScheme !== 'bearer' && authScheme !== 'x-api-key') fail();
+  return { baseUrl: url, authScheme };
+}
+
 function hash(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -579,6 +625,8 @@ function profileBytes(
     blocked: ReturnType<typeof coworkBlockedMcpEntries>;
     /** Managed preferences own inference; the profile sets no provider. */
     managedInference: boolean;
+    /** Send Desktop's inference to this gateway, not the Anthropic API. */
+    gateway?: InferenceGateway;
     /** Claude Desktop's `toolSearchEnabled` (`coworkSetup.toolSearch`). */
     toolSearch: boolean;
   }
@@ -615,7 +663,13 @@ function profileBytes(
     ...(options.managedInference
       ? {}
       : {
-          inferenceProvider: 'anthropic',
+          ...(options.gateway
+            ? {
+                inferenceProvider: 'gateway',
+                inferenceGatewayBaseUrl: options.gateway.baseUrl,
+                inferenceGatewayAuthScheme: options.gateway.authScheme,
+              }
+            : { inferenceProvider: 'anthropic' }),
           inferenceCredentialKind: 'helper-script',
           inferenceCredentialHelper: join(options.directory, HELPER),
         }),
@@ -646,6 +700,10 @@ async function validateInstall(options: InstallOptions) {
   if (await exists(join(profileDirectory, LOCK))) fail();
   if (await exists(directory)) fail();
   const env = { ...options.env };
+  // The gateway's token is the staged ANTHROPIC_API_KEY. Managed preferences
+  // that set the provider already route inference: don't override them.
+  const gateway = inferenceGateway(env);
+  if (gateway && managedInference) fail();
   let inference: Buffer | undefined;
   if (!managedInference) {
     const key = Object.hasOwn(env, 'ANTHROPIC_API_KEY')
@@ -677,6 +735,7 @@ async function validateInstall(options: InstallOptions) {
     marketplaces,
     blocked,
     managedInference,
+    gateway,
     toolSearch,
   });
   // A blocked plugin server must never shadow an eval server (any case).
@@ -752,6 +811,7 @@ async function validateInstall(options: InstallOptions) {
     env,
     inference,
     managedInference,
+    gateway,
     toolSearch,
     original,
     sourcePath,

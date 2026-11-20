@@ -104,11 +104,17 @@ Two separate model clients run during a macOS case:
 
 - **Claude Desktop's inference** (the model under test). By default, MST stages
   `ANTHROPIC_API_KEY` for the temporary profile through a private credential
-  helper. When managed preferences set `inferenceProvider` (for example, an LLM
+  helper, and Desktop sends it to the Anthropic API. With
+  `MST_INFERENCE_GATEWAY_URL` set, the profile sends Desktop's inference to that
+  LLM gateway instead (`inferenceProvider: "gateway"`), with the same staged key
+  as its token, sent as `MST_INFERENCE_AUTH_SCHEME`: `bearer` (the default) or
+  `x-api-key`. These are the variables MST's Linux image reads. The URL must be
+  HTTPS, or HTTP to a loopback host, with no credentials, query or fragment.
+  When managed preferences set `inferenceProvider` (for example, an LLM
   gateway with its own credential helper), they take precedence over the
   profile: MST then requires no key, stages no inference credential, and sets no
-  provider in the profile. If those managed preferences change during setup, the
-  run fails closed.
+  provider in the profile, and it refuses `MST_INFERENCE_GATEWAY_URL`. If those
+  managed preferences change during setup, the run fails closed.
 - **The Computer Use planner** (`clientOptions.computerUseModel`). It uses MST's
   [LLM gateway settings](./llm-gateways.md): `ANTHROPIC_BASE_URL` with
   `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`, else `ANTHROPIC_API_KEY`
