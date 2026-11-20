@@ -717,7 +717,10 @@ non-regular files are never copied. Judges and
 pairwise judges get the copy as `trial.artifactsDir`; no result holds its path.
 The `codex-cli` client reports Codex's rollout trace unless `rolloutTrace` is
 false ([codex.md](./codex.md#the-rollout-trace)): each model request as Codex
-sent it.
+sent it. The `claude-code` client reports Claude Code's raw API bodies unless
+`rawApiBodies` is false
+([mst-client.md](./mst-client.md#claude-code-raw-api-bodies)): each model
+request as Claude Code sent it, and each response.
 
 A copy has limits: 16 MB per file, 64 MB in all, 4,096 entries and 16
 directories deep. A copy that fails (over a limit, or a directory that's gone)
@@ -894,6 +897,7 @@ Options and their defaults follow. `timeout` is in milliseconds. Required option
 | `isolate`      | true                                               |
 | `cwd`          | empty temporary directory, removed after the trial |
 | `env`          | inherited environment; no extra variables          |
+| `rawApiBodies` | true                                               |
 
 #### `codex-app` options
 

@@ -58,6 +58,14 @@ import type { CloudConnectorConfig } from './cowork/claudeAiConnectors.js';
 import { CHATGPT_APP_CLIENTS, chatgptOptionIssues } from './chatgptClient.js';
 import { CODEX_CLIENT, assertCodexServers } from './codexClient.js';
 import {
+  claudeRawApiBodies,
+  CLAUDE_RAW_API_BODIES_DIR,
+  RAW_API_BODIES_ENV,
+  rawApiBodiesEnv,
+  withArtifactBodyRefs,
+} from './claudeRawApiBodies.js';
+import { clientSecretValues } from './clientSecrets.js';
+import {
   claudeCodeOtelEnv,
   claudeCodeTelemetryClaim,
   hostTelemetryReceiver,
@@ -115,6 +123,10 @@ async function runBuiltinClient(
   let configDir: string | undefined;
   let claudeConfigDir: string | undefined;
   let workDir: string | undefined;
+  // `rawApiBodies`: the directory Claude Code writes the trial's raw API
+  // bodies in, or why MST keeps none it wrote.
+  let bodiesDir: string | undefined;
+  let bodiesNotKept: string | undefined;
   // `telemetry.host`: Claude Code's own OpenTelemetry, for this session.
   let hostReceiver: HostTelemetryReceiver | undefined;
   let hostSessionId: string | undefined;
@@ -283,6 +295,31 @@ async function runBuiltinClient(
               `claude-code: cwd ${config.cli.cwd} is not a directory.`
             );
           }
+          // Claude Code writes each request it sends, and each response, in
+          // a directory of the trial's own, over one the shell names. One
+          // the client's env names is used as given, and MST keeps none.
+          if (
+            (clientConfig as { rawApiBodies?: boolean }).rawApiBodies ??
+            CLAUDE_CODE_DEFAULTS.rawApiBodies
+          ) {
+            if (
+              (clientConfig.env as ClientEnvironment | undefined)?.[
+                RAW_API_BODIES_ENV
+              ] === undefined
+            ) {
+              bodiesDir = fs.mkdtempSync(
+                path.join(os.tmpdir(), 'mst-claude-bodies-')
+              );
+              fs.mkdirSync(path.join(bodiesDir, CLAUDE_RAW_API_BODIES_DIR), {
+                mode: 0o700,
+              });
+              config.cli = {
+                ...config.cli,
+                env: { ...config.cli.env, ...rawApiBodiesEnv(bodiesDir) },
+              };
+            } else
+              bodiesNotKept = `The client's env sets ${RAW_API_BODIES_ENV}, so Claude Code wrote its raw API bodies where that says, and MST kept none.`;
+          }
           const hostConfig = options.evalConfig?.telemetry?.host;
           const claim = hostConfig ? claudeCodeTelemetryClaim() : undefined;
           if (claim && !warnedTelemetryClaim) {
@@ -339,6 +376,27 @@ async function runBuiltinClient(
           response.modelCalls = withHostRequestIds(response.modelCalls, host);
         }
       }
+      // A redacted copy of MST's own: Claude Code's directory is removed
+      // below, and the copy with the trial's artifacts.
+      const bodies = bodiesDir
+        ? await claudeRawApiBodies(bodiesDir, {
+            secrets: clientSecretValues(env, input.servers),
+          })
+        : bodiesNotKept === undefined
+          ? undefined
+          : { telemetry: { notKept: bodiesNotKept } };
+      if (bodies) {
+        response.telemetry = {
+          ...response.telemetry,
+          rawApiBodies: bodies.telemetry,
+        };
+        if (bodies.artifacts) response.artifacts = bodies.artifacts;
+      }
+      if (bodiesDir && response.hostTelemetry)
+        response.hostTelemetry = withArtifactBodyRefs(
+          response.hostTelemetry,
+          bodiesDir
+        );
       return {
         ...response,
         events: attributeBuiltinEvents(response.events, input.servers),
@@ -378,6 +436,8 @@ async function runBuiltinClient(
       });
     if (workDir)
       fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 3 });
+    if (bodiesDir)
+      fs.rmSync(bodiesDir, { recursive: true, force: true, maxRetries: 3 });
   }
 }
 
@@ -515,6 +575,15 @@ const CliClientSchema = z
     env: z.record(z.string(), z.string().optional()).optional().meta({
       'x-defaultDescription': 'inherited environment; no extra variables',
     }),
+    /**
+     * Have Claude Code write its raw API bodies (`OTEL_LOG_RAW_API_BODIES`):
+     * each model request exactly as Claude Code sent it, and each response
+     * with its usage. The trial reports them as its client artifacts.
+     */
+    rawApiBodies: z
+      .boolean()
+      .optional()
+      .meta({ default: CLAUDE_CODE_DEFAULTS.rawApiBodies }),
     ...UNUSED_SERVER_OPTIONS,
   })
   .strict();

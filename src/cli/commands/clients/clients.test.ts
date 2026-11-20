@@ -236,6 +236,7 @@ describe('mst clients', () => {
         'isolate',
         'cwd',
         'env',
+        'rawApiBodies',
       ],
       'codex-cli': [
         'model',

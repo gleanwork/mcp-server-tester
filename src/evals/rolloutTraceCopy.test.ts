@@ -77,6 +77,19 @@ describe('copyRolloutTrace', () => {
     }
   });
 
+  it('copies each bundle as a directory of its own with no `under`', async () => {
+    const copy = await copyRolloutTrace(root, [bundle], { under: [] });
+    try {
+      expect(copy).toMatchObject({ files: 2, bytes: 4 });
+      expect(await readdir(copy.dir)).toEqual([bundle]);
+      expect(await readdir(join(copy.dir, bundle, 'payloads'))).toEqual([
+        '1.json',
+      ]);
+    } finally {
+      await rm(copy.dir, { recursive: true, force: true });
+    }
+  });
+
   it('does not copy a bundle it is given that is a symbolic link', async () => {
     await symlink(elsewhere, join(root, 'trace-linked'));
     const copying = copyRolloutTrace(root, ['trace-linked']);

@@ -115,7 +115,7 @@ It needs a server behind a dry-run proxy. See [Writes](https://github.com/gleanw
 
 `api` options: `provider` (inferred from the model id unless set: `anthropic`, `openai`, `google`, `vertex-anthropic`, `mistral`, `azure`, `deepseek`, `openrouter`, `xai`), `maxToolCalls` (default 5), `temperature`, `maxTokens`, `timeout`, `apiKeyEnvVar`, `systemPrompt`, `skills` (`off`, `catalog`, `preload`), `env`.
 
-`claude-code` options: `provider` (`anthropic`, `vertex`, `vertex-anthropic`), `timeout`, `systemPrompt` (passed with `--append-system-prompt`), `isolate` (`false` to use your own Claude Code configuration), `env`.
+`claude-code` options: `provider` (`anthropic`, `vertex`, `vertex-anthropic`), `timeout`, `systemPrompt` (passed with `--append-system-prompt`), `isolate` (`false` to use your own Claude Code configuration), `env`, `rawApiBodies` (`false` to keep none of the requests and responses Claude Code sent and got; see [Claude Code raw API bodies](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/mst-client.md#claude-code-raw-api-bodies)).
 
 `systemPrompt` is a validation error for `cowork`, `chatgpt` and `codex-app`, which take organisation instructions from the app.
 
