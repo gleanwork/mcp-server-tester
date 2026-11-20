@@ -141,12 +141,32 @@ describe('ChatGPT macOS application controller (all execution mocked)', () => {
       'com.example.chatgpt',
       '/Applications/X.app',
     ]);
-    expect(options.env).toBe(process.env);
+    expect(options.env).toEqual(process.env);
     expect(options).toMatchObject({ timeout: 45_000, maxBuffer: 16 * 1024 });
     expect(stdinWrites).toEqual([
       '{}',
       JSON.stringify({ OPENAI_API_KEY: 'synthetic-secret' }),
     ]);
+  });
+
+  it('omits a missing temporary CA bundle when restarting the app', async () => {
+    const missing = join(root, 'removed-ca.pem');
+    const present = join(root, 'available-ca.pem');
+    await fs.writeFile(present, 'test certificate');
+    vi.stubEnv('SSL_CERT_FILE', missing);
+    vi.stubEnv('NODE_EXTRA_CA_CERTS', present);
+    const { getChatgptApplicationController } =
+      await import('./macController.js');
+    const controller = await getChatgptApplicationController();
+    await controller.start({ SSL_CERT_FILE: missing });
+    const [, , options] = execute.mock.calls[1]! as [
+      string,
+      string[],
+      ExecOptions,
+    ];
+    expect(options.env.SSL_CERT_FILE).toBeUndefined();
+    expect(options.env.NODE_EXTRA_CA_CERTS).toBe(present);
+    expect(JSON.parse(stdinWrites[0]!)).toEqual({});
   });
 
   // Changed by the shared helper: the callback form never put stderr on the

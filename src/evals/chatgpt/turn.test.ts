@@ -414,6 +414,7 @@ describe('bounded native binding wait and failure classification', () => {
     const mac = chatgptMacos;
     const linux = chatgptLinux;
     expect(chatgptBindingDeadline(mac, 1000, 200_000)).toBe(31_000);
+    expect(chatgptBindingDeadline(mac, 1000, 200_000, 120_000)).toBe(121_000);
     expect(chatgptBindingDeadline(linux, 1000, 200_000)).toBe(121_000);
     expect(chatgptBindingDeadline(linux, 1000, 41_234)).toBe(41_234);
   });

@@ -92,6 +92,9 @@ to display labels such as `5.6 Terra Medium`. Linux rejects `clientOptions.confi
 pins the expected email, ChatGPT account ID and organization ID, and chooses
 `workLocation: "local"` or `"cloud"` in the app. The source is one signed-in
 `chatgpt.com` page exposed through a loopback-only Chrome DevTools endpoint.
+On macOS, the Computer Use driver selects and visually checks the chosen Work
+location. The Linux AT-SPI driver does not verify the Cloud location, so MST
+rejects first-party Linux Cloud configs until that check is implemented.
 MST reads only account ID, organization ID and email from that page and checks
 them against the pins; it does not export browser cookies or tokens. It also
 checks the native app's email and optional workspace, and the selected server's

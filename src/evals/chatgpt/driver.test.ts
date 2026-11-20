@@ -115,6 +115,20 @@ describe('ChatGPT shared Computer Use adapter', () => {
     expect(() =>
       validateChatgptConfig({ ...linux, options: { surface: 'chat' } })
     ).toThrow('surface');
+    expect(() =>
+      validateChatgptConfig({
+        ...linux,
+        firstParty: {
+          serverName: 'glean_default',
+          expectedEmail: 'eval@example.com',
+          expectedAccountId: 'account-id',
+          expectedOrganizationId: 'org-example',
+          workLocation: 'cloud',
+          source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+          acknowledgeToolPolicyIsNotASandbox: true,
+        },
+      })
+    ).toThrow('Cloud location is not verified');
   });
 
   it("checks maxActions against the trial's OS: Computer Use on macOS, the native budget on Linux", () => {

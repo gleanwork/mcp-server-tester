@@ -132,9 +132,13 @@ export type ChatgptTurn = ChatgptTurnSuccess | ChatgptTurnFailure;
 export function chatgptBindingDeadline(
   desktop: ChatgptDesktop,
   now: number,
-  runDeadline: number
+  runDeadline: number,
+  minimumWindowMs = 0
 ): number {
-  return Math.min(now + desktop.bindingWindowMs, runDeadline);
+  return Math.min(
+    now + Math.max(desktop.bindingWindowMs, minimumWindowMs),
+    runDeadline
+  );
 }
 
 /**
@@ -494,7 +498,13 @@ export async function captureChatgptTurn(
   const bindingDeadline = chatgptBindingDeadline(
     steps,
     Date.now(),
-    runDeadline
+    runDeadline,
+    steps.os === 'darwin' &&
+      config.firstParty &&
+      'serverName' in config.firstParty &&
+      config.firstParty.workLocation === 'cloud'
+      ? 120_000
+      : 0
   );
   // A rewrite that never finishes is a transcript failure, not a lost
   // submission. Keep what the bound turn recorded before it.

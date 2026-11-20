@@ -1,6 +1,7 @@
 import type { ChatgptApplicationController } from '../chatgpt/driver.js';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import {
   compileSwiftHelper,
@@ -21,6 +22,23 @@ export interface ChatgptApplicationOptions {
 }
 
 const controllers = new Map<string, Promise<ChatgptApplicationController>>();
+
+/** A removed temporary CA bundle can leave the restored app on its splash screen. */
+function withoutMissingCaFiles<T extends Record<string, string | undefined>>(
+  environment: T
+): T {
+  const filtered = { ...environment };
+  for (const name of [
+    'SSL_CERT_FILE',
+    'NODE_EXTRA_CA_CERTS',
+    'REQUESTS_CA_BUNDLE',
+    'CURL_CA_BUNDLE',
+  ]) {
+    const file = filtered[name];
+    if (file && isAbsolute(file) && !existsSync(file)) delete filtered[name];
+  }
+  return filtered;
+}
 
 export async function getChatgptApplicationController(
   options: ChatgptApplicationOptions = {}
@@ -64,10 +82,11 @@ async function compile(
         // The helper launches ChatGPT from this environment, so the app sees the
         // test process's variables. Narrowing it to an allowlist needs a check
         // on a real Mac that ChatGPT still launches and signs in.
-        environment: 'inherit',
+        environment:
+          action === 'start' ? withoutMissingCaFiles(process.env) : 'inherit',
         timeoutMs: 45_000,
         // Launch credentials travel over a pipe, never in process-list arguments.
-        stdin: JSON.stringify(environment),
+        stdin: JSON.stringify(withoutMissingCaFiles(environment)),
       });
     } catch (error) {
       throw controllerError(action, error);
