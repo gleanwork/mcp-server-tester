@@ -266,7 +266,9 @@ export type ComputerUseOutcome =
       status: 'submitted';
       action_count: number;
       model: string;
-      submission_action: { action: 'key'; text: 'enter' };
+      submission_action:
+        | { action: 'key'; text: 'enter' }
+        | { action: 'left_click' };
       telemetry: ComputerUseTelemetry;
     }
   | {
@@ -566,6 +568,13 @@ async function loop(
         ? 'ChatGPT Work'
         : 'Codex'
       : 'Cowork';
+  // Mac Work Cloud keeps a filled draft when Enter is pressed. Its visible
+  // Send button is the submission control; the native turn still proves it ran.
+  const cloudWorkSendClick =
+    application === 'chatgpt' &&
+    run.chatgptSurface === 'chatgpt-work' &&
+    run.requiredWorkLocation === 'cloud' &&
+    mode === 'submit';
   const model = run.model;
   log(
     `starting driver with model=${model}, max_actions=${maxActions}, app=${application}`
@@ -653,7 +662,9 @@ async function loop(
         'Insert the unchanged original evaluation query into the focused ' +
         `empty ${surface} task composer. First locate and focus that composer using a screenshot. ` +
         'This tool takes no text: the harness supplies the exact text. It may run only once. ' +
-        'After it succeeds, use computer key Enter to submit, never click Send.',
+        (cloudWorkSendClick
+          ? 'After it succeeds, observe the filled composer and call submit_cloud_work on the visible Send button.'
+          : 'After it succeeds, use computer key Enter to submit, never click Send.'),
       input_schema: {
         type: 'object',
         properties: {},
@@ -663,13 +674,19 @@ async function loop(
     instruction =
       `Control ${appName} Desktop. Open ${surface}, create a fresh task, and focus its empty ` +
       'prompt composer. Call fill_query with no arguments. It inserts the original ' +
-      'query for you. Do not reconstruct or type the query yourself. Then press ' +
-      'unmodified Enter once to submit. Do not wait for or read the answer.';
+      'query for you. Do not reconstruct or type the query yourself. ' +
+      (cloudWorkSendClick
+        ? 'Then call submit_cloud_work once on the visible Send button. '
+        : 'Then press unmodified Enter once to submit. ') +
+      'Do not wait for or read the answer.';
     system =
       'You are a bounded desktop submission operator. Use screenshots and Computer Use ' +
       `actions to open/focus ${appName}, select ${surface}, create a fresh task, and focus its composer. ` +
       'Use fill_query, not computer type, to insert the query. After fill_query succeeds, ' +
-      'submit with unmodified Enter, never by clicking Send. Never submit twice. Stop after ' +
+      (cloudWorkSendClick
+        ? 'submit with submit_cloud_work on the visible Send button, never with Enter. '
+        : 'submit with unmodified Enter, never by clicking Send. ') +
+      'Never submit twice. Stop after ' +
       'submission. Do not approve permissions or change account settings.';
   }
 
@@ -744,6 +761,27 @@ async function loop(
       `After ${focusWorkComposerTool}, call fill_query. ` +
       'Do not confirm when the location is missing or ambiguous. ' +
       'If the requested location cannot be verified, call report_blocker with navigation_blocked.';
+  }
+  if (cloudWorkSendClick) {
+    tools.push({
+      name: 'submit_cloud_work',
+      description:
+        'Click the visible blue Send button exactly once after observing the filled Work Cloud composer in a fresh screenshot. ' +
+        'The screenshot must show the unchanged query and no open menu or dialog. Supply the Send button coordinates; do not press Enter.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          coordinate: {
+            type: 'array',
+            items: { type: 'integer', minimum: 0 },
+            minItems: 2,
+            maxItems: 2,
+          },
+        },
+        required: ['coordinate'],
+        additionalProperties: false,
+      },
+    });
   }
   if (requireModelConfirmation) {
     tools.push({
@@ -826,7 +864,10 @@ async function loop(
           'or tab, or use keyboard shortcuts other than Enter and Escape. ') +
       'After fill_query, take a screenshot and check it: the composer must show the query ' +
       'and no menu, suggestion list or dialog may be open (press Escape to close one, then ' +
-      'take another screenshot). Only then press Enter. ';
+      'take another screenshot). ' +
+      (cloudWorkSendClick
+        ? 'Only then call submit_cloud_work on the visible blue Send button. '
+        : 'Only then press Enter. ');
     instruction +=
       selection +
       ` Before filling, select ${surface} through Switch mode and verify its current-mode label. ` +
@@ -1024,7 +1065,10 @@ async function loop(
               'Before fill_query, verify the exact selected model in an observed fresh screenshot and call confirm_model.';
           } else if (typedQuery) {
             refusal =
-              'The query is already entered. Do not fill again. Use unmodified Enter to submit.';
+              'The query is already entered. Do not fill again. ' +
+              (cloudWorkSendClick
+                ? 'Use submit_cloud_work to send it.'
+                : 'Use unmodified Enter to submit.');
           } else if (Object.keys(asAction(block.input)).length !== 0) {
             refusal =
               'fill_query takes no arguments; the harness owns the original text.';
@@ -1034,6 +1078,33 @@ async function loop(
               text: query,
             };
             actionName = String(action.action);
+          }
+        } else if (cloudWorkSendClick && toolName === 'submit_cloud_work') {
+          const coordinate = action.coordinate;
+          if (
+            !typedQuery ||
+            !postFillObserved ||
+            !workLocationConfirmed ||
+            !workComposerFocused
+          ) {
+            refusal =
+              'Confirm Cloud, focus and fill the composer, then observe a fresh screenshot before clicking Send.';
+          } else if (
+            Object.keys(action).length !== 1 ||
+            !Array.isArray(coordinate) ||
+            coordinate.length !== 2 ||
+            !coordinate.every(
+              (value, index) =>
+                Number.isSafeInteger(value) &&
+                value >= 0 &&
+                value < (index === 0 ? DISPLAY_WIDTH : DISPLAY_HEIGHT)
+            )
+          ) {
+            refusal =
+              'Provide two integer Send button coordinates inside the screenshot.';
+          } else {
+            action = { action: 'left_click', coordinate };
+            actionName = 'left_click';
           }
         } else if (toolName !== 'computer') {
           refusal =
@@ -1046,7 +1117,10 @@ async function loop(
           refusal =
             'Do not reconstruct the query. Focus the empty composer, then call fill_query with no arguments.';
         } else if (actionName === 'key' && isEnterChord(text)) {
-          if (
+          if (cloudWorkSendClick) {
+            refusal =
+              'Work Cloud uses submit_cloud_work on the visible Send button.';
+          } else if (
             !typedQuery ||
             !['enter', 'return'].includes(text.toLowerCase())
           ) {
@@ -1070,7 +1144,11 @@ async function loop(
           // Escape closes a suggestion list or dialog after the fill.
         } else if (typedQuery && !OBSERVING_ACTIONS.has(actionName)) {
           refusal =
-            'The query is entered. Only screenshots or the single Enter submission are allowed.';
+            'The query is entered. Only screenshots or the single ' +
+            (cloudWorkSendClick
+              ? 'submit_cloud_work click'
+              : 'Enter submission') +
+            ' are allowed.';
         }
       }
       if (refusal) {
@@ -1171,13 +1249,19 @@ async function loop(
         typedQuery = true;
         postFillShot = false;
       }
-      if (submitted && mode === 'submit') {
+      if (
+        (submitted || toolName === 'submit_cloud_work') &&
+        mode === 'submit'
+      ) {
         log('submission boundary reached; stopping immediately');
         return {
           status: 'submitted',
           action_count: actionsExecuted,
           model,
-          submission_action: { action: 'key', text: 'enter' },
+          submission_action:
+            toolName === 'submit_cloud_work'
+              ? { action: 'left_click' }
+              : { action: 'key', text: 'enter' },
         };
       }
       toolResults.push({

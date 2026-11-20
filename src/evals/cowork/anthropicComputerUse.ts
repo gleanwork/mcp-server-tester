@@ -280,7 +280,7 @@ async function runComputerUseDriver(
     return {
       status: 'submitted',
       ...common,
-      submission_action: { action: 'key', text: 'enter' },
+      submission_action: outcome.submission_action,
     };
   } catch (error) {
     if (!(error instanceof ComputerUseLoopError)) throw error;

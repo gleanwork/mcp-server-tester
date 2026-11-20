@@ -180,6 +180,81 @@ it.each(['chatgpt', 'cowork'] as const)(
   }
 );
 
+it('reports a single Work Cloud Send click as the submission action', async () => {
+  const plans: PlannerResponse[] = [
+    {
+      content: [
+        {
+          type: 'tool_use',
+          id: '1',
+          name: 'confirm_cloud_work',
+          input: { location: 'cloud' },
+        },
+        {
+          type: 'tool_use',
+          id: '2',
+          name: 'computer',
+          input: { action: 'key', text: 'Escape' },
+        },
+        {
+          type: 'tool_use',
+          id: '3',
+          name: 'computer',
+          input: { action: 'screenshot' },
+        },
+      ],
+    },
+    {
+      content: [
+        {
+          type: 'tool_use',
+          id: '4',
+          name: 'focus_cloud_composer',
+          input: { coordinate: [100, 100] },
+        },
+        FILL,
+        {
+          type: 'tool_use',
+          id: '5',
+          name: 'computer',
+          input: { action: 'screenshot' },
+        },
+      ],
+    },
+    {
+      content: [
+        {
+          type: 'tool_use',
+          id: '6',
+          name: 'submit_cloud_work',
+          input: { coordinate: [1150, 650] },
+        },
+      ],
+    },
+  ];
+  const fake = useRuntime(async () => plans.shift()!, {
+    frontmostApp: async () => 'ChatGPT',
+  });
+  const result = await runAnthropicComputerUseSubmission(
+    'query',
+    options({
+      application: 'chatgpt',
+      requiredWorkLocation: 'cloud',
+    })
+  );
+  expect(result).toMatchObject({
+    status: 'submitted',
+    submission_action: { action: 'left_click' },
+  });
+  expect(fake.executed.at(-1)).toEqual({
+    action: 'left_click',
+    coordinate: [1150, 650],
+  });
+  expect(
+    fake.executed.filter((action) => action.action === 'paste')
+  ).toHaveLength(1);
+});
+
 it('launches the session bundle path', async () => {
   const fake = useRuntime(submits);
   await runAnthropicComputerUseSubmission(

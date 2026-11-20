@@ -59,6 +59,10 @@ const FOCUS_CLOUD_COMPOSER: Proposal = {
   tool: 'focus_cloud_composer',
   input: { coordinate: [100, 100] },
 };
+const SUBMIT_CLOUD: Proposal = {
+  tool: 'submit_cloud_work',
+  input: { coordinate: [1150, 650] },
+};
 const ESCAPE: Proposal = { action: 'key', text: 'Escape' };
 const IMAGE = {
   type: 'image',
@@ -751,6 +755,7 @@ describe('ChatGPT Cloud Work confirmation', () => {
     expect(request).toContain('On your computer');
     expect(request).toContain('check mark');
     expect(request).toContain('confirm_cloud_work');
+    expect(request).toContain('submit_cloud_work');
     expect(run.executed).toEqual([]);
   });
 
@@ -763,19 +768,43 @@ describe('ChatGPT Cloud Work confirmation', () => {
         budget: 8,
         plans: [
           [FOCUS_CLOUD_COMPOSER, FILL, { action: 'screenshot' }],
-          [ENTER],
+          [ENTER, SUBMIT_CLOUD],
         ],
       }
     );
     expect(run.result?.status).toBe('submitted');
+    expect(run.result).toMatchObject({
+      submission_action: { action: 'left_click' },
+    });
+    expect(run.telemetry.refused_action_count).toBe(1);
     expect(run.executed.map((action) => action.action)).toEqual([
       'key',
       'screenshot',
       'left_click',
       'paste',
       'screenshot',
-      'key',
+      'left_click',
     ]);
+  });
+
+  it('does not click Send before observing the filled Cloud composer', async () => {
+    const run = await runActions(
+      [CONFIRM_CLOUD, ESCAPE, { action: 'screenshot' }],
+      {
+        application: 'chatgpt',
+        requiredWorkLocation: 'cloud',
+        budget: 8,
+        plans: [
+          [FOCUS_CLOUD_COMPOSER, FILL, SUBMIT_CLOUD, { action: 'screenshot' }],
+          [SUBMIT_CLOUD],
+        ],
+      }
+    );
+    expect(run.result?.status).toBe('submitted');
+    expect(run.telemetry.refused_action_count).toBe(1);
+    expect(
+      run.executed.filter((action) => action.action === 'left_click')
+    ).toHaveLength(2);
   });
 
   it('does not submit without confirming the requested Cloud location', async () => {
