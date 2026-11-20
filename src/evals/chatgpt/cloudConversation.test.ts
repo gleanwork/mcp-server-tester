@@ -133,7 +133,7 @@ describe('ChatGPT Cloud conversation evidence', () => {
       }, detail.messages[2]],
     });
     await expect(readCloudConversation(source, expected, id))
-      .rejects.toThrow('pinned signed-in browser account');
+      .rejects.toThrow('pinned account');
   });
 
   it('keeps built-in Work apps in the reserved app transport for the caller audit', async () => {
@@ -160,6 +160,6 @@ describe('ChatGPT Cloud conversation evidence', () => {
   ])('rejects %s', async (_name, value) => {
     vi.mocked(evaluateChatgptWeb).mockResolvedValue(value);
     await expect(readCloudConversation(source, expected, id))
-      .rejects.toThrow('pinned signed-in browser account');
+      .rejects.toThrow('pinned account');
   });
 });

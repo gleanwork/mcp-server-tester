@@ -6,7 +6,7 @@
  * its evidence. Nothing here resubmits a prompt.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { basename } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { stat } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -30,9 +30,11 @@ import {
   listCloudConversations,
   readCloudConversation,
   type CloudConversation,
+  type CloudConversationSource,
 } from './cloudConversation.js';
 import {
   ComputerUseDriverError,
+  chatgptDesktopEnvironment,
   chatgptSurface,
   isLinuxChatgpt,
   submitChatgptQuery,
@@ -291,10 +293,10 @@ export function useAppSession(
 async function snapshotBeforeSubmission(
   state: ChatgptTurnState
 ): Promise<void> {
-  if (isMacWorkCloud(state.config)) {
+  if (isWorkCloud(state.config)) {
     const firstParty = workFirstParty(state.config);
     state.cloudBaseline = new Set(
-      (await listCloudConversations(firstParty.source, webIdentity(firstParty))).map(
+      (await listCloudConversations(cloudSource(state.config), webIdentity(firstParty))).map(
         (item) => item.id
       )
     );
@@ -320,12 +322,20 @@ function webIdentity(firstParty: ReturnType<typeof workFirstParty>) {
   };
 }
 
-function isMacWorkCloud(config: ChatgptAppConfig): boolean {
-  return config.os === 'darwin' &&
-    config.firstParty !== undefined &&
+function isWorkCloud(config: ChatgptAppConfig): boolean {
+  return config.firstParty !== undefined &&
     'serverName' in config.firstParty &&
     config.firstParty.workLocation === 'cloud' &&
     chatgptSurface(config) === 'chatgpt-work';
+}
+
+function cloudSource(config: ChatgptAppConfig): CloudConversationSource {
+  const firstParty = workFirstParty(config);
+  if (config.os !== 'linux') return firstParty.source;
+  const home = chatgptDesktopEnvironment(config).HOME;
+  if (!home || !isAbsolute(home) || resolve(home) !== home)
+    throw new Error('Linux ChatGPT account profile is unavailable.');
+  return { kind: 'native', authFile: join(home, '.codex', 'auth.json') };
 }
 
 /** Submit once through the trial machine's OS. */
@@ -516,7 +526,7 @@ function attachScreenshot(
 export async function captureChatgptTurn(
   state: ChatgptTurnState
 ): Promise<ChatgptTurn> {
-  if (isMacWorkCloud(state.config)) return captureCloudTurn(state);
+  if (isWorkCloud(state.config)) return captureCloudTurn(state);
   const { config, trial } = state;
   let matched = false;
   let bound: ChatgptTranscriptBinding | undefined;
@@ -763,8 +773,8 @@ async function captureCloudTurn(state: ChatgptTurnState): Promise<ChatgptTurn> {
   let listReadFailureSince: number | undefined;
   while (Date.now() < deadline && (boundId || Date.now() < bindingDeadline)) {
     try {
-      const items = await listCloudConversations(
-        firstParty.source, webIdentity(firstParty)
+        const items = await listCloudConversations(
+        cloudSource(config), webIdentity(firstParty)
       );
       listReadFailureSince = undefined;
       const candidates: CloudConversation[] = [];
@@ -776,7 +786,7 @@ async function captureCloudTurn(state: ChatgptTurnState): Promise<ChatgptTurn> {
         let conversation: CloudConversation;
         try {
           conversation = await readCloudConversation(
-            firstParty.source, webIdentity(firstParty), item.id
+            cloudSource(config), webIdentity(firstParty), item.id
           );
         } catch {
           // The list can publish a task before its detail is readable.

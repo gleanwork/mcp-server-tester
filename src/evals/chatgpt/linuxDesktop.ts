@@ -184,6 +184,10 @@ export async function runLinuxChatgptDesktop(
   const draft = mode === 'submit' ? (prompt ?? '') : '';
   const payload = JSON.stringify({
     surface,
+    ...(config.firstParty && 'serverName' in config.firstParty &&
+      config.firstParty.workLocation === 'cloud'
+      ? { workLocation: 'cloud' }
+      : {}),
     ...(mode === 'submit' ? { prompt } : {}),
   });
   if (Buffer.byteLength(payload) > 2 * 1024 * 1024)

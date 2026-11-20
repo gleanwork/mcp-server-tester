@@ -96,14 +96,6 @@ export function validateChatgptConfig(config: ChatgptAppConfig): void {
       'ChatGPT requires native transcript evidence, not UI answer extraction.'
     );
   if (isLinuxChatgpt(config)) {
-    if (
-      config.firstParty &&
-      'serverName' in config.firstParty &&
-      config.firstParty.workLocation === 'cloud'
-    )
-      throw new Error(
-        'Linux ChatGPT Work Cloud location is not verified by the native AT-SPI driver.'
-      );
     if (config.options?.computerUseModel !== undefined)
       throw new Error(
         'Linux ChatGPT uses native AT-SPI, not a Computer Use planner.'

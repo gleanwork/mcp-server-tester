@@ -34,6 +34,8 @@ const MENU_LABELS: Record<ChatgptSurface, string> = {
   codex: 'Codex Build, debug, and ship',
 };
 const BUTTONS = ['button', 'push button'];
+const RUN_LOCATION_TRIGGER = 'Choose where to run this chat';
+const RUN_LOCATION_ITEMS = ['menu item', 'check menu item', 'radio button'];
 export const INPUT_LIMIT = 2 * 1024 * 1024;
 /**
  * After the one deep-link hand-off the draft usually appears in 1-3 s, but
@@ -396,6 +398,50 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     return switches.length === 1 && switches[0]!.name === MODE_LABELS[surface];
   }
 
+  private cloudLocationItem(nodes: readonly N[]): N[] {
+    return nodes.filter((node) =>
+      available(node) && RUN_LOCATION_ITEMS.includes(node.role) &&
+      (node.name === 'In the cloud' || node.name.startsWith('In the cloud '))
+    );
+  }
+
+  /** Select Cloud and verify the menu's checked state before any Send action. */
+  async selectCloudLocation(nodes: N[], prompt: string): Promise<N[]> {
+    const trigger = unique(
+      controls(nodes, [RUN_LOCATION_TRIGGER], [...BUTTONS, 'toggle button']),
+      'work_location_missing_or_ambiguous'
+    );
+    this.step = 'work-location-open';
+    await this.action(() => this.desktop.clickObservedControl(nodes, trigger));
+    let menu = await this.wait((ns) => this.cloudLocationItem(ns).length === 1);
+    const cloud = unique(this.cloudLocationItem(menu), 'work_location_missing_or_ambiguous');
+    this.step = 'work-location-select';
+    await this.action(() => this.desktop.clickObservedControl(menu, cloud));
+    nodes = await this.wait((ns) =>
+      this.cloudLocationItem(ns).length === 0 && this.ready(ns, 'chatgpt-work')
+    );
+    const reopen = unique(
+      controls(nodes, [RUN_LOCATION_TRIGGER], [...BUTTONS, 'toggle button']),
+      'work_location_missing_or_ambiguous'
+    );
+    this.step = 'work-location-verify';
+    await this.action(() => this.desktop.clickObservedControl(nodes, reopen));
+    menu = await this.wait((ns) => this.cloudLocationItem(ns).length === 1);
+    if (!unique(this.cloudLocationItem(menu), 'work_location_missing_or_ambiguous').selected)
+      throw new DriverFailure('work_location_not_selected');
+    const close = unique(
+      controls(menu, [RUN_LOCATION_TRIGGER], [...BUTTONS, 'toggle button']),
+      'work_location_missing_or_ambiguous'
+    );
+    this.step = 'work-location-close';
+    await this.action(() => this.desktop.clickObservedControl(menu, close));
+    return this.wait(async (ns) =>
+      this.cloudLocationItem(ns).length === 0 &&
+      this.ready(ns, 'chatgpt-work') &&
+      matchesPrompt(await this.desktop.text(composer(ns)), prompt)
+    );
+  }
+
   async selectSurface(
     nodes: N[],
     surface: ChatgptSurface,
@@ -604,10 +650,13 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     return this.receipt('ready', surface);
   }
 
-  async submit(prompt: unknown, surface: unknown): Promise<ChatgptReceipt> {
+  async submit(prompt: unknown, surface: unknown, workLocation?: unknown): Promise<ChatgptReceipt> {
     if (typeof prompt !== 'string' || !prompt.trim())
       throw new DriverFailure('invalid_prompt');
     if (!isSurface(surface)) throw new DriverFailure('invalid_surface');
+    if (workLocation !== undefined &&
+        (workLocation !== 'cloud' || surface !== 'chatgpt-work'))
+      throw new DriverFailure('invalid_work_location');
     this.desktop.requireHelpers();
     // Setup ran once for the batch. A visible switch in another mode blocks
     // submission. After a previous turn the app stays on that conversation,
@@ -682,6 +731,8 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         matchesPrompt(await this.desktop.text(composer(ns)), prompt) &&
         controls(ns, ['Send']).length === 1
     );
+    if (workLocation === 'cloud')
+      nodes = await this.selectCloudLocation(nodes, prompt);
     // Exactly one send. No retry, Enter fallback, or resubmission on a missing transcript.
     this.step = 'send';
     await this.action(() =>

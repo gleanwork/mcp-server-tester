@@ -128,7 +128,7 @@ describe('ChatGPT shared Computer Use adapter', () => {
           acknowledgeToolPolicyIsNotASandbox: true,
         },
       })
-    ).toThrow('Cloud location is not verified');
+    ).not.toThrow();
   });
 
   it("checks maxActions against the trial's OS: Computer Use on macOS, the native budget on Linux", () => {

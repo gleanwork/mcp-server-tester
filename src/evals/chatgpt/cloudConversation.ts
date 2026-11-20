@@ -5,14 +5,17 @@ import {
   type ChatgptWebIdentitySource,
 } from '../chatgptSetup/webIdentity.js';
 import type { LLMToolCall } from '../mstClient/types.js';
+import { evaluateNativeCloud, type NativeCloudSource } from './nativeCloud.js';
 
 const CLOUD_ERROR =
-  'ChatGPT Cloud conversation could not be read from the pinned signed-in browser account.';
+  'ChatGPT Cloud conversation could not be read from the pinned account.';
 const MAX_CONVERSATIONS = 50;
 const BUILTIN_WORK_APPS = new Set([
   'automations', 'chatgpt_space', 'openai_library', 'personal_context',
   'plugin_management', 'sites', 'work_pets',
 ]);
+
+export type CloudConversationSource = ChatgptWebIdentitySource | NativeCloudSource;
 
 export interface CloudConversationSummary {
   id: string;
@@ -132,12 +135,14 @@ function expression(expected: ChatgptWebIdentity, id?: string): string {
 }
 
 export async function listCloudConversations(
-  source: ChatgptWebIdentitySource,
+  source: CloudConversationSource,
   expected: ChatgptWebIdentity
 ): Promise<CloudConversationSummary[]> {
   let value: unknown;
   try {
-    value = await evaluateChatgptWeb(source, expression(expected));
+    value = source.kind === 'native'
+      ? await evaluateNativeCloud(source, expected)
+      : await evaluateChatgptWeb(source, expression(expected));
   } catch {
     throw new Error(CLOUD_ERROR);
   }
@@ -156,14 +161,16 @@ export async function listCloudConversations(
 }
 
 export async function readCloudConversation(
-  source: ChatgptWebIdentitySource,
+  source: CloudConversationSource,
   expected: ChatgptWebIdentity,
   id: string
 ): Promise<CloudConversation> {
   if (!validId(id)) throw new Error(CLOUD_ERROR);
   let value: unknown;
   try {
-    value = await evaluateChatgptWeb(source, expression(expected, id));
+    value = source.kind === 'native'
+      ? await evaluateNativeCloud(source, expected, id)
+      : await evaluateChatgptWeb(source, expression(expected, id));
   } catch {
     throw new Error(CLOUD_ERROR);
   }

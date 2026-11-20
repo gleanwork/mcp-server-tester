@@ -105,6 +105,9 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
   staleChecked = false;
   announcement = false;
   workAccess = false;
+  cloudLocation = false;
+  cloudChecked = false;
+  cloudSelectedState = true;
   snapshots = 0;
 
   constructor(public nodes: FakeNode[] = ready()) {}
@@ -126,8 +129,11 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
 
   async openPrompt(prompt: string): Promise<void> {
     this.actions.push(['open', prompt]);
-    if (this.stall !== 'open')
+    if (this.stall !== 'open') {
       this.nodes = ready(this.openSurface ?? this.surface(), prompt);
+      if (this.cloudLocation)
+        this.nodes.push(node('Choose where to run this chat'));
+    }
   }
 
   async selectProfession(_: readonly FakeNode[], choice: FakeNode) {
@@ -158,6 +164,16 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
         : ready(CODEX);
     else if (name === 'Continue with current model') this.nodes = ready(CODEX);
     else if (name === 'Switch to Work') this.nodes = ready(WORK);
+    else if (name === 'Choose where to run this chat') {
+      if (this.nodes.some((item) => item.name === 'In the cloud'))
+        this.nodes = this.nodes.filter((item) => item.name !== 'In the cloud');
+      else this.nodes = [...this.nodes, node('In the cloud', 'menu item', {
+        selected: this.cloudChecked && this.cloudSelectedState,
+      })];
+    } else if (name === 'In the cloud') {
+      this.cloudChecked = true;
+      this.nodes = this.nodes.filter((item) => item.name !== 'In the cloud');
+    }
     else if (name.startsWith('Switch mode'))
       this.nodes = [
         ...this.nodes,
@@ -607,6 +623,30 @@ describe('setup (prepare)', () => {
 });
 
 describe('submit', () => {
+  it('selects and verifies Work Cloud before its one Send', async () => {
+    const desktop = new FakeDesktop();
+    desktop.cloudLocation = true;
+    const receipt = await driverFor(desktop).submit('Find docs', 'chatgpt-work', 'cloud');
+    expect(receipt.status).toBe('submitted');
+    expect(desktop.names()).toEqual([
+      'open', 'Choose where to run this chat', 'In the cloud',
+      'Choose where to run this chat', 'Choose where to run this chat', 'Send',
+    ]);
+  });
+
+  it('fails closed when Work Cloud cannot be selected or verified', async () => {
+    const missing = new FakeDesktop();
+    await expect(driverFor(missing).submit('Find docs', 'chatgpt-work', 'cloud'))
+      .rejects.toThrow(DriverFailure);
+    expect(missing.names()).not.toContain('Send');
+    const stale = new FakeDesktop();
+    stale.cloudLocation = true;
+    stale.cloudSelectedState = false;
+    await expect(driverFor(stale).submit('Find docs', 'chatgpt-work', 'cloud'))
+      .rejects.toThrow(DriverFailure);
+    expect(stale.names()).not.toContain('Send');
+  });
+
   it('sends once on an exact echo or one trailing LF, with the unmodified prompt', async () => {
     for (const prompt of ['Find docs', PROMPT, 'π\n\n'])
       for (const suffix of ['', '\n'])
