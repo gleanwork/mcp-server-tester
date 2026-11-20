@@ -41,6 +41,7 @@ import {
   cloudInitialMessage,
   cloudTrialMetadata,
   coworkClaudeAi,
+  fetchCloudFile,
   restoreClaudeAiConnectors,
   setClaudePageRetryDelaysForTests,
   settleTask,
@@ -392,6 +393,8 @@ class ClaudeAccount {
   requests: PageRequest[] = [];
   beforeRequest?: (request: PageRequest) => void;
   sessions: CloudSession[] = [];
+  /** Session files by `<session id>:<path>`. */
+  files = new Map<string, { status: number; body: unknown }>();
   eventPageSize = 2;
   permissions: Record<string, boolean> = {
     'srv-search:search': false,
@@ -488,6 +491,15 @@ class ClaudeAccount {
       return json({
         data: this.sessions.slice(0, limit).map(({ events: _, ...s }) => s),
       });
+    }
+    const file = /^\/v1\/code\/sessions\/([^/]+)\/file$/.exec(url.pathname);
+    if (file) {
+      const reply = this.files.get(
+        `${decodeURIComponent(file[1]!)}:${url.searchParams.get('path')}`
+      );
+      return reply
+        ? json(reply.body, reply.status)
+        : json({ error: { reason: 'session_file_not_found' } }, 404);
     }
     const events = /^\/v1\/code\/sessions\/([^/]+)\/events$/.exec(url.pathname);
     if (events) {
@@ -2616,6 +2628,42 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       expect(account.permissions).not.toEqual(account.original);
     });
 
+    it('serves output files only of sessions the source observed', async () => {
+      const path = '/mnt/user-data/outputs/report.docx';
+      account.files.set(`cse_seen:${path}`, {
+        status: 200,
+        body: { content: 'ZG9jeA==' },
+      });
+      const { control, call } = await controller();
+      expect((await call({ method: 'prepare' })).ok).toBe(true);
+      const unobserved = await call({
+        method: 'file',
+        sessionId: 'cse_seen',
+        path,
+      });
+      // The worker gets no source-side detail; the source's stderr does.
+      expect(unobserved).toMatchObject({
+        ok: false,
+        error: expect.stringMatching(/^Cowork source file failed/),
+      });
+      expect(account.requests.some((r) => r.path.includes('/file?'))).toBe(
+        false
+      );
+      account.sessions.push({
+        id: 'cse_seen',
+        created_at: new Date().toISOString(),
+        events: [],
+      });
+      expect((await call({ method: 'listSessions' })).ok).toBe(true);
+      expect(
+        await call({ method: 'file', sessionId: 'cse_seen', path })
+      ).toMatchObject({
+        ok: true,
+        result: { status: 'saved', content: 'ZG9jeA==' },
+      });
+      await drive(control.close());
+    });
+
     it('keeps ownership even if no permission values changed before the lost submission', async () => {
       const initial = await controller();
       expect((await initial.call({ method: 'prepare' })).ok).toBe(true);
@@ -3088,6 +3136,52 @@ describe('coworkClaudeAi lifecycle (offline)', () => {
       expect(account.patches()).toHaveLength(1);
       await expect(stat(journal())).resolves.toBeDefined();
     });
+  });
+
+  it("reads a cloud task's output files through the signed-in page", async () => {
+    const out = '/mnt/user-data/outputs/';
+    account.files.set(`cse_out:${out}Q3 report.docx`, {
+      status: 200,
+      body: { content: 'ZG9jeA==', content_type: 'application/octet-stream' },
+    });
+    account.files.set(`cse_out:${out}charts`, {
+      status: 400,
+      body: { error: { reason: 'session_file_not_readable' } },
+    });
+    account.files.set(`cse_out:${out}huge.bin`, {
+      status: 400,
+      body: { error: { reason: 'session_file_too_large' } },
+    });
+    account.files.set(`cse_out:${out}flaky.txt`, { status: 502, body: {} });
+    await expect(
+      drive(fetchCloudFile(PORT, 'cse_out', `${out}Q3 report.docx`))
+    ).resolves.toEqual({ status: 'saved', content: 'ZG9jeA==' });
+    await expect(
+      drive(fetchCloudFile(PORT, 'cse_out', `${out}gone.pdf`))
+    ).resolves.toEqual({ status: 'missing' });
+    await expect(
+      drive(fetchCloudFile(PORT, 'cse_out', `${out}charts`))
+    ).resolves.toEqual({ status: 'not_a_file' });
+    await expect(
+      drive(fetchCloudFile(PORT, 'cse_out', `${out}huge.bin`))
+    ).resolves.toEqual({ status: 'too_large' });
+    await expect(
+      drive(fetchCloudFile(PORT, 'cse_out', `${out}flaky.txt`))
+    ).rejects.toThrow('(502)');
+    await expect(
+      drive(fetchCloudFile(PORT, 'cse_out', '/etc/passwd'))
+    ).rejects.toThrow('Not a Cowork output file path');
+    expect(
+      account.requests
+        .map((request) => request.path)
+        .filter((path) => path.includes('/file?'))
+    ).toEqual([
+      `/v1/code/sessions/cse_out/file?path=${encodeURIComponent(`${out}Q3 report.docx`)}`,
+      `/v1/code/sessions/cse_out/file?path=${encodeURIComponent(`${out}gone.pdf`)}`,
+      `/v1/code/sessions/cse_out/file?path=${encodeURIComponent(`${out}charts`)}`,
+      `/v1/code/sessions/cse_out/file?path=${encodeURIComponent(`${out}huge.bin`)}`,
+      `/v1/code/sessions/cse_out/file?path=${encodeURIComponent(`${out}flaky.txt`)}`,
+    ]);
   });
 
   it('rejects Linux without a source cloud-control socket before app or account activity', async () => {

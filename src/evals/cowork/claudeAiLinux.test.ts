@@ -39,10 +39,14 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
   let methods: string[];
   let rejectMethod: string | undefined;
   let dispose: (() => Promise<void>) | undefined;
+  let replies: Partial<
+    Record<string, (request: CoworkCloudControlRequest) => unknown>
+  >;
   const actions: string[] = [];
   beforeEach(async () => {
     host.home = await mkdtemp('/tmp/mst-1p-worker-');
     methods = [];
+    replies = {};
     actions.length = 0;
     rejectMethod = undefined;
     dispose = undefined;
@@ -114,8 +118,10 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
           pending = pending.slice(newline + 1);
           methods.push(request.method);
           actions.push(request.method);
-          const result =
-            request.method === 'prepare'
+          const reply = replies[request.method];
+          const result = reply
+            ? reply(request)
+            : request.method === 'prepare'
               ? preparation
               : request.method === 'listSessions'
                 ? []
@@ -240,6 +246,77 @@ describe('Linux claude.ai wrapper (offline base + private domain socket)', () =>
       settingsVerified: true,
     });
   }, 10_000);
+
+  it("saves a finished task's output files beside its mirrored audit", async () => {
+    await prepared(desktop());
+    const at = new Date().toISOString();
+    const assistant = (content: unknown[]) => ({
+      source: 'server',
+      created_at: at,
+      payload: { type: 'assistant', message: { role: 'assistant', content } },
+    });
+    const events = [
+      {
+        source: 'client',
+        created_at: at,
+        payload: {
+          type: 'user',
+          message: { role: 'user', content: PROMPT },
+        },
+      },
+      assistant([
+        {
+          type: 'tool_use',
+          name: 'SendUserFile',
+          input: { files: ['/mnt/user-data/outputs/Q3 report.docx'] },
+        },
+      ]),
+      { source: 'server', created_at: at, payload: { type: 'result' } },
+    ];
+    const files: string[] = [];
+    replies = {
+      listSessions: () => [{ id: 'cse_out', created_at: at }],
+      events: () => events,
+      file: (request) => {
+        const path = (request as { path: string }).path;
+        files.push(path);
+        return {
+          status: 'saved',
+          content: Buffer.from('docx').toString('base64'),
+        };
+      },
+    };
+    const session = join(
+      host.home,
+      '.mcp-server-tester',
+      'cowork-claude-ai',
+      'local_cse_out'
+    );
+    const { readFile } = await import('node:fs/promises');
+    await vi.waitFor(
+      async () => {
+        await readFile(join(session, 'audit.jsonl'));
+      },
+      { timeout: 8_000, interval: 100 }
+    );
+    expect(files).toEqual(['/mnt/user-data/outputs/Q3 report.docx']);
+    expect(
+      await readFile(join(session, 'outputs', 'Q3 report.docx'), 'utf8')
+    ).toBe('docx');
+    expect(
+      JSON.parse(await readFile(join(session, 'outputs.json'), 'utf8'))
+    ).toEqual({
+      root: '/mnt/user-data/outputs/',
+      files: [
+        {
+          path: '/mnt/user-data/outputs/Q3 report.docx',
+          source: 'sent',
+          status: 'saved',
+          bytes: 4,
+        },
+      ],
+    });
+  }, 15_000);
 
   it('rejects managed/gateway preflight before source account mutations', async () => {
     base.prepare = vi.fn(async () => {
