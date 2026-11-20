@@ -8,6 +8,14 @@ import {
   type CoworkCloudControlCommand,
 } from './cloudControlProtocol.js';
 
+/** How long one call may take before the transport counts as lost. */
+const CALL_TIMEOUT_MS = 120_000;
+/**
+ * Ending a task from claude.ai waits for its terminal result (up to three
+ * minutes) and proves it with account reads that retry transient refusals.
+ */
+const SETTLE_TIMEOUT_MS = 6 * 60_000;
+
 /** Worker-only, fixed domain RPC. Never falls back to local Chrome or permissions. */
 export function createCoworkCloudControlClient(
   env: Record<string, string | undefined>
@@ -126,7 +134,17 @@ export function createCoworkCloudControlClient(
               'Cowork cloud control request exceeds its frame limit.'
             );
           return await new Promise<unknown>((resolve, reject) => {
-            pending = { id, resolve, reject, timer: setTimeout(fail, 120_000) };
+            pending = {
+              id,
+              resolve,
+              reject,
+              timer: setTimeout(
+                fail,
+                command.method === 'settleTask'
+                  ? SETTLE_TIMEOUT_MS
+                  : CALL_TIMEOUT_MS
+              ),
+            };
             connected.write(frame, (error) => {
               if (error) fail();
             });

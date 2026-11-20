@@ -1176,12 +1176,29 @@ async function handleLinuxHitl(
         // once a multi-select option is checked. A pass that finds no
         // unambiguous control acts on nothing and the next looks again.
         driving = true;
-        const result = await execute(
-          'answer',
-          { questions: question.questions },
-          { ...options, maxActions: Math.min(1, budget - actions) },
-          driverMode
-        );
+        let result: Receipt;
+        try {
+          result = await execute(
+            'answer',
+            { questions: question.questions },
+            { ...options, maxActions: Math.min(1, budget - actions) },
+            driverMode
+          );
+        } catch (error) {
+          // The driver refused to answer and its receipt shows it acted on
+          // nothing: the question can't be answered, and waiting for it until
+          // the deadline only holds the task. Fail now, as an unanswered
+          // question does, so the reset ends the task.
+          if (
+            error instanceof CoworkDriverError &&
+            error.telemetry?.action_count === 0
+          )
+            throw new CoworkUserQuestionError(
+              `Cowork's question (AskUserQuestion) could not be answered: ${error.message}`,
+              telemetry(started, actions, 'partial', counts)
+            );
+          throw error;
+        }
         driving = false;
         actions += result.action_count;
         if (result.answered) counts.questionsAnswered += 1;

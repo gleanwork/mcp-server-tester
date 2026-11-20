@@ -71,6 +71,42 @@ describe('worker cloud-control domain RPC (offline Unix socket)', () => {
     );
   });
 
+  it('gives ending a task from claude.ai longer than other calls', async () => {
+    const held: Array<{ request: CoworkCloudControlRequest; socket: Socket }> =
+      [];
+    let arrived: () => void = () => undefined;
+    const next = () =>
+      new Promise<void>((resolve) => {
+        arrived = resolve;
+      });
+    const { client } = await serve((request, socket) => {
+      held.push({ request, socket });
+      arrived();
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let received = next();
+      const settled = client.call({ method: 'settleTask' });
+      await received;
+      // Past the ordinary 120 s limit, the settle call still stands.
+      await vi.advanceTimersByTimeAsync(150_000);
+      held[0]!.socket.write(reply(held[0]!.request, null));
+      await expect(settled).resolves.toBeNull();
+      received = next();
+      const restore = client.call({ method: 'restore' });
+      const rejected = expect(restore).rejects.toThrow(/disconnected/);
+      await received;
+      await vi.advanceTimersByTimeAsync(121_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(held.map((item) => item.request.method)).toEqual([
+      'settleTask',
+      'restore',
+    ]);
+  });
+
   it('rejects non-sockets and world-accessible paths before sending', async () => {
     const file = join(directory, 'not-a-socket');
     await writeFile(file, '', { mode: 0o600 });

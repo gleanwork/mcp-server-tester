@@ -937,6 +937,41 @@ describe('account question safety', () => {
     expect(ui.actions).toEqual(['Table Rows and columns']);
   });
 
+  it("answers beside the app's update notice and sidebar task titles", async () => {
+    const ui = questionUi();
+    ui.extra.push(
+      node('bar', 'Sidebar', 'landmark', { parentId: 'app' }),
+      // A past task's title and the update notice, as Cowork shows them.
+      node('past', 'Update the Q3 roadmap', 'button', { parentId: 'bar' }),
+      node('more', 'More options for Update the Q3 roadmap', 'button', {
+        parentId: 'bar',
+      }),
+      node('update', 'Update available v5.11492.5', 'button', {
+        parentId: 'app',
+      }),
+      node('stop', 'Stop response', 'button', { parentId: 'app' })
+    );
+    expect(
+      await run('answer', ui, { questions: formatQuestion })
+    ).toMatchObject({ answered: 'option', action_count: 1 });
+    expect(ui.actions).toEqual(['Table Rows and columns']);
+  });
+
+  it('still refuses beside a write card outside the sidebar', async () => {
+    const ui = questionUi();
+    ui.extra.push(
+      node('bar', 'Sidebar', 'landmark', { parentId: 'app' }),
+      node('write', 'Update', 'button', { parentId: 'app' })
+    );
+    expect(
+      await run('answer', ui, { questions: formatQuestion })
+    ).toMatchObject({
+      status: 'failed',
+      error: 'account_question_action_conflict',
+    });
+    expect(ui.actions).toEqual([]);
+  });
+
   it('matches an option whose shortcut digit comes before its label', async () => {
     const ui = new AccountUi();
     ui.extra = [
