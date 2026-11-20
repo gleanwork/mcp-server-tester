@@ -297,7 +297,7 @@ export async function installCodexConfig(
   const tools = options.builtinToolPolicy;
   if (
     tools !== undefined &&
-    (tools.webSearch !== 'disabled' ||
+    ((tools.webSearch !== undefined && tools.webSearch !== 'disabled') ||
       new Set(tools.disabledPlugins).size !== tools.disabledPlugins.length ||
       !tools.disabledPlugins.every((id) => PLUGIN_ID_PATTERN.test(id)) ||
       new Set(tools.disabledFeatures ?? []).size !==

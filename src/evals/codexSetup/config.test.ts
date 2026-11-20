@@ -137,12 +137,14 @@ describe('Codex configuration lifecycle', () => {
     temporaryDirectories.push(directory);
     const configPath = join(directory, 'config.toml');
     const original =
+      'web_search = "live"\n' +
       '[mcp_servers.glean_default]\nurl = "https://example.test/mcp"\n' +
       '[apps.github]\nenabled = true\n';
     await writeFile(configPath, original, { mode: 0o600 });
     const installation = await installCodexConfig(
       { configPath, servers: [] },
       {
+        builtinToolPolicy: { disabledPlugins: [] },
         accountMcpPolicy: {
           serverName: 'glean_default',
           allowedTools: ['search'],
@@ -152,6 +154,7 @@ describe('Codex configuration lifecycle', () => {
     );
     const installed = parse(await readFile(configPath, 'utf8'));
     expect(installed).toMatchObject({
+      web_search: 'live',
       mcp_servers: { glean_default: { enabled_tools: ['search'] } },
       apps: {
         github: { enabled: true },
