@@ -31,9 +31,8 @@ const RUN_OUTPUT_LIMIT = 16 * 1024;
  *   needs the caller's environment.
  * - `'inherit'`: the test process's environment. The helper, and any application
  *   it launches, can read every variable the test run has, credentials included.
- * - An explicit environment allows callers to remove stale launch variables.
  */
-type NativeHelperEnvironment = 'minimal' | 'inherit' | NodeJS.ProcessEnv;
+type NativeHelperEnvironment = 'minimal' | 'inherit';
 
 interface NativeHelperRunOptions {
   environment: NativeHelperEnvironment;
@@ -178,12 +177,7 @@ export async function compileSwiftHelper(options: {
     return {
       async run(args, runOptions) {
         const pending = exec(binary, args, {
-          env:
-            runOptions.environment === 'minimal'
-              ? minimal
-              : runOptions.environment === 'inherit'
-                ? process.env
-                : runOptions.environment,
+          env: runOptions.environment === 'minimal' ? minimal : process.env,
           cwd: ownedDirectory,
           timeout: runOptions.timeoutMs,
           maxBuffer: RUN_OUTPUT_LIMIT,

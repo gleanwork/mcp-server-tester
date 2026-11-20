@@ -122,7 +122,7 @@ describe('ChatGPT macOS application controller (all execution mocked)', () => {
     expect(Object.keys(options.env).sort()).toEqual(['PATH', 'TMPDIR']);
   });
 
-  it('launches with the inherited environment and passes credentials on stdin only', async () => {
+  it('launches with a minimal environment and passes credentials on stdin only', async () => {
     const { getChatgptApplicationController } =
       await import('./macController.js');
     const controller = await getChatgptApplicationController({
@@ -141,7 +141,7 @@ describe('ChatGPT macOS application controller (all execution mocked)', () => {
       'com.example.chatgpt',
       '/Applications/X.app',
     ]);
-    expect(options.env).toEqual(process.env);
+    expect(Object.keys(options.env).sort()).toEqual(['PATH', 'TMPDIR']);
     expect(options).toMatchObject({ timeout: 45_000, maxBuffer: 16 * 1024 });
     expect(stdinWrites).toEqual([
       '{}',
@@ -149,7 +149,7 @@ describe('ChatGPT macOS application controller (all execution mocked)', () => {
     ]);
   });
 
-  it('omits a missing temporary CA bundle when restarting the app', async () => {
+  it('does not inherit terminal CA settings when restarting the app', async () => {
     const missing = join(root, 'removed-ca.pem');
     const present = join(root, 'available-ca.pem');
     await fs.writeFile(present, 'test certificate');
@@ -165,7 +165,7 @@ describe('ChatGPT macOS application controller (all execution mocked)', () => {
       ExecOptions,
     ];
     expect(options.env.SSL_CERT_FILE).toBeUndefined();
-    expect(options.env.NODE_EXTRA_CA_CERTS).toBe(present);
+    expect(options.env.NODE_EXTRA_CA_CERTS).toBeUndefined();
     expect(JSON.parse(stdinWrites[0]!)).toEqual({});
   });
 

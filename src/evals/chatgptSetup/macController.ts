@@ -79,11 +79,10 @@ async function compile(
   ): Promise<unknown> => {
     try {
       return await helper.run([action, bundleId, appPath], {
-        // The helper launches ChatGPT from this environment, so the app sees the
-        // test process's variables. Narrowing it to an allowlist needs a check
-        // on a real Mac that ChatGPT still launches and signs in.
-        environment:
-          action === 'start' ? withoutMissingCaFiles(process.env) : 'inherit',
+        // NSWorkspace can pass the helper's environment into the app. The
+        // terminal may contain proxy or CA settings that the signed-in app did
+        // not have before setup, so launch it with only explicit overrides.
+        environment: action === 'start' ? 'minimal' : 'inherit',
         timeoutMs: 45_000,
         // Launch credentials travel over a pipe, never in process-list arguments.
         stdin: JSON.stringify(withoutMissingCaFiles(environment)),
