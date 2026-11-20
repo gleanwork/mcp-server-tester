@@ -27,6 +27,11 @@ import { resolveCodexSetup } from '../codexSetup/config.js';
 import { selectedChatgptServerLabels } from './selection.js';
 import type { ChatgptAppSession } from '../chatgptSetup/session.js';
 import {
+  listCloudConversations,
+  readCloudConversation,
+  type CloudConversation,
+} from './cloudConversation.js';
+import {
   ComputerUseDriverError,
   chatgptSurface,
   isLinuxChatgpt,
@@ -86,6 +91,8 @@ export interface ChatgptTurnState {
   evidenceDir?: string;
   /** Native sessions that existed before submission. */
   baseline?: ChatgptSessionSnapshot;
+  /** Cloud conversation IDs that existed before this trial. */
+  cloudBaseline?: Set<string>;
   promptSubmitted: boolean;
   /** macOS submission receipt. */
   computerUse?: ClientMetadata['computerUse'];
@@ -284,7 +291,41 @@ export function useAppSession(
 async function snapshotBeforeSubmission(
   state: ChatgptTurnState
 ): Promise<void> {
+  if (isMacWorkCloud(state.config)) {
+    const firstParty = workFirstParty(state.config);
+    state.cloudBaseline = new Set(
+      (await listCloudConversations(firstParty.source, webIdentity(firstParty))).map(
+        (item) => item.id
+      )
+    );
+    return;
+  }
   state.baseline = await snapshotChatgptSessions(state.sessionsRoot as string);
+}
+
+function workFirstParty(config: ChatgptAppConfig): Extract<
+  NonNullable<ChatgptAppConfig['firstParty']>,
+  { serverName: string }
+> {
+  if (!config.firstParty || !('serverName' in config.firstParty))
+    throw new Error('ChatGPT Work requires a pinned first-party account.');
+  return config.firstParty;
+}
+
+function webIdentity(firstParty: ReturnType<typeof workFirstParty>) {
+  return {
+    accountId: firstParty.expectedAccountId,
+    organizationId: firstParty.expectedOrganizationId,
+    email: firstParty.expectedEmail,
+  };
+}
+
+function isMacWorkCloud(config: ChatgptAppConfig): boolean {
+  return config.os === 'darwin' &&
+    config.firstParty !== undefined &&
+    'serverName' in config.firstParty &&
+    config.firstParty.workLocation === 'cloud' &&
+    chatgptSurface(config) === 'chatgpt-work';
 }
 
 /** Submit once through the trial machine's OS. */
@@ -475,6 +516,7 @@ function attachScreenshot(
 export async function captureChatgptTurn(
   state: ChatgptTurnState
 ): Promise<ChatgptTurn> {
+  if (isMacWorkCloud(state.config)) return captureCloudTurn(state);
   const { config, trial } = state;
   let matched = false;
   let bound: ChatgptTranscriptBinding | undefined;
@@ -698,6 +740,166 @@ export async function captureChatgptTurn(
       boundEvidence(bound)
     );
   }
+}
+
+/** Bind a fresh Cloud task in the pinned account. The browser never sends a prompt. */
+async function captureCloudTurn(state: ChatgptTurnState): Promise<ChatgptTurn> {
+  const { config, trial } = state;
+  const firstParty = workFirstParty(config);
+  const baseline = state.cloudBaseline;
+  if (!baseline || !state.promptSubmitted)
+    return failureResult(state, {
+      failureKind: 'client_run_failed',
+      error: 'Cloud capture requires a pre-submission baseline and Send receipt.',
+      limitations: [],
+    });
+  const deadline = trial.startedAtMs + trial.timeoutMs;
+  let boundId: string | undefined;
+  let latest: CloudConversation | undefined;
+  let unreadableFreshConversation = false;
+  while (Date.now() < deadline) {
+    try {
+      const items = await listCloudConversations(
+        firstParty.source, webIdentity(firstParty)
+      );
+      const candidates: CloudConversation[] = [];
+      for (const item of items) {
+        if (baseline.has(item.id) || item.origin !== 'tpp') continue;
+        const created = Date.parse(item.createdAt);
+        if (!Number.isFinite(created) || created < trial.startedAtMs - 5000)
+          continue;
+        let conversation: CloudConversation;
+        try {
+          conversation = await readCloudConversation(
+            firstParty.source, webIdentity(firstParty), item.id
+          );
+        } catch {
+          // The list can publish a task before its detail is readable.
+          // Keep polling without sending the prompt again.
+          unreadableFreshConversation = true;
+          continue;
+        }
+        if (conversation.prompt === trial.submittedInput)
+          candidates.push(conversation);
+      }
+      if (candidates.length > 1 ||
+          (boundId && candidates.some(c => c.id !== boundId)))
+        return failureResult(state, {
+          failureKind: 'ambiguous_matching_sessions',
+          error: 'Multiple fresh Cloud conversations match the submitted query.',
+          limitations: [],
+        });
+      if (candidates.length === 1) {
+        const conversation = candidates[0]!;
+        boundId ??= conversation.id;
+        latest = conversation;
+        if (conversation.complete) return completedCloudTurn(state, conversation);
+      }
+    } catch (error) {
+      return failureResult(state, {
+        failureKind: 'parse_failure',
+        error: error instanceof Error ? error.message : String(error),
+        limitations: ['Cloud task evidence could not be verified.'],
+      });
+    }
+    await delay(Math.min(POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
+  }
+  return failureResult(state, {
+    failureKind: latest ? 'timeout'
+      : unreadableFreshConversation ? 'parse_failure' : 'no_matching_session',
+    error: latest
+      ? 'Timed out waiting for the bound ChatGPT Cloud task to finish.'
+      : unreadableFreshConversation
+        ? 'A fresh ChatGPT Cloud conversation could not be verified before the run deadline.'
+        : 'No unique fresh ChatGPT Cloud conversation matched the submitted query within the run deadline.',
+    limitations: latest?.limitations ?? [],
+  });
+}
+
+function completedCloudTurn(
+  state: ChatgptTurnState,
+  conversation: CloudConversation
+): ChatgptTurn {
+  const { config, trial } = state;
+  // Work Cloud adds its runtime suffix to the selected desktop model.
+  if (config.model && conversation.model !== config.model &&
+      conversation.model !== `${config.model}-wm`)
+    return failureResult(state, {
+      failureKind: 'client_run_failed',
+      error: `ChatGPT Cloud model mismatch: requested ${config.model}, recorded ${conversation.model ?? 'unknown'}.`,
+      limitations: conversation.limitations,
+    });
+  const expectedEffort = config.reasoningEffort === 'medium'
+    ? 'standard' : config.reasoningEffort;
+  if (expectedEffort && conversation.reasoningEffort !== expectedEffort &&
+      conversation.reasoningEffort !== config.reasoningEffort)
+    return failureResult(state, {
+      failureKind: 'client_run_failed',
+      error: `ChatGPT Cloud reasoning effort mismatch: requested ${config.reasoningEffort}, recorded ${conversation.reasoningEffort ?? 'unknown'}.`,
+      limitations: conversation.limitations,
+    });
+  if (!conversation.response)
+    return failureResult(state, {
+      failureKind: 'parse_failure',
+      error: 'Completed ChatGPT Cloud task has no final answer.',
+      limitations: conversation.limitations,
+    });
+  if (!conversation.turnId)
+    return failureResult(state, {
+      failureKind: 'parse_failure',
+      error: 'Completed ChatGPT Cloud task has no native turn ID.',
+      limitations: conversation.limitations,
+    });
+  const source = 'browser-api' as const;
+  const metadata = buildMetadata(state);
+  return {
+    success: true,
+    response: conversation.response,
+    toolCalls: conversation.toolCalls,
+    conversationHistory: [
+      { role: 'user', content: trial.submittedInput },
+      { role: 'assistant', content: conversation.response },
+    ],
+    clientMetadata: {
+      ...metadata,
+      transcriptSource: source,
+      transcriptConfidence: 'high',
+      transcriptLimitations: conversation.limitations,
+      session: {
+        ...metadata.session,
+        id: conversation.id,
+        turnId: conversation.turnId,
+        startedAt: conversation.createdAt,
+        ...(conversation.completedAt
+          ? { completedAt: conversation.completedAt } : {}),
+      },
+      correlation: {
+        ...metadata.correlation,
+        nativePromptMatch: 'exact',
+        nativePromptSha256: metadata.correlation.promptSha256,
+      },
+      telemetry: {
+        toolCallCount: conversation.toolCalls.length,
+        mcpToolCallCount: conversation.toolCalls.filter(c => c.source === 'mcp').length,
+        builtinToolCallCount: conversation.toolCalls.filter(c => c.source === 'builtin').length,
+        models: conversation.model ? [conversation.model] : [],
+        reasoningEffort: conversation.reasoningEffort,
+        toolProvenance: conversation.toolCalls.map(c => ({
+          ...(c.id ? { id: c.id } : {}),
+          source: c.source ?? 'builtin',
+          ...(c.server ? { nativeServer: c.server } : {}),
+          nativeTool: c.rawName ?? c.name,
+        })),
+      },
+      sources: { finalAnswer: source, toolCalls: source, usage: 'none', cost: 'none' },
+      evidence: {
+        finalAnswer: { source, confidence: 'high' },
+        toolCalls: { source, confidence: 'medium' },
+        usage: { source: 'none', confidence: 'unknown' },
+        cost: { source: 'none', confidence: 'unknown' },
+      },
+    },
+  };
 }
 
 /**

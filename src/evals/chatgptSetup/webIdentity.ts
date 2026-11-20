@@ -133,11 +133,15 @@ const IDENTITY_EXPRESSION = `
   };
 })()`;
 
-async function readIdentity(
-  endpoint: string,
-  signal?: AbortSignal,
-  fetchImpl: ChatgptIdentityFetch = fetch
-): Promise<ChatgptWebIdentity> {
+/** Evaluate a fixed, trusted read-only expression in the sole ChatGPT tab. */
+export async function evaluateChatgptWeb(
+  source: ChatgptWebIdentitySource,
+  expression: string,
+  options: { signal?: AbortSignal; fetchImpl?: ChatgptIdentityFetch } = {}
+): Promise<unknown> {
+  const endpoint = checkedSource(source);
+  const { signal, fetchImpl = fetch } = options;
+  if (expression.length > 32_768) throw new Error(PROBE_ERROR);
   const response = await fetchImpl(`${endpoint}/json/list`, {
     redirect: 'error',
     signal: AbortSignal.any([
@@ -165,7 +169,7 @@ async function readIdentity(
   return await new Promise((resolve, reject) => {
     const socket = new WebSocket(debuggerUrl);
     let finished = false;
-    const finish = (identity?: ChatgptWebIdentity) => {
+    const finish = (value?: unknown, ok = false) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
@@ -176,7 +180,7 @@ async function readIdentity(
         reject(new Error(PROBE_ERROR));
         return;
       }
-      if (identity) resolve(identity);
+      if (ok) resolve(value);
       else reject(new Error(PROBE_ERROR));
     };
     const abort = () => finish();
@@ -190,7 +194,7 @@ async function readIdentity(
             id: 1,
             method: 'Runtime.evaluate',
             params: {
-              expression: IDENTITY_EXPRESSION,
+              expression,
               awaitPromise: true,
               returnByValue: true,
             },
@@ -217,7 +221,7 @@ async function readIdentity(
           !isRecord(reply.result.result)
         )
           return finish();
-        finish(checkedIdentity(reply.result.result.value));
+        finish(reply.result.result.value, true);
       } catch {
         finish();
       }
@@ -226,6 +230,20 @@ async function readIdentity(
     socket.addEventListener('close', abort);
     if (signal?.aborted) abort();
   });
+}
+
+async function readIdentity(
+  endpoint: string,
+  signal?: AbortSignal,
+  fetchImpl: ChatgptIdentityFetch = fetch
+): Promise<ChatgptWebIdentity> {
+  return checkedIdentity(
+    await evaluateChatgptWeb(
+      { kind: 'cdp', endpoint },
+      IDENTITY_EXPRESSION,
+      { signal, fetchImpl }
+    )
+  );
 }
 
 export async function probeChatgptWebIdentity(

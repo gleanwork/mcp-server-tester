@@ -95,8 +95,10 @@ pins the expected email, ChatGPT account ID and organization ID, and chooses
 On macOS, the Computer Use driver selects and visually checks the chosen Work
 location. The Linux AT-SPI driver does not verify the Cloud location, so MST
 rejects first-party Linux Cloud configs until that check is implemented.
-MST reads only account ID, organization ID and email from that page and checks
-them against the pins; it does not export browser cookies or tokens. It also
+MST reads account ID, organization ID and email from that page and checks
+them against the pins. For Cloud runs, it also makes read-only conversation
+requests inside that signed-in tab; the token stays in the tab and is never
+returned to MST. It does not export browser cookies or tokens. It also
 checks the native app's email and optional workspace, and the selected server's
 tool inventory before changing the app config. An explicit `allowedTools` list
 can only narrow tools annotated read-only. Eval MCP servers and client plugins
@@ -124,7 +126,8 @@ For Local Work, MST temporarily stages the selected MCP server and allowed
 tools in the desktop config, then restores the prior config. Built-in Work apps
 remain available. Keep only the selected external connector on the dedicated
 eval account. For Cloud Work, the account's app settings control which apps
-can be called before they run. MST audits the native trace after calls and
+can be called before they run. MST audits the Cloud conversation's connector
+call names after calls and
 fails a case that used an off-list external app or tool. Known Work apps are
 excluded from that audit; unknown app IDs fail the case. The local config and
 audit are not a pre-call security boundary. Use server-side read-only
@@ -516,7 +519,7 @@ after a successful UI receipt.
 
 ## Evidence and continuation
 
-The existing strict native transcript contract is shared across both platforms:
+Local Work and Codex use the strict native transcript contract on both platforms:
 unchanged `exact_prompt` matching (only exact text or one additional native
 terminal LF, reported as `native_terminal_lf`; on Linux only, Markdown
 punctuation backslash-escaped by the app, reported as
@@ -524,6 +527,19 @@ punctuation backslash-escaped by the app, reported as
 query, and complete native final-answer/model/effort evidence. UI text is never
 treated as an answer.
 Explicit `prompt_marker` correlation remains opt-in.
+
+Mac Work Cloud uses a different evidence source because Cloud tasks do not
+create local rollout files. Before Send, MST snapshots conversation IDs in the
+pinned browser account. After Send, it polls for one fresh Work conversation
+with the exact submitted prompt, a completed final answer, model, reasoning
+effort and native turn ID. A second match fails as ambiguous. The browser's
+authenticated session makes the read-only requests inside the tab; neither
+the browser token nor cookies leave it. The Cloud conversation exposes
+connector call names, which MST uses for the post-run server and tool audit.
+It does not expose tool arguments, results, timing or token usage through this
+record, so those fields remain unavailable. The Mac submission driver refreshes
+the Work composer by switching Chat then Work before it fills the prompt, and
+clicks Send once. A Send receipt alone does not count as a completed task.
 
 If a truncated JSONL record is followed by an unfinished native replacement with
 the same next ordinal, collection waits read-only for the replacement. It never

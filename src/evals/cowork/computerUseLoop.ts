@@ -860,8 +860,10 @@ async function loop(
       (workspace
         ? 'The harness already opened a fresh draft in its own folder: do not click New chat, ' +
           'open a project or choose a folder, which would replace that draft. '
-        : 'The harness already opened a new chat: do not click New chat, open a project ' +
-          'or tab, or use keyboard shortcuts other than Enter and Escape. ') +
+        : cloudWorkSendClick
+          ? 'The harness already opened a new chat: after the required Chat to Work refresh, do not click New chat, open a project or switch tabs again. '
+          : 'The harness already opened a new chat: do not click New chat, open a project ' +
+            'or tab, or use keyboard shortcuts other than Enter and Escape. ') +
       'After fill_query, take a screenshot and check it: the composer must show the query ' +
       'and no menu, suggestion list or dialog may be open (press Escape to close one, then ' +
       'take another screenshot). ' +
@@ -869,6 +871,9 @@ async function loop(
         ? 'Only then call submit_cloud_work on the visible blue Send button. '
         : 'Only then press Enter. ');
     instruction +=
+      (cloudWorkSendClick
+        ? 'Before setting the Work location or filling the query, click the Chat tab and then the Work tab once, using fresh screenshots to find both. This refreshes the Work composer. Do this only while the composer is empty. '
+        : '') +
       selection +
       ` Before filling, select ${surface} through Switch mode and verify its current-mode label. ` +
       'Do not substitute another surface. Surface selection is UI setup, never text for the evaluated model. ' +

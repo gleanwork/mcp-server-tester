@@ -22,6 +22,10 @@ import {
 import type { ChatgptAppConfig } from './config.js';
 import { linuxEnvironment } from './linuxEnvironment.fixture.js';
 import { submitChatgptQuery } from './driver.js';
+import {
+  listCloudConversations,
+  readCloudConversation,
+} from './cloudConversation.js';
 import type * as DriverModule from './driver.js';
 import { runLinuxChatgptDesktop } from './linuxDesktop.js';
 import type * as LinuxModule from './linuxDesktop.js';
@@ -59,6 +63,10 @@ vi.mock('./transcript.js', async (original) => ({
 vi.mock('./driver.js', async (original) => ({
   ...(await original<typeof DriverModule>()),
   submitChatgptQuery: vi.fn(),
+}));
+vi.mock('./cloudConversation.js', () => ({
+  listCloudConversations: vi.fn(),
+  readCloudConversation: vi.fn(),
 }));
 vi.mock('./linuxDesktop.js', async (original) => ({
   ...(await original<typeof LinuxModule>()),
@@ -175,6 +183,8 @@ beforeEach(() => {
   vi.mocked(findChatgptTranscript).mockReset().mockResolvedValue(undefined);
   vi.mocked(snapshotChatgptSessions).mockReset().mockResolvedValue(new Map());
   vi.mocked(submitChatgptQuery).mockReset();
+  vi.mocked(listCloudConversations).mockReset();
+  vi.mocked(readCloudConversation).mockReset();
   vi.mocked(runLinuxChatgptDesktop).mockReset();
   screenshots.saveStallScreenshot
     .mockReset()
@@ -248,6 +258,57 @@ describe('one trial, in order', () => {
 
   beforeEach(() => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'test-planner-key');
+  });
+
+  it('binds a fresh Mac Cloud conversation and audits its connector names', async () => {
+    const id = '6b009631-d634-8326-9bb2-b5bd4122d71c';
+    const source = { kind: 'cdp' as const, endpoint: 'http://127.0.0.1:9223' };
+    const config: ChatgptAppConfig = {
+      os: 'darwin', model: 'gpt-6.1-sol', reasoningEffort: 'medium',
+      firstParty: {
+        serverName: 'glean_default', expectedEmail: 'eval@example.com',
+        expectedAccountId: 'account-12345678',
+        expectedOrganizationId: 'org-example123456',
+        workLocation: 'cloud', source,
+        acknowledgeToolPolicyIsNotASandbox: true,
+      },
+    };
+    vi.mocked(listCloudConversations)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        id, origin: 'tpp', createdAt: '1970-01-01T00:00:01.000Z',
+      }]);
+    vi.mocked(readCloudConversation).mockResolvedValue({
+      id, turnId: 'turn-123', prompt: 'Search Glean',
+      createdAt: '1970-01-01T00:00:01.000Z',
+      completedAt: '1970-01-01T00:00:02.000Z',
+      response: 'Found the policy.', complete: true,
+      model: 'gpt-6.1-sol-wm', reasoningEffort: 'standard',
+      toolCalls: [{ source: 'mcp', server: 'glean_default',
+        name: 'search', rawName: 'glean_default.search', arguments: {} }],
+      limitations: ['No tool arguments or results.'],
+    });
+    vi.mocked(submitChatgptQuery).mockResolvedValue({
+      status: 'submitted', action_count: 1, model: 'planner-model',
+      submission_action: {}, telemetry: computerUseTelemetry,
+    });
+    const result = await runChatgptTurn(
+      'Search Glean', config, fakeSession({ sessionsRoot: '/sessions' })
+    );
+    expect(result).toMatchObject({
+      success: true, response: 'Found the policy.',
+      toolCalls: [{ source: 'mcp', server: 'glean_default', name: 'search' }],
+      clientMetadata: {
+        transcriptSource: 'browser-api',
+        session: { id, turnId: 'turn-123' },
+        correlation: { nativePromptMatch: 'exact' },
+      },
+    });
+    expect(snapshotChatgptSessions).not.toHaveBeenCalled();
+    expect(findChatgptTranscript).not.toHaveBeenCalled();
+    expect(submitChatgptQuery).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(listCloudConversations).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(submitChatgptQuery).mock.invocationCallOrder[0]!);
   });
 
   it('checks settings, uses the session, snapshots, submits once and captures', async () => {
