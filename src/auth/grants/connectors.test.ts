@@ -26,6 +26,7 @@ describe('connector validation', () => {
           acme: {
             url: 'https://mcp.acme.example/mcp',
             auth: { type: 'oauth' },
+            headers: { 'X-Request-Tag': 'mst' },
           },
           github: {
             url: 'https://api.github.example/mcp/',
@@ -76,6 +77,14 @@ describe('connector validation', () => {
     [
       { url: 'https://x.example', auth: { type: 'oauth' }, launch: 'node' },
       'launch must be a function',
+    ],
+    [
+      {
+        url: 'https://x.example',
+        auth: { type: 'oauth' },
+        headers: { tag: 1 },
+      },
+      'headers must be an object of strings',
     ],
   ])('rejects %j', (definition, message) => {
     expect(() => assertPlugin(plugin({ bad: definition }), 'inline')).toThrow(
