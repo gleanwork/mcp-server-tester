@@ -766,6 +766,8 @@ describe('ChatGPT Cloud Work confirmation', () => {
     expect(request).toContain('confirm_cloud_work_after_fill');
     expect(request).toContain('open_cloud_location_after_fill');
     expect(request).toContain('submit_cloud_work');
+    expect(request).toContain('only if it is not already selected');
+    expect(request).not.toContain('click the Chat tab and then the Work tab');
     expect(run.executed).toEqual([]);
   });
 
