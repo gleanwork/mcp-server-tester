@@ -96,6 +96,7 @@ describe('Codex configuration lifecycle', () => {
     temporaryDirectories.push(directory);
     const configPath = join(directory, 'config.toml');
     const original =
+      '[features]\napps = false\n' +
       '[mcp_servers.glean_default]\nurl = "https://example.test/mcp"\n' +
       'enabled_tools = ["search", "read_document", "write"]\n' +
       '[mcp_servers.glean_default.http_headers]\nAuthorization = "fixture-only"\n' +
@@ -105,9 +106,7 @@ describe('Codex configuration lifecycle', () => {
       { configPath, servers: [] },
       {
         builtinToolPolicy: {
-          webSearch: 'disabled',
           disabledPlugins: [],
-          disabledFeatures: ['apps', 'in_app_browser'],
         },
         accountMcpPolicy: {
           serverName: 'glean_default',
@@ -117,7 +116,7 @@ describe('Codex configuration lifecycle', () => {
     );
     const installed = parse(await readFile(configPath, 'utf8'));
     expect(installed).toMatchObject({
-      features: { apps: false, in_app_browser: false },
+      features: { apps: true },
       mcp_servers: {
         glean_default: {
           url: 'https://example.test/mcp',

@@ -385,6 +385,11 @@ export async function installCodexConfig(
     // ChatGPT rewrite defaults during startup and loses the selected Work settings.
     const settings = original ? parse(original.toString('utf8')) : {};
     if (accountMcp) {
+      // The account app transport must be available in both Work locations.
+      // The user's original feature setting is restored after the run.
+      const features = isTable(settings.features) ? settings.features : {};
+      features.apps = true;
+      settings.features = features;
       const servers = isTable(settings.mcp_servers) ? settings.mcp_servers : {};
       const server = servers[accountMcp.serverName];
       if (
