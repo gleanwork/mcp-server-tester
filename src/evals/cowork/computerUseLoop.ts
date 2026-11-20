@@ -663,7 +663,7 @@ async function loop(
         `empty ${surface} task composer. First locate and focus that composer using a screenshot. ` +
         'This tool takes no text: the harness supplies the exact text. It may run only once. ' +
         (cloudWorkSendClick
-          ? 'After it succeeds, observe the filled composer and call submit_cloud_work on the visible Send button.'
+          ? 'After it succeeds, reconfirm the Cloud location with confirm_cloud_work_after_fill, then call submit_cloud_work on the visible Send button.'
           : 'After it succeeds, use computer key Enter to submit, never click Send.'),
       input_schema: {
         type: 'object',
@@ -676,7 +676,7 @@ async function loop(
       'prompt composer. Call fill_query with no arguments. It inserts the original ' +
       'query for you. Do not reconstruct or type the query yourself. ' +
       (cloudWorkSendClick
-        ? 'Then call submit_cloud_work once on the visible Send button. '
+        ? 'Then reopen the Work location menu, reconfirm Cloud, close the menu, and call submit_cloud_work once on the visible Send button. '
         : 'Then press unmodified Enter once to submit. ') +
       'Do not wait for or read the answer.';
     system =
@@ -684,7 +684,7 @@ async function loop(
       `actions to open/focus ${appName}, select ${surface}, create a fresh task, and focus its composer. ` +
       'Use fill_query, not computer type, to insert the query. After fill_query succeeds, ' +
       (cloudWorkSendClick
-        ? 'submit with submit_cloud_work on the visible Send button, never with Enter. '
+        ? 'reconfirm Cloud after filling, then submit with submit_cloud_work on the visible Send button, never with Enter. '
         : 'submit with unmodified Enter, never by clicking Send. ') +
       'Never submit twice. Stop after ' +
       'submission. Do not approve permissions or change account settings.';
@@ -764,9 +764,35 @@ async function loop(
   }
   if (cloudWorkSendClick) {
     tools.push({
+      name: 'open_cloud_location_after_fill',
+      description:
+        'After filling and observing the query, click the Work location icon below the composer to reopen its menu. Supply coordinates from a fresh screenshot. This does not send the query.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          coordinate: {
+            type: 'array', items: { type: 'integer', minimum: 0 },
+            minItems: 2, maxItems: 2,
+          },
+        },
+        required: ['coordinate'], additionalProperties: false,
+      },
+    });
+    tools.push({
+      name: 'confirm_cloud_work_after_fill',
+      description:
+        'After filling, confirm only when a fresh screenshot shows a check mark next to "In the cloud" in the open Work location menu. The filled query must remain visible. No desktop action is executed.',
+      input_schema: {
+        type: 'object',
+        properties: { location: { type: 'string', enum: ['cloud'] } },
+        required: ['location'],
+        additionalProperties: false,
+      },
+    });
+    tools.push({
       name: 'submit_cloud_work',
       description:
-        'Click the visible blue Send button exactly once after observing the filled Work Cloud composer in a fresh screenshot. ' +
+        'Click the visible blue Send button exactly once after reconfirming Cloud after fill and observing the filled Work Cloud composer in a fresh screenshot. ' +
         'The screenshot must show the unchanged query and no open menu or dialog. Supply the Send button coordinates; do not press Enter.',
       input_schema: {
         type: 'object',
@@ -868,7 +894,7 @@ async function loop(
       'and no menu, suggestion list or dialog may be open (press Escape to close one, then ' +
       'take another screenshot). ' +
       (cloudWorkSendClick
-        ? 'Only then call submit_cloud_work on the visible blue Send button. '
+        ? 'Then call open_cloud_location_after_fill on the location icon, take a fresh screenshot, and call confirm_cloud_work_after_fill only if "In the cloud" still has the check mark. Close the menu with Escape, take another screenshot, and only then call submit_cloud_work on the visible blue Send button. '
         : 'Only then press Enter. ');
     instruction +=
       (cloudWorkSendClick
@@ -903,6 +929,8 @@ async function loop(
   let typedQuery = false;
   let modelConfirmed = false;
   let workLocationConfirmed = false;
+  let cloudPostFillConfirmed = false;
+  let cloudPostFillMenuOpened = false;
   let workLocationMenuClosed = false;
   let workComposerFocused = false;
   let uiRevision = 0;
@@ -1039,6 +1067,38 @@ async function loop(
             action = { action: 'left_click', coordinate };
             actionName = 'left_click';
           }
+        } else if (cloudWorkSendClick && toolName === 'open_cloud_location_after_fill') {
+          const coordinate = action.coordinate;
+          if (!typedQuery || !postFillObserved || cloudPostFillMenuOpened ||
+              Object.keys(action).length !== 1 ||
+              !Array.isArray(coordinate) || coordinate.length !== 2 ||
+              !coordinate.every((value, index) =>
+                Number.isSafeInteger(value) && value >= 0 &&
+                value < (index === 0 ? DISPLAY_WIDTH : DISPLAY_HEIGHT))) {
+            refusal =
+              'Observe the filled Cloud composer before opening the location menu once.';
+          } else {
+            action = { action: 'left_click', coordinate };
+            actionName = 'left_click';
+          }
+        } else if (cloudWorkSendClick && toolName === 'confirm_cloud_work_after_fill') {
+          if (!typedQuery || !cloudPostFillMenuOpened || !postFillObserved ||
+              observedRevision !== uiRevision ||
+              Object.keys(action).length !== 1 || action.location !== 'cloud') {
+            refusal =
+              'After filling, observe a fresh screenshot of the open location menu with Cloud checked before confirming it.';
+          } else {
+            workLocationConfirmed = true;
+            workLocationMenuClosed = false;
+            workComposerFocused = true;
+            cloudPostFillConfirmed = true;
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: 'Cloud location reconfirmed after filling. No desktop action executed.',
+            });
+            continue;
+          }
         } else if (requireModelConfirmation && toolName === 'confirm_model') {
           modelConfirmed = false;
           const keys = Object.keys(action);
@@ -1090,10 +1150,12 @@ async function loop(
             !typedQuery ||
             !postFillObserved ||
             !workLocationConfirmed ||
-            !workComposerFocused
+            !workComposerFocused ||
+            !cloudPostFillConfirmed ||
+            !workLocationMenuClosed
           ) {
             refusal =
-              'Confirm Cloud, focus and fill the composer, then observe a fresh screenshot before clicking Send.';
+              'Reconfirm Cloud after filling, close the location menu, then observe a fresh screenshot before clicking Send.';
           } else if (
             Object.keys(action).length !== 1 ||
             !Array.isArray(coordinate) ||
@@ -1231,6 +1293,8 @@ async function loop(
           workLocationConfirmed = false;
           workLocationMenuClosed = false;
           workComposerFocused = false;
+          cloudPostFillConfirmed = false;
+          cloudPostFillMenuOpened = false;
         }
       }
       // The focus check above can outlast the deadline: never act after it.
@@ -1239,6 +1303,14 @@ async function loop(
       const { result, submitted } = await desktop.execute(action, deps.signal);
       telemetry.executed += 1;
       if (closesWorkLocationMenu) workLocationMenuClosed = true;
+      if (toolName === 'open_cloud_location_after_fill') {
+        cloudPostFillMenuOpened = true;
+        workLocationConfirmed = false;
+        workLocationMenuClosed = false;
+        workComposerFocused = false;
+        cloudPostFillConfirmed = false;
+        uiRevision += 1;
+      }
       if (toolName === focusWorkComposerTool) workComposerFocused = true;
       const isImage =
         typeof result === 'object' && (result as ImageBlock).type === 'image';

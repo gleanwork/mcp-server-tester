@@ -754,14 +754,19 @@ async function captureCloudTurn(state: ChatgptTurnState): Promise<ChatgptTurn> {
       limitations: [],
     });
   const deadline = trial.startedAtMs + trial.timeoutMs;
+  const bindingDeadline = chatgptBindingDeadline(
+    state.desktop, Date.now(), deadline, 120_000
+  );
   let boundId: string | undefined;
   let latest: CloudConversation | undefined;
   let unreadableFreshConversation = false;
-  while (Date.now() < deadline) {
+  let listReadFailureSince: number | undefined;
+  while (Date.now() < deadline && (boundId || Date.now() < bindingDeadline)) {
     try {
       const items = await listCloudConversations(
         firstParty.source, webIdentity(firstParty)
       );
+      listReadFailureSince = undefined;
       const candidates: CloudConversation[] = [];
       for (const item of items) {
         if (baseline.has(item.id) || item.origin !== 'tpp') continue;
@@ -795,22 +800,30 @@ async function captureCloudTurn(state: ChatgptTurnState): Promise<ChatgptTurn> {
         latest = conversation;
         if (conversation.complete) return completedCloudTurn(state, conversation);
       }
-    } catch (error) {
-      return failureResult(state, {
-        failureKind: 'parse_failure',
-        error: error instanceof Error ? error.message : String(error),
-        limitations: ['Cloud task evidence could not be verified.'],
-      });
+    } catch {
+      listReadFailureSince ??= Date.now();
+      if (Date.now() - listReadFailureSince >= 15_000)
+        return failureResult(state, {
+          failureKind: 'parse_failure',
+          error: 'The pinned browser Cloud conversation list remained unreadable for 15 seconds.',
+          limitations: ['No Cloud task evidence could be verified.'],
+        });
     }
-    await delay(Math.min(POLL_INTERVAL_MS, Math.max(1, deadline - Date.now())));
+    await delay(Math.min(
+      POLL_INTERVAL_MS,
+      Math.max(1, (boundId ? deadline : bindingDeadline) - Date.now())
+    ));
   }
   return failureResult(state, {
     failureKind: latest ? 'timeout'
-      : unreadableFreshConversation ? 'parse_failure' : 'no_matching_session',
+      : unreadableFreshConversation || listReadFailureSince !== undefined
+        ? 'parse_failure' : 'no_matching_session',
     error: latest
       ? 'Timed out waiting for the bound ChatGPT Cloud task to finish.'
       : unreadableFreshConversation
         ? 'A fresh ChatGPT Cloud conversation could not be verified before the run deadline.'
+        : listReadFailureSince !== undefined
+          ? 'The pinned browser Cloud conversation list was unreadable at the binding deadline.'
         : 'No unique fresh ChatGPT Cloud conversation matched the submitted query within the run deadline.',
     limitations: latest?.limitations ?? [],
   });

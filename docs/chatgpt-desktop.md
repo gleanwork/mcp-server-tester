@@ -538,8 +538,10 @@ the browser token nor cookies leave it. The Cloud conversation exposes
 connector call names, which MST uses for the post-run server and tool audit.
 It does not expose tool arguments, results, timing or token usage through this
 record, so those fields remain unavailable. The Mac submission driver refreshes
-the Work composer by switching Chat then Work before it fills the prompt, and
-clicks Send once. A Send receipt alone does not count as a completed task.
+the Work composer by switching Chat then Work before it fills the prompt. It
+checks the Cloud location again after filling and clicks Send once. A Send
+receipt alone does not count as a completed task. Brief browser read failures
+after Send are retried; an unbound Cloud task has a 120-second binding window.
 
 If a truncated JSONL record is followed by an unfinished native replacement with
 the same next ordinal, collection waits read-only for the replacement. It never

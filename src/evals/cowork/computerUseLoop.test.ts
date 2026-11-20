@@ -51,6 +51,14 @@ const CONFIRM_CLOUD: Proposal = {
   tool: 'confirm_cloud_work',
   input: { location: 'cloud' },
 };
+const CONFIRM_CLOUD_AFTER_FILL: Proposal = {
+  tool: 'confirm_cloud_work_after_fill',
+  input: { location: 'cloud' },
+};
+const OPEN_CLOUD_AFTER_FILL: Proposal = {
+  tool: 'open_cloud_location_after_fill',
+  input: { coordinate: [1150, 700] },
+};
 const FOCUS_LOCAL_COMPOSER: Proposal = {
   tool: 'focus_local_composer',
   input: { coordinate: [100, 100] },
@@ -755,6 +763,8 @@ describe('ChatGPT Cloud Work confirmation', () => {
     expect(request).toContain('On your computer');
     expect(request).toContain('check mark');
     expect(request).toContain('confirm_cloud_work');
+    expect(request).toContain('confirm_cloud_work_after_fill');
+    expect(request).toContain('open_cloud_location_after_fill');
     expect(request).toContain('submit_cloud_work');
     expect(run.executed).toEqual([]);
   });
@@ -765,9 +775,11 @@ describe('ChatGPT Cloud Work confirmation', () => {
       {
         application: 'chatgpt',
         requiredWorkLocation: 'cloud',
-        budget: 8,
+        budget: 16,
         plans: [
           [FOCUS_CLOUD_COMPOSER, FILL, { action: 'screenshot' }],
+          [OPEN_CLOUD_AFTER_FILL, { action: 'screenshot' }],
+          [CONFIRM_CLOUD_AFTER_FILL, ESCAPE, { action: 'screenshot' }],
           [ENTER, SUBMIT_CLOUD],
         ],
       }
@@ -784,27 +796,30 @@ describe('ChatGPT Cloud Work confirmation', () => {
       'paste',
       'screenshot',
       'left_click',
+      'screenshot',
+      'key',
+      'screenshot',
+      'left_click',
     ]);
   });
 
-  it('does not click Send before observing the filled Cloud composer', async () => {
+  it('does not click Send without Cloud reconfirmation after filling', async () => {
     const run = await runActions(
       [CONFIRM_CLOUD, ESCAPE, { action: 'screenshot' }],
       {
         application: 'chatgpt',
         requiredWorkLocation: 'cloud',
-        budget: 8,
+        budget: 7,
         plans: [
           [FOCUS_CLOUD_COMPOSER, FILL, SUBMIT_CLOUD, { action: 'screenshot' }],
-          [SUBMIT_CLOUD],
         ],
       }
     );
-    expect(run.result?.status).toBe('submitted');
-    expect(run.telemetry.refused_action_count).toBe(1);
+    expect(run.error).toBeDefined();
+    expect(run.telemetry.refused_action_count).toBeGreaterThan(0);
     expect(
       run.executed.filter((action) => action.action === 'left_click')
-    ).toHaveLength(2);
+    ).toHaveLength(1);
   });
 
   it('does not submit without confirming the requested Cloud location', async () => {

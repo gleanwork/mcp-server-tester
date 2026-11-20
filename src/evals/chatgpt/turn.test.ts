@@ -311,6 +311,39 @@ describe('one trial, in order', () => {
       .toBeLessThan(vi.mocked(submitChatgptQuery).mock.invocationCallOrder[0]!);
   });
 
+  it('retries a brief browser list failure after Send without submitting again', async () => {
+    const id = '6b009631-d634-8326-9bb2-b5bd4122d71c';
+    const config: ChatgptAppConfig = {
+      os: 'darwin',
+      firstParty: {
+        serverName: 'glean_default', expectedEmail: 'eval@example.com',
+        expectedAccountId: 'account-12345678',
+        expectedOrganizationId: 'org-example123456',
+        workLocation: 'cloud',
+        source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+        acknowledgeToolPolicyIsNotASandbox: true,
+      },
+    };
+    vi.mocked(listCloudConversations)
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('transient browser read'))
+      .mockResolvedValueOnce([{ id, origin: 'tpp',
+        createdAt: '1970-01-01T00:00:01.000Z' }]);
+    vi.mocked(readCloudConversation).mockResolvedValue({
+      id, turnId: 'turn-123', prompt: 'Search Glean',
+      createdAt: '1970-01-01T00:00:01.000Z',
+      response: 'Found it.', complete: true, toolCalls: [], limitations: [],
+    });
+    vi.mocked(submitChatgptQuery).mockResolvedValue({
+      status: 'submitted', action_count: 1, model: 'planner-model',
+      submission_action: {}, telemetry: computerUseTelemetry,
+    });
+    const result = await runChatgptTurn('Search Glean', config, fakeSession());
+    expect(result.success).toBe(true);
+    expect(submitChatgptQuery).toHaveBeenCalledTimes(1);
+    expect(listCloudConversations).toHaveBeenCalledTimes(3);
+  });
+
   it('checks settings, uses the session, snapshots, submits once and captures', async () => {
     const session = fakeSession({ sessionsRoot: '/sessions' });
     vi.mocked(submitChatgptQuery).mockResolvedValue({
