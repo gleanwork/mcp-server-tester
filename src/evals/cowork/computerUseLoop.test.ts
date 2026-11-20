@@ -1021,6 +1021,20 @@ describe('ChatGPT', () => {
     expect(run.telemetry.refused_action_count).toBe(2);
   });
 
+  it('asks the planner to correct an unsupported Mac action without ending the run', async () => {
+    const run = await runActions(
+      [{ action: 'hold_key', text: 'cmd' }, FILL, { action: 'screenshot' }],
+      { plans: [[ENTER]], application: 'chatgpt' }
+    );
+    expect(run.result!.status).toBe('submitted');
+    expect(run.executed).toEqual([
+      { action: 'paste', text: 'query' },
+      { action: 'screenshot' },
+      ENTER,
+    ]);
+    expect(run.telemetry.refused_action_count).toBe(1);
+  });
+
   it('waits to press Enter until the filled composer is seen', async () => {
     // Enter in the fill's own plan, and Enter with a screenshot in the same
     // plan, are refused: a menu opened while typing would take the Enter.

@@ -73,6 +73,23 @@ const MOVING_ACTIONS = new Set([
   'mouse_move',
   'cursor_position',
 ]);
+/** The Mac desktop adapter can execute these Computer Use actions. */
+const DESKTOP_ACTIONS = new Set([
+  'screenshot',
+  'wait',
+  'cursor_position',
+  'mouse_move',
+  'left_click',
+  'right_click',
+  'middle_click',
+  'double_click',
+  'triple_click',
+  'left_click_drag',
+  'type',
+  'paste',
+  'key',
+  'scroll',
+]);
 const MAX_SAFE_TOTAL = Number.MAX_SAFE_INTEGER;
 const SECRET_NAME = /token|key|secret|password|authorization/i;
 const RESPONSE_MODEL = /^claude-[a-z0-9][a-z0-9.-]{0,99}$/;
@@ -887,6 +904,7 @@ async function loop(
       if (canReportBlocker && toolName === 'report_blocker') {
         telemetry.refused += 1;
         const code = action.code;
+        log(`planner reported blocker: ${String(code)}`);
         throw new DesktopBlockedError(
           (BLOCKER_CODES as readonly unknown[]).includes(code)
             ? (code as BlockerCode)
@@ -1020,6 +1038,10 @@ async function loop(
         } else if (toolName !== 'computer') {
           refusal =
             'Unknown tool. Use computer for navigation and fill_query for text entry.';
+        } else if (!DESKTOP_ACTIONS.has(actionName)) {
+          refusal =
+            `Not executed: ${actionName} is unsupported on this desktop. ` +
+            'Use a supported computer action, such as key with a key chord for a shortcut.';
         } else if (actionName === 'type') {
           refusal =
             'Do not reconstruct the query. Focus the empty composer, then call fill_query with no arguments.';
@@ -1053,6 +1075,7 @@ async function loop(
       }
       if (refusal) {
         telemetry.refused += 1;
+        log(`refused action ${actionsExecuted} (${actionName})`);
         // A rejected proposal has no desktop side effects. Let the planner
         // correct it within the same action budget; never retry a failed
         // physical text entry.
@@ -1176,8 +1199,10 @@ async function loop(
         log('no HITL action was needed');
         return { status: 'hitl_checked', action_count: actionsExecuted, model };
       }
-      if (application === 'chatgpt')
+      if (application === 'chatgpt') {
+        log('planner stopped without a submission action');
         throw new DesktopBlockedError('navigation_blocked');
+      }
       throw new Error(
         `Computer Use planner stopped before submitting the ${surface} query`
       );
