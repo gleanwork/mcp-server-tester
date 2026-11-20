@@ -1,6 +1,18 @@
 
 
 
+
+## v2.0.0-rc.4 (2026-11-20)
+
+#### :rocket: Enhancement
+* [#614](https://github.com/gleanwork/mcp-server-tester/pull/614) feat(cowork): send macOS Claude Desktop inference to an LLM gateway ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :bug: Bug Fix
+* [#615](https://github.com/gleanwork/mcp-server-tester/pull/615) fix(cowork): answer 1P questions beside the sidebar and update notice; fail fast and settle in time ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### Committers: 1
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
 ## v2.0.0-rc.3 (2026-11-19)
 
 #### :bug: Bug Fix
