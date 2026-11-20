@@ -95,6 +95,63 @@ describe('ChatGPT Cloud conversation evidence', () => {
       .toMatchObject([{ source: 'mcp', server: 'other_connector' }]);
   });
 
+  it('records a direct Cloud connector call paired with its native tool result', async () => {
+    const path = '/asdk_app_6afcad2b34cc8191b3322115583bcc16/link_6afcad43ab9c8191b3cd7e3a2dbf03c3/search';
+    vi.mocked(evaluateChatgptWeb).mockResolvedValue({
+      ...detail,
+      messages: [detail.messages[0], {
+        id: 'call-direct', role: 'assistant', recipient: 'api_tool.call_tool',
+        channel: null, status: 'finished_successfully', endTurn: false,
+        parts: [], tools: [], connectorPath: path,
+      }, {
+        role: 'tool', recipient: 'all', channel: 'commentary',
+        status: 'finished_successfully', endTurn: null, parts: [], tools: [],
+        invokedResource: {
+          resourceUri: path,
+          connectorId: 'asdk_app_6afcad2b34cc8191b3322115583bcc16',
+          appName: 'glean_default',
+        },
+      }, detail.messages[2]],
+    });
+    const conversation = await readCloudConversation(source, expected, id);
+    expect(conversation.toolCalls).toMatchObject([{
+      source: 'mcp', server: 'glean_default', name: 'search',
+      rawName: 'glean_default.search', id: 'call-direct',
+    }]);
+    const expression = vi.mocked(evaluateChatgptWeb).mock.calls[0]![1];
+    expect(expression).toContain('connector_tool_payload');
+    expect(expression).not.toContain('args: payload.args');
+    expect(() => new Function(`return ${expression}`)).not.toThrow();
+  });
+
+  it('rejects an unpaired direct connector call', async () => {
+    vi.mocked(evaluateChatgptWeb).mockResolvedValue({
+      ...detail,
+      messages: [detail.messages[0], {
+        role: 'assistant', recipient: 'api_tool.call_tool',
+        connectorPath: '/asdk_app_123/link_456/search', tools: [],
+      }, detail.messages[2]],
+    });
+    await expect(readCloudConversation(source, expected, id))
+      .rejects.toThrow('pinned signed-in browser account');
+  });
+
+  it('keeps built-in Work apps in the reserved app transport for the caller audit', async () => {
+    vi.mocked(evaluateChatgptWeb).mockResolvedValue({
+      ...detail,
+      messages: [detail.messages[0], {
+        ...detail.messages[1], toolCount: 1,
+        tools: [{ type: 'connector_call', connectorId: 'asdk_app_pages',
+          toolName: 'chatgpt_space.search_pages' }],
+      }, detail.messages[2]],
+    });
+    expect((await readCloudConversation(source, expected, id)).toolCalls)
+      .toMatchObject([{
+        source: 'mcp', server: 'codex_apps',
+        name: 'chatgpt_space.search_pages',
+      }]);
+  });
+
   it.each([
     ['wrong origin', { ...detail, origin: null }],
     ['multiple user prompts', { ...detail, messages: [detail.messages[0], detail.messages[0], ...detail.messages.slice(1)] }],

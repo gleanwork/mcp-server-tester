@@ -9,6 +9,10 @@ import type { LLMToolCall } from '../mstClient/types.js';
 const CLOUD_ERROR =
   'ChatGPT Cloud conversation could not be read from the pinned signed-in browser account.';
 const MAX_CONVERSATIONS = 50;
+const BUILTIN_WORK_APPS = new Set([
+  'automations', 'chatgpt_space', 'openai_library', 'personal_context',
+  'plugin_management', 'sites', 'work_pets',
+]);
 
 export interface CloudConversationSummary {
   id: string;
@@ -81,7 +85,9 @@ function expression(expected: ChatgptWebIdentity, id?: string): string {
       ? new Date(data.create_time * 1000).toISOString() : data.create_time,
     origin: data.conversation_origin,
     messages: data.messages.map(m => ({
+      id: m.id,
       role: m.author?.role,
+      recipient: m.recipient,
       channel: m.channel,
       createdAt: typeof m.create_time === 'number'
         ? new Date(m.create_time * 1000).toISOString() : m.create_time,
@@ -95,6 +101,20 @@ function expression(expected: ChatgptWebIdentity, id?: string): string {
       model: m.metadata?.model_slug,
       effort: m.metadata?.thinking_effort,
       turnId: m.metadata?.turn_id,
+      connectorPath: m.recipient === 'api_tool.call_tool'
+        ? (() => {
+            if (typeof m.metadata?.connector_tool_payload !== 'string')
+              throw new Error('connector-payload');
+            const payload = JSON.parse(m.metadata.connector_tool_payload);
+            return payload?.path;
+          })()
+        : undefined,
+      invokedResource: m.author?.role === 'tool' && m.metadata?.invoked_resource
+        ? {
+            resourceUri: m.metadata.invoked_resource.resource_uri,
+            connectorId: m.metadata.invoked_resource.connector_id,
+            appName: m.metadata.invoked_resource.app_name
+          } : undefined,
       toolCount: m.metadata?.dil_v2_reasoning?.appData?.tool_count,
       tools: Array.isArray(m.metadata?.dil_v2_reasoning?.appData?.items)
         ? m.metadata.dil_v2_reasoning.appData.items.map(item => ({
@@ -187,7 +207,10 @@ export async function readCloudConversation(
         const [server, name] = tool.toolName.split('.');
         if (!server || !name) throw new Error(CLOUD_ERROR);
         toolCalls.push({
-          source: 'mcp', server, name, rawName: tool.toolName,
+          source: 'mcp',
+          server: BUILTIN_WORK_APPS.has(server) ? 'codex_apps' : server,
+          name: BUILTIN_WORK_APPS.has(server) ? tool.toolName : name,
+          rawName: tool.toolName,
           arguments: {},
           ...(typeof tool.id === 'string' ? { id: tool.id } : {}),
         });
@@ -205,6 +228,49 @@ export async function readCloudConversation(
     }
   }
   if (declaredCount !== observedCount) throw new Error(CLOUD_ERROR);
+  const directCalls: LLMToolCall[] = [];
+  const directResults = messages
+    .filter(m => record(m) && m.role === 'tool' && m.invokedResource !== undefined)
+    .map(m => (m as Record<string, unknown>).invokedResource);
+  const usedResults = new Set<number>();
+  for (const message of messages) {
+    if (!record(message) || message.recipient !== 'api_tool.call_tool') continue;
+    const path = message.connectorPath;
+    if (typeof path !== 'string' ||
+        !/^\/asdk_app_[A-Za-z0-9_-]+\/link_[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/.test(path))
+      throw new Error(CLOUD_ERROR);
+    const resultIndex = directResults.findIndex((result, index) =>
+      !usedResults.has(index) && record(result) && result.resourceUri === path
+    );
+    if (resultIndex < 0) throw new Error(CLOUD_ERROR);
+    usedResults.add(resultIndex);
+    const result = directResults[resultIndex];
+    if (!record(result) || typeof result.appName !== 'string' ||
+        !/^[A-Za-z0-9_-]+$/.test(result.appName) ||
+        typeof result.connectorId !== 'string' ||
+        !path.startsWith(`/${result.connectorId}/`))
+      throw new Error(CLOUD_ERROR);
+    const name = path.slice(path.lastIndexOf('/') + 1);
+    const builtIn = BUILTIN_WORK_APPS.has(result.appName);
+    directCalls.push({
+      source: 'mcp',
+      server: builtIn ? 'codex_apps' : result.appName,
+      name: builtIn ? `${result.appName}.${name}` : name,
+      rawName: `${result.appName}.${name}`, arguments: {},
+      ...(typeof message.id === 'string' ? { id: message.id } : {}),
+    });
+  }
+  if (directResults.length !== usedResults.size) throw new Error(CLOUD_ERROR);
+  if (directCalls.length && toolCalls.some(c => c.source === 'mcp')) {
+    const summaryNames = toolCalls.filter(c => c.source === 'mcp')
+      .map(c => c.rawName).sort();
+    const directNames = directCalls.map(c => c.rawName).sort();
+    if (JSON.stringify(summaryNames) !== JSON.stringify(directNames))
+      throw new Error(CLOUD_ERROR);
+  }
+  const observedCalls = directCalls.length
+    ? [...directCalls, ...toolCalls.filter(c => c.source === 'builtin')]
+    : toolCalls;
   const response = record(final) && Array.isArray(final.parts) &&
     final.parts.length === 1 && typeof final.parts[0] === 'string'
       ? final.parts[0] : undefined;
@@ -220,9 +286,9 @@ export async function readCloudConversation(
     ...(model ? { model } : {}),
     ...(effort ? { reasoningEffort: effort } : {}),
     complete: Boolean(response),
-    toolCalls,
+    toolCalls: observedCalls,
     limitations: [
-      'Cloud conversation tool summaries contain names, but not arguments, results, timing or token usage.',
+      'Cloud conversation connector evidence contains names, but not arguments, results, timing or token usage.',
     ],
   };
 }
