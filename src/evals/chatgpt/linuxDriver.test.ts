@@ -109,6 +109,7 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
   cloudChecked = false;
   cloudSelectedState = true;
   cloudTriggerChanges = false;
+  cloudSendSettle = 0;
   snapshots = 0;
 
   constructor(public nodes: FakeNode[] = ready()) {}
@@ -117,6 +118,9 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
 
   async snapshot(): Promise<FakeNode[]> {
     this.snapshots += 1;
+    if (this.cloudChecked && this.cloudSendSettle > 0 &&
+        --this.cloudSendSettle === 0)
+      this.nodes.find((item) => item.name === 'Send')!.enabled = true;
     return this.nodes;
   }
 
@@ -174,6 +178,8 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
     } else if (name === 'In the cloud') {
       this.cloudChecked = true;
       this.nodes = this.nodes.filter((item) => item.name !== 'In the cloud');
+      if (this.cloudSendSettle > 0)
+        this.nodes.find((item) => item.name === 'Send')!.enabled = false;
       if (this.cloudTriggerChanges)
         this.nodes.find((item) => item.name === 'Choose where to run this chat')!.name =
           'Choose where to run this chat. Local execution is starting…';
@@ -631,6 +637,7 @@ describe('submit', () => {
     const desktop = new FakeDesktop();
     desktop.cloudLocation = true;
     desktop.cloudTriggerChanges = true;
+    desktop.cloudSendSettle = 6;
     const receipt = await driverFor(desktop).submit('Find docs', 'chatgpt-work', 'cloud');
     expect(receipt.status).toBe('submitted');
     expect(desktop.names()).toEqual([

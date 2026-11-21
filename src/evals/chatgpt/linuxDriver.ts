@@ -438,6 +438,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     return this.wait(async (ns) =>
       this.cloudLocationItem(ns).length === 0 &&
       this.ready(ns, 'chatgpt-work') &&
+      controls(ns, ['Send']).length === 1 &&
       matchesPrompt(await this.desktop.text(composer(ns)), prompt)
     );
   }
