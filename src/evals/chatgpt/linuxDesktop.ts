@@ -34,6 +34,10 @@ const FailureStep = z.enum([
   'draft-open',
   'draft-surface',
   'draft-readback',
+  'work-location-open',
+  'work-location-select',
+  'work-location-verify',
+  'work-location-close',
   'send',
 ]);
 const DraftState = z
@@ -115,6 +119,10 @@ const Receipt = z
               'draft-open',
               'draft-surface',
               'draft-readback',
+              'work-location-open',
+              'work-location-select',
+              'work-location-verify',
+              'work-location-close',
               'send',
             ].includes(receipt.step))))
   );

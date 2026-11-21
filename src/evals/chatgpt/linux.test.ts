@@ -225,7 +225,9 @@ describe('Linux ChatGPT runtime adapter', () => {
         newlineCount: 2,
       },
     ].map((draftState) => ({ step: 'draft-surface', draftState })),
-    ...['draft-open', 'draft-readback', 'send'].map((step) => ({ step })),
+    ...['draft-open', 'draft-readback', 'work-location-open',
+      'work-location-select', 'work-location-verify', 'work-location-close',
+      'send'].map((step) => ({ step })),
     ...[
       'helper_missing',
       'helper_failed',
@@ -234,6 +236,8 @@ describe('Linux ChatGPT runtime adapter', () => {
       'accessibility_dbus_error',
       'accessibility_node_defunct',
       'desktop_driver_failed',
+      'work_location_missing_or_ambiguous',
+      'work_location_not_selected',
     ].map((error) => ({ error })),
     {},
   ] as Array<{ step?: string; draftState?: object; error?: string }>)(

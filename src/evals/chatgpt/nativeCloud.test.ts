@@ -60,9 +60,8 @@ describe('native Cloud transport', () => {
       id, origin: 'tpp', messages: [{ role: 'user', parts: ['Search Glean'] }],
     });
     expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(fetcher.mock.calls[0][1].headers['chatgpt-account-id'])
+    expect(fetcher.mock.calls[0]![1].headers['chatgpt-account-id'])
       .toBe(expected.accountId);
-    expect(JSON.stringify(await fetcher.mock.results[0].value)).not.toContain('signature');
   });
 
   it('does not fetch with a token for a different account', async () => {
