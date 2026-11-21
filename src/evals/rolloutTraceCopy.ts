@@ -1,7 +1,9 @@
 /**
  * A trial's copy of a Codex rollout trace (the bundles Codex writes under
  * `CODEX_ROLLOUT_TRACE_ROOT`), made before the trial reports it as its client
- * artifacts. Any client whose agent writes such a trace can collect it here.
+ * artifacts. Any client whose agent writes such a trace can collect it here,
+ * as can one whose agent writes another record of its own into a directory,
+ * such as Claude Code's raw API bodies (claudeRawApiBodies.ts).
  *
  * The agent can write where its trace is, so the copy trusts none of it.
  * It copies only directories and regular files MST's user owns, never a hard
@@ -174,11 +176,13 @@ async function readTraceFile(file: string, maxBytes: number): Promise<Buffer> {
 /**
  * Copy `bundles` (names of directories in `root`) into a new temporary
  * directory, as `<dir>/codex-rollout-trace/<bundle>/`, with `secrets`
- * replaced in every file. Entries other than directories and regular files
- * are left out, as the artifact copy leaves them out; `root` and `bundles`
- * themselves must be directories. Fails, leaving no directory, with a
- * {@link RolloutTraceError} for a limit or an entry MST won't copy, or with
- * the error that kept it from reading the trace.
+ * replaced in every file. `under` names the directories the bundles go in
+ * instead, outermost first; with none, each bundle is `<dir>/<bundle>/`.
+ * Entries other than directories and regular files are left out, as the
+ * artifact copy leaves them out; `root` and `bundles` themselves must be
+ * directories. Fails, leaving no directory, with a {@link RolloutTraceError}
+ * for a limit or an entry MST won't copy, or with the error that kept it from
+ * reading the trace.
  */
 export async function copyRolloutTrace(
   root: string,
@@ -186,13 +190,16 @@ export async function copyRolloutTrace(
   options: {
     readonly secrets?: readonly string[];
     readonly limits?: ArtifactLimits;
+    readonly under?: readonly string[];
   } = {}
 ): Promise<{ dir: string; files: number; bytes: number }> {
   const limits = options.limits ?? ARTIFACT_LIMITS;
   const secrets = options.secrets ?? [];
+  const under = options.under ?? [ROLLOUT_TRACE_DIR];
   const target = await mkdtemp(path.join(os.tmpdir(), 'mst-rollout-trace-'));
-  // As the artifact copy counts them: it visits ROLLOUT_TRACE_DIR first.
-  let entries = 1;
+  // As the artifact copy counts them: it visits the directories of `under`
+  // first.
+  let entries = under.length;
   let files = 0;
   let bytes = 0;
   const countEntry = () => {
@@ -211,7 +218,7 @@ export async function copyRolloutTrace(
         'limit',
         `it is more than ${limits.depth} directories deep`
       );
-    const dirName = segments.slice(1).join('/');
+    const dirName = segments.slice(under.length).join('/');
     const id = await labelled(dirName, () => openTraceDir(source));
     await mkdir(path.join(target, ...segments), {
       recursive: true,
@@ -229,7 +236,7 @@ export async function copyRolloutTrace(
         continue;
       }
       if (!entry.isFile()) continue;
-      const name = at.slice(1).join('/');
+      const name = at.slice(under.length).join('/');
       const data = redactClientSecretBytes(
         await labelled(name, () => readTraceFile(from, limits.fileBytes)),
         secrets
@@ -259,7 +266,7 @@ export async function copyRolloutTrace(
     const rootId = await labelled('the trace root', () => openTraceDir(root));
     for (const bundle of bundles) {
       countEntry();
-      await walk(path.join(root, bundle), [ROLLOUT_TRACE_DIR, bundle]);
+      await walk(path.join(root, bundle), [...under, bundle]);
     }
     await labelled('the trace root', () => checkTraceDir(root, rootId));
   } catch (error) {

@@ -29,6 +29,7 @@ export const CLAUDE_CODE_DEFAULTS = {
   timeout: 180_000,
   provider: 'anthropic',
   isolate: true,
+  rawApiBodies: true,
 } as const;
 
 export const GenerationOptions = {

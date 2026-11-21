@@ -207,9 +207,38 @@ direct-child cancellation.
 These controls apply to the `claude-code` client, which supplies the server
 names from its generated MCP config.
 
+## Claude Code raw API bodies
+
+The transcript has each model response, but not the request Claude Code sent for it: its system prompt, its tool definitions and the conversation as the model got them. By default, MST sets `OTEL_LOG_RAW_API_BODIES=file:<dir>` for each trial, to a directory of the trial's own, and Claude Code writes each Messages API request there exactly as it sent it, and each response. It writes them whether or not it exports telemetry.
+
+```json
+{
+  "name": "claude-code-bodies",
+  "client": "claude-code",
+  "redactStoredResponses": false,
+  "datasets": ["./cases.json"]
+}
+```
+
+The trial reports the bodies as its [client artifacts](./evaluation-framework.md#client-artifacts), so judges read them with the trial (`trial.artifactsDir`). A run that keeps full transcripts (`"redactStoredResponses": false`) keeps them at `artifacts/<variant>/<case-id>/<trial>/claude-raw-api-bodies/`; otherwise they are removed once grading is done:
+
+- `*.request.json`: one request attempt, as sent: `model`, `system`, `messages`, `tools`, `thinking`, `max_tokens` and the rest. A retried request has a file for each attempt. `betas` is in the file, but Claude Code sends it as the `anthropic-beta` header.
+- `*.response.json`: one successful response: its `id`, `content`, `usage` and `stop_reason`.
+- `index.jsonl` (Claude Code 2.1.274 or later): a line for each successful response, with its `request_file` and `response_file`, and its `message_id`: the `modelCalls[].id` of the transcript's model call it is.
+
+Claude Code redacts extended-thinking content in both. Each request's `metadata` names Claude Code's device and session; with [isolation](#claude-code-isolation), the device ID is new for each trial.
+
+Claude Code runs with `bypassPermissions` and can write where the bodies are, so the trial keeps a copy MST makes when Claude Code is done, as it copies the Codex CLI's rollout trace ([codex.md](./codex.md#the-rollout-trace)): only directories and regular files MST's user owns, never a link, and with the credentials MST knows for the trial replaced with `[REDACTED]`. MST then removes Claude Code's directory.
+
+The trial's telemetry has `rawApiBodies`: how many requests and responses, files and bytes it kept (as written, after redaction). Bodies that are larger than a trial's artifacts may be (16 MB per file, 64 MB in all, 4,096 entries), that have an entry MST doesn't copy, that MST couldn't read, or that Claude Code didn't write aren't kept, and `rawApiBodies.notKept` says why. The trial is graded either way.
+
+MST sets the variable over one your shell exports. One in the client's or case's `env` is used as given: Claude Code writes the bodies where it says, and MST keeps none. With [`telemetry.host`](./telemetry.md#host-telemetry), Claude Code's `api_request_body` and `api_response_body` events name each file as it is in the trial's artifacts (`body_ref`, as `claude-raw-api-bodies/<file>`).
+
+The bodies hold everything the model saw, including what the servers returned, so keep the runs that store them where that data may go. To keep none, set `"clientOptions": { "rawApiBodies": false }`.
+
 ## Client results
 
-`api` and `claude-code` return `ClientRunResult`, the same contract as other clients. Import its type from `@gleanwork/mcp-server-tester/evals`. The result contains `finalText`, ordered `events`, and optional `error`, `ending`, `usage`, `modelCalls`, `diagnostics` and `telemetry`.
+`api` and `claude-code` return `ClientRunResult`, the same contract as other clients. Import its type from `@gleanwork/mcp-server-tester/evals`. The result contains `finalText`, ordered `events`, and optional `error`, `ending`, `usage`, `modelCalls`, `diagnostics` and `telemetry`. A `claude-code` trial also reports its [raw API bodies](#claude-code-raw-api-bodies) as `artifacts`.
 
 MST derives the assertion view once from that result. A successful `runEvalCase` in Playwright and an eval client both expose `response.success`, `response.response`, `response.toolCalls`, `response.events` and `response.evidence` to validators and judges. The case's `transcript` retains non-tool events, such as skills and commands.
 
