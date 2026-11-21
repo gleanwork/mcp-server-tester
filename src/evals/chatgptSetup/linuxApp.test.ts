@@ -82,6 +82,7 @@ describe('deep-link URL encoding', () => {
       '%CE%B1%20%F0%9F%98%80%0A%21%2A%27%28%29~-_.'
     );
     expect(chatgptDraftUrl('/w', '')).toBe('codex://new?path=%2Fw');
+    expect(chatgptDraftUrl('/w', 'a&b', 'cloud')).toBe('codex://new?prompt=a%26b');
     expect(chatgptDraftUrl('/w', 'a&b')).toBe(
       'codex://new?path=%2Fw&prompt=a%26b'
     );

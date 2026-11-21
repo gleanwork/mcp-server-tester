@@ -519,7 +519,10 @@ export class ChatgptAppSession {
       throw new Error('ChatGPT app session is not running.');
     if (!lifecycle.controller.openPrompt)
       throw new Error('ChatGPT platform cannot open native drafts.');
-    await lifecycle.controller.openPrompt(prompt);
+    const firstParty = this.#launch?.config.firstParty;
+    const workLocation = firstParty && 'serverName' in firstParty
+      ? firstParty.workLocation : undefined;
+    await lifecycle.controller.openPrompt(prompt, workLocation);
   }
 
   assertCompatible(

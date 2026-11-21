@@ -65,7 +65,7 @@ export function redactAppLog(text: string, secrets: readonly string[]): string {
 
 export interface LinuxChatgptAppController extends ChatgptApplicationController {
   /** Hand a draft to the running app. Never sends it. No retry. */
-  openPrompt(prompt: string): Promise<void>;
+  openPrompt(prompt: string, workLocation?: 'local' | 'cloud'): Promise<void>;
 }
 
 /** Every UTF-8 byte but `A-Za-z0-9_.~-` percent-encoded, for the codex:// URL contract. */
@@ -75,9 +75,12 @@ export function quoteUrlComponent(value: string): string {
   return percentEncodeUtf8(value);
 }
 
-export function chatgptDraftUrl(workspace: string, prompt: string): string {
-  let url = `codex://new?path=${quoteUrlComponent(workspace)}`;
-  if (prompt) url += `&prompt=${quoteUrlComponent(prompt)}`;
+export function chatgptDraftUrl(
+  workspace: string, prompt: string, workLocation: 'local' | 'cloud' = 'local'
+): string {
+  let url = workLocation === 'cloud' ? 'codex://new' :
+    `codex://new?path=${quoteUrlComponent(workspace)}`;
+  if (prompt) url += `${url.includes('?') ? '&' : '?'}prompt=${quoteUrlComponent(prompt)}`;
   return url;
 }
 
@@ -186,11 +189,11 @@ export function createLinuxChatgptApp(
       if (!stopped) throw new CodexSetupError('app_stop_failed');
       child = undefined;
     },
-    async openPrompt(prompt) {
+    async openPrompt(prompt, workLocation = 'local') {
       if (!running() || child?.pid === undefined)
         throw new CodexSetupError('app_not_running');
       const main = child.pid;
-      const url = chatgptDraftUrl(options.workspace, prompt);
+      const url = chatgptDraftUrl(options.workspace, prompt, workLocation);
       if (Buffer.byteLength(url) > MAX_URL_BYTES)
         throw new CodexSetupError('prompt_too_large');
       // A short-lived second instance delivers the URL over the app's own IPC.
