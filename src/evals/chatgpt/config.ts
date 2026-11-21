@@ -21,6 +21,8 @@ export interface ChatgptAppConfig {
   /** Requested ChatGPT model ID (verified against the native turn record). */
   model?: string;
   reasoningEffort?: ChatgptAppReasoningEffort;
+  /** Keep only the trial's bound native thread's rollout trace. */
+  rolloutTrace?: boolean;
   /**
    * How the trial is matched to its native turn. `exact_prompt` (the
    * default) matches the unchanged prompt in a fresh native session;

@@ -97,6 +97,7 @@ describe('in-process Linux ChatGPT app controller', () => {
       CODEX_HOME: join(root, '.codex'),
       MST_CHATGPT_MCP_TOKEN_0: 'fixture-token',
       OPENAI_API_KEY: 'must-not-pass',
+      CODEX_ROLLOUT_TRACE_ROOT: join(root, 'trace'),
     });
     expect(await controller.state()).toEqual({ running: true });
     await controller.openPrompt('  α 😀\nline  ');
@@ -112,6 +113,7 @@ describe('in-process Linux ChatGPT app controller', () => {
       GTK_MODULES: 'gail:atk-bridge',
       DISPLAY: ':99',
       CODEX_HOME: join(root, '.codex'),
+      CODEX_ROLLOUT_TRACE_ROOT: join(root, 'trace'),
     });
     expect(main!.env.OPENAI_API_KEY).toBeUndefined();
     expect(handoff!.args).toEqual([
@@ -120,6 +122,7 @@ describe('in-process Linux ChatGPT app controller', () => {
     ]);
     // The hand-off process never receives MCP credentials.
     expect(handoff!.env.MST_CHATGPT_MCP_TOKEN_0).toBeUndefined();
+    expect(handoff!.env.CODEX_ROLLOUT_TRACE_ROOT).toBeUndefined();
     const helperPid = () => readFile(join(root, 'helper.pid'), 'utf8');
     await expect.poll(() => helperPid().catch(() => ''), SPAWN).not.toBe('');
     const group = [main!.pid, Number(await helperPid())];
@@ -133,6 +136,17 @@ describe('in-process Linux ChatGPT app controller', () => {
   it.each([
     ['a mismatched CODEX_HOME', { CODEX_HOME: '/home/user/.codex' }, invalid],
     ['an invalid token', { MST_CHATGPT_MCP_TOKEN_0: 'a\nb' }, invalid],
+    [
+      'a relative trace root',
+      { CODEX_ROLLOUT_TRACE_ROOT: 'relative' },
+      invalid,
+    ],
+    [
+      'an unnormalized trace root',
+      { CODEX_ROLLOUT_TRACE_ROOT: '/tmp/../trace' },
+      invalid,
+    ],
+    ['the filesystem trace root', { CODEX_ROLLOUT_TRACE_ROOT: '/' }, invalid],
     ['a hand-off without a main process', undefined, 'app_not_running'],
   ])('rejects %s before spawning', async (_, environment, code) => {
     const controller = await fakeApp();
