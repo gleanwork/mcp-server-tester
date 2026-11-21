@@ -29,7 +29,7 @@ async function source(accountId = expected.accountId) {
   await writeFile(authFile, JSON.stringify({
     auth_mode: 'chatgpt',
     tokens: { account_id: expected.accountId, access_token: access,
-      id_token: access, refresh_token: '' },
+      id_token: access, refresh_token: 'private-refresh-sentinel' },
   }), { mode: 0o600 });
   return { kind: 'native' as const, authFile };
 }

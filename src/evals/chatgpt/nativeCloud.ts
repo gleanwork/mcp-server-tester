@@ -37,8 +37,9 @@ async function accountToken(
     const auth: unknown = JSON.parse(bytes.subarray(0, bytesRead).toString('utf8'));
     if (!record(auth) || auth.auth_mode !== 'chatgpt' ||
         !record(auth.tokens) || auth.tokens.account_id !== expected.accountId ||
-        auth.tokens.refresh_token !== '' ||
-        auth.tokens.id_token !== auth.tokens.access_token ||
+        typeof auth.tokens.refresh_token !== 'string' ||
+        !auth.tokens.refresh_token ||
+        typeof auth.tokens.id_token !== 'string' ||
         typeof auth.tokens.access_token !== 'string' ||
         !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(auth.tokens.access_token))
       throw new Error('Invalid account source');
