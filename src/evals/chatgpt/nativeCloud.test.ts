@@ -27,7 +27,7 @@ async function source(accountId = expected.accountId) {
   const authFile = join(folder, 'auth.json');
   const access = token(accountId);
   await writeFile(authFile, JSON.stringify({
-    auth_mode: 'chatgptAuthTokens',
+    auth_mode: 'chatgpt',
     tokens: { account_id: expected.accountId, access_token: access,
       id_token: access, refresh_token: '' },
   }), { mode: 0o600 });

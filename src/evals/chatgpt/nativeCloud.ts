@@ -35,7 +35,7 @@ async function accountToken(
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
     if (bytesRead > MAX_AUTH_BYTES) throw new Error('Invalid account source');
     const auth: unknown = JSON.parse(bytes.subarray(0, bytesRead).toString('utf8'));
-    if (!record(auth) || auth.auth_mode !== 'chatgptAuthTokens' ||
+    if (!record(auth) || auth.auth_mode !== 'chatgpt' ||
         !record(auth.tokens) || auth.tokens.account_id !== expected.accountId ||
         auth.tokens.refresh_token !== '' ||
         auth.tokens.id_token !== auth.tokens.access_token ||

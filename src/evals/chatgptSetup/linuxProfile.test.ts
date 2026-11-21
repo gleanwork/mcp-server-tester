@@ -132,7 +132,7 @@ describe('Linux ChatGPT environment contract', () => {
     ).toThrow();
   });
 
-  it('imports a pinned account token into the fresh profile without a refresh token', async () => {
+  it('imports a pinned native account session into the fresh profile', async () => {
     const encode = (value: unknown) =>
       Buffer.from(JSON.stringify(value)).toString('base64url');
     const token = `${encode({ alg: 'RS256' })}.${encode({
@@ -145,12 +145,13 @@ describe('Linux ChatGPT environment contract', () => {
     await writeFile(
       source,
       JSON.stringify({
-        auth_mode: 'chatgptAuthTokens',
+        OPENAI_API_KEY: null,
+        auth_mode: 'chatgpt',
         tokens: {
           account_id: 'account12345678',
           access_token: token,
           id_token: token,
-          refresh_token: '',
+          refresh_token: 'private-refresh-sentinel',
         },
       }),
       { mode: 0o600 }
@@ -170,7 +171,7 @@ describe('Linux ChatGPT environment contract', () => {
       JSON.parse(
         await (await import('node:fs/promises')).readFile(target, 'utf8')
       ).tokens.refresh_token
-    ).toBe('');
+    ).toBe('private-refresh-sentinel');
     await expect(
       importAccountAuth(source, join(home, 'wrong-auth.json'), {
         ...firstParty,
@@ -191,12 +192,13 @@ describe('Linux ChatGPT environment contract', () => {
     await writeFile(
       source,
       JSON.stringify({
-        auth_mode: 'chatgptAuthTokens',
+        OPENAI_API_KEY: null,
+        auth_mode: 'chatgpt',
         tokens: {
           account_id: 'account12345678',
           access_token: token,
           id_token: token,
-          refresh_token: '',
+          refresh_token: 'private-refresh-sentinel',
         },
       }),
       { mode: 0o600 }

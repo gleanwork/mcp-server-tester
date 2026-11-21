@@ -362,10 +362,12 @@ export async function importAccountAuth(
     if (!record(tokens)) throw new Error();
     const token = tokens.access_token;
     if (
-      auth.auth_mode !== 'chatgptAuthTokens' ||
+      auth.auth_mode !== 'chatgpt' ||
+      auth.OPENAI_API_KEY !== null ||
       tokens.account_id !== firstParty.expectedAccountId ||
-      tokens.id_token !== token ||
-      tokens.refresh_token !== '' ||
+      typeof tokens.id_token !== 'string' ||
+      typeof tokens.refresh_token !== 'string' ||
+      !tokens.refresh_token ||
       typeof token !== 'string' ||
       !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)
     )
