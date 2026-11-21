@@ -411,7 +411,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       node.name.startsWith(RUN_LOCATION_TRIGGER));
   }
 
-  /** Select Cloud and verify the menu's checked state before any Send action. */
+  /** Select Cloud, then verify the menu and unchanged draft before Send. */
   async selectCloudLocation(nodes: N[], prompt: string): Promise<N[]> {
     const trigger = unique(this.locationTriggers(nodes), 'work_location_missing_or_ambiguous');
     this.step = 'work-location-open';
@@ -428,8 +428,10 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     this.step = 'work-location-verify';
     await this.action(() => this.desktop.clickObservedControl(nodes, reopen));
     menu = await this.wait((ns) => this.cloudLocationItem(ns).length === 1);
-    if (!unique(this.cloudLocationItem(menu), 'work_location_missing_or_ambiguous').selected)
-      throw new DriverFailure('work_location_not_selected');
+    // This app version draws the selected checkmark as an icon but does not
+    // expose its checked state through AT-SPI. The collector later requires a
+    // fresh Cloud-origin task for the exact prompt on this pinned account.
+    unique(this.cloudLocationItem(menu), 'work_location_missing_or_ambiguous');
     const close = unique(this.locationTriggers(menu), 'work_location_missing_or_ambiguous');
     this.step = 'work-location-close';
     await this.action(() => this.desktop.clickObservedControl(menu, close));

@@ -640,7 +640,7 @@ describe('submit', () => {
     ]);
   });
 
-  it('fails closed when Work Cloud cannot be selected or verified', async () => {
+  it('fails closed when Work Cloud cannot be selected', async () => {
     const missing = new FakeDesktop();
     await expect(driverFor(missing).submit('Find docs', 'chatgpt-work', 'cloud'))
       .rejects.toThrow(DriverFailure);
@@ -648,9 +648,8 @@ describe('submit', () => {
     const stale = new FakeDesktop();
     stale.cloudLocation = true;
     stale.cloudSelectedState = false;
-    await expect(driverFor(stale).submit('Find docs', 'chatgpt-work', 'cloud'))
-      .rejects.toThrow(DriverFailure);
-    expect(stale.names()).not.toContain('Send');
+    expect((await driverFor(stale).submit('Find docs', 'chatgpt-work', 'cloud')).status)
+      .toBe('submitted');
   });
 
   it('sends once on an exact echo or one trailing LF, with the unmodified prompt', async () => {
