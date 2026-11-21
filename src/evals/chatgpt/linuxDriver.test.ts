@@ -108,6 +108,7 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
   cloudLocation = false;
   cloudChecked = false;
   cloudSelectedState = true;
+  cloudTriggerChanges = false;
   snapshots = 0;
 
   constructor(public nodes: FakeNode[] = ready()) {}
@@ -164,7 +165,7 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
         : ready(CODEX);
     else if (name === 'Continue with current model') this.nodes = ready(CODEX);
     else if (name === 'Switch to Work') this.nodes = ready(WORK);
-    else if (name === 'Choose where to run this chat') {
+    else if (name.startsWith('Choose where to run this chat')) {
       if (this.nodes.some((item) => item.name === 'In the cloud'))
         this.nodes = this.nodes.filter((item) => item.name !== 'In the cloud');
       else this.nodes = [...this.nodes, node('In the cloud', 'menu item', {
@@ -173,6 +174,9 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
     } else if (name === 'In the cloud') {
       this.cloudChecked = true;
       this.nodes = this.nodes.filter((item) => item.name !== 'In the cloud');
+      if (this.cloudTriggerChanges)
+        this.nodes.find((item) => item.name === 'Choose where to run this chat')!.name =
+          'Choose where to run this chat. Local execution is starting…';
     }
     else if (name.startsWith('Switch mode'))
       this.nodes = [
@@ -626,11 +630,13 @@ describe('submit', () => {
   it('selects and verifies Work Cloud before its one Send', async () => {
     const desktop = new FakeDesktop();
     desktop.cloudLocation = true;
+    desktop.cloudTriggerChanges = true;
     const receipt = await driverFor(desktop).submit('Find docs', 'chatgpt-work', 'cloud');
     expect(receipt.status).toBe('submitted');
     expect(desktop.names()).toEqual([
       'open', 'Choose where to run this chat', 'In the cloud',
-      'Choose where to run this chat', 'Choose where to run this chat', 'Send',
+      'Choose where to run this chat. Local execution is starting…',
+      'Choose where to run this chat. Local execution is starting…', 'Send',
     ]);
   });
 

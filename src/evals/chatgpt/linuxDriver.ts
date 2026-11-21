@@ -405,12 +405,15 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     );
   }
 
+  private locationTriggers(nodes: readonly N[]): N[] {
+    return nodes.filter((node) => available(node) &&
+      [...BUTTONS, 'toggle button'].includes(node.role) &&
+      node.name.startsWith(RUN_LOCATION_TRIGGER));
+  }
+
   /** Select Cloud and verify the menu's checked state before any Send action. */
   async selectCloudLocation(nodes: N[], prompt: string): Promise<N[]> {
-    const trigger = unique(
-      controls(nodes, [RUN_LOCATION_TRIGGER], [...BUTTONS, 'toggle button']),
-      'work_location_missing_or_ambiguous'
-    );
+    const trigger = unique(this.locationTriggers(nodes), 'work_location_missing_or_ambiguous');
     this.step = 'work-location-open';
     await this.action(() => this.desktop.clickObservedControl(nodes, trigger));
     let menu = await this.wait((ns) => this.cloudLocationItem(ns).length === 1);
@@ -418,21 +421,16 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     this.step = 'work-location-select';
     await this.action(() => this.desktop.clickObservedControl(menu, cloud));
     nodes = await this.wait((ns) =>
-      this.cloudLocationItem(ns).length === 0 && this.ready(ns, 'chatgpt-work')
+      this.cloudLocationItem(ns).length === 0 &&
+      this.locationTriggers(ns).length === 1 && this.ready(ns, 'chatgpt-work')
     );
-    const reopen = unique(
-      controls(nodes, [RUN_LOCATION_TRIGGER], [...BUTTONS, 'toggle button']),
-      'work_location_missing_or_ambiguous'
-    );
+    const reopen = unique(this.locationTriggers(nodes), 'work_location_missing_or_ambiguous');
     this.step = 'work-location-verify';
     await this.action(() => this.desktop.clickObservedControl(nodes, reopen));
     menu = await this.wait((ns) => this.cloudLocationItem(ns).length === 1);
     if (!unique(this.cloudLocationItem(menu), 'work_location_missing_or_ambiguous').selected)
       throw new DriverFailure('work_location_not_selected');
-    const close = unique(
-      controls(menu, [RUN_LOCATION_TRIGGER], [...BUTTONS, 'toggle button']),
-      'work_location_missing_or_ambiguous'
-    );
+    const close = unique(this.locationTriggers(menu), 'work_location_missing_or_ambiguous');
     this.step = 'work-location-close';
     await this.action(() => this.desktop.clickObservedControl(menu, close));
     return this.wait(async (ns) =>
