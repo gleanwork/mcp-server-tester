@@ -386,3 +386,179 @@ console.log(JSON.stringify({ type: 'result', result: JSON.stringify(seen) }));
     );
   });
 });
+
+describe('claude-code raw API bodies', () => {
+  const copies: string[] = [];
+  afterEach(() => {
+    for (const copy of copies.splice(0))
+      fs.rmSync(copy, { recursive: true, force: true });
+  });
+  // Writes what Claude Code writes with OTEL_LOG_RAW_API_BODIES=file:<dir>,
+  // unless FAKE_BODIES is none: a request with the token in it, its response
+  // and the index. With host telemetry, it posts the request's event, which
+  // names the request's file.
+  function fakeClaude(): void {
+    fs.writeFileSync(
+      path.join(directory, 'claude'),
+      `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+(async () => {
+  const value = process.env.OTEL_LOG_RAW_API_BODIES ?? null;
+  const dir = value?.startsWith('file:') ? value.slice('file:'.length) : undefined;
+  if (dir && process.env.FAKE_BODIES !== 'none') {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'r1.request.json'), JSON.stringify({ model: 'claude-test', messages: [{ role: 'user', content: 'token ' + process.env.ACME_API_TOKEN }] }));
+    fs.writeFileSync(path.join(dir, 'req_1.response.json'), JSON.stringify({ id: 'msg_1' }));
+    fs.writeFileSync(path.join(dir, 'index.jsonl'), JSON.stringify({ message_id: 'msg_1', request_file: 'r1.request.json', response_file: 'req_1.response.json' }) + '\\n');
+  }
+  const endpoint = process.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT;
+  if (endpoint && dir) {
+    const session = process.argv[process.argv.indexOf('--session-id') + 1];
+    const attribute = (key, stringValue) => ({ key, value: { stringValue } });
+    await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ resourceLogs: [{ scopeLogs: [{ logRecords: [{
+        timeUnixNano: String(BigInt(Date.now()) * 1000000n),
+        attributes: [
+          attribute('event.name', 'api_request_body'),
+          attribute('session.id', session),
+          attribute('body_ref', path.join(dir, 'r1.request.json')),
+        ],
+      }] }] }] }),
+    });
+  }
+  console.log(JSON.stringify({ type: 'result', result: JSON.stringify({ value }) }));
+})();
+`,
+      { mode: 0o700 }
+    );
+  }
+  async function run(
+    client: Record<string, unknown>,
+    env: Record<string, string> = {},
+    context: ClientRunContext = {
+      evalConfig: { name: 'offline', datasets: [] },
+    }
+  ) {
+    fakeClaude();
+    const result = await getClient('claude-code').run!(
+      {
+        prompt: 'hello',
+        servers: [],
+        env: { PATH: directory, ACME_API_TOKEN: 'acme-secret-123456', ...env },
+      },
+      { type: 'claude-code', ...client },
+      context
+    );
+    if (result.artifacts) copies.push(result.artifacts.dir);
+    expect(result.error).toBeUndefined();
+    return {
+      result,
+      value: (JSON.parse(result.finalText) as { value: string | null }).value,
+    };
+  }
+
+  it('keeps the bodies Claude Code wrote, redacted, as client artifacts, and removes its own directories', async () => {
+    // The trial's directories are all made here: only the copy is left.
+    const tmp = fs.mkdtempSync(path.join(directory, 'tmp-'));
+    vi.stubEnv('TMPDIR', tmp);
+    const { result, value } = await run({});
+    expect(value).toMatch(
+      /^file:.+\/mst-claude-bodies-[^/]+\/claude-raw-api-bodies$/
+    );
+    expect(value!.startsWith(`file:${tmp}${path.sep}`)).toBe(true);
+    expect(result.telemetry?.rawApiBodies).toEqual({
+      requests: 1,
+      responses: 1,
+      files: 3,
+      bytes: expect.any(Number),
+    });
+    expect(result.artifacts).toMatchObject({
+      include: ['claude-raw-api-bodies'],
+      temporary: true,
+    });
+    const copy = path.join(result.artifacts!.dir, 'claude-raw-api-bodies');
+    expect(fs.readdirSync(copy).sort()).toEqual([
+      'index.jsonl',
+      'r1.request.json',
+      'req_1.response.json',
+    ]);
+    const request = fs.readFileSync(path.join(copy, 'r1.request.json'), 'utf8');
+    expect(request).toContain('[REDACTED]');
+    expect(request).not.toContain('acme-secret-123456');
+    expect(fs.readdirSync(tmp)).toEqual([path.basename(result.artifacts!.dir)]);
+  });
+
+  it('keeps none with rawApiBodies: false', async () => {
+    vi.stubEnv('OTEL_LOG_RAW_API_BODIES', undefined);
+    const { result, value } = await run({ rawApiBodies: false });
+    expect(value).toBeNull();
+    expect(result.artifacts).toBeUndefined();
+    expect(result.telemetry?.rawApiBodies).toBeUndefined();
+  });
+
+  it('writes them in a directory of its own over one the shell names', async () => {
+    vi.stubEnv('OTEL_LOG_RAW_API_BODIES', `file:${directory}`);
+    const { result, value } = await run({});
+    expect(value).toMatch(/\/mst-claude-bodies-[^/]+\/claude-raw-api-bodies$/);
+    expect(result.telemetry?.rawApiBodies).toMatchObject({
+      requests: 1,
+      responses: 1,
+    });
+  });
+
+  it("leaves them where the client's env names, and keeps none", async () => {
+    const own = path.join(directory, 'own-bodies');
+    const { result, value } = await run({
+      env: { OTEL_LOG_RAW_API_BODIES: `file:${own}` },
+    });
+    expect(value).toBe(`file:${own}`);
+    expect(result.artifacts).toBeUndefined();
+    expect(result.telemetry?.rawApiBodies).toEqual({
+      notKept:
+        "The client's env sets OTEL_LOG_RAW_API_BODIES, so Claude Code wrote its raw API bodies where that says, and MST kept none.",
+    });
+    expect(fs.readdirSync(own).sort()).toEqual([
+      'index.jsonl',
+      'r1.request.json',
+      'req_1.response.json',
+    ]);
+  });
+
+  it('says so when Claude Code wrote none', async () => {
+    const { result } = await run({}, { FAKE_BODIES: 'none' });
+    expect(result.artifacts).toBeUndefined();
+    expect(result.telemetry?.rawApiBodies).toEqual({
+      requests: 0,
+      responses: 0,
+      notKept:
+        'Claude Code wrote no raw API bodies. Claude Code 2.1.274 or later writes them, unless managed settings turn them off.',
+    });
+  });
+
+  it("names each body event's file as it is in the trial's artifacts (telemetry.host)", async () => {
+    const { result } = await run({}, undefined, {
+      evalConfig: { name: 'offline', datasets: [], telemetry: { host: {} } },
+      env: {},
+    });
+    expect(result.hostTelemetry?.events).toEqual([
+      expect.objectContaining({
+        name: 'api_request_body',
+        attributes: expect.objectContaining({
+          body_ref: 'claude-raw-api-bodies/r1.request.json',
+        }),
+      }),
+    ]);
+    expect(
+      fs.existsSync(
+        path.join(
+          result.artifacts!.dir,
+          'claude-raw-api-bodies',
+          'r1.request.json'
+        )
+      )
+    ).toBe(true);
+  });
+});

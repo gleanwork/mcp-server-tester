@@ -785,6 +785,7 @@ claude-code  The Claude Code CLI, headless
     isolate       true
     cwd           empty temporary directory, removed after the trial
     env           inherited environment; no extra variables
+    rawApiBodies  true
 ```
 
 `--json` adds the same `options` JSON Schema to each listed client that `show --json` returns. Literal defaults use `default`; defaults that depend on the model, OS or environment use `x-defaultDescription`. The same field marks an option as `required` or its default as `not declared`. A missing plugin declaration stays unknown; MST does not run the plugin to infer it. Removed options remain rejected in the JSON Schema and are omitted from the text option table. A plugin schema that cannot form one table, such as a union, prints as JSON Schema in text mode too.
