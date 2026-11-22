@@ -19,10 +19,10 @@ More desktop clients will come. Each one today means a new automation for each O
 
 - **A client is one of three kinds, and the kind decides how MST runs it.**
 
-  | Kind          | Built-in clients                | How MST runs it                                            |
-  | ------------- | ------------------------------- | ---------------------------------------------------------- |
-  | The API       | `api`                           | Calls the model's provider and the servers' tools itself   |
-  | A CLI         | `claude-code`, `codex-cli`      | Starts the tool as a process and reads what it writes      |
+  | Kind          | Built-in clients                 | How MST runs it                                             |
+  | ------------- | -------------------------------- | ----------------------------------------------------------- |
+  | The API       | `api`                            | Calls the model's provider and the servers' tools itself    |
+  | A CLI         | `claude-code`, `codex-cli`       | Starts the tool as a process and reads what it writes       |
   | A desktop app | `cowork`, `chatgpt`, `codex-app` | Operates the app's window through the OS accessibility tree |
 
   A plugin's client is one of these kinds too. This replaces ADR 0011's rule that the client and the OS decide.
@@ -66,14 +66,14 @@ More desktop clients will come. Each one today means a new automation for each O
 
 As of 2026-11-21. "Tried" means a live check; nothing here is a complete `mst run`.
 
-| Client and OS                  | Driven today by         | State                | What is known                                                                                                                                                                         |
-| ------------------------------ | ----------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cowork`, first-party, macOS   | Computer Use            | Built, not merged    | The comparison above. Not tried: a live approval.                                                                                                                                     |
-| `cowork`, third-party, macOS   | Computer Use            | Not tried            | The same app as the row above.                                                                                                                                                        |
-| `cowork`, Linux                | Cowork's AT-SPI adapter | Tried in a spike     | The tree has the same names and depths as the adapter's. Clicks work. Prompts go in by a clipboard paste, 16,391 characters and 300 lines included. Not tried: sending.               |
-| `chatgpt`, `codex-app`, macOS  | Computer Use            | Read only            | On ChatGPT 26.1111.21308, `agent-desktop` reads a complete tree (1,240 nodes). The prompt takes a set value and the send control takes a click. Nothing was pressed.                                            |
-| `chatgpt`, `codex-app`, Linux  | ChatGPT's AT-SPI adapter | Not tried            | Today its first-run profession choice needs a real mouse click.                                                                                                                       |
-| Any client, Windows            | Nothing                 | Not tried            | MST has no setup for a desktop app on Windows.                                                                                                                                        |
+| Client and OS                 | Driven today by          | State             | What is known                                                                                                                                                           |
+| ----------------------------- | ------------------------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cowork`, first-party, macOS  | Computer Use             | Built, not merged | The comparison above. Not tried: a live approval.                                                                                                                       |
+| `cowork`, third-party, macOS  | Computer Use             | Not tried         | The same app as the row above.                                                                                                                                          |
+| `cowork`, Linux               | Cowork's AT-SPI adapter  | Tried in a spike  | The tree has the same names and depths as the adapter's. Clicks work. Prompts go in by a clipboard paste, 16,391 characters and 300 lines included. Not tried: sending. |
+| `chatgpt`, `codex-app`, macOS | Computer Use             | Read only         | On ChatGPT 26.1111.21308, `agent-desktop` reads a complete tree (1,240 nodes). The prompt takes a set value and the send control takes a click. Nothing was pressed.    |
+| `chatgpt`, `codex-app`, Linux | ChatGPT's AT-SPI adapter | Not tried         | Today its first-run profession choice needs a real mouse click.                                                                                                         |
+| Any client, Windows           | Nothing                  | Not tried         | MST has no setup for a desktop app on Windows.                                                                                                                          |
 
 ### Exceptions
 
