@@ -28,6 +28,10 @@ import packageJson from '../../../package.json' with { type: 'json' };
 import { resolveLLMEndpoint } from '../../llm/endpoint.js';
 import { getClient } from '../builtinClients.js';
 import { bareClientName } from '../clientNames.js';
+import {
+  chosenDesktopAutomation,
+  DESKTOP_AUTOMATION_ENV,
+} from '../desktopUi/automation.js';
 import { machineRunner } from './channel.js';
 import { readShardBundle } from './protocol.js';
 import { stageInstalledPackage } from './installedPackage.js';
@@ -292,6 +296,12 @@ export function dockerRunArgs(options: {
   inference?: { baseURL: string; authScheme: 'bearer' | 'x-api-key' };
   /** Forwarded to the container's desktop-ready helper when set. */
   warmVmTimeoutS?: string;
+  /**
+   * The desktop automation the coordinator's environment chose
+   * (`MST_DESKTOP_AUTOMATION`, ADR 0017), forwarded so the container's
+   * session and drivers run on it. Undefined: the client's default.
+   */
+  desktopAutomation?: string;
   /** The container's memory and CPUs. Default: no limits. */
   limits?: ContainerLimits;
 }): string[] {
@@ -334,6 +344,9 @@ export function dockerRunArgs(options: {
     // falls back to its own default.
     ...(warm !== undefined && /^[1-9][0-9]*$/.test(warm)
       ? ['--env', `MST_COWORK_WARM_VM_TIMEOUT_S=${warm}`]
+      : []),
+    ...(options.desktopAutomation !== undefined
+      ? ['--env', `${DESKTOP_AUTOMATION_ENV}=${options.desktopAutomation}`]
       : []),
     // Out of memory, the kernel kills a process in this container, not the
     // Docker daemon or another shard's.
@@ -1087,6 +1100,9 @@ function openDocker(
               inference:
                 secret && 'cowork' in secret ? secret.cowork : undefined,
               warmVmTimeoutS: process.env.MST_COWORK_WARM_VM_TIMEOUT_S,
+              // Checked here, so a value MST doesn't know fails before a
+              // container starts.
+              desktopAutomation: chosenDesktopAutomation(process.env),
               limits,
             })
           : chatgptDockerRunArgs({

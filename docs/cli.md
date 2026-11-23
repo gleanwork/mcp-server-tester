@@ -28,6 +28,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [open - Open a Run's Report](#open---open-a-runs-report)
 - [cowork setup - Prepare Claude Desktop](#cowork-setup---prepare-claude-desktop)
 - [cowork restore-connectors - Restore Cloud Connector Settings](#cowork-restore-connectors---restore-cloud-connector-settings)
+- [desktop - Read What MST Sees of a Desktop App](#desktop---read-what-mst-sees-of-a-desktop-app)
 - [runner setup - Prepare a Runner](#runner-setup---prepare-a-runner)
 
 ## Global options
@@ -1265,6 +1266,21 @@ npx mst cowork restore-connectors [--recover-stale-lock]
 ```
 
 Restores the account connector permissions that a killed first-party `cowork` run left in its recovery journal, on macOS. It runs no eval and does not drive the app. It reads the recorder port from the shell, not from an eval config. It restores only after the account, concurrent-edit, write-outcome and task-completion checks pass, and otherwise keeps the journal and desktop lock. A task still running is first ended from claude.ai (Skip on an open question, then Stop; never an answer or approval), and a transient claude.ai refusal is retried with a page reload. `--recover-stale-lock` removes a desktop lease only when its local owner is provably dead; it does not prove a cloud task finished or a write settled. See [Recover connector settings](./cowork.md#recover-connector-settings).
+
+## `desktop` - Read What MST Sees of a Desktop App
+
+```bash
+npx mst desktop snapshot --app Claude --automation agent-desktop --out claude-idle.json
+npx mst desktop parity --app Claude --out parity.json
+```
+
+The read-only checks of [ADR 0017](./adr/0017-desktop-clients-share-one-automation.md). Both name the running app by its accessible application name (`Claude`, `ChatGPT`), read one screen of it, and press, type and open nothing.
+
+`snapshot` reads through one transport of the desktop interface and writes the controls MST's drivers would see, with the transport, the OS, the time and how long the read took. `--automation` is `atspi` (the default on Linux) or `agent-desktop` (the only transport that reads a tree on macOS, so the default there). The output is JSON, to stdout or `--out`.
+
+`parity` reads through the default transport and through `agent-desktop`, one after the other, and lists every control that differs by role, name or state. It exits 1 when any does. `--out` writes the report and both snapshots as JSON. On macOS the default (Computer Use) reads no tree, so there is nothing to compare and the command says so.
+
+`agent-desktop` is an optional dependency of MST; a machine without it fails with `agent_desktop_not_installed`. How the checks fit into proving a transport is in [docs/desktop-validation/](./desktop-validation/README.md).
 
 ## `runner setup` - Prepare a Runner
 

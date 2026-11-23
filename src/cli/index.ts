@@ -53,6 +53,7 @@ import {
 } from './commands/datasets/index.js';
 import { listJudgeCommand, showJudge } from './commands/judges/index.js';
 import { listClientCommand, showClient } from './commands/clients/index.js';
+import { desktopParity, desktopSnapshot } from './commands/desktop/index.js';
 import {
   checkJudgeCommand,
   type JudgeCheckCommandOptions,
@@ -779,6 +780,39 @@ coworkCommand
     'Reclaim a desktop lock only when its local owner is provably stopped'
   )
   .action(restoreCoworkConnectorsCommand);
+
+// Desktop command: the read-only checks of a desktop transport (ADR 0017)
+const desktopCommand = program
+  .command('desktop')
+  .description(
+    'Read what MST sees of a running desktop app, through one or both transports of the desktop interface'
+  );
+desktopCommand
+  .command('snapshot')
+  .description(
+    'Read one screen of a running app and write the controls MST would see; presses nothing'
+  )
+  .requiredOption(
+    '--app <name>',
+    'The accessible application name, such as Claude or ChatGPT'
+  )
+  .option(
+    '--automation <name>',
+    'The transport to read through: atspi or agent-desktop (default: the default on this OS)'
+  )
+  .option('--out <file>', 'Write the snapshot here instead of stdout')
+  .action(desktopSnapshot);
+desktopCommand
+  .command('parity')
+  .description(
+    'Read one screen through the default transport and agent-desktop, and list every control that differs; exits 1 when any does'
+  )
+  .requiredOption(
+    '--app <name>',
+    'The accessible application name, such as Claude or ChatGPT'
+  )
+  .option('--out <file>', 'Write the report and both snapshots here as JSON')
+  .action(desktopParity);
 
 // Open command
 program

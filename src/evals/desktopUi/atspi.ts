@@ -3,8 +3,7 @@
  * client, for an app on Linux. Native primitives only: which app this is and
  * how a link reaches it come from the caller.
  */
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { isAbsolute } from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
 import {
   ATSPI_COMPONENT,
   ATSPI_HYPERTEXT,
@@ -23,6 +22,7 @@ import {
   type DesktopUi,
   type DesktopUiNode,
 } from './desktopUi.js';
+import { openLinuxLink } from './linuxLink.js';
 
 const SKIPPED_ROLES = new Set(['table', 'tree table']);
 const TEXT_ROLES = new Set(['static', 'text', 'label', 'paragraph', 'heading']);
@@ -132,30 +132,14 @@ export async function connectAtspiDesktopUi(
       throw error;
     }
   }
-  /** One bounded run of the URL opener, without a shell. Never retried. */
   async function open(url: string, code: string): Promise<void> {
     check();
-    const opener = options.urlOpener;
-    if (opener !== undefined && !isAbsolute(opener))
-      throw new DesktopUiError('invalid_url_opener');
-    await new Promise<void>((resolve, reject) => {
-      const child = execFile(
-        opener ?? 'xdg-open',
-        [url],
-        {
-          env,
-          shell: false,
-          timeout: Math.min(15_000, remainingMs(deadlineAt)),
-          killSignal: 'SIGKILL',
-          maxBuffer: 64 * 1024,
-        },
-        (error) => {
-          processes.delete(child);
-          if (error) reject(new DesktopUiError(code));
-          else resolve();
-        }
-      );
-      processes.add(child);
+    await openLinuxLink(url, code, {
+      env,
+      deadlineAt,
+      ...(options.urlOpener !== undefined ? { opener: options.urlOpener } : {}),
+      track: (child, done) =>
+        done ? processes.delete(child) : processes.add(child),
     });
   }
 

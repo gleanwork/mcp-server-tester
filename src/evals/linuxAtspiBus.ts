@@ -188,6 +188,11 @@ class Connection {
     });
   }
 
+  /** Stops the open connection from keeping the process running. */
+  unref(): void {
+    this.socket.unref();
+  }
+
   close(): void {
     this.fail(new AtspiError('accessibility_bus_closed'));
     this.socket.destroy();
@@ -510,6 +515,11 @@ export class AtspiBus {
         body: [x, y, coords],
       })
     );
+  }
+
+  /** Stops the open connection from keeping the process running. */
+  unref(): void {
+    this.connection.unref();
   }
 
   close(): void {
