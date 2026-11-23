@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { connectLinuxUi } from './linuxAtspi.js';
+import { connectLinuxUi } from './linuxConnect.js';
 import type { LinuxUi, LinuxUiNode } from './linuxUi.js';
 
 const external = vi.hoisted(() => ({

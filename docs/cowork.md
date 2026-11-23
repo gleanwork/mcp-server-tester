@@ -861,8 +861,10 @@ the bytes present at audit time; notices contain no original digest to authentic
   with the test environment; see [ChatGPT desktop](./chatgpt-desktop.md).
 - `cowork/interaction.ts`: shared receipts, error classifications, and scoped telemetry. New Linux receipts omit `driver`; old receipts remain readable.
 - `cowork/linux.ts`: separate first-party and third-party adapters, with runtime guards, readiness checks and execution against a caller-owned desktop.
-- `cowork/linuxUi.ts`: the bounded native UI interface and driver receipts.
-- `cowork/linuxAtspi.ts`: TypeScript AT-SPI primitives over D-Bus, with bounded tree reads, native actions and clipboard input.
+- `desktopUi/desktopUi.ts`: the desktop interface, which no product owns: a snapshot of the app's window, a control's text, and the actions on a control.
+- `desktopUi/atspi.ts`: the desktop interface over AT-SPI on D-Bus, in TypeScript, with bounded tree reads, native actions and clipboard input.
+- `cowork/linuxUi.ts`: Claude Desktop over the desktop interface (its application names and its links), and the driver receipts.
+- `cowork/linuxConnect.ts`: connects a driver process to the session's Claude Desktop. The one place Cowork on Linux names a transport.
 - `cowork/linuxFirstPartyDriver.ts`: first-party readiness, model selection, single submission, scoped HITL and diagnostics over the UI interface.
 - `cowork/linuxFirstPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-first-party-runtime`, accepting JSON input and returning a receipt.
 - `cowork/linuxThirdPartyDriver.ts`: managed third-party readiness, reset, single submission, HITL and clarifying-question answers over the UI interface; no lifecycle or answer parsing.
