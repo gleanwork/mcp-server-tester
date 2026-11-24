@@ -118,8 +118,11 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
 
   async snapshot(): Promise<FakeNode[]> {
     this.snapshots += 1;
-    if (this.cloudChecked && this.cloudSendSettle > 0 &&
-        --this.cloudSendSettle === 0)
+    if (
+      this.cloudChecked &&
+      this.cloudSendSettle > 0 &&
+      --this.cloudSendSettle === 0
+    )
       this.nodes.find((item) => item.name === 'Send')!.enabled = true;
     return this.nodes;
   }
@@ -172,19 +175,23 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
     else if (name.startsWith('Choose where to run this chat')) {
       if (this.nodes.some((item) => item.name === 'In the cloud'))
         this.nodes = this.nodes.filter((item) => item.name !== 'In the cloud');
-      else this.nodes = [...this.nodes, node('In the cloud', 'menu item', {
-        selected: this.cloudChecked && this.cloudSelectedState,
-      })];
+      else
+        this.nodes = [
+          ...this.nodes,
+          node('In the cloud', 'menu item', {
+            selected: this.cloudChecked && this.cloudSelectedState,
+          }),
+        ];
     } else if (name === 'In the cloud') {
       this.cloudChecked = true;
       this.nodes = this.nodes.filter((item) => item.name !== 'In the cloud');
       if (this.cloudSendSettle > 0)
         this.nodes.find((item) => item.name === 'Send')!.enabled = false;
       if (this.cloudTriggerChanges)
-        this.nodes.find((item) => item.name === 'Choose where to run this chat')!.name =
-          'Choose where to run this chat. Local execution is starting…';
-    }
-    else if (name.startsWith('Switch mode'))
+        this.nodes.find(
+          (item) => item.name === 'Choose where to run this chat'
+        )!.name = 'Choose where to run this chat. Local execution is starting…';
+    } else if (name.startsWith('Switch mode'))
       this.nodes = [
         ...this.nodes,
         node(WORK_ITEM, 'menu item'),
@@ -212,6 +219,40 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
       await original(prompt);
       after(prompt);
     };
+  }
+}
+
+class ModelDesktop extends FakeDesktop {
+  keepDraftOnSelection = true;
+  constructor(
+    private current = 'GPT-6.2 Sol Medium',
+    private readonly choices = ['GPT-6.2 Sol', 'GPT-6.1 Sol']
+  ) {
+    super();
+  }
+
+  override async openPrompt(prompt: string): Promise<void> {
+    await super.openPrompt(prompt);
+    this.nodes.push(node(this.current));
+  }
+
+  override async activate(control: FakeNode, allowed: readonly string[]) {
+    await super.activate(control, allowed);
+    if (control.name === this.current && control.role === 'button')
+      this.nodes.push(node('Select model', 'menu item'));
+    else if (control.name === 'Select model') {
+      this.nodes = this.nodes.filter((item) => item.name !== 'Select model');
+      this.nodes.push(
+        ...this.choices.map((name) => node(name, 'radio menu item'))
+      );
+    } else if (control.role === 'radio menu item') {
+      this.current = `${control.name} Medium`;
+      this.nodes = this.nodes.filter((item) => item.role !== 'radio menu item');
+      this.nodes.find(
+        (item) => item.role === 'button' && /^GPT-/.test(item.name)
+      )!.name = this.current;
+      if (!this.keepDraftOnSelection) composer(this.nodes).text = '';
+    }
   }
 }
 
@@ -633,30 +674,117 @@ describe('setup (prepare)', () => {
 });
 
 describe('submit', () => {
+  it('selects the configured Work model before one Send', async () => {
+    const desktop = new ModelDesktop();
+    const receipt = await driverFor(desktop).submit(
+      'Find docs',
+      'chatgpt-work',
+      undefined,
+      'gpt-6.1-sol'
+    );
+    expect(receipt.status).toBe('submitted');
+    expect(desktop.names()).toEqual([
+      'open',
+      'GPT-6.2 Sol Medium',
+      'Select model',
+      'GPT-6.1 Sol',
+      'Send',
+    ]);
+    expect(composer(desktop.nodes).text).toBe('Find docs');
+  });
+
+  it('accepts the Cloud runtime suffix and skips an already selected model', async () => {
+    const desktop = new ModelDesktop('GPT-6.2 Sol Medium');
+    expect(
+      (
+        await driverFor(desktop).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.2-sol-wm'
+        )
+      ).status
+    ).toBe('submitted');
+    expect(desktop.names()).toEqual(['open', 'Send']);
+  });
+
+  it('fails before Send when the requested model is unavailable or invalid', async () => {
+    const missing = new ModelDesktop();
+    expect(
+      await failure(
+        driverFor(missing).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.3-sol'
+        )
+      )
+    ).toBe('model_unavailable');
+    expect(missing.names()).not.toContain('Send');
+    const invalid = new ModelDesktop();
+    expect(
+      await failure(
+        driverFor(invalid).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.1-sol; click anything'
+        )
+      )
+    ).toBe('invalid_model');
+    expect(invalid.names()).toEqual([]);
+  });
+
+  it('does not send if changing models clears the draft', async () => {
+    const desktop = new ModelDesktop();
+    desktop.keepDraftOnSelection = false;
+    expect(
+      await failure(
+        driverFor(desktop).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.1-sol'
+        )
+      )
+    ).toBe('model_not_selected');
+    expect(desktop.names()).not.toContain('Send');
+  });
+
   it('selects and verifies Work Cloud before its one Send', async () => {
     const desktop = new FakeDesktop();
     desktop.cloudLocation = true;
     desktop.cloudTriggerChanges = true;
     desktop.cloudSendSettle = 6;
-    const receipt = await driverFor(desktop).submit('Find docs', 'chatgpt-work', 'cloud');
+    const receipt = await driverFor(desktop).submit(
+      'Find docs',
+      'chatgpt-work',
+      'cloud'
+    );
     expect(receipt.status).toBe('submitted');
     expect(desktop.names()).toEqual([
-      'open', 'Choose where to run this chat', 'In the cloud',
+      'open',
+      'Choose where to run this chat',
+      'In the cloud',
       'Choose where to run this chat. Local execution is starting…',
-      'Choose where to run this chat. Local execution is starting…', 'Send',
+      'Choose where to run this chat. Local execution is starting…',
+      'Send',
     ]);
   });
 
   it('fails closed when Work Cloud cannot be selected', async () => {
     const missing = new FakeDesktop();
-    await expect(driverFor(missing).submit('Find docs', 'chatgpt-work', 'cloud'))
-      .rejects.toThrow(DriverFailure);
+    await expect(
+      driverFor(missing).submit('Find docs', 'chatgpt-work', 'cloud')
+    ).rejects.toThrow(DriverFailure);
     expect(missing.names()).not.toContain('Send');
     const stale = new FakeDesktop();
     stale.cloudLocation = true;
     stale.cloudSelectedState = false;
-    expect((await driverFor(stale).submit('Find docs', 'chatgpt-work', 'cloud')).status)
-      .toBe('submitted');
+    expect(
+      (await driverFor(stale).submit('Find docs', 'chatgpt-work', 'cloud'))
+        .status
+    ).toBe('submitted');
   });
 
   it('sends once on an exact echo or one trailing LF, with the unmodified prompt', async () => {

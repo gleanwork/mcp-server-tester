@@ -36,6 +36,8 @@ const MENU_LABELS: Record<ChatgptSurface, string> = {
 const BUTTONS = ['button', 'push button'];
 const RUN_LOCATION_TRIGGER = 'Choose where to run this chat';
 const RUN_LOCATION_ITEMS = ['menu item', 'check menu item', 'radio button'];
+const MODEL_ID = /^gpt-(\d+(?:\.\d+)?)-([a-z]+)(?:-wm)?$/;
+const MODEL_BUTTON = /^GPT-\d+(?:\.\d+)? [A-Z][a-z]+(?: .*)?$/;
 export const INPUT_LIMIT = 2 * 1024 * 1024;
 /**
  * After the one deep-link hand-off the draft usually appears in 1-3 s, but
@@ -244,6 +246,14 @@ function isSurface(value: unknown): value is ChatgptSurface {
   return value === 'chatgpt-work' || value === 'codex';
 }
 
+function modelDisplay(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new DriverFailure('invalid_model');
+  const match = MODEL_ID.exec(value);
+  if (!match) throw new DriverFailure('invalid_model');
+  return `GPT-${match[1]} ${match[2]![0]!.toUpperCase()}${match[2]!.slice(1)}`;
+}
+
 type Predicate<N> = (nodes: N[]) => Promise<boolean> | boolean;
 
 export interface DriverOptions {
@@ -399,32 +409,119 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
   }
 
   private cloudLocationItem(nodes: readonly N[]): N[] {
-    return nodes.filter((node) =>
-      available(node) && RUN_LOCATION_ITEMS.includes(node.role) &&
-      (node.name === 'In the cloud' || node.name.startsWith('In the cloud '))
+    return nodes.filter(
+      (node) =>
+        available(node) &&
+        RUN_LOCATION_ITEMS.includes(node.role) &&
+        (node.name === 'In the cloud' || node.name.startsWith('In the cloud '))
     );
   }
 
   private locationTriggers(nodes: readonly N[]): N[] {
-    return nodes.filter((node) => available(node) &&
-      [...BUTTONS, 'toggle button'].includes(node.role) &&
-      node.name.startsWith(RUN_LOCATION_TRIGGER));
+    return nodes.filter(
+      (node) =>
+        available(node) &&
+        [...BUTTONS, 'toggle button'].includes(node.role) &&
+        node.name.startsWith(RUN_LOCATION_TRIGGER)
+    );
+  }
+
+  private modelButtons(nodes: readonly N[]): N[] {
+    return nodes.filter(
+      (node) =>
+        available(node) &&
+        BUTTONS.includes(node.role) &&
+        MODEL_BUTTON.test(node.name)
+    );
+  }
+
+  /** Select the exact Work model in the native picker before sending a draft. */
+  async selectModel(
+    nodes: N[],
+    requested: string,
+    prompt: string
+  ): Promise<N[]> {
+    const current = unique(
+      this.modelButtons(nodes),
+      'model_missing_or_ambiguous'
+    );
+    if (current.name === requested || current.name.startsWith(`${requested} `))
+      return nodes;
+    this.step = 'model-open';
+    await this.action(() => this.desktop.clickObservedControl(nodes, current));
+    const menu = await this.wait(
+      (ns) => controls(ns, ['Select model'], ['menu item']).length === 1
+    );
+    const openPicker = unique(
+      controls(menu, ['Select model'], ['menu item']),
+      'model_missing_or_ambiguous'
+    );
+    await this.action(() =>
+      this.desktop.clickObservedControl(menu, openPicker)
+    );
+    const picker = await this.wait((ns) =>
+      ns.some(
+        (node) =>
+          available(node) &&
+          node.role === 'radio menu item' &&
+          MODEL_BUTTON.test(node.name)
+      )
+    );
+    const item = unique(
+      picker.filter(
+        (node) =>
+          available(node) &&
+          node.role === 'radio menu item' &&
+          node.name === requested
+      ),
+      'model_unavailable'
+    );
+    this.step = 'model-select';
+    await this.action(() => this.desktop.clickObservedControl(picker, item));
+    this.step = 'model-verify';
+    try {
+      return await this.wait(async (ns) => {
+        const selected = this.modelButtons(ns);
+        return (
+          selected.length === 1 &&
+          (selected[0]!.name === requested ||
+            selected[0]!.name.startsWith(`${requested} `)) &&
+          this.ready(ns, 'chatgpt-work') &&
+          matchesPrompt(await this.desktop.text(composer(ns)), prompt)
+        );
+      });
+    } catch (error) {
+      if (codeOf(error) === 'state_transition_unobserved')
+        throw new DriverFailure('model_not_selected');
+      throw error;
+    }
   }
 
   /** Select Cloud, then verify the menu and unchanged draft before Send. */
   async selectCloudLocation(nodes: N[], prompt: string): Promise<N[]> {
-    const trigger = unique(this.locationTriggers(nodes), 'work_location_missing_or_ambiguous');
+    const trigger = unique(
+      this.locationTriggers(nodes),
+      'work_location_missing_or_ambiguous'
+    );
     this.step = 'work-location-open';
     await this.action(() => this.desktop.clickObservedControl(nodes, trigger));
     let menu = await this.wait((ns) => this.cloudLocationItem(ns).length === 1);
-    const cloud = unique(this.cloudLocationItem(menu), 'work_location_missing_or_ambiguous');
+    const cloud = unique(
+      this.cloudLocationItem(menu),
+      'work_location_missing_or_ambiguous'
+    );
     this.step = 'work-location-select';
     await this.action(() => this.desktop.clickObservedControl(menu, cloud));
-    nodes = await this.wait((ns) =>
-      this.cloudLocationItem(ns).length === 0 &&
-      this.locationTriggers(ns).length === 1 && this.ready(ns, 'chatgpt-work')
+    nodes = await this.wait(
+      (ns) =>
+        this.cloudLocationItem(ns).length === 0 &&
+        this.locationTriggers(ns).length === 1 &&
+        this.ready(ns, 'chatgpt-work')
     );
-    const reopen = unique(this.locationTriggers(nodes), 'work_location_missing_or_ambiguous');
+    const reopen = unique(
+      this.locationTriggers(nodes),
+      'work_location_missing_or_ambiguous'
+    );
     this.step = 'work-location-verify';
     await this.action(() => this.desktop.clickObservedControl(nodes, reopen));
     menu = await this.wait((ns) => this.cloudLocationItem(ns).length === 1);
@@ -432,14 +529,18 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     // expose its checked state through AT-SPI. The collector later requires a
     // fresh Cloud-origin task for the exact prompt on this pinned account.
     unique(this.cloudLocationItem(menu), 'work_location_missing_or_ambiguous');
-    const close = unique(this.locationTriggers(menu), 'work_location_missing_or_ambiguous');
+    const close = unique(
+      this.locationTriggers(menu),
+      'work_location_missing_or_ambiguous'
+    );
     this.step = 'work-location-close';
     await this.action(() => this.desktop.clickObservedControl(menu, close));
-    return this.wait(async (ns) =>
-      this.cloudLocationItem(ns).length === 0 &&
-      this.ready(ns, 'chatgpt-work') &&
-      controls(ns, ['Send']).length === 1 &&
-      matchesPrompt(await this.desktop.text(composer(ns)), prompt)
+    return this.wait(
+      async (ns) =>
+        this.cloudLocationItem(ns).length === 0 &&
+        this.ready(ns, 'chatgpt-work') &&
+        controls(ns, ['Send']).length === 1 &&
+        matchesPrompt(await this.desktop.text(composer(ns)), prompt)
     );
   }
 
@@ -651,13 +752,23 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     return this.receipt('ready', surface);
   }
 
-  async submit(prompt: unknown, surface: unknown, workLocation?: unknown): Promise<ChatgptReceipt> {
+  async submit(
+    prompt: unknown,
+    surface: unknown,
+    workLocation?: unknown,
+    model?: unknown
+  ): Promise<ChatgptReceipt> {
     if (typeof prompt !== 'string' || !prompt.trim())
       throw new DriverFailure('invalid_prompt');
     if (!isSurface(surface)) throw new DriverFailure('invalid_surface');
-    if (workLocation !== undefined &&
-        (workLocation !== 'cloud' || surface !== 'chatgpt-work'))
+    if (
+      workLocation !== undefined &&
+      (workLocation !== 'cloud' || surface !== 'chatgpt-work')
+    )
       throw new DriverFailure('invalid_work_location');
+    const requestedModel = modelDisplay(model);
+    if (requestedModel && surface !== 'chatgpt-work')
+      throw new DriverFailure('invalid_model');
     this.desktop.requireHelpers();
     // Setup ran once for the batch. A visible switch in another mode blocks
     // submission. After a previous turn the app stays on that conversation,
@@ -732,6 +843,8 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         matchesPrompt(await this.desktop.text(composer(ns)), prompt) &&
         controls(ns, ['Send']).length === 1
     );
+    if (requestedModel)
+      nodes = await this.selectModel(nodes, requestedModel, prompt);
     if (workLocation === 'cloud')
       nodes = await this.selectCloudLocation(nodes, prompt);
     // Exactly one send. No retry, Enter fallback, or resubmission on a missing transcript.

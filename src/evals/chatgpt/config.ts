@@ -19,7 +19,7 @@ export interface ChatgptAppConfig {
   os: 'darwin' | 'linux';
   /** End-to-end time limit for the trial. */
   timeoutMs?: number;
-  /** Requested ChatGPT model ID (verified against the native turn record). */
+  /** Requested ChatGPT model ID (selected in Work UI and verified against the turn). */
   model?: string;
   reasoningEffort?: ChatgptAppReasoningEffort;
   /**

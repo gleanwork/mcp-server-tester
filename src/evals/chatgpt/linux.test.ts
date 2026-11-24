@@ -225,9 +225,15 @@ describe('Linux ChatGPT runtime adapter', () => {
         newlineCount: 2,
       },
     ].map((draftState) => ({ step: 'draft-surface', draftState })),
-    ...['draft-open', 'draft-readback', 'work-location-open',
-      'work-location-select', 'work-location-verify', 'work-location-close',
-      'send'].map((step) => ({ step })),
+    ...[
+      'draft-open',
+      'draft-readback',
+      'work-location-open',
+      'work-location-select',
+      'work-location-verify',
+      'work-location-close',
+      'send',
+    ].map((step) => ({ step })),
     ...[
       'helper_missing',
       'helper_failed',
@@ -320,6 +326,24 @@ describe('Linux ChatGPT runtime adapter', () => {
       ])
     );
     expect(call.codexHome).toBe(join(root, '.codex'));
+  });
+  it('passes the first-party model to the native Work selector', async () => {
+    await helper();
+    config.model = 'gpt-6.1-sol';
+    config.firstParty = {
+      serverName: 'glean_default',
+      expectedEmail: 'eval@example.com',
+      expectedAccountId: 'account',
+      expectedOrganizationId: 'organization',
+      source: { kind: 'cdp', endpoint: 'http://127.0.0.1:9223' },
+      acknowledgeToolPolicyIsNotASandbox: true,
+    };
+    await run('submit', 'Find docs');
+    expect((await record<{ payload: unknown }>()).payload).toEqual({
+      prompt: 'Find docs',
+      surface: 'chatgpt-work',
+      model: 'gpt-6.1-sol',
+    });
   });
   it.each([
     [undefined, '24'],

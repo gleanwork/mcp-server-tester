@@ -38,6 +38,9 @@ const FailureStep = z.enum([
   'work-location-select',
   'work-location-verify',
   'work-location-close',
+  'model-open',
+  'model-select',
+  'model-verify',
   'send',
 ]);
 const DraftState = z
@@ -123,6 +126,9 @@ const Receipt = z
               'work-location-select',
               'work-location-verify',
               'work-location-close',
+              'model-open',
+              'model-select',
+              'model-verify',
               'send',
             ].includes(receipt.step))))
   );
@@ -192,8 +198,15 @@ export async function runLinuxChatgptDesktop(
   const draft = mode === 'submit' ? (prompt ?? '') : '';
   const payload = JSON.stringify({
     surface,
-    ...(config.firstParty && 'serverName' in config.firstParty &&
-      config.firstParty.workLocation === 'cloud'
+    ...(mode === 'submit' &&
+    config.model &&
+    config.firstParty &&
+    'serverName' in config.firstParty
+      ? { model: config.model }
+      : {}),
+    ...(config.firstParty &&
+    'serverName' in config.firstParty &&
+    config.firstParty.workLocation === 'cloud'
       ? { workLocation: 'cloud' }
       : {}),
     ...(mode === 'submit' ? { prompt } : {}),

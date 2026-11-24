@@ -95,7 +95,12 @@ async function main(): Promise<void> {
     receipt =
       mode === 'prepare'
         ? await driver.prepare(payload.surface)
-        : await driver.submit(payload.prompt, payload.surface, payload.workLocation);
+        : await driver.submit(
+            payload.prompt,
+            payload.surface,
+            payload.workLocation,
+            payload.model
+          );
   } catch (error) {
     receipt = driver
       ? await driver.receipt('failed')
