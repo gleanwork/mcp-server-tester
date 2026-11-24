@@ -7,7 +7,7 @@ status: proposed
 MST has three parts with three owners ([ADR 0001](./0001-eslint-style-declarative-plugins.md)): MST itself, an organization's plugin, and a team's eval configs. [ADR 0006](./0006-mst-is-written-in-typescript.md) adds that MST's code is TypeScript and that code for one organization goes in its plugin. Those rules say what MST is. They don't say where a new change goes, and more people now send changes. Two kinds of change show the gap.
 
 - **A tool around MST, proposed as part of MST.** A harness that runs another eval framework's tasks on MST's clients does its work by calling `mst run`. It was proposed as a second workspace in this repo, in Python, with its own manifest and lockfile. Nothing in it needs to be here: it uses MST the way any user does. In this repo it would be a second language that CI doesn't check, and a second package that every release has to carry.
-- **One product's rules in core.** Cowork's first-party mode has limits of its own: one shard, no detached runs, no simulated writes. Eval loading, config validation and the detached launch each import `cowork/firstParty.ts` and ask `isFirstPartyCowork(...)` to apply them. Core now knows one mode of one product by name. The next product with a limit adds another branch in the same places.
+- **One product's rules in core.** The `cowork` client's first-party mode has limits of its own: one shard, no detached runs, no simulated writes. Eval loading, config validation and the detached launch each import `cowork/firstParty.ts` and ask `isFirstPartyCowork(...)` to apply them. Core now knows one mode of one product by name. The next product with a limit adds another branch in the same places.
 
 Each change is reasonable to the person who makes it. Together they make the repo larger for every user and core harder to hold in your head. The first breaks a rule that `REVIEW.md` already has, so a rule that only a reviewer applies isn't enough. The second breaks no written rule, because none says what core may know about a product.
 
@@ -22,7 +22,7 @@ Each change is reasonable to the person who makes it. Together they make the rep
 
 Three rules follow.
 
-- **Core names no product.** Product code is the code for one client product, such as Cowork, ChatGPT or Codex. It lives in that product's directory and client file under `src/evals/`.
+- **Core names no product.** Product code is the code for one client product, such as Claude Desktop, ChatGPT or Codex. It lives in that product's directory and client file under `src/evals/`.
   - Core reaches a product only through its client definition: its options schema, its sessions and what it declares about itself.
   - When core has to treat a client differently, the client declares a general property and core reads the property. `checksServersAfterPrepare` and `assertClientSupports` already work this way. Core doesn't ask which product, or which mode, it is running.
   - Three kinds of file may import product code: `builtinClients.ts`, which adds the built-in clients; the entry points in `src/entries/`, which export a product's public names; and a product's own CLI command.
@@ -64,7 +64,7 @@ Core imports product code in five places. They stay until each is replaced, and 
 ## Not decided here
 
 - **Where `mstClient/` belongs.** It holds the `api` and `claude-code` clients and also the types every client returns, so the check doesn't treat it as product code. Splitting it comes later.
-- **How Cowork's first-party mode declares its limits.** The table above names the direction. The mode needs an ADR of its own.
+- **How the `cowork` client's first-party mode declares its limits.** The table above names the direction. The mode needs an ADR of its own.
 
 ## Consequences
 

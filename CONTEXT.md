@@ -353,7 +353,7 @@ The code that runs an eval the same way for every client: loading, case executio
 _Avoid_: framework, engine
 
 **Product code**:
-The code for one client product, such as Cowork or ChatGPT: its directory and client file under `src/evals/`. Core reaches it only through the client definition.
+The code for one client product, such as Claude Desktop or ChatGPT: its directory and client file under `src/evals/`. Core reaches it only through the client definition.
 _Avoid_: client internals, surface code
 
 **Plugin**:

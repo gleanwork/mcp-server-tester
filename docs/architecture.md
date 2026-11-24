@@ -8,7 +8,7 @@ MST is one core and a set of extensions.
 
 - **Core** runs an eval the same way for every client: it loads the dataset, runs each case on a client, turns what the client did into a transcript, grades it, and writes the run and its report. [How MST evals work](./design/explainer.md#a-run-from-top-to-bottom) walks through the steps. Core names no client product.
 - **Extensions** are what core runs with: dataset sources, clients, judges, pairwise judges, metrics, result stores, connectors, runners and credential stores. Each kind has one lookup and one shape. MST ships some as built-ins, and a plugin adds others.
-- **A client is one product.** Cowork, ChatGPT, Codex and Claude Code are each a client, and each keeps its code in its own directory and client file under `src/evals/`. None of them is the reference product: defaults, the run format and the report describe clients in general.
+- **A client is one product.** Claude Desktop, ChatGPT, Codex and Claude Code are each a client, and each keeps its code in its own directory and client file under `src/evals/`. None of them is the reference product: defaults, the run format and the report describe clients in general.
 - **A plugin** holds what one organization needs: its datasets, judges, sign-ins and machines.
 
 ### Where a change goes

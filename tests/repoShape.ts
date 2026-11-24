@@ -128,7 +128,7 @@ export function unexpectedPackages(files: string[]): string[] {
 }
 
 /**
- * Product code: the code for one client product, such as Cowork or ChatGPT.
+ * Product code: the code for one client product, such as Claude Desktop or ChatGPT.
  * A new product's directory or client file goes here.
  */
 const PRODUCT_CODE = [
