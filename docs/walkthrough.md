@@ -1,8 +1,6 @@
-# Comparing tool descriptions in Claude Desktop
+# Walkthrough: compare tool descriptions in Claude Desktop
 
-> **Design proposal.** This is how we intend evals to be run. Some of these commands and config keys don't exist yet; each is marked planned where it appears. The [explainer](./explainer.md) covers the design, the run lifecycle, and what exists today versus what's planned.
-
-This walkthrough runs one eval end to end. It uses a fictional company, Acme, whose private plugin `@acme/mst-plugin` provides datasets, judges, a VM runner and a result store.
+This walkthrough runs one eval end to end. It uses a fictional company, Acme, whose private plugin `@acme/mst-plugin` provides datasets, judges, connectors, a VM runner and a result store. [How MST works](./architecture.md) explains what happens at each step and why.
 
 **Goal:** find out whether rewritten tool descriptions for Acme's own MCP server make Claude Desktop pick the right tools and answer Acme's info-seeking questions better. Every variant uses the same servers (Acme's, Slack's and GitHub's) and the same model; only the descriptions change.
 
@@ -26,31 +24,12 @@ npm i -D @gleanwork/mcp-server-tester@rc @acme/mst-plugin
 # Once, on a Mac that will run Claude Desktop locally
 npx mst clients setup cowork
 
-# Once, to run Claude Desktop in containers (section 6)
+# Once, to run Claude Desktop in containers (section 6):
+# builds the mst-cowork-linux image for this MST version
 npx mst runner setup docker
-# → built mst-cowork-linux:2.0.0-beta.9
 ```
 
-See what the plugin provides (`mst plugins` is planned):
-
-```bash
-npx mst plugins --plugins @acme/mst-plugin
-```
-
-```text
-@acme/mst-plugin 0.14.0 (namespace: acme, snapshot 2026-10-06)
-  dataset            acme/dataset/info-seeking, acme/dataset/action-taking, acme/dataset/tool-selection
-  judge              acme/judge/correctness, acme/judge/completeness, acme/judge/groundedness
-  pairwise-judge     acme/pairwise-judge/preference
-  connector          acme/connector/acme, acme/connector/slack, acme/connector/github, …
-  credential-store   acme/credential-store/secret-manager
-  setup              acme/setup/reset-test-tenant           (planned kind)
-  runner             acme/runner/cloud-vm
-  result-store       acme/result-store/eval-results
-  config             acme/config/cowork
-```
-
-Names are `<namespace>/<kind>/<name>`, so `acme/judge/correctness` is a judge.
+The plugin's extensions are named `<namespace>/<kind>/<name>`, so `acme/judge/correctness` is a judge and `acme/runner/cloud-vm` is a runner.
 
 ## 2. Find datasets and judges
 
@@ -149,33 +128,14 @@ Each case has an `input`, an `expected` answer, tags, and optional default judge
 - **`datasets`** use the snapshot by default. To pin a snapshot: `{ "type": "acme/dataset/info-seeking", "snapshot": "2026-10-01" }`. For live data: `{ "type": "…", "source": "live" }`. `run.json` records which copy each dataset came from.
 - **`redactStoredResponses: false`** keeps full transcripts in the run. Stored transcripts are redacted by default, and a redacted run can't be collected with `--no-grade`, regraded (section 8) or resumed (section 7). A plugin's shared config can set it for every eval that extends the config.
 - **`judges`** apply to every case, on top of each case's own judges. Pointwise judges score each trial. Pairwise judges compare each variant with the baseline on each case.
-- **`setup`** (planned, optional) lists plugin steps that run before collection and tear down afterwards, e.g. `acme/setup/reset-test-tenant`.
 
 Point write-capable servers at test tenants or test accounts. A connector's dry-run proxy blocks writes, or answers them with a success reply when the eval config sets `"simulateWrites": true`. Connectors added in the Claude account don't go through the proxy, so disconnect any that could write to real accounts.
 
-Check the plan without running anything. Today `--dry-run` prints the plan as JSON and doesn't check sign-ins; the text plan below, with its `credentials` line, is planned:
+Check the plan without running anything. `--dry-run` loads the config and its plugins, resolves the datasets, variants and judges, and prints the plan as JSON. It doesn't check sign-ins:
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json --dry-run
 ```
-
-```text
-cowork-tool-descriptions
-  datasets    acme/dataset/info-seeking (snapshot 2026-10-06, 50 cases, sha256 3f9a…)
-  client      cowork · model claude-opus-4-8 · 3 trials per case
-  servers     acme, slack, github (every variant)
-  variants    current (baseline) · the servers' own descriptions
-              rewritten · tool metadata for 2 tools
-              rewritten-terse · tool metadata for 2 tools
-  graders     acme/judge/correctness, acme/judge/completeness (12 cases)
-              acme/pairwise-judge/preference (each variant vs current)
-  runner      local (macOS) · 1 shard
-  results     .mcp-test-results/cowork-tool-descriptions/
-  total       450 trials · 100 pairwise preferences
-  credentials 1 of 3 servers needs `mst auth` (slack)
-```
-
-The `runner` line says where the trials would run. With `--runner docker --runner-option shards=4`, it reads `docker (linux/amd64) · 4 shards · image mst-desktop@sha256:9c1e…`.
 
 ## 4. Authenticate once
 
@@ -183,13 +143,7 @@ The `runner` line says where the trials would run. With `--runner docker --runne
 npx mst auth --config evals/cowork-tool-descriptions.json --store acme/credential-store/secret-manager
 ```
 
-```text
-acme     oauth           ✓ valid
-slack    oauth           → opening browser for consent…  ✓ saved
-github   github-app      ✓ client credentials (no consent needed)
-```
-
-Each run refreshes these grants and hands short-lived tokens to the client, then removes them when it finishes. Leave out `--store` to keep grants on your machine only. Remote runs and CI need a shared credential store: `--store` takes a directory or a plugin's credential store, such as `acme/credential-store/secret-manager`.
+`mst auth` prints one line per server. A server whose grant is still valid is left alone, a server that needs consent opens your browser, and a server whose connector signs in without a person (client credentials or a fixed token) needs nothing from you. Each run refreshes these grants and hands short-lived tokens to the client, then removes them when it finishes. Leave out `--store` to keep grants on your machine only. Remote runs and CI need a shared credential store: `--store` takes a directory or a plugin's credential store, such as `acme/credential-store/secret-manager`.
 
 ```bash
 npx mst auth status --config evals/cowork-tool-descriptions.json
@@ -206,48 +160,25 @@ npx mst run --config evals/cowork-tool-descriptions.json --max-cases 5
 npx mst run --config evals/cowork-tool-descriptions.json --filter-tag source:correctness
 ```
 
-```text
-setup     auth staged for 3 servers · desktop lease acquired
-collect   current           e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●●
-          rewritten         e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●!
-          rewritten-terse   e2e-0000 ●●●  e2e-0001 ●●●  e2e-0002 ●●●
-teardown  tokens removed · Claude Desktop profile restored
-grade     current           e2e-0000 ✓✗✓  e2e-0001 ✓✓✓  e2e-0002 ✓✓✗
-          rewritten         e2e-0000 ✓✓✓  e2e-0001 ✓✓✓  e2e-0002 ✗✓–
-          rewritten-terse   e2e-0000 ✓✗✓  e2e-0001 ✓✓✗  e2e-0002 ✓✓✓
-● collected  ! infrastructure error  ✓ passed  ✗ failed  – missing
-```
-
-The client runs the trials first. Judges then grade the collected transcripts.
+For each variant, the client runs the trials first, and the judges then grade the collected transcripts. A trial that hits an infrastructure problem, such as Claude Desktop crashing, is reported as such and left out of the pass rate: the client never got to answer.
 
 ## 6. Run in containers
 
-> **Built, with limits.** See [Claude Desktop in Docker](../cowork-docker.md). Each Docker host runs one Claude Desktop container at a time, so 4 shards need 4 Docker contexts (`--runner-option contexts=a,b,c,d`); on one host they run one after another. The progress display below, and `mst runs view`, are planned.
-
-Run the same config in 4 Linux containers on your machine:
+Run the same config in 4 Linux containers:
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json --runner docker --runner-option shards=4
 ```
 
-```text
-setup     auth staged for 3 servers · 4 containers from mst-desktop@sha256:9c1e…
-collect   shard 1  e2e-0003 ●●● ●●● ●●●  e2e-0007 ●●● ●●● ●●●
-          shard 2  e2e-0000 ●●● ●●● ●●●  e2e-0011 ●●● ●●! ●●●
-          shard 3  e2e-0001 ●●● ●●● ●●●
-          shard 4  e2e-0002 ●●● ●●● ●●●  e2e-0005 ●●● ●●● ●●●
-teardown  tokens removed · 4 containers deleted
-grade     …
-```
+Each Docker host runs one Claude Desktop container at a time, so 4 shards need 4 Docker contexts (`--runner-option contexts=a,b,c,d`); on one host they run one after another. [Claude Desktop in Docker](./cowork-docker.md) has the details.
 
 Claude Desktop runs in the containers, so you can keep using your Mac. Each container is a fresh desktop: it has nothing from your own Claude Desktop, and leaves nothing behind. A case's variants and trials all run in one container, so each comparison is made on one desktop, minutes apart.
 
 To use an image your organization publishes instead of building one, add `--runner-option image=registry.acme.example/mst-desktop@sha256:…`.
 
-Watch a container's desktop while it runs (`mst runs` is planned), or keep a container that failed so you can look at it:
+To keep a container whose shard failed, so you can look at it:
 
 ```bash
-npx mst runs view <run-id> --shard 2
 npx mst run --config evals/cowork-tool-descriptions.json --runner docker --runner-option shards=4 --runner-option keep=failed
 ```
 
@@ -263,7 +194,7 @@ npx mst run --config evals/cowork-tool-descriptions.json \
 
 The VMs run the trials. Your machine gathers their transcripts, runs the judges, and writes the results. Ctrl-C deletes the VMs and keeps the transcripts collected so far. Rerun with `--resume <run-id>` to collect only what's missing. `--runner-option keep=failed` keeps a VM whose shard failed, as it does for containers.
 
-To walk away from a long run, detach it ([ADR 0007](../adr/0007-detached-runs-move-the-coordinator.md)). The run's coordinator then runs on a machine the runner creates, with a cloud identity of its own, and your machine can go offline. It needs a result store and, for connector servers, a credential store that machine reaches:
+To walk away from a long run, detach it ([ADR 0007](./adr/0007-detached-runs-move-the-coordinator.md)). The run's coordinator then runs on a machine the runner creates, with a cloud identity of its own, and your machine can go offline. It needs a result store and, for connector servers, a credential store that machine reaches:
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json \
@@ -313,7 +244,7 @@ npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json
 # → run 7f3c2a.g2 (transcripts from 7f3c2a)
 ```
 
-Grading takes hours when an agentic judge reads every trial. Grade on the runner's machines instead, with the judges' keys in the secrets file ([ADR 0005](../adr/0005-grading-runs-in-an-environment.md)):
+Grading takes hours when an agentic judge reads every trial. Grade on the runner's machines instead, with the judges' keys in the secrets file ([ADR 0005](./adr/0005-grading-runs-in-an-environment.md)):
 
 ```bash
 npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json \
@@ -331,30 +262,9 @@ npx mst grade 7f3c2a --config evals/cowork-tool-descriptions.json \
 
 `--resume 7f3c2a` fetches the same way, then collects what's missing.
 
-Planned: `mst grade` without `--config`, and the `--plugin-option` and `--judge` flags:
-
-```bash
-npx mst grade 7f3c2a --plugin-option acme.source=live
-npx mst grade 7f3c2a --judge acme/judge/groundedness
-```
-
 ## 9. Find your results
 
-Runs are written locally by default:
-
-```text
-.mcp-test-results/cowork-tool-descriptions/
-├── latest.json         # the newest complete, full run
-└── runs/<run-id>/
-    ├── run.json        # the config's identity, each variant's setup, resolved datasets and judges,
-    │                   #   runner, phase status
-    ├── transcripts/    # one transcript per trial
-    ├── artifacts/      # each trial's client artifacts, for judges
-    ├── scores/         # one score per grader per trial; pairwise preferences per case
-    ├── results.json    # transcripts and scores joined
-    ├── summary.json    # per-variant metrics and comparisons
-    └── report/
-```
+Runs are written locally, under `.mcp-test-results/cowork-tool-descriptions/runs/<run-id>/`. [What a run leaves behind](./evaluation-framework.md#what-a-run-leaves-behind) describes each file.
 
 `--results` also keeps the run in a result store, in this layout under `<eval name>/`. Without it, the eval config's `results.store` applies, if it has one. The run directory stays local either way.
 
@@ -364,37 +274,16 @@ Runs are written locally by default:
 --results file:./shared-results              # any local directory
 ```
 
-```bash
-npx mst stores --plugins @acme/mst-plugin   # planned
-```
-
-`run.json` records where the run ran: the runner, its options, the number of shards, and each shard's machine (its image digest, worker MST and OS, which decides how a desktop client ran); each trial records its client app. A regrade on a runner's machines (section 8) also records where it graded, in `grading.runner`. The report shows both under _Run details_. Recording each transcript's shard is planned for 2.0.
+`run.json` records where the run ran: the runner, its options, the number of shards, and each shard's machine (its image digest, worker MST and OS, which decides how a desktop client ran); each trial records its client app. A regrade on a runner's machines (section 8) also records where it graded, in `grading.runner`. The report shows both under _Run details_.
 
 ## 10. Read your results
 
-Every graded run ends with a comparison against the baseline:
-
-```text
-cowork-tool-descriptions · run 7f3c2a · 50 cases × 3 trials · baseline: current
-
-variant           pass    judge   vs baseline (pairwise)   $/case   median   tools used
-current           0.78    0.80    —                        0.71     55 s     acme 58% · slack 27% · github 15%
-rewritten         0.86 ▲  0.85    44% win · 30% loss       0.69     51 s     acme 74% · slack 17% · …
-rewritten-terse   0.75    0.74 ▼  29% win · 41% loss       0.70     54 s     acme 63% · slack 24% · …
-
-▼ ▲ clearly worse / clearly better than baseline
-rewritten: 2 cases regressed · 7 improved      rewritten-terse: 6 regressed · 3 improved
-```
-
-Open the report:
+Every graded run compares each variant with the baseline, case by case. Open the report:
 
 ```bash
 npx mst open                                                          # newest local run
 npx mst open .mcp-test-results/cowork-tool-descriptions/runs/<run-id>
-
-# planned
-npx mst open --results acme/result-store/eval-results 7f3c2a
-npx mst open --results acme/result-store/eval-results --latest cowork-tool-descriptions
+npx mst open --history --config evals/cowork-tool-descriptions.json   # every run of this eval
 ```
 
 The report has the same sections for every eval:

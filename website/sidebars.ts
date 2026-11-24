@@ -7,7 +7,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Get started',
       collapsed: false,
-      items: ['quickstart', 'evals-guide'],
+      items: ['quickstart', 'evals-guide', 'walkthrough'],
     },
     {
       type: 'category',
@@ -53,19 +53,9 @@ const sidebars: SidebarsConfig = {
       ],
     },
   ],
-  reference: ['cli', 'api-reference', 'evaluation-framework'],
+  reference: ['cli', 'api-reference', 'evaluation-framework', 'connectors'],
   internals: [
     'architecture',
-    {
-      type: 'category',
-      label: 'Design',
-      items: [
-        'design/explainer',
-        'design/README',
-        'design/auth-and-connectors',
-        'design/chatgpt-docker',
-      ],
-    },
     {
       type: 'category',
       label: 'Architecture decisions',

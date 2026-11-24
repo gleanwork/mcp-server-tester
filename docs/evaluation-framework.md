@@ -1143,24 +1143,7 @@ The [metrics](#metrics) `write_case_passed` (its rate over write cases), `write_
 
 ## Execution lifecycle
 
-```text
-EvalConfig
-  -> load the eval's plugins (built-ins are always available)
-  -> validate tagged blocks, extension names and namespaces, schemas, and server labels
-  -> resolve DatasetSource entries into EvalDataset values
-  -> derive one or more variants from the eval config (baseline first)
-  -> resolve every server's write mode, and list the read-only servers' tools
-  -> check each batch's servers are ready, then run each variant through its
-     client (built-in or plugin) with its MCPConfig[] server set
-  -> compute metrics and judges
-  -> write per-variant results through the ResultStore
-  -> save a RunSummary with the config's identity, content hash, variant aggregates,
-     deltas from the baseline, and per-case artifact pointers
-```
-
-`EvalDataset`, `EvalCase`, `MCPConfig`, and `runEvalDataset` remain
-the canonical case and execution primitives. The eval layer composes them; it
-does not replace them with a second case model.
+[One `mst run`, start to finish](./architecture.md#one-mst-run-start-to-finish) describes each step of a run, where it runs, and why. `EvalDataset`, `EvalCase`, `MCPConfig`, and `runEvalDataset` remain the canonical case and execution primitives. The eval layer composes them; it does not replace them with a second case model.
 
 ## What a run leaves behind
 

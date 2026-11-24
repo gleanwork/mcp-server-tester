@@ -983,7 +983,7 @@ A connector server names a plugin's connector instead of a transport:
 }
 ```
 
-The plugin's connector says where the server is, how to sign in, and how the client reaches it (for example, through the [dry-run proxy](./cowork.md#dry-run-proxy), which blocks writes). See [docs/design/auth-and-connectors.md](./design/auth-and-connectors.md).
+The plugin's connector says where the server is, how to sign in, and how the client reaches it (for example, through the [dry-run proxy](./cowork.md#dry-run-proxy), which blocks writes). See [Connectors and `mst auth`](./connectors.md).
 
 ### Usage
 

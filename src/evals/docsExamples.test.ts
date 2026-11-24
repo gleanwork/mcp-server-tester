@@ -1,17 +1,60 @@
 /**
  * Every JSON eval config and dataset in the README and the docs is one that
  * `mst run` accepts. Migration guides and ADRs are left out: their "before"
- * examples are old on purpose. So are design proposals (`docs/design/`),
- * whose examples show keys that don't exist yet. Annotated references with comments are
- * fenced as `jsonc` and not checked.
+ * examples are old on purpose. Annotated references with comments are fenced
+ * as `jsonc` and not checked.
+ *
+ * Examples that name the docs' fictional `acme` plugin validate against a
+ * fixture with only the extensions the docs name, so a misspelt name still
+ * fails.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
+import type { Plugin } from '../plugins/plugin.js';
 import { buildEvalDataset } from './buildEvalDataset.js';
 import { loadEvalConfigFromObject, type EvalConfig } from './evalConfig.js';
 import { validateEvalConfig } from './configValidation.js';
+
+const ACME_CONNECTOR = {
+  url: 'https://mcp.acme.example/mcp',
+  auth: { type: 'none' },
+} as const;
+
+const ACME: Plugin = {
+  meta: { name: '@acme/mst-plugin', namespace: 'acme' },
+  datasetSources: {
+    'info-seeking': {
+      schema: z.object({ type: z.string() }).passthrough(),
+      load: async () => ({ name: 'info-seeking', cases: [] }),
+    },
+  },
+  judges: {
+    correctness: {
+      schema: z.object({}).passthrough(),
+      evaluate: async () => ({ score: 1 }),
+    },
+    completeness: {
+      schema: z.object({}).passthrough(),
+      evaluate: async () => ({ score: 1 }),
+    },
+  },
+  pairwiseJudges: {
+    preference: {
+      schema: z.object({}).passthrough(),
+      compare: async () => ({ preference: 'tie' as const }),
+    },
+  },
+  connectors: {
+    acme: ACME_CONNECTOR,
+    slack: ACME_CONNECTOR,
+    github: ACME_CONNECTOR,
+  },
+  configs: { cowork: {} },
+};
 
 const ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -27,7 +70,6 @@ function markdownFiles(): string[] {
         file.endsWith('.md') &&
         !file.startsWith('migrations') &&
         !file.startsWith('adr') &&
-        !file.startsWith('design') &&
         !path.basename(file).startsWith('migration-')
     )
     .map((file) => path.join('docs', file));
@@ -94,6 +136,13 @@ for (const file of markdownFiles()) {
 }
 
 describe('eval config and dataset examples in the docs', () => {
+  beforeAll(() => {
+    installPlugins([ACME]);
+  });
+  afterAll(() => {
+    resetPluginsForTests();
+  });
+
   it('finds both kinds, and every whole example parses', () => {
     expect(
       examples.filter((example) => example.kind === 'eval config').length

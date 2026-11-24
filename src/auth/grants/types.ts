@@ -7,7 +7,7 @@
  * long-lived token) in a credential store. Connectors with the same `grant`
  * share one sign-in.
  *
- * See docs/design/auth-and-connectors.md.
+ * See docs/connectors.md.
  */
 import type { MCPConfig } from '../../config/mcpConfig.js';
 import type { SettingsContext } from '../../plugins/plugin.js';

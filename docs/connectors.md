@@ -1,14 +1,8 @@
-# Connector contract: connectors and `mst auth`
+# Connectors and `mst auth`
 
-> **The connector contract.** It specifies step 4 of the [walkthrough](./README.md) ("Authenticate once"), the `connectors` extension kind and the credential store. It extends the [explainer](./explainer.md). Terms follow [`CONTEXT.md`](../../CONTEXT.md).
->
-> **Built:** connectors, `mst auth` / `status` / `revoke`, the local credential store, plugin credential stores (`--store <namespace>/credential-store/<name>`), run preflight, delivery, renewal and cleanup (on this machine, and to a shard's worker over `mst.shard/v1`), the [dry-run proxy](../cowork.md#dry-run-proxy) and its [simulated writes](../cowork.md#simulated-writes).
+This is the contract for the `connector` extension kind, `mst auth` and the credential store. You run `mst auth` once. After that, every `mst run` on any client reaches every server in every variant with a fresh token, on this machine or on a runner's. You don't edit `.env` or copy tokens, and no secret goes into a config or a result.
 
-## Goal
-
-An author runs `mst auth` once. After that, every local `mst run` on any client reaches every server in every variant with a fresh token. The author doesn't edit `.env` or copy tokens, and no secret ever goes into a config or a result.
-
-The connector contract is done when the walkthrough's three variants (`current`, `rewritten`, `rewritten-terse`) authenticate and run one case each in local Claude Desktop on macOS.
+[Authenticate once](./walkthrough.md#4-authenticate-once) in the walkthrough shows it in use, and [How MST works](./architecture.md#3-prepare) shows where it fits in a run. The [dry-run proxy](./cowork.md#dry-run-proxy) and its [simulated writes](./cowork.md#simulated-writes) are how a connector blocks writes. Terms follow [`CONTEXT.md`](../CONTEXT.md).
 
 ## Who owns what
 
@@ -25,7 +19,7 @@ The connector contract is done when the walkthrough's three variants (`current`,
 
 MST has no vendor names in its code. Without a plugin, a server with a plain `serverUrl` uses generic MCP OAuth (discovery and DCR), as `mst login` does today.
 
-## New extension kind: `connector`
+## The `connector` extension kind
 
 A connector is one vendor MCP server as an organization uses it. It is referenced as `<namespace>/connector/<name>`, for example `acme/connector/slack`.
 
@@ -185,20 +179,9 @@ MST ships a local credential store (`src/auth/grants/localStore.ts`), the defaul
 - Neither may appear in eval configs, `run.json`, transcripts, results, reports, logs, stdout or the client's MCP settings. Every staged token goes on the run's redaction list.
 - Client secrets come from the plugin at call time. MST never writes them anywhere.
 
-## How we test it
+## On a runner's machines
 
-| Layer          | What                                                                                                                                                                                                                                                                                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Unit (MST)     | A fake authorization server covering authorization code with PKCE, DCR, device flow, client credentials, rotating refresh, revocation and under-scoped grants. Also: grant grouping and scope union, a lock that allows one redemption under concurrency, renewal rewriting `tokenFile`, expiry becoming an infrastructure error, and the preflight message. |
-| Contract (MST) | A fixture plugin with connectors and a fake vendor MCP server. `mst auth`, `status`, `revoke`, then `mst run` on the `api` client: the token reaches the server and renews. A scan of the run directory and the logs finds no token.                                                                                                                         |
-| `cowork` (MST) | Platform doubles: token files staged in the transaction, removed on success, on failure and on cancel.                                                                                                                                                                                                                                                       |
-| Plugin (acme)  | Connectors for two servers behind the dry-run proxy and one direct HTTP server. `launch` returns the dry-run proxy. Writes are blocked: zero write calls reach a fake vendor.                                                                                                                                                                                |
-| Live (manual)  | `mst auth` against all 3 servers. Then 1 case × 3 variants in local Claude Desktop. Then one run longer than an hour, to show token renewal.                                                                                                                                                                                                                 |
-
-## Out of scope
-
-- Token staging in runners: delivering connector tokens into VMs and containers. The runner contract must carry `tokenFile` renewal across the boundary. The `mst.shard/v1` protocol carries tokens ([ADR 0004](../adr/0004-environments-run-shards-over-a-channel.md)), but today a run refuses connector servers in any runner other than `local`.
-- An MST-owned interceptor kind.
+Connector servers run on every runner. Each worker launches the connectors itself, and the coordinator sends it fresh access tokens over the shard's channel as `mst.shard/v1` messages ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)). Refresh grants never leave the coordinator.
 
 ## Decisions
 

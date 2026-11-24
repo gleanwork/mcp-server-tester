@@ -14,7 +14,7 @@ With `--env`, the trials and the grading run on an environment's machines, but t
 
 So a run lasts only as long as the laptop stays awake and online. Closing its lid ends every shard within a minute ("The worker sent nothing for 60 s"). The machines stay up, with nothing running on them, until the environment's own deadline deletes them. A run of a few hours means keeping a laptop open, plugged in and on one network for those hours.
 
-The walkthrough plans `--detach` and `mst runs` for this ([section 7](../design/README.md#7-run-remotely)), and ADR 0004 says both need "an environment with a `detach` function, and credential and result stores that aren't local". This record decides what detaching does.
+The walkthrough plans `--detach` and `mst runs` for this ([section 7](../walkthrough.md#7-run-remotely)), and ADR 0004 says both need "an environment with a `detach` function, and credential and result stores that aren't local". This record decides what detaching does.
 
 The workaround today is to run the coordinator on a machine of your own in the cloud. It works, but by hand: install MST and the plugins at the right versions, and copy the eval's credentials there. Copying a cloud login, the simplest way to let that machine create the workers, copies everything in it, including keys for other projects. Detaching should make this the supported path, without copying a user's login anywhere.
 
