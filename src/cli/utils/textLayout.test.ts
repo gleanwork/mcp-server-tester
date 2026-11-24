@@ -133,4 +133,21 @@ describe('formatTable', () => {
       ].join('\n')
     );
   });
+
+  it('keeps a blank line inside a last cell, beside the row or below it', () => {
+    const cell = 'First paragraph.\n\nSecond paragraph.';
+    expect(formatTable([['a', cell]], 60)).toBe(
+      ['a  First paragraph.', '', '   Second paragraph.'].join('\n')
+    );
+    expect(
+      formatTable([['a-rather-long-reference', 'version-1', cell]], 50)
+    ).toBe(
+      [
+        'a-rather-long-reference  version-1',
+        '    First paragraph.',
+        '',
+        '    Second paragraph.',
+      ].join('\n')
+    );
+  });
 });

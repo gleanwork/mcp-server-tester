@@ -218,9 +218,10 @@ export async function showJudge(
         width
       ),
       ...optionsSection(
-        // A built-in judge resolves what an entry leaves out when it runs,
-        // such as its model from the `models` block.
-        extensionOptionsSchema(entry.schema, 'judge', "the judge's default"),
+        // An option with no declared default shows `not declared`, as a
+        // client's does: leaving it out may mean the judge's own default,
+        // or no limit, and the schema doesn't say which.
+        extensionOptionsSchema(entry.schema, 'judge'),
         'judge',
         width
       ),

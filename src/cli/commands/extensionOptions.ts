@@ -36,13 +36,12 @@ function removed(option: OptionSchema | boolean): boolean {
 /**
  * JSON Schema defaults describe omission; they never parse or fill in options.
  * A runtime-dependent default is described by `x-defaultDescription`, rather
- * than evaluated on the coordinator. An option with neither is `unset`: for
- * a client, `not declared`, so a plugin with no declaration stays unknown.
+ * than evaluated on the coordinator. An option with neither is `not declared`,
+ * so an extension with no declaration stays unknown.
  */
 export function extensionOptionsSchema(
   schema: ZodType,
-  kind: string,
-  unset = 'not declared'
+  kind: string
 ): ExtensionOptionsSchema {
   const options = optionsSchema(schema, kind) as ExtensionOptionsSchema;
   if (!options.properties) return options;
@@ -61,7 +60,7 @@ export function extensionOptionsSchema(
                 ...field,
                 'x-defaultDescription': options.required?.includes(name)
                   ? 'required'
-                  : unset,
+                  : 'not declared',
               },
         ];
       })

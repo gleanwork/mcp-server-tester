@@ -119,11 +119,13 @@ export function formatTable(table: string[][], width?: number): string {
         .join('  ');
       const cell = row[last] ?? '';
       if (below) {
+        // An empty cell adds no line; a blank line inside a cell stays.
         const text = cell
-          .split('\n')
-          .filter(Boolean)
-          .flatMap((part) => wrap(part, width - 4))
-          .map((line) => `    ${line}`);
+          ? cell
+              .split('\n')
+              .flatMap((part) => wrap(part, width - 4))
+              .map((line) => (line ? `    ${line}` : ''))
+          : [];
         return [lead.trimEnd(), ...text];
       }
       const lines =

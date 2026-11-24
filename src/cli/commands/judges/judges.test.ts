@@ -272,7 +272,11 @@ describe('mst judges', () => {
       /^ {2}rubric +required\n +one of: correctness, completeness, groundedness,/m
     );
     expect(text).toContain('or an object');
-    expect(text).toMatch(/^ {2}model +the judge's default$/m);
+    // No declared default: the text doesn't claim one, since leaving an
+    // option out can also mean no limit (maxToolOutputSize).
+    expect(text).toMatch(/^ {2}model +not declared$/m);
+    expect(text).toMatch(/^ {2}maxToolOutputSize +not declared$/m);
+    expect(text).not.toContain("the judge's default");
     expect(text).not.toContain('"$schema"');
     for (const line of text.split('\n'))
       expect(line.length).toBeLessThanOrEqual(80);
