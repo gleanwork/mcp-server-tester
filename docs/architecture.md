@@ -2,6 +2,26 @@
 
 This document describes the internal structure of `@gleanwork/mcp-server-tester` — its module layout, key data flows, and the design decisions that shaped them.
 
+## The model
+
+MST is one core and a set of extensions.
+
+- **Core** runs an eval the same way for every client: it loads the dataset, runs each case on a client, turns what the client did into a transcript, grades it, and writes the run and its report. [How MST evals work](./design/explainer.md#a-run-from-top-to-bottom) walks through the steps. Core names no client product.
+- **Extensions** are what core runs with: dataset sources, clients, judges, pairwise judges, metrics, result stores, connectors, runners and credential stores. Each kind has one lookup and one shape. MST ships some as built-ins, and a plugin adds others.
+- **A client is one product.** Claude Desktop, ChatGPT, Codex and Claude Code are each a client, and each keeps its code in its own directory and client file under `src/evals/`. None of them is the reference product: defaults, the run format and the report describe clients in general.
+- **A plugin** holds what one organization needs: its datasets, judges, sign-ins and machines.
+
+### Where a change goes
+
+A change goes in the first home that fits ([ADR 0016](./adr/0016-mst-holds-only-what-every-mst-user-needs.md)):
+
+1. **Does it use MST only through the `mst` command or the public exports?** It goes in its own repo.
+2. **Does one organization need it?** It goes in that organization's plugin.
+3. **Does one client product need it?** It goes in that product's code. Core reaches it through the client definition.
+4. **Does every user of MST need it?** It goes in core. A new contract, mode or protocol has an accepted ADR before its code merges.
+
+`tests/repoShape.test.ts` checks the parts of this a test can check: no other language, no second package, no new top-level directory, and no new import of product code from core.
+
 ## Module Map
 
 This map covers the core modules. [AGENTS.md](../AGENTS.md#architecture) is the full list, including `plugins/`, `proxy/`, `llm/`, `skills/`, `entries/`, `evals/runners/` and `auth/grants/`.

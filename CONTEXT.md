@@ -348,6 +348,14 @@ _Avoid_: direct case, unit eval
 
 ### Extending MST
 
+**Core**:
+The code that runs an eval the same way for every client: loading, case execution, grading, the run format and the report. Core names no client product ([ADR 0016](docs/adr/0016-mst-holds-only-what-every-mst-user-needs.md)).
+_Avoid_: framework, engine
+
+**Product code**:
+The code for one client product, such as Claude Desktop or ChatGPT: its directory and client file under `src/evals/`. Core reaches it only through the client definition.
+_Avoid_: client internals, surface code
+
 **Plugin**:
 A plain object, the default export of a module or package, that contributes named extensions to MST under one namespace. A plugin is data that core reads; it does not call into core to register itself.
 _Avoid_: register hook, extension module
