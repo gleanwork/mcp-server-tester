@@ -1,0 +1,38 @@
+name: Docs coverage
+
+# Warns when a pull request changes the code a page in docs/ describes and
+# not the page: an annotation on the page and a table in the job summary.
+# docs/code-map.json says which code each page describes. It only warns, and
+# never fails: a code change often leaves the page true. See
+# scripts/docs-coverage.ts.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-coverage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Docs coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The base branch too, to diff the pull request against it.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # mise.toml's major. Node runs the script's TypeScript itself
+          # (type stripping, from 22.18).
+          node-version: '22'
+
+      - name: Warn on pages whose code changed
+        run: node scripts/docs-coverage.ts
