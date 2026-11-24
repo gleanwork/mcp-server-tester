@@ -130,7 +130,11 @@ jobs:
         working-directory: website
         run: npm run smoke
 
+      # The diagrams project renders every Mermaid diagram in a browser.
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
       # Conformance, the docs tools and every skill, in both protocol eras,
-      # over the function Vercel deploys.
+      # over the function Vercel deploys; and every Mermaid diagram.
       - name: Test the site's MCP server with MST
         run: npm run test:site

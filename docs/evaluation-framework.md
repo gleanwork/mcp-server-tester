@@ -1219,7 +1219,7 @@ const store: RunStore = {
 };
 ```
 
-Opening a stored run (`mst open --results`) and listing runs (`mst runs list`) are planned.
+`mst open` doesn't read result stores yet: it opens runs on disk.
 
 Run JSON, file/GCS result-store artifacts and `saveResultsTo` baselines are
 written and read in chunks, so large batches of tool transcripts do not require one
