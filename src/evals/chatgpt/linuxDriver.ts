@@ -494,6 +494,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         throw new DriverFailure('model_unavailable');
       throw error;
     }
+    let scrolled = false;
     for (let scrolls = 0; scrolls < 12; scrolls++) {
       const options = picker.filter(
         (node) =>
@@ -521,6 +522,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       await this.action(() =>
         this.desktop.scrollObservedControl(picker, anchor, direction)
       );
+      scrolled = true;
       try {
         picker = await this.wait((ns) => {
           const visible = ns.filter(
@@ -539,6 +541,12 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
           throw new DriverFailure('model_unavailable');
         throw error;
       }
+    }
+    if (scrolled) {
+      // The picker animates after a wheel event. Refresh the target before its
+      // sole click so a stale accessibility rectangle cannot authorize it.
+      await this.clock.sleep(400);
+      picker = await this.snapshot();
     }
     const item = unique(
       picker.filter(
