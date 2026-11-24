@@ -563,8 +563,8 @@ async function execute(
       ? SUBMIT_TIMEOUT_MS
       : mode === 'diagnose'
         ? 20_000
-        : mode === 'stop'
-          ? // A skipped question, then Stop and the wait for it to take.
+        : mode === 'stop' || (mode === 'reset' && driverMode === 'third-party')
+          ? // Allow slow accessibility reads and time to verify navigation.
             30_000
           : 10_000
   );
@@ -1097,9 +1097,9 @@ const coworkLinuxThirdParty: CoworkDesktop = {
     await diagnoseLinux(options, 'third-party');
   },
   async reset(options) {
-    // Stop the failed case's task if it still runs (its Stop response), then
-    // one empty new-task deep link and a read-only wait. Never types or sends.
-    await execute('reset', {}, { ...options, maxActions: 2 });
+    // Stop, open an empty new-task link, and only for a retained draft try
+    // alternate empty navigation. Never types or sends.
+    await execute('reset', {}, { ...options, maxActions: 3 });
   },
   async submit(query, options) {
     const started = Date.now();

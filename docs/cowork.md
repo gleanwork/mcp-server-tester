@@ -915,10 +915,13 @@ retried or resent. Each case is self-contained: after a submit, binding, HITL, o
 transcript failure, MST records that case's failure and resets the app before the next
 case. On third-party Linux the reset first stops the failed case's task if it still runs (a
 task past its deadline, or one waiting on a prompt): it clicks the task's Stop
-response and waits until it's gone, about 2 seconds. A task that won't stop fails
-the reset (`task_not_stopped`), and the old task's view is left as it is. The
-reset then opens one empty new-task deep link and waits read-only (about 10
-seconds) for the Cowork start surface. First-party Linux reset first ends an
+response and waits until it's gone. A task that won't stop fails the reset
+(`task_not_stopped`). The reset then opens an empty new-task deep link. If a
+known composer still holds a draft after navigation, it tries the empty Cowork
+route once and must see a disabled Start task and an empty composer before
+continuing. Neither link sends anything. Each reset attempt has up to 30 seconds
+for accessibility reads and navigation; Linux Cowork retries a failed reset
+twice, after 10 and 20 seconds. First-party Linux reset first ends an
 active task, proved by its terminal result: `Skip` on each open question page,
 then `Stop`, and, if the desktop cannot, from claude.ai through the source host.
 It opens a new-task link only when no Stop control is present.

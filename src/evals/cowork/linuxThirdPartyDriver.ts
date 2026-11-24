@@ -32,6 +32,8 @@ const SCAN_ATTEMPTS = 3;
 const DEEP_LINK_PROMPT_CHARS = 14_336;
 const PASTE_CHECK_CHARS = 200;
 const PASTE_TIMEOUT_MS = 30_000;
+/** Give the primary new-task link time to replace the old composer. */
+const RESET_DRAFT_GRACE_MS = 5_000;
 const COMPOSER = 'Write your prompt to Claude';
 const TEXT_ROLES = ['static', 'text', 'label', 'paragraph', 'heading'];
 const OPTION_ROLES = [
@@ -235,58 +237,90 @@ class ThirdPartyDriver {
     throw new DriverFailure('cowork_not_ready');
   }
 
+  /** A disabled or offscreen Stop response is not evidence of an idle app. */
+  stopControls(nodes: readonly LinuxUiNode[]): LinuxUiNode[] {
+    return controls(nodes, ['Stop response'], ['button'], {
+      enabled: false,
+      showing: false,
+    });
+  }
+
   /** Stop a failed case's task before leaving it. Never sends. */
   async stopRunningTask(): Promise<boolean> {
-    const stops = controls(await this.scan(), ['Stop response'], ['button']);
+    const stops = this.stopControls(await this.scan());
     if (!stops.length) return false;
     if (stops.length !== 1) throw new DriverFailure('stop_control_ambiguous');
-    await this.action(() => this.ui.activate(stops[0]!));
+    const stop = stops[0]!;
+    if (!stop.enabled || !stop.showing)
+      throw new DriverFailure('task_not_stopped');
+    await this.action(() => this.ui.activate(stop));
     for (;;) {
       if (Date.now() >= this.scanDeadline)
         throw new DriverFailure('task_not_stopped');
-      if (!controls(await this.scan(), ['Stop response'], ['button']).length)
-        break;
+      if (!this.stopControls(await this.scan()).length) break;
       await this.pause();
     }
     return true;
   }
 
   async reset(): Promise<ThirdPartyReceipt> {
-    // Stop, then open one empty new-task link and wait read-only. An enabled
-    // Start task still holds a draft the link failed to clear.
+    // Stop, then open an empty new-task link. If it leaves a draft, try the
+    // app's parameterless Cowork route once. Neither link sends or types.
     const stopped = await this.stopRunningTask();
     const ready = (): ThirdPartyReceipt => ({
       ...this.receipt('ready'),
       ...(stopped ? { stopped: true as const } : {}),
     });
     await this.action(() => this.ui.openNewTask(''));
+    const navigatedAt = Date.now();
+    const recoverAt =
+      navigatedAt +
+      Math.min(RESET_DRAFT_GRACE_MS, (this.scanDeadline - navigatedAt) / 2);
     let draft = false;
+    let recovered = false;
     for (;;) {
       if (Date.now() >= this.scanDeadline)
         throw new DriverFailure(
           draft ? 'draft_not_cleared' : 'deadline_exceeded'
         );
       const nodes = await this.scan();
+      // An uncertain submission can become visible while we're resetting.
+      if (this.stopControls(nodes).length)
+        throw new DriverFailure('task_not_stopped');
       const starts = controls(nodes, ['Start task'], ['button'], {
         enabled: false,
         showing: false,
       });
-      if (starts.length === 1) {
-        if (
-          !controls(nodes, ['Start task'], ['button'], { showing: false })
-            .length
-        )
-          return ready();
-        draft = true;
-      } else if (!starts.length) {
-        // The sidebar button proves nothing. An unselected mode radio lets the
-        // next submit select Cowork, then verify Start task.
-        const radios = controls(nodes, ['Cowork'], ['radio button'], {
-          enabled: false,
-        });
-        if (radios.length === 1 && !radios[0]!.selected) return ready();
+      const entries = controls(nodes, [COMPOSER], ['entry'], {
+        enabled: false,
+        showing: false,
+      });
+      const entry = entries.length === 1 ? entries[0] : undefined;
+      // The sidebar button proves nothing. An unselected mode radio lets the
+      // next submit select Cowork, unless a draft has already been seen.
+      const radios =
+        !starts.length && !draft
+          ? controls(nodes, ['Cowork'], ['radio button'], { enabled: false })
+          : [];
+      const start = starts.length === 1 ? starts[0] : undefined;
+      if (start?.enabled) draft = true;
+      else if (start || (radios.length === 1 && !radios[0]!.selected)) {
+        if (!draft && !entries.length) return ready();
+        if (entry) {
+          // Start task can be disabled during navigation even with a draft.
+          if (!(await this.ui.readText(entry)).trim()) {
+            this.remaining();
+            return ready();
+          }
+          draft = true;
+        }
       }
-      await sleep(Math.min(100, this.deadlineAt - Date.now()));
+      if (start && draft && entry && !recovered && Date.now() >= recoverAt) {
+        await this.action(() => this.ui.openCowork());
+        recovered = true;
+        continue;
+      }
+      await this.pause();
     }
   }
 
