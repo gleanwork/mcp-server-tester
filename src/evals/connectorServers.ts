@@ -266,6 +266,9 @@ export async function expandConnectorServers(
       transport: 'http',
       label: use.label,
       serverUrl: use.url,
+      ...(use.connector.headers
+        ? { headers: { ...use.connector.headers } }
+        : {}),
       ...(slot ? { auth: { accessTokenEnv: name } } : {}),
     };
   }

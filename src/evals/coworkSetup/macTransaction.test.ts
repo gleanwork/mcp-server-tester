@@ -593,6 +593,84 @@ describe('Mac Cowork settings transaction', () => {
     });
   });
 
+  describe('with MST_INFERENCE_GATEWAY_URL', () => {
+    const GATEWAY = 'http://127.0.0.1:4100';
+
+    it('sends inference to the gateway with the staged key', async () => {
+      const result = await installMacCoworkSettings(
+        options({ env: { ...ENV, MST_INFERENCE_GATEWAY_URL: GATEWAY } })
+      );
+      const installed = await readJson(profile(result.id));
+      expect(installed).toMatchObject({
+        inferenceProvider: 'gateway',
+        inferenceGatewayBaseUrl: GATEWAY,
+        inferenceGatewayAuthScheme: 'bearer',
+        inferenceCredentialKind: 'helper-script',
+        inferenceCredentialHelper: stage('inference-helper.sh'),
+      });
+      expect(await text(profile(result.id))).not.toContain(TOKEN);
+      expect(
+        await invokeHelper(stage('inference-helper.sh'), {
+          kind: 'inference',
+          path: stage('credentials/inference.json'),
+        })
+      ).toBe(TOKEN + '\n');
+      await result.restore();
+      await expectClean();
+    });
+
+    it('uses MST_INFERENCE_AUTH_SCHEME', async () => {
+      const result = await installMacCoworkSettings(
+        options({
+          env: {
+            ...ENV,
+            MST_INFERENCE_GATEWAY_URL: 'https://gateway.example.test/anthropic',
+            MST_INFERENCE_AUTH_SCHEME: 'x-api-key',
+          },
+        })
+      );
+      expect(await readJson(profile(result.id))).toMatchObject({
+        inferenceProvider: 'gateway',
+        inferenceGatewayBaseUrl: 'https://gateway.example.test/anthropic',
+        inferenceGatewayAuthScheme: 'x-api-key',
+      });
+      await result.restore();
+      await expectClean();
+    });
+
+    it.each([
+      { MST_INFERENCE_GATEWAY_URL: 'http://gateway.example.test' },
+      { MST_INFERENCE_GATEWAY_URL: 'https://user:pass@gateway.example.test' },
+      { MST_INFERENCE_GATEWAY_URL: 'https://gateway.example.test/?key=1' },
+      { MST_INFERENCE_GATEWAY_URL: 'https://gateway.example.test/#x' },
+      { MST_INFERENCE_GATEWAY_URL: 'https://gateway.example.test/a b' },
+      { MST_INFERENCE_GATEWAY_URL: 'file:///tmp/gateway' },
+      { MST_INFERENCE_GATEWAY_URL: 'not a url' },
+      {
+        MST_INFERENCE_GATEWAY_URL: `https://g.example.test/${'x'.repeat(2048)}`,
+      },
+      {
+        MST_INFERENCE_GATEWAY_URL: GATEWAY,
+        MST_INFERENCE_AUTH_SCHEME: 'basic',
+      },
+      { MST_INFERENCE_AUTH_SCHEME: 'bearer' },
+    ])('rejects an unsafe or incomplete gateway (#%#)', async (gateway) => {
+      await rejectInstall({ env: { ...ENV, ...gateway } });
+      await expectClean();
+    });
+
+    it('refuses to override managed preferences that set the provider', async () => {
+      await fs.writeFile(join(root, 'managed.plist'), 'managed');
+      vi.mocked(
+        managedPreferences.checkManagedInferencePreferences
+      ).mockResolvedValue({ setsProvider: true });
+      await rejectInstall({
+        env: { ...ENV, MST_INFERENCE_GATEWAY_URL: GATEWAY },
+      });
+      await expectClean();
+    });
+  });
+
   it('requires ANTHROPIC_API_KEY when managed preferences set no provider', async () => {
     await fs.writeFile(join(root, 'managed.plist'), 'managed');
     vi.mocked(

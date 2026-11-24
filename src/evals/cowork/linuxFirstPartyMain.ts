@@ -1,7 +1,7 @@
 /** Isolated Node entry point for the account-backed Linux desktop driver. */
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
-import { connectLinuxUi } from './linuxAtspi.js';
+import { connectLinuxUi } from './linuxConnect.js';
 import { runFirstPartyLinux } from './linuxFirstPartyDriver.js';
 import {
   LinuxUiError,

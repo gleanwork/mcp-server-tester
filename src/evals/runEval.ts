@@ -130,6 +130,7 @@ import {
   resolveWriteModes,
   type WriteMode,
 } from './writeModes.js';
+import { mixedWriteComparisonSkipReason } from './mixedWriteComparison.js';
 import { batchRequests, prepareClientBatch } from './prepareClientBatch.js';
 import { readinessRetryDelaysMs } from './readinessCheck.js';
 import { clientSecretValues, redactedClientRun } from './clientSecrets.js';
@@ -633,7 +634,8 @@ async function comparePairwiseVariants(
   evalConfig: EvalConfig,
   variantResults: EvaluationVariantResult[],
   cases: readonly EvalCase[],
-  grading: GradingSource
+  grading: GradingSource,
+  writeModes: ReadonlyMap<string, Record<string, WriteMode>>
 ): Promise<Partial<UsageMetrics> | undefined> {
   const judges = (evalConfig.pairwiseJudges ?? [])
     .map((entry) => pairwiseJudgeWithModel(entry, evalConfig.models))
@@ -666,6 +668,14 @@ async function comparePairwiseVariants(
       candidate: { name: candidate.name, caseResults: ran(candidate) },
       judges,
       cases: byId,
+      mixedWriteSkipReason: (baselineResult, candidateResult) =>
+        mixedWriteComparisonSkipReason(
+          baselineResult,
+          candidateResult,
+          writeModes.get(baseline.name),
+          writeModes.get(candidate.name),
+          evalConfig.allowMixedWriteModes === true
+        ),
       concurrency: evalConfig.concurrency,
       ...(evalConfig.settings ? { settings: evalConfig.settings } : {}),
       ...(grading !== LOCAL_GRADING
@@ -2652,6 +2662,7 @@ async function evaluate(
       await assertWriteModes({
         variants: checked,
         allowLiveWrites: options.allowLiveWrites === true,
+        allowMixedWriteModes: evalConfig.allowMixedWriteModes,
         declared,
         writeCases: canonicalDatasets.flatMap(({ dataset }) =>
           dataset.cases
@@ -3104,7 +3115,8 @@ async function evaluate(
         evalConfig,
         variantResults,
         canonicalDatasets.flatMap(({ dataset }) => dataset.cases),
-        grading
+        grading,
+        writeModes
       );
     } catch (error) {
       console.warn(

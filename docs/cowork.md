@@ -104,11 +104,17 @@ Two separate model clients run during a macOS case:
 
 - **Claude Desktop's inference** (the model under test). By default, MST stages
   `ANTHROPIC_API_KEY` for the temporary profile through a private credential
-  helper. When managed preferences set `inferenceProvider` (for example, an LLM
+  helper, and Desktop sends it to the Anthropic API. With
+  `MST_INFERENCE_GATEWAY_URL` set, the profile sends Desktop's inference to that
+  LLM gateway instead (`inferenceProvider: "gateway"`), with the same staged key
+  as its token, sent as `MST_INFERENCE_AUTH_SCHEME`: `bearer` (the default) or
+  `x-api-key`. These are the variables MST's Linux image reads. The URL must be
+  HTTPS, or HTTP to a loopback host, with no credentials, query or fragment.
+  When managed preferences set `inferenceProvider` (for example, an LLM
   gateway with its own credential helper), they take precedence over the
   profile: MST then requires no key, stages no inference credential, and sets no
-  provider in the profile. If those managed preferences change during setup, the
-  run fails closed.
+  provider in the profile, and it refuses `MST_INFERENCE_GATEWAY_URL`. If those
+  managed preferences change during setup, the run fails closed.
 - **The Computer Use planner** (`clientOptions.computerUseModel`). It uses MST's
   [LLM gateway settings](./llm-gateways.md): `ANTHROPIC_BASE_URL` with
   `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`, else `ANTHROPIC_API_KEY`
@@ -632,6 +638,46 @@ Run MST in the prepared desktop's filesystem and session context. `DISPLAY` and
 `DBUS_SESSION_BUS_ADDRESS` are required. MST does not install Linux desktop
 dependencies.
 
+### Run on agent-desktop instead
+
+By default the drivers read and press the app through MST's own AT-SPI client.
+They can run the same rules over [`agent-desktop`](https://github.com/vercel-labs/agent-desktop),
+the automation every desktop client is moving to
+([ADR 0017](./adr/0017-desktop-clients-share-one-automation.md)), while that
+move is proven:
+
+```bash
+MST_DESKTOP_AUTOMATION=agent-desktop mst run evals/my-eval.json
+```
+
+Set it in the environment of the machine that runs the trial; it is not an
+eval config option. `agent-desktop` is an optional dependency of MST, pinned
+to one version, so it installs with MST where its platform is supported. A
+value a client can't run on fails before MST touches the app; a missing
+`agent-desktop` fails a driver operation with `agent_desktop_not_installed`.
+
+What differs when it runs:
+
+- The batch holds one accessibility client on the bus for its whole life.
+  `agent-desktop` connects for one command and leaves, and when the last
+  client leaves while Chromium handles a key, Claude Desktop crashes
+  ([agent-desktop#529](https://github.com/vercel-labs/agent-desktop/issues/529)).
+  The held client keeps the app's key listener in place. It is released with
+  the batch.
+- Text goes in by paste: `agent-desktop` puts the prompt on the clipboard,
+  focuses the composer and sends one Ctrl+V. Claude Desktop's composer ignores
+  a value set over AT-SPI. The driver reads the draft back as before.
+- A snapshot takes about half a second, against tens of milliseconds for
+  MST's own client.
+- Each receipt's `telemetry.automation` is `"agent-desktop"`. A receipt on the
+  default has no `automation` field.
+
+`mst desktop parity --app Claude` reads one idle screen of the running app
+through both and lists every control that differs; `mst desktop snapshot`
+saves what one of them sees. Neither presses anything. The checks that prove
+the move, and the record a default change needs, are in
+[docs/desktop-validation/](./desktop-validation/README.md).
+
 The package exposes two executable runtime files, resolved independently of the
 working directory:
 
@@ -735,9 +781,12 @@ the first option of the question on screen (Claude Desktop shows one per page, m
 screen). A control matches by its exact label, or by the label followed by its
 description, with or without the shortcut digit Cowork shows before or after it,
 unless a longer option label claims it. The composer's own `Send message` and
-`Stop response` controls show beside every question and do not block an answer;
-any other approval or send control on screen does. A first-party account run
-answers the same way, even when it refuses write approvals. Once a multi-select
+`Stop response` controls show beside every question and do not block an answer,
+and neither does the app's sidebar (past task titles such as `Update the roadmap`)
+or its `Update available` notice; any other approval or send control on screen
+does. A first-party account run answers the same way, even when it refuses write
+approvals. When the driver refuses a question without acting, the case fails as
+unanswered at once rather than waiting for its deadline. Once a multi-select
 option is checked, HITL presses the page's one `Submit`/`Next` control. HITL acts
 only on one unambiguous control and never types an answer. If the form doesn't
 take the first option within 60 seconds, or the question has no usable options,
@@ -852,8 +901,16 @@ the bytes present at audit time; notices contain no original digest to authentic
   with the test environment; see [ChatGPT desktop](./chatgpt-desktop.md).
 - `cowork/interaction.ts`: shared receipts, error classifications, and scoped telemetry. New Linux receipts omit `driver`; old receipts remain readable.
 - `cowork/linux.ts`: separate first-party and third-party adapters, with runtime guards, readiness checks and execution against a caller-owned desktop.
-- `cowork/linuxUi.ts`: the bounded native UI interface and driver receipts.
-- `cowork/linuxAtspi.ts`: TypeScript AT-SPI primitives over D-Bus, with bounded tree reads, native actions and clipboard input.
+- `desktopUi/desktopUi.ts`: the desktop interface, which no product owns: a snapshot of the app's window, a control's text, and the actions on a control.
+- `desktopUi/atspi.ts`: the desktop interface over AT-SPI on D-Bus, in TypeScript, with bounded tree reads, native actions and clipboard input.
+- `desktopUi/agentDesktop.ts`: the one module that runs the `agent-desktop` CLI, one command per call, with its typed reads and actions.
+- `desktopUi/agentDesktopUi.ts`: the desktop interface over agent-desktop, for every OS; `agentDesktopLinux.ts` and `agentDesktopMac.ts` add what each OS needs (the session's window, links, how text goes in), and `agentDesktopConnect.ts` picks one by the OS that runs MST.
+- `desktopUi/automation.ts`: the desktop automations MST knows and `MST_DESKTOP_AUTOMATION`; `desktopDefaults.ts`, beside it, is each client's default on each OS (`DESKTOP_DEFAULTS`).
+- `desktopUi/heldAccessibilityClient.ts`: the AT-SPI client a batch holds while its drivers run over agent-desktop.
+- `desktopUi/parity.ts`: the comparison behind `mst desktop parity`.
+- `cowork/linuxUi.ts`: Claude Desktop over the desktop interface (its application names and its links), and the driver receipts.
+- `cowork/linuxAutomation.ts`: which automation Cowork on Linux runs on in this environment; the client asks it without connecting.
+- `cowork/linuxConnect.ts`: connects a driver process to the session's Claude Desktop. The one place Cowork on Linux names a transport.
 - `cowork/linuxFirstPartyDriver.ts`: first-party readiness, model selection, single submission, scoped HITL and diagnostics over the UI interface.
 - `cowork/linuxFirstPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-first-party-runtime`, accepting JSON input and returning a receipt.
 - `cowork/linuxThirdPartyDriver.ts`: managed third-party readiness, reset, single submission, HITL and clarifying-question answers over the UI interface; no lifecycle or answer parsing.

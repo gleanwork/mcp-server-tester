@@ -194,6 +194,7 @@ export interface EvalConfig {
    * reach the server. Default false.
    */
   simulateWrites?: boolean;
+  allowMixedWriteModes?: boolean;
   /**
    * Write modes for servers no dry-run proxy guards, by server label (ADR
    * 0014). `unguarded`: MST can't see the server's writes, and the run
@@ -632,6 +633,7 @@ export const EvalConfigSchema = z
       .optional(),
     redactStoredResponses: z.boolean().optional(),
     simulateWrites: z.boolean().optional(),
+    allowMixedWriteModes: z.boolean().optional(),
     writes: z
       .record(z.string().min(1), z.enum(['unguarded', 'live']))
       .optional(),
@@ -724,6 +726,7 @@ const PluginConfigSchema = EvalConfigSchema.pick({
   maxTokens: true,
   redactStoredResponses: true,
   simulateWrites: true,
+  allowMixedWriteModes: true,
   writes: true,
 }).strict();
 

@@ -87,6 +87,18 @@ for _ in $(seq 50); do
   sleep 0.1
 done
 
+# Over agent-desktop (MST_DESKTOP_AUTOMATION, ADR 0017) the session has a
+# window manager: agent-desktop matches each accessibility frame to its X11
+# window through one, and reads no window without it. The default session
+# stays as it was, with none.
+if [[ "${MST_DESKTOP_AUTOMATION:-}" == agent-desktop ]]; then
+  openbox > "${log}/openbox.log" 2>&1 &
+  for _ in $(seq 50); do
+    xprop -root _NET_SUPPORTING_WM_CHECK 2> /dev/null | grep -q 'window id' && break
+    sleep 0.1
+  done
+fi
+
 dbus-daemon --session --address="${DBUS_SESSION_BUS_ADDRESS}" --nofork \
   > "${log}/dbus.log" 2>&1 &
 for _ in $(seq 50); do

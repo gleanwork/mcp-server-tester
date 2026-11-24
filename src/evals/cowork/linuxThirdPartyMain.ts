@@ -5,7 +5,7 @@ import { stat, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
-import { connectLinuxUi } from './linuxAtspi.js';
+import { connectLinuxUi } from './linuxConnect.js';
 import {
   accessibilityText,
   runThirdPartyLinux,

@@ -40,6 +40,7 @@ const TRANSPORT_ERRORS = new Set([
   'accessibility_text_unavailable',
   'invalid_prompt',
   'open_cowork_failed',
+  'agent_desktop_not_installed',
 ]);
 const PERSISTENT = [
   'Allow',
@@ -68,6 +69,18 @@ const UNSAFE_QUESTION = [
  * a question option with one of these labels is still refused.
  */
 const COMPOSER_CONTROLS = new Set(['send message', 'stop response']);
+/**
+ * Claude Desktop's update notice ("Update available v5.11492.5"). It is app
+ * chrome, never an approval card, whose write action is named `Update` alone.
+ */
+const UPDATE_NOTICE = /^Update available(?: v?[0-9][0-9.]*)?$/i;
+/**
+ * The app's sidebar lists past tasks by title ("Update the roadmap") and app
+ * notices: none is an approval for the open question, so the denylist scan
+ * passes over it. Approval cards render in the task's own pane.
+ */
+const SIDEBAR = /^Sidebar$/i;
+const SIDEBAR_ROLES = ['landmark', 'panel', 'navigation'];
 /** Skip presses per stop: one per question page, bounded. */
 const MAX_SKIPS = 6;
 /** Time for a skipped page to leave the screen before Skip is pressed again. */
@@ -494,13 +507,24 @@ class FirstPartyDriver {
     if (!validQuestions(questions))
       throw new DriverFailure('invalid_questions');
     const nodes = await this.bounded(() => this.ui.snapshot());
+    const byId = new Map(nodes.map((item) => [item.id, item]));
+    const sidebars = nodes
+      .filter(
+        (item) =>
+          SIDEBAR_ROLES.includes(item.role) &&
+          SIDEBAR.test(normalized(item.name))
+      )
+      .map((item) => item.id);
     if (
       controls(
         nodes,
         (name) =>
           !COMPOSER_CONTROLS.has(normalized(name).toLowerCase()) &&
+          !UPDATE_NOTICE.test(normalized(name)) &&
           unsafeQuestionAction(name),
         OPTION_ROLES
+      ).filter(
+        (item) => !sidebars.some((id) => withinContainer(byId, item, id))
       ).length
     )
       throw new DriverFailure('account_question_action_conflict');
@@ -546,7 +570,6 @@ class FirstPartyDriver {
     let target = matches[0]!;
     // Apply scope proof to selection as well as advancement: a unique exact
     // label elsewhere in the app is not evidence of a question option.
-    const byId = new Map(nodes.map((item) => [item.id, item]));
     const scope =
       target.parentId === undefined
         ? undefined

@@ -1,5 +1,9 @@
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { isAbsolute } from 'node:path';
+/**
+ * The desktop interface over AT-SPI on D-Bus: MST's own accessibility
+ * client, for an app on Linux. Native primitives only: which app this is and
+ * how a link reaches it come from the caller.
+ */
+import { spawn, type ChildProcess } from 'node:child_process';
 import {
   ATSPI_COMPONENT,
   ATSPI_HYPERTEXT,
@@ -13,8 +17,12 @@ import {
   type AtspiRef,
   type AtspiStates,
 } from '../linuxAtspiBus.js';
-import { hasLoneSurrogate, percentEncodeUtf8 } from '../urlComponent.js';
-import { LinuxUiError, type LinuxUi, type LinuxUiNode } from './linuxUi.js';
+import {
+  DesktopUiError,
+  type DesktopUi,
+  type DesktopUiNode,
+} from './desktopUi.js';
+import { openLinuxLink } from './linuxLink.js';
 
 const SKIPPED_ROLES = new Set(['table', 'tree table']);
 const TEXT_ROLES = new Set(['static', 'text', 'label', 'paragraph', 'heading']);
@@ -22,24 +30,21 @@ const TEXT_ROLES = new Set(['static', 'text', 'label', 'paragraph', 'heading']);
 const INLINE_ROLES = new Set([...TEXT_ROLES, 'link']);
 const MAX_INLINE_DEPTH = 8;
 
-/** Claude Desktop's accessible application names, compared case-insensitively. */
-function isClaude(name: string): boolean {
-  return ['claude', 'claude-desktop'].includes(name.toLowerCase());
-}
-
-export interface LinuxUiOptions {
-  /** Which application to read. Default: exactly `Claude` or `claude-desktop`. */
-  application?: (name: string) => boolean;
+export interface AtspiDesktopUiOptions {
+  /** Whether an accessible application of this name is the app to read. */
+  application: (name: string) => boolean;
+  /** The program that hands a link to the app. Default: `xdg-open`. */
+  urlOpener?: string;
 }
 
 /** Native AT-SPI primitives only. No account, readiness, permission or retry policy. */
-export async function connectLinuxUi(
+export async function connectAtspiDesktopUi(
   env: Record<string, string | undefined>,
   deadlineAt: number,
-  options: LinuxUiOptions = {}
-): Promise<LinuxUi> {
+  options: AtspiDesktopUiOptions
+): Promise<DesktopUi> {
   const bus = await openAtspiBus(env, deadlineAt);
-  const application = options.application ?? isClaude;
+  const { application } = options;
   const processes = new Set<ChildProcess>();
   let known = new Map<string, AtspiRef>();
   let clipboard: ChildProcess | undefined;
@@ -48,13 +53,13 @@ export async function connectLinuxUi(
   let closing: Promise<void> | undefined;
 
   function check(): void {
-    if (closed) throw new LinuxUiError('accessibility_bus_closed');
+    if (closed) throw new DesktopUiError('accessibility_bus_closed');
     remainingMs(deadlineAt);
   }
-  function reference(node: LinuxUiNode): AtspiRef {
+  function reference(node: DesktopUiNode): AtspiRef {
     check();
     const ref = known.get(node.id);
-    if (!ref) throw new LinuxUiError('accessibility_unknown_node');
+    if (!ref) throw new DesktopUiError('accessibility_unknown_node');
     return ref;
   }
   function stop(child: ChildProcess): void {
@@ -93,7 +98,7 @@ export async function connectLinuxUi(
         let settled = false;
         let settle: ReturnType<typeof setTimeout> | undefined;
         const deadline = setTimeout(
-          () => finish(new LinuxUiError('deadline_exceeded')),
+          () => finish(new DesktopUiError('deadline_exceeded')),
           remainingMs(deadlineAt)
         );
         function finish(error?: Error): void {
@@ -105,13 +110,13 @@ export async function connectLinuxUi(
           else resolve();
         }
         child.on('error', () =>
-          finish(new LinuxUiError('clipboard_unavailable'))
+          finish(new DesktopUiError('clipboard_unavailable'))
         );
         child.on('exit', () =>
-          finish(new LinuxUiError('clipboard_unavailable'))
+          finish(new DesktopUiError('clipboard_unavailable'))
         );
         child.stdin.on('error', () =>
-          finish(new LinuxUiError('clipboard_unavailable'))
+          finish(new DesktopUiError('clipboard_unavailable'))
         );
         child.stdin.end(text, 'utf8', () => {
           if (settled) return;
@@ -127,30 +132,14 @@ export async function connectLinuxUi(
       throw error;
     }
   }
-  /** One bounded run of the URL opener, without a shell. Never retried. */
   async function open(url: string, code: string): Promise<void> {
     check();
-    const opener = env.MST_COWORK_URL_OPENER;
-    if (opener !== undefined && !isAbsolute(opener))
-      throw new LinuxUiError('invalid_url_opener');
-    await new Promise<void>((resolve, reject) => {
-      const child = execFile(
-        opener ?? 'xdg-open',
-        [url],
-        {
-          env,
-          shell: false,
-          timeout: Math.min(15_000, remainingMs(deadlineAt)),
-          killSignal: 'SIGKILL',
-          maxBuffer: 64 * 1024,
-        },
-        (error) => {
-          processes.delete(child);
-          if (error) reject(new LinuxUiError(code));
-          else resolve();
-        }
-      );
-      processes.add(child);
+    await openLinuxLink(url, code, {
+      env,
+      deadlineAt,
+      ...(options.urlOpener !== undefined ? { opener: options.urlOpener } : {}),
+      track: (child, done) =>
+        done ? processes.delete(child) : processes.add(child),
     });
   }
 
@@ -163,7 +152,7 @@ export async function connectLinuxUi(
           application(app.name)
         );
         if (matches.length !== 1)
-          throw new LinuxUiError('desktop_missing_or_ambiguous');
+          throw new DesktopUiError('desktop_missing_or_ambiguous');
         const refs = new Map<string, AtspiRef>();
         const nodes = await walkAtspi(
           matches[0]!.ref,
@@ -184,7 +173,7 @@ export async function connectLinuxUi(
               // omit it rather than lose the whole scan. The app root can't.
               if (
                 parentId &&
-                error instanceof LinuxUiError &&
+                error instanceof DesktopUiError &&
                 error.code === 'accessibility_node_defunct'
               )
                 return null;
@@ -210,8 +199,11 @@ export async function connectLinuxUi(
         return nodes;
       } catch (error) {
         known.clear();
-        if (error instanceof LinuxUiError && error.code === 'deadline_exceeded')
-          throw new LinuxUiError('accessibility_scan_timeout');
+        if (
+          error instanceof DesktopUiError &&
+          error.code === 'deadline_exceeded'
+        )
+          throw new DesktopUiError('accessibility_scan_timeout');
         throw error;
       }
     },
@@ -223,7 +215,7 @@ export async function connectLinuxUi(
         if (embeddedChildren.has(atspiId(ref))) {
           const role = await bus.role(ref);
           if (!INLINE_ROLES.has(role) || !interfaces.includes(ATSPI_TEXT))
-            throw new LinuxUiError('accessibility_text_unavailable');
+            throw new DesktopUiError('accessibility_text_unavailable');
         }
         if (interfaces.includes(ATSPI_TEXT)) {
           const text = await bus.text(ref, 0, -1);
@@ -239,7 +231,7 @@ export async function connectLinuxUi(
               (char) => char === '\ufffc'
             ).length;
             if (descendants.length !== markers)
-              throw new LinuxUiError('accessibility_text_unavailable');
+              throw new DesktopUiError('accessibility_text_unavailable');
             for (const child of descendants)
               embeddedChildren.add(atspiId(child));
             return { value: '', children: descendants };
@@ -268,7 +260,7 @@ export async function connectLinuxUi(
         depth: number
       ): Promise<string> {
         if (depth > MAX_INLINE_DEPTH)
-          throw new LinuxUiError('accessibility_text_unavailable');
+          throw new DesktopUiError('accessibility_text_unavailable');
         try {
           return await viaHyperlinks(ref, text, depth);
         } catch {
@@ -282,7 +274,7 @@ export async function connectLinuxUi(
         depth: number
       ): Promise<string> {
         const unavailable = () =>
-          new LinuxUiError('accessibility_text_unavailable');
+          new DesktopUiError('accessibility_text_unavailable');
         const characters = [...text];
         const children = await bus.children(ref);
         if (
@@ -322,7 +314,7 @@ export async function connectLinuxUi(
         depth: number
       ): Promise<string> {
         const unavailable = () =>
-          new LinuxUiError('accessibility_text_unavailable');
+          new DesktopUiError('accessibility_text_unavailable');
         if (!(await bus.interfaces(ref)).includes(ATSPI_HYPERTEXT))
           throw unavailable();
         const characters = [...text];
@@ -358,9 +350,9 @@ export async function connectLinuxUi(
       try {
         const accepted = await bus.doAction(ref, 0);
         if (!accepted)
-          throw new LinuxUiError('action_acknowledgement_uncertain');
+          throw new DesktopUiError('action_acknowledgement_uncertain');
       } catch {
-        throw new LinuxUiError('action_acknowledgement_uncertain');
+        throw new DesktopUiError('action_acknowledgement_uncertain');
       }
     },
     async reveal(node) {
@@ -371,9 +363,10 @@ export async function connectLinuxUi(
         signature: 'u',
         body: [6],
       });
-      if (accepted !== true) throw new LinuxUiError('reveal_failed');
+      if (accepted !== true) throw new DesktopUiError('reveal_failed');
     },
-    async paste(node, text) {
+    /** One clipboard paste into the control. */
+    async enterText(node, text) {
       let unlock: Promise<void> | undefined;
       function releaseModifiers(): Promise<void> {
         // Shutdown and paste's finally share exactly one bounded unlock,
@@ -389,9 +382,9 @@ export async function connectLinuxUi(
           interface: ATSPI_COMPONENT,
           member: 'GrabFocus',
         });
-        if (focused !== true) throw new LinuxUiError('composer_not_focused');
+        if (focused !== true) throw new DesktopUiError('composer_not_focused');
         if (child.exitCode !== null || child.signalCode !== null)
-          throw new LinuxUiError('clipboard_unavailable');
+          throw new DesktopUiError('clipboard_unavailable');
         modifierCleanup = releaseModifiers;
         try {
           await keyboard(1 << 2, 5); // LOCKMODIFIERS, Control
@@ -410,15 +403,8 @@ export async function connectLinuxUi(
         throw error;
       }
     },
-    async openCowork() {
-      await open('claude://cowork/new', 'open_cowork_failed');
-    },
-    async openNewTask(prompt) {
-      if (hasLoneSurrogate(prompt)) throw new LinuxUiError('invalid_prompt');
-      await open(
-        `claude://claude.ai/new?q=${percentEncodeUtf8(prompt)}`,
-        'open_task_failed'
-      );
+    async openLink(url, failure) {
+      await open(url, failure);
     },
     close() {
       if (closed) return closing;

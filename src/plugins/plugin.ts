@@ -384,6 +384,14 @@ function connectorProblem(
       ))
   )
     return `${label}: dispatchers maps each dispatcher tool to the argument that names its target: { "run_tool": "tool_name" }`;
+  if (
+    definition.headers !== undefined &&
+    (!isRecord(definition.headers) ||
+      Object.values(definition.headers).some(
+        (value) => typeof value !== 'string'
+      ))
+  )
+    return `${label}: headers must be an object of strings`;
   return undefined;
 }
 
