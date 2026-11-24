@@ -113,6 +113,8 @@ const Receipt = z
         pickerOptionCount: z.number().int().min(0).max(5000),
         targetOptionShowing: z.boolean(),
         effortOptionCount: z.number().int().min(0).max(5000),
+        targetOptionSelected: z.boolean(),
+        targetButtonTextVisible: z.boolean(),
       })
       .strict()
       .optional(),
@@ -357,7 +359,7 @@ export async function runLinuxChatgptDesktop(
   };
   if (!valid)
     throw new NativeChatgptDriverError(
-      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}${record?.step ? `; step=${record.step}` : ''}${record?.modelState ? `; modelVisible=${record.modelState.requestedVisible}; modelButtons=${record.modelState.modelButtonCount}; workReady=${record.modelState.workReady}; draftIntact=${record.modelState.draftIntact}; pickerOptions=${record.modelState.pickerOptionCount}; targetOption=${record.modelState.targetOptionShowing}; effortOptions=${record.modelState.effortOptionCount}` : ''}${openFailure ? `; open=${openFailure}` : ''}); no retry attempted.`,
+      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}${record?.step ? `; step=${record.step}` : ''}${record?.modelState ? `; modelVisible=${record.modelState.requestedVisible}; modelButtons=${record.modelState.modelButtonCount}; workReady=${record.modelState.workReady}; draftIntact=${record.modelState.draftIntact}; pickerOptions=${record.modelState.pickerOptionCount}; targetOption=${record.modelState.targetOptionShowing}; effortOptions=${record.modelState.effortOptionCount}; targetSelected=${record.modelState.targetOptionSelected}; targetButtonText=${record.modelState.targetButtonTextVisible}` : ''}${openFailure ? `; open=${openFailure}` : ''}); no retry attempted.`,
       {
         telemetry,
         error: record?.error,

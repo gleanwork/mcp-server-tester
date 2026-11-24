@@ -255,6 +255,8 @@ export interface ChatgptReceipt {
     pickerOptionCount: number;
     targetOptionShowing: boolean;
     effortOptionCount: number;
+    targetOptionSelected: boolean;
+    targetButtonTextVisible: boolean;
   };
   error?: LinuxChatgptErrorCode;
 }
@@ -453,6 +455,24 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     );
   }
 
+  private modelShownByButton(nodes: readonly N[], requested: string): boolean {
+    return nodes.some(
+      (button, index) =>
+        available(button) &&
+        BUTTONS.includes(button.role) &&
+        (MODEL_BUTTON.test(button.name) ||
+          button.name === 'Select ChatGPT model') &&
+        (button.name === requested ||
+          button.name.startsWith(`${requested} `) ||
+          nodes.some(
+            (child) =>
+              available(child, false) &&
+              child.ancestors.includes(index) &&
+              child.name.startsWith(requested)
+          ))
+    );
+  }
+
   /** Select the exact Work model in the native picker before sending a draft. */
   async selectModel(
     nodes: N[],
@@ -463,8 +483,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       this.modelButtons(nodes),
       'model_missing_or_ambiguous'
     );
-    if (current.name === requested || current.name.startsWith(`${requested} `))
-      return nodes;
+    if (this.modelShownByButton(nodes, requested)) return nodes;
     this.step = 'model-open';
     await this.action(() => this.desktop.clickObservedControl(nodes, current));
     const menu = await this.wait(
@@ -647,8 +666,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         const selected = this.modelButtons(ns);
         return (
           selected.length === 1 &&
-          (selected[0]!.name === requested ||
-            selected[0]!.name.startsWith(`${requested} `)) &&
+          this.modelShownByButton(ns, requested) &&
           this.ready(ns, 'chatgpt-work') &&
           matchesPrompt(await this.desktop.text(composer(ns)), prompt)
         );
@@ -694,6 +712,24 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
               available(node) &&
               /^(Low|Medium|High|Extra high|Max)$/.test(node.name)
           ).length,
+          targetOptionSelected: last.some(
+            (node) =>
+              node.role === 'radio menu item' &&
+              node.name === requested &&
+              node.selected
+          ),
+          targetButtonTextVisible: last.some(
+            (button, index) =>
+              BUTTONS.includes(button.role) &&
+              (MODEL_BUTTON.test(button.name) ||
+                button.name === 'Select ChatGPT model') &&
+              last.some(
+                (child) =>
+                  available(child, false) &&
+                  child.ancestors.includes(index) &&
+                  child.name.startsWith(requested)
+              )
+          ),
         };
         throw new DriverFailure('model_not_selected');
       }

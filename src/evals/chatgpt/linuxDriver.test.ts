@@ -851,6 +851,31 @@ describe('submit', () => {
     expect(desktop.names().at(-1)).toBe('Send');
   });
 
+  it('accepts the visible model text beneath a generically named button', async () => {
+    const desktop = new ModelDesktop('Select ChatGPT model');
+    desktop.hookOpen(() => {
+      const index = desktop.nodes.findIndex(
+        (item) => item.name === 'Select ChatGPT model'
+      );
+      desktop.nodes.push(
+        node('GPT-6.1 Sol Medium', 'static text', {
+          ancestors: [index],
+        })
+      );
+    });
+    expect(
+      (
+        await driverFor(desktop).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.1-sol'
+        )
+      ).status
+    ).toBe('submitted');
+    expect(desktop.names()).toEqual(['open', 'Send']);
+  });
+
   it('selects the Cloud location before selecting the requested model', async () => {
     const desktop = new ModelDesktop();
     desktop.cloudLocation = true;
