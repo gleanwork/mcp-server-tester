@@ -31,7 +31,7 @@ More desktop clients will come. Each one today means a new automation for each O
 
 - **Every desktop client is driven through the OS accessibility tree, with [`agent-desktop`](https://github.com/vercel-labs/agent-desktop), on every OS.** MST reads the app's controls by role and name and acts on them directly: it sets the prompt's text and presses the control that sends it. No screenshot is read and no model decides where to click. `agent-desktop` uses the AX API on macOS, AT-SPI on Linux and UI Automation on Windows, behind one command-line interface.
 
-- **One interface, which no product owns.** It has six operations: take a snapshot of the app's window, read a control's text, activate a control, bring a control into view, enter text in a control, and open a link in the app. One implementation runs them through `agent-desktop`. What differs between OSes stays inside that implementation: how the app's window is found, how a link is opened, and what a Linux session needs. The interface and its implementation live in a directory of their own under `src/evals/`, outside every product's directory.
+- **One interface, which no product owns.** It has six operations: take a snapshot of the app's window, read a control's text, activate a control, bring a control into view, enter text in a control, and open a link in the app. A transport implements them over one way of reaching the app. `agent-desktop` is the transport every client moves to, and MST's AT-SPI client is a transport too. What differs between OSes stays inside a transport: how the app's window is found, how a link is opened, and what a Linux session needs. A client's rules never name a transport. One module of the client does, so the transport under a client changes there and nowhere else. The interface and its transports live in a directory of their own under `src/evals/`, outside every product's directory, and a test fails when a product is named there.
 
 - **A desktop client supplies three things and no automation code.**
   1. **Its identity:** how to tell its window from every other window, and the link that opens a new conversation.
@@ -58,13 +58,26 @@ More desktop clients will come. Each one today means a new automation for each O
   - A workaround for a defect in it lives in the shared implementation, names the upstream issue, and is removed when a release fixes it.
   - It is written in Rust and MST runs it as it runs `xdotool`. MST's own code stays TypeScript ([ADR 0006](./0006-mst-is-written-in-typescript.md)).
 
-- **A move is proven live before it merges.** Before a client on an OS changes how it is driven, a live check covers each operation its rules use: reaching an empty prompt, entering a prompt with line breaks and reading it back, sending once, choosing the model, answering an approval, and resetting after a failure. One complete `mst run` follows. Tests against a recorded tree come with it, and they don't replace it.
+- **A client's default changes only after proof, and both ways of driving it stay until then.** A client on an OS has one default, which is what it ran on before this ADR. It may have a second way, which it can be run on while that way is proven. Merging a transport changes no default.
+  - The second way is chosen with `MST_DESKTOP_AUTOMATION=agent-desktop`, in the environment of the machine that runs the trial. It is not an eval config option: how a client runs is still not configuration (ADR 0011). The variable is for proving a move, and it goes when the last default has changed.
+  - A value that a client can't run on fails before MST touches the app.
+  - A receipt written on anything but the default names what wrote it, so two runs can be told apart.
 
-- **Options follow.** `computerUseModel` is valid only for a client and OS in the table of exceptions, and fails validation anywhere else. `maxActions` means one thing with one range on every OS.
+- **Proof is the same four checks for every client, and anyone can run them again.**
+  1. **Parity.** `mst desktop parity` reads one idle screen of the live app through both transports and lists every control that differs. It presses nothing. Where the default reads no tree (Computer Use), there is nothing to compare, and the next check stands alone.
+  2. **Recorded trees.** `mst desktop snapshot` saves what the app shows, from a profile that holds nobody's data. The saved trees are test fixtures, and the client's rules run against them in CI.
+  3. **Each operation, live.** In a profile made for the check: reaching an empty prompt, entering a prompt with line breaks and reading it back, sending once, choosing the model, answering an approval, and resetting after a failure.
+  4. **A paired run.** One fixed eval, run with `mst run` on each way, on the same machine and the same version of the app. The endings, the pass rate and the duration are compared.
+
+  The results go in a record under `docs/desktop-validation/`, one for each client and OS. A record names the versions, gives each check's result, and lists what was not checked. A test fails when a client's default is `agent-desktop` and it has no record. The guide to the four checks is in the same directory, and a new desktop client is validated by the same guide.
+
+- **What a default replaced is deleted last.** It stays for one release after the default changes, so a regression can be checked against it.
+
+- **Options follow.** `computerUseModel` stays valid for a client and OS while Computer Use is its default. After the default changes it fails validation, unless the table of exceptions lists that client and OS. `maxActions` means one thing with one range on every OS.
 
 ## Where each client stands
 
-As of 2026-11-21. "Tried" means a live check; nothing here is a complete `mst run`.
+As of 2026-11-21. "Driven today by" is the default, and no default has changed. "Tried" means a live check; nothing here is a complete `mst run`, and no row has a record of proof.
 
 | Client and OS                 | Driven today by          | State             | What is known                                                                                                                                                           |
 | ----------------------------- | ------------------------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -90,15 +103,18 @@ Found in the spike, with `agent-desktop` 1.3.1 and Claude Desktop 5.11492.5 in M
 
 ## Order of work
 
-Each step is its own pull request, proven as the decision says.
+Each step is its own pull request. A step that lets a client run on `agent-desktop` changes no default. A step that changes a default comes with its record.
 
-1. `cowork` first-party on macOS.
-2. `cowork` third-party on macOS. After it, `cowork` uses no Computer Use.
-3. The interface and its implementation move out of `cowork/`, with the receipts and the named failures.
-4. `cowork` on Linux, with what the section above lists.
-5. `chatgpt` and `codex-app` on macOS, with their rules written over the interface.
-6. `chatgpt` and `codex-app` on Linux, on the same rules.
-7. What nothing uses is deleted: the Computer Use loop, its planner and its Swift helper (about 2,300 lines), and both AT-SPI adapters (about 950 lines).
+1. The interface moves out of `cowork/`, with MST's AT-SPI client behind it as a transport. Nothing changes for a run.
+2. `agent-desktop` becomes a transport, with the variable that chooses it and the two commands. `cowork` on Linux can run on it, with what the section above lists.
+3. `cowork` first-party on macOS can run on it.
+4. Each of those two is proven, and its default changes.
+5. `cowork` third-party on macOS: it can run on it, it is proven, and its default changes. After it, `cowork` uses no Computer Use.
+6. `chatgpt` and `codex-app` on macOS, in the same three parts, with their rules written over the interface.
+7. `chatgpt` and `codex-app` on Linux, on the same rules.
+8. What nothing uses is deleted, a release after the last default that used it changed: the Computer Use loop, its planner and its Swift helper (about 2,300 lines), and both AT-SPI adapters (about 950 lines).
+
+The Linux drivers of `cowork` run most of today's evals, and other work changes them often. Steps 1 and 2 leave their rules alone, so that work and this don't collide.
 
 ## Considered
 
@@ -119,7 +135,9 @@ Each step is its own pull request, proven as the decision says.
 - **ADR 0011 and ADR 0006 change when this is accepted.** ADR 0011's "On macOS … use Computer Use. On Linux they use the accessibility (AT-SPI) automation" becomes this ADR's rule, and its consequence that the difference stays is withdrawn. ADR 0006's "Linux drivers talk to AT-SPI over D-Bus from TypeScript" holds only for code that hasn't moved, and for the held client. Each gets a note.
 - **MST depends on a young tool for every desktop client.** `agent-desktop` reached 1.0 on 2026-10-28 and had six more releases in the next sixteen days. The pin, the single module and the live checks on an upgrade are how MST carries that. If the tool stops being maintained, the interface is where another implementation goes.
 - **A macOS desktop run needs less.** A client with no exception needs no planner model, no credential for one and no Screen Recording permission.
-- **The eval config changes.** `computerUseModel` fails on a client that no longer uses Computer Use. The migration guide lists each change as its step lands.
+- **Nothing changes for a run until a default does.** A run that doesn't set `MST_DESKTOP_AUTOMATION` is driven as it was. A default change is a breaking change of its own: it ships with its record and a note in the migration guide.
+- **The eval config changes with a default.** `computerUseModel` fails on a client whose default is no longer Computer Use. The migration guide lists each change as its step lands.
+- **MST carries two ways of driving a client for a while.** That is the cost of proving a move before making it. The order of work ends it.
 - **Transcripts don't change.** They come from the app's own record of a conversation, not from how MST pressed its controls.
-- **Linux runs get slower by the snapshot time, and macOS runs get faster.**
+- **When the defaults change, Linux runs get slower by the snapshot time, and macOS runs get faster.** The paired runs measure by how much.
 - **`CONTEXT.md`, `docs/cowork.md` and `docs/chatgpt-desktop.md` change with each step**, not before it.
