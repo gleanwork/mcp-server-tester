@@ -9,6 +9,7 @@
  */
 import { createConnection, type Socket } from 'node:net';
 import { isAbsolute } from 'node:path';
+import { DesktopUiError as AtspiError } from './desktopUi/desktopUi.js';
 
 const ATSPI_ACCESSIBLE = 'org.a11y.atspi.Accessible';
 export const ATSPI_ACTION = 'org.a11y.atspi.Action';
@@ -39,13 +40,8 @@ export const ATSPI_COORDS = { screen: 0, window: 1 } as const;
 const ATSPI_MAX_NODES = 5000;
 const CONCURRENCY = 16;
 
-/** A failure with a stable, allowlistable code and no native detail. */
-export class AtspiError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = 'LinuxUiError';
-  }
-}
+/** The bus fails with the desktop interface's error, so one check covers both. */
+export { AtspiError };
 
 export type AtspiRef = { destination: string; path: string };
 export type AtspiMessage = AtspiRef & {
