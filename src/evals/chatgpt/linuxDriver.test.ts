@@ -239,6 +239,7 @@ class ModelDesktop extends FakeDesktop {
   requiresEffort = false;
   hoverOpensEffort = false;
   pendingModel: string | undefined;
+  preselectedModel: string | undefined;
   constructor(
     private current = 'GPT-6.2 Sol Medium',
     private readonly choices = ['GPT-6.2 Sol', 'GPT-6.1 Sol']
@@ -259,14 +260,19 @@ class ModelDesktop extends FakeDesktop {
         (item) => item.role === 'button' && /^GPT-/.test(item.name)
       )!.name = this.current;
     }
-    if (control.name === this.current && control.role === 'button')
-      this.nodes.push(node('Select model', 'menu item'));
-    else if (control.name === 'Select model') {
+    if (control.name === this.current && control.role === 'button') {
+      if (this.nodes.some((item) => item.role === 'radio menu item'))
+        this.nodes = this.nodes.filter(
+          (item) => item.role !== 'radio menu item'
+        );
+      else this.nodes.push(node('Select model', 'menu item'));
+    } else if (control.name === 'Select model') {
       this.nodes = this.nodes.filter((item) => item.name !== 'Select model');
       this.nodes.push(
         ...this.choices.map((name, index) =>
           node(name, 'radio menu item', {
             showing: !this.clipModels || index === 0,
+            selected: name === this.preselectedModel,
           })
         )
       );
@@ -823,6 +829,26 @@ describe('submit', () => {
       'Medium',
       'Send',
     ]);
+  });
+
+  it('accepts the checked picker option when the model button has a generic accessibility name', async () => {
+    const desktop = new ModelDesktop();
+    desktop.cloudLocation = true;
+    desktop.cloudResetsModel = true;
+    desktop.preselectedModel = 'GPT-6.1 Sol';
+    expect(
+      (
+        await driverFor(desktop).submit(
+          'Find docs',
+          'chatgpt-work',
+          'cloud',
+          'gpt-6.1-sol'
+        )
+      ).status
+    ).toBe('submitted');
+    expect(desktop.names()).toContain('Select ChatGPT model');
+    expect(desktop.names()).not.toContain('GPT-6.1 Sol');
+    expect(desktop.names().at(-1)).toBe('Send');
   });
 
   it('selects the Cloud location before selecting the requested model', async () => {

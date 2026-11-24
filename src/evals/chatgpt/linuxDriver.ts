@@ -496,6 +496,33 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         throw new DriverFailure('model_unavailable');
       throw error;
     }
+    if (
+      picker.filter(
+        (node) =>
+          node.role === 'radio menu item' &&
+          node.name === requested &&
+          node.selected
+      ).length === 1
+    ) {
+      this.step = 'model-close';
+      await this.action(() =>
+        this.desktop.clickObservedControl(
+          picker,
+          unique(this.modelButtons(picker), 'model_missing_or_ambiguous')
+        )
+      );
+      return this.wait(
+        async (ns) =>
+          !ns.some(
+            (node) =>
+              available(node) &&
+              node.role === 'radio menu item' &&
+              MODEL_BUTTON.test(node.name)
+          ) &&
+          this.ready(ns, 'chatgpt-work') &&
+          matchesPrompt(await this.desktop.text(composer(ns)), prompt)
+      );
+    }
     let scrolled = false;
     for (let scrolls = 0; scrolls < 12; scrolls++) {
       const options = picker.filter(
