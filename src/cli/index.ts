@@ -248,7 +248,29 @@ function discoveryOptions(command: Command): Command {
 function clientPluginOptions(command: Command): Command {
   return command
     .option('--plugins <modules...>', "Plugin modules, for a plugin's client")
-    .option('--root-dir <dir>', 'Where relative plugin paths resolve', '.');
+    .option(
+      '--root-dir <dir>',
+      'Where relative plugin paths resolve (default: ".")'
+    );
+}
+/**
+ * A `clients setup` or `recover` command's options. The parent `clients`
+ * command defines `--plugins`, `--root-dir`, `--config` and `--json` too, and
+ * Commander gives it those flags wherever they appear, so read both. Its
+ * `--config` and `--json` fail here rather than load an eval config's
+ * plugins or be ignored.
+ */
+function clientCommandOptions<T extends object>(command: Command): T {
+  const parent = command.parent?.opts<DiscoveryOptions>() ?? {};
+  for (const flag of ['config', 'json'] as const)
+    if (parent[flag] !== undefined)
+      throw new Error(
+        `\`mst clients ${command.name()}\` takes no --${flag}: it runs no eval. Name a plugin's client with --plugins.`
+      );
+  const own = Object.fromEntries(
+    Object.entries(command.opts()).filter(([, value]) => value !== undefined)
+  );
+  return { ...parent, ...own } as T;
 }
 function datasetSelection(command: Command): Command {
   return command
@@ -308,7 +330,7 @@ clientPluginOptions(
     )
     .argument('<ref>', 'A built-in name, or namespace/client/name')
 ).action((ref: string, _options: unknown, command: Command) =>
-  setupClient(ref, command.optsWithGlobals<DiscoveryOptions>())
+  setupClient(ref, clientCommandOptions<DiscoveryOptions>(command))
 );
 clientPluginOptions(
   clientsCommand
@@ -322,7 +344,7 @@ clientPluginOptions(
       'Reclaim a desktop lock only when its local owner is provably stopped'
     )
 ).action((ref: string, _options: unknown, command: Command) =>
-  recoverClient(ref, command.optsWithGlobals<ClientRecoverOptions>())
+  recoverClient(ref, clientCommandOptions<ClientRecoverOptions>(command))
 );
 
 // Judges command: built-in and plugin judges

@@ -650,6 +650,58 @@ describe('mst CLI', () => {
       expect(unknown.stderr).toContain('Client "nope" is not available.');
     });
 
+    it('resolves plugins and settings from --root-dir, and takes no --config or --json', async () => {
+      const schema =
+        '{ safeParse: (value) => ({ success: true, data: value }) }';
+      await project.write({
+        elsewhere: {
+          'plugin.mjs': `export default {
+            meta: { name: 'acme-plugin', namespace: 'acme' },
+            settings: { schema: ${schema} },
+            clients: {
+              desk: {
+                schema: ${schema},
+                async run() { return {}; },
+                async setup({ print, settings }) { print('set up ' + settings.project); },
+                async recover({ print, settings }) { print('recovered ' + settings.project); },
+              },
+            },
+          };`,
+          'mst.config.json': JSON.stringify({
+            settings: { acme: { project: 'p2' } },
+          }),
+        },
+      });
+      const plugins = ['--plugins', './plugin.mjs', '--root-dir', 'elsewhere'];
+      const setup = await runBin(
+        'clients',
+        'setup',
+        'acme/client/desk',
+        ...plugins
+      );
+      expect(setup.exitCode).toBe(0);
+      expect(setup.stdout).toBe('set up p2');
+      const recover = await runBin(
+        'clients',
+        'recover',
+        'acme/client/desk',
+        ...plugins
+      );
+      expect(recover.stdout).toBe('recovered p2');
+
+      for (const [flags, flag] of [
+        [['--config', 'eval.json'], '--config'],
+        [['--json'], '--json'],
+      ] as const)
+        for (const command of ['setup', 'recover']) {
+          const result = await runBin('clients', command, 'api', ...flags);
+          expect(result.exitCode).toBe(1);
+          expect(result.stderr).toContain(
+            `\`mst clients ${command}\` takes no ${flag}: it runs no eval.`
+          );
+        }
+    });
+
     it.runIf(process.platform === 'darwin')(
       "creates the cowork client's empty Claude profile",
       async () => {
