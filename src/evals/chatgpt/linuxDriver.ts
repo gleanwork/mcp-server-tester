@@ -245,6 +245,12 @@ export interface ChatgptReceipt {
   phase?: string;
   step?: string;
   draftState?: DraftState;
+  modelState?: {
+    requestedVisible: boolean;
+    modelButtonCount: number;
+    workReady: boolean;
+    draftIntact: boolean;
+  };
   error?: LinuxChatgptErrorCode;
 }
 
@@ -275,6 +281,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
   phase: string | undefined;
   step: string | undefined;
   lastSnapshot: N[] | undefined;
+  modelState: ChatgptReceipt['modelState'];
   readonly clock: DriverClock;
   private readonly setupSettlePolls: number;
 
@@ -568,9 +575,16 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         } catch {
           // Failure diagnostics never authorize a retry.
         }
-        console.error(
-          `[mst:chatgpt] model verification: requestedVisible=${buttons.some((button) => button.name === requested || button.name.startsWith(`${requested} `))} modelButtonCount=${buttons.length} workReady=${workReady} draftIntact=${draftIntact}`
-        );
+        this.modelState = {
+          requestedVisible: buttons.some(
+            (button) =>
+              button.name === requested ||
+              button.name.startsWith(`${requested} `)
+          ),
+          modelButtonCount: buttons.length,
+          workReady,
+          draftIntact,
+        };
         throw new DriverFailure('model_not_selected');
       }
       throw error;
@@ -999,6 +1013,9 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       ...(status === 'failed' && this.phase ? { phase: this.phase } : {}),
       ...(status === 'failed' && this.step ? { step: this.step } : {}),
       ...(draftState ? { draftState } : {}),
+      ...(status === 'failed' && this.modelState
+        ? { modelState: this.modelState }
+        : {}),
     };
   }
 }

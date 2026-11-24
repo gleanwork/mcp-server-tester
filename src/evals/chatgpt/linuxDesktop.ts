@@ -101,6 +101,15 @@ const Receipt = z
     phase: FailurePhase.optional(),
     step: FailureStep.optional(),
     draftState: DraftState.optional(),
+    modelState: z
+      .object({
+        requestedVisible: z.boolean(),
+        modelButtonCount: z.number().int().min(0).max(5000),
+        workReady: z.boolean(),
+        draftIntact: z.boolean(),
+      })
+      .strict()
+      .optional(),
     error: z.enum(LINUX_CHATGPT_ERROR_CODES).optional(),
   })
   .strict()
@@ -339,7 +348,7 @@ export async function runLinuxChatgptDesktop(
   };
   if (!valid)
     throw new NativeChatgptDriverError(
-      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}${record?.step ? `; step=${record.step}` : ''}${openFailure ? `; open=${openFailure}` : ''}); no retry attempted.`,
+      `Linux ChatGPT ${mode} failed or its receipt was uncertain (${record?.error ?? 'missing_or_invalid_receipt'}${record?.phase ? `; phase=${record.phase}` : ''}${record?.step ? `; step=${record.step}` : ''}${record?.modelState ? `; modelVisible=${record.modelState.requestedVisible}; modelButtons=${record.modelState.modelButtonCount}; workReady=${record.modelState.workReady}; draftIntact=${record.modelState.draftIntact}` : ''}${openFailure ? `; open=${openFailure}` : ''}); no retry attempted.`,
       {
         telemetry,
         error: record?.error,
