@@ -943,6 +943,24 @@ describe('profession click', () => {
     }
   });
 
+  it('scrolls over an observed model option without clicking it', async () => {
+    const log = join(root, 'model-scroll');
+    const helper = await xdotool(`echo "$@" >> ${log}`);
+    const fixture = geometry();
+    fixture.choice.name = 'GPT-6.2 Sol';
+    fixture.choice.role = 'radio menu item';
+    const desktop = desktopFor(fixture.bus, { xdotool: helper });
+    const nodes = await desktop.snapshot();
+    const option = nodes.find((node) => node.name === 'GPT-6.2 Sol')!;
+    await desktop.scrollObservedControl(nodes, option, 'down');
+    await desktop.scrollObservedControl(nodes, option, 'up');
+    expect((await readFile(log, 'utf8')).trim().split('\n')).toEqual([
+      'mousemove 370 260 click 5',
+      'mousemove 370 260 click 4',
+    ]);
+    expect(fixture.bus.count('doAction')).toBe(0);
+  });
+
   it('never clicks on invalid geometry, a missing frame or component, or a missed hit test', async () => {
     const log = join(root, 'argv');
     const helper = await xdotool(`echo "$@" >> ${log}`);

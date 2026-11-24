@@ -153,6 +153,14 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
     await this.activate(control, ['click']);
   }
 
+  async scrollObservedControl(
+    _: readonly FakeNode[],
+    control: FakeNode,
+    direction: 'up' | 'down'
+  ) {
+    this.actions.push(['scroll', control.name, direction]);
+  }
+
   async activate(control: FakeNode, allowed: readonly string[]) {
     const name = control.name;
     this.actions.push([name, allowed]);
@@ -225,6 +233,7 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
 class ModelDesktop extends FakeDesktop {
   keepDraftOnSelection = true;
   cloudResetsModel = false;
+  clipModels = false;
   constructor(
     private current = 'GPT-6.2 Sol Medium',
     private readonly choices = ['GPT-6.2 Sol', 'GPT-6.1 Sol']
@@ -250,7 +259,11 @@ class ModelDesktop extends FakeDesktop {
     else if (control.name === 'Select model') {
       this.nodes = this.nodes.filter((item) => item.name !== 'Select model');
       this.nodes.push(
-        ...this.choices.map((name) => node(name, 'radio menu item'))
+        ...this.choices.map((name, index) =>
+          node(name, 'radio menu item', {
+            showing: !this.clipModels || index === 0,
+          })
+        )
       );
     } else if (control.role === 'radio menu item') {
       this.current = `${control.name} Medium`;
@@ -261,6 +274,23 @@ class ModelDesktop extends FakeDesktop {
           (/^GPT-/.test(item.name) || item.name === 'Select ChatGPT model')
       )!.name = this.current;
       if (!this.keepDraftOnSelection) composer(this.nodes).text = '';
+    }
+  }
+
+  override async scrollObservedControl(
+    nodes: readonly FakeNode[],
+    control: FakeNode,
+    direction: 'up' | 'down'
+  ) {
+    await super.scrollObservedControl(nodes, control, direction);
+    const options = this.nodes.filter(
+      (item) => item.role === 'radio menu item'
+    );
+    const current = options.findIndex((item) => item.showing);
+    const next = current + (direction === 'down' ? 1 : -1);
+    if (next >= 0 && next < options.length) {
+      options[current]!.showing = false;
+      options[next]!.showing = true;
     }
   }
 }
@@ -700,6 +730,20 @@ describe('submit', () => {
       'Send',
     ]);
     expect(composer(desktop.nodes).text).toBe('Find docs');
+  });
+
+  it('scrolls an offscreen model into view before selecting it', async () => {
+    const desktop = new ModelDesktop();
+    desktop.clipModels = true;
+    const receipt = await driverFor(desktop).submit(
+      'Find docs',
+      'chatgpt-work',
+      undefined,
+      'gpt-6.1-sol'
+    );
+    expect(receipt.status).toBe('submitted');
+    expect(desktop.actions).toContainEqual(['scroll', 'GPT-6.2 Sol', 'down']);
+    expect(desktop.names().at(-2)).toBe('GPT-6.1 Sol');
   });
 
   it('selects the Cloud location before selecting the requested model', async () => {

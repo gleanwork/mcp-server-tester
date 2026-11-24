@@ -100,6 +100,12 @@ export interface ChatgptLinuxDesktop<N extends ChatgptNode = ChatgptNode> {
   selectProfession(nodes: readonly N[], choice: N): Promise<void>;
   /** One real mouse click on a selected control, at its live geometry. */
   clickObservedControl(nodes: readonly N[], control: N): Promise<void>;
+  /** One mouse wheel tick over an observed, showing model option. */
+  scrollObservedControl(
+    nodes: readonly N[],
+    control: N,
+    direction: 'up' | 'down'
+  ): Promise<void>;
 }
 
 export interface DriverClock {
@@ -465,7 +471,9 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         (ns) =>
           ns.filter(
             (node) =>
-              available(node) &&
+              node.visible &&
+              node.enabled &&
+              node.sensitive &&
               node.role === 'radio menu item' &&
               node.name === requested
           ).length === 1,
@@ -475,6 +483,52 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       if (codeOf(error) === 'state_transition_unobserved')
         throw new DriverFailure('model_unavailable');
       throw error;
+    }
+    for (let scrolls = 0; scrolls < 12; scrolls++) {
+      const options = picker.filter(
+        (node) =>
+          node.visible &&
+          node.enabled &&
+          node.sensitive &&
+          node.role === 'radio menu item' &&
+          MODEL_BUTTON.test(node.name)
+      );
+      const targetIndex = options.findIndex((node) => node.name === requested);
+      if (targetIndex < 0) throw new DriverFailure('model_unavailable');
+      if (available(options[targetIndex]!)) break;
+      const showing = options.flatMap((node, index) =>
+        available(node) ? [index] : []
+      );
+      if (!showing.length) throw new DriverFailure('model_unavailable');
+      const first = showing[0]!;
+      const last = showing[showing.length - 1]!;
+      const direction =
+        targetIndex > last ? 'down' : targetIndex < first ? 'up' : undefined;
+      if (!direction) throw new DriverFailure('model_unavailable');
+      const anchor = options[direction === 'down' ? last : first]!;
+      const before = showing.map((index) => options[index]!.name).join('|');
+      this.step = 'model-scroll';
+      await this.action(() =>
+        this.desktop.scrollObservedControl(picker, anchor, direction)
+      );
+      try {
+        picker = await this.wait((ns) => {
+          const visible = ns.filter(
+            (node) =>
+              available(node) &&
+              node.role === 'radio menu item' &&
+              MODEL_BUTTON.test(node.name)
+          );
+          return (
+            visible.some((node) => node.name === requested) ||
+            visible.map((node) => node.name).join('|') !== before
+          );
+        }, 10);
+      } catch (error) {
+        if (codeOf(error) === 'state_transition_unobserved')
+          throw new DriverFailure('model_unavailable');
+        throw error;
+      }
     }
     const item = unique(
       picker.filter(

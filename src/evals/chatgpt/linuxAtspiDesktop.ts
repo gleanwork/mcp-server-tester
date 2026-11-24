@@ -463,12 +463,28 @@ export class AtspiChatgptDesktop implements ChatgptLinuxDesktop<AtspiChatgptNode
     nodes: readonly AtspiChatgptNode[],
     control: AtspiChatgptNode
   ): Promise<void> {
-    return this.clickObserved(nodes, control);
+    return this.pointerObserved(nodes, control, '1');
+  }
+
+  async scrollObservedControl(
+    nodes: readonly AtspiChatgptNode[],
+    control: AtspiChatgptNode,
+    direction: 'up' | 'down'
+  ): Promise<void> {
+    return this.pointerObserved(nodes, control, direction === 'up' ? '4' : '5');
   }
 
   private async clickObserved(
     nodes: readonly AtspiChatgptNode[],
     choice: AtspiChatgptNode
+  ): Promise<void> {
+    return this.pointerObserved(nodes, choice, '1');
+  }
+
+  private async pointerObserved(
+    nodes: readonly AtspiChatgptNode[],
+    choice: AtspiChatgptNode,
+    button: '1' | '4' | '5'
   ): Promise<void> {
     // The observed radio's WINDOW extents plus its top-level frame's SCREEN
     // origin. Never reuse guessed coordinates.
@@ -510,7 +526,7 @@ export class AtspiChatgptDesktop implements ChatgptLinuxDesktop<AtspiChatgptNode
     await new Promise<void>((resolve, reject) => {
       execFile(
         this.xdotool,
-        ['mousemove', String(x), String(y), 'click', '1'],
+        ['mousemove', String(x), String(y), 'click', button],
         {
           env: this.environment(),
           timeout: this.remaining(),
