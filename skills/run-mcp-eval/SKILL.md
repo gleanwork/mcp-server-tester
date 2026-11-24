@@ -19,7 +19,7 @@ npx mst run --config eval.json --dry-run
 
 Then check the credentials the run needs:
 
-- **The client's credentials.** `npx mst clients` lists each client's install, credentials and setup. For example, `api` with Anthropic needs `ANTHROPIC_API_KEY`, and `codex-cli` needs `OPENAI_API_KEY` (a Codex sign-in is not enough).
+- **The client's credentials.** `npx mst clients show <client>` prints a client's install, credentials and setup (`npx mst clients` lists the clients). For example, `api` with Anthropic needs `ANTHROPIC_API_KEY`, and `codex-cli` needs `OPENAI_API_KEY` (a Codex sign-in is not enough).
 - **The judge's key**, when the config has judges. A judge's provider can differ from the client's.
 - **Server tokens**: a server's `auth.accessTokenEnv` names an environment variable. Connector servers need `mst auth --config eval.json` once.
 

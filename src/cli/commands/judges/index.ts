@@ -15,8 +15,25 @@ import {
   optionsSchema,
   type DiscoveryOptions,
 } from '../discoveryPlugins.js';
+import { extensionOptionsSchema, optionsSection } from '../extensionOptions.js';
+import { indented, outputWidth } from '../../utils/textLayout.js';
 
 type JudgeKind = 'judge' | 'pairwise';
+
+/** How text output is laid out; a test sets the width. */
+interface TextOptions {
+  width?: number;
+}
+
+const KIND_TEXT: Record<JudgeKind, string> = {
+  judge: 'judge: scores each trial',
+  pairwise: 'pairwise judge: compares each variant with the baseline',
+};
+
+const GROUP_HEADINGS: Record<JudgeKind, string> = {
+  judge: 'Judges (score each trial)',
+  pairwise: 'Pairwise judges (compare each variant with the baseline)',
+};
 
 interface ListedJudge {
   ref: string;
@@ -96,9 +113,12 @@ const listed = ({
   requires,
 });
 
-/** `mst judges`: judges, then pairwise judges, each sorted by reference. */
+/**
+ * `mst judges`: judges, then pairwise judges, each sorted by reference, in a
+ * table under its heading.
+ */
 export async function listJudgeCommand(
-  options: DiscoveryOptions,
+  options: DiscoveryOptions & TextOptions,
   print: (text: string) => void = (text) => process.stdout.write(text)
 ): Promise<void> {
   const entries = await judgeEntries(options);
@@ -106,20 +126,44 @@ export async function listJudgeCommand(
     print(`${JSON.stringify(entries.map(listed), null, 2)}\n`);
     return;
   }
-  const rows = entries.map((entry) => [
-    entry.ref,
-    entry.kind,
-    shownVersion(entry),
-    entry.requires.length ? `requires ${entry.requires.join(', ')}` : '',
-    entry.description ?? '',
-  ]);
-  print(`${formatTable(rows)}\n`);
+  const width = options.width ?? outputWidth();
+  const groups = (['judge', 'pairwise'] as const).flatMap((kind) => {
+    const group = entries.filter((entry) => entry.kind === kind);
+    if (!group.length) return [];
+    const table = formatTable(
+      [
+        // A column no judge in the group fills is left out, heading too.
+        [
+          'Judge',
+          group.some(shownVersion) ? 'Version' : '',
+          group.some((entry) => entry.requires.length) ? 'Requires' : '',
+          group.some((entry) => entry.description) ? 'Description' : '',
+        ],
+        ...group.map((entry) => [
+          entry.ref,
+          shownVersion(entry),
+          entry.requires.join(', '),
+          entry.description ?? '',
+        ]),
+      ],
+      width - 2
+    );
+    return [
+      [
+        GROUP_HEADINGS[kind],
+        ...table.split('\n').map((line) => `  ${line}`),
+      ].join('\n'),
+    ];
+  });
+  print(
+    `${groups.join('\n\n')}\n\nWhat a judge requires, and its options: mst judges show <judge>\n`
+  );
 }
 
 /** `mst judges show <ref>`: what a judge needs and the options it takes. */
 export async function showJudge(
   ref: string,
-  options: DiscoveryOptions,
+  options: DiscoveryOptions & TextOptions,
   print: (text: string) => void = (text) => process.stdout.write(text)
 ): Promise<void> {
   const entries = await judgeEntries(options);
@@ -147,21 +191,39 @@ export async function showJudge(
     );
     return;
   }
-  const blocks = shown.map((entry) =>
+  const width = options.width ?? outputWidth();
+  const blocks = matches.map((entry) =>
     [
-      `${entry.ref}  (${entry.kind === 'judge' ? 'judge: scores each trial' : 'pairwise judge: compares each variant with the baseline'})`,
-      ...(entry.description !== undefined ? [`  ${entry.description}`] : []),
-      `  version   ${shownVersion(entry) || '-'}`,
-      `  requires  ${entry.requires.length ? entry.requires.join(', ') : '-'}`,
-      ...(entry.swapPositions !== undefined
-        ? [
-            `  swaps     ${entry.swapPositions ? 'yes: each order, reconciled' : 'no'}`,
-          ]
+      entry.ref,
+      ...(entry.description !== undefined
+        ? indented(entry.description, width, '')
         : []),
-      '  options',
-      ...JSON.stringify(entry.options, null, 2)
-        .split('\n')
-        .map((line) => `    ${line}`),
+      '',
+      formatTable(
+        [
+          ['Kind', KIND_TEXT[entry.kind]],
+          ['Version', shownVersion(entry) || 'none'],
+          ['Requires', entry.requires.join(', ') || 'nothing'],
+          ...(entry.swapPositions !== undefined
+            ? [
+                [
+                  'Swaps',
+                  entry.swapPositions
+                    ? 'yes: asks in each order and reconciles the answers'
+                    : 'no',
+                ],
+              ]
+            : []),
+        ],
+        width
+      ),
+      ...optionsSection(
+        // A built-in judge resolves what an entry leaves out when it runs,
+        // such as its model from the `models` block.
+        extensionOptionsSchema(entry.schema, 'judge', "the judge's default"),
+        'judge',
+        width
+      ),
     ].join('\n')
   );
   print(`${blocks.join('\n\n')}\n`);

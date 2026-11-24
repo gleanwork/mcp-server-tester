@@ -276,7 +276,7 @@ const clientsCommand = discoveryOptions(
   program
     .command('clients')
     .description(
-      'List clients: built-in and from plugins, with where each one runs'
+      'List clients: built-in and from plugins, with where each one runs and what it is'
     )
 ).action((options: DiscoveryOptions) => listClientCommand(options));
 discoveryOptions(
@@ -845,10 +845,10 @@ program
 // Runner command: prepare a runner once (ADR 0004)
 program
   .command('runner')
-  .description('Prepare runners that runs collect trials in')
+  .description('Prepare the runners that collect trials')
   .command('setup')
   .description(
-    "Prepare what runs in a runner need, once: docker builds MST's Linux Cowork image"
+    "Prepare what runs in a runner need, once: docker builds MST's Linux Claude Desktop image, or the ChatGPT image for a ChatGPT or Codex app eval"
   )
   .argument('<runner>', 'docker, or <namespace>/runner/<name>')
   .option(

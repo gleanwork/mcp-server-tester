@@ -408,21 +408,30 @@ describe('mst CLI', () => {
     it('lists and shows built-in judges without plugins', async () => {
       const list = await runBin('judges');
       expect(list.exitCode).toBe(0);
-      expect(list.stdout).toMatch(
-        /^rubric +judge +[0-9a-f]{12} +An LLM grades/m
+      const listed = String(list.stdout);
+      expect(listed).toMatch(
+        /^Judges \(score each trial\)\n {2}Judge +Version/
       );
-      expect(list.stdout).toMatch(
-        /^task-completion +judge +[0-9a-f]{12} +Asks whether/m
+      expect(listed).toMatch(/^ {2}rubric +[0-9a-f]{12} +An LLM grades/m);
+      expect(listed).toMatch(
+        /^ {2}task-completion +[0-9a-f]{12} +Asks whether/m
       );
-      expect(list.stdout).toMatch(
-        /^grounded-in-tools {2}judge +[0-9a-f]{12} +Asks whether every claim/m
+      expect(listed).toMatch(
+        /^ {2}grounded-in-tools {2}[0-9a-f]{12} +Asks whether every claim/m
       );
-      expect(list.stdout).toMatch(
-        /^tool-use +judge +[0-9a-f]{12} +Asks whether the client/m
+      expect(listed).toMatch(
+        /^ {2}tool-use +[0-9a-f]{12} +Asks whether the client/m
       );
-      expect(list.stdout).toMatch(
-        /^preference +pairwise {2}[0-9a-f]{12} +Asks which run better/m
+      expect(listed).toMatch(
+        /^Pairwise judges[^\n]*\n {2}Judge[^\n]*\n {2}preference +[0-9a-f]{12} +Asks which run better/m
       );
+      // Piped, not a terminal: laid out in 100 columns.
+      for (const line of listed.split('\n'))
+        expect(line.length).toBeLessThanOrEqual(100);
+
+      const shownText = await runBin('judges', 'show', 'rubric');
+      expect(shownText.exitCode).toBe(0);
+      expect(shownText.stdout).toMatch(/^ {2}rubric +required\n +one of: /m);
 
       const show = await runBin('judges', 'show', 'rubric', '--json');
       expect(show.exitCode).toBe(0);
@@ -489,11 +498,9 @@ describe('mst CLI', () => {
         './bare.mjs'
       );
       expect(table.exitCode).toBe(0);
-      expect(table.stdout).toMatch(
-        /^acme\/judge\/declared +judge +declared-2$/m
-      );
-      expect(table.stdout).toMatch(/^acme\/judge\/inherited +judge +1\.4\.0$/m);
-      expect(table.stdout).toMatch(/^bare\/judge\/loose +judge +unversioned$/m);
+      expect(table.stdout).toMatch(/^ {2}acme\/judge\/declared +declared-2$/m);
+      expect(table.stdout).toMatch(/^ {2}acme\/judge\/inherited +1\.4\.0$/m);
+      expect(table.stdout).toMatch(/^ {2}bare\/judge\/loose +unversioned$/m);
     });
   });
 
@@ -551,14 +558,23 @@ describe('mst CLI', () => {
     it('lists and shows built-in clients without plugins', async () => {
       const list = await runBin('clients');
       expect(list.exitCode).toBe(0);
-      expect(list.stdout).toMatch(
-        /^cowork +Claude Desktop[^\n]*\n +runs on +macOS, Linux/m
+      const listed = String(list.stdout);
+      expect(listed).toMatch(/^Client +Runs on +Description\n/);
+      expect(listed).toMatch(/^cowork +macOS, Linux +Claude Desktop/m);
+      expect(listed).toMatch(/^codex-cli +any OS +The Codex CLI/m);
+      // Piped, not a terminal: laid out in 100 columns.
+      for (const line of listed.split('\n'))
+        expect(line.length).toBeLessThanOrEqual(100);
+
+      const shownText = await runBin('clients', 'show', 'api');
+      expect(shownText.exitCode).toBe(0);
+      expect(shownText.stdout).toMatch(/^api\nThe model alone/);
+      expect(shownText.stdout).toMatch(
+        /^ {2}timeout +none \(no time limit\)$/m
       );
-      expect(list.stdout).toMatch(
-        /^codex-cli +The Codex CLI[^\n]*\n +runs on +any OS/m
+      expect(shownText.stdout).toMatch(
+        /^ {2}skills +"off"\n +one of: off, catalog, preload$/m
       );
-      expect(list.stdout).toMatch(/timeout +none \(no time limit\)/);
-      expect(list.stdout).toMatch(/timeout +180000/);
 
       const show = await runBin('clients', 'show', 'codex-cli', '--json');
       expect(show.exitCode).toBe(0);

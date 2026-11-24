@@ -759,7 +759,7 @@ The list shows what each dataset's `describe()` reports, without loading cases; 
 
 ## `clients` - Find Clients
 
-Lists the clients an eval can run, built-in and from plugins, with their requirements, every option and its default. `show <client>` prints the same information for one client.
+Lists the clients an eval can run, built-in and from plugins: where each one runs and what it is. `show <client>` prints what a machine needs to run one client, and every option it takes with its default and the values it accepts.
 
 ### Usage
 
@@ -770,25 +770,50 @@ npx mst clients show codex-cli
 npx mst clients show acme/client/desk --plugins @acme/mst-plugin --json
 ```
 
-For example, `mst clients show claude-code` prints:
+`mst clients` prints:
 
 ```text
-claude-code  The Claude Code CLI, headless
-  runs on      any OS
-  install      Claude Code (`claude`) on `PATH`
-  credentials  `ANTHROPIC_API_KEY`, or Google Application Default Credentials with `provider: "vertex"`
-  setup        -
-  options (defaults; timeout in ms)
-    model         Claude Code default
-    timeout       180000
-    systemPrompt  not set (no additional instructions)
-    provider      "anthropic"
-    isolate       true
-    cwd           empty temporary directory, removed after the trial
-    env           inherited environment; no extra variables
+Client       Runs on       Description
+api          any OS        The model alone, through its provider's API, with the servers' tools: it
+                           isolates the model and your tool metadata
+chatgpt      macOS, Linux  The ChatGPT desktop app
+claude-code  any OS        The Claude Code CLI, headless
+codex-app    macOS, Linux  The Codex surface of the ChatGPT desktop app
+codex-cli    any OS        The Codex CLI, headless, through the Codex SDK
+cowork       macOS, Linux  Claude Desktop, each trial in a Cowork session
+
+What a client needs, and its options: mst clients show <client>
 ```
 
-`--json` adds the same `options` JSON Schema to each listed client that `show --json` returns. Literal defaults use `default`; defaults that depend on the model, OS or environment use `x-defaultDescription`. The same field marks an option as `required` or its default as `not declared`. A missing plugin declaration stays unknown; MST does not run the plugin to infer it. Removed options remain rejected in the JSON Schema and are omitted from the text option table. A plugin schema that cannot form one table, such as a union, prints as JSON Schema in text mode too.
+And `mst clients show claude-code` prints:
+
+```text
+claude-code
+The Claude Code CLI, headless
+
+Runs on  any OS
+
+Install
+  Claude Code (`claude`) on `PATH`
+
+Credentials
+  `ANTHROPIC_API_KEY`, or Google Application Default Credentials with `provider: "vertex"`
+
+Options (timeout in ms)
+  Option        Default
+  model         Claude Code default
+  timeout       180000
+  systemPrompt  not set (no additional instructions)
+  provider      "anthropic"
+                one of: anthropic, vertex, vertex-anthropic
+  isolate       true
+  cwd           empty temporary directory, removed after the trial
+  env           inherited environment; no extra variables
+```
+
+A section a client doesn't declare, such as `Setup` here, is left out. Text wraps to the terminal's width, or to 100 columns when output is piped, and breaks only at spaces, so a command or path in it stays whole.
+
+`--json` lists each client with its requirements and the same `options` JSON Schema that `show --json` returns. Literal defaults use `default`; defaults that depend on the model, OS or environment use `x-defaultDescription`. The same field marks an option as `required` or its default as `not declared`. A missing plugin declaration stays unknown; MST does not run the plugin to infer it. Removed options remain rejected in the JSON Schema and are omitted from the text option table. A plugin schema that cannot form one table, such as a union, prints as JSON Schema in text mode too.
 
 `timeout` is in milliseconds. The API client has no default timeout, which is not `0` or `null`; omit it to leave the trial without that limit. The other built-in defaults and all OS-dependent defaults appear in the [generated client tables](./evaluation-framework.md#clients). Listing options does not fill in missing config values or resolve defaults using the coordinator's OS.
 
@@ -810,13 +835,27 @@ npx mst judges show rubric --json
 ```
 
 ```text
-acme/judge/completeness         judge     1.4.0         requires case.expected.answer  Did the answer cover every point of the expected answer?
-rubric                          judge     d6fd641dc6c8                                 An LLM grades the answer against a rubric: ...
-acme/pairwise-judge/preference  pairwise  unversioned                                  Which answer would the asker rather get?
-preference                      pairwise  ff685f10a4f3                                 Asks which run better did what the user asked: ...
+Judges (score each trial)
+  Judge                    Version       Requires              Description
+  acme/judge/completeness  1.4.0         case.expected.answer  Did the answer cover every point of
+                                                               the expected answer?
+  rubric                   d6fd641dc6c8                        An LLM grades the answer against a
+                                                               rubric: a built-in one or your own
+                                                               text, with the case's expected answer
+                                                               as reference.
+
+Pairwise judges (compare each variant with the baseline)
+  Judge                           Version       Description
+  acme/pairwise-judge/preference  unversioned   Which answer would the asker rather get?
+  preference                      ecd526bc3118  Asks which run better did what the user asked: the
+                                                final answer first, then the tool use. A, B or tie,
+                                                asked in both orders, with the case's reference
+                                                answer when it has one.
+
+What a judge requires, and its options: mst judges show <judge>
 ```
 
-A `judge` scores each trial; a `pairwise` judge compares each variant's trial with the baseline's. Each judge shows its version, the one its identity covers ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)): a built-in's covers its prompts and defaults (a content hash, cut to 12 characters in the table), a plugin judge's is the `version` it declares or else its plugin's package version, and a judge with neither is **unversioned** (with `--json`, `"unversioned": true` and no `version`). `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options as JSON Schema: what an eval config's `judges` entry may set besides `type`. Plugins add `description` to a judge or pairwise judge for these commands.
+A judge scores each trial; a pairwise judge compares each variant's trial with the baseline's. A column no judge in a table fills, such as `Requires`, is left out. When the other columns leave a description too little room, it goes on the lines below its row. Each judge shows its version, the one its identity covers ([ADR 0009](./adr/0009-users-calibrate-judges-against-their-own-labels.md)): a built-in's covers its prompts and defaults (a content hash, cut to 12 characters in the table), a plugin judge's is the `version` it declares or else its plugin's package version, and a judge with neither is **unversioned** (with `--json`, `"unversioned": true` and no `version`). `show` prints the description, the case or trial fields the judge `requires` (a case without them is recorded as skipped), whether a pairwise judge also compares with the runs swapped, and its options: what an eval config's `judges` entry may set besides `type`, with each one's default and the values it accepts. An option the judge resolves when it runs, such as its model, shows `the judge's default`. `--json` gives the options as JSON Schema. Plugins add `description` to a judge or pairwise judge for these commands.
 
 Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
 
