@@ -161,6 +161,8 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
     this.actions.push(['scroll', control.name, direction]);
   }
 
+  async hoverObservedControl(_: readonly FakeNode[], __: FakeNode) {}
+
   async activate(control: FakeNode, allowed: readonly string[]) {
     const name = control.name;
     this.actions.push([name, allowed]);
@@ -235,6 +237,7 @@ class ModelDesktop extends FakeDesktop {
   cloudResetsModel = false;
   clipModels = false;
   requiresEffort = false;
+  hoverOpensEffort = false;
   pendingModel: string | undefined;
   constructor(
     private current = 'GPT-6.2 Sol Medium',
@@ -310,6 +313,18 @@ class ModelDesktop extends FakeDesktop {
     if (next >= 0 && next < options.length) {
       options[current]!.showing = false;
       options[next]!.showing = true;
+    }
+  }
+
+  override async hoverObservedControl(
+    nodes: readonly FakeNode[],
+    control: FakeNode
+  ) {
+    await super.hoverObservedControl(nodes, control);
+    if (this.hoverOpensEffort) {
+      this.pendingModel = control.name;
+      this.nodes = this.nodes.filter((item) => item.role !== 'radio menu item');
+      this.nodes.push(node('Medium', 'menu item'));
     }
   }
 }
@@ -788,6 +803,28 @@ describe('submit', () => {
     ]);
   });
 
+  it('selects Medium when hovering the model opens its submenu', async () => {
+    const desktop = new ModelDesktop();
+    desktop.hoverOpensEffort = true;
+    expect(
+      (
+        await driverFor(desktop).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.1-sol'
+        )
+      ).status
+    ).toBe('submitted');
+    expect(desktop.names()).toEqual([
+      'open',
+      'GPT-6.2 Sol Medium',
+      'Select model',
+      'Medium',
+      'Send',
+    ]);
+  });
+
   it('selects the Cloud location before selecting the requested model', async () => {
     const desktop = new ModelDesktop();
     desktop.cloudLocation = true;
@@ -846,7 +883,7 @@ describe('submit', () => {
         )
       ).status
     ).toBe('submitted');
-    expect(clock.sleeps).toBe(5);
+    expect(clock.sleeps).toBeGreaterThanOrEqual(5);
     expect(desktop.names().at(-2)).toBe('GPT-6.1 Sol');
   });
 

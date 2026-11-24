@@ -479,6 +479,13 @@ export class AtspiChatgptDesktop implements ChatgptLinuxDesktop<AtspiChatgptNode
     return this.pointerObserved(nodes, control, direction === 'up' ? '4' : '5');
   }
 
+  async hoverObservedControl(
+    nodes: readonly AtspiChatgptNode[],
+    control: AtspiChatgptNode
+  ): Promise<void> {
+    return this.pointerObserved(nodes, control);
+  }
+
   private async clickObserved(
     nodes: readonly AtspiChatgptNode[],
     choice: AtspiChatgptNode
@@ -489,7 +496,7 @@ export class AtspiChatgptDesktop implements ChatgptLinuxDesktop<AtspiChatgptNode
   private async pointerObserved(
     nodes: readonly AtspiChatgptNode[],
     choice: AtspiChatgptNode,
-    button: '1' | '4' | '5',
+    button?: '1' | '4' | '5',
     settleHover = false
   ): Promise<void> {
     // The observed radio's WINDOW extents plus its top-level frame's SCREEN
@@ -537,8 +544,7 @@ export class AtspiChatgptDesktop implements ChatgptLinuxDesktop<AtspiChatgptNode
           String(x),
           String(y),
           ...(settleHover ? ['sleep', '0.3'] : []),
-          'click',
-          button,
+          ...(button ? ['click', button] : []),
         ],
         {
           env: this.environment(),

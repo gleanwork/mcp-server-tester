@@ -106,6 +106,8 @@ export interface ChatgptLinuxDesktop<N extends ChatgptNode = ChatgptNode> {
     control: N,
     direction: 'up' | 'down'
   ): Promise<void>;
+  /** One pointer move to an observed model option, without clicking. */
+  hoverObservedControl(nodes: readonly N[], control: N): Promise<void>;
 }
 
 export interface DriverClock {
@@ -557,15 +559,46 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       ),
       'model_unavailable'
     );
-    this.step = 'model-select';
-    await this.action(() => this.desktop.clickObservedControl(picker, item));
-    const afterModel = await this.wait(
-      (ns) =>
-        this.modelButtons(ns).some(
-          (button) =>
-            button.name === requested || button.name.startsWith(`${requested} `)
-        ) || ns.some((node) => available(node) && node.name === 'Medium')
-    );
+    this.step = 'model-hover';
+    await this.action(() => this.desktop.hoverObservedControl(picker, item));
+    let afterModel: N[] | undefined;
+    try {
+      afterModel = await this.wait(
+        (ns) =>
+          this.modelButtons(ns).some(
+            (button) =>
+              button.name === requested ||
+              button.name.startsWith(`${requested} `)
+          ) || ns.some((node) => available(node) && node.name === 'Medium'),
+        15
+      );
+    } catch (error) {
+      if (codeOf(error) !== 'state_transition_unobserved') throw error;
+    }
+    if (!afterModel) {
+      picker = await this.snapshot();
+      const refreshed = unique(
+        picker.filter(
+          (node) =>
+            available(node) &&
+            node.role === 'radio menu item' &&
+            node.name === requested
+        ),
+        'model_unavailable'
+      );
+      this.step = 'model-select';
+      await this.action(() =>
+        this.desktop.clickObservedControl(picker, refreshed)
+      );
+      afterModel = await this.wait(
+        (ns) =>
+          this.modelButtons(ns).some(
+            (button) =>
+              button.name === requested ||
+              button.name.startsWith(`${requested} `)
+          ) || ns.some((node) => available(node) && node.name === 'Medium')
+      );
+    }
     if (
       !this.modelButtons(afterModel).some(
         (button) =>
