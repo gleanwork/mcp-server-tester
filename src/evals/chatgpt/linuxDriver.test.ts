@@ -240,6 +240,7 @@ class ModelDesktop extends FakeDesktop {
   hoverOpensEffort = false;
   pendingModel: string | undefined;
   preselectedModel: string | undefined;
+  checkInPickerWithoutButtonChange = false;
   constructor(
     private current = 'GPT-6.2 Sol Medium',
     private readonly choices = ['GPT-6.2 Sol', 'GPT-6.1 Sol']
@@ -277,6 +278,12 @@ class ModelDesktop extends FakeDesktop {
         )
       );
     } else if (control.role === 'radio menu item') {
+      if (this.checkInPickerWithoutButtonChange) {
+        this.nodes
+          .filter((item) => item.role === 'radio menu item')
+          .forEach((item) => (item.selected = item.name === control.name));
+        return;
+      }
       if (this.requiresEffort) {
         this.pendingModel = control.name;
         this.nodes = this.nodes.filter(
@@ -874,6 +881,23 @@ describe('submit', () => {
       ).status
     ).toBe('submitted');
     expect(desktop.names()).toEqual(['open', 'Send']);
+  });
+
+  it('verifies a checked model after a generic button keeps its name', async () => {
+    const desktop = new ModelDesktop('Select ChatGPT model');
+    desktop.checkInPickerWithoutButtonChange = true;
+    expect(
+      (
+        await driverFor(desktop).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.1-sol'
+        )
+      ).status
+    ).toBe('submitted');
+    expect(desktop.names().at(-2)).toBe('Select ChatGPT model');
+    expect(desktop.names().at(-1)).toBe('Send');
   });
 
   it('selects the Cloud location before selecting the requested model', async () => {

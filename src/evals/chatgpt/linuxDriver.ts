@@ -473,6 +473,41 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     );
   }
 
+  private modelCheckedInPicker(
+    nodes: readonly N[],
+    requested: string
+  ): boolean {
+    return (
+      nodes.filter(
+        (node) =>
+          node.role === 'radio menu item' &&
+          node.name === requested &&
+          node.selected
+      ).length === 1
+    );
+  }
+
+  private async closeModelPicker(nodes: N[], prompt: string): Promise<N[]> {
+    this.step = 'model-close';
+    await this.action(() =>
+      this.desktop.clickObservedControl(
+        nodes,
+        unique(this.modelButtons(nodes), 'model_missing_or_ambiguous')
+      )
+    );
+    return this.wait(
+      async (ns) =>
+        !ns.some(
+          (node) =>
+            available(node) &&
+            node.role === 'radio menu item' &&
+            MODEL_BUTTON.test(node.name)
+        ) &&
+        this.ready(ns, 'chatgpt-work') &&
+        matchesPrompt(await this.desktop.text(composer(ns)), prompt)
+    );
+  }
+
   /** Select the exact Work model in the native picker before sending a draft. */
   async selectModel(
     nodes: N[],
@@ -515,33 +550,8 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         throw new DriverFailure('model_unavailable');
       throw error;
     }
-    if (
-      picker.filter(
-        (node) =>
-          node.role === 'radio menu item' &&
-          node.name === requested &&
-          node.selected
-      ).length === 1
-    ) {
-      this.step = 'model-close';
-      await this.action(() =>
-        this.desktop.clickObservedControl(
-          picker,
-          unique(this.modelButtons(picker), 'model_missing_or_ambiguous')
-        )
-      );
-      return this.wait(
-        async (ns) =>
-          !ns.some(
-            (node) =>
-              available(node) &&
-              node.role === 'radio menu item' &&
-              MODEL_BUTTON.test(node.name)
-          ) &&
-          this.ready(ns, 'chatgpt-work') &&
-          matchesPrompt(await this.desktop.text(composer(ns)), prompt)
-      );
-    }
+    if (this.modelCheckedInPicker(picker, requested))
+      return this.closeModelPicker(picker, prompt);
     let scrolled = false;
     for (let scrolls = 0; scrolls < 12; scrolls++) {
       const options = picker.filter(
@@ -611,11 +621,13 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     try {
       afterModel = await this.wait(
         (ns) =>
+          this.modelCheckedInPicker(ns, requested) ||
           this.modelButtons(ns).some(
             (button) =>
               button.name === requested ||
               button.name.startsWith(`${requested} `)
-          ) || ns.some((node) => available(node) && node.name === 'Medium'),
+          ) ||
+          ns.some((node) => available(node) && node.name === 'Medium'),
         15
       );
     } catch (error) {
@@ -638,14 +650,17 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       );
       afterModel = await this.wait(
         (ns) =>
+          this.modelCheckedInPicker(ns, requested) ||
           this.modelButtons(ns).some(
             (button) =>
               button.name === requested ||
               button.name.startsWith(`${requested} `)
-          ) || ns.some((node) => available(node) && node.name === 'Medium')
+          ) ||
+          ns.some((node) => available(node) && node.name === 'Medium')
       );
     }
     if (
+      !this.modelCheckedInPicker(afterModel, requested) &&
       !this.modelButtons(afterModel).some(
         (button) =>
           button.name === requested || button.name.startsWith(`${requested} `)
@@ -662,15 +677,19 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     }
     this.step = 'model-verify';
     try {
-      return await this.wait(async (ns) => {
+      const verified = await this.wait(async (ns) => {
         const selected = this.modelButtons(ns);
         return (
           selected.length === 1 &&
-          this.modelShownByButton(ns, requested) &&
+          (this.modelShownByButton(ns, requested) ||
+            this.modelCheckedInPicker(ns, requested)) &&
           this.ready(ns, 'chatgpt-work') &&
           matchesPrompt(await this.desktop.text(composer(ns)), prompt)
         );
       });
+      return this.modelCheckedInPicker(verified, requested)
+        ? await this.closeModelPicker(verified, prompt)
+        : verified;
     } catch (error) {
       if (codeOf(error) === 'state_transition_unobserved') {
         const last = this.lastSnapshot ?? [];
