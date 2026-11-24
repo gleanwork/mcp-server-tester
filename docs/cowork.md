@@ -638,6 +638,46 @@ Run MST in the prepared desktop's filesystem and session context. `DISPLAY` and
 `DBUS_SESSION_BUS_ADDRESS` are required. MST does not install Linux desktop
 dependencies.
 
+### Run on agent-desktop instead
+
+By default the drivers read and press the app through MST's own AT-SPI client.
+They can run the same rules over [`agent-desktop`](https://github.com/vercel-labs/agent-desktop),
+the automation every desktop client is moving to
+([ADR 0017](./adr/0017-desktop-clients-share-one-automation.md)), while that
+move is proven:
+
+```bash
+MST_DESKTOP_AUTOMATION=agent-desktop mst run evals/my-eval.json
+```
+
+Set it in the environment of the machine that runs the trial; it is not an
+eval config option. `agent-desktop` is an optional dependency of MST, pinned
+to one version, so it installs with MST where its platform is supported. A
+value a client can't run on fails before MST touches the app; a missing
+`agent-desktop` fails a driver operation with `agent_desktop_not_installed`.
+
+What differs when it runs:
+
+- The batch holds one accessibility client on the bus for its whole life.
+  `agent-desktop` connects for one command and leaves, and when the last
+  client leaves while Chromium handles a key, Claude Desktop crashes
+  ([agent-desktop#529](https://github.com/vercel-labs/agent-desktop/issues/529)).
+  The held client keeps the app's key listener in place. It is released with
+  the batch.
+- Text goes in by paste: `agent-desktop` puts the prompt on the clipboard,
+  focuses the composer and sends one Ctrl+V. Claude Desktop's composer ignores
+  a value set over AT-SPI. The driver reads the draft back as before.
+- A snapshot takes about half a second, against tens of milliseconds for
+  MST's own client.
+- Each receipt's `telemetry.automation` is `"agent-desktop"`. A receipt on the
+  default has no `automation` field.
+
+`mst desktop parity --app Claude` reads one idle screen of the running app
+through both and lists every control that differs; `mst desktop snapshot`
+saves what one of them sees. Neither presses anything. The checks that prove
+the move, and the record a default change needs, are in
+[docs/desktop-validation/](./desktop-validation/README.md).
+
 The package exposes two executable runtime files, resolved independently of the
 working directory:
 
@@ -863,7 +903,13 @@ the bytes present at audit time; notices contain no original digest to authentic
 - `cowork/linux.ts`: separate first-party and third-party adapters, with runtime guards, readiness checks and execution against a caller-owned desktop.
 - `desktopUi/desktopUi.ts`: the desktop interface, which no product owns: a snapshot of the app's window, a control's text, and the actions on a control.
 - `desktopUi/atspi.ts`: the desktop interface over AT-SPI on D-Bus, in TypeScript, with bounded tree reads, native actions and clipboard input.
+- `desktopUi/agentDesktop.ts`: the one module that runs the `agent-desktop` CLI, one command per call, with its typed reads and actions.
+- `desktopUi/agentDesktopUi.ts`: the desktop interface over agent-desktop, for every OS; `agentDesktopLinux.ts` and `agentDesktopMac.ts` add what each OS needs (the session's window, links, how text goes in), and `agentDesktopConnect.ts` picks one by the OS that runs MST.
+- `desktopUi/automation.ts`: the desktop automations MST knows and `MST_DESKTOP_AUTOMATION`; `desktopDefaults.ts`, beside it, is each client's default on each OS (`DESKTOP_DEFAULTS`).
+- `desktopUi/heldAccessibilityClient.ts`: the AT-SPI client a batch holds while its drivers run over agent-desktop.
+- `desktopUi/parity.ts`: the comparison behind `mst desktop parity`.
 - `cowork/linuxUi.ts`: Claude Desktop over the desktop interface (its application names and its links), and the driver receipts.
+- `cowork/linuxAutomation.ts`: which automation Cowork on Linux runs on in this environment; the client asks it without connecting.
 - `cowork/linuxConnect.ts`: connects a driver process to the session's Claude Desktop. The one place Cowork on Linux names a transport.
 - `cowork/linuxFirstPartyDriver.ts`: first-party readiness, model selection, single submission, scoped HITL and diagnostics over the UI interface.
 - `cowork/linuxFirstPartyMain.ts`: the isolated Node entry point behind `./cowork-linux-first-party-runtime`, accepting JSON input and returning a receipt.

@@ -497,6 +497,56 @@ describe('mst CLI', () => {
     });
   });
 
+  describe('desktop command', () => {
+    it('describes its two read-only checks', async () => {
+      const help = await runBin('desktop', '--help');
+      expect(help.exitCode).toBe(0);
+      expect(help.stdout).toContain('snapshot');
+      expect(help.stdout).toContain('parity');
+
+      const snapshot = await runBin('desktop', 'snapshot', '--help');
+      expect(snapshot.stdout).toContain('--app <name>');
+      expect(snapshot.stdout).toContain('--automation <name>');
+      expect(snapshot.stdout).toMatch(/presses\s+nothing/);
+    });
+
+    it('refuses an automation it does not know before touching the desktop', async () => {
+      const result = await runBin(
+        'desktop',
+        'snapshot',
+        '--app',
+        'Claude',
+        '--automation',
+        'xdotool'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        '"xdotool" names no desktop automation; MST knows atspi, computer-use, agent-desktop.'
+      );
+    });
+
+    it('needs --app', async () => {
+      const result = await runBin('desktop', 'parity');
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain(
+        "required option '--app <name>' not specified"
+      );
+    });
+
+    // Each OS's parity has its own answer; the one with nothing to compare
+    // needs no desktop to show it.
+    it.runIf(process.platform === 'darwin')(
+      'has nothing to compare on macOS',
+      async () => {
+        const result = await runBin('desktop', 'parity', '--app', 'Claude');
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr).toContain(
+          'the default reads no accessibility tree (Computer Use), so there is nothing to compare agent-desktop with'
+        );
+      }
+    );
+  });
+
   describe('clients command', () => {
     it('lists and shows built-in clients without plugins', async () => {
       const list = await runBin('clients');

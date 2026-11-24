@@ -20,6 +20,9 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkDesktop } from './desktop.js';
 import { installedDebApp } from '../installedApp.js';
+import { DESKTOP_AUTOMATION_ENV } from '../desktopUi/automation.js';
+import { holdAccessibilityClient } from '../desktopUi/heldAccessibilityClient.js';
+import { linuxCoworkAutomation } from './linuxAutomation.js';
 import { transportServers } from '../evalConfig.js';
 import { credentialHelperScript } from '../coworkSetup/credentialHelper.js';
 import {
@@ -57,6 +60,7 @@ import {
   CoworkHitlError,
   CoworkUserQuestionError,
   type CoworkDriverOptions,
+  type CoworkDriverTelemetry,
   type CoworkHitlReceipt,
   type CoworkPendingQuestion,
   type SemanticDesktopTelemetry,
@@ -98,9 +102,39 @@ const SESSION_ENV = [
   'MST_COWORK_ACCOUNT_PROFILE',
   'MST_COWORK_SETTINGS_FILE',
   'MST_COWORK_URL_OPENER',
+  // Which transport of the desktop interface the driver connects through.
+  DESKTOP_AUTOMATION_ENV,
   'LANG',
   'LC_ALL',
 ];
+
+/**
+ * What the batch holds for its transport. Over agent-desktop, a key reaches
+ * the app only while an accessibility client is on the bus, and agent-desktop
+ * is one only while a command runs (`heldAccessibilityClient.ts`); the batch
+ * keeps one for every driver process it runs. MST's own client needs nothing
+ * held: it stays on the bus for the whole operation. Fails, before anything
+ * touches the app, on an automation Cowork on Linux can't run on.
+ */
+async function holdForAutomation(
+  env: Record<string, string | undefined>
+): Promise<() => void> {
+  if (linuxCoworkAutomation(env) !== 'agent-desktop') return () => {};
+  return holdAccessibilityClient({ ...process.env, ...env });
+}
+
+/**
+ * A receipt written on anything but the default names what wrote it (ADR
+ * 0017), so two runs can be told apart. On the default it says nothing.
+ */
+function named<T extends { telemetry?: CoworkDriverTelemetry }>(
+  receipt: T,
+  env: Record<string, string | undefined> | undefined
+): T {
+  const automation = linuxCoworkAutomation({ ...process.env, ...env });
+  if (automation === 'atspi' || !receipt.telemetry) return receipt;
+  return { ...receipt, telemetry: { ...receipt.telemetry, automation } };
+}
 interface Receipt {
   status: 'ready' | 'submitted' | 'hitl_checked' | 'diagnosed' | 'failed';
   action_count: number;
@@ -1017,9 +1051,12 @@ const coworkLinuxThirdParty: CoworkDesktop = {
       )}\n`;
       await writeSettingsText(settingsFile, ownedText);
     }
+    // Held from here: every exit below goes through `restore`.
+    const releaseClient = await holdForAutomation(env);
     // In owned mode the settings go back, whether or not the desktop is ready,
     // and the servers' credentials are removed.
     const restore = async () => {
+      releaseClient();
       if (!owned) return;
       await writeSettingsText(settingsFile, original ?? '{}\n');
       await headerFiles?.remove();
@@ -1104,14 +1141,17 @@ const coworkLinuxThirdParty: CoworkDesktop = {
   async submit(query, options) {
     const started = Date.now();
     const result = await execute('submit', { prompt: query }, options);
-    return {
-      status: 'submitted',
-      action_count: result.action_count,
-      telemetry: telemetry(started, result.action_count, 'complete'),
-    };
+    return named(
+      {
+        status: 'submitted' as const,
+        action_count: result.action_count,
+        telemetry: telemetry(started, result.action_count, 'complete'),
+      },
+      options.env
+    );
   },
   async handleHitl(options) {
-    return handleLinuxHitl(options, 'third-party');
+    return named(await handleLinuxHitl(options, 'third-party'), options.env);
   },
 };
 
@@ -1285,25 +1325,32 @@ export const coworkLinuxFirstParty: CoworkDesktop = {
         'First-party Linux Cowork cannot install managed plugins or telemetry settings, or pin appVersion.'
       );
     await checkAccountRuntime(env);
-    // Read-only readiness. In particular, no managed restart or warmup task.
-    await execute(
-      'probe',
-      {},
-      { deadlineAt: Date.now() + 15_000, maxActions: 1, env },
-      'first-party'
-    );
+    const releaseClient = await holdForAutomation(env);
+    try {
+      // Read-only readiness. In particular, no managed restart or warmup task.
+      await execute(
+        'probe',
+        {},
+        { deadlineAt: Date.now() + 15_000, maxActions: 1, env },
+        'first-party'
+      );
+    } catch (error) {
+      releaseClient();
+      throw error;
+    }
     const app = await installedCoworkApp();
     return {
       ...(app ? { app } : {}),
       async dispose() {
         // The plugin owns the profile and its cleanup; source control owns policy.
+        releaseClient();
       },
     };
   },
   async handleHitl(options) {
     await checkAccountRuntime(options.env ?? process.env);
     // Account `ask` must not become a persistent account permission in the UI.
-    return handleLinuxHitl(options, 'first-party');
+    return named(await handleLinuxHitl(options, 'first-party'), options.env);
   },
   async reset(options) {
     await checkAccountRuntime(options.env ?? process.env);
@@ -1326,10 +1373,13 @@ export const coworkLinuxFirstParty: CoworkDesktop = {
       options,
       'first-party'
     );
-    return {
-      status: 'submitted',
-      action_count: result.action_count,
-      telemetry: telemetry(started, result.action_count, 'complete'),
-    };
+    return named(
+      {
+        status: 'submitted' as const,
+        action_count: result.action_count,
+        telemetry: telemetry(started, result.action_count, 'complete'),
+      },
+      options.env
+    );
   },
 };

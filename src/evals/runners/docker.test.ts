@@ -63,6 +63,19 @@ describe('the docker runner', () => {
       expect(
         dockerRunArgs({ ...base, warmVmTimeoutS }).join(' ')
       ).not.toContain('MST_COWORK_WARM_VM_TIMEOUT_S');
+
+    // The coordinator's chosen desktop automation reaches the container's
+    // session and drivers; the default sends nothing (ADR 0017).
+    const chosen = dockerRunArgs({
+      ...base,
+      desktopAutomation: 'agent-desktop',
+    });
+    expect(
+      chosen[chosen.indexOf('MST_DESKTOP_AUTOMATION=agent-desktop') - 1]
+    ).toBe('--env');
+    expect(dockerRunArgs(base).join(' ')).not.toContain(
+      'MST_DESKTOP_AUTOMATION'
+    );
   });
 
   it('packs a checkout as built, and an installed package without its scripts', () => {

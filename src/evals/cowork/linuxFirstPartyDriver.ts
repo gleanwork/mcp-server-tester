@@ -40,6 +40,7 @@ const TRANSPORT_ERRORS = new Set([
   'accessibility_text_unavailable',
   'invalid_prompt',
   'open_cowork_failed',
+  'agent_desktop_not_installed',
 ]);
 const PERSISTENT = [
   'Allow',

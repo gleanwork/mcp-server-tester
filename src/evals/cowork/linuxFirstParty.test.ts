@@ -28,6 +28,10 @@ vi.mock('node:child_process', () => ({ execFile: runtime.exec }));
 vi.mock('node:timers/promises', () => ({
   setTimeout: vi.fn().mockResolvedValue(undefined),
 }));
+const held = vi.hoisted(() => ({ hold: vi.fn(), release: vi.fn() }));
+vi.mock('../desktopUi/heldAccessibilityClient.js', () => ({
+  holdAccessibilityClient: held.hold,
+}));
 vi.mock('../installedApp.js', () => ({
   installedDebApp: vi.fn().mockResolvedValue({
     name: 'Claude',
@@ -84,6 +88,7 @@ function prepare(overrides: Record<string, string | undefined> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  held.hold.mockResolvedValue(held.release);
   runtime.payloads.length = 0;
   marker = {
     version: 1,
@@ -182,6 +187,39 @@ describe('plugin-staged first-party Linux desktop', () => {
       ).toBe(false);
     }
   );
+
+  it('holds an accessibility client for the batch only over agent-desktop', async () => {
+    await (await prepare()).dispose();
+    expect(held.hold).not.toHaveBeenCalled();
+
+    const lifecycle = await prepare({
+      MST_DESKTOP_AUTOMATION: 'agent-desktop',
+    });
+    expect(held.hold).toHaveBeenCalledOnce();
+    expect(held.hold.mock.invocationCallOrder[0]!).toBeLessThan(
+      runtime.exec.mock.invocationCallOrder.at(-1)!
+    );
+    expect(held.release).not.toHaveBeenCalled();
+    await lifecycle.dispose();
+    expect(held.release).toHaveBeenCalledOnce();
+  });
+
+  it('releases the held client when the first-party probe fails', async () => {
+    runtime.exec.mockImplementationOnce(
+      (_command, _args, _options, callback) => ({
+        stdin: {
+          on: vi.fn(),
+          end() {
+            callback(new Error('exit 1'), '', '');
+          },
+        },
+      })
+    );
+    await expect(
+      prepare({ MST_DESKTOP_AUTOMATION: 'agent-desktop' })
+    ).rejects.toThrow();
+    expect(held.release).toHaveBeenCalledOnce();
+  });
 
   it('preserves exact model/prompt and the action budget through one first-party submission', async () => {
     const prompt = '  Find 中文 & "quotes"\nunchanged  ';

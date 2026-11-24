@@ -66,6 +66,11 @@ export interface ComputerUseTelemetry {
 export interface SemanticDesktopTelemetry {
   /** Recorded by earlier versions only; new receipts omit this identity. */
   driver?: 'linux-desktop';
+  /**
+   * The desktop automation that wrote this receipt, when it is not the
+   * client's default on this OS (ADR 0017). A receipt on the default omits it.
+   */
+  automation?: string;
   accounting: 'complete' | 'partial';
   duration_ms: number;
   action_count: number;

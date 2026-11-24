@@ -41,6 +41,13 @@ vi.mock('node:child_process', () => ({ execFile: child.exec }));
 vi.mock('node:timers/promises', () => ({
   setTimeout: vi.fn().mockResolvedValue(undefined),
 }));
+const held = vi.hoisted(() => ({
+  hold: vi.fn(),
+  release: vi.fn(),
+}));
+vi.mock('../desktopUi/heldAccessibilityClient.js', () => ({
+  holdAccessibilityClient: held.hold,
+}));
 let directory: string;
 const session = {
   DISPLAY: ':1',
@@ -74,6 +81,8 @@ beforeEach(async () => {
   child.exec.mockReset();
   child.payloads.length = 0;
   child.responses.length = 0;
+  held.hold.mockReset().mockResolvedValue(held.release);
+  held.release.mockReset();
   child.exec.mockImplementation((_command, args, _options, callback) => ({
     stdin: {
       on: vi.fn(),
@@ -190,6 +199,98 @@ describe('caller-owned Linux Cowork desktop', () => {
     ).toEqual(settings);
     expect(child.exec).toHaveBeenCalledOnce();
     expect(child.exec.mock.calls[0]![1]).toContain('probe');
+    // MST's own AT-SPI client, the default, needs nothing held for the batch.
+    expect(held.hold).not.toHaveBeenCalled();
+  });
+
+  describe('over agent-desktop (MST_DESKTOP_AUTOMATION=agent-desktop)', () => {
+    const chosen = { ...session, MST_DESKTOP_AUTOMATION: 'agent-desktop' };
+    async function prepareChosen() {
+      const file = join(directory, 'settings.json');
+      await writeFile(file, JSON.stringify(settings));
+      return linuxCoworkPlatform.prepare({
+        evalConfig,
+        model: 'test-model',
+        env: { ...chosen, MST_COWORK_SETTINGS_FILE: file },
+      });
+    }
+
+    it('holds an accessibility client before the first driver runs, and tells the driver its transport', async () => {
+      const lifecycle = await prepareChosen();
+      expect(held.hold).toHaveBeenCalledOnce();
+      expect(held.hold.mock.calls[0]![0]).toMatchObject({
+        DISPLAY: ':1',
+        DBUS_SESSION_BUS_ADDRESS: 'unix:path=/fake/session',
+      });
+      expect(held.hold.mock.invocationCallOrder[0]!).toBeLessThan(
+        child.exec.mock.invocationCallOrder[0]!
+      );
+      const forwarded = (
+        child.exec.mock.calls[0]![2] as ChildProcess.ExecFileOptions
+      ).env!;
+      expect(forwarded.MST_DESKTOP_AUTOMATION).toBe('agent-desktop');
+      expect(forwarded.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(held.release).not.toHaveBeenCalled();
+      await lifecycle.dispose();
+      expect(held.release).toHaveBeenCalledOnce();
+    });
+
+    it('names the automation in a receipt, where a receipt on the default says nothing', async () => {
+      const file = join(directory, 'settings.json');
+      await writeFile(file, JSON.stringify(settings));
+      child.responses.push({
+        value: { status: 'submitted', action_count: 3, duration_ms: 5 },
+      });
+      const onDefault = await linuxCoworkPlatform.submit('q', {
+        ...options(),
+        env: { ...session, MST_COWORK_SETTINGS_FILE: file },
+      });
+      expect(onDefault.telemetry).not.toHaveProperty('automation');
+
+      child.responses.push({
+        value: { status: 'submitted', action_count: 3, duration_ms: 5 },
+      });
+      const chosenReceipt = await linuxCoworkPlatform.submit('q', {
+        ...options(),
+        env: { ...chosen, MST_COWORK_SETTINGS_FILE: file },
+      });
+      expect(chosenReceipt.telemetry).toMatchObject({
+        automation: 'agent-desktop',
+        action_count: 3,
+      });
+    });
+
+    it('releases the client when the desktop is not ready', async () => {
+      child.responses.push({ failed: true });
+      await expect(prepareChosen()).rejects.toThrow();
+      expect(held.release).toHaveBeenCalledOnce();
+    });
+
+    it('runs no driver when the bus refuses the client', async () => {
+      held.hold.mockRejectedValue(new Error('accessibility_bus_unavailable'));
+      await expect(prepareChosen()).rejects.toThrow(
+        'accessibility_bus_unavailable'
+      );
+      expect(child.exec).not.toHaveBeenCalled();
+    });
+
+    it('fails before the bus and the driver on an automation Cowork on Linux cannot run on', async () => {
+      const file = join(directory, 'settings.json');
+      await writeFile(file, JSON.stringify(settings));
+      await expect(
+        linuxCoworkPlatform.prepare({
+          evalConfig,
+          model: 'test-model',
+          env: {
+            ...session,
+            MST_DESKTOP_AUTOMATION: 'computer-use',
+            MST_COWORK_SETTINGS_FILE: file,
+          },
+        })
+      ).rejects.toThrow('not a way cowork on Linux can run');
+      expect(held.hold).not.toHaveBeenCalled();
+      expect(child.exec).not.toHaveBeenCalled();
+    });
   });
   it('accepts a pinned required plugin marketplace with its own MCP server blocked', async () => {
     const prepared = {
