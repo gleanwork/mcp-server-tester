@@ -41,6 +41,7 @@ const FailureStep = z.enum([
   'model-open',
   'model-scroll',
   'model-select',
+  'model-effort-select',
   'model-verify',
   'send',
 ]);
@@ -142,6 +143,7 @@ const Receipt = z
               'model-open',
               'model-scroll',
               'model-select',
+              'model-effort-select',
               'model-verify',
               'send',
             ].includes(receipt.step))))

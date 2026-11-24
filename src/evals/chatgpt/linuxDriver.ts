@@ -551,6 +551,28 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     );
     this.step = 'model-select';
     await this.action(() => this.desktop.clickObservedControl(picker, item));
+    const afterModel = await this.wait(
+      (ns) =>
+        this.modelButtons(ns).some(
+          (button) =>
+            button.name === requested || button.name.startsWith(`${requested} `)
+        ) || ns.some((node) => available(node) && node.name === 'Medium')
+    );
+    if (
+      !this.modelButtons(afterModel).some(
+        (button) =>
+          button.name === requested || button.name.startsWith(`${requested} `)
+      )
+    ) {
+      const effort = unique(
+        afterModel.filter((node) => available(node) && node.name === 'Medium'),
+        'model_unavailable'
+      );
+      this.step = 'model-effort-select';
+      await this.action(() =>
+        this.desktop.clickObservedControl(afterModel, effort)
+      );
+    }
     this.step = 'model-verify';
     try {
       return await this.wait(async (ns) => {

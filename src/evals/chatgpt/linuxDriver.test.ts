@@ -234,6 +234,8 @@ class ModelDesktop extends FakeDesktop {
   keepDraftOnSelection = true;
   cloudResetsModel = false;
   clipModels = false;
+  requiresEffort = false;
+  pendingModel: string | undefined;
   constructor(
     private current = 'GPT-6.2 Sol Medium',
     private readonly choices = ['GPT-6.2 Sol', 'GPT-6.1 Sol']
@@ -266,6 +268,14 @@ class ModelDesktop extends FakeDesktop {
         )
       );
     } else if (control.role === 'radio menu item') {
+      if (this.requiresEffort) {
+        this.pendingModel = control.name;
+        this.nodes = this.nodes.filter(
+          (item) => item.role !== 'radio menu item'
+        );
+        this.nodes.push(node('Medium', 'menu item'));
+        return;
+      }
       this.current = `${control.name} Medium`;
       this.nodes = this.nodes.filter((item) => item.role !== 'radio menu item');
       this.nodes.find(
@@ -274,6 +284,15 @@ class ModelDesktop extends FakeDesktop {
           (/^GPT-/.test(item.name) || item.name === 'Select ChatGPT model')
       )!.name = this.current;
       if (!this.keepDraftOnSelection) composer(this.nodes).text = '';
+    } else if (control.name === 'Medium' && this.pendingModel) {
+      this.current = `${this.pendingModel} Medium`;
+      this.pendingModel = undefined;
+      this.nodes = this.nodes.filter((item) => item.name !== 'Medium');
+      this.nodes.find(
+        (item) =>
+          item.role === 'button' &&
+          (/^GPT-/.test(item.name) || item.name === 'Select ChatGPT model')
+      )!.name = this.current;
     }
   }
 
@@ -744,6 +763,29 @@ describe('submit', () => {
     expect(receipt.status).toBe('submitted');
     expect(desktop.actions).toContainEqual(['scroll', 'GPT-6.2 Sol', 'down']);
     expect(desktop.names().at(-2)).toBe('GPT-6.1 Sol');
+  });
+
+  it('selects Medium when the model opens a reasoning effort submenu', async () => {
+    const desktop = new ModelDesktop();
+    desktop.requiresEffort = true;
+    expect(
+      (
+        await driverFor(desktop).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.1-sol'
+        )
+      ).status
+    ).toBe('submitted');
+    expect(desktop.names()).toEqual([
+      'open',
+      'GPT-6.2 Sol Medium',
+      'Select model',
+      'GPT-6.1 Sol',
+      'Medium',
+      'Send',
+    ]);
   });
 
   it('selects the Cloud location before selecting the requested model', async () => {
