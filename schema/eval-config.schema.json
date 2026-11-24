@@ -407,6 +407,10 @@
       "type": "boolean",
       "description": "Connector servers' dry-run proxies answer writes with a success reply instead of a planned-write result, and record them; the trial's tool calls they answered are marked simulatedWrite. Writes still never reach the server. Default false."
     },
+    "allowMixedWriteModes": {
+      "type": "boolean",
+      "description": "Allow comparing variants with different stopped-write modes. Pairwise judging skips cases with attempted writes or incomplete write evidence. Live and unguarded servers are not permitted in such comparisons. Default false."
+    },
     "writes": {
       "type": "object",
       "description": "Write modes for servers no dry-run proxy guards, by server label (ADR 0014). unguarded: MST can't see the server's writes, and the run accepts that. live: writes reach the service, which also needs --allow-live-writes. A server with neither and no proxy must list no tool that isn't read-only, or the run doesn't start.",
