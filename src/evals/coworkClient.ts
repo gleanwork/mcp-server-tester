@@ -142,7 +142,7 @@ const CoworkSchema = z
       .string()
       .regex(/^[A-Za-z0-9._:-]+$/)
       .optional()
-      .meta({ 'x-defaultDescription': 'Cowork default' }),
+      .meta({ 'x-defaultDescription': 'Claude Desktop default' }),
     /** Gone: the client fixes its provider. */
     ...removedClientOptions({
       provider: fixedProviderGone('cowork', 'anthropic'),
@@ -585,6 +585,10 @@ async function desktopAdapter(
         'Cowork submission was not attempted.'
       );
       let continuation: DesktopContinuation = 'continue';
+      // Set once the platform proved the task finished and checked its
+      // settings (`validateTranscript`), so the case survives a later
+      // batch cleanup failure.
+      let verified = false;
       // The sessions the task's own telemetry names, once bound.
       let hostSessions: string[] = [];
       const finishCase = async (): Promise<DesktopCaseOutcome> => {
@@ -618,7 +622,11 @@ async function desktopAdapter(
             },
           },
         };
-        return { result, continuation };
+        return {
+          result,
+          continuation,
+          ...(verified && !result.error ? { verified: true } : {}),
+        };
       };
       // Bind each fresh task before another submission can create an identical prompt.
       const snapshot = await snapshotClaudeSessions(dataDir);
@@ -949,7 +957,10 @@ async function desktopAdapter(
         };
         // Validation may write its own audit receipt and then reject the task.
         // Keep the completed native evidence even when that happens early.
-        await platform.validateTranscript?.(transcript);
+        if (platform.validateTranscript) {
+          await platform.validateTranscript(transcript);
+          verified = true;
+        }
         process.stderr.write(
           `[mst:cowork] case ${index + 1}: native completion found (${transcript.toolCalls.length} tool calls)\n`
         );
@@ -1181,18 +1192,18 @@ export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
   // checks them after `prepare`, not the dispatch before it.
   const definition: ClientDefinition = checksServersAfterPrepare({
     schema: CoworkSchema,
-    description: 'Claude Desktop in Cowork mode',
+    description: 'Claude Desktop, each trial in a Cowork session',
     requirements: {
       os: ['macos', 'linux'],
       install: [
         'macOS: Claude Desktop, signed in, the Xcode Command Line Tools, and Accessibility and Screen Recording permission for the terminal that runs MST',
-        "Linux: MST's Cowork image (`--runner docker`), or a prepared desktop with Claude Desktop",
+        "Linux: MST's Claude Desktop image (`--runner docker`), or a prepared desktop with Claude Desktop",
       ],
       credentials: [
-        'macOS default third-party: `ANTHROPIC_API_KEY` for Cowork inference, unless managed preferences set its provider',
-        'macOS first-party: Cowork inference uses the existing signed-in Claude account; MST installs no inference credential',
+        "macOS default third-party: `ANTHROPIC_API_KEY` for Claude Desktop's inference, unless managed preferences set its provider",
+        "macOS first-party: Claude Desktop's inference uses the existing signed-in Claude account; MST installs no inference credential",
         'macOS both modes: `ANTHROPIC_API_KEY` or an LLM gateway for the Computer Use planner',
-        'Linux third-party image: Cowork inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`)',
+        "Linux third-party image: for Claude Desktop's inference, `ANTHROPIC_API_KEY` or an LLM gateway (`ANTHROPIC_BASE_URL` with `MST_LLM_AUTH_COMMAND` or `ANTHROPIC_AUTH_TOKEN`)",
         'Linux first-party: a plugin-staged private account profile and source-host cloud control; no inference credential or Computer Use planner in MST',
       ],
       setup: [

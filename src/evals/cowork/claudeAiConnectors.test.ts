@@ -15,6 +15,7 @@ import {
   type CloudConnectorIO,
   type PermissionPatch,
 } from './claudeAiConnectors.js';
+import { CoworkCloudPreparationSchema } from './cloudControlProtocol.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof files>();
@@ -615,6 +616,57 @@ describe('fail-closed cloud permission transactions', () => {
 });
 
 describe('durable cloud task ownership', () => {
+  it('ends a task left running, then restores only after completion is proved', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      await session.beginTask();
+      await session.bindTask('cse_held');
+      let running = true;
+      io.assertTaskComplete = vi.fn(async () => {
+        if (running) throw new Error('task still running');
+      });
+      io.settleTask = vi.fn(async () => {
+        running = false;
+      });
+      await session.restore();
+      expect(io.settleTask).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'cse_held' })
+      );
+      expect(io.assertTaskComplete).toHaveBeenCalledTimes(2);
+      expect(state.permissions).toEqual({});
+      await expect(journalAt(path)).rejects.toThrow();
+    });
+  });
+
+  it('keeps the journal and both reasons when the task cannot be ended', async () => {
+    await withJournal(async (path) => {
+      const { state, io } = permissionFixture();
+      const session = await configureCloudConnectors(
+        io,
+        transactionConfig,
+        path
+      );
+      await session.beginTask();
+      await session.bindTask('cse_held');
+      io.assertTaskComplete = vi.fn(async () => {
+        throw new Error('task still running');
+      });
+      io.settleTask = vi.fn(async () => {
+        throw new Error('Stop did not take');
+      });
+      await expect(session.restore()).rejects.toThrow(
+        /task still running.*Stop did not take/s
+      );
+      expect(state.permissions['docs:search']).toBe(true);
+      expect((await journalAt(path)).pendingTask?.sessionId).toBe('cse_held');
+    });
+  });
+
   it('persists the task before submit, binds once, and gates restoration on provider proof', async () => {
     await withJournal(async (path) => {
       const { state, io } = permissionFixture();
@@ -1484,5 +1536,122 @@ describe('cloud connector configuration', () => {
       'jira:read-hash': false,
     });
     expect(plan.allowedTools).toEqual(['mcp__Glean__search']);
+  });
+});
+
+describe('connector catalog drift', () => {
+  const init = (tools: string[]) => ({
+    payload: { type: 'system', subtype: 'init', tools, mcp_servers: [] },
+  });
+  const call = (name: string) => ({
+    payload: {
+      type: 'assistant',
+      message: { content: [{ type: 'tool_use', id: 'call', name }] },
+    },
+  });
+  const readOnly = (catalogDrift?: 'fail' | 'record') =>
+    planCloudConnectors(policySnapshot, {
+      servers: { docs: { policy: 'read-only' } },
+      ...(catalogDrift ? { catalogDrift } : {}),
+    });
+
+  it('fails by default on a managed tool the prepared catalog did not list', () => {
+    const plan = readOnly();
+    expect(plan.catalogDrift).toBe('fail');
+    expect(() =>
+      verifyCloudConnectorEvents(plan, [
+        init(['mcp__Acme_Documents__search', 'mcp__Acme_Documents__export']),
+      ])
+    ).toThrow('Unexpected: mcp__Acme_Documents__export');
+  });
+
+  it('records a listed-only unplanned tool in record mode', () => {
+    const result = verifyCloudConnectorEvents(readOnly('record'), [
+      init(['mcp__Acme_Documents__search', 'mcp__Acme_Documents__export']),
+    ]);
+    expect(result.catalogDrift).toEqual({
+      unlisted: ['mcp__Acme_Documents__export'],
+      unloaded: [],
+    });
+  });
+
+  it('still fails in record mode when the agent calls an unplanned tool', () => {
+    expect(() =>
+      verifyCloudConnectorEvents(readOnly('record'), [
+        init(['mcp__Acme_Documents__search', 'mcp__Acme_Documents__export']),
+        call('mcp__Acme_Documents__export'),
+      ])
+    ).toThrow('Unexpected: mcp__Acme_Documents__export');
+  });
+
+  it('still fails in record mode when a blocked tool is listed', () => {
+    expect(() =>
+      verifyCloudConnectorEvents(readOnly('record'), [
+        init(['mcp__Acme_Documents__search', 'mcp__Acme_Documents__send']),
+      ])
+    ).toThrow('Unexpected: mcp__Acme_Documents__send');
+  });
+
+  it('records an allowed tool a loaded server did not load, in record mode only', () => {
+    const plan = (catalogDrift: 'fail' | 'record') =>
+      planCloudConnectors(policySnapshot, {
+        servers: { docs: { policy: 'allow-all' } },
+        catalogDrift,
+      });
+    const events = [init(['mcp__Acme_Documents__search'])];
+    expect(() => verifyCloudConnectorEvents(plan('fail'), events)).toThrow(
+      'Missing: mcp__Acme_Documents__send'
+    );
+    expect(
+      verifyCloudConnectorEvents(plan('record'), events).catalogDrift
+    ).toEqual({ unlisted: [], unloaded: ['mcp__Acme_Documents__send'] });
+  });
+
+  it('still fails in record mode when a server loaded none of its allowed tools', () => {
+    const plan = planCloudConnectors(policySnapshot, {
+      servers: {
+        docs: { policy: 'read-only' },
+        tasks: { policy: 'read-only' },
+      },
+      catalogDrift: 'record',
+    });
+    expect(() =>
+      verifyCloudConnectorEvents(plan, [init(['mcp__Acme_Documents__search'])])
+    ).toThrow('Missing: mcp__Task_Board__read');
+  });
+
+  const prompt = (tool_name: string) => ({
+    payload: {
+      type: 'control_request',
+      request: { subtype: 'can_use_tool', tool_name },
+    },
+  });
+
+  it('records an approval prompt for a built-in tool without failing the policy', () => {
+    const result = verifyCloudConnectorEvents(readOnly(), [
+      init(['mcp__Acme_Documents__search', 'WebFetch']),
+      prompt('WebFetch'),
+    ]);
+    expect(result.approvalRequests).toBe(0);
+    expect(result.builtinApprovalRequests).toEqual(['WebFetch']);
+  });
+
+  it.each(['mcp__Acme_Documents__search', 'mcp__Other_Server__lookup'])(
+    'fails on an approval prompt for MCP tool %s',
+    (tool) => {
+      expect(() =>
+        verifyCloudConnectorEvents(readOnly(), [
+          init(['mcp__Acme_Documents__search']),
+          prompt(tool),
+        ])
+      ).toThrow('Cloud requested 1 tool approvals');
+    }
+  );
+
+  it('reads a prepared plan from a source that predates the setting as fail', () => {
+    const { catalogDrift: _omitted, ...legacy } = readOnly('record');
+    expect(
+      CoworkCloudPreparationSchema.shape.plan.parse(legacy).catalogDrift
+    ).toBe('fail');
   });
 });

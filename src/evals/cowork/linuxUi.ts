@@ -1,14 +1,16 @@
-/** The native Linux UI seam. Mode selection and workflow policy stay in the driver. */
-export interface LinuxUiNode {
-  id: string;
-  parentId?: string;
-  name: string;
-  role: string;
-  visible: boolean;
-  showing: boolean;
-  enabled: boolean;
-  selected: boolean;
-}
+/**
+ * What Cowork's drivers see of Claude Desktop: the desktop interface
+ * (`desktopUi/desktopUi.ts`), with Claude's own links. Mode selection and
+ * workflow policy stay in the drivers.
+ */
+import {
+  DesktopUiError,
+  type DesktopUi,
+  type DesktopUiNode,
+} from '../desktopUi/desktopUi.js';
+import { hasLoneSurrogate, percentEncodeUtf8 } from '../urlComponent.js';
+
+export type LinuxUiNode = DesktopUiNode;
 
 export interface LinuxUi {
   /** A complete bounded snapshot of the single Claude application, or an error. */
@@ -16,7 +18,7 @@ export interface LinuxUi {
   readText(node: LinuxUiNode): Promise<string>;
   activate(node: LinuxUiNode): Promise<void>;
   reveal(node: LinuxUiNode): Promise<void>;
-  /** One clipboard paste into the specified entry. The driver verifies the result. */
+  /** The prompt, entered once in the specified entry. The driver verifies the result. */
   paste(node: LinuxUiNode, text: string): Promise<void>;
   openCowork(): Promise<void>;
   /** One new-task link with `prompt` as its draft (empty for a blank task). Never sends. */
@@ -25,7 +27,34 @@ export interface LinuxUi {
   close(): void | Promise<void>;
 }
 
-export { AtspiError as LinuxUiError } from '../linuxAtspiBus.js';
+export { DesktopUiError as LinuxUiError };
+
+/** Claude Desktop's accessible application names, compared case-insensitively. */
+export function isClaude(name: string): boolean {
+  return ['claude', 'claude-desktop'].includes(name.toLowerCase());
+}
+
+/** Claude Desktop over any transport of the desktop interface. */
+export function coworkUi(ui: DesktopUi): LinuxUi {
+  return {
+    snapshot: () => ui.snapshot(),
+    readText: (node) => ui.readText(node),
+    activate: (node) => ui.activate(node),
+    reveal: (node) => ui.reveal(node),
+    paste: (node, text) => ui.enterText(node, text),
+    async openCowork() {
+      await ui.openLink('claude://cowork/new', 'open_cowork_failed');
+    },
+    async openNewTask(prompt) {
+      if (hasLoneSurrogate(prompt)) throw new DesktopUiError('invalid_prompt');
+      await ui.openLink(
+        `claude://claude.ai/new?q=${percentEncodeUtf8(prompt)}`,
+        'open_task_failed'
+      );
+    },
+    close: () => ui.close(),
+  };
+}
 
 export type LinuxDriverOperation =
   | 'probe'
@@ -33,6 +62,7 @@ export type LinuxDriverOperation =
   | 'submit'
   | 'hitl'
   | 'answer'
+  | 'stop'
   | 'diagnose';
 
 export interface LinuxDriverReceipt {

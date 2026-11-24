@@ -9,12 +9,13 @@
  */
 import { createConnection, type Socket } from 'node:net';
 import { isAbsolute } from 'node:path';
+import { DesktopUiError as AtspiError } from './desktopUi/desktopUi.js';
 
 const ATSPI_ACCESSIBLE = 'org.a11y.atspi.Accessible';
 export const ATSPI_ACTION = 'org.a11y.atspi.Action';
 export const ATSPI_COMPONENT = 'org.a11y.atspi.Component';
 export const ATSPI_TEXT = 'org.a11y.atspi.Text';
-const ATSPI_HYPERTEXT = 'org.a11y.atspi.Hypertext';
+export const ATSPI_HYPERTEXT = 'org.a11y.atspi.Hypertext';
 const ATSPI_HYPERLINK = 'org.a11y.atspi.Hyperlink';
 export const ATSPI_EDITABLE_TEXT = 'org.a11y.atspi.EditableText';
 export const ATSPI_REGISTRY = 'org.a11y.atspi.Registry';
@@ -39,13 +40,8 @@ export const ATSPI_COORDS = { screen: 0, window: 1 } as const;
 const ATSPI_MAX_NODES = 5000;
 const CONCURRENCY = 16;
 
-/** A failure with a stable, allowlistable code and no native detail. */
-export class AtspiError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = 'LinuxUiError';
-  }
-}
+/** The bus fails with the desktop interface's error, so one check covers both. */
+export { AtspiError };
 
 export type AtspiRef = { destination: string; path: string };
 export type AtspiMessage = AtspiRef & {
@@ -258,13 +254,20 @@ function childReferences(value: unknown): AtspiRef[] {
 }
 
 /** dbus-native's low-level variant: [signature AST, array of values]. */
-function variant(value: unknown, type: string): unknown {
+function variant(value: unknown, type: string | readonly string[]): unknown {
+  const types: readonly string[] = typeof type === 'string' ? [type] : type;
+  const actual = (
+    Array.isArray(value) && Array.isArray(value[0])
+      ? (value[0][0] as { type?: unknown } | undefined)?.type
+      : undefined
+  ) as string | undefined;
   if (
     !Array.isArray(value) ||
     value.length !== 2 ||
     !Array.isArray(value[0]) ||
     value[0].length !== 1 ||
-    (value[0][0] as { type?: unknown } | undefined)?.type !== type ||
+    actual === undefined ||
+    !types.includes(actual) ||
     !Array.isArray(value[1]) ||
     value[1].length !== 1
   )
@@ -308,7 +311,7 @@ export class AtspiBus {
     ref: AtspiRef,
     iface: string,
     name: string,
-    type: string
+    type: string | readonly string[]
   ): Promise<unknown> {
     return variant(
       await this.call({
@@ -429,7 +432,10 @@ export class AtspiBus {
   }
 
   async anchorCount(link: AtspiRef): Promise<number> {
-    return integer(await this.property(link, ATSPI_HYPERLINK, 'NAnchors', 'n'));
+    // The spec says int16; at-spi2-atk (Chromium, Electron) sends int32.
+    return integer(
+      await this.property(link, ATSPI_HYPERLINK, 'NAnchors', ['n', 'i'])
+    );
   }
 
   async linkObject(link: AtspiRef, index: number): Promise<AtspiRef> {
@@ -572,15 +578,17 @@ export interface AtspiVisited<T> {
 
 /**
  * Bounded parallel fetch, then depth-first order independent of reply timing.
- * A repeated node is an error, as is a tree over ATSPI_MAX_NODES.
+ * A repeated node is an error, as is a tree over ATSPI_MAX_NODES. A visit that
+ * returns null omits that node and its subtree (one that went defunct while
+ * the tree was read, say); the root can't be omitted.
  */
 export async function walkAtspi<T>(
   root: AtspiRef,
-  visit: (item: AtspiTreeItem) => Promise<AtspiVisited<T>>
+  visit: (item: AtspiTreeItem) => Promise<AtspiVisited<T> | null>
 ): Promise<T[]> {
   const queue: AtspiTreeItem[] = [{ ref: root, depth: 0 }];
   const seen = new Set([atspiId(root)]);
-  const records = new Map<string, AtspiVisited<T>>();
+  const records = new Map<string, AtspiVisited<T> | null>();
   for (let offset = 0; offset < queue.length; ) {
     const batch = queue.slice(offset, offset + CONCURRENCY);
     offset += batch.length;
@@ -589,7 +597,10 @@ export async function walkAtspi<T>(
       const parent = batch[index]!;
       const parentId = atspiId(parent.ref);
       const result = results[index]!;
+      if (result === null && parent.depth === 0)
+        throw new AtspiError('accessibility_tree_invalid');
       records.set(parentId, result);
+      if (result === null) continue;
       for (const ref of result.children) {
         const childId = atspiId(ref);
         if (seen.has(childId))
@@ -604,7 +615,8 @@ export async function walkAtspi<T>(
   const output: T[] = [];
   const pending = [root];
   while (pending.length) {
-    const record = records.get(atspiId(pending.pop()!))!;
+    const record = records.get(atspiId(pending.pop()!));
+    if (!record) continue;
     output.push(record.value);
     pending.push(...record.children.slice().reverse());
   }

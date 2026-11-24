@@ -36,7 +36,7 @@ describe('Docker context capacity', () => {
     expect(plan.slots).toBe(1);
     expect(plan.limits).toEqual({ memory: colima.memory - GIB });
     expect(plan.note).toBe(
-      'has 11.7 GiB and 6 CPUs: 1 Cowork container at a time, 10.7 GiB each'
+      'has 11.7 GiB and 6 CPUs: 1 Claude Desktop container at a time, 10.7 GiB each'
     );
     // Asked for: what was asked, still one at a time.
     expect(
@@ -89,7 +89,7 @@ describe('Docker context capacity', () => {
     expect(planContext('collect', undefined, {})).toEqual({
       limits: {},
       slots: 1,
-      note: "has an unknown size (docker info didn't say): 1 Cowork container at a time, no memory limit each",
+      note: "has an unknown size (docker info didn't say): 1 Claude Desktop container at a time, no memory limit each",
     });
     expect(planContext('grade', undefined, {})).toMatchObject({
       slots: 1,

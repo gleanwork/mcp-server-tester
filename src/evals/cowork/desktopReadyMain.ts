@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { connectLinuxUi } from './linuxAtspi.js';
+import { connectLinuxUi } from './linuxConnect.js';
 import { desktopReady } from './desktopReady.js';
 import type { LinuxUi } from './linuxUi.js';
 

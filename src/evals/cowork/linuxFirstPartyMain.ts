@@ -1,7 +1,7 @@
 /** Isolated Node entry point for the account-backed Linux desktop driver. */
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
-import { connectLinuxUi } from './linuxAtspi.js';
+import { connectLinuxUi } from './linuxConnect.js';
 import { runFirstPartyLinux } from './linuxFirstPartyDriver.js';
 import {
   LinuxUiError,
@@ -15,6 +15,7 @@ const operation = z.enum([
   'submit',
   'hitl',
   'answer',
+  'stop',
   'diagnose',
 ]);
 const payloadSchema = z
@@ -70,7 +71,7 @@ async function main(): Promise<void> {
     });
     if (values.help) {
       process.stdout.write(
-        'Linux first-party Cowork: --mode <probe|reset|submit|hitl|answer|diagnose> --timeout-ms <ms> --max-actions <count>\n'
+        'Linux first-party Cowork: --mode <probe|reset|submit|hitl|answer|stop|diagnose> --timeout-ms <ms> --max-actions <count>\n'
       );
       return;
     }

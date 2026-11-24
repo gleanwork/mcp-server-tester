@@ -129,9 +129,24 @@ describe('first-party server declarations', () => {
     expect(binding.config).toEqual({
       default: 'block',
       failOnApproval: true,
+      catalogDrift: 'fail',
       servers: { 'remote-id': { policy: 'read-only', tools: {} } },
     });
     expect(bindFirstPartyServers(snapshot, []).config.servers).toEqual({});
+  });
+  it('carries the requested catalogDrift mode into the binding and its plan', () => {
+    const binding = bindFirstPartyServers(
+      snapshot,
+      [
+        {
+          transport: 'http',
+          label: 'eval-search',
+          serverUrl: 'https://example.com/mcp',
+        },
+      ],
+      { catalogDrift: 'record' }
+    );
+    expect(binding.config.catalogDrift).toBe('record');
   });
   it('rejects a selected connector with an empty authenticated tool inventory', () => {
     const empty = structuredClone(snapshot);

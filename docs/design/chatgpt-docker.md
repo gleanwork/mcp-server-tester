@@ -4,11 +4,11 @@
 
 ## Goal
 
-Run a ChatGPT eval the way a Cowork eval runs in Docker: each shard gets a disposable Linux container with its own ChatGPT desktop app, your machine stays usable, and no personal account is involved:
+Run a ChatGPT eval the way a `cowork` eval runs in Docker: each shard gets a disposable Linux container with its own ChatGPT desktop app, your machine stays usable, and no personal account is involved:
 
 ```bash
 export OPENAI_BASE_URL=https://llm-gateway.example.com/openai/v1   # your gateway's OpenAI base
-export MST_LLM_AUTH_COMMAND=…                                       # as for Cowork
+export MST_LLM_AUTH_COMMAND=…                                       # as for the cowork client
 
 npx mst runner setup docker --config chatgpt-eval.json              # builds mst-chatgpt-linux:<MST version> (planned)
 npx mst run --config chatgpt-eval.json --runner docker --runner-option shards=3
@@ -24,7 +24,7 @@ ChatGPT desktop 26.1007.71326 (OpenAI's arm64 Linux package) ran natively in a c
 - **Inference through a gateway.** A custom model provider in `config.toml` sends turns to an OpenAI-compatible gateway (the Responses API). The provider's token comes from a command, which the app's backend re-runs on an interval. A ChatGPT Work turn completed. Its rollout recorded `originator: codex_work_desktop`, the originator MST matches for that surface, and the gateway provider.
 - **A keyring is required.** Without an unlocked keyring, the app sits on its splash screen behind a keyring password prompt (`gcr-prompter`). An empty-password login keyring created before launch avoids it.
 - **A fresh profile shows a model announcement** ("Introducing …", **Continue with current model**) after the first-run screens. The Linux driver doesn't handle it yet.
-- **No VM.** Unlike Cowork, ChatGPT needs no KVM or vsock devices.
+- **No VM.** Unlike Claude Desktop, ChatGPT needs no KVM or vsock devices.
 
 ## Design
 
@@ -46,7 +46,7 @@ command = "/opt/mst/bin/inference-token"   # prints the token MST delivered
 refresh_interval_ms = 60000
 ```
 
-- **The token never enters the config or the environment.** `mst run` resolves it on the host (`MST_LLM_AUTH_COMMAND`, then `OPENAI_API_KEY`) and writes it into the container's tmpfs over `docker exec` stdin. It refreshes the file every 4 minutes, as for Cowork. The token command only reads that file.
+- **The token never enters the config or the environment.** `mst run` resolves it on the host (`MST_LLM_AUTH_COMMAND`, then `OPENAI_API_KEY`) and writes it into the container's tmpfs over `docker exec` stdin. It refreshes the file every 4 minutes, as for the `cowork` client. The token command only reads that file.
 - **Readiness replaces login.** Instead of `codex login status`, MST checks the gateway before the app starts: `GET <base>/models` with the token, and fails with `inference_unavailable` if that fails. MST's shared readiness check, which runs before the batch for every client, replaced the direct Linux MCP preflight. The app-server probe stays.
 - **API-key mode stays** for runs without a gateway: `MST_CHATGPT_API_KEY_FILE`, as today.
 - **The run records the mode** in `nativeReadiness` (`inference: gateway | api-key`), with no URL or token.
@@ -59,20 +59,20 @@ refresh_interval_ms = 60000
 
 ### 3. The image: `docker/chatgpt-linux`
 
-Built by `mst runner setup docker` when the eval's client is `chatgpt`, next to the Cowork image and sharing its layout (`/opt/mst/bin`, `/opt/mst/plugins`, the `mst` user):
+Built by `mst runner setup docker` when the eval's client is `chatgpt`, next to the Claude Desktop image and sharing its layout (`/opt/mst/bin`, `/opt/mst/plugins`, the `mst` user):
 
-- **Base:** `node:22-trixie-slim`, like the Cowork image.
+- **Base:** `node:22-trixie-slim`, like the Claude Desktop image.
 - **ChatGPT:** the `chatgpt` package for the build's architecture, from OpenAI's apt repository. The build reads `Filename` and `SHA256` from the repository's `Packages` index and checks the download against them. `--runner-option chatgptVersion=<version>` pins a version; the default is the newest. The repository's `.list` entry is removed, so nothing updates the app inside a container.
 - **Desktop:** `xvfb`, `dbus`, `at-spi2-core`, `python3-gi`, `gir1.2-atspi-2.0`, `gnome-keyring`, `libsecret-1-0`.
 - **Session script:** as the desktop user, start Xvfb, the session bus and AT-SPI, and unlock an empty-password login keyring. Then write `ready`. The app isn't started here: the Linux client starts it per session with its own fresh `HOME`.
 - **Fixed addresses**, so `docker exec` workers get them from the image's `ENV`: `DBUS_SESSION_BUS_ADDRESS`, `GNOME_KEYRING_CONTROL` (`--control-directory`), and `AT_SPI_BUS_ADDRESS` (read once, with `org.a11y.Bus.GetAddress`, into a file the worker's wrapper exports).
-- **MST and plugins:** installed as in the Cowork image, at the version the run uses.
+- **MST and plugins:** installed as in the Claude Desktop image, at the version the run uses.
 
 ### 4. The runner: one `docker`, two images
 
 `docker` stays one runner. It picks a profile from the eval's `client`:
 
-|                            | Cowork                             | ChatGPT                                |
+|                            | Claude Desktop                     | ChatGPT                                |
 | -------------------------- | ---------------------------------- | -------------------------------------- |
 | Image                      | `mst-cowork-linux:<version>`       | `mst-chatgpt-linux:<version>`          |
 | Devices, seccomp           | KVM, vsock, net; MST's profile     | none; Docker's default profile         |
@@ -100,7 +100,7 @@ A Docker run differs from a Mac run in more than the machine: the app is signed 
 
 ## Open questions
 
-1. **Package trust.** The `Packages` index and the download are both fetched over HTTPS from OpenAI. The repository's `InRelease` is signed, but OpenAI publishes the key only inside the package. Is the HTTPS-plus-checksum chain enough, as it is for the Cowork image's `key.asc`?
+1. **Package trust.** The `Packages` index and the download are both fetched over HTTPS from OpenAI. The repository's `InRelease` is signed, but OpenAI publishes the key only inside the package. Is the HTTPS-plus-checksum chain enough, as it is for the Claude Desktop image's `key.asc`?
 2. **First-run state.** Can a pre-written app state skip the first-run screens and the announcement entirely, instead of the driver clicking through them?
 3. **Gateway model names.** The gateway accepted `gpt-6-luna`. Do all evaluated models have the same IDs on the gateway and in the app?
 4. **Memory per container,** to set a sensible default for `shards`.

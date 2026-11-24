@@ -37,6 +37,8 @@ const TRANSPORT_ERRORS = new Set([
   'accessibility_node_defunct',
   'accessibility_tree_invalid',
   'accessibility_unknown_node',
+  'accessibility_text_unavailable',
+  'invalid_prompt',
   'open_cowork_failed',
 ]);
 const PERSISTENT = [
@@ -60,6 +62,28 @@ const UNSAFE_QUESTION = [
   'Cancel',
   'Stop',
 ];
+/**
+ * The composer's own controls show beside every open question. Answering
+ * never activates them, so the window-wide denylist scan passes over them;
+ * a question option with one of these labels is still refused.
+ */
+const COMPOSER_CONTROLS = new Set(['send message', 'stop response']);
+/**
+ * Claude Desktop's update notice ("Update available v5.11492.5"). It is app
+ * chrome, never an approval card, whose write action is named `Update` alone.
+ */
+const UPDATE_NOTICE = /^Update available(?: v?[0-9][0-9.]*)?$/i;
+/**
+ * The app's sidebar lists past tasks by title ("Update the roadmap") and app
+ * notices: none is an approval for the open question, so the denylist scan
+ * passes over it. Approval cards render in the task's own pane.
+ */
+const SIDEBAR = /^Sidebar$/i;
+const SIDEBAR_ROLES = ['landmark', 'panel', 'navigation'];
+/** Skip presses per stop: one per question page, bounded. */
+const MAX_SKIPS = 6;
+/** Time for a skipped page to leave the screen before Skip is pressed again. */
+const SKIP_SETTLE_MS = 1_500;
 const TEXT_ROLES = ['static', 'text', 'label', 'paragraph', 'heading'];
 const OPTION_ROLES = [
   'radio button',
@@ -81,6 +105,24 @@ function normalized(text: string): string {
 
 function label(node: LinuxUiNode): string {
   return node.name.replace(/ [0-9]$/, '');
+}
+
+/**
+ * The names an option can be matched by. Cowork shows a keyboard shortcut
+ * digit before the label ("1 Current state") or after it ("Brief 1"); a
+ * label that itself starts or ends with a number still matches as written.
+ */
+function optionNames(node: LinuxUiNode): string[] {
+  const name = normalized(node.name);
+  const trailing = name.replace(/ [0-9]$/, '');
+  return [
+    ...new Set([
+      name,
+      trailing,
+      name.replace(/^[0-9] /, ''),
+      trailing.replace(/^[0-9] /, ''),
+    ]),
+  ];
 }
 
 function controls(
@@ -279,6 +321,41 @@ class FirstPartyDriver {
     return this.receipt('ready');
   }
 
+  /**
+   * Stops the task on screen, the failed case's own. Stop is hidden while
+   * the task waits on a question, so an open question is skipped first.
+   * Never types, submits, answers or opens another task. Ready once neither
+   * Stop nor Skip shows; the caller still proves the task's terminal result.
+   */
+  async stop(): Promise<LinuxDriverReceipt> {
+    // A pending question holds the task: Stop's interrupt is not processed
+    // until it is answered or skipped. Skip each page first, then Stop once.
+    let skips = 0;
+    let lastSkip = 0;
+    let stopped = false;
+    return this.poll(25_000, 'task_not_stopped', async (nodes) => {
+      const skip = controls(nodes, ['Skip']);
+      if (skip.length > 1) throw new DriverFailure('skip_control_ambiguous');
+      if (skip.length === 1) {
+        if (skips >= MAX_SKIPS || Date.now() - lastSkip < SKIP_SETTLE_MS)
+          return null;
+        await this.action(() => this.ui.activate(skip[0]!));
+        skips++;
+        lastSkip = Date.now();
+        return null;
+      }
+      const stops = controls(nodes, ['Stop response', 'Stop task']);
+      if (stops.length > 1) throw new DriverFailure('stop_control_ambiguous');
+      if (stops.length === 1) {
+        if (stopped) return null;
+        await this.action(() => this.ui.activate(stops[0]!));
+        stopped = true;
+        return null;
+      }
+      return this.receipt('ready');
+    });
+  }
+
   async selectModel(target: string, current: Surface): Promise<void> {
     if (current.model === target) return;
     await this.action(() => this.ui.activate(current.header));
@@ -429,7 +506,26 @@ class FirstPartyDriver {
     if (!validQuestions(questions))
       throw new DriverFailure('invalid_questions');
     const nodes = await this.bounded(() => this.ui.snapshot());
-    if (controls(nodes, unsafeQuestionAction, OPTION_ROLES).length)
+    const byId = new Map(nodes.map((item) => [item.id, item]));
+    const sidebars = nodes
+      .filter(
+        (item) =>
+          SIDEBAR_ROLES.includes(item.role) &&
+          SIDEBAR.test(normalized(item.name))
+      )
+      .map((item) => item.id);
+    if (
+      controls(
+        nodes,
+        (name) =>
+          !COMPOSER_CONTROLS.has(normalized(name).toLowerCase()) &&
+          !UPDATE_NOTICE.test(normalized(name)) &&
+          unsafeQuestionAction(name),
+        OPTION_ROLES
+      ).filter(
+        (item) => !sidebars.some((id) => withinContainer(byId, item, id))
+      ).length
+    )
       throw new DriverFailure('account_question_action_conflict');
     // Page totals are literal text, not keyboard shortcut suffixes.
     const markers = controls(nodes, () => true, TEXT_ROLES, false).filter(
@@ -448,6 +544,18 @@ class FirstPartyDriver {
         Number(match[1]) <= questions.length
           ? Number(match[1]) - 1
           : undefined;
+    } else if (questions.length > 1) {
+      // No page marker: the page is the one question whose first option is
+      // the only match on screen and whose other options show beside it.
+      const shown = questions.flatMap((question, index) => {
+        const values = question.labels.map(normalized);
+        return values.every(
+          (value) => questionOptions(nodes, values, value).length === 1
+        )
+          ? [index]
+          : [];
+      });
+      if (shown.length === 1) page = shown[0];
     }
     const idle = this.receipt('hitl_checked');
     if (page === undefined) return idle;
@@ -461,7 +569,6 @@ class FirstPartyDriver {
     let target = matches[0]!;
     // Apply scope proof to selection as well as advancement: a unique exact
     // label elsewhere in the app is not evidence of a question option.
-    const byId = new Map(nodes.map((item) => [item.id, item]));
     const scope =
       target.parentId === undefined
         ? undefined
@@ -548,23 +655,20 @@ function questionOptions(
   wanted: string
 ): LinuxUiNode[] {
   const options = controls(nodes, () => true, OPTION_ROLES);
-  const exact = options.filter(
-    (item) =>
-      normalized(label(item)) === wanted || normalized(item.name) === wanted
-  );
+  const exact = options.filter((item) => optionNames(item).includes(wanted));
   if (exact.length) return exact;
   const starts = (name: string, value: string) =>
     name === value || name.startsWith(`${value} `);
-  return options.filter((item) => {
-    const name = normalized(label(item));
-    return (
-      starts(name, wanted) &&
-      !NOT_OPTION.test(name) &&
-      !labels.some(
-        (other) => other.length > wanted.length && starts(name, other)
-      )
-    );
-  });
+  return options.filter((item) =>
+    optionNames(item).some(
+      (name) =>
+        starts(name, wanted) &&
+        !NOT_OPTION.test(name) &&
+        !labels.some(
+          (other) => other.length > wanted.length && starts(name, other)
+        )
+    )
+  );
 }
 
 function withinContainer(
@@ -653,6 +757,8 @@ export async function runFirstPartyLinux(
         return await driver.hitl(payload.approveWrites === true);
       case 'answer':
         return await driver.answer(payload.questions);
+      case 'stop':
+        return await driver.stop();
       case 'diagnose':
         return await driver.diagnose(payload.dir);
       default:

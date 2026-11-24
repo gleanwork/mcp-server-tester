@@ -271,12 +271,12 @@ the app starts for an HTTP server with `headers` or with OAuth. For a server
 that needs a header, such as an eval ID, use a connector, whose dry-run proxy
 adds the connector's headers, or another stdio proxy.
 
-ChatGPT rejects two Cowork-only forms before the app starts:
+ChatGPT rejects two forms that only the `cowork` client takes, before the app starts:
 client-resolved stdio entries (`url`, `auth`, `files`, or
 `${url}`/`${dataDir}`/`${pluginRoot:...}` placeholders) and
 `plugins[].blockMcpServers`. For plugin-specific endpoint and credential
 overrides, use the Linux `plugins[].mcp` setup above. See
-[cowork.md](cowork.md#stdio-eval-servers) for Cowork's macOS/Linux contract.
+[cowork.md](cowork.md#stdio-eval-servers) for the `cowork` client's macOS/Linux contract.
 
 Execution policy: on Linux, MST writes `approval_policy = "never"` and
 `sandbox_mode = "danger-full-access"`. Native command execution needs

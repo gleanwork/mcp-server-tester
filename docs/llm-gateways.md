@@ -59,17 +59,17 @@ A case's `clientOptions.env` takes part in this too, so a dataset can set `MST_L
 
 ## What reads these settings
 
-| Consumer                                     | Anthropic | OpenAI | Notes                                                                                                  |
-| -------------------------------------------- | --------- | ------ | ------------------------------------------------------------------------------------------------------ |
-| `api` client, `provider: 'anthropic'`        | Yes       |        | Streams its responses (see below).                                                                     |
-| `api` client, `provider: 'openai'`           |           | Yes    | Uses the Responses API; sends `store: false` behind a base URL override (see below).                   |
-| `anthropic` judge                            | Yes       |        |                                                                                                        |
-| `openai` judge                               |           | Yes    | Uses non-streaming Chat Completions, which some gateways don't serve. Use the `anthropic` judge there. |
-| Computer Use planner (Cowork, ChatGPT macOS) | Yes       |        | The gateway must accept the Computer Use beta tool.                                                    |
+| Consumer                                             | Anthropic | OpenAI | Notes                                                                                                  |
+| ---------------------------------------------------- | --------- | ------ | ------------------------------------------------------------------------------------------------------ |
+| `api` client, `provider: 'anthropic'`                | Yes       |        | Streams its responses (see below).                                                                     |
+| `api` client, `provider: 'openai'`                   |           | Yes    | Uses the Responses API; sends `store: false` behind a base URL override (see below).                   |
+| `anthropic` judge                                    | Yes       |        |                                                                                                        |
+| `openai` judge                                       |           | Yes    | Uses non-streaming Chat Completions, which some gateways don't serve. Use the `anthropic` judge there. |
+| Computer Use planner (Claude Desktop, ChatGPT macOS) | Yes       |        | The gateway must accept the Computer Use beta tool.                                                    |
 
 The Computer Use planner gets one credential for exactly one endpoint: MST resolves both with the rules above, and the driver ignores `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from its own environment.
 
-Cowork's own inference is configured in Claude Desktop, not by these settings. MST stages `ANTHROPIC_API_KEY` for it, unless managed preferences already set the inference provider (for example, a gateway); see [Cowork inference](./cowork.md#inference).
+Claude Desktop's own inference is configured in the app, not by these settings. MST stages `ANTHROPIC_API_KEY` for it, unless managed preferences already set the inference provider (for example, a gateway); see [Inference](./cowork.md#inference).
 
 The `anthropic-agent-sdk` judge and CLI clients run their own processes, which read their own configuration.
 

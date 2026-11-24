@@ -106,7 +106,7 @@ npx mst grade 7f3c2a.g2 --config eval.json --resume              # run only the 
 
 ## Step 6: Run somewhere else
 
-- **Docker.** `--runner docker` runs trials in containers from MST's Linux images: the ChatGPT image for `chatgpt` and `codex-app`, else the Cowork image. Build the image once with `mst runner setup docker --config eval.json`. `--runner-option shards=4` splits cases over four containers. Each Docker context runs one Cowork container at a time, so four `cowork` shards run side by side only with four contexts (`--runner-option contexts=a,b,c,d`).
+- **Docker.** `--runner docker` runs trials in containers from MST's Linux images: the ChatGPT image for `chatgpt` and `codex-app`, else the Claude Desktop image. Build the image once with `mst runner setup docker --config eval.json`. `--runner-option shards=4` splits cases over four containers. Each Docker context runs one Claude Desktop container at a time, so four `cowork` shards run side by side only with four contexts (`--runner-option contexts=a,b,c,d`).
 - **Detached.** `--detach` runs the coordinator on a machine a plugin runner creates, so your machine can go offline. It needs `--runner`, a result store other machines reach (`--results gs://bucket/prefix`), secrets in `--secrets-file`, and for connector servers a shared credential store (`--store`). Follow it with `mst runs list`, `mst runs watch <id>` and `mst runs logs <id>`, each with the same `--config` and `--results`. `mst runs cancel <id>` stops it and keeps what it collected.
 - **Several configs.** `mst batch --config-dir ./evals --workers 2` runs every eval config in a directory, and exits 1 when any failed. `--skip-existing` skips configs whose result store already has a completed run.
 
@@ -132,4 +132,4 @@ npx mst grade 7f3c2a.g2 --config eval.json --resume              # run only the 
 - [What a run leaves behind](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/evaluation-framework.md#what-a-run-leaves-behind): the run directory, regrades and result stores
 - [Metrics](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/evaluation-framework.md#metrics): what each metric counts, incomplete cases and how trials end
 - [Server readiness](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/evaluation-framework.md#server-readiness): the check before each batch
-- [Cowork in Docker](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/cowork-docker.md) and [ChatGPT in Docker](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/chatgpt-docker.md)
+- [Claude Desktop in Docker](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/cowork-docker.md) and [ChatGPT in Docker](https://github.com/gleanwork/mcp-server-tester/blob/main/docs/chatgpt-docker.md)

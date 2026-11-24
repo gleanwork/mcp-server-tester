@@ -23,7 +23,7 @@ const features: Feature[] = [
   },
   {
     title: 'Evals on real clients',
-    body: "Run the same cases on the api client, Claude Code, the Codex CLI, Cowork, ChatGPT and the Codex app. Each trial's transcript records what the client did: its tool calls, skill loads and final answer.",
+    body: "Run the same cases on the api client, Claude Code, the Codex CLI, Claude Desktop, ChatGPT and the Codex app. Each trial's transcript records what the client did: its tool calls, skill loads and final answer.",
     to: '/docs/mst-client',
   },
   {
@@ -43,7 +43,7 @@ const features: Feature[] = [
   },
   {
     title: 'Desktop clients in Docker',
-    body: 'The docker runner collects Cowork and ChatGPT trials in disposable Linux containers, one per shard, while your machine stays usable.',
+    body: 'The docker runner collects Claude Desktop and ChatGPT trials in disposable Linux containers, one per shard, while your machine stays usable.',
     to: '/docs/cowork-docker',
   },
   {

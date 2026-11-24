@@ -1,17 +1,17 @@
-# Comparing tool descriptions in Cowork
+# Comparing tool descriptions in Claude Desktop
 
 > **Design proposal.** This is how we intend evals to be run. Some of these commands and config keys don't exist yet; each is marked planned where it appears. The [explainer](./explainer.md) covers the design, the run lifecycle, and what exists today versus what's planned.
 
 This walkthrough runs one eval end to end. It uses a fictional company, Acme, whose private plugin `@acme/mst-plugin` provides datasets, judges, a VM runner and a result store.
 
-**Goal:** find out whether rewritten tool descriptions for Acme's own MCP server make Cowork pick the right tools and answer Acme's info-seeking questions better. Every variant uses the same servers (Acme's, Slack's and GitHub's) and the same model; only the descriptions change.
+**Goal:** find out whether rewritten tool descriptions for Acme's own MCP server make Claude Desktop pick the right tools and answer Acme's info-seeking questions better. Every variant uses the same servers (Acme's, Slack's and GitHub's) and the same model; only the descriptions change.
 
 ## Prerequisites
 
 - Node.js 22+
 - Access to your organization's MST plugin package (here `@acme/mst-plugin`)
 - Cloud credentials for the plugin's result store and credential store (only for remote runs, CI, or remote results)
-- For local Cowork runs: Claude Desktop on your Mac
+- For local runs: Claude Desktop on your Mac
 - For container runs: Docker (or OrbStack), and Claude Desktop's Linux package or a desktop image your organization publishes
 
 ## 1. Install
@@ -23,10 +23,10 @@ mkdir cowork-evals && cd cowork-evals
 npm init -y
 npm i -D @gleanwork/mcp-server-tester@rc @acme/mst-plugin
 
-# Once, on a Mac that will run Cowork locally
+# Once, on a Mac that will run Claude Desktop locally
 npx mst cowork setup
 
-# Once, to run Cowork in containers (section 6)
+# Once, to run Claude Desktop in containers (section 6)
 npx mst runner setup docker
 # → built mst-cowork-linux:2.0.0-beta.9
 ```
@@ -144,7 +144,7 @@ Each case has an `input`, an `expected` answer, tags, and optional default judge
 }
 ```
 
-- **`servers`** defines each server once. The key is its label in transcripts and the report. Each one names a plugin connector, which says where the server is, how to sign in, and how Cowork reaches it (here, through a dry-run proxy). A server can also be a plain `http` or `stdio` entry with a literal or environment-backed token; `mst auth` signs in only to connector servers.
+- **`servers`** defines each server once. The key is its label in transcripts and the report. Each one names a plugin connector, which says where the server is, how to sign in, and how Claude Desktop reaches it (here, through a dry-run proxy). A server can also be a plain `http` or `stdio` entry with a literal or environment-backed token; `mst auth` signs in only to connector servers.
 - **`variants`** run the same cases with the same client, model and servers, and only the tool descriptions differ. A variant that lists no `servers` uses all of them. `current` shows the servers' own descriptions. `rewritten` and `rewritten-terse` set **tool metadata** (`tools`) for Acme's two tools, keyed `server.tool`; calls are still recorded under the tools' original names, so assertions read the same in every variant. The first variant is the baseline; set `"baseline"` to choose another.
 - **`datasets`** use the snapshot by default. To pin a snapshot: `{ "type": "acme/dataset/info-seeking", "snapshot": "2026-10-01" }`. For live data: `{ "type": "…", "source": "live" }`. `run.json` records which copy each dataset came from.
 - **`redactStoredResponses: false`** keeps full transcripts in the run. Stored transcripts are redacted by default, and a redacted run can't be collected with `--no-grade`, regraded (section 8) or resumed (section 7). A plugin's shared config can set it for every eval that extends the config.
@@ -222,7 +222,7 @@ The client runs the trials first. Judges then grade the collected transcripts.
 
 ## 6. Run in containers
 
-> **Built, with limits.** See [Cowork in Docker](../cowork-docker.md). Each Docker host runs one Cowork container at a time, so 4 shards need 4 Docker contexts (`--runner-option contexts=a,b,c,d`); on one host they run one after another. The progress display below, and `mst runs view`, are planned.
+> **Built, with limits.** See [Claude Desktop in Docker](../cowork-docker.md). Each Docker host runs one Claude Desktop container at a time, so 4 shards need 4 Docker contexts (`--runner-option contexts=a,b,c,d`); on one host they run one after another. The progress display below, and `mst runs view`, are planned.
 
 Run the same config in 4 Linux containers on your machine:
 
@@ -240,7 +240,7 @@ teardown  tokens removed · 4 containers deleted
 grade     …
 ```
 
-Cowork runs in the containers, so you can keep using your Mac. Each container is a fresh desktop: it has nothing from your own Claude Desktop, and leaves nothing behind. A case's variants and trials all run in one container, so each comparison is made on one desktop, minutes apart.
+Claude Desktop runs in the containers, so you can keep using your Mac. Each container is a fresh desktop: it has nothing from your own Claude Desktop, and leaves nothing behind. A case's variants and trials all run in one container, so each comparison is made on one desktop, minutes apart.
 
 To use an image your organization publishes instead of building one, add `--runner-option image=registry.acme.example/mst-desktop@sha256:…`.
 
@@ -305,7 +305,7 @@ jobs:
 
 ## 8. Regrade without re-running
 
-Judges read stored transcripts, so you can change or add judges and regrade without running Cowork again. This needs the run stored with `"redactStoredResponses": false`, as the config in section 3 sets:
+Judges read stored transcripts, so you can change or add judges and regrade without running Claude Desktop again. This needs the run stored with `"redactStoredResponses": false`, as the config in section 3 sets:
 
 ```bash
 npx mst run --config evals/cowork-tool-descriptions.json --runner acme/runner/cloud-vm --no-grade

@@ -1,4 +1,42 @@
 
+
+
+
+## v2.0.0-rc.4 (2026-11-20)
+
+#### :rocket: Enhancement
+* [#614](https://github.com/gleanwork/mcp-server-tester/pull/614) feat(cowork): send macOS Claude Desktop inference to an LLM gateway ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :bug: Bug Fix
+* [#615](https://github.com/gleanwork/mcp-server-tester/pull/615) fix(cowork): answer 1P questions beside the sidebar and update notice; fail fast and settle in time ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### Committers: 1
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+## v2.0.0-rc.3 (2026-11-19)
+
+#### :bug: Bug Fix
+* [#611](https://github.com/gleanwork/mcp-server-tester/pull/611) fix(cowork): keep one stuck first-party task from failing the batch, later arms and recovery ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### Committers: 1
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+## v2.0.0-rc.2 (2026-11-18)
+
+#### :bug: Bug Fix
+* [#608](https://github.com/gleanwork/mcp-server-tester/pull/608) fix(cowork): make first-party Linux runs survive connector drift, URL prompts and re-renders ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+
+#### :memo: Documentation
+* [#606](https://github.com/gleanwork/mcp-server-tester/pull/606) docs: say Claude Desktop for the app the cowork client drives ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### :house: Internal
+* [#604](https://github.com/gleanwork/mcp-server-tester/pull/604) ci(website): pin the Vercel CLI as a site devDependency ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+* [#603](https://github.com/gleanwork/mcp-server-tester/pull/603) ci(website): put the globally installed Vercel CLI on PATH ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
+#### Committers: 2
+- Chenhao Yang ([@chenhao-yang-glean](https://github.com/chenhao-yang-glean))
+- Steve Calvert ([@steve-calvert-glean](https://github.com/steve-calvert-glean))
+
 ## v2.0.0-rc.1 (2026-11-16)
 
 #### :boom: Breaking Change

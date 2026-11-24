@@ -8,7 +8,7 @@
 
 An author runs `mst auth` once. After that, every local `mst run` on any client reaches every server in every variant with a fresh token. The author doesn't edit `.env` or copy tokens, and no secret ever goes into a config or a result.
 
-The connector contract is done when the walkthrough's three variants (`current`, `rewritten`, `rewritten-terse`) authenticate and run one case each in local Cowork on macOS.
+The connector contract is done when the walkthrough's three variants (`current`, `rewritten`, `rewritten-terse`) authenticate and run one case each in local Claude Desktop on macOS.
 
 ## Who owns what
 
@@ -38,6 +38,9 @@ interface ConnectorDefinition {
   grant?: string;
 
   auth: ConnectorAuth;
+
+  /** Sent on the direct connection and the sign-in check. A `launch` sends its own. */
+  headers?: Record<string, string>;
 
   /** How the client reaches the server. Default: the client connects to `url` directly with a bearer token. */
   launch?(ctx: LaunchContext): MCPServerEntry | Promise<MCPServerEntry>;
@@ -88,7 +91,7 @@ The rules:
 
 - **Secrets stay in the plugin.** `client()` and `token()` run at call time. For example, a plugin can read a client secret from a cloud secret manager. MST never stores client secrets.
 - **Shared grants.** `mst auth` asks for consent once for each `grant`, using the union of every member's scopes. Gmail, Drive and Calendar can share one Google grant.
-- **`launch` is optional.** Without it, MST passes the client `url` and the current access token. With it, the plugin returns a server entry, for example a stdio proxy that reads `tokenFile`. This is where a plugin adds a dry-run proxy that blocks writes, with no MST interceptor kind needed.
+- **`launch` is optional.** Without it, MST passes the client `url`, `headers`, and the current access token. With it, the plugin returns a server entry, for example a stdio proxy that reads `tokenFile`, and that entry sends its own headers. This is where a plugin adds a dry-run proxy that blocks writes, with no MST interceptor kind needed.
 - **`runId` tags a run's requests.** `mst run` and each shard it starts launch connectors with the run's ID, so a connector can send it to a server that attributes eval traffic (for example, as a request header through `dryRunProxyServer`'s `headers`).
 - **Tool policy belongs to the connector.** MST doesn't know which tools are writes. A connector that wants writes blocked must launch a proxy that blocks them.
 
@@ -123,6 +126,8 @@ mst auth revoke --config <file> --server <label> [--store <ref>]
 | --------------------------------- | ------------------------------------------------------------------------- | ------------------------------ |
 | Valid refresh grant in store      | Nothing                                                                   | `✓ valid`                      |
 | Valid, shared with another server | Nothing                                                                   | `✓ valid (shares gmail grant)` |
+| Server rejects the token          | Sign in again                                                             | `! signing in again`           |
+| Check fails for another reason    | Keep the grant and exit 1                                                 | `! keeping the saved grant`    |
 | Missing, expired or `--force`     | `authorization-code`: open the browser. `device`: print the code and URL. | `→ opening browser… ✓ saved`   |
 | `client-credentials`              | Mint one token to prove the client works                                  | `✓ client credentials`         |
 | `static` / `none`                 | Call `token()` once / nothing                                             | `✓ static` / `– no auth`       |
@@ -145,7 +150,7 @@ preflight ─► stage ─► collect (renew as needed) ─► teardown
 3. **Renew**: for each token file whose token expires before the run can end, MST refreshes it `renewBefore` ahead of expiry (default 20 minutes) and atomically rewrites it. The proxy reads the new token on its next request; MCP sessions don't restart. A direct HTTP connection can't be renewed mid-run: use `launch` for servers whose tokens are short-lived. If renewal keeps failing and the token expires, the proxy logs `CONNECTOR_AUTH_EXPIRED` and the affected calls fail.
 4. **Teardown**, also on failure: the run removes the token directory when it stops. On Ctrl-C, SIGTERM, SIGHUP or exit without stopping, a process-wide guard removes it synchronously, then lets the signal stop the process as before. A run killed outright (SIGKILL, a crash) can't clean up: each directory records its owner's pid, and the next run removes directories whose owner is gone. Refresh grants stay in the store.
 
-Staging happens before any client starts and is the same for every client: expanded connector servers are plain `stdio` or `http` entries, so Cowork, Claude Code and the `api` client need no changes.
+Staging happens before any client starts and is the same for every client: expanded connector servers are plain `stdio` or `http` entries, so Claude Desktop, Claude Code and the `api` client need no changes.
 
 ## The credential store
 
@@ -186,9 +191,9 @@ MST ships a local credential store (`src/auth/grants/localStore.ts`), the defaul
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Unit (MST)     | A fake authorization server covering authorization code with PKCE, DCR, device flow, client credentials, rotating refresh, revocation and under-scoped grants. Also: grant grouping and scope union, a lock that allows one redemption under concurrency, renewal rewriting `tokenFile`, expiry becoming an infrastructure error, and the preflight message. |
 | Contract (MST) | A fixture plugin with connectors and a fake vendor MCP server. `mst auth`, `status`, `revoke`, then `mst run` on the `api` client: the token reaches the server and renews. A scan of the run directory and the logs finds no token.                                                                                                                         |
-| Cowork (MST)   | Platform doubles: token files staged in the transaction, removed on success, on failure and on cancel.                                                                                                                                                                                                                                                       |
+| `cowork` (MST) | Platform doubles: token files staged in the transaction, removed on success, on failure and on cancel.                                                                                                                                                                                                                                                       |
 | Plugin (acme)  | Connectors for two servers behind the dry-run proxy and one direct HTTP server. `launch` returns the dry-run proxy. Writes are blocked: zero write calls reach a fake vendor.                                                                                                                                                                                |
-| Live (manual)  | `mst auth` against all 3 servers. Then 1 case × 3 variants in local Cowork. Then one run longer than an hour, to show token renewal.                                                                                                                                                                                                                         |
+| Live (manual)  | `mst auth` against all 3 servers. Then 1 case × 3 variants in local Claude Desktop. Then one run longer than an hour, to show token renewal.                                                                                                                                                                                                                 |
 
 ## Out of scope
 

@@ -29,27 +29,27 @@ Plain stdio is supported by these built-in evaluation client families:
 
 - Claude CLI (`claude-code`) and Vercel AI SDK (`api`).
 - The ChatGPT desktop app's ChatGPT Work and Codex surfaces: the `chatgpt` and `codex-app` clients.
-- Cowork (`cowork`) on macOS and Linux. The package exports
+- Claude Desktop (`cowork`) on macOS and Linux. The package exports
   `COWORK_STDIO_PLATFORMS` as `['darwin', 'linux']`.
 
 Plain stdio uses `command`, optional `args`, `cwd`, and declared `env`; it does
-not require a URL or plugin. Cowork also supports private file-backed native
+not require a URL or plugin. The `cowork` client also supports private file-backed native
 proxies and mixed HTTP/stdio sets. Its client-resolved fields (`url`, `auth`,
 `files`, `minTools`, and placeholders) are not portable to ChatGPT or direct
 MCP clients. ChatGPT plugin-specific overrides use `plugins[].mcp` instead.
 
 Over HTTP, `chatgpt` and `codex-app` take a bearer token only: an HTTP server
 with `headers` or OAuth fails before the app starts
-([ChatGPT guide](./chatgpt-desktop.md)). Cowork takes `headers` and a bearer
+([ChatGPT guide](./chatgpt-desktop.md)). The `cowork` client takes `headers` and a bearer
 token.
 
-Cowork rejects `inheritEnv: true`; declare the server environment explicitly.
+The `cowork` client rejects `inheritEnv: true`; declare the server environment explicitly.
 It implements `cwd` with a fixed argv wrapper, not shell-interpolated values.
 Mac setup owns the private files and runtime paths; Linux setup checks
 caller-staged paths. On Mac, only `${pluginRoot:...}` resolution is unavailable
 because marketplace installation paths are unknown before startup; native
 proxies with known local paths remain supported. See the
-[Cowork contract](./cowork.md#stdio-eval-servers) and
+[`cowork` client contract](./cowork.md#stdio-eval-servers) and
 [ChatGPT guide](./chatgpt-desktop.md).
 
 Transport support does not enforce read-only tools. The caller's proxy policy

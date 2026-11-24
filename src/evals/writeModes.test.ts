@@ -231,6 +231,56 @@ describe('assertWriteModes', () => {
     ).rejects.toThrow(/different replies to a write/);
   });
 
+  it('allows mixed stopped modes only with the opt-in', async () => {
+    const variants: WriteModeCheck['variants'] = [
+      {
+        variant: 'a',
+        modes: { notes: 'planned' as const },
+        servers: [server('notes')],
+      },
+      {
+        variant: 'b',
+        modes: { glean: 'server-planned' as const },
+        servers: [server('glean')],
+      },
+    ];
+    await expect(assertWriteModes(check({}, { variants }))).rejects.toThrow(
+      /different replies to a write/
+    );
+    await expect(
+      assertWriteModes(check({}, { variants, allowMixedWriteModes: true }))
+    ).resolves.toBeUndefined();
+  });
+
+  it.each(['live', 'unguarded'] as const)(
+    'does not allow %s servers in an opted-in mixed comparison',
+    async (mode) => {
+      await expect(
+        assertWriteModes(
+          check(
+            {},
+            {
+              allowLiveWrites: true,
+              allowMixedWriteModes: true,
+              variants: [
+                {
+                  variant: 'a',
+                  modes: { notes: 'planned', other: mode },
+                  servers: [server('notes'), server('other')],
+                },
+                {
+                  variant: 'b',
+                  modes: { glean: 'server-planned' },
+                  servers: [server('glean')],
+                },
+              ],
+            }
+          )
+        )
+      ).rejects.toThrow(/cannot be compared with live or unguarded servers/);
+    }
+  );
+
   it('refuses a declaration that names no server', async () => {
     await expect(
       assertWriteModes(

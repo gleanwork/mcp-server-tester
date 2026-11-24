@@ -595,6 +595,30 @@ describe('caller-owned Linux Cowork desktop', () => {
     await expect(pending).rejects.toThrow('offers no usable options');
     expect(child.exec).not.toHaveBeenCalled();
   });
+  it('fails a clarifying question at once when the driver refuses it without acting', async () => {
+    child.responses.push({
+      value: {
+        status: 'failed',
+        action_count: 0,
+        duration_ms: 1,
+        error: 'account_question_action_conflict',
+      },
+    });
+    const pending = linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete: async () => false,
+      pendingQuestion: async () => ({
+        id: 'toolu_1',
+        questions: [{ labels: ['A', 'B'], multiSelect: false }],
+      }),
+    });
+    // Not a HITL failure that leaves the task waiting until the deadline.
+    await expect(pending).rejects.toBeInstanceOf(CoworkUserQuestionError);
+    await expect(pending).rejects.toThrow(
+      /could not be answered: .*account_question_action_conflict/
+    );
+    expect(child.exec).toHaveBeenCalledTimes(1);
+  });
   it("fails a clarifying question whose form doesn't take its first option in time", async () => {
     let now = Date.now();
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);

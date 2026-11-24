@@ -29,7 +29,7 @@ function recordsWrites(mode: WriteMode | undefined): boolean {
   );
 }
 
-function isStoppedMode(mode: WriteMode): mode is StoppedWriteMode {
+export function isStoppedMode(mode: WriteMode): mode is StoppedWriteMode {
   return recordsWrites(mode);
 }
 
@@ -123,6 +123,7 @@ export interface WriteModeCheck {
   >;
   /** `--allow-live-writes`. */
   allowLiveWrites: boolean;
+  allowMixedWriteModes?: boolean;
   /** The cases that list writes in `expected.writes`, with the servers they name. */
   writeCases: ReadonlyArray<{ id: string; servers: readonly string[] }>;
   /** The eval config's `writes`, to check it names real servers. */
@@ -206,12 +207,23 @@ export async function assertWriteModes(check: WriteModeCheck): Promise<void> {
             ...(byMode.get(mode) ?? []),
             `${label} (${variant})`,
           ]);
-    if (byMode.size > 1)
-      throw new Error(
-        `The variants compared get different replies to a write: ${[...byMode]
-          .map(([mode, servers]) => `${mode} on ${servers.join(', ')}`)
-          .join('; ')}. Give every server the same write mode (ADR 0014).`
+    if (byMode.size > 1) {
+      const unsafe = check.variants.flatMap(({ variant, modes }) =>
+        Object.entries(modes)
+          .filter(([, mode]) => mode === 'live' || mode === 'unguarded')
+          .map(([label, mode]) => `${label} (${variant}): ${mode}`)
       );
+      if (!check.allowMixedWriteModes || unsafe.length > 0)
+        throw new Error(
+          `The variants compared get different replies to a write: ${[...byMode]
+            .map(([mode, servers]) => `${mode} on ${servers.join(', ')}`)
+            .join('; ')}. ${
+            unsafe.length > 0 && check.allowMixedWriteModes
+              ? `Mixed write modes cannot be compared with live or unguarded servers: ${unsafe.join(', ')}.`
+              : 'Give every server the same write mode, or opt in to mixed stopped-write modes (ADR 0014).'
+          }`
+        );
+    }
   }
 
   // Each read-only server once, however many variants use it. One this

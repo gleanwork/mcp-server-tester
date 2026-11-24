@@ -70,6 +70,13 @@ export interface CoworkDesktop {
     options: CoworkDriverOptions & { restartApp?: () => Promise<void> }
   ): Promise<void>;
   /**
+   * Stops the task the app shows, the failed case's own: skips a question it
+   * waits on, then presses Stop. Never types, submits or answers. Account
+   * mode uses it when that task has no terminal result, so its connector
+   * settings can be restored and the next case submitted. Optional.
+   */
+  stopTask?(options: CoworkDriverOptions): Promise<void>;
+  /**
    * After a failed case, before any reset: write what the app shows and its
    * own logs into `dir`, a directory the case's result keeps as artifacts.
    * Read-only and bounded; never acts on the app. Optional.

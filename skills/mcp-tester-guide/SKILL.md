@@ -63,7 +63,7 @@ MST uses these terms in its API, config keys, CLI and reports. Use them, and not
 | `@gleanwork/mcp-server-tester/fixtures/mcpAuth`      | The `mcpAuthProvider` fixture, for building your own authenticated client                                                             |
 | `@gleanwork/mcp-server-tester/reporters/mcpReporter` | The Playwright reporter: eval results as a run that `mst open` opens                                                                  |
 | `@gleanwork/mcp-server-tester/auth`                  | Low-level OAuth: discovery, token storage, client credentials                                                                         |
-| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop client types and Cowork helpers; may change between minor versions                                                            |
+| `@gleanwork/mcp-server-tester/experimental/clients`  | Desktop client types and `cowork` client helpers; may change between minor versions                                                   |
 
 The subpaths are ESM only. MCP SDK types come from `@modelcontextprotocol/client` (SDK v2), not `@modelcontextprotocol/sdk`.
 
@@ -86,7 +86,7 @@ A Playwright project's `use.mcpConfig`, an eval config's `servers` entries, and 
 | --------------------------- | -------------------------------------------------------------------- | ------------------------------------- |
 | `api`                       | The model alone, through its provider's API, with the servers' tools | Playwright and `mst run`              |
 | `claude-code`               | Claude Code, with an empty config directory                          | `mst run`                             |
-| `cowork`                    | Claude Cowork in Claude Desktop                                      | `mst run` (macOS: `mst cowork setup`) |
+| `cowork`                    | Claude Desktop (each trial is a Cowork session)                      | `mst run` (macOS: `mst cowork setup`) |
 | `codex-cli`                 | The Codex CLI, headless                                              | `mst run`                             |
 | `chatgpt`                   | The ChatGPT desktop app                                              | `mst run`                             |
 | `codex-app`                 | The Codex surface of the ChatGPT desktop app                         | `mst run`                             |

@@ -525,7 +525,7 @@ function receipt(stdout: string): Receipt | undefined {
 type LinuxCoworkMode = 'third-party' | 'first-party';
 
 async function execute(
-  mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'answer' | 'diagnose',
+  mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'answer' | 'stop' | 'diagnose',
   payload: object,
   options: CoworkDriverOptions,
   driverMode: LinuxCoworkMode = 'third-party'
@@ -563,7 +563,10 @@ async function execute(
       ? SUBMIT_TIMEOUT_MS
       : mode === 'diagnose'
         ? 20_000
-        : 10_000
+        : mode === 'stop'
+          ? // A skipped question, then Stop and the wait for it to take.
+            30_000
+          : 10_000
   );
   // Reserve time for the bounded driver to return its final receipt.
   const driverTimeout = Math.max(
@@ -606,7 +609,7 @@ async function execute(
   );
   const record = receipt(result.stdout);
   const expected =
-    mode === 'probe' || mode === 'reset'
+    mode === 'probe' || mode === 'reset' || mode === 'stop'
       ? 'ready'
       : mode === 'submit'
         ? 'submitted'
@@ -1173,16 +1176,40 @@ async function handleLinuxHitl(
         // once a multi-select option is checked. A pass that finds no
         // unambiguous control acts on nothing and the next looks again.
         driving = true;
-        const result = await execute(
-          'answer',
-          { questions: question.questions },
-          { ...options, maxActions: Math.min(1, budget - actions) },
-          driverMode
-        );
+        let result: Receipt;
+        try {
+          result = await execute(
+            'answer',
+            { questions: question.questions },
+            { ...options, maxActions: Math.min(1, budget - actions) },
+            driverMode
+          );
+        } catch (error) {
+          // The driver refused to answer and its receipt shows it acted on
+          // nothing: the question can't be answered, and waiting for it until
+          // the deadline only holds the task. Fail now, as an unanswered
+          // question does, so the reset ends the task.
+          if (
+            error instanceof CoworkDriverError &&
+            error.telemetry?.action_count === 0
+          )
+            throw new CoworkUserQuestionError(
+              `Cowork's question (AskUserQuestion) could not be answered: ${error.message}`,
+              telemetry(started, actions, 'partial', counts)
+            );
+          throw error;
+        }
         driving = false;
         actions += result.action_count;
         if (result.answered) counts.questionsAnswered += 1;
         if (result.scanIncomplete) counts.incompleteScans += 1;
+        await delay(
+          Math.min(1_000, Math.max(0, options.deadlineAt - Date.now()))
+        );
+        continue;
+      }
+      if (options.questionsOnly) {
+        // Approvals are the policy's to reject; only questions are answered.
         await delay(
           Math.min(1_000, Math.max(0, options.deadlineAt - Date.now()))
         );
@@ -1281,6 +1308,11 @@ export const coworkLinuxFirstParty: CoworkDesktop = {
   async reset(options) {
     await checkAccountRuntime(options.env ?? process.env);
     await execute('reset', {}, { ...options, maxActions: 2 }, 'first-party');
+  },
+  async stopTask(options) {
+    await checkAccountRuntime(options.env ?? process.env);
+    // Skip on each open question page (the driver caps it at 6), then Stop.
+    await execute('stop', {}, { ...options, maxActions: 7 }, 'first-party');
   },
   async submit(query, options) {
     await checkAccountRuntime(options.env ?? process.env);
