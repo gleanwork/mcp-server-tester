@@ -57,17 +57,20 @@ async function compile(
   }
   const invoke = async (
     action: 'state' | 'stop' | 'start',
-    environment: Record<string, string> = {}
+    environment?: Record<string, string>
   ): Promise<unknown> => {
     try {
       return await helper.run([action, bundleId, appPath], {
-        // The helper launches ChatGPT from this environment, so the app sees the
-        // test process's variables. Narrowing it to an allowlist needs a check
-        // on a real Mac that ChatGPT still launches and signs in.
+        // The helper launches a batch's ChatGPT from this environment, so the
+        // app sees the test process's variables. Narrowing it to an allowlist
+        // needs a check on a real Mac that ChatGPT still launches and signs in.
         environment: 'inherit',
         timeoutMs: 45_000,
-        // Launch credentials travel over a pipe, never in process-list arguments.
-        stdin: JSON.stringify(environment),
+        // Launch credentials travel over a pipe, never in process-list
+        // arguments. A start without an environment (the user's own app,
+        // after a run) starts the app with none of the test process's
+        // variables.
+        ...(environment ? { stdin: JSON.stringify(environment) } : {}),
       });
     } catch (error) {
       throw controllerError(action, error);

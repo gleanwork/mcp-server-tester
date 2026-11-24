@@ -49,13 +49,25 @@ case "start":
     }
     let options = NSWorkspace.OpenConfiguration()
     options.activates = true
+    // The app can get this helper's own environment whether or not
+    // options.environment is set, so what it must not see is removed here.
+    // Only MST's batch selects a rollout trace root, never an operator's.
+    unsetenv("CODEX_ROLLOUT_TRACE_ROOT")
     let data = FileHandle.standardInput.readDataToEndOfFile()
-    if !data.isEmpty {
+    if data.isEmpty {
+        // The user's own app, started again after a run: as at login, with
+        // none of the test process's variables.
+        for name in ProcessInfo.processInfo.environment.keys where name != "__CF_USER_TEXT_ENCODING" {
+            unsetenv(name)
+        }
+    } else {
         guard let environment = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
             fputs("Invalid launch environment.\n", stderr); exit(1)
         }
         if !environment.isEmpty {
-            options.environment = ProcessInfo.processInfo.environment.merging(environment) { _, configured in configured }
+            var launchEnvironment = ProcessInfo.processInfo.environment
+            launchEnvironment.removeValue(forKey: "CODEX_ROLLOUT_TRACE_ROOT")
+            options.environment = launchEnvironment.merging(environment) { _, configured in configured }
         }
     }
     var done = false

@@ -144,9 +144,23 @@ describe('ChatGPT macOS application controller (all execution mocked)', () => {
     expect(options.env).toBe(process.env);
     expect(options).toMatchObject({ timeout: 45_000, maxBuffer: 16 * 1024 });
     expect(stdinWrites).toEqual([
-      '{}',
+      '',
       JSON.stringify({ OPENAI_API_KEY: 'synthetic-secret' }),
     ]);
+  });
+
+  it("tells the helper which start is the user's own app: the one with no launch environment", async () => {
+    const { getChatgptApplicationController } =
+      await import('./macController.js');
+    const controller = await getChatgptApplicationController({
+      bundleId: 'com.example.chatgpt',
+      appPath: '/Applications/X.app',
+    });
+    // A batch's start, with nothing to add, then the user's app after it,
+    // which the helper starts with none of the test process's variables.
+    await controller.start({});
+    await controller.start();
+    expect(stdinWrites).toEqual(['{}', '']);
   });
 
   // Changed by the shared helper: the callback form never put stderr on the
