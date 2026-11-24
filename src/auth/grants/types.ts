@@ -94,6 +94,11 @@ export interface ConnectorDefinition {
   grant?: string;
   auth: ConnectorAuth;
   /**
+   * Sent on the direct connection and the sign-in check. Absent means no
+   * extra headers. A connector with `launch` sends its own.
+   */
+  headers?: Readonly<Record<string, string>>;
+  /**
    * How the client reaches the server. Default: the client connects to `url`
    * directly with the access token. Return, for example, `dryRunProxyServer()`
    * to block writes.
