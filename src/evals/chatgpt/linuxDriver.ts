@@ -431,7 +431,7 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
       (node) =>
         available(node) &&
         BUTTONS.includes(node.role) &&
-        MODEL_BUTTON.test(node.name)
+        (MODEL_BUTTON.test(node.name) || node.name === 'Select ChatGPT model')
     );
   }
 

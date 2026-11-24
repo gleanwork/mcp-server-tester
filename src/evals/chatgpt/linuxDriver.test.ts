@@ -224,6 +224,7 @@ class FakeDesktop implements ChatgptLinuxDesktop<FakeNode> {
 
 class ModelDesktop extends FakeDesktop {
   keepDraftOnSelection = true;
+  cloudResetsModel = false;
   constructor(
     private current = 'GPT-6.2 Sol Medium',
     private readonly choices = ['GPT-6.2 Sol', 'GPT-6.1 Sol']
@@ -238,6 +239,12 @@ class ModelDesktop extends FakeDesktop {
 
   override async activate(control: FakeNode, allowed: readonly string[]) {
     await super.activate(control, allowed);
+    if (control.name === 'In the cloud' && this.cloudResetsModel) {
+      this.current = 'Select ChatGPT model';
+      this.nodes.find(
+        (item) => item.role === 'button' && /^GPT-/.test(item.name)
+      )!.name = this.current;
+    }
     if (control.name === this.current && control.role === 'button')
       this.nodes.push(node('Select model', 'menu item'));
     else if (control.name === 'Select model') {
@@ -249,7 +256,9 @@ class ModelDesktop extends FakeDesktop {
       this.current = `${control.name} Medium`;
       this.nodes = this.nodes.filter((item) => item.role !== 'radio menu item');
       this.nodes.find(
-        (item) => item.role === 'button' && /^GPT-/.test(item.name)
+        (item) =>
+          item.role === 'button' &&
+          (/^GPT-/.test(item.name) || item.name === 'Select ChatGPT model')
       )!.name = this.current;
       if (!this.keepDraftOnSelection) composer(this.nodes).text = '';
     }
@@ -696,6 +705,7 @@ describe('submit', () => {
   it('selects the Cloud location before selecting the requested model', async () => {
     const desktop = new ModelDesktop();
     desktop.cloudLocation = true;
+    desktop.cloudResetsModel = true;
     expect(
       (
         await driverFor(desktop).submit(
@@ -712,7 +722,7 @@ describe('submit', () => {
       'In the cloud',
       'Choose where to run this chat',
       'Choose where to run this chat',
-      'GPT-6.2 Sol Medium',
+      'Select ChatGPT model',
       'Select model',
       'GPT-6.1 Sol',
       'Send',
