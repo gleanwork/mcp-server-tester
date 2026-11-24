@@ -961,6 +961,23 @@ describe('profession click', () => {
     expect(fixture.bus.count('doAction')).toBe(0);
   });
 
+  it('settles hover before clicking an observed model row', async () => {
+    const log = join(root, 'model-click');
+    const helper = await xdotool(`echo "$@" > ${log}`);
+    const fixture = geometry();
+    fixture.choice.name = 'GPT-6.1 Sol';
+    fixture.choice.role = 'radio menu item';
+    const desktop = desktopFor(fixture.bus, { xdotool: helper });
+    const nodes = await desktop.snapshot();
+    await desktop.clickObservedControl(
+      nodes,
+      nodes.find((node) => node.name === 'GPT-6.1 Sol')!
+    );
+    expect((await readFile(log, 'utf8')).trim()).toBe(
+      'mousemove 370 260 sleep 0.3 click 1'
+    );
+  });
+
   it('never clicks on invalid geometry, a missing frame or component, or a missed hit test', async () => {
     const log = join(root, 'argv');
     const helper = await xdotool(`echo "$@" >> ${log}`);
