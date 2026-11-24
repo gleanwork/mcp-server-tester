@@ -250,6 +250,9 @@ export interface ChatgptReceipt {
     modelButtonCount: number;
     workReady: boolean;
     draftIntact: boolean;
+    pickerOptionCount: number;
+    targetOptionShowing: boolean;
+    effortOptionCount: number;
   };
   error?: LinuxChatgptErrorCode;
 }
@@ -584,6 +587,23 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
           modelButtonCount: buttons.length,
           workReady,
           draftIntact,
+          pickerOptionCount: last.filter(
+            (node) =>
+              available(node) &&
+              node.role === 'radio menu item' &&
+              MODEL_BUTTON.test(node.name)
+          ).length,
+          targetOptionShowing: last.some(
+            (node) =>
+              available(node) &&
+              node.role === 'radio menu item' &&
+              node.name === requested
+          ),
+          effortOptionCount: last.filter(
+            (node) =>
+              available(node) &&
+              /^(Low|Medium|High|Extra high|Max)$/.test(node.name)
+          ).length,
         };
         throw new DriverFailure('model_not_selected');
       }
