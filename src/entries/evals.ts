@@ -71,6 +71,8 @@ export type {
   ClientDefinition,
   ClientOS,
   ClientRequirements,
+  ClientSetupContext,
+  ClientRecoverContext,
   ClientRunOptions,
   ClientBatchRequest,
   ClientRunResult,

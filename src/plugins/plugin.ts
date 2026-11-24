@@ -200,6 +200,12 @@ function clientProblem(
     typeof definition.description !== 'string'
   )
     return 'description must be a string';
+  for (const hook of ['setup', 'recover'] as const)
+    if (
+      definition[hook] !== undefined &&
+      typeof definition[hook] !== 'function'
+    )
+      return `${hook} must be a function`;
   const requirements = definition.requirements;
   if (requirements === undefined) return undefined;
   if (!isRecord(requirements)) return 'requirements must be an object';

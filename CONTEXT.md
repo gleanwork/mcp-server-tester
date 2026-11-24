@@ -39,7 +39,7 @@ The MCP client application an eval tests, named canonically: `claude-code`, `cod
 _Avoid_: host, harness (unqualified), agent, runner, solver, provider. One exception: **host telemetry**.
 
 **Claude Desktop**:
-The application the `cowork` client drives. Anthropic is merging Chat and Cowork into one Claude experience: where that has rolled out, the app has no Cowork mode to choose, and a message from its home screen starts a **Cowork session**, which is what a trial runs. Say "Claude Desktop" for the app and the product, and "the `cowork` client" for what MST does. Say "Cowork" only where Anthropic still does: a Cowork session, Cowork's VM, Cowork settings and keys such as `coworkTabEnabled`. The client name, the `mst cowork` command, the `MST_COWORK_*` variables and the image name `mst-cowork-linux` keep their names.
+The application the `cowork` client drives. Anthropic is merging Chat and Cowork into one Claude experience: where that has rolled out, the app has no Cowork mode to choose, and a message from its home screen starts a **Cowork session**, which is what a trial runs. Say "Claude Desktop" for the app and the product, and "the `cowork` client" for what MST does. Say "Cowork" only where Anthropic still does: a Cowork session, Cowork's VM, Cowork settings and keys such as `coworkTabEnabled`. The client name, the `MST_COWORK_*` variables and the image name `mst-cowork-linux` keep their names.
 _Avoid_: Cowork (for the app, the product or the client), Cowork mode, Claude Cowork
 
 **Client auth cache**:

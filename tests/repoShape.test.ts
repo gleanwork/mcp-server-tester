@@ -99,8 +99,13 @@ describe('productImports', () => {
           file: 'src/evals/runEval.ts',
           text: "const d = await import('./codex-app/macos.js');",
         },
+        {
+          file: 'src/cli/commands/cowork/index.ts',
+          text: "import { e } from '../../../evals/cowork/restoreConnectors.js';",
+        },
       ])
     ).toEqual([
+      'src/cli/commands/cowork/index.ts -> src/evals/cowork/restoreConnectors.ts',
       'src/evals/grading.ts -> src/evals/cowork/firstParty.ts',
       'src/evals/runEval.ts -> src/evals/codex-app/macos.ts',
       'src/evals/runners/collect.ts -> src/evals/chatgpt/turn.ts',
@@ -122,10 +127,6 @@ describe('productImports', () => {
         {
           file: 'src/entries/experimentalClients.ts',
           text: "export { c } from '../evals/cowork/interaction.js';",
-        },
-        {
-          file: 'src/cli/commands/cowork/index.ts',
-          text: "import { d } from '../../../evals/cowork/restoreConnectors.js';",
         },
       ])
     ).toEqual([]);

@@ -66,6 +66,8 @@ import {
 import { removedClientOptions } from './renamedKeys.js';
 import { CloudConnectorsSchema } from './cowork/claudeAiConnectors.js';
 import { assertFirstPartyServers } from './cowork/firstParty.js';
+import { initializeMacCoworkProfile } from './coworkSetup/macTransaction.js';
+import { restoreCoworkConnectors } from './cowork/restoreConnectors.js';
 
 const CoworkSchema = z
   .object({
@@ -1207,8 +1209,8 @@ export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
         'Linux first-party: a plugin-staged private account profile and source-host cloud control; no inference credential or Computer Use planner in MST',
       ],
       setup: [
-        'macOS default third-party: `mst cowork setup`, then sign in to Claude Desktop once',
-        'macOS first-party: use the installed Claude Desktop and Chrome signed in to the same Claude account, with its selected connectors connected; Chrome needs a loopback DevTools port (`MST_CLAUDE_AI_DEBUG_PORT`, default 9222). Do not run `mst cowork setup` for this mode',
+        'macOS default third-party: `mst clients setup cowork`, then sign in to Claude Desktop once',
+        'macOS first-party: use the installed Claude Desktop and Chrome signed in to the same Claude account, with its selected connectors connected; Chrome needs a loopback DevTools port (`MST_CLAUDE_AI_DEBUG_PORT`, default 9222). Do not run `mst clients setup cowork` for this mode',
         'Docker third-party: `mst runner setup docker`',
         'Linux first-party: an attached plugin-owned runtime must stage the account profile and MST_COWORK_CLOUD_CONTROL_SOCKET; stock Docker or a managed/gateway profile cannot supply account mode',
       ],
@@ -1217,6 +1219,34 @@ export function createCoworkClient(platform?: CoworkDesktop): ClientDefinition {
     // Cowork sets up its MCP servers once per batch, so a tool variant goes
     // through one proxy endpoint for the whole batch.
     serversPerBatch: true,
+    // macOS default third-party mode: the empty Claude 3P profile each batch
+    // copies.
+    async setup({ print }) {
+      const result = await initializeMacCoworkProfile();
+      if (result.created) {
+        print(
+          `Initialized the empty Claude 3P profile at ${result.profileDirectory}.`
+        );
+        print(
+          'Next: launch Claude Desktop, sign in, open one normal conversation, quit Claude Desktop, then run the Cowork evaluation.'
+        );
+      } else {
+        print(`Claude 3P profile is ready at ${result.profileDirectory}.`);
+        print(
+          'If Claude Desktop is not signed in, launch it and complete sign-in before running the Cowork evaluation.'
+        );
+      }
+    },
+    // macOS first-party mode: the account connector settings a killed run
+    // left in its recovery journal.
+    async recover({ print, recoverStaleLock }) {
+      const restored = await restoreCoworkConnectors({ recoverStaleLock });
+      print(
+        restored
+          ? 'Restored Claude account connector settings from the recovery journal.'
+          : 'No Claude account connector recovery journal was found; no settings were changed.'
+      );
+    },
     async open(options, context) {
       return openDesktopSession(
         await desktopAdapter([options], context, platform)

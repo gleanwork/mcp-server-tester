@@ -3827,7 +3827,7 @@ describe('first-party Cowork through client sessions', () => {
       /both modes:.*Computer Use planner/
     );
     expect(requirements.setup?.join('\n')).toMatch(
-      /third-party:.*mst cowork setup/
+      /third-party:.*mst clients setup cowork/
     );
     expect(requirements.setup?.join('\n')).toMatch(
       /first-party:.*Chrome.*same.*account/

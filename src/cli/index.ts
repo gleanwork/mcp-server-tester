@@ -36,10 +36,6 @@ import {
 import { history, type HistoryOptions } from './commands/history/index.js';
 import { setConfigOverrideFile } from '../plugins/settingsFile.js';
 import {
-  restoreCoworkConnectorsCommand,
-  setupCowork,
-} from './commands/cowork/index.js';
-import {
   auth,
   authRevoke,
   authStatus,
@@ -52,7 +48,13 @@ import {
   type DatasetPullOptions,
 } from './commands/datasets/index.js';
 import { listJudgeCommand, showJudge } from './commands/judges/index.js';
-import { listClientCommand, showClient } from './commands/clients/index.js';
+import {
+  listClientCommand,
+  recoverClient,
+  setupClient,
+  showClient,
+  type ClientRecoverOptions,
+} from './commands/clients/index.js';
 import { desktopParity, desktopSnapshot } from './commands/desktop/index.js';
 import {
   checkJudgeCommand,
@@ -239,6 +241,15 @@ function discoveryOptions(command: Command): Command {
     .option('--root-dir <dir>', 'Where relative plugin paths resolve', '.')
     .option('--json', 'Print JSON');
 }
+/**
+ * `mst clients setup` and `recover` run no eval, so they take plugins for a
+ * plugin's client but no eval config.
+ */
+function clientPluginOptions(command: Command): Command {
+  return command
+    .option('--plugins <modules...>', "Plugin modules, for a plugin's client")
+    .option('--root-dir <dir>', 'Where relative plugin paths resolve', '.');
+}
 function datasetSelection(command: Command): Command {
   return command
     .option('--snapshot <id>', "A snapshot (default: the plugin's latest)")
@@ -288,6 +299,30 @@ discoveryOptions(
     .argument('<ref>', 'A built-in name, or namespace/client/name')
 ).action((ref: string, _options: unknown, command: Command) =>
   showClient(ref, command.optsWithGlobals<DiscoveryOptions>())
+);
+clientPluginOptions(
+  clientsCommand
+    .command('setup')
+    .description(
+      "Prepare this machine for a client, once, with the client's own setup; runs no eval"
+    )
+    .argument('<ref>', 'A built-in name, or namespace/client/name')
+).action((ref: string, _options: unknown, command: Command) =>
+  setupClient(ref, command.optsWithGlobals<DiscoveryOptions>())
+);
+clientPluginOptions(
+  clientsCommand
+    .command('recover')
+    .description(
+      "Put back what a stopped run of a client left changed, with the client's own recovery; runs no eval"
+    )
+    .argument('<ref>', 'A built-in name, or namespace/client/name')
+    .option(
+      '--recover-stale-lock',
+      'Reclaim a desktop lock only when its local owner is provably stopped'
+    )
+).action((ref: string, _options: unknown, command: Command) =>
+  recoverClient(ref, command.optsWithGlobals<ClientRecoverOptions>())
 );
 
 // Judges command: built-in and plugin judges
@@ -760,26 +795,22 @@ optimizeTarget(
     )
 ).action((options: OptimizeTargetOptions) => optimizeFinish(options));
 
-// Cowork setup and recovery commands
-const coworkCommand = program
-  .command('cowork')
-  .description(
-    'Prepare or recover Claude Desktop on macOS for the cowork client'
-  );
-coworkCommand
-  .command('setup')
-  .description('Initialize or validate the empty Claude 3P profile')
-  .action(setupCowork);
-coworkCommand
-  .command('restore-connectors')
-  .description(
-    'Restore Claude account connector settings from an existing journal only'
-  )
-  .option(
-    '--recover-stale-lock',
-    'Reclaim a desktop lock only when its local owner is provably stopped'
-  )
-  .action(restoreCoworkConnectorsCommand);
+// `mst cowork` became `mst clients setup|recover cowork`: recognized only to
+// say so.
+program
+  .command('cowork', { hidden: true })
+  .argument('[command]')
+  .allowUnknownOption()
+  .allowExcessArguments()
+  .action((command: string | undefined) => {
+    throw new Error(
+      command === 'setup'
+        ? '`mst cowork setup` is now `mst clients setup cowork`'
+        : command === 'restore-connectors'
+          ? '`mst cowork restore-connectors` is now `mst clients recover cowork`'
+          : '`mst cowork setup` is now `mst clients setup cowork`, and `mst cowork restore-connectors` is `mst clients recover cowork`'
+    );
+  });
 
 // Desktop command: the read-only checks of a desktop transport (ADR 0017)
 const desktopCommand = program
