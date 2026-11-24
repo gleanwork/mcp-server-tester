@@ -11,19 +11,19 @@ it does not provision or authenticate that runtime.
 ## First-time macOS setup
 
 This section is for the default `third-party` mode. In `first-party` mode, do
-not run `mst cowork setup`: it uses the signed-in installed app and no MST
+not run `mst clients setup cowork`: it uses the signed-in installed app and no MST
 profile (see [Cloud sessions](#cloud-sessions)).
 
 Run this once on a new Mac before the first default-mode `cowork` evaluation:
 
 ```bash
-node --import tsx src/cli/index.ts cowork setup
+node --import tsx src/cli/index.ts clients setup cowork
 ```
 
 For an installed package, use the package binary instead:
 
 ```bash
-npx mst cowork setup
+npx mst clients setup cowork
 ```
 
 The command creates the minimal empty Claude 3P profile only when the profile
@@ -448,7 +448,7 @@ the same port the run used:
 
 ```bash
 export MST_CLAUDE_AI_DEBUG_PORT=9222   # omit if the recorder uses the default
-npx mst cowork restore-connectors [--recover-stale-lock]
+npx mst clients recover cowork [--recover-stale-lock]
 ```
 
 This macOS command uses the existing Chrome recorder profile sign-in. It runs no
@@ -493,7 +493,7 @@ in place until you have established that doing otherwise is safe.
 
 #### Resolve a blocked journal manually
 
-Repeating `restore-connectors` or using `--recover-stale-lock` does not attest
+Repeating `mst clients recover cowork` or using `--recover-stale-lock` does not attest
 that a write or task has ended, and neither clears these markers. Do not delete
 or edit the journal or the desktop lease to retry: the journal is the only record
 of the original permissions, and no current command performs or verifies manual

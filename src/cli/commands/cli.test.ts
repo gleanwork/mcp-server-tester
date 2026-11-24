@@ -71,7 +71,9 @@ describe('mst CLI', () => {
       expect(result.stdout).toContain('generate');
       expect(result.stdout).toContain('login');
       expect(result.stdout).toContain('token');
-      expect(result.stdout).toContain('cowork');
+      expect(result.stdout).toContain('clients');
+      // No client has a command of its own: `mst clients setup|recover`.
+      expect(result.stdout).not.toMatch(/^ +cowork\b/m);
     });
 
     it('ships `mst` and `mcp-server-tester` as the same binary', () => {
@@ -574,6 +576,167 @@ describe('mst CLI', () => {
       expect(unknown.exitCode).toBe(1);
       expect(unknown.stderr).toContain('Client "nope" is not available.');
     });
+
+    it('sets up and recovers a client through its hooks, with its settings', async () => {
+      const schema =
+        '{ safeParse: (value) => ({ success: true, data: value }) }';
+      await project.write({
+        'plugin.mjs': `export default {
+          meta: { name: 'acme-plugin', namespace: 'acme' },
+          settings: { schema: ${schema} },
+          clients: {
+            desk: {
+              schema: ${schema},
+              async run() { return {}; },
+              async setup({ print, settings }) { print('set up ' + settings.project); },
+              async recover({ print, settings, recoverStaleLock }) {
+                print('recovered ' + settings.project + ' stale=' + recoverStaleLock);
+              },
+            },
+            plain: { schema: ${schema}, async run() { return {}; } },
+          },
+        };`,
+        'mst.config.json': JSON.stringify({
+          settings: { acme: { project: 'p1' } },
+        }),
+      });
+      const plugins = ['--plugins', './plugin.mjs'];
+
+      const setup = await runBin(
+        'clients',
+        'setup',
+        'acme/client/desk',
+        ...plugins
+      );
+      expect(setup.exitCode).toBe(0);
+      expect(setup.stdout).toBe('set up p1');
+
+      const recover = await runBin(
+        'clients',
+        'recover',
+        'acme/client/desk',
+        ...plugins
+      );
+      expect(recover.stdout).toBe('recovered p1 stale=false');
+      const stale = await runBin(
+        'clients',
+        'recover',
+        'acme/client/desk',
+        '--recover-stale-lock',
+        ...plugins
+      );
+      expect(stale.stdout).toBe('recovered p1 stale=true');
+
+      // A client without the hooks has nothing to do, and says so.
+      const plain = await runBin(
+        'clients',
+        'setup',
+        'acme/client/plain',
+        ...plugins
+      );
+      expect(plain.stdout).toBe('acme/client/plain needs no setup.');
+      const builtin = await runBin('clients', 'recover', 'api');
+      expect(builtin.exitCode).toBe(0);
+      expect(builtin.stdout).toBe('api has nothing to recover.');
+
+      // A plugin's client needs its plugin; an unknown one fails.
+      const unloaded = await runBin('clients', 'setup', 'acme/client/desk');
+      expect(unloaded.exitCode).toBe(1);
+      expect(unloaded.stderr).toContain(
+        'Plugin clients need --plugins or --config.'
+      );
+      const unknown = await runBin('clients', 'setup', 'nope');
+      expect(unknown.exitCode).toBe(1);
+      expect(unknown.stderr).toContain('Client "nope" is not available.');
+    });
+
+    it('resolves plugins and settings from --root-dir, and takes no --config or --json', async () => {
+      const schema =
+        '{ safeParse: (value) => ({ success: true, data: value }) }';
+      await project.write({
+        elsewhere: {
+          'plugin.mjs': `export default {
+            meta: { name: 'acme-plugin', namespace: 'acme' },
+            settings: { schema: ${schema} },
+            clients: {
+              desk: {
+                schema: ${schema},
+                async run() { return {}; },
+                async setup({ print, settings }) { print('set up ' + settings.project); },
+                async recover({ print, settings }) { print('recovered ' + settings.project); },
+              },
+            },
+          };`,
+          'mst.config.json': JSON.stringify({
+            settings: { acme: { project: 'p2' } },
+          }),
+        },
+      });
+      const plugins = ['--plugins', './plugin.mjs', '--root-dir', 'elsewhere'];
+      const setup = await runBin(
+        'clients',
+        'setup',
+        'acme/client/desk',
+        ...plugins
+      );
+      expect(setup.exitCode).toBe(0);
+      expect(setup.stdout).toBe('set up p2');
+      const recover = await runBin(
+        'clients',
+        'recover',
+        'acme/client/desk',
+        ...plugins
+      );
+      expect(recover.stdout).toBe('recovered p2');
+
+      for (const [flags, flag] of [
+        [['--config', 'eval.json'], '--config'],
+        [['--json'], '--json'],
+      ] as const)
+        for (const command of ['setup', 'recover']) {
+          const result = await runBin('clients', command, 'api', ...flags);
+          expect(result.exitCode).toBe(1);
+          expect(result.stderr).toContain(
+            `\`mst clients ${command}\` takes no ${flag}: it runs no eval.`
+          );
+        }
+    });
+
+    it.runIf(process.platform === 'darwin')(
+      "creates the cowork client's empty Claude profile",
+      async () => {
+        const home = path.join(project.baseDir, 'home');
+        mkdirSync(home);
+        const first = await runBin('clients', 'setup', 'cowork', {
+          env: { HOME: home },
+        });
+        expect(first.exitCode).toBe(0);
+        expect(first.stdout).toContain(
+          'Initialized the empty Claude 3P profile at'
+        );
+        expect(
+          existsSync(
+            path.join(
+              home,
+              'Library/Application Support/Claude-3p/configLibrary'
+            )
+          )
+        ).toBe(true);
+        const again = await runBin('clients', 'setup', 'cowork', {
+          env: { HOME: home },
+        });
+        expect(again.stdout).toContain('Claude 3P profile is ready at');
+      }
+    );
+
+    it.runIf(process.platform !== 'darwin')(
+      "refuses the cowork client's macOS setup on another OS",
+      async () => {
+        const result = await runBin('clients', 'setup', 'cowork');
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr).toContain('Cowork profile setup requires macOS.');
+      }
+    );
   });
 
   describe('label command', () => {

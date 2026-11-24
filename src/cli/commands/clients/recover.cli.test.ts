@@ -51,17 +51,33 @@ function unresolvedJournal(): string {
   });
 }
 
-describe('cowork restore-connectors CLI registration', () => {
+describe('mst clients recover cowork', () => {
   it('lists recovery separately from setup', async () => {
-    const result = await run('cowork', '--help');
+    const result = await run('clients', '--help');
     expect(result.stderr).toBe('');
-    expect(result.stdout).toContain('setup');
-    expect(result.stdout).toContain('restore-connectors');
+    expect(result.stdout).toMatch(/^ +setup \[options\] <ref>/m);
+    expect(result.stdout).toMatch(/^ +recover \[options\] <ref>/m);
+    expect(await readdir(home)).toEqual([]);
+  });
+
+  it('names the replacement for the removed cowork commands', async () => {
+    await expect(run('cowork', 'restore-connectors')).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining(
+        '`mst cowork restore-connectors` is now `mst clients recover cowork`'
+      ),
+    });
+    await expect(run('cowork', 'setup')).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining(
+        '`mst cowork setup` is now `mst clients setup cowork`'
+      ),
+    });
     expect(await readdir(home)).toEqual([]);
   });
 
   it('offers explicit stale-owner recovery without eval options', async () => {
-    const result = await run('cowork', 'restore-connectors', '--help');
+    const result = await run('clients', 'recover', '--help');
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('--recover-stale-lock');
     expect(result.stdout).not.toContain('--config');
@@ -79,7 +95,7 @@ describe('cowork restore-connectors CLI registration', () => {
       const text = unresolvedJournal();
       await writeFile(journal, text, { mode: 0o600 });
       await expect(
-        run('cowork', 'restore-connectors', '--recover-stale-lock', flag)
+        run('clients', 'recover', 'cowork', '--recover-stale-lock', flag)
       ).rejects.toMatchObject({
         code: 1,
         stderr: expect.stringContaining(`unknown option '${flag}'`),
@@ -99,7 +115,7 @@ describe('cowork restore-connectors CLI registration', () => {
       await writeFile(journal, text, { mode: 0o600 });
       // MST_CLAUDE_AI_DEBUG_PORT is invalid: reaching Chrome would fail with a
       // port error instead of the unresolved-write refusal.
-      await expect(run('cowork', 'restore-connectors')).rejects.toMatchObject({
+      await expect(run('clients', 'recover', 'cowork')).rejects.toMatchObject({
         code: 1,
         stderr: expect.stringMatching(/retained for inspection.*unknown/is),
       });
@@ -111,7 +127,7 @@ describe('cowork restore-connectors CLI registration', () => {
       // The retained lock names the exited command, but the unresolved write
       // still refuses after an explicit stale-lock recovery.
       await expect(
-        run('cowork', 'restore-connectors', '--recover-stale-lock')
+        run('clients', 'recover', 'cowork', '--recover-stale-lock')
       ).rejects.toMatchObject({
         code: 1,
         stderr: expect.stringMatching(/retained for inspection.*unknown/is),
@@ -138,14 +154,15 @@ describe('cowork restore-connectors CLI registration', () => {
         startedAt: new Date().toISOString(),
       });
       await writeFile(path, owner);
-      await expect(run('cowork', 'restore-connectors')).rejects.toMatchObject({
+      await expect(run('clients', 'recover', 'cowork')).rejects.toMatchObject({
         code: 1,
         stderr: expect.stringContaining('--recover-stale-lock'),
       });
       expect(await readFile(path, 'utf8')).toBe(owner);
       const result = await run(
+        'clients',
+        'recover',
         'cowork',
-        'restore-connectors',
         '--recover-stale-lock'
       );
       expect(result.stderr).toBe('');
@@ -168,7 +185,7 @@ describe('cowork restore-connectors CLI registration', () => {
       });
       await writeFile(path, owner);
       await expect(
-        run('cowork', 'restore-connectors', '--recover-stale-lock')
+        run('clients', 'recover', 'cowork', '--recover-stale-lock')
       ).rejects.toMatchObject({
         code: 1,
         stderr: expect.stringContaining(
@@ -185,7 +202,7 @@ describe('cowork restore-connectors CLI registration', () => {
   it.skipIf(process.platform !== 'darwin')(
     'reports no journal without Chrome or a native app',
     async () => {
-      const result = await run('cowork', 'restore-connectors');
+      const result = await run('clients', 'recover', 'cowork');
       expect(result.stderr).toBe('');
       expect(result.stdout).toBe(
         'No Claude account connector recovery journal was found; no settings were changed.\n'

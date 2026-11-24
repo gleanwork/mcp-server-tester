@@ -24,7 +24,7 @@ npm init -y
 npm i -D @gleanwork/mcp-server-tester@rc @acme/mst-plugin
 
 # Once, on a Mac that will run Claude Desktop locally
-npx mst cowork setup
+npx mst clients setup cowork
 
 # Once, to run Claude Desktop in containers (section 6)
 npx mst runner setup docker
