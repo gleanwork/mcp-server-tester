@@ -843,10 +843,10 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         matchesPrompt(await this.desktop.text(composer(ns)), prompt) &&
         controls(ns, ['Send']).length === 1
     );
-    if (requestedModel)
-      nodes = await this.selectModel(nodes, requestedModel, prompt);
     if (workLocation === 'cloud')
       nodes = await this.selectCloudLocation(nodes, prompt);
+    if (requestedModel)
+      nodes = await this.selectModel(nodes, requestedModel, prompt);
     // Exactly one send. No retry, Enter fallback, or resubmission on a missing transcript.
     this.step = 'send';
     await this.action(() =>

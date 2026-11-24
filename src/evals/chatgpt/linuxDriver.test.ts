@@ -693,6 +693,32 @@ describe('submit', () => {
     expect(composer(desktop.nodes).text).toBe('Find docs');
   });
 
+  it('selects the Cloud location before selecting the requested model', async () => {
+    const desktop = new ModelDesktop();
+    desktop.cloudLocation = true;
+    expect(
+      (
+        await driverFor(desktop).submit(
+          'Find docs',
+          'chatgpt-work',
+          'cloud',
+          'gpt-6.1-sol'
+        )
+      ).status
+    ).toBe('submitted');
+    expect(desktop.names()).toEqual([
+      'open',
+      'Choose where to run this chat',
+      'In the cloud',
+      'Choose where to run this chat',
+      'Choose where to run this chat',
+      'GPT-6.2 Sol Medium',
+      'Select model',
+      'GPT-6.1 Sol',
+      'Send',
+    ]);
+  });
+
   it('accepts the Cloud runtime suffix and skips an already selected model', async () => {
     const desktop = new ModelDesktop('GPT-6.2 Sol Medium');
     expect(
