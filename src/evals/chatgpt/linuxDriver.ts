@@ -554,8 +554,25 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
         );
       });
     } catch (error) {
-      if (codeOf(error) === 'state_transition_unobserved')
+      if (codeOf(error) === 'state_transition_unobserved') {
+        const last = this.lastSnapshot ?? [];
+        const buttons = this.modelButtons(last);
+        let draftIntact = false;
+        let workReady = false;
+        try {
+          draftIntact = matchesPrompt(
+            await this.desktop.text(composer(last)),
+            prompt
+          );
+          workReady = this.ready(last, 'chatgpt-work');
+        } catch {
+          // Failure diagnostics never authorize a retry.
+        }
+        console.error(
+          `[mst:chatgpt] model verification: requestedVisible=${buttons.some((button) => button.name === requested || button.name.startsWith(`${requested} `))} modelButtonCount=${buttons.length} workReady=${workReady} draftIntact=${draftIntact}`
+        );
         throw new DriverFailure('model_not_selected');
+      }
       throw error;
     }
   }
