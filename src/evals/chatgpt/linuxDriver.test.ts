@@ -744,6 +744,26 @@ describe('submit', () => {
     expect(desktop.names()).toEqual(['open', 'Send']);
   });
 
+  it('waits for the exact model option to appear in the picker', async () => {
+    const desktop = new ModelDesktop('GPT-6.2 Sol Medium', ['GPT-6.2 Sol']);
+    const clock = fakeClock((count) => {
+      if (count === 5)
+        desktop.nodes.push(node('GPT-6.1 Sol', 'radio menu item'));
+    });
+    expect(
+      (
+        await driverFor(desktop, { clock }).submit(
+          'Find docs',
+          'chatgpt-work',
+          undefined,
+          'gpt-6.1-sol'
+        )
+      ).status
+    ).toBe('submitted');
+    expect(clock.sleeps).toBe(5);
+    expect(desktop.names().at(-2)).toBe('GPT-6.1 Sol');
+  });
+
   it('fails before Send when the requested model is unavailable or invalid', async () => {
     const missing = new ModelDesktop();
     expect(

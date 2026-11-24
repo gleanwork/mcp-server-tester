@@ -459,14 +459,23 @@ export class ChatgptDriver<N extends ChatgptNode = ChatgptNode> {
     await this.action(() =>
       this.desktop.clickObservedControl(menu, openPicker)
     );
-    const picker = await this.wait((ns) =>
-      ns.some(
-        (node) =>
-          available(node) &&
-          node.role === 'radio menu item' &&
-          MODEL_BUTTON.test(node.name)
-      )
-    );
+    let picker: N[];
+    try {
+      picker = await this.wait(
+        (ns) =>
+          ns.filter(
+            (node) =>
+              available(node) &&
+              node.role === 'radio menu item' &&
+              node.name === requested
+          ).length === 1,
+        30
+      );
+    } catch (error) {
+      if (codeOf(error) === 'state_transition_unobserved')
+        throw new DriverFailure('model_unavailable');
+      throw error;
+    }
     const item = unique(
       picker.filter(
         (node) =>
