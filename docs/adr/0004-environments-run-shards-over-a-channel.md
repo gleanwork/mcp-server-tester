@@ -8,7 +8,7 @@ status: accepted
 
 A desktop client runs one conversation at a time per machine, and today that machine is the user's own. While an eval runs, the machine can't be used for anything else, and its state can break or skew the results: in one Cowork run, a stray window kept taking focus, and from case 13 on no submission reached the client. The run is also slow. The walkthrough's 450 trials take about 8.5 hours on one desktop.
 
-The design (`docs/design/README.md`) plans `--env`, shards, gather and `--resume`, but it leaves open what an environment must do (the design explainer's open question 7; the explainer is now [How MST works](../architecture.md)). This record answers that question.
+The design ([`docs/design/README.md`](https://github.com/gleanwork/mcp-server-tester/blob/78b667e3c0988f0c28208913f006ec3ccd4c030a/docs/design/README.md), since removed) plans `--env`, shards, gather and `--resume`, but it leaves open what an environment must do (the design explainer's open question 7; the explainer is now [How MST works](../architecture.md)). This record answers that question.
 
 ## Decision
 

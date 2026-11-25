@@ -5,8 +5,11 @@
  * as `jsonc` and not checked.
  *
  * Examples that name the docs' fictional `acme` plugin validate against a
- * fixture with only the extensions the docs name, so a misspelt name still
- * fails.
+ * fixture with only the extensions the docs name, as `mst run` resolves them:
+ * the plugins an example lists give its namespaces, its `extends` apply, and
+ * each connector server's connector is looked up. So a misspelt dataset,
+ * judge, connector or shared config still fails, as does a name from a plugin
+ * the example doesn't list.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +19,9 @@ import { z } from 'zod';
 import { installPlugins, resetPluginsForTests } from '../plugins/extensions.js';
 import type { Plugin } from '../plugins/plugin.js';
 import { buildEvalDataset } from './buildEvalDataset.js';
+import { getConnector } from '../auth/grants/connectors.js';
 import { loadEvalConfigFromObject, type EvalConfig } from './evalConfig.js';
+import { resolveConfigExtends } from './configExtends.js';
 import { validateEvalConfig } from './configValidation.js';
 
 const ACME_CONNECTOR = {
@@ -53,8 +58,42 @@ const ACME: Plugin = {
     slack: ACME_CONNECTOR,
     github: ACME_CONNECTOR,
   },
-  configs: { cowork: {} },
+  configs: { cowork: {}, recommended: {} },
 };
+
+/** The plugins the docs name, by package, with the namespace each one loads. */
+const DOCS_PLUGINS: Record<string, string> = {
+  [ACME.meta.name]: ACME.meta.namespace,
+};
+
+/**
+ * An eval config as `mst run` checks it before it runs: the namespaces of
+ * the plugins it lists, its `extends` applied, its references checked
+ * against those namespaces, and each connector server's connector found.
+ */
+function checkEvalConfig(value: unknown): void {
+  const evalConfig = loadEvalConfigFromObject(value, {
+    skipDatasetValidation: true,
+  });
+  const namespaces = (evalConfig.plugins ?? []).map((name) => {
+    const namespace = DOCS_PLUGINS[name];
+    if (!namespace) throw new Error(`No docs plugin "${name}"`);
+    return namespace;
+  });
+  const resolved = validateEvalConfig(
+    resolveConfigExtends(evalConfig, namespaces),
+    { namespaces }
+  );
+  for (const servers of [
+    resolved.servers,
+    ...(resolved.variants ?? []).map((variant) => variant.servers),
+  ]) {
+    for (const server of Object.values(servers ?? {})) {
+      if (typeof server === 'object' && server && 'connector' in server)
+        getConnector(String(server.connector));
+    }
+  }
+}
 
 const ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -164,9 +203,36 @@ describe('eval config and dataset examples in the docs', () => {
       ).not.toThrow();
       return;
     }
-    const evalConfig = loadEvalConfigFromObject(value, {
-      skipDatasetValidation: true,
-    });
-    expect(() => validateEvalConfig(evalConfig)).not.toThrow();
+    expect(() => checkEvalConfig(value)).not.toThrow();
+  });
+
+  it.each([
+    ['a misspelt connector', { connector: 'acme/connector/slak' }, {}],
+    ['a misspelt shared config', {}, { extends: ['acme/config/cowrk'] }],
+    ['a plugin it does not list', {}, { plugins: [] }],
+  ])('fails an example with %s', (_name, server, overrides) => {
+    const example = {
+      name: 'docs',
+      plugins: ['@acme/mst-plugin'],
+      extends: ['acme/config/cowork'],
+      datasets: ['acme/dataset/info-seeking'],
+      servers: { slack: { connector: 'acme/connector/slack', ...server } },
+      variants: [{ name: 'baseline', client: 'api' }],
+      ...overrides,
+    };
+    expect(() => checkEvalConfig(example)).toThrow();
+  });
+
+  it('passes that example when every name is right', () => {
+    expect(() =>
+      checkEvalConfig({
+        name: 'docs',
+        plugins: ['@acme/mst-plugin'],
+        extends: ['acme/config/cowork'],
+        datasets: ['acme/dataset/info-seeking'],
+        servers: { slack: { connector: 'acme/connector/slack' } },
+        variants: [{ name: 'baseline', client: 'api' }],
+      })
+    ).not.toThrow();
   });
 });

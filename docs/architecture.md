@@ -128,7 +128,7 @@ flowchart LR
   class collect remote
 ```
 
-Every step runs on the **coordinator**, the machine where you typed `mst run`, except step 4 (dashed), which runs wherever the client runs: this machine, or a runner's machines.
+Every step runs on the **coordinator**, the machine where you typed `mst run`, except step 4 (dashed), which runs wherever the client runs: this machine, or a runner's machines. With `--grade-runner`, step 5 runs on the runner's machines too.
 
 ### 1. Load
 

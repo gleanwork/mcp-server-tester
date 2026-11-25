@@ -6,7 +6,7 @@ status: accepted
 
 > **Since then.** The `env` kind joined the scheme ([ADR 0004](./0004-environments-run-shards-over-a-channel.md)), and [ADR 0013](./0013-mst-uses-anthropics-eval-vocabulary.md) renamed it `runner`. `setup` and `credential-store` are still planned.
 
-ADR 0001 named plugin extensions `namespace/name`. A name alone did not say what it was, so `acme/correctness` could be a judge, a metric or a dataset, and using it in the wrong place failed with "not available" instead of saying why. The 2.0 design (`docs/design/README.md`) names every extension `<namespace>/<kind>/<name>`, so `acme/judge/correctness` is a judge wherever it appears.
+ADR 0001 named plugin extensions `namespace/name`. A name alone did not say what it was, so `acme/correctness` could be a judge, a metric or a dataset, and using it in the wrong place failed with "not available" instead of saying why. The 2.0 design ([`docs/design/README.md`](https://github.com/gleanwork/mcp-server-tester/blob/78b667e3c0988f0c28208913f006ec3ccd4c030a/docs/design/README.md), since removed) names every extension `<namespace>/<kind>/<name>`, so `acme/judge/correctness` is a judge wherever it appears.
 
 ## Decision
 
