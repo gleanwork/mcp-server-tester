@@ -502,6 +502,20 @@ async function desktopAdapter(
     // slow desktop) would otherwise skip every later case in the batch.
     // macOS already falls back to restarting the app.
     ...(linux ? { resetRetryDelaysMs: RESET_RETRY_DELAYS_MS } : {}),
+    ...(linux && !firstParty
+      ? {
+          async recoverReset(
+            session: CoworkSession,
+            _index: number,
+            error: unknown
+          ) {
+            return (
+              (await session?.recoverReset?.(error, Date.now() + 180_000)) ??
+              false
+            );
+          },
+        }
+      : {}),
     async prepare() {
       if (env.MST_COWORK_RECOVER === '1') await platform.recover();
       const session = await platform.prepare({

@@ -317,9 +317,11 @@ describe('runDesktopBatch', () => {
     });
   });
 
-  it('retries a failed reset before giving up on the rest of the batch', async () => {
+  it('retries a failed reset without invoking recovery when a retry succeeds', async () => {
     let resets = 0;
+    const recoverReset = vi.fn();
     const client = fakeClient({
+      recoverReset,
       async runCase(_session, request, index) {
         client.events.push(`case ${index + 1}`);
         return index === 0
@@ -350,7 +352,63 @@ describe('runDesktopBatch', () => {
       undefined,
       undefined,
     ]);
+    expect(recoverReset).not.toHaveBeenCalled();
   });
+
+  it.each(['verified', 'declined', 'failed'] as const)(
+    'uses one final reset recovery after retries: %s',
+    async (recovery) => {
+      const timedOut = new Error('accessibility_scan_timeout');
+      const client = fakeClient({
+        async runCase(_session, request, index) {
+          client.events.push(`case ${index + 1}`);
+          return index === 0
+            ? {
+                result: {
+                  finalText: '',
+                  events: [],
+                  error: 'uncertain submit',
+                },
+                continuation: 'reset',
+              }
+            : ok(request.caseId);
+        },
+        async reset() {
+          client.events.push('reset');
+          throw timedOut;
+        },
+        async recoverReset(_session, index, error) {
+          expect(index).toBe(1);
+          expect(error).toBe(timedOut);
+          client.events.push('recover');
+          if (recovery === 'failed')
+            throw new Error('could not verify restart');
+          return recovery === 'verified';
+        },
+      });
+      const results = await runDesktopBatch(client, requests(3));
+      expect(client.events).toEqual([
+        'prepare',
+        'case 1',
+        'reset',
+        'reset',
+        'reset',
+        'recover',
+        ...(recovery === 'verified' ? ['case 2', 'case 3'] : []),
+        'dispose session',
+      ]);
+      expect(results[0]!.error).toBe('uncertain submit');
+      for (const result of results.slice(1)) {
+        if (recovery === 'verified') expect(result.error).toBeUndefined();
+        else
+          expect(result.error).toContain(
+            recovery === 'declined'
+              ? 'accessibility_scan_timeout'
+              : 'could not verify restart'
+          );
+      }
+    }
+  );
 
   it('submits nothing more when the app cannot be reset', async () => {
     let resets = 0;

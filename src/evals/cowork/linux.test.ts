@@ -959,6 +959,105 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     expect(await readFile(file, 'utf8')).toBe(original);
   });
 
+  const scanFailure = (error: string, action_count = 0) => ({
+    failed: true,
+    value: { status: 'failed', error, action_count, duration_ms: 1 },
+  });
+
+  async function failedReset(error: string, actions?: number) {
+    child.responses.push(scanFailure(error, actions));
+    return linuxCoworkPlatform.reset!(options()).then(
+      () => {
+        throw new Error('expected reset to fail');
+      },
+      (failure: unknown) => failure
+    );
+  }
+
+  it('restarts once after a reset scan timeout and rechecks settings, readiness and the blank task', async () => {
+    const { lifecycle, file, original } = await prepareOwned();
+    const prepared = await lifecycle;
+    const error = await failedReset('accessibility_scan_timeout');
+    child.exec.mockClear();
+    child.payloads.length = 0;
+    child.responses.push(
+      {},
+      {},
+      { value: { status: 'ready', action_count: 1, duration_ms: 1 } }
+    );
+    expect(await prepared.recoverReset!(error, Date.now() + 180_000)).toBe(
+      true
+    );
+    expect(
+      child.exec.mock.calls.map(([command, args]) =>
+        command === RESTART ? 'restart' : String(args[2])
+      )
+    ).toEqual(['restart', 'probe', 'reset']);
+    expect(child.exec.mock.calls[0]![2].timeout).toBeLessThanOrEqual(135_000);
+    expect(child.payloads.filter(Boolean)).toEqual(['{}', '{}']);
+    await prepared.dispose();
+    expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
+  it.each([
+    ['task_not_stopped', 0],
+    ['accessibility_scan_timeout', 4],
+  ] as const)(
+    'does not restart for an ineligible reset receipt (%s, %d actions)',
+    async (code, actions) => {
+      const { lifecycle } = await prepareOwned();
+      const prepared = await lifecycle;
+      const error = await failedReset(code, actions);
+      child.exec.mockClear();
+      expect(await prepared.recoverReset!(error, Date.now() + 180_000)).toBe(
+        false
+      );
+      expect(child.exec).not.toHaveBeenCalled();
+      await prepared.dispose();
+    }
+  );
+
+  it('does not enable recovery on a caller-owned desktop', async () => {
+    const prepared = await prepare();
+    expect(prepared.recoverReset).toBeUndefined();
+    await prepared.dispose();
+  });
+
+  it.each(['restart', 'probe', 'reset', 'deadline', 'settings'] as const)(
+    'refuses to resume when owned recovery fails at %s',
+    async (stage) => {
+      const { file, lifecycle } = await prepareOwned();
+      const prepared = await lifecycle;
+      const error = await failedReset('accessibility_scan_timeout');
+      child.exec.mockClear();
+      if (stage === 'settings') await writeFile(file, '{}');
+      if (stage === 'restart') child.responses.push({ failed: true });
+      if (stage === 'probe')
+        child.responses.push({}, scanFailure('accessibility_scan_timeout'));
+      if (stage === 'reset')
+        child.responses.push({}, {}, scanFailure('accessibility_scan_timeout'));
+      await expect(
+        prepared.recoverReset!(
+          error,
+          Date.now() + (stage === 'deadline' ? 1000 : 180_000)
+        )
+      ).rejects.toThrow('owned desktop recovery failed');
+      const expected = {
+        restart: ['restart'],
+        probe: ['restart', 'probe'],
+        reset: ['restart', 'probe', 'reset'],
+        deadline: [],
+        settings: [],
+      };
+      expect(
+        child.exec.mock.calls.map(([command, args]) =>
+          command === RESTART ? 'restart' : String(args[2])
+        )
+      ).toEqual(expected[stage]);
+      await prepared.dispose();
+    }
+  );
+
   it("lets Cowork reach public hosts unless the image or the eval names others; the eval's list wins", async () => {
     const egressOf = async (
       base: Record<string, unknown>,

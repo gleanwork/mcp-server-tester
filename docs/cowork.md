@@ -969,7 +969,13 @@ composer before continuing. Reset prefers the showing composer over offscreen
 leftovers and takes a fresh snapshot if a composer disappears during readback.
 Neither link sends anything. Each reset attempt has up to 30 seconds
 for accessibility reads and navigation; Linux Cowork retries a failed reset
-twice, after 10 and 20 seconds. First-party Linux reset first ends an
+twice, after 10 and 20 seconds. If the final reset reports
+`accessibility_scan_timeout` on an MST-owned third-party Linux desktop, MST
+restarts the desktop once. It checks the variant settings and desktop readiness,
+then verifies a fresh task with the same reset checks. Only then does MST submit
+the next case. If recovery fails, the remaining cases are not submitted. MST
+never restarts a caller-owned desktop this way and never resends the failed case.
+First-party Linux reset first ends an
 active task, proved by its terminal result: `Skip` on each open question page,
 then `Stop`, and, if the desktop cannot, from claude.ai through the source host.
 It opens a new-task link only when no Stop control is present.
