@@ -1,5 +1,10 @@
 /** The managed Linux Cowork driver's policy over a fake native UI. No desktop. */
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { runDesktopBatch } from '../desktopBatch.js';
+import type { ClientBatchRequest } from '../evalFrameworkTypes.js';
 import {
   accessibilityText,
   runThirdPartyLinux,
@@ -128,6 +133,10 @@ class FakeUi implements LinuxUi {
 
   async openCowork(): Promise<void> {
     throw new Error('the managed driver never opens the hosted Cowork URL');
+  }
+
+  async openBlankManagedTask(): Promise<void> {
+    throw new Error('a blank managed route was not expected');
   }
 
   async openNewTask(prompt: string): Promise<void> {
@@ -463,6 +472,28 @@ describe('reset', () => {
     expect(two.actions).toEqual([]);
   });
 
+  it.each([{ showing: false }, { enabled: false }])(
+    'leaves a running task alone when Stop cannot be acted on (%j)',
+    async (state) => {
+      const ui = new FakeUi();
+      ui.extra = [{ name: 'Stop response', ...state }];
+      expect((await run(ui, 'reset')).error).toBe('task_not_stopped');
+      expect(ui.actions).toEqual([]);
+      expect(ui.links).toBeUndefined();
+    }
+  );
+
+  it('does not navigate when the reset scan never finishes', async () => {
+    const ui = new FakeUi();
+    ui.snapshot = async () => new Promise(() => {});
+    const receipt = await run(ui, 'reset', {}, { timeout: 60 });
+    expect(receipt).toMatchObject({
+      error: 'accessibility_scan_timeout',
+      action_count: 0,
+    });
+    expect(ui.links).toBeUndefined();
+  });
+
   it('never takes the old task view for ready', async () => {
     // A failed case's view: no Start task, no mode switch, only the sidebar's
     // Cowork button, which the link leaves on screen.
@@ -488,6 +519,80 @@ describe('reset', () => {
     expect(outside.actions).toEqual([]);
   });
 
+  it('reads the showing composer instead of an offscreen leftover', async () => {
+    const ui = new FakeUi();
+    ui.extra = [
+      { name: COMPOSER, role: 'entry', showing: false },
+      { name: COMPOSER, role: 'entry' },
+    ];
+    const reads: boolean[] = [];
+    ui.readText = async (node) => {
+      reads.push(node.showing);
+      return node.showing ? '' : 'leftover';
+    };
+    expect(await run(ui, 'reset')).toMatchObject({
+      status: 'ready',
+      action_count: 1,
+    });
+    expect(reads).toEqual([true]);
+  });
+
+  it('does not choose between two showing composers', async () => {
+    const ui = new FakeUi();
+    ui.extra = [
+      { name: COMPOSER, role: 'entry' },
+      { name: COMPOSER, role: 'entry' },
+    ];
+    ui.readText = async () => {
+      throw new Error('ambiguous read');
+    };
+    expect(await run(ui, 'reset', {}, { timeout: 60 })).toMatchObject({
+      error: 'deadline_exceeded',
+      action_count: 1,
+    });
+    expect(ui.actions).toEqual([]);
+  });
+
+  it('rescans and reads the replacement composer when the old one goes defunct', async () => {
+    const ui = new FakeUi();
+    ui.extra = [{ name: COMPOSER, role: 'entry' }];
+    const reads: string[] = [];
+    ui.readText = async (node) => {
+      reads.push(node.id);
+      if (reads.length === 1) {
+        ui.extra.unshift({ name: 'new header' });
+        throw new LinuxUiError('accessibility_node_defunct');
+      }
+      return '';
+    };
+    expect(await run(ui, 'reset')).toMatchObject({
+      status: 'ready',
+      action_count: 1,
+    });
+    expect(reads).toHaveLength(2);
+    expect(reads[0]).not.toBe(reads[1]);
+    expect(ui.links).toEqual(['']);
+  });
+
+  it.each([
+    ['accessibility_node_defunct', 3],
+    ['accessibility_scan_timeout', 1],
+  ] as const)(
+    'fails closed when the composer read keeps failing (%s)',
+    async (error, attempts) => {
+      const ui = new FakeUi();
+      ui.extra = [{ name: COMPOSER, role: 'entry' }];
+      let reads = 0;
+      ui.readText = async () => {
+        reads++;
+        throw new LinuxUiError(error);
+      };
+      expect(await run(ui, 'reset')).toMatchObject({ error, action_count: 1 });
+      expect(reads).toBe(attempts);
+      expect(ui.links).toEqual(['']);
+    }
+  );
+
   it('fails on a draft the empty link left', async () => {
     const ui = new FakeUi();
     ui.prompt = 'is my email OK?';
@@ -505,6 +610,118 @@ describe('reset', () => {
     expect((await run(empty, 'reset')).status).toBe('ready');
     expect(empty.actions).toEqual([]);
   });
+});
+
+describe('reset between managed Cowork cases', () => {
+  it.each(['clears', 'keeps', 'resumes', 'wrong surface'] as const)(
+    'only submits the next case if alternate navigation clears the draft (%s)',
+    async (outcome) => {
+      const ui = new FakeUi();
+      ui.extra = [
+        { name: COMPOSER, role: 'entry', showing: false },
+        { name: COMPOSER, role: 'entry' },
+      ];
+      const activate = ui.activate.bind(ui);
+      const attempted: string[] = [];
+      ui.activate = async (node) => {
+        await activate(node);
+        if (node.name !== 'Start task') return;
+        attempted.push(ui.prompt!);
+        if (attempted.length === 1) {
+          // Start may have been dispatched; the composer still holds the draft.
+          ui.keepsDraft = true;
+          ui.hidden.add('Start task');
+          throw new LinuxUiError('action_acknowledgement_uncertain');
+        }
+      };
+      let alternateNavigations = 0;
+      ui.openBlankManagedTask = async () => {
+        alternateNavigations++;
+        if (outcome === 'resumes') {
+          ui.stops = ['Stop response'];
+          ui.stopLingers = 10_000;
+        }
+        if (outcome === 'wrong surface') {
+          ui.starts = [];
+          ui.radioSelected = false;
+        }
+        // Start can become disabled during navigation even with text present.
+        ui.startDisabled = true;
+        if (outcome === 'clears') {
+          ui.prompt = '';
+          ui.hidden.clear();
+          ui.whenOpened(() => {
+            ui.startDisabled = false;
+          });
+        }
+      };
+      const requests: ClientBatchRequest[] = ['one', 'two'].map((prompt) => ({
+        caseId: prompt,
+        trial: 0,
+        input: { prompt, servers: [] },
+        config: { type: 'cowork' },
+      }));
+      const directory = await mkdtemp(join(tmpdir(), 'mst-3p-reset-test-'));
+      try {
+        const results = await runDesktopBatch(
+          {
+            name: 'Cowork',
+            lease: { directory, file: 'desktop.lock' },
+            resetVerb: 'reset',
+            resetRetryDelaysMs: [0, 0],
+            secrets: [],
+            async prepare() {
+              return ui;
+            },
+            async runCase(current, { input }) {
+              const receipt = await submit(current, input.prompt);
+              return receipt.status === 'submitted'
+                ? {
+                    continuation: 'continue',
+                    result: { finalText: 'collected', events: [] },
+                  }
+                : {
+                    continuation: 'reset',
+                    result: { finalText: '', events: [], error: receipt.error },
+                  };
+            },
+            async reset(current) {
+              const receipt = await run(
+                current,
+                'reset',
+                {},
+                {
+                  timeout: 420,
+                  actions: 3,
+                }
+              );
+              if (receipt.status !== 'ready') throw new Error(receipt.error);
+            },
+            async dispose() {},
+          },
+          requests
+        );
+        expect(results[0]?.error).toBe('action_acknowledgement_uncertain');
+        expect(alternateNavigations).toBeGreaterThan(0);
+        if (outcome === 'clears') {
+          expect(alternateNavigations).toBe(1);
+          expect(attempted).toEqual(['one', 'two']);
+          expect(ui.links).toEqual(['one', '', 'two']);
+          expect(results[1]).toMatchObject({ finalText: 'collected' });
+        } else {
+          expect(attempted).toEqual(['one']);
+          expect(results[1]).toMatchObject({
+            diagnostics: { failureKind: 'not-submitted' },
+          });
+          expect(results[1]?.error).toContain(
+            outcome === 'resumes' ? 'task_not_stopped' : 'draft_not_cleared'
+          );
+        }
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+  );
 });
 
 describe('hitl', () => {

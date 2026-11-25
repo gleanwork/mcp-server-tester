@@ -534,9 +534,8 @@ async function desktopAdapter(
             process.stderr.write(
               `[mst:cowork] resetting the app before case ${index + 1}\n`
             );
-            // Each platform bounds its own reset (one action within 10
-            // seconds on Linux, eight Computer Use actions on macOS); this
-            // deadline only stops a stuck driver.
+            // Each platform bounds its own reset; this deadline only stops
+            // a stuck driver.
             await platform.reset!({
               deadlineAt: Date.now() + 180_000,
               model: computerUseModel,

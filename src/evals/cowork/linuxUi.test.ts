@@ -52,6 +52,15 @@ describe('coworkUi', () => {
     );
   });
 
+  it('opens the managed new-task route with no query parameter', async () => {
+    const desktop = transport();
+    await coworkUi(desktop).openBlankManagedTask();
+    expect(desktop.openLink).toHaveBeenCalledExactlyOnceWith(
+      'claude://claude.ai/new',
+      'open_task_failed'
+    );
+  });
+
   it('opens a new task with the prompt percent-encoded as its draft', async () => {
     const desktop = transport();
     await coworkUi(desktop).openNewTask('a b&c=d/é\n');

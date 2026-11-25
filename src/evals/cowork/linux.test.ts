@@ -623,8 +623,37 @@ describe('caller-owned Linux Cowork desktop', () => {
     expect(
       args.slice(args.indexOf('--mode'), args.indexOf('--mode') + 2)
     ).toEqual(['--mode', 'reset']);
-    // Stop response, and the new-task link: two actions, never a send.
-    expect(args[args.indexOf('--max-actions') + 1]).toBe('2');
+    // Stop response, the new-task link, and one alternate empty navigation.
+    expect(args[args.indexOf('--max-actions') + 1]).toBe('3');
+  });
+  it('allows a slow reset scan to finish without extending the caller deadline', async () => {
+    child.exec.mockImplementation((_command, args, _options, callback) => ({
+      stdin: {
+        on: vi.fn(),
+        end: () => {
+          const timeoutMs = Number(args[args.indexOf('--timeout-ms') + 1]);
+          const ready = timeoutMs > 12_000;
+          callback(
+            ready ? null : new Error('driver exited with a failed receipt'),
+            JSON.stringify({
+              status: ready ? 'ready' : 'failed',
+              action_count: ready ? 1 : 0,
+              duration_ms: Math.min(timeoutMs, 12_000),
+              ...(ready ? {} : { error: 'accessibility_scan_timeout' }),
+            })
+          );
+        },
+      },
+    }));
+    await linuxCoworkPlatform.reset!({
+      ...options(),
+      deadlineAt: Date.now() + 180_000,
+    });
+    expect(child.exec.mock.calls[0]?.[2]).toMatchObject({ timeout: 30_000 });
+    await expect(linuxCoworkPlatform.reset!(options())).rejects.toThrow(
+      'accessibility_scan_timeout'
+    );
+    expect(child.exec.mock.calls[1]?.[2].timeout).toBeLessThanOrEqual(10_000);
   });
   it('fails fast when the bound task waits on an AskUserQuestion answer', async () => {
     const pending = linuxCoworkPlatform.handleHitl({
