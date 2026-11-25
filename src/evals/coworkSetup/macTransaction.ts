@@ -830,7 +830,7 @@ export async function preflightMacCoworkSettings(
     await validateInstall(options);
   } catch {
     throw new Error(
-      `${ERROR}\nRun 'mst cowork setup' first if the Claude 3P profile library is missing.`
+      `${ERROR}\nRun 'mst clients setup cowork' first if the Claude 3P profile library is missing.`
     );
   }
 }

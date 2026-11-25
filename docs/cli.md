@@ -16,6 +16,7 @@ Before the package is installed (for example, running `init` in a new directory)
 - [token - Export Tokens for CI/CD](#token---export-tokens-for-cicd)
 - [datasets - Find Plugin Datasets](#datasets---find-plugin-datasets)
 - [clients - Find Clients](#clients---find-clients)
+- [clients setup and recover - Prepare and Recover a Client](#clients-setup-and-recover---prepare-and-recover-a-client)
 - [judges - Find Judges](#judges---find-judges)
 - [label - Label Judge Verdicts](#label---label-judge-verdicts)
 - [auth - Sign In to Connector Servers](#auth---sign-in-to-connector-servers)
@@ -26,8 +27,6 @@ Before the package is installed (for example, running `init` in a new directory)
 - [history - An Eval's Runs Over Time](#history---an-evals-runs-over-time)
 - [batch - Run Several Eval Configs](#batch---run-several-eval-configs)
 - [open - Open a Run's Report](#open---open-a-runs-report)
-- [cowork setup - Prepare Claude Desktop](#cowork-setup---prepare-claude-desktop)
-- [cowork restore-connectors - Restore Cloud Connector Settings](#cowork-restore-connectors---restore-cloud-connector-settings)
 - [desktop - Read What MST Sees of a Desktop App](#desktop---read-what-mst-sees-of-a-desktop-app)
 - [runner setup - Prepare a Runner](#runner-setup---prepare-a-runner)
 
@@ -821,6 +820,26 @@ Plugins add `description` and `requirements` (`os`, `install`, `credentials`, `s
 
 Options: `--plugins <modules...>`, `-c, --config <path>` (an eval config's plugins), `--json`, `--root-dir <dir>`, as for [`datasets`](#datasets---find-plugin-datasets).
 
+## `clients setup` and `recover` - Prepare and Recover a Client
+
+```bash
+npx mst clients setup <client>
+npx mst clients recover <client> [--recover-stale-lock]
+```
+
+`setup` prepares this machine for a client, once. `recover` puts back what a stopped run of a client left changed on this machine or account. Neither runs an eval. Each calls the client's own `setup` or `recover` hook, so built-in and plugin clients work the same way. A client without the hook needs nothing, and the command says so and exits 0.
+
+The built-in clients with hooks:
+
+- **`cowork` `setup`** creates or checks the empty Claude 3P profile that the default third-party mode uses on macOS. Then launch Claude Desktop, sign in, open one conversation and quit it. Skip this for first-party mode, which uses the signed-in app. See [First-time macOS setup](./cowork.md#first-time-macos-setup).
+- **`cowork` `recover`** restores the account connector permissions that a killed first-party run left in its recovery journal, on macOS. It does not drive the app. It reads the recorder port from the shell (`MST_CLAUDE_AI_DEBUG_PORT`), not from an eval config. It restores only after the account, concurrent-edit, write-outcome and task-completion checks pass, and otherwise keeps the journal and desktop lock. A task still running is first ended from claude.ai (Skip on an open question, then Stop; never an answer or approval), and a transient claude.ai refusal is retried with a page reload. See [Recover connector settings](./cowork.md#recover-connector-settings).
+
+`--recover-stale-lock` removes a desktop lease only when its local owner is provably stopped. A live or unknown owner still fails. It does not prove a cloud task finished or a write settled.
+
+Options: `--plugins <modules...>` and `--root-dir <dir>`, for a plugin's client. The client gets its plugin's settings from the `mst.config.json` at or above `--root-dir`. There is no `--config`: these commands run no eval.
+
+A plugin adds the hooks to its client definition as `setup(context)` and `recover(context)`. `context.print(line)` writes a line to stdout, `context.settings` holds the plugin's settings, and `recover` also gets `context.recoverStaleLock`. A hook that can't finish safely throws, and the command exits 1 with its message.
+
 ## `judges` - Find Judges
 
 Lists the judges an eval config can use, built-in and from plugins, and shows what one requires and the options it takes.
@@ -1288,23 +1307,6 @@ npx mst open --history --config ./eval.json --print
 ```
 
 The report has the same sections for every eval: **Result** (each variant clearly better, clearly worse, or unclear against the baseline), **Variants compared** (pass rate, judge score, pairwise preference, cost, time, tools used; _Show statistics_ adds 95% ranges, p-values and pass^k), **What differs** (each variant's setup next to the baseline's), **Case by case** (every trial with its transcript, each grader's score and the pairwise preference) and **Why trials failed**. Every pass rate has its likely range, and a run too thin to pin them down says so and what to run next. A run with one variant has the same sections, with one column, and opens on the cases that need attention, if any do. A run that stored responses redacted (the default, `redactStoredResponses`) shows no answers or tool outputs; set `redactStoredResponses: false` in the eval config to keep them.
-
-## `cowork setup` - Prepare Claude Desktop
-
-```bash
-npx mst cowork setup
-```
-
-Initialises or validates the empty Claude profile used by default third-party mode on macOS. Skip this command for first-party mode, which uses the existing signed-in app. See [Claude Desktop in MST](./cowork.md).
-
-## `cowork restore-connectors` - Restore Cloud Connector Settings
-
-```bash
-export MST_CLAUDE_AI_DEBUG_PORT=9222   # if the recorder port is not the default
-npx mst cowork restore-connectors [--recover-stale-lock]
-```
-
-Restores the account connector permissions that a killed first-party `cowork` run left in its recovery journal, on macOS. It runs no eval and does not drive the app. It reads the recorder port from the shell, not from an eval config. It restores only after the account, concurrent-edit, write-outcome and task-completion checks pass, and otherwise keeps the journal and desktop lock. A task still running is first ended from claude.ai (Skip on an open question, then Stop; never an answer or approval), and a transient claude.ai refusal is retried with a page reload. `--recover-stale-lock` removes a desktop lease only when its local owner is provably dead; it does not prove a cloud task finished or a write settled. See [Recover connector settings](./cowork.md#recover-connector-settings).
 
 ## `desktop` - Read What MST Sees of a Desktop App
 

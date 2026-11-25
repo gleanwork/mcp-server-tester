@@ -82,15 +82,15 @@ A Playwright project's `use.mcpConfig`, an eval config's `servers` entries, and 
 
 ## Clients
 
-| Client                      | What it is                                                           | Runs                                  |
-| --------------------------- | -------------------------------------------------------------------- | ------------------------------------- |
-| `api`                       | The model alone, through its provider's API, with the servers' tools | Playwright and `mst run`              |
-| `claude-code`               | Claude Code, with an empty config directory                          | `mst run`                             |
-| `cowork`                    | Claude Desktop (each trial is a Cowork session)                      | `mst run` (macOS: `mst cowork setup`) |
-| `codex-cli`                 | The Codex CLI, headless                                              | `mst run`                             |
-| `chatgpt`                   | The ChatGPT desktop app                                              | `mst run`                             |
-| `codex-app`                 | The Codex surface of the ChatGPT desktop app                         | `mst run`                             |
-| `<namespace>/client/<name>` | A plugin's client                                                    | `mst run`                             |
+| Client                      | What it is                                                           | Runs                                          |
+| --------------------------- | -------------------------------------------------------------------- | --------------------------------------------- |
+| `api`                       | The model alone, through its provider's API, with the servers' tools | Playwright and `mst run`                      |
+| `claude-code`               | Claude Code, with an empty config directory                          | `mst run`                                     |
+| `cowork`                    | Claude Desktop (each trial is a Cowork session)                      | `mst run` (macOS: `mst clients setup cowork`) |
+| `codex-cli`                 | The Codex CLI, headless                                              | `mst run`                                     |
+| `chatgpt`                   | The ChatGPT desktop app                                              | `mst run`                                     |
+| `codex-app`                 | The Codex surface of the ChatGPT desktop app                         | `mst run`                                     |
+| `<namespace>/client/<name>` | A plugin's client                                                    | `mst run`                                     |
 
 The `api` client needs `ai`, its provider's package (such as `@ai-sdk/anthropic`) and the API key. Options and the other clients' needs: `write-mcp-eval`.
 
@@ -128,7 +128,7 @@ An extension's name is `<namespace>/<kind>/<name>`, where the kind comes from th
 | `mst auth --config <path>`                      | Sign in to an eval config's connector servers (`status`, `revoke`)                                                         |
 | `mst optimize start --config <path>`            | Improve tool metadata a round at a time (`optimize-mcp-tool-metadata`)                                                     |
 | `mst runner setup docker`, `mst runs list`      | Prepare Docker; follow detached runs                                                                                       |
-| `mst cowork setup`                              | Prepare Claude Desktop's profile for the `cowork` client (macOS)                                                           |
+| `mst clients setup <client>`                    | Prepare this machine for a client, once (`cowork`: Claude Desktop's profile on macOS); `recover` undoes a stopped run      |
 
 No command needs a terminal. In one, `init` and `generate` ask for what the flags leave out; in an agent's shell they take every answer from flags and name the flag they need. `generate` without `--tool` asks which tools to call, so an agent passes `--tool`. Without a terminal, `mst login` prints the sign-in URL instead of opening a browser and waits: run it in the background and give the user the URL. `2.0.0-rc.0` and older fail in an agent's shell with `Raw mode is not supported on the current process.stdin`; upgrade it.
 

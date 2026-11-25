@@ -117,6 +117,16 @@ describe('assertPlugin', () => {
     ],
     [
       'clients',
+      { schema, run: async () => ({}), setup: 'mst cowork setup' },
+      'clients.x: setup must be a function',
+    ],
+    [
+      'clients',
+      { schema, run: async () => ({}), recover: true },
+      'clients.x: recover must be a function',
+    ],
+    [
+      'clients',
       { schema, open: async () => ({}), runBatch: async () => [] },
       'clients.x: runBatch was removed; implement open(options, context)',
     ],

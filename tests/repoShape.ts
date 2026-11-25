@@ -138,14 +138,10 @@ const PRODUCT_CODE = [
 
 /**
  * The client boundary: the files that may import product code. They add the
- * built-in clients, export a product's public names, or are a product's own
- * CLI command.
+ * built-in clients or export a product's public names. A product's commands
+ * are its client's hooks (`mst clients setup|recover`), not CLI code.
  */
-const CLIENT_BOUNDARY = [
-  /^src\/evals\/builtinClients\.ts$/,
-  /^src\/entries\//,
-  /^src\/cli\/commands\/cowork\//,
-];
+const CLIENT_BOUNDARY = [/^src\/evals\/builtinClients\.ts$/, /^src\/entries\//];
 
 /**
  * The core files that import product code today, as `importer -> imported`.

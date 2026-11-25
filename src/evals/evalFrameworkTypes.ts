@@ -481,6 +481,21 @@ export interface ClientRequirements {
   readonly setup?: readonly string[];
 }
 
+/** What `mst clients setup` gives a client's `setup`. */
+export interface ClientSetupContext extends SettingsContext {
+  /** Writes a line for the person running the command (stdout). */
+  readonly print: (line: string) => void;
+}
+
+/** What `mst clients recover` gives a client's `recover`. */
+export interface ClientRecoverContext extends ClientSetupContext {
+  /**
+   * `--recover-stale-lock`: the person asked to remove a desktop lease whose
+   * local owner is provably stopped. A live or unknown owner still refuses.
+   */
+  readonly recoverStaleLock: boolean;
+}
+
 /** Public client extension point. */
 export interface ClientDefinition {
   readonly schema: ZodType;
@@ -522,6 +537,18 @@ export interface ClientDefinition {
    * Without it, a client gets the desktop.
    */
   readonly headless?: boolean;
+  /**
+   * Prepares this machine for the client, once (`mst clients setup <client>`):
+   * for example, creates an app profile. Runs no eval. Says what it did, and
+   * any step left to the person, through `context.print`.
+   */
+  setup?(context: ClientSetupContext): Promise<void>;
+  /**
+   * Puts back what a run that was stopped left changed on this machine or
+   * account (`mst clients recover <client>`). Runs no eval. Refuses, by
+   * throwing, when it can't prove the restore is safe.
+   */
+  recover?(context: ClientRecoverContext): Promise<void>;
   /**
    * Opens one session with fixed options/model/servers/environment. MST
    * prefers open for collection when both entry points exist. A definition

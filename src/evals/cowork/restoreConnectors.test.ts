@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { restoreCoworkConnectorsCommand } from '../../cli/commands/cowork/index.js';
+import { recoverClient } from '../../cli/commands/clients/index.js';
 import { claimDesktopLease } from '../desktopBatch.js';
 import { coworkDesktopLease } from './desktopLease.js';
 import { restoreCoworkConnectors } from './restoreConnectors.js';
@@ -781,17 +781,18 @@ describe('restore-only Cowork connector recovery', () => {
   });
 
   it('prints the actual missing-journal and restored outcomes in the CLI handler', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await restoreCoworkConnectorsCommand({});
-    expect(log).toHaveBeenLastCalledWith(
-      'No Claude account connector recovery journal was found; no settings were changed.'
+    const printed: string[] = [];
+    const print = (text: string) => printed.push(text);
+    await recoverClient('cowork', {}, print);
+    expect(printed.at(-1)).toBe(
+      'No Claude account connector recovery journal was found; no settings were changed.\n'
     );
     await writeJournal();
     chrome = await fakeChrome(state());
     vi.stubEnv('MST_CLAUDE_AI_DEBUG_PORT', chrome.env.MST_CLAUDE_AI_DEBUG_PORT);
-    await restoreCoworkConnectorsCommand({});
-    expect(log).toHaveBeenLastCalledWith(
-      'Restored Claude account connector settings from the recovery journal.'
+    await recoverClient('cowork', {}, print);
+    expect(printed.at(-1)).toBe(
+      'Restored Claude account connector settings from the recovery journal.\n'
     );
   });
 });
