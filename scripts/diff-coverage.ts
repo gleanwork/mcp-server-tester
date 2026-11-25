@@ -21,6 +21,10 @@
  *
  * A path with no line range excuses every line of the file. The check reads
  * the description when it runs, so after editing it, re-run the job.
+ *
+ * A changed file the unit coverage has no entry for fails: the check can't
+ * tell which of its lines run. Vitest's coverage includes every file in
+ * `src/`, so that only happens when `vitest.config.mts` excludes one.
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -200,6 +204,14 @@ export function uncoveredLines(
   return uncovered;
 }
 
+/** The changed files the unit coverage has no entry for. */
+export function unmappedFiles(
+  changed: LinesByFile,
+  hits: HitsByFile
+): string[] {
+  return [...changed.keys()].filter((file) => !hits.has(file));
+}
+
 /** Splits uncovered lines into those `## Untested` excuses and the rest. */
 export function applyUntested(
   uncovered: LinesByFile,
@@ -253,6 +265,10 @@ export function report(
     uncoveredLines(changed, hits),
     untested.entries
   );
+  const unmapped = unmappedFiles(changed, hits);
+  const unmappedFailing = unmapped.filter(
+    (file) => !untested.entries.some((entry) => entry.file === file)
+  );
   const out: string[] = [];
   for (const line of untested.invalid) {
     out.push(`## Untested item names no \`path\` or gives no reason: ${line}`);
@@ -260,7 +276,19 @@ export function report(
   for (const [file, lines] of excused) {
     out.push(`Excused by ## Untested: ${file}:${formatRanges(lines)}`);
   }
-  if (failing.size === 0 && untested.invalid.length === 0) {
+  for (const file of unmapped.filter((f) => !unmappedFailing.includes(f))) {
+    out.push(`Excused by ## Untested: ${file}`);
+  }
+  for (const file of unmappedFailing) {
+    out.push(
+      `${file} changed but has no unit coverage, so no line of it can be checked. Remove what excludes it from coverage in vitest.config.mts.`
+    );
+  }
+  if (
+    failing.size === 0 &&
+    unmappedFailing.length === 0 &&
+    untested.invalid.length === 0
+  ) {
     out.push(`Every changed line in src/ that has a statement runs in a test.`);
     return { ok: true, text: out.join('\n') };
   }
@@ -283,8 +311,16 @@ export function report(
 }
 
 /** `::error` annotations, so GitHub marks the lines in the diff. */
-export function annotations(failing: LinesByFile): string[] {
+export function annotations(
+  failing: LinesByFile,
+  unmapped: string[] = []
+): string[] {
   const out: string[] = [];
+  for (const file of unmapped) {
+    out.push(
+      `::error file=${file},title=No coverage for this file::vitest.config.mts excludes it from coverage, so the check cannot tell which lines run.`
+    );
+  }
   for (const [file, lines] of failing) {
     const sorted = [...lines].sort((a, b) => a - b);
     for (const range of formatRanges(sorted).split(', ')) {
@@ -373,7 +409,10 @@ async function main(): Promise<void> {
       uncoveredLines(changed, hits),
       untested.entries
     );
-    for (const line of annotations(failing)) console.log(line);
+    const unmapped = unmappedFiles(changed, hits).filter(
+      (file) => !untested.entries.some((entry) => entry.file === file)
+    );
+    for (const line of annotations(failing, unmapped)) console.log(line);
   }
   process.exitCode = result.ok ? 0 : 1;
 }
