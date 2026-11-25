@@ -21,6 +21,8 @@ export interface LinuxUi {
   /** The prompt, entered once in the specified entry. The driver verifies the result. */
   paste(node: LinuxUiNode, text: string): Promise<void>;
   openCowork(): Promise<void>;
+  /** Open the managed new-task route without a draft parameter. Never sends. */
+  openBlankManagedTask(): Promise<void>;
   /** One new-task link with `prompt` as its draft (empty for a blank task). Never sends. */
   openNewTask(prompt: string): Promise<void>;
   /** Stop input, then allow at most one extra second solely for modifier cleanup. */
@@ -44,6 +46,9 @@ export function coworkUi(ui: DesktopUi): LinuxUi {
     paste: (node, text) => ui.enterText(node, text),
     async openCowork() {
       await ui.openLink('claude://cowork/new', 'open_cowork_failed');
+    },
+    async openBlankManagedTask() {
+      await ui.openLink('claude://claude.ai/new', 'open_task_failed');
     },
     async openNewTask(prompt) {
       if (hasLoneSurrogate(prompt)) throw new DesktopUiError('invalid_prompt');

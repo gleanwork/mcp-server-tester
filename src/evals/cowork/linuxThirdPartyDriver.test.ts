@@ -135,6 +135,10 @@ class FakeUi implements LinuxUi {
     throw new Error('the managed driver never opens the hosted Cowork URL');
   }
 
+  async openBlankManagedTask(): Promise<void> {
+    throw new Error('a blank managed route was not expected');
+  }
+
   async openNewTask(prompt: string): Promise<void> {
     this.onOpen?.(prompt);
     this.links = [...(this.links ?? []), prompt];
@@ -515,6 +519,80 @@ describe('reset', () => {
     expect(outside.actions).toEqual([]);
   });
 
+  it('reads the showing composer instead of an offscreen leftover', async () => {
+    const ui = new FakeUi();
+    ui.extra = [
+      { name: COMPOSER, role: 'entry', showing: false },
+      { name: COMPOSER, role: 'entry' },
+    ];
+    const reads: boolean[] = [];
+    ui.readText = async (node) => {
+      reads.push(node.showing);
+      return node.showing ? '' : 'leftover';
+    };
+    expect(await run(ui, 'reset')).toMatchObject({
+      status: 'ready',
+      action_count: 1,
+    });
+    expect(reads).toEqual([true]);
+  });
+
+  it('does not choose between two showing composers', async () => {
+    const ui = new FakeUi();
+    ui.extra = [
+      { name: COMPOSER, role: 'entry' },
+      { name: COMPOSER, role: 'entry' },
+    ];
+    ui.readText = async () => {
+      throw new Error('ambiguous read');
+    };
+    expect(await run(ui, 'reset', {}, { timeout: 60 })).toMatchObject({
+      error: 'deadline_exceeded',
+      action_count: 1,
+    });
+    expect(ui.actions).toEqual([]);
+  });
+
+  it('rescans and reads the replacement composer when the old one goes defunct', async () => {
+    const ui = new FakeUi();
+    ui.extra = [{ name: COMPOSER, role: 'entry' }];
+    const reads: string[] = [];
+    ui.readText = async (node) => {
+      reads.push(node.id);
+      if (reads.length === 1) {
+        ui.extra.unshift({ name: 'new header' });
+        throw new LinuxUiError('accessibility_node_defunct');
+      }
+      return '';
+    };
+    expect(await run(ui, 'reset')).toMatchObject({
+      status: 'ready',
+      action_count: 1,
+    });
+    expect(reads).toHaveLength(2);
+    expect(reads[0]).not.toBe(reads[1]);
+    expect(ui.links).toEqual(['']);
+  });
+
+  it.each([
+    ['accessibility_node_defunct', 3],
+    ['accessibility_scan_timeout', 1],
+  ] as const)(
+    'fails closed when the composer read keeps failing (%s)',
+    async (error, attempts) => {
+      const ui = new FakeUi();
+      ui.extra = [{ name: COMPOSER, role: 'entry' }];
+      let reads = 0;
+      ui.readText = async () => {
+        reads++;
+        throw new LinuxUiError(error);
+      };
+      expect(await run(ui, 'reset')).toMatchObject({ error, action_count: 1 });
+      expect(reads).toBe(attempts);
+      expect(ui.links).toEqual(['']);
+    }
+  );
+
   it('fails on a draft the empty link left', async () => {
     const ui = new FakeUi();
     ui.prompt = 'is my email OK?';
@@ -539,7 +617,10 @@ describe('reset between managed Cowork cases', () => {
     'only submits the next case if alternate navigation clears the draft (%s)',
     async (outcome) => {
       const ui = new FakeUi();
-      ui.extra = [{ name: COMPOSER, role: 'entry' }];
+      ui.extra = [
+        { name: COMPOSER, role: 'entry', showing: false },
+        { name: COMPOSER, role: 'entry' },
+      ];
       const activate = ui.activate.bind(ui);
       const attempted: string[] = [];
       ui.activate = async (node) => {
@@ -554,7 +635,7 @@ describe('reset between managed Cowork cases', () => {
         }
       };
       let alternateNavigations = 0;
-      ui.openCowork = async () => {
+      ui.openBlankManagedTask = async () => {
         alternateNavigations++;
         if (outcome === 'resumes') {
           ui.stops = ['Stop response'];

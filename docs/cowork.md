@@ -917,9 +917,11 @@ case. On third-party Linux the reset first stops the failed case's task if it st
 task past its deadline, or one waiting on a prompt): it clicks the task's Stop
 response and waits until it's gone. A task that won't stop fails the reset
 (`task_not_stopped`). The reset then opens an empty new-task deep link. If a
-known composer still holds a draft after navigation, it tries the empty Cowork
-route once and must see a disabled Start task and an empty composer before
-continuing. Neither link sends anything. Each reset attempt has up to 30 seconds
+known composer still holds a draft after navigation, it tries the parameterless
+managed new-task route once and must see a disabled Start task and an empty
+composer before continuing. Reset prefers the showing composer over offscreen
+leftovers and takes a fresh snapshot if a composer disappears during readback.
+Neither link sends anything. Each reset attempt has up to 30 seconds
 for accessibility reads and navigation; Linux Cowork retries a failed reset
 twice, after 10 and 20 seconds. First-party Linux reset first ends an
 active task, proved by its terminal result: `Skip` on each open question page,

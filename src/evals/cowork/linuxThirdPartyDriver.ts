@@ -16,11 +16,7 @@ const SCAN_INCOMPLETE = new Set([
   'accessibility_tree_budget',
   'accessibility_scan_timeout',
 ]);
-/**
- * Reads that fail while the tree changes under a scan: a node gone mid-read, a
- * child reference that is already null, or a node that moved under another
- * parent and so appears twice. The scan is repeated, never an action.
- */
+/** Reads that can fail while the accessibility tree changes. */
 const TRANSIENT = new Set([
   'accessibility_dbus_error',
   'accessibility_node_defunct',
@@ -28,6 +24,10 @@ const TRANSIENT = new Set([
   'accessibility_tree_invalid',
 ]);
 const SCAN_ATTEMPTS = 3;
+
+function isTransientUiRead(error: unknown): boolean {
+  return error instanceof LinuxUiError && TRANSIENT.has(error.code);
+}
 /** Claude Desktop truncates longer new-task links; paste those prompts instead. */
 const DEEP_LINK_PROMPT_CHARS = 14_336;
 const PASTE_CHECK_CHARS = 200;
@@ -265,7 +265,7 @@ class ThirdPartyDriver {
 
   async reset(): Promise<ThirdPartyReceipt> {
     // Stop, then open an empty new-task link. If it leaves a draft, try the
-    // app's parameterless Cowork route once. Neither link sends or types.
+    // parameterless managed route once. Neither link sends or types.
     const stopped = await this.stopRunningTask();
     const ready = (): ThirdPartyReceipt => ({
       ...this.receipt('ready'),
@@ -278,6 +278,7 @@ class ThirdPartyDriver {
       Math.min(RESET_DRAFT_GRACE_MS, (this.scanDeadline - navigatedAt) / 2);
     let draft = false;
     let recovered = false;
+    let composerReadFailures = 0;
     for (;;) {
       if (Date.now() >= this.scanDeadline)
         throw new DriverFailure(
@@ -295,7 +296,11 @@ class ThirdPartyDriver {
         enabled: false,
         showing: false,
       });
-      const entry = entries.length === 1 ? entries[0] : undefined;
+      // Navigation can leave an old, offscreen composer in the tree. If no
+      // entry is showing, a sole offscreen composer can still hold the draft.
+      const showing = entries.filter((node) => node.showing);
+      const composers = showing.length ? showing : entries;
+      const entry = composers.length === 1 ? composers[0] : undefined;
       // The sidebar button proves nothing. An unselected mode radio lets the
       // next submit select Cowork, unless a draft has already been seen.
       const radios =
@@ -305,10 +310,24 @@ class ThirdPartyDriver {
       const start = starts.length === 1 ? starts[0] : undefined;
       if (start?.enabled) draft = true;
       else if (start || (radios.length === 1 && !radios[0]!.selected)) {
-        if (!draft && !entries.length) return ready();
+        if (!draft && !entries.length && !composerReadFailures) return ready();
         if (entry) {
           // Start task can be disabled during navigation even with a draft.
-          if (!(await this.ui.readText(entry)).trim()) {
+          let text: string;
+          try {
+            text = await this.ui.readText(entry);
+          } catch (error) {
+            // A vanished node must be found again in a fresh snapshot. This
+            // retries only the read, never the navigation or a submit.
+            if (
+              !isTransientUiRead(error) ||
+              ++composerReadFailures >= SCAN_ATTEMPTS
+            )
+              throw error;
+            continue;
+          }
+          composerReadFailures = 0;
+          if (!text.trim()) {
             this.remaining();
             return ready();
           }
@@ -316,7 +335,7 @@ class ThirdPartyDriver {
         }
       }
       if (start && draft && entry && !recovered && Date.now() >= recoverAt) {
-        await this.action(() => this.ui.openCowork());
+        await this.action(() => this.ui.openBlankManagedTask());
         recovered = true;
         continue;
       }
@@ -613,12 +632,7 @@ export async function scanLinuxUi(
         }),
       ]);
     } catch (error) {
-      if (
-        attempt >= SCAN_ATTEMPTS ||
-        !(error instanceof LinuxUiError) ||
-        !TRANSIENT.has(error.code)
-      )
-        throw error;
+      if (attempt >= SCAN_ATTEMPTS || !isTransientUiRead(error)) throw error;
     } finally {
       clearTimeout(timer);
     }

@@ -80,6 +80,9 @@ class AccountUi implements LinuxUi {
     this.actions.push('open cowork');
     if (!this.keepDraft) this.prompt = '';
   }
+  async openBlankManagedTask(): Promise<void> {
+    throw new Error('the first-party driver never opens the managed route');
+  }
   async openNewTask(): Promise<void> {
     throw new Error('the first-party driver never opens a new-task link');
   }
