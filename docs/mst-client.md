@@ -444,7 +444,7 @@ A recommendation should mean the evidence supports it, so `runToolOptimization` 
 **What these checks can't tell you:**
 
 - "No clear breakage" means the tests found none, not that none happened. With 5 trials per case, one case breaking outright can be caught on its own only when there are at most 12 regression cases; the report says when your run is too small. Breakage spread across cases is caught by the group test.
-- With one trial per case, only large changes show up as clear. In simulation, a variant that fixed most failing cases was recommended 30% of the time with 1 trial per case, 87% with 5 and 97% with 10. Use `defaultLlmIterations` or per-case `trials` of 5 or more.
+- With one trial per case, only large changes show up as clear. In simulation, a variant that fixed most failing cases was recommended 30% of the time with 1 trial per case, 87% with 5 and 97% with 10. Set `trials` to 5 or more, in the eval config or on each case.
 - Cases are treated as independent. Near-duplicate prompts count as separate evidence and make results look surer than they are. Miller recommends clustered standard errors for grouped questions; they aren't supported yet.
 
 Seeded simulations in `src/evals/variantComparison.test.ts` pin these error rates. A variant identical to the baseline is called clearly better less than 5% of the time and broken less than 7.5% of the time, while a real improvement is still found more than 75% of the time.

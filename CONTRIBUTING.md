@@ -86,7 +86,20 @@ npm ci
 npm start        # http://localhost:3000, reloads as you edit docs/
 ```
 
-A new page needs an entry in `website/sidebars.ts`. `npm run build` fails on a broken link, including a relative link to a repo file that doesn't exist. After a build, `npm run test:site` (at the repo root) tests the site's MCP server with MST.
+A new page needs an entry in `website/sidebars.ts`. `npm run build` fails on a broken link, including a relative link to a repo file that doesn't exist. After a build, `npm run test:site` (at the repo root) tests the site's MCP server with MST and renders every Mermaid diagram.
+
+### Keeping the Docs True
+
+These checks fail when a page stops matching the code:
+
+- `tests/docsDrift.test.ts` (in `npm test`, after `npm run build`): every `mst` command and flag a page shows is in the CLI, every name a code example imports from the package is exported from that entry point, every code name in backticks is in the repo, and every link to a repo file resolves.
+- `src/evals/docsExamples.test.ts`: every eval config and dataset in `docs/` loads.
+- `npm run docs:check`: snippets marked with a source file and line range match that source.
+- `tests/site/diagrams.spec.ts` (in `npm run test:site`): every Mermaid diagram renders.
+
+ADRs and migration guides record a moment, so only their links and diagrams are checked. When a page must name another project's setting or method in backticks, add it to `OTHER_PROJECTS_NAMES` in `tests/docsDrift.test.ts` with the reason.
+
+No check can tell whether prose still describes what the code does. When you change how something works, search `docs/` for it and update the page in the same pull request.
 
 ### Making Changes
 

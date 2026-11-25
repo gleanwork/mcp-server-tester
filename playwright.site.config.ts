@@ -12,6 +12,10 @@ const SITE_PORT = 3459;
  *
  * The main config (playwright.config.ts) ignores tests/site/, so its runs
  * don't need a built site.
+ *
+ * The `diagrams` project renders every Mermaid diagram in the repo's
+ * Markdown in a browser. It reads the site's Mermaid package, and it needs
+ * the build too, because `webServer` starts for every project.
  */
 export default defineConfig({
   testDir: './tests/site',
@@ -27,16 +31,20 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
   },
-  projects: protocolMatrix(
-    {
-      name: 'site',
-      use: {
-        mcpConfig: {
-          transport: 'http' as const,
-          serverUrl: `http://localhost:${SITE_PORT}/mcp`,
+  projects: [
+    ...protocolMatrix(
+      {
+        name: 'site',
+        testIgnore: /diagrams\.spec\.ts/,
+        use: {
+          mcpConfig: {
+            transport: 'http' as const,
+            serverUrl: `http://localhost:${SITE_PORT}/mcp`,
+          },
         },
       },
-    },
-    ['legacy', '2026-07-28']
-  ),
+      ['legacy', '2026-07-28']
+    ),
+    { name: 'diagrams', testMatch: /diagrams\.spec\.ts/ },
+  ],
 });

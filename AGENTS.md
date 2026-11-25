@@ -207,7 +207,7 @@ npm run test:playwright     # Integration tests (Playwright)
 
 # The docs site (the CI website job)
 (cd website && npm ci && npm run typecheck && npm test && npm run build && npm run smoke)
-npm run test:site           # The site's MCP server, tested with MST
+npm run test:site           # The site's MCP server, tested with MST, and every Mermaid diagram
 ```
 
 If `format:check` or `lint` fails, run `npm run format` or `npm run lint:fix` to auto-fix, then re-check. If `docs:check` fails with "content-mismatch", update the snippet line range in the markdown file to match the current source. If `build:check` fails with `... is imported from external module ... but never used in "dist/..."`, a bundle uses part of a module whose other code needs that import: move that code into its own module (as `toolSurfaceProxyServer.ts` and `writeRecordFormat.ts` are) rather than silencing the warning.
