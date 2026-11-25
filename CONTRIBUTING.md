@@ -67,6 +67,11 @@ npm run test:watch
 
 # Integration tests (Playwright)
 npm run test:playwright
+
+# Unit tests and use cases with coverage, then the check that every line
+# you changed in src/ runs in a test (CI's diff-coverage job)
+npm run test:coverage
+npm run coverage:diff
 ```
 
 Before you push, run the checks in the pre-push checklist in [AGENTS.md](./AGENTS.md#pre-push-checklist). They are the checks CI runs.

@@ -23,6 +23,14 @@ const LIBRARY_EXTERNAL = [
   ...OPTIONAL_JUDGE_SDKS,
 ];
 
+/**
+ * Source maps for the bundles that run as their own process (the CLI, the
+ * desktop drivers, the dry-run proxy). The package ships them without maps;
+ * `npm run test:coverage` builds them with maps so the coverage of a test's
+ * child process maps back to `src/` (scripts/diff-coverage.ts).
+ */
+const PROCESS_SOURCEMAPS = process.env.MST_COVERAGE === '1';
+
 export default defineConfig([
   // Library build (ESM). The root and public subpaths share chunks, so registries and
   // classes are one instance whichever subpath a caller imports them from.
@@ -68,7 +76,7 @@ export default defineConfig([
     format: ['esm'],
     dts: false,
     splitting: false,
-    sourcemap: false,
+    sourcemap: PROCESS_SOURCEMAPS,
     treeshake: true,
     minify: false,
     outDir: 'dist/cli',
@@ -91,7 +99,7 @@ export default defineConfig([
     format: ['esm'],
     dts: false,
     splitting: false,
-    sourcemap: false,
+    sourcemap: PROCESS_SOURCEMAPS,
     treeshake: true,
     minify: false,
     outDir: 'dist/cowork',
@@ -103,7 +111,7 @@ export default defineConfig([
     format: ['esm'],
     dts: false,
     splitting: false,
-    sourcemap: false,
+    sourcemap: PROCESS_SOURCEMAPS,
     treeshake: true,
     minify: false,
     outDir: 'dist/chatgpt',
@@ -117,7 +125,7 @@ export default defineConfig([
     format: ['esm'],
     dts: false,
     splitting: false,
-    sourcemap: false,
+    sourcemap: PROCESS_SOURCEMAPS,
     treeshake: true,
     minify: false,
     outDir: 'dist/proxy',

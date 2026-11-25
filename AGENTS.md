@@ -183,7 +183,9 @@ Every change that adds behavior adds a test that fails without it, in the same P
 - Each new branch, including error, fallback and non-interactive paths, such as no TTY, a missing file or a failed read. A happy-path test doesn't cover them.
 - Each new process, server or proxy a command starts, through the command that starts it. A test of the module alone doesn't show the command starts it.
 
-If a path can't be tested, say why in the PR description.
+CI enforces this. The `diff-coverage` job fails a PR when a line it adds or changes in `src/` runs in no test, and marks each such line in the diff (`scripts/diff-coverage.ts`). It reads coverage from the unit tests and the use cases, including the processes they start, such as the built `mst` binary (`scripts/test-coverage.ts`). The Playwright specs and the report UI in `src/reporters/ui-src/` are not covered. CI runs on Linux, so a test that runs only on macOS doesn't count. Run it locally with `npm run test:coverage` and then `npm run coverage:diff`.
+
+If a path can't be tested, name it under an `## Untested` heading in the PR description, with the reason. Put one list item per path, as ``- `src/evals/cowork/macos.ts`: drives the macOS app`` for the whole file, or ``- `src/evals/cowork/macos.ts:40-52`: drives the macOS app`` for a line range. The check ignores other text under the heading. It reads the description each time it runs, so after you edit it, re-run the `diff-coverage` job.
 
 ## Pre-Push Checklist
 
@@ -198,8 +200,8 @@ npm run knip                # Unused files, exports and dependencies
 npm run docs:check          # Docs snippet sync
 npm run test:eval-foundation # Public evaluation foundation contracts
 npm run test:eval-review    # CLI smoke
-npm run test:usecases       # Use cases through the CLI (tests/usecases)
-npm test                    # Unit tests (Vitest)
+npm run test:coverage       # Unit tests (Vitest) and use cases through the CLI, with coverage; builds first
+npm run coverage:diff       # Every changed line in src/ runs in a test (the diff-coverage job)
 npx playwright install --with-deps chromium
 npm run test:playwright     # Integration tests (Playwright)
 
