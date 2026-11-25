@@ -1,17 +1,46 @@
-# Architecture
+# How MST works
 
-This document describes the internal structure of `@gleanwork/mcp-server-tester` — its module layout, key data flows, and the design decisions that shaped them.
+MST is two tools on one core. **Tool tests** are Playwright tests: they call an MCP server's tools and check the replies. **Evals** run an AI client against MCP servers, write every attempt to a run directory, grade it, and compare setups. Both use the same MCP client, the same validators and the same report.
 
-## The model
+This page explains how the parts fit together, what happens during a run, and why it works that way. It is for contributors, plugin authors, and anyone who wants to know what MST does with their config. The terms (case, trial, variant, transcript, grader, runner, connector) are defined in [`CONTEXT.md`](../CONTEXT.md). The exact contracts are in the [evaluation framework reference](./evaluation-framework.md), and the decisions behind them are in the [ADRs](./adr/).
 
-MST is one core and a set of extensions.
+## The problem evals solve
 
-- **Core** runs an eval the same way for every client: it loads the dataset, runs each case on a client, turns what the client did into a transcript, grades it, and writes the run and its report. [How MST evals work](./design/explainer.md#a-run-from-top-to-bottom) walks through the steps. Core names no client product.
-- **Extensions** are what core runs with: dataset sources, clients, judges, pairwise judges, metrics, result stores, connectors, runners and credential stores. Each kind has one lookup and one shape. MST ships some as built-ins, and a plugin adds others.
-- **A client is one product.** Claude Desktop, ChatGPT, Codex and Claude Code are each a client, and each keeps its code in its own directory and client file under `src/evals/`. None of them is the reference product: defaults, the run format and the report describe clients in general.
-- **A plugin** holds what one organization needs: its datasets, judges, sign-ins and machines.
+Say you run an MCP server and have rewritten its tool descriptions. You want to know whether Claude Desktop picks the right tools and gives better answers with the new descriptions. Asking it one question tells you little:
 
-### Where a change goes
+- **The same question gets different answers.** One good answer could be luck, so each case runs several **trials**.
+- **One question isn't representative.** You need dozens of realistic cases, each with a known good answer.
+- **"Better" needs a consistent grader.** An LLM judge can grade hundreds of answers, but it has to grade every one the same way.
+- **The comparison has to be fair.** Every **variant** gets the same cases, model, client and servers; only what you are testing changes.
+- **Real clients are desktop apps.** MST drives them as a person would, on a Mac or in Linux containers or VMs. That is slow, so long runs are split across machines.
+- **Your data and credentials are yours.** Datasets, grading rules and sign-ins are company-specific, so they live in a plugin, not in MST.
+
+## Three parts, three owners
+
+An eval brings together three things, and each one has a different owner.
+
+```mermaid
+flowchart LR
+  config["<b>Your eval config</b><br/>what to compare"]
+  plugin["<b>Your company's plugin</b><br/>datasets, judges, sign-ins,<br/>machines, where results go"]
+  mst["<b>MST</b><br/>runs the clients,<br/>grades, compares"]
+  out["Run directory<br/>and report"]
+  config --> mst
+  plugin --> mst
+  mst --> out
+```
+
+| Part                      | Owner                              | Changes when                              | Knows about your company?         |
+| ------------------------- | ---------------------------------- | ----------------------------------------- | --------------------------------- |
+| **MST**                   | Open source                        | MST releases                              | No                                |
+| **Your company's plugin** | Your company (a platform team)     | Datasets, judges or infrastructure change | Yes                               |
+| **Eval configs**          | You or your team, in your own repo | You want to compare something new         | Only the plugin's extension names |
+
+MST stays generic: no tenant URLs, internal datasets or cloud accounts. Each part changes at its own pace, so a new comparison never needs a plugin release, and a new dataset never needs an MST release. MST has built-ins for most of what a plugin adds, so you can run evals without one. Every extension is named `<namespace>/<kind>/<name>`, such as `acme/judge/correctness`, and MST checks the kind wherever a name is used ([ADR 0003](./adr/0003-extension-names-say-their-kind.md)).
+
+## Where a change goes
+
+Core runs an eval the same way for every client. **A client is one product**: Claude Desktop, ChatGPT, Codex and Claude Code each keep their code in their own directory and client file under `src/evals/`. None of them is the reference product: defaults, the run format and the report describe clients in general.
 
 A change goes in the first home that fits ([ADR 0016](./adr/0016-mst-holds-only-what-every-mst-user-needs.md)):
 
@@ -22,186 +51,268 @@ A change goes in the first home that fits ([ADR 0016](./adr/0016-mst-holds-only-
 
 `tests/repoShape.test.ts` checks the parts of this a test can check: no other language, no second package, no new top-level directory, and no new import of product code from core.
 
-## Module Map
+## The parts
 
-This map covers the core modules. [AGENTS.md](../AGENTS.md#architecture) is the full list, including `plugins/`, `proxy/`, `llm/`, `skills/`, `entries/`, `evals/runners/` and `auth/grants/`.
+```mermaid
+flowchart TD
+  config["Eval config<br/>+ plugins"]
+  coord["<b>Coordinator</b><br/>runEval.ts"]
+  auth["Connectors<br/>+ credential store"]
+  runner["Runner shards<br/>mst collect"]
+  batch["Client batch<br/>caseExecution.ts"]
+  clients["Clients"]
+  proxy["Proxies<br/>dry-run, tool metadata"]
+  grade["Grading<br/>assertions + judges"]
+  rundir[("Run directory<br/>mst.run/v1")]
+  views["Report, history,<br/>result store"]
+  servers[("MCP servers")]
+  pw["<b>Tool tests</b><br/>Playwright + mcp fixture"]
+  sdk["MCP client<br/>+ matchers"]
 
-### `src/config/`
-
-Defines and validates the `MCPConfig` discriminated union (`stdio` | `http`) using Zod. All transport configuration is typed and validated at the boundary via `validateMCPConfig()`. Nothing else in the codebase reaches into transport details directly; they go through this module first.
-
-### `src/mcp/`
-
-The MCP client layer. `clientFactory.ts` owns `createMCPClientForConfig()`, which translates an `MCPConfig` into a connected MCP SDK `Client` instance — choosing between `StdioClientTransport`, `StreamableHTTPClientTransport`, or `SSEClientTransport` based on config. `response.ts` normalises raw `CallToolResult` objects from the SDK into the framework's `NormalizedToolResponse` shape (with `.text`, `.isError`, `.contentBlocks`). The `fixtures/` subdirectory contains `MCPFixtureApi`, the high-level test helper wrapping the client.
-
-### `src/fixtures/`
-
-Playwright test fixtures. `mcp.ts` exposes `{ test, expect }` — `test` is the base Playwright `test` extended with `mcpClient` (raw SDK `Client`) and `mcp` (`MCPFixtureApi`). `assertions` is the Playwright `assertions` extended with all custom matchers. `mcpAuth.ts` provides an auth-specific fixture variant for OAuth and token auth flows. Configuration is read from `project.use.mcpConfig` in the consumer's `playwright.config.ts`.
-
-### `src/assertions/`
-
-The unified assertion layer. Internally split into:
-
-- **`validators/`** — pure functions returning `ValidationResult` objects. They have no Playwright dependency and can be called from the eval runner, unit tests, or anywhere else.
-- **`matchers/`** — thin Playwright adapter functions wrapping each validator. All matchers are registered in a single `assertions.extend({})` call in `matchers/index.ts`, which re-exports the extended `assertions`.
-
-This separation is intentional: validators can be used programmatically without Playwright (e.g., in the eval runner), while matchers provide the idiomatic `expect(result).toContainToolText(...)` API in Playwright tests.
-
-### `src/evals/`
-
-The dataset-driven evaluation engine. Key files:
-
-- `datasetTypes.ts` — Zod schemas for `EvalDataset`, `EvalCase`, and all assertion block types.
-- `datasetLoader.ts` — reads and validates JSON datasets from disk.
-- `evalRunner.ts` — `runEvalDataset()` iterates cases, calls the MCP server (or the LLM client simulator), validates results against each case's assertion block, and returns `EvalRunnerResult`. Supports multi-trial accuracy tracking and configurable concurrency.
-- `baseline.ts` — saves and loads pass/fail baselines for tracking regressions across runs.
-- `resultStore.ts` — persists eval runs, reporter runs, and comparison artifacts to local files or GCS using a shared JSON envelope.
-- `mstClient/` — the `api` client: a model through the Vercel AI SDK, or Claude Code (see data flow below).
-
-### `src/judge/`
-
-LLM-as-a-judge evaluation. `judgeTypes.ts` defines the `Judge` interface and `JUDGE_PROVIDER_KINDS`, from which `ProviderKind` and the dataset schema derive. `llmJudge.ts` is the one judge core: the prompts, the verdict parser, the `maxToolOutputSize` guard and usage defaults. Each provider file (`anthropicJudge.ts`, `vertexAnthropicJudge.ts`, `claudeAgentJudge.ts`, `openaiJudge.ts`, `googleJudge.ts`) is only a completion adapter: a prompt goes in, text and tokens come out. `judgeClient.ts` maps each provider kind to its adapter in `createJudge()`. `rubrics.ts` provides built-in rubric definitions and the `resolveRubric()` helper. `questionJudge.ts` is the core of the yes-or-no judges (ADR 0009): `defineQuestionJudge()` asks each question in its own model call, about the trial's transcript as `judgeTranscript.ts` renders it (the request, each tool call with its arguments and result, and the final answer), and combines the answers: a required no fails, a required `unknown` makes the verdict unknown. Its prompts are files in `prompts/`, and a judge's version is a hash of them, the transcript format and its defaults. `taskCompletionJudge.ts`, `groundedInToolsJudge.ts` and `toolUseJudge.ts` are built-in yes-or-no judges, and `builtinQuestions.ts` gives `mst label` each built-in yes-or-no judge's question. Custom named judges come from plugins (`judges` in a plugin object, referenced as `<namespace>/judge/<name>`); they return a score and don't use the LLM core. `agentic/` holds agentic judges, which run an agent (the Claude Agent SDK or Codex) over a workspace of the trial's evidence.
-
-### `src/auth/`
-
-OAuth 2.1 with PKCE and static token utilities.
-
-- `oauthFlow.ts` — low-level OAuth primitives: PKCE generation, authorization URL building, code exchange, token refresh. Uses `oauth4webapi`.
-- `discovery.ts` — RFC 9728 protected resource discovery and OAuth authorization server metadata discovery.
-- `oauthClientProvider.ts` — implements the MCP SDK's `OAuthClientProvider` interface, wiring together discovery, PKCE, and token storage for the SDK's automatic auth handling.
-- `storage.ts` — file-based token persistence (`tokens.json`, `client.json`, `server.json`) with `0700`/`0600` permissions.
-- `cli.ts` — `CLIOAuthClient`, which orchestrates the full browser-based OAuth login flow for the CLI and supports CI token injection from environment variables.
-- `tokenAuth.ts` — static access token utilities (header generation, expiry checks).
-
-### `src/spec/`
-
-MCP protocol conformance checks. `conformanceChecks.ts` runs a set of server-level verifications (server info presence, tool schema validity) and returns a structured `ConformanceResult`. Used in tests to assert protocol compliance rather than specific tool behaviour.
-
-### `src/reporters/`
-
-Custom Playwright reporter. `channel.ts` is the contract between the code that records results on a test (the fixture's `listTools`/`callTool`, conformance and cross-era checks, `runEvalDataset`, tool optimizations) and the reporter: attachment names, payload types, one writer (`attachReporterData`) and a schema-checked reader. `mcpReporter.ts` is a Playwright `Reporter` implementation that reads each test's eval results and tool optimizations (and nothing else: tests and conformance checks are in Playwright's own report) and writes them as a `mst.run/v1` run with the run report, a variant per project. This repo's own `playwright.config.ts` runs it once the UI is built. The `ui-src/` subdirectory contains the React application that renders the report UI; it is compiled separately and embedded into `ui-dist/`. `build-ui.ts` is the build script for the React app.
-
-### `src/cli/`
-
-The CLI, installed as `mst` and as `mcp-server-tester` (the same binary). `index.ts` is the entry point; the `commands/` directory contains one subdirectory per command (`init`, `generate`, `login`, `token`, `auth`, `datasets`, `judges`, `run`, `grade`, `batch`, `cowork`, `open`, and the hidden `collect` a worker runs). `utils/prompt.ts` holds the line prompts `init` and `generate` ask in a terminal; without one, they take every answer from flags. `templates/` stores scaffold files emitted by `init`.
-
-### `src/types/`
-
-Canonical shared type definitions, kept here to prevent drift between modules:
-
-- `index.ts` — core types: `AuthType`, `ResultSource`, `GraderType`, `GraderScore`.
-- `reporter.ts` — reporter-specific types: `EvalCaseResult`, `MCPRunReportData`, `MCPConformanceResultData`.
-
-`src/reporters/ui-src/types.ts` re-exports all types directly from the canonical backend sources (`src/types/index.ts` and `src/types/reporter.ts`) — no manual sync is required.
-
----
-
-## Data Flows
-
-### Tool Test (a Playwright test with matchers)
-
-```
-test(... async ({ mcp }) => ...)
-   ↓  mcp.callTool(name, args)  ← MCPFixtureApi
-   ↓  MCP SDK Client.callTool()
-   ↓  Transport (stdio or HTTP)
-   ↓  MCP Server (under test)
-CallToolResult (raw SDK response)
-   ↓  matchers/: expect(result).toContainToolText(), toMatchToolSchema(), ...
-   ↓  validators/: validateText(), validateSchema(), validatePattern(), etc.
-ValidationResult (pass: boolean, message: string)
-   ↓  Playwright's own reporter
-Playwright report (the MCP reporter reports evals only)
+  config -- loads --> coord
+  coord -- tokens --> auth
+  coord -- local --> batch
+  coord -. shards .-> runner
+  runner -. "same batch code" .-> batch
+  batch -- "open / run" --> clients
+  auth -. launches .-> proxy
+  clients -- "tool calls" --> proxy
+  proxy --> servers
+  batch -- transcripts --> grade
+  grade -- scores --> rundir
+  rundir -- derived --> views
+  pw -- callTool --> sdk
+  sdk --> servers
 ```
 
-### Client Eval Case (the api client in a Playwright test)
+| Part               | What it does                                                                                                                                                                                                                    | Code                                                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Coordinator        | `mst run` hands its flags to `runEval`, whose `evaluate` function owns the whole run: load, collect, grade and record. It runs wherever you typed `mst run`.                                                                    | [`runEval.ts`](../src/evals/runEval.ts), [`cli/index.ts`](../src/cli/index.ts)                                                        |
+| Eval config        | One JSON file names the datasets, variants, servers, judges and metrics. `plugins` loads extensions; `extends` pulls in shared configs.                                                                                         | [`evalConfig.ts`](../src/evals/evalConfig.ts), [`evalPlugins.ts`](../src/evals/evalPlugins.ts)                                        |
+| Connectors         | Describe how a server signs in and how the client reaches it. Refresh grants stay on the coordinator; clients get short-lived access tokens.                                                                                    | [`connectorServers.ts`](../src/evals/connectorServers.ts), [`auth/grants/`](../src/auth/grants/)                                      |
+| Runner shards      | `local` collects in this process. `docker` or a plugin runner starts machines, and each runs the hidden `mst collect` with the same batch code.                                                                                 | [`evals/runners/`](../src/evals/runners/)                                                                                             |
+| Client batch       | A variant's cases on one client. Every case runs through one function, whatever the client and wherever it runs. Readiness checks, resets and limits apply here.                                                                | [`caseExecution.ts`](../src/evals/caseExecution.ts), [`prepareClientBatch.ts`](../src/evals/prepareClientBatch.ts)                    |
+| Clients            | The AI application under test: `api`, `claude-code` and `codex-cli` run as processes; `cowork`, `chatgpt` and `codex-app` drive desktop apps. Plugins can add more. See [the clients table](./evaluation-framework.md#clients). | [`builtinClients.ts`](../src/evals/builtinClients.ts)                                                                                 |
+| Proxies            | Sit between a client and some of its servers. The dry-run proxy lets reads through and blocks or simulates writes; the tool-metadata proxy serves a variant's rewritten tool descriptions.                                      | [`proxy/`](../src/proxy/), [`toolSurfaceProxyServer.ts`](../src/evals/toolSurfaceProxyServer.ts)                                      |
+| Grading            | Assertions, judges and the `writes` grader score each trial. Pairwise judges compare two variants' trials of a case.                                                                                                            | [`grading.ts`](../src/evals/grading.ts), [`judge/`](../src/judge/)                                                                    |
+| Run directory      | Every run's files, in the versioned `mst.run/v1` format. It is the only state a run keeps.                                                                                                                                      | [`runFormat.ts`](../src/evals/runFormat.ts)                                                                                           |
+| Report and history | Both are rebuilt from run files. A result store gets a copy of the whole run directory.                                                                                                                                         | [`runReport.ts`](../src/evals/runReport.ts), [`runHistory.ts`](../src/evals/runHistory.ts), [`runStore.ts`](../src/evals/runStore.ts) |
+| Tool tests         | The Playwright fixture gives each test an MCP client. Matchers wrap the same validators that grade evals. No coordinator is involved.                                                                                           | [`fixtures/mcp.ts`](../src/fixtures/mcp.ts), [`mcp/`](../src/mcp/), [`assertions/`](../src/assertions/)                               |
 
-```
-EvalCase { input, assertions.toolsTriggered }, run { client: "api", model }
-   ↓  caseExecution.ts: a case with input runs on the client
-   ↓  mstClient/run.ts: runApiClient()
-   ↓  mstClient/adapters/vercel.ts: runVercelClient()
-      - Lists MCP tools via mcp.listTools()
-      - Sends tools + input to the configured LLM provider (via Vercel AI SDK)
-      - LLM generates text and calls tools autonomously (multi-turn, up to maxSteps)
-      - Each tool call is forwarded to the MCP server via mcp.callTool()
-ClientRunResult (.events[], .finalText, .error)
-   ↓  clientTranscript.ts: clientRunToExecution() — assertion view and transcript
-   ↓  validators/: validateToolCalls(), validateToolCallCount()
-ValidationResult
-   ↓  evalRunner.ts: rolled into EvalCaseResult (with a pass rate over N trials)
-EvalRunnerResult
-```
+## One `mst run`, start to finish
 
-### External Result Storage
-
-```
-EvalRunnerResult / run summary / comparison result
-   ↓  resultStore.ts: createStoredEvalArtifact()
-StoredEvalArtifact { format, kind, id, metadata, data }
-   ↓
-FileEvalResultStore or GCSEvalResultStore
-   ↓
-eval-runs/, eval-summaries/, or comparisons/
-   ↓
-latest.json + immutable <id>.json
-```
-
-An eval config's result store is different: `mst run` copies each `mst.run/v1`
-run directory into a `RunStore` (`src/evals/runStore.ts`), which only moves
-bytes, and reads its earlier runs from there.
-
-The eval runner uses stored `eval-runner-result` artifacts for baseline
-regression detection. `compareEvalRuns()` remains pure; helpers load stored runs
-and save comparison artifacts around it. The Playwright reporter writes each
-run's eval results as a run directory with its report, and stores its summary as
-an `eval-run-summary` artifact, as `mst run` does.
-
-### Auth Flow
-
-```
-CLI user runs: mst login <server-url>
-   ↓
-auth/cli.ts: CLIOAuthClient.login()
-   ↓
-auth/discovery.ts: discoverProtectedResource()   [RFC 9728: GET /.well-known/oauth-protected-resource]
-   ↓
-auth/discovery.ts: discoverAuthorizationServer()  [RFC 8414: GET /.well-known/oauth-authorization-server]
-   ↓
-auth/oauthFlow.ts: generatePKCE()                 [code_verifier + code_challenge]
-auth/oauthFlow.ts: buildAuthorizationUrl()
-   ↓
-Browser opens → user authenticates → redirect to localhost callback
-   ↓
-auth/oauthFlow.ts: exchangeCodeForTokens()        [PKCE code_verifier cleared after exchange]
-   ↓
-auth/storage.ts: saveTokens()                     [written to ~/.local/state/mcp-tests/<key>/ with 0600 perms]
-   ↓
-At test time:
-auth/credentials.ts: resolveCredentials(config)   [the one place credential precedence is decided]
-   ↓  auth.oauth.authStatePath → PlaywrightOAuthClientProvider (Playwright OAuth state file)
-   ↓  auth.accessToken → a static header; auth.clientCredentials → ClientCredentialsAuthProvider (re-runs the grant as tokens expire)
-   ↓  otherwise (fixtures) a stored login → StoredLoginAuthProvider (refreshes via CLIOAuthClient.tryGetAccessToken() as tokens expire)
-mcp/clientFactory.ts: createMCPClientForConfig(config, { authProvider })
-   ↓  MCP SDK Client asks the authProvider for a token before each request
+```mermaid
+flowchart LR
+  subgraph setup["Set up"]
+    direction TB
+    load["<b>1. Load</b><br/>config, plugins, extends"]
+    resolve["<b>2. Resolve</b><br/>cases, judges, runner"]
+    prepare["<b>3. Prepare</b><br/>tokens, proxies"]
+    load --> resolve --> prepare
+  end
+  subgraph variants["For each variant"]
+    direction TB
+    collect["<b>4. Collect</b><br/>where the client runs"]
+    grade["<b>5. Grade</b><br/>each trial"]
+    collect -- transcripts --> grade
+  end
+  subgraph finish["Finish"]
+    direction TB
+    cleanup["<b>6. Clean up</b><br/>tokens, machines"]
+    pairwise["<b>7. Pairwise judges</b><br/>variant against baseline"]
+    record["<b>8. Record</b><br/>run, history, report"]
+    cleanup --> pairwise --> record
+  end
+  setup --> variants --> finish
+  classDef remote stroke-dasharray: 5 5
+  class collect remote
 ```
 
----
+Every step runs on the **coordinator**, the machine where you typed `mst run`, except step 4 (dashed), which runs wherever the client runs: this machine, or a runner's machines. With `--grade-runner`, step 5 runs on the runner's machines too.
 
-## Key Design Decisions
+### 1. Load
 
-### Why Playwright for e2e / integration tests?
+`loadEvalConfig` reads the eval config, `loadEvalPlugins` loads its plugins, and `resolveConfigExtends` merges any shared configs. Every name must exist and be the right kind, and every variant's servers must be defined.
 
-The framework is built to help users write Playwright tests for MCP servers. Using Playwright for its own integration tests (against the mock server) means the framework exercises the exact same fixture, config, and reporter surface that consumers use. It also means the CI pipeline runs the framework tests in the same environment as consumer CI pipelines.
+_Why first:_ a typo should cost a second, not an hour of desktop time.
 
-### Why Vitest for unit tests?
+### 2. Resolve
 
-Playwright's test runner is process-heavy and starts real browser workers. Unit tests for pure logic (validators, config parsing, OAuth utilities) don't need that overhead. Vitest's ESM-native, watch-friendly runner is a better fit, and it supports the same `assertions` assertions. The two test runners co-exist: `npm test` runs Vitest, `npm run test:playwright` runs Playwright.
+Names become exact content. A dataset name becomes specific cases, from the plugin's snapshot unless you ask for live data. A judge name becomes a specific rubric, model and threshold. `validateEvalConfig` checks each client against the OS of the machines that will run it, and judges are checked before any client starts. `run.json` records a content hash of each dataset and judge. `--dry-run` stops here and prints the plan.
 
-### Why tests and evals (direct vs. client cases)?
+_Why:_ a result only means something if you know exactly what was tested and how it was graded. Two runs can be compared knowing whether their data matched.
 
-Direct tool calls are deterministic: you specify exact inputs and assert exact outputs. They are fast, cheap, and suitable for CI regression gates. Client cases are non-deterministic: a client and its model get a natural-language input and decide which tools to call, given only their descriptions. The two answer different questions (direct calls validate correctness, client cases validate discoverability) and they need to be run and interpreted differently (direct: once per CI run; client cases: N trials, measure the pass rate).
+### 3. Prepare
 
-### Why a separate assertions/validators layer?
+`startConnectorCredentials` checks that every refresh grant the run needs is in the credential store, exchanges each one for a short-lived access token, and renews it until the run ends. A missing or revoked grant stops the run with the `mst auth` command that fixes it. Connectors may launch a proxy in front of their server.
 
-Early versions of the framework coupled assertions directly to Playwright matchers. When the eval runner was added (which needed to validate responses outside of Playwright's `expect()`), we had to duplicate logic. The split into pure `validators` (framework-agnostic) and `matchers` (Playwright adapters) eliminates the duplication: the eval runner calls validators directly, and the matchers are a thin wrapper providing the `expect(result).toContainToolText()` ergonomics for inline Playwright tests.
+_Why:_ you sign in once, not once per run. No token goes into an eval config, transcript, log or report. See the [connector contract](./connectors.md).
+
+### 4. Collect
+
+For each variant, MST hands a **batch** of cases to the client. Before the batch's first trial, `readyBatch` connects to each server and lists its tools; it retries after 10 s and 30 s, and if a server still fails, every trial in the batch ends as a retryable setup failure. Then each trial gets the case's input as a user would type it. Each transcript is written as soon as its trial ends, so a stopped run keeps every finished trial.
+
+Nothing is graded here. A trial that hits an infrastructure problem, such as the client crashing, is not a failed trial: the client never answered. Pass rates leave it out ([ADR 0010](./adr/0010-a-trial-ending-is-decided-where-it-ends.md)).
+
+With `--runner`, the trials run on other machines. See [Runners and shards](#runners-and-shards).
+
+### 5. Grade
+
+`runEvalDataset` calls `gradeTrial` for each trial: the case's assertions, the eval config's judges and the case's own judges, and the `writes` grader. Locally, a variant's trials are graded right after its batch, then the next variant starts. With shards, the coordinator grades what the workers sent back, or `--grade-runner` grades on the runner's machines ([ADR 0005](./adr/0005-grading-runs-in-an-environment.md)).
+
+_Why grading is separate from collecting:_ collecting is slow and expensive, and grading is cheap. Because graders read only stored transcripts, `mst grade <run-id>` can regrade with a new rubric or an extra judge, without running the client again. A regrade is a new run, `<run-id>.g2`, that names the original in `gradedFrom`. `--no-grade` stops after collecting. Both need `"redactStoredResponses": false`.
+
+### 6. Clean up
+
+MST stops renewing tokens, removes the ones it handed out, stops proxies, and resets the client. Containers and VMs are deleted unless `--runner-option keep=failed` keeps a failed one. Clean-up runs even when the run fails or you press Ctrl-C.
+
+### 7. Pairwise judges
+
+A pairwise judge reads two variants' trials of the same case and says which is better. It needs both sides, so it runs after every variant has been collected and graded.
+
+### 8. Record
+
+`writeRun` writes `results.json` (every case result) and `summary.json` (per-variant metrics, deltas from the baseline, and the comparison with the previous run). Then MST updates the eval's `history.json`, builds the report, writes `latest.json` (for complete, full runs only), and uploads the run directory to the result store if there is one.
+
+The report compares each variant with the baseline **case by case**, as a paired test, and says whether each metric is better, worse or unclear. "Unclear" means the difference could be chance at this number of cases and trials. Comparing the same case across variants removes the spread between easy and hard cases, so a real difference shows up with fewer cases.
+
+## How a batch drives a client
+
+There are two kinds of client. **Run-only** clients (`api`, `claude-code`, `codex-cli`) run each case on its own, up to `concurrency` at a time. **Session** clients (`cowork`, `chatgpt`, `codex-app`) drive one desktop app, so they open a session once and run its trials one after another:
+
+```mermaid
+sequenceDiagram
+  participant coord as runEval
+  participant batch as prepareClientBatch
+  participant collector as collectClientBatch
+  participant app as Desktop app session
+  participant srv as MCP servers
+  participant grader as gradeTrial
+
+  Note over coord,srv: Before the first trial
+  coord->>batch: cases of one variant
+  batch->>srv: readyBatch: connect, list tools
+  srv-->>batch: tools listed
+  batch->>collector: requests
+  collector->>app: open(): lease, prepare
+
+  Note over coord,srv: Each trial, one at a time
+  collector->>app: run(case input)
+  app->>srv: tool calls
+  srv-->>app: results
+  app-->>collector: transcript
+  collector-->>coord: save the trial
+  collector->>app: reset(), when needed
+
+  Note over coord,grader: After the batch
+  collector->>app: close(): clean up, release the lease
+  batch-->>coord: transcripts per case
+  coord->>grader: each trial
+  grader-->>coord: scores
+```
+
+`collectClientBatch` owns everything a desktop client would otherwise repeat: the lease on the desktop, resets between trials, diagnosing failures, and stopping after repeated failures. A client supplies only `open`, `run`, `reset`, an optional `diagnose`, and `close`. `cowork` checks its servers after `open` prepares it, because its servers are known only then.
+
+How a desktop client runs follows from the OS of the machine that runs the trial, never from a config option ([ADR 0011](./adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md)). Each desktop client has a `macos.ts` and a `linux.ts` entry point. [ADR 0017](./adr/0017-desktop-clients-share-one-automation.md) (proposed) would give both platforms one accessibility automation.
+
+## Runners and shards
+
+A desktop client runs one conversation at a time per machine. Fifty cases, three variants and three trials, at a minute or more each, take hours on one machine. A runner splits the trials across machines, called **shards**:
+
+```mermaid
+flowchart LR
+  prep["<b>Coordinator</b><br/>load, resolve, prepare"]
+  subgraph runner["Runner: acme/runner/cloud-vm, 5 shards"]
+    vm1["Machine 1<br/>mst collect"]
+    vm2["Machine 2<br/>mst collect"]
+    vm5["… Machine 5<br/>mst collect"]
+    vm1 ~~~ vm2 ~~~ vm5
+  end
+  store[("Run directory<br/>transcripts from every shard")]
+  post["<b>Coordinator</b><br/>grade, compare, record"]
+  prep -- "cases, tokens" --> runner
+  runner -- transcripts --> store
+  store --> post
+```
+
+A runner only creates machines and opens a **channel** to each: run a command with its input and output attached, and copy files in and out. Docker, SSH and Kubernetes all provide one. Over the channel, MST copies the shard's cases to the machine and starts `mst collect`, which runs the same batch code a local run uses. The worker and coordinator exchange `mst.shard/v1` JSON messages: progress, heartbeats, and access tokens, which the worker keeps only in memory-backed files. Refresh grants never leave the coordinator ([ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)).
+
+A case's variants and trials all go to one shard, so each comparison is made on one machine, minutes apart. The eval config's `limits` cap how many trials run at once across all shards, per LLM provider and per server. If a shard fails, its trials are **missing**, not failed, and `mst run --resume <run-id>` collects only those. `--detach` moves the coordinator itself to a machine the runner creates, so yours can go offline ([ADR 0007](./adr/0007-detached-runs-move-the-coordinator.md)).
+
+_Why `--runner` is a flag and not part of the eval config:_ where the client runs doesn't change the question you are asking. The same config works for a quick local check, a run on VMs, and a nightly CI job.
+
+## The run directory is the contract
+
+Every eval has a directory, and each run is a directory inside it, in the `mst.run/v1` format: `run.json` (what ran), a transcript and a score file per trial, `results.json`, `summary.json` and the report. [What a run leaves behind](./evaluation-framework.md#what-a-run-leaves-behind) has the full layout and its rules, and [`schema/run/v1/`](../schema/run/v1/) has the JSON Schemas.
+
+Everything after collection reads these files and keeps no state of its own:
+
+- `mst grade` regrades stored transcripts into a new run.
+- `mst run --resume` collects only the trials a run is missing.
+- `mst open` rebuilds the report, and `mst history` reads `history.json`, which is a cache derived from the runs ([ADR 0012](./adr/0012-an-evals-history-is-derived-from-its-runs.md), proposed).
+- A result store holds a copy of whole run directories, so a CI machine with no local runs still has a previous run to compare with.
+
+Adding an optional field keeps `mst.run/v1`; readers keep fields they don't know. Removing or renaming a field moves the format to v2. Other tools, such as a company dashboard, can read the files directly without depending on MST's code.
+
+## Tool tests
+
+A tool test calls one tool and checks the reply. It is deterministic, fast and free, so it suits CI regression gates.
+
+```mermaid
+flowchart LR
+  test["Playwright test"] -- "mcp.callTool()" --> fixture["MCPFixtureApi<br/>fixtures/mcp.ts"]
+  fixture --> client["MCP SDK client<br/>clientFactory.ts"]
+  client -- "stdio or HTTP" --> server[("MCP server")]
+  fixture -- "normalized result" --> matchers["Matchers<br/>expect(result)…"]
+  matchers --> validators["Validators<br/>pure functions"]
+```
+
+`createMCPClientForConfig` turns an `MCPConfig` into a connected client, choosing the transport and the protocol version (see [protocol versions](./protocol-versions.md)). Protocol errors, such as an unknown tool, come back as an error result rather than an exception. `runConformanceChecks` checks the server against the MCP spec for the negotiated protocol version. A test can also run eval cases on the `api` client with `runEvalDataset`, over the test's own connection.
+
+_Why validators and matchers are separate:_ validators are pure functions that return a `ValidationResult`, with no Playwright dependency. Eval grading calls them directly. Each matcher is a thin Playwright adapter over one validator, so `expect(result).toContainToolText()` and an eval's `containsText` assertion can't disagree.
+
+_Why Playwright and Vitest:_ MST's own integration tests use Playwright against mock servers, so they exercise the same fixtures, config and reporter that users run. Unit tests for pure logic use Vitest, which doesn't start browser workers. `npm test` runs Vitest; `npm run test:playwright` runs Playwright.
+
+## Where MST can be extended
+
+A plugin is a plain object that MST reads; it never calls into MST to register ([ADR 0001](./adr/0001-eslint-style-declarative-plugins.md)). Each kind's built-ins install on first lookup, so code that needs only judges never loads desktop drivers.
+
+| Kind               | Example name                     | Built-ins                                                                |
+| ------------------ | -------------------------------- | ------------------------------------------------------------------------ |
+| `dataset`          | `acme/dataset/info-seeking`      | `file`, `dir`, `gcs`                                                     |
+| `client`           | `acme/client/x`                  | `api`, `claude-code`, `codex-cli`, `cowork`, `chatgpt`, `codex-app`      |
+| `judge`            | `acme/judge/correctness`         | `rubric`, `task-completion`, `grounded-in-tools`, `tool-use`, `criteria` |
+| `pairwise-judge`   | `acme/pairwise-judge/preference` | none                                                                     |
+| `metric`           | `acme/metric/x`                  | the [built-in metrics](./evaluation-framework.md#metrics)                |
+| `result-store`     | `acme/result-store/x`            | `file`, `gcs`                                                            |
+| `connector`        | `acme/connector/slack`           | none                                                                     |
+| `runner`           | `acme/runner/cloud-vm`           | `local`, `docker`                                                        |
+| `credential-store` | `acme/credential-store/x`        | none; MST's local store is not an extension                              |
+
+Shared configs (`extends`) use a tenth segment, `config`. [Plugins](./evaluation-framework.md#plugins) has each kind's contract.
+
+## Rules that hold everywhere
+
+| Rule                                                                                          | Where it is enforced                                                                           | Decision                                                                             |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| A trial's ending, trial or infrastructure, is decided where it ends; grading never changes it | [`trialEnding.ts`](../src/evals/trialEnding.ts)                                                | [ADR 0010](./adr/0010-a-trial-ending-is-decided-where-it-ends.md)                    |
+| Every client's servers are checked once per batch, before its first trial                     | [`readinessCheck.ts`](../src/evals/readinessCheck.ts)                                          | [ADR 0011](./adr/0011-a-client-is-a-product-and-how-it-runs-is-not-configuration.md) |
+| Grading reads only stored transcripts, so a run can be regraded without the client            | [`grading.ts`](../src/evals/grading.ts), [`runEval.ts`](../src/evals/runEval.ts)               | [ADR 0005](./adr/0005-grading-runs-in-an-environment.md)                             |
+| A shard holds whole cases; refresh grants never leave the coordinator                         | [`runners/`](../src/evals/runners/), [`connectorServers.ts`](../src/evals/connectorServers.ts) | [ADR 0004](./adr/0004-environments-run-shards-over-a-channel.md)                     |
+| Every write a client attempts is recorded and matched with its transcript                     | [`proxy/`](../src/proxy/), [`writeRecord.ts`](../src/evals/writeRecord.ts)                     | [ADR 0014](./adr/0014-graders-check-outcomes-and-every-write-is-accounted-for.md)    |
+| Default model IDs live in one table, and a run records each one it falls back on              | [`modelDefaults.ts`](../src/llm/modelDefaults.ts)                                              | [ADR 0015](./adr/0015-default-models-come-from-config-files.md)                      |
+| An extension's name says its kind, and the kind is checked where the name is used             | [`plugin.ts`](../src/plugins/plugin.ts), [`extensions.ts`](../src/plugins/extensions.ts)       | [ADR 0003](./adr/0003-extension-names-say-their-kind.md)                             |
+| MST is TypeScript; Swift only for macOS APIs that Node can't reach                            | [`nativeHelper.ts`](../src/evals/nativeHelper.ts)                                              | [ADR 0006](./adr/0006-mst-is-written-in-typescript.md)                               |
+
+## Reading the code
+
+To learn the code base, read it in this order:
+
+1. [`CONTEXT.md`](../CONTEXT.md) for the terms.
+2. A tool test against [`tests/mocks/dualEraServer.ts`](../tests/mocks/dualEraServer.ts), following `callTool` into [`clientFactory.ts`](../src/mcp/clientFactory.ts).
+3. `evaluate` in [`runEval.ts`](../src/evals/runEval.ts), beside [One `mst run`, start to finish](#one-mst-run-start-to-finish).
+4. [`caseExecution.ts`](../src/evals/caseExecution.ts), [`prepareClientBatch.ts`](../src/evals/prepareClientBatch.ts) and [`desktopBatch.ts`](../src/evals/desktopBatch.ts), beside [How a batch drives a client](#how-a-batch-drives-a-client).
+5. `gradeTrial` in [`grading.ts`](../src/evals/grading.ts), then one judge, such as [`questionJudge.ts`](../src/judge/questionJudge.ts).
+6. [`runners/channel.ts`](../src/evals/runners/channel.ts) and [`runners/collect.ts`](../src/evals/runners/collect.ts), beside [Runners and shards](#runners-and-shards).
+
+[`AGENTS.md`](../AGENTS.md) has the full module map and the steps for adding a client, judge, validator or matcher.

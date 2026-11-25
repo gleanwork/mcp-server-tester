@@ -9,7 +9,7 @@ This file covers setup and the pull request process. The rest has one home each,
 - [AGENTS.md](./AGENTS.md): the code style, the checks CI runs (the pre-push checklist), the tests each change needs, and how to add a validator, matcher, assertion type, judge provider, client provider, transport or built-in extension
 - [CONTEXT.md](./CONTEXT.md): what each term means (eval, case, trial, grader, runner and the rest)
 - [REVIEW.md](./REVIEW.md): what a review checks
-- [docs/architecture.md](./docs/architecture.md) and [docs/adr/](./docs/adr): the module structure and the design decisions
+- [docs/architecture.md](./docs/architecture.md) and [docs/adr/](./docs/adr): how the parts fit together, and the design decisions
 - [RELEASE.md](./RELEASE.md): how releases work
 
 ## Ways to Contribute
