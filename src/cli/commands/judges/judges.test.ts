@@ -129,24 +129,47 @@ describe('mst judges', () => {
     ]);
   });
 
-  it("lists plugins' judges and pairwise judges", async () => {
+  it("lists plugins' judges and pairwise judges, each kind in its own table", async () => {
     const out = capture();
-    await listJudgeCommand(plugins(), out.print);
-    const lines = out.text().trimEnd().split('\n');
-    expect(lines.map((line) => line.split(/\s{2,}/).slice(0, 2))).toEqual([
-      ['acme/judge/completeness', 'judge'],
-      ['criteria', 'judge'],
-      ['grounded-in-tools', 'judge'],
-      ['rubric', 'judge'],
-      ['task-completion', 'judge'],
-      ['tool-use', 'judge'],
-      ['acme/pairwise-judge/ordered', 'pairwise'],
-      ['acme/pairwise-judge/preference', 'pairwise'],
-      ['preference', 'pairwise'],
+    await listJudgeCommand({ ...plugins(), width: 80 }, out.print);
+    const [judges, pairwise, hint] = out.text().trimEnd().split('\n\n');
+    // Rows start two spaces in; wrapped descriptions further.
+    const names = (group: string) =>
+      group
+        .split('\n')
+        .filter((line) => /^ {2}\S/.test(line))
+        .map((line) => line.trim().split(/\s{2,}/)[0]);
+    expect(judges!.split('\n')[0]).toBe('Judges (score each trial)');
+    expect(names(judges!)).toEqual([
+      'Judge',
+      'acme/judge/completeness',
+      'criteria',
+      'grounded-in-tools',
+      'rubric',
+      'task-completion',
+      'tool-use',
     ]);
-    expect(lines[0]).toContain('requires case.expected.answer');
-    expect(lines[0]).toContain(
-      'Did the answer cover every point of the expected answer?'
+    expect(pairwise!.split('\n')[0]).toBe(
+      'Pairwise judges (compare each variant with the baseline)'
+    );
+    expect(names(pairwise!)).toEqual([
+      'Judge',
+      'acme/pairwise-judge/ordered',
+      'acme/pairwise-judge/preference',
+      'preference',
+    ]);
+    // At 80 columns the other columns leave the description too little
+    // room, so it goes under each row.
+    expect(judges).toMatch(/^ {2}Judge +Version +Requires\n {6}Description$/m);
+    expect(judges).toMatch(
+      /^ {2}acme\/judge\/completeness +completeness-2 +case\.expected\.answer\n {6}Did the answer/m
+    );
+    // No pairwise judge requires a field, so that table has no such column.
+    expect(pairwise).not.toContain('Requires');
+    for (const line of out.text().split('\n'))
+      expect(line.length).toBeLessThanOrEqual(80);
+    expect(hint).toBe(
+      'What a judge requires, and its options: mst judges show <judge>'
     );
   });
 
@@ -191,15 +214,13 @@ describe('mst judges', () => {
       table.print
     );
     expect(table.text()).toMatch(
-      /^acme\/judge\/completeness +judge +completeness-2 +requires/m
+      /^ {2}acme\/judge\/completeness +completeness-2 +case\.expected\.answer/m
     );
     expect(table.text()).toMatch(
-      /^acme\/pairwise-judge\/preference +pairwise +1\.4\.0 +Which answer/m
+      /^ {2}acme\/pairwise-judge\/preference +1\.4\.0 +Which answer/m
     );
-    expect(table.text()).toMatch(/^bare\/judge\/loose +judge +unversioned$/m);
-    expect(table.text()).toMatch(
-      /^rubric +judge +[0-9a-f]{12} +An LLM grades/m
-    );
+    expect(table.text()).toMatch(/^ {2}bare\/judge\/loose +unversioned$/m);
+    expect(table.text()).toMatch(/^ {2}rubric +[0-9a-f]{12} +An LLM grades/m);
 
     resetPluginsForTests();
     const shown = capture();
@@ -215,7 +236,7 @@ describe('mst judges', () => {
     resetPluginsForTests();
     const shownText = capture();
     await showJudge('acme/judge/completeness', plugins(), shownText.print);
-    expect(shownText.text()).toContain('  version   completeness-2');
+    expect(shownText.text()).toContain('\nVersion   completeness-2\n');
   });
 
   it("shows a judge's requirements and options as JSON Schema", async () => {
@@ -238,21 +259,39 @@ describe('mst judges', () => {
     });
   });
 
-  it('shows the built-in rubric judge and its rubrics', async () => {
+  it('shows the built-in rubric judge and its rubrics as a table of options', async () => {
     const out = capture();
-    await showJudge('rubric', {}, out.print);
-    expect(out.text()).toMatch(/^rubric {2}\(judge: scores each trial\)/);
-    expect(out.text()).toContain('"correctness"');
-    expect(out.text()).toContain('"rubric"');
+    await showJudge('rubric', { width: 80 }, out.print);
+    const text = out.text();
+    expect(text).toMatch(/^rubric\nAn LLM grades the answer/);
+    expect(text).toContain('\nKind      judge: scores each trial\n');
+    expect(text).toContain('\nRequires  nothing\n');
+    expect(text).toMatch(/^Options\n {2}Option +Default$/m);
+    // The rubrics it takes, under the default, not as raw JSON Schema.
+    expect(text).toMatch(
+      /^ {2}rubric +required\n +one of: correctness, completeness, groundedness,/m
+    );
+    expect(text).toContain('or an object');
+    // No declared default: the text doesn't claim one, since leaving an
+    // option out can also mean no limit (maxToolOutputSize).
+    expect(text).toMatch(/^ {2}model +not declared$/m);
+    expect(text).toMatch(/^ {2}maxToolOutputSize +not declared$/m);
+    expect(text).not.toContain("the judge's default");
+    expect(text).not.toContain('"$schema"');
+    for (const line of text.split('\n'))
+      expect(line.length).toBeLessThanOrEqual(80);
   });
 
   it('shows whether a pairwise judge swaps positions', async () => {
     const shown = capture();
     await showJudge('acme/pairwise-judge/preference', plugins(), shown.print);
+    expect(shown.text()).toMatch(/^acme\/pairwise-judge\/preference\n/);
     expect(shown.text()).toContain(
-      'acme/pairwise-judge/preference  (pairwise judge: compares each variant with the baseline)'
+      '\nKind      pairwise judge: compares each variant with the baseline\n'
     );
-    expect(shown.text()).toContain('swaps     yes: each order, reconciled');
+    expect(shown.text()).toContain(
+      '\nSwaps     yes: asks in each order and reconciles the answers\n'
+    );
     resetPluginsForTests();
     const ordered = capture();
     await showJudge(

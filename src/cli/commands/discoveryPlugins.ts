@@ -12,6 +12,7 @@ import { loadPlugins } from '../../plugins/loadPlugins.js';
 import { parseExtensionReference } from '../../plugins/plugin.js';
 import { evalSettings, type SettingsSections } from '../../plugins/settings.js';
 import { fileSettings } from '../../plugins/settingsFile.js';
+import { wrap } from '../utils/textLayout.js';
 
 export interface DiscoveryOptions {
   config?: string;
@@ -90,9 +91,13 @@ export function inNamespaces(
 
 /**
  * Left-aligned columns, two spaces apart; the last column isn't padded and a
- * column empty in every row is left out.
+ * column empty in every row is left out. With a `width`, the last column
+ * wraps under itself to keep each line within it, and a `\n` in a last cell
+ * starts a new line in that column. When the other columns leave the last
+ * fewer than 30 characters, its text goes on the lines below its row,
+ * indented, instead.
  */
-export function formatTable(table: string[][]): string {
+export function formatTable(table: string[][], width?: number): string {
   const kept = (table[0] ?? []).flatMap((_, column) =>
     table.some((row) => row[column]) ? [column] : []
   );
@@ -100,14 +105,41 @@ export function formatTable(table: string[][]): string {
   const widths = rows[0]?.map((_, column) =>
     Math.max(...rows.map((row) => row[column]?.length ?? 0))
   );
+  const last = kept.length - 1;
+  // Where the last column starts.
+  const offset = (widths ?? [])
+    .slice(0, last)
+    .reduce((sum, columnWidth) => sum + columnWidth + 2, 0);
+  const below = width !== undefined && last > 0 && width - offset < 30;
   return rows
-    .map((row) =>
-      row
-        .map((cell, column) =>
-          column === row.length - 1 ? cell : cell.padEnd(widths![column]!)
-        )
-        .join('  ')
-        .trimEnd()
-    )
+    .flatMap((row) => {
+      const lead = row
+        .slice(0, last)
+        .map((cell, column) => cell.padEnd(widths![column]!))
+        .join('  ');
+      const cell = row[last] ?? '';
+      if (below) {
+        // An empty cell adds no line; a blank line inside a cell stays.
+        const text = cell
+          ? cell
+              .split('\n')
+              .flatMap((part) => wrap(part, width - 4))
+              .map((line) => (line ? `    ${line}` : ''))
+          : [];
+        return [lead.trimEnd(), ...text];
+      }
+      const lines =
+        width === undefined
+          ? [cell]
+          : cell
+              .split('\n')
+              .flatMap((part) => wrap(part, Math.max(30, width - offset)));
+      return lines.map((line, index) =>
+        (last === 0
+          ? line
+          : `${index === 0 ? lead : ' '.repeat(offset - 2)}  ${line}`
+        ).trimEnd()
+      );
+    })
     .join('\n');
 }

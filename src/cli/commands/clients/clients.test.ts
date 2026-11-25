@@ -59,6 +59,16 @@ function capture(): { text: () => string; print: (text: string) => void } {
   return { text: () => out, print: (text) => (out += text) };
 }
 
+/** The option names in `show`'s Options table: rows start two spaces in. */
+function optionNames(text: string): string[] {
+  const table = text.split(/^Options.*\n/m)[1] ?? '';
+  return table
+    .split('\n')
+    .filter((line) => /^ {2}\S/.test(line))
+    .map((line) => line.trim().split(/\s+/)[0]!)
+    .filter((name) => name !== 'Option');
+}
+
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mst-clients-'));
   pluginPath = path.join(dir, 'plugin.mjs');
@@ -77,15 +87,13 @@ afterEach(async () => {
 });
 
 describe('mst clients', () => {
-  it('lists the built-in clients with where each one runs', async () => {
+  it('lists the built-in clients in a table: where each one runs and what it is', async () => {
     const out = capture();
-    await listClientCommand({}, out.print);
-    const lines = out
-      .text()
-      .trim()
-      .split('\n')
-      .filter((line) => /^\S/.test(line));
-    expect(lines.map((line) => line.split(/\s+/)[0])).toEqual([
+    await listClientCommand({ width: 80 }, out.print);
+    const [table, hint] = out.text().trimEnd().split('\n\n');
+    const rows = table!.split('\n').filter((line) => /^\S/.test(line));
+    expect(rows[0]).toMatch(/^Client\s+Runs on\s+Description$/);
+    expect(rows.slice(1).map((line) => line.split(/\s+/)[0])).toEqual([
       'api',
       'chatgpt',
       'claude-code',
@@ -94,13 +102,19 @@ describe('mst clients', () => {
       'cowork',
     ]);
     expect(out.text()).toMatch(
-      /^cowork\s+Claude Desktop[^\n]*\n\s+runs on\s+macOS, Linux/m
+      /^cowork {7}macOS, Linux {2}Claude Desktop, each trial in a Cowork session$/m
     );
+    expect(out.text()).toMatch(/^codex-cli\s+any OS\s+The Codex CLI/m);
+    // A long description wraps under its column, within the width.
     expect(out.text()).toMatch(
-      /^codex-cli\s+The Codex CLI[^\n]*\n\s+runs on\s+any OS/m
+      /^api {10}any OS {8}The model alone[^\n]*\n {27}\S/m
     );
-    expect(out.text()).toMatch(
-      /^codex-app\s+The Codex surface of the ChatGPT desktop app\n\s+runs on\s+macOS, Linux/m
+    for (const line of out.text().split('\n'))
+      expect(line.length).toBeLessThanOrEqual(80);
+    // The list leaves requirements and options to `show`, and says so.
+    expect(out.text()).not.toContain('Credentials');
+    expect(hint).toBe(
+      'What a client needs, and its options: mst clients show <client>'
     );
   });
 
@@ -132,9 +146,10 @@ describe('mst clients', () => {
   it('shows an empty plugin options schema as none declared', async () => {
     const out = capture();
     await showClient('acme/client/bare', { plugins: [pluginPath] }, out.print);
-    expect(out.text()).toContain('acme/client/bare');
-    expect(out.text()).toContain('options (defaults; timeout in ms)');
-    expect(out.text()).toContain('(none declared)');
+    expect(out.text()).toMatch(/^acme\/client\/bare\n/);
+    expect(out.text()).toContain('\nOptions\n  none declared\n');
+    // A client that declares no requirements shows no empty sections.
+    expect(out.text()).not.toContain('Install');
   });
 
   it("lists and shows an eval config's plugins' clients", async () => {
@@ -170,12 +185,43 @@ describe('mst clients', () => {
     const out = capture();
     await showClient('acme/client/desk', { plugins: [pluginPath] }, out.print);
     const text = out.text();
-    expect(text).toMatch(/^acme\/client\/desk {2}The Acme desktop app$/m);
-    expect(text).toMatch(/runs on\s+macOS/);
-    expect(text).toMatch(/install\s+the Acme app, signed in/);
-    expect(text).toMatch(/credentials\s+`ACME_API_KEY`/);
-    expect(text).toMatch(/setup\s+`acme setup`/);
-    expect(text).toMatch(/maxActions\s+40/);
+    expect(text).toMatch(/^acme\/client\/desk\nThe Acme desktop app\n\n/);
+    expect(text).toContain('\nRuns on  macOS\n');
+    expect(text).toContain('\nInstall\n  the Acme app, signed in\n');
+    expect(text).toContain('\nCredentials\n  `ACME_API_KEY`\n');
+    expect(text).toContain('\nSetup\n  `acme setup`\n');
+    // No timeout option, so the heading doesn't mention its unit.
+    expect(text).toMatch(/^Options\n {2}Option\s+Default\n/m);
+    expect(text).toMatch(/^ {2}maxActions\s+40$/m);
+  });
+
+  it('wraps long requirements and option defaults within the width, never inside a word', async () => {
+    const out = capture();
+    await showClient('cowork', { width: 80 }, out.print);
+    const text = out.text();
+    for (const line of text.split('\n'))
+      expect(line.length).toBeLessThanOrEqual(80);
+    // Several requirements are a bulleted list; each wraps under its text.
+    expect(text).toMatch(/^Credentials\n {2}- macOS default third-party: /m);
+    expect(text).toMatch(/^ {2}- macOS first-party: [^\n]*\n {4}\S/m);
+    // An enum's values follow its default, under the Default column.
+    expect(text).toMatch(
+      /^ {2}mode {14}third-party \(MST-managed profile\)\n {20}one of: third-party, first-party$/m
+    );
+    expect(text).toContain('Options (timeout in ms)');
+    // Words stay whole: every word of the JSON's requirements is in the text.
+    const json = capture();
+    await showClient('cowork', { json: true }, json.print);
+    const { requirements } = JSON.parse(json.text()) as {
+      requirements: Record<string, string[] | undefined>;
+    };
+    const words = new Set(text.split(/\s+/));
+    for (const line of [
+      ...(requirements.install ?? []),
+      ...(requirements.credentials ?? []),
+      ...(requirements.setup ?? []),
+    ])
+      for (const word of line.split(/\s+/)) expect(words).toContain(word);
   });
 
   it.each([
@@ -194,24 +240,25 @@ describe('mst clients', () => {
     expect(shown.options.properties.timeout).toMatchObject(expected);
   });
 
-  it('lists the same requirements, options and defaults that show prints in both formats', async () => {
+  it('lists as JSON what show prints for each client, and shows each timeout default', async () => {
     const json = capture();
-    const text = capture();
     await listClientCommand({ json: true }, json.print);
-    await listClientCommand({}, text.print);
     const entries = JSON.parse(json.text()) as Array<{ ref: string }>;
+    const shown: string[] = [];
     for (const entry of entries) {
       const shownJson = capture();
       const shownText = capture();
       await showClient(entry.ref, { json: true }, shownJson.print);
       await showClient(entry.ref, {}, shownText.print);
       expect(JSON.parse(shownJson.text())).toEqual(entry);
-      expect(text.text()).toContain(shownText.text().trim());
+      expect(shownText.text()).toMatch(new RegExp(`^${entry.ref}\n`));
+      shown.push(shownText.text());
     }
-    expect(text.text()).toMatch(/timeout\s+none \(no time limit\)/);
-    expect(text.text()).toMatch(/timeout\s+180000/);
-    expect(text.text()).toMatch(/timeout\s+300000/);
-    expect(text.text()).toMatch(/timeout\s+900000/);
+    const text = shown.join('\n');
+    expect(text).toMatch(/timeout\s+none \(no time limit\)/);
+    expect(text).toMatch(/timeout\s+180000/);
+    expect(text).toMatch(/timeout\s+300000/);
+    expect(text).toMatch(/timeout\s+900000/);
   });
 
   it('lists every usable option, excluding the client tag and removed names', async () => {
@@ -294,14 +341,7 @@ describe('mst clients', () => {
     for (const [client, names] of Object.entries(expected)) {
       const out = capture();
       await showClient(client, {}, out.print);
-      const rows = out
-        .text()
-        .split('  options (defaults; timeout in ms)\n')[1]!
-        .trim()
-        .split('\n');
-      expect(rows.map((line) => line.trim().split(/\s+/)[0]).sort()).toEqual(
-        [...names].sort()
-      );
+      expect(optionNames(out.text()).sort()).toEqual([...names].sort());
       expect(out.text()).not.toContain('not declared');
     }
   });
@@ -438,7 +478,10 @@ describe('mst clients', () => {
     expect(out.text()).toContain('"turns"');
     expect(out.text()).toContain('"default": 3');
     expect(out.text()).toContain('"instruction"');
-    expect(out.text()).not.toContain('(none declared)');
+    expect(out.text()).toContain(
+      "This client's options take more than one shape. Its JSON Schema:"
+    );
+    expect(out.text()).not.toContain('none declared');
   });
 
   it.each(['chatgpt', 'codex-app'] as const)(

@@ -23,13 +23,23 @@ import {
   loadDiscoveryPlugins,
   type DiscoveryOptions,
 } from '../discoveryPlugins.js';
-import { clientOptionsSchema, clientOptionRows } from './options.js';
+import {
+  extensionOptionsSchema,
+  optionsSection,
+  type ExtensionOptionsSchema,
+} from '../extensionOptions.js';
+import { indented, listSection, outputWidth } from '../../utils/textLayout.js';
 
 interface ListedClient {
   ref: string;
   description?: string;
   requirements: ClientRequirements;
-  options: ReturnType<typeof clientOptionsSchema>;
+  options: ExtensionOptionsSchema;
+}
+
+/** How text output is laid out; a test sets the width. */
+interface TextOptions {
+  width?: number;
 }
 
 const OS_NAMES: Record<ClientOS, string> = { macos: 'macOS', linux: 'Linux' };
@@ -58,13 +68,16 @@ async function clientEntries(
         ? { description: definition.description }
         : {}),
       requirements: definition.requirements ?? {},
-      options: clientOptionsSchema(definition.schema),
+      options: extensionOptionsSchema(definition.schema, 'client'),
     }));
 }
 
-/** `mst clients`: each client's requirements, options and defaults. */
+/**
+ * `mst clients`: a row for each client, with where it runs and what it is.
+ * `--json` has each one's requirements and options too.
+ */
 export async function listClientCommand(
-  options: DiscoveryOptions,
+  options: DiscoveryOptions & TextOptions,
   print: (text: string) => void = (text) => process.stdout.write(text)
 ): Promise<void> {
   const entries = await clientEntries(options);
@@ -72,45 +85,46 @@ export async function listClientCommand(
     print(`${JSON.stringify(entries, null, 2)}\n`);
     return;
   }
-  print(`${entries.map(clientText).join('\n\n')}\n`);
-}
-
-/** Lines under a heading, the heading on the first. */
-function section(heading: string, lines: readonly string[] = []): string[] {
-  const label = heading.padEnd(12);
-  if (!lines.length) return [`  ${label} -`];
-  return lines.map(
-    (line, index) => `  ${index === 0 ? label : ' '.repeat(12)} ${line}`
+  const table = formatTable(
+    [
+      ['Client', 'Runs on', 'Description'],
+      ...entries.map((entry) => [
+        entry.ref,
+        clientOS(entry.requirements),
+        entry.description ?? '',
+      ]),
+    ],
+    options.width ?? outputWidth()
+  );
+  print(
+    `${table}\n\nWhat a client needs, and its options: mst clients show <client>\n`
   );
 }
 
-function clientText(entry: ListedClient): string {
+/**
+ * A client for people: what it is, where it runs, what a machine needs to
+ * run it, and its options with their defaults.
+ */
+function clientText(entry: ListedClient, width: number): string {
   const { requirements } = entry;
-  const rows = clientOptionRows(entry.options);
-  // A union or other non-object plugin schema cannot be a flat option table.
-  const optionText = rows.length
-    ? formatTable(rows)
-    : (entry.options.unavailable ??
-      (entry.options.properties
-        ? '(none declared)'
-        : JSON.stringify(entry.options, null, 2)));
   return [
-    entry.description !== undefined
-      ? `${entry.ref}  ${entry.description}`
-      : entry.ref,
-    ...section('runs on', [clientOS(requirements)]),
-    ...section('install', requirements.install),
-    ...section('credentials', requirements.credentials),
-    ...section('setup', requirements.setup),
-    '  options (defaults; timeout in ms)',
-    ...optionText.split('\n').map((line) => `    ${line}`),
+    entry.ref,
+    ...(entry.description !== undefined
+      ? indented(entry.description, width, '')
+      : []),
+    '',
+    `Runs on  ${clientOS(requirements)}`,
+    ...listSection('Install', requirements.install, width),
+    ...listSection('Credentials', requirements.credentials, width),
+    ...listSection('Setup', requirements.setup, width),
+    ...optionsSection(entry.options, 'client', width),
   ].join('\n');
 }
 
 /** `mst clients show <ref>`: what a client needs and the options it takes. */
 export async function showClient(
   ref: string,
-  options: DiscoveryOptions,
+  options: DiscoveryOptions & TextOptions,
   print: (text: string) => void = (text) => process.stdout.write(text)
 ): Promise<void> {
   // A renamed client fails naming its replacement, and `mst/client/<name>`
@@ -120,7 +134,11 @@ export async function showClient(
   const entry = entries.find((candidate) => candidate.ref === wanted);
   if (!entry) throw missingClient(ref, wanted, options);
   print(
-    `${options.json ? JSON.stringify(entry, null, 2) : clientText(entry)}\n`
+    `${
+      options.json
+        ? JSON.stringify(entry, null, 2)
+        : clientText(entry, options.width ?? outputWidth())
+    }\n`
   );
 }
 
