@@ -1,0 +1,108 @@
+{
+  "$comment": "The code each page in docs/ describes. When a pull request changes a page's code and not the page, scripts/docs-coverage.ts warns on it. A path ending in / covers everything under it. Tests and snapshots don't count. A page that describes no code in particular maps to []. tests/docsCoverage.test.ts checks that every current page is here and every path exists.",
+  "pages": {
+    "docs/api-reference.md": [
+      "src/index.ts",
+      "src/entries/",
+      "src/fixtures/",
+      "src/assertions/matchers/types.ts"
+    ],
+    "docs/architecture.md": [
+      "src/evals/runEval.ts",
+      "src/evals/caseExecution.ts",
+      "src/evals/prepareClientBatch.ts",
+      "src/evals/desktopBatch.ts",
+      "src/evals/readinessCheck.ts",
+      "src/evals/grading.ts",
+      "src/evals/runFormat.ts",
+      "src/evals/runners/",
+      "src/plugins/"
+    ],
+    "docs/assertions.md": ["src/assertions/"],
+    "docs/authentication.md": [
+      "src/auth/cli.ts",
+      "src/auth/credentials.ts",
+      "src/auth/discovery.ts",
+      "src/auth/oauthClientProvider.ts",
+      "src/auth/oauthFlow.ts",
+      "src/auth/setupOAuth.ts",
+      "src/auth/storage.ts",
+      "src/auth/tokenAuth.ts",
+      "src/auth/types.ts",
+      "src/fixtures/mcpAuth.ts",
+      "src/cli/commands/login/",
+      "src/cli/commands/token/"
+    ],
+    "docs/chatgpt-desktop.md": [
+      "src/evals/chatgpt/",
+      "src/evals/chatgptClient.ts",
+      "src/evals/chatgptSetup/",
+      "src/evals/codex-app/",
+      "src/cli/commands/clients/"
+    ],
+    "docs/chatgpt-docker.md": ["docker/chatgpt-linux/"],
+    "docs/cli.md": ["src/cli/"],
+    "docs/codex.md": [
+      "src/evals/codexClient.ts",
+      "src/evals/codexTranscript.ts",
+      "src/evals/codexSetup/"
+    ],
+    "docs/connectors.md": [
+      "src/auth/grants/",
+      "src/evals/connectorServers.ts",
+      "src/cli/commands/auth/"
+    ],
+    "docs/cowork-docker.md": [
+      "docker/cowork-linux/",
+      "src/evals/runners/docker.ts",
+      "src/evals/runners/dockerContainers.ts"
+    ],
+    "docs/cowork.md": [
+      "src/evals/cowork/",
+      "src/evals/coworkClient.ts",
+      "src/evals/coworkSetup/",
+      "src/cli/commands/clients/"
+    ],
+    "docs/evals-guide.md": [
+      "src/evals/datasetTypes.ts",
+      "src/evals/evalConfig.ts",
+      "src/evals/grading.ts"
+    ],
+    "docs/evaluation-framework.md": [
+      "src/judge/",
+      "src/evals/evalConfig.ts",
+      "src/evals/evalFrameworkTypes.ts",
+      "src/evals/metrics.ts",
+      "src/evals/resultStore.ts",
+      "src/evals/runStore.ts",
+      "src/evals/runHistory.ts",
+      "src/evals/variantComparison.ts",
+      "src/entries/evals.ts"
+    ],
+    "docs/judges.md": [
+      "src/judge/builtinJudges.ts",
+      "src/judge/questionJudge.ts",
+      "src/judge/prompts/"
+    ],
+    "docs/llm-gateways.md": ["src/llm/"],
+    "docs/mst-client.md": ["src/evals/mstClient/"],
+    "docs/protocol-versions.md": [
+      "src/mcp/protocol.ts",
+      "src/config/protocolMatrix.ts",
+      "src/spec/checks/"
+    ],
+    "docs/quickstart.md": ["src/cli/commands/init/", "src/cli/templates/"],
+    "docs/skills.md": ["src/skills/", "src/spec/checks/skills.ts"],
+    "docs/telemetry.md": ["src/evals/telemetry/"],
+    "docs/transports.md": [
+      "src/config/mcpConfig.ts",
+      "src/mcp/clientFactory.ts"
+    ],
+    "docs/troubleshooting.md": [],
+    "docs/ui-reporter.md": ["src/reporters/"],
+    "docs/walkthrough.md": [
+      "src/evals/coworkClient.ts",
+      "src/evals/variantComparison.ts"
+    ]
+  }
+}

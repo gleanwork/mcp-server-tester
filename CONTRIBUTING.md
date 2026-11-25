@@ -99,7 +99,7 @@ These checks fail when a page stops matching the code:
 
 ADRs and migration guides record a moment, so only their links and diagrams are checked. When a page must name another project's setting or method in backticks, add it to `OTHER_PROJECTS_NAMES` in `tests/docsDrift.test.ts` with the reason.
 
-No check can tell whether prose still describes what the code does. When you change how something works, search `docs/` for it and update the page in the same pull request.
+No check can tell whether prose still describes what the code does. When you change how something works, search `docs/` for it and update the page in the same pull request. To help, the Docs coverage workflow warns on a pull request that changes the code a page describes and not the page. `docs/code-map.json` says which code each page describes; a new page needs an entry there (`[]` if it describes no code in particular).
 
 ### Making Changes
 
