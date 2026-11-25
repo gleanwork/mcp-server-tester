@@ -20,6 +20,7 @@ import {
   coworkLinux as linuxCoworkPlatform,
   COWORK_MANAGED_ONLY,
   desktopRestartTimeoutMs,
+  ownedResetRecoveryWindowMs,
 } from './linux.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
@@ -974,30 +975,50 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     );
   }
 
-  it('restarts once after a reset scan timeout and rechecks settings, readiness and the blank task', async () => {
-    const { lifecycle, file, original } = await prepareOwned();
-    const prepared = await lifecycle;
-    const error = await failedReset('accessibility_scan_timeout');
-    child.exec.mockClear();
-    child.payloads.length = 0;
-    child.responses.push(
-      {},
-      {},
-      { value: { status: 'ready', action_count: 1, duration_ms: 1 } }
-    );
-    expect(await prepared.recoverReset!(error, Date.now() + 180_000)).toBe(
-      true
-    );
-    expect(
-      child.exec.mock.calls.map(([command, args]) =>
-        command === RESTART ? 'restart' : String(args[2])
-      )
-    ).toEqual(['restart', 'probe', 'reset']);
-    expect(child.exec.mock.calls[0]![2].timeout).toBeLessThanOrEqual(135_000);
-    expect(child.payloads.filter(Boolean)).toEqual(['{}', '{}']);
-    await prepared.dispose();
-    expect(await readFile(file, 'utf8')).toBe(original);
-  });
+  it.each([
+    ['the default 5 minutes', { MST_DESKTOP_RESTART_TIMEOUT_S: '' }, 300_000],
+    [
+      'the image limit of 900 seconds',
+      { MST_DESKTOP_RESTART_TIMEOUT_S: '900' },
+      900_000,
+    ],
+  ] as const)(
+    'restarts once after a reset scan timeout (%s) and rechecks settings, readiness and the blank task',
+    async (_label, extraEnv, restartMs) => {
+      const { lifecycle, file, original } = await prepareOwned({
+        ...extraEnv,
+      });
+      const prepared = await lifecycle;
+      const error = await failedReset('accessibility_scan_timeout');
+      child.exec.mockClear();
+      child.payloads.length = 0;
+      child.responses.push(
+        {},
+        {},
+        { value: { status: 'ready', action_count: 1, duration_ms: 1 } }
+      );
+      const before = Date.now();
+      expect(
+        await prepared.recoverReset!(
+          error,
+          before + ownedResetRecoveryWindowMs(extraEnv)
+        )
+      ).toBe(true);
+      expect(
+        child.exec.mock.calls.map(([command, args]) =>
+          command === RESTART ? 'restart' : String(args[2])
+        )
+      ).toEqual(['restart', 'probe', 'reset']);
+      // The restart keeps its own limit. Verification still has its 45s.
+      const timeout = child.exec.mock.calls[0]![2].timeout as number;
+      expect(timeout).toBeGreaterThan(restartMs - 5_000);
+      expect(timeout).toBeLessThanOrEqual(restartMs);
+      expect(before + restartMs + 45_000 - Date.now()).toBeGreaterThan(40_000);
+      expect(child.payloads.filter(Boolean)).toEqual(['{}', '{}']);
+      await prepared.dispose();
+      expect(await readFile(file, 'utf8')).toBe(original);
+    }
+  );
 
   it.each([
     ['task_not_stopped', 0],
@@ -1698,6 +1719,10 @@ describe('desktopRestartTimeoutMs', () => {
     expect(
       desktopRestartTimeoutMs({ MST_DESKTOP_RESTART_TIMEOUT_S: '900' })
     ).toBe(900_000);
+    expect(ownedResetRecoveryWindowMs({})).toBe(345_000);
+    expect(
+      ownedResetRecoveryWindowMs({ MST_DESKTOP_RESTART_TIMEOUT_S: '900' })
+    ).toBe(945_000);
     for (const value of ['0', '3601', '1.5', 'soon'])
       expect(() =>
         desktopRestartTimeoutMs({ MST_DESKTOP_RESTART_TIMEOUT_S: value })

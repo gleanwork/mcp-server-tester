@@ -971,8 +971,10 @@ Neither link sends anything. Each reset attempt has up to 30 seconds
 for accessibility reads and navigation; Linux Cowork retries a failed reset
 twice, after 10 and 20 seconds. If the final reset reports
 `accessibility_scan_timeout` on an MST-owned third-party Linux desktop, MST
-restarts the desktop once. It checks the variant settings and desktop readiness,
-then verifies a fresh task with the same reset checks. Only then does MST submit
+restarts the desktop once, with the same limit as `MST_DESKTOP_RESTART`
+(5 minutes, or `MST_DESKTOP_RESTART_TIMEOUT_S`; 900 seconds in MST's image).
+It then keeps 45 seconds to check the variant settings and desktop readiness
+and to verify a fresh task with the same reset checks. Only then does MST submit
 the next case. If recovery fails, the remaining cases are not submitted. MST
 never restarts a caller-owned desktop this way and never resends the failed case.
 First-party Linux reset first ends an

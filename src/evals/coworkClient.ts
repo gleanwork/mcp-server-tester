@@ -500,7 +500,8 @@ async function desktopAdapter(
     resetVerb: 'reset',
     // On Linux, a reset that fails once (accessibility_scan_timeout on a
     // slow desktop) would otherwise skip every later case in the batch.
-    // macOS already falls back to restarting the app.
+    // macOS already falls back to restarting the app. Recovery uses the
+    // image's MST_DESKTOP_RESTART limit, then leaves time to verify.
     ...(linux ? { resetRetryDelaysMs: RESET_RETRY_DELAYS_MS } : {}),
     ...(linux && !firstParty
       ? {
@@ -509,9 +510,13 @@ async function desktopAdapter(
             _index: number,
             error: unknown
           ) {
+            const { ownedResetRecoveryWindowMs } =
+              await import('./cowork/linux.js');
             return (
-              (await session?.recoverReset?.(error, Date.now() + 180_000)) ??
-              false
+              (await session?.recoverReset?.(
+                error,
+                Date.now() + ownedResetRecoveryWindowMs(env)
+              )) ?? false
             );
           },
         }

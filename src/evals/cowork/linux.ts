@@ -563,6 +563,17 @@ class LinuxCoworkResetScanTimeout extends CoworkDriverError {}
 
 const RESET_VERIFICATION_BUDGET_MS = 45_000;
 
+/**
+ * How long an owned-desktop recovery may take: one restart at
+ * `desktopRestartTimeoutMs`, then the checks that the next case can start.
+ * A nested VM can use the whole restart limit (900 seconds in MST's image).
+ */
+export function ownedResetRecoveryWindowMs(
+  env: Record<string, string | undefined>
+): number {
+  return desktopRestartTimeoutMs(env) + RESET_VERIFICATION_BUDGET_MS;
+}
+
 async function resetManagedCowork(options: CoworkDriverOptions): Promise<void> {
   // Stop, open an empty new-task link, and only for a retained draft try
   // alternate empty navigation. Never types or sends.
@@ -1109,7 +1120,8 @@ const coworkLinuxThirdParty: CoworkDesktop = {
       ownedDesktopSettings.delete(settingsFile);
       try {
         // The image restart reapplies this staged file. Do not restart with
-        // unknown settings or consume the time reserved for UI verification.
+        // unknown settings. The caller passes `ownedResetRecoveryWindowMs`,
+        // and the remainder after this restart is the verification budget.
         if ((await readSettingsText(settingsFile)) !== ownedText)
           throw new Error('the staged variant settings changed');
         const restartEnv = { ...process.env, ...env };

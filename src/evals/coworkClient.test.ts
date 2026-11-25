@@ -38,6 +38,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import type * as OsModule from 'node:os';
 import type * as ChildProcessModule from 'node:child_process';
+import type * as LinuxCowork from './cowork/linux.js';
 import type * as ReadinessCheck from './readinessCheck.js';
 import type * as ReadinessServer from './cowork/readinessServer.js';
 import { readyStdioServer } from '../../tests/mocks/readyServers.js';
@@ -91,10 +92,14 @@ const linuxAccountPlatform = vi.hoisted(() => ({
   handleHitl: vi.fn(),
 }));
 const cloudWrapper = vi.hoisted(() => ({ wrap: vi.fn() }));
-vi.mock('./cowork/linux.js', () => ({
-  coworkLinux: linuxPlatform,
-  coworkLinuxFirstParty: linuxAccountPlatform,
-}));
+vi.mock('./cowork/linux.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof LinuxCowork>();
+  return {
+    ...actual,
+    coworkLinux: linuxPlatform,
+    coworkLinuxFirstParty: linuxAccountPlatform,
+  };
+});
 
 vi.mock('./coworkSetup/recoverSession.js', () => ({
   recoverMacCoworkSession: vi.fn(),
@@ -881,6 +886,43 @@ describe('V2 Cowork client', () => {
         approveWriteTools: true,
       })
     );
+  });
+  it('budgets an owned Linux restart for the image limit, then verification', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    let remainingMs = 0;
+    const opened = await createCoworkClient({
+      dataDirectory: () => '/fixture/cowork',
+      prepare: async () => ({
+        dispose: mocks.dispose,
+        recoverReset: async (_error: unknown, deadlineAt: number) => {
+          remainingMs = deadlineAt - Date.now();
+          return true;
+        },
+      }),
+      recover: async () => {},
+      submit: mocks.submit,
+      handleHitl: mocks.hitl,
+      reset: async () => {
+        throw new Error('accessibility_scan_timeout');
+      },
+    }).open!(
+      { config: clientConfig, input: { servers: [server] } },
+      {
+        ...context,
+        env: { ...context.env, MST_DESKTOP_RESTART_TIMEOUT_S: '900' },
+      }
+    );
+    vi.useFakeTimers();
+    try {
+      const reset = opened.reset();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await reset;
+    } finally {
+      vi.useRealTimers();
+    }
+    // 900s for the image restart, then 45s to verify settings and a fresh task.
+    expect(remainingMs).toBe(945_000);
+    await opened.close();
   });
   it("records Claude Desktop's own telemetry with each Linux task (telemetry.host)", async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
