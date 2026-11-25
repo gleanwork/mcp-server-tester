@@ -18,11 +18,13 @@ import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -43,14 +45,14 @@ const PACKAGE = '@gleanwork/mcp-server-tester';
  * (dist, website/build, website/.vercel, ...) is ignored, and it holds the
  * docs' own text, so scanning it would make every name look like code.
  */
-function repoFiles(): string[] {
+function repoFiles(root = REPO): string[] {
   return execFileSync(
     'git',
     ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
-    { cwd: REPO, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
+    { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
   )
     .split('\0')
-    .filter((file) => file !== '' && existsSync(path.join(REPO, file)));
+    .filter((file) => file !== '' && existsSync(path.join(root, file)));
 }
 
 const REPO_FILES = repoFiles();
@@ -229,19 +231,31 @@ const CODE_NAME =
 
 describe('docs drift', () => {
   it('scans no build output, which holds the docs’ own text', () => {
-    const probe = path.join(REPO, 'website/.vercel/output/drift-probe.js');
-    const existed = existsSync(path.dirname(probe));
-    mkdirSync(path.dirname(probe), { recursive: true });
-    writeFileSync(probe, 'export const removedDocsName = 1;\n');
+    // In a scratch repo with this repo's ignore rule, so the test never
+    // writes into the checkout.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'docs-drift-'));
+    const write = (file: string) => {
+      mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      writeFileSync(
+        path.join(dir, file),
+        'export const removedDocsName = 1;\n'
+      );
+    };
     try {
-      expect(
-        repoFiles().filter((file) => file.startsWith('website/.vercel/'))
-      ).toEqual([]);
+      execFileSync('git', ['init', '-q'], { cwd: dir });
+      writeFileSync(
+        path.join(dir, '.gitignore'),
+        readFileSync(path.join(REPO, 'website/.gitignore'), 'utf8')
+      );
+      write('tracked.ts');
+      execFileSync('git', ['add', '.'], { cwd: dir });
+      write('new.ts');
+      write('.vercel/output/static/page.js');
+      expect(repoFiles(dir).sort()).toEqual(
+        ['.gitignore', 'new.ts', 'tracked.ts'].sort()
+      );
     } finally {
-      rmSync(existed ? probe : path.join(REPO, 'website/.vercel'), {
-        recursive: true,
-        force: true,
-      });
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
