@@ -278,7 +278,10 @@ function AttemptDialog({
         if (e.target === ref.current) ref.current?.close();
       }}
       aria-labelledby="exp-trials-h"
-      className="w-[min(900px,96vw)] rounded-lg border bg-background p-0 text-foreground backdrop:bg-black/50"
+      // m-auto: Tailwind's preflight sets every margin to 0, which overrides
+      // the browser's `margin: auto` for a modal dialog and pins it to the
+      // top-left corner.
+      className="m-auto w-[min(900px,96vw)] rounded-lg border bg-background p-0 text-foreground backdrop:bg-black/50"
     >
       <div className="grid gap-3 border-b p-4">
         <div className="flex items-start justify-between gap-4">
