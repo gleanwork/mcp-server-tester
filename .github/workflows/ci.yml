@@ -22,8 +22,12 @@ jobs:
 
       # Legacy examples resolve package self-imports through dist. The check
       # fails when a bundle carries an unused import from an external package.
+      # MST_COVERAGE gives the CLI and other process bundles source maps, so
+      # the coverage step below maps their coverage back to src/.
       - name: Build
         run: npm run build:check
+        env:
+          MST_COVERAGE: '1'
 
       - run: npm run typecheck
 
@@ -40,15 +44,56 @@ jobs:
       - name: CLI smoke
         run: npm run test:eval-review
 
-      - name: Use cases through the CLI
-        run: npm run test:usecases
+      # The unit tests and the use cases through the CLI, with coverage of
+      # the tests and of the processes they start (scripts/test-coverage.ts).
+      - name: Unit tests and use cases, with coverage
+        run: npm run test:coverage -- --no-build
 
-      - run: npm test
+      - name: Upload coverage
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage/unit/coverage-final.json
+            coverage/children/coverage-final.json
+          retention-days: 7
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
       - run: npm run test:playwright
+
+  # Fails when a line the pull request adds or changes in src/ runs in no
+  # test, unless the description names it under ## Untested with a reason
+  # (scripts/diff-coverage.ts). Its own job, so after editing the
+  # description, re-running it takes seconds: it reads the description when
+  # it runs and reuses the test job's coverage.
+  diff-coverage:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      # The merge commit and its first parent, the base branch.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: jdx/mise-action@v2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: coverage
+          path: coverage
+
+      # Node runs the script's TypeScript itself; it has no dependencies.
+      - name: Changed lines run in a test
+        run: node scripts/diff-coverage.ts --range HEAD^1..HEAD
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   # The docs site in website/: it renders docs/ and serves it, with skills/,
   # over MCP. This job only builds and tests it; deploy-website.yml deploys it
