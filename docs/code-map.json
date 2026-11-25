@@ -65,9 +65,11 @@
     ],
     "docs/evals-guide.md": [
       "src/evals/datasetTypes.ts",
-      "src/evals/evalConfig.ts"
+      "src/evals/evalConfig.ts",
+      "src/evals/grading.ts"
     ],
     "docs/evaluation-framework.md": [
+      "src/judge/",
       "src/evals/evalConfig.ts",
       "src/evals/evalFrameworkTypes.ts",
       "src/evals/metrics.ts",

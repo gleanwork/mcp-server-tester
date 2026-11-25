@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -99,12 +108,63 @@ describe('docs/code-map.json', () => {
 });
 
 describe('node scripts/docs-coverage.ts', () => {
-  function run(files: string[]): string {
+  function run(
+    files: string[],
+    options: { cwd?: string; env?: Record<string, string> } = {}
+  ): string {
     return execFileSync(process.execPath, [SCRIPT, ...files], {
       encoding: 'utf8',
-      env: { ...process.env, GITHUB_STEP_SUMMARY: '' },
+      cwd: options.cwd,
+      env: { ...process.env, GITHUB_STEP_SUMMARY: '', ...options.env },
     });
   }
+
+  it('writes the table to the step summary in GitHub Actions', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'docs-coverage-'));
+    try {
+      const summary = path.join(dir, 'summary.md');
+      const out = run(['src/llm/endpoint.ts'], {
+        env: { GITHUB_STEP_SUMMARY: summary },
+      });
+      expect(out.trim().split('\n')).toEqual([
+        expect.stringContaining('::warning file=docs/llm-gateways.md,'),
+      ]);
+      expect(readFileSync(summary, 'utf8')).toContain(
+        '| `docs/llm-gateways.md` | `src/llm/endpoint.ts` |'
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // With no files, the script diffs the branch against origin/<base>, as CI
+  // runs it.
+  it('reads the files from git, with both paths of a move', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'docs-coverage-'));
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+    try {
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 'test@example.com');
+      git('config', 'user.name', 'Test');
+      mkdirSync(path.join(dir, 'src/plugins'), { recursive: true });
+      writeFileSync(
+        path.join(dir, 'src/plugins/loadPlugins.ts'),
+        'export const a = 1;\n'
+      );
+      git('add', '.');
+      git('commit', '-qm', 'base');
+      git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      mkdirSync(path.join(dir, 'src/other'));
+      git('mv', 'src/plugins/loadPlugins.ts', 'src/other/loadPlugins.ts');
+      git('commit', '-qm', 'move');
+      const out = run([], { cwd: dir, env: { GITHUB_BASE_REF: 'main' } });
+      expect(out).toContain('::warning file=docs/architecture.md,');
+      expect(out).toContain('src/plugins/loadPlugins.ts');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it("warns on the repo's map for changed code without its page", () => {
     expect(run(['src/llm/endpoint.ts'])).toContain(

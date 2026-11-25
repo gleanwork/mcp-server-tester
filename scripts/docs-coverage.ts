@@ -84,9 +84,13 @@ export function report(stale: StalePage[]): {
 
 function changedSinceBase(): string[] {
   const base = `origin/${process.env.GITHUB_BASE_REF || 'main'}`;
-  return execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], {
-    encoding: 'utf8',
-  })
+  // --no-renames lists a moved file's old path too, so the page that maps
+  // the directory it left still gets a warning.
+  return execFileSync(
+    'git',
+    ['diff', '--name-only', '--no-renames', `${base}...HEAD`],
+    { encoding: 'utf8' }
+  )
     .split('\n')
     .filter(Boolean);
 }
