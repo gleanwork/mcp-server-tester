@@ -24,14 +24,10 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       // Files no test loads are reported too, with every line unrun.
+      // scripts/diff-coverage.ts fails on a changed file this leaves out, so
+      // exclude only files that aren't source: a types.ts can hold code.
       include: ['src/**/*.{ts,tsx}'],
-      exclude: [
-        'node_modules',
-        'dist',
-        '**/*.test.ts',
-        '**/*.spec.ts',
-        '**/types.ts',
-      ],
+      exclude: ['node_modules', 'dist', '**/*.test.ts', '**/*.spec.ts'],
     },
   },
 });

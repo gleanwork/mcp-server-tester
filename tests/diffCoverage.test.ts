@@ -16,6 +16,7 @@ import {
   parseUntested,
   report,
   uncoveredLines,
+  unmappedFiles,
   type CoverageMap,
   type FileCoverage,
 } from '../scripts/diff-coverage.js';
@@ -272,6 +273,47 @@ describe('report', () => {
     });
   });
 
+  it('fails on a changed file the unit coverage has no entry for', () => {
+    const result = report(
+      new Map([...changed, ['src/excluded.ts', new Set([7])]]),
+      new Map([
+        [
+          'src/a.ts',
+          new Map([
+            [1, 1],
+            [2, 1],
+            [3, 1],
+            [5, 1],
+          ]),
+        ],
+      ]),
+      { entries: [], invalid: [] }
+    );
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain(
+      'src/excluded.ts changed but has no unit coverage'
+    );
+    expect(result.text).not.toContain('Every changed line');
+  });
+
+  it('passes a file with no unit coverage that ## Untested names', () => {
+    const result = report(
+      new Map([['src/excluded.ts', new Set([7])]]),
+      new Map(),
+      {
+        entries: [{ file: 'src/excluded.ts', lines: null, reason: 'r' }],
+        invalid: [],
+      }
+    );
+    expect(result).toEqual({
+      ok: true,
+      text: [
+        'Excused by ## Untested: src/excluded.ts',
+        'Every changed line in src/ that has a statement runs in a test.',
+      ].join('\n'),
+    });
+  });
+
   it('fails on an ## Untested line with no path or reason', () => {
     const result = report(new Map(), new Map(), {
       entries: [],
@@ -286,6 +328,49 @@ describe('report', () => {
 
 it('formatRanges joins runs of lines', () => {
   expect(formatRanges([9, 3, 4, 5, 12, 13])).toBe('3-5, 9, 12-13');
+});
+
+it('unmappedFiles lists changed files the coverage has no entry for', () => {
+  expect(
+    unmappedFiles(
+      new Map([
+        ['src/a.ts', new Set([1])],
+        ['src/excluded.ts', new Set([2])],
+      ]),
+      new Map([['src/a.ts', new Map([[1, 1]])]])
+    )
+  ).toEqual({ excused: [], failing: ['src/excluded.ts'] });
+});
+
+it('unmappedFiles excuses a file only when ## Untested covers every changed line', () => {
+  const changed = new Map([
+    ['src/ranged.ts', new Set([40, 100])],
+    ['src/covered.ts', new Set([40, 52])],
+  ]);
+  expect(
+    unmappedFiles(changed, new Map(), [
+      { file: 'src/ranged.ts', lines: { start: 40, end: 52 }, reason: 'r' },
+      { file: 'src/covered.ts', lines: { start: 40, end: 52 }, reason: 'r' },
+    ])
+  ).toEqual({ excused: ['src/covered.ts'], failing: ['src/ranged.ts'] });
+});
+
+it('annotations mark a file with no coverage', () => {
+  expect(annotations(new Map(), ['src/excluded.ts'])).toEqual([
+    '::error file=src/excluded.ts,title=No coverage for this file::vitest.config.mts excludes it from coverage, so the check cannot tell which lines run.',
+  ]);
+});
+
+// Node runs TypeScript without a loader only from 22.18; engines allows 22.0.
+// CI calls diff-coverage.ts with plain node, on the Node that mise installs.
+it('npm scripts run TypeScript through tsx', () => {
+  const { scripts } = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')
+  ) as { scripts: Record<string, string> };
+  const bare = Object.entries(scripts).filter(([, command]) =>
+    /(^|&&\s*)node\s+(?!--import tsx)\S*\.ts\b/.test(command)
+  );
+  expect(bare).toEqual([]);
 });
 
 it('annotations mark each range in the diff', () => {
@@ -374,6 +459,34 @@ describe('the script', () => {
   it('annotates the lines in GitHub Actions', () => {
     const result = run(repo(), ARGS, { GITHUB_ACTIONS: 'true' });
     expect(result.stdout).toContain('::error file=src/a.ts,line=4,endLine=4');
+  });
+
+  it('fails on and annotates a changed file with no coverage entry', () => {
+    const dir = repo();
+    fs.writeFileSync(path.join(dir, 'src/b.ts'), 'export const e = 5;\n');
+    spawnSync('git', ['add', 'src/b.ts'], { cwd: dir });
+    spawnSync(
+      'git',
+      [
+        '-c',
+        'user.email=t@e',
+        '-c',
+        'user.name=t',
+        'commit',
+        '-q',
+        '--amend',
+        '--no-edit',
+      ],
+      { cwd: dir }
+    );
+    const result = run(dir, ARGS, { GITHUB_ACTIONS: 'true' });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain(
+      'src/b.ts changed but has no unit coverage'
+    );
+    expect(result.stdout).toContain(
+      '::error file=src/b.ts,title=No coverage for this file::'
+    );
   });
 
   it('passes with the line under ## Untested in --body-file', () => {
