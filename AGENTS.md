@@ -185,7 +185,7 @@ Every change that adds behavior adds a test that fails without it, in the same P
 
 CI enforces this. The `diff-coverage` job fails a PR when a line it adds or changes in `src/` runs in no test, and marks each such line in the diff (`scripts/diff-coverage.ts`). It reads coverage from the unit tests and the use cases, including the processes they start, such as the built `mst` binary (`scripts/test-coverage.ts`). The Playwright specs and the report UI in `src/reporters/ui-src/` are not covered. CI runs on Linux, so a test that runs only on macOS doesn't count. Run it locally with `npm run test:coverage` and then `npm run coverage:diff`.
 
-If a path can't be tested, name it under an `## Untested` heading in the PR description, with the reason. Put one line per path, as ``- `src/evals/cowork/macos.ts`: drives the macOS app`` for the whole file, or ``- `src/evals/cowork/macos.ts:40-52`: drives the macOS app`` for a line range. The check reads the description each time it runs, so after you edit it, re-run the `diff-coverage` job.
+If a path can't be tested, name it under an `## Untested` heading in the PR description, with the reason. Put one list item per path, as ``- `src/evals/cowork/macos.ts`: drives the macOS app`` for the whole file, or ``- `src/evals/cowork/macos.ts:40-52`: drives the macOS app`` for a line range. The check ignores other text under the heading. It reads the description each time it runs, so after you edit it, re-run the `diff-coverage` job.
 
 ## Pre-Push Checklist
 

@@ -132,6 +132,7 @@ describe('parseUntested', () => {
       '- `src/ignored.ts`: not in the section',
       '',
       '### Untested',
+      'None of these run on Linux: `src/prose.ts` is not an entry.',
       '- `src/evals/cowork/macos.ts`: drives the macOS app.',
       '* `src/cli/index.ts:120-134` - only without a TTY on Windows',
       '- `./src/a.ts:7` the one line',
@@ -278,7 +279,7 @@ describe('report', () => {
     });
     expect(result).toEqual({
       ok: false,
-      text: '## Untested line names no `path` or gives no reason: - fix later',
+      text: '## Untested item names no `path` or gives no reason: - fix later',
     });
   });
 });

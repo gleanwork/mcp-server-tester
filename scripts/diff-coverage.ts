@@ -12,8 +12,8 @@
  * and they aren't covered.
  *
  * When a path can't be tested, the pull request names it under an
- * `## Untested` heading in its description, one line per path with the
- * reason, as AGENTS.md asks:
+ * `## Untested` heading in its description, one list item per path with the
+ * reason, as AGENTS.md asks. Other text under the heading is ignored:
  *
  *     ## Untested
  *     - `src/evals/cowork/macos.ts`: drives the macOS app, which CI can't run.
@@ -50,7 +50,7 @@ export interface UntestedEntry {
 
 export interface UntestedSection {
   entries: UntestedEntry[];
-  /** Lines under the heading that name no path or give no reason. */
+  /** List items under the heading that name no path or give no reason. */
   invalid: string[];
 }
 
@@ -163,7 +163,8 @@ export function parseUntested(body: string): UntestedSection {
       inSection = /^untested$/i.test(heading[1]!);
       continue;
     }
-    if (!inSection || line === '') continue;
+    // Only list items are entries; prose under the heading is the author's.
+    if (!inSection || !/^[-*]\s/.test(line)) continue;
     const entry =
       /^[-*]\s+`([^`:]+)(?::(\d+)(?:-(\d+))?)?`\s*[:\u2013\u2014-]?\s*(.*)$/.exec(
         line
@@ -254,7 +255,7 @@ export function report(
   );
   const out: string[] = [];
   for (const line of untested.invalid) {
-    out.push(`## Untested line names no \`path\` or gives no reason: ${line}`);
+    out.push(`## Untested item names no \`path\` or gives no reason: ${line}`);
   }
   for (const [file, lines] of excused) {
     out.push(`Excused by ## Untested: ${file}:${formatRanges(lines)}`);
