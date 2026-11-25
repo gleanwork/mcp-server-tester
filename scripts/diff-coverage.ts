@@ -204,12 +204,25 @@ export function uncoveredLines(
   return uncovered;
 }
 
-/** The changed files the unit coverage has no entry for. */
+/**
+ * The changed files the unit coverage has no entry for: `excused` when
+ * `## Untested` excuses every changed line of the file, as it would a
+ * mapped file's lines, else `failing`.
+ */
 export function unmappedFiles(
   changed: LinesByFile,
-  hits: HitsByFile
-): string[] {
-  return [...changed.keys()].filter((file) => !hits.has(file));
+  hits: HitsByFile,
+  entries: UntestedEntry[] = []
+): { excused: string[]; failing: string[] } {
+  const unmapped: LinesByFile = new Map(
+    [...changed].filter(([file]) => !hits.has(file))
+  );
+  const { failing } = applyUntested(unmapped, entries);
+  const files = [...unmapped.keys()];
+  return {
+    excused: files.filter((file) => !failing.has(file)),
+    failing: files.filter((file) => failing.has(file)),
+  };
 }
 
 /** Splits uncovered lines into those `## Untested` excuses and the rest. */
@@ -265,10 +278,8 @@ export function report(
     uncoveredLines(changed, hits),
     untested.entries
   );
-  const unmapped = unmappedFiles(changed, hits);
-  const unmappedFailing = unmapped.filter(
-    (file) => !untested.entries.some((entry) => entry.file === file)
-  );
+  const unmapped = unmappedFiles(changed, hits, untested.entries);
+  const unmappedFailing = unmapped.failing;
   const out: string[] = [];
   for (const line of untested.invalid) {
     out.push(`## Untested item names no \`path\` or gives no reason: ${line}`);
@@ -276,7 +287,7 @@ export function report(
   for (const [file, lines] of excused) {
     out.push(`Excused by ## Untested: ${file}:${formatRanges(lines)}`);
   }
-  for (const file of unmapped.filter((f) => !unmappedFailing.includes(f))) {
+  for (const file of unmapped.excused) {
     out.push(`Excused by ## Untested: ${file}`);
   }
   for (const file of unmappedFailing) {
@@ -409,9 +420,7 @@ async function main(): Promise<void> {
       uncoveredLines(changed, hits),
       untested.entries
     );
-    const unmapped = unmappedFiles(changed, hits).filter(
-      (file) => !untested.entries.some((entry) => entry.file === file)
-    );
+    const unmapped = unmappedFiles(changed, hits, untested.entries).failing;
     for (const line of annotations(failing, unmapped)) console.log(line);
   }
   process.exitCode = result.ok ? 0 : 1;

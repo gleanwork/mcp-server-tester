@@ -339,7 +339,20 @@ it('unmappedFiles lists changed files the coverage has no entry for', () => {
       ]),
       new Map([['src/a.ts', new Map([[1, 1]])]])
     )
-  ).toEqual(['src/excluded.ts']);
+  ).toEqual({ excused: [], failing: ['src/excluded.ts'] });
+});
+
+it('unmappedFiles excuses a file only when ## Untested covers every changed line', () => {
+  const changed = new Map([
+    ['src/ranged.ts', new Set([40, 100])],
+    ['src/covered.ts', new Set([40, 52])],
+  ]);
+  expect(
+    unmappedFiles(changed, new Map(), [
+      { file: 'src/ranged.ts', lines: { start: 40, end: 52 }, reason: 'r' },
+      { file: 'src/covered.ts', lines: { start: 40, end: 52 }, reason: 'r' },
+    ])
+  ).toEqual({ excused: ['src/covered.ts'], failing: ['src/ranged.ts'] });
 });
 
 it('annotations mark a file with no coverage', () => {
@@ -446,6 +459,34 @@ describe('the script', () => {
   it('annotates the lines in GitHub Actions', () => {
     const result = run(repo(), ARGS, { GITHUB_ACTIONS: 'true' });
     expect(result.stdout).toContain('::error file=src/a.ts,line=4,endLine=4');
+  });
+
+  it('fails on and annotates a changed file with no coverage entry', () => {
+    const dir = repo();
+    fs.writeFileSync(path.join(dir, 'src/b.ts'), 'export const e = 5;\n');
+    spawnSync('git', ['add', 'src/b.ts'], { cwd: dir });
+    spawnSync(
+      'git',
+      [
+        '-c',
+        'user.email=t@e',
+        '-c',
+        'user.name=t',
+        'commit',
+        '-q',
+        '--amend',
+        '--no-edit',
+      ],
+      { cwd: dir }
+    );
+    const result = run(dir, ARGS, { GITHUB_ACTIONS: 'true' });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain(
+      'src/b.ts changed but has no unit coverage'
+    );
+    expect(result.stdout).toContain(
+      '::error file=src/b.ts,title=No coverage for this file::'
+    );
   });
 
   it('passes with the line under ## Untested in --body-file', () => {
