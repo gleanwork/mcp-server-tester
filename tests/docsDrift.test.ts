@@ -14,7 +14,15 @@
  *
  * The CLI check reads the built CLI's help, so build first.
  */
-import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
@@ -30,20 +38,25 @@ import {
 const REPO = fileURLToPath(new URL('../', import.meta.url));
 const PACKAGE = '@gleanwork/mcp-server-tester';
 
+/**
+ * The repo's own files: tracked, or new and not ignored. Build output
+ * (dist, website/build, website/.vercel, ...) is ignored, and it holds the
+ * docs' own text, so scanning it would make every name look like code.
+ */
+function repoFiles(): string[] {
+  return execFileSync(
+    'git',
+    ['ls-files', '-z', '--cached', '--others', '--exclude-standard'],
+    { cwd: REPO, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
+  )
+    .split('\0')
+    .filter((file) => file !== '' && existsSync(path.join(REPO, file)));
+}
+
+const REPO_FILES = repoFiles();
+
 function walk(dir: string, keep: (file: string) => boolean): string[] {
-  return readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap(
-    (entry) => {
-      const file = path.posix.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (
-          ['node_modules', 'dist', 'build', '.docusaurus'].includes(entry.name)
-        )
-          return [];
-        return walk(file, keep);
-      }
-      return keep(file) ? [file] : [];
-    }
-  );
+  return REPO_FILES.filter((file) => file.startsWith(`${dir}/`) && keep(file));
 }
 
 function isRecord(file: string): boolean {
@@ -215,6 +228,23 @@ const CODE_NAME =
   /`([a-z][a-z0-9]*[A-Z][A-Za-z0-9]*|[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*)(?:\(\))?`/g;
 
 describe('docs drift', () => {
+  it('scans no build output, which holds the docs’ own text', () => {
+    const probe = path.join(REPO, 'website/.vercel/output/drift-probe.js');
+    const existed = existsSync(path.dirname(probe));
+    mkdirSync(path.dirname(probe), { recursive: true });
+    writeFileSync(probe, 'export const removedDocsName = 1;\n');
+    try {
+      expect(
+        repoFiles().filter((file) => file.startsWith('website/.vercel/'))
+      ).toEqual([]);
+    } finally {
+      rmSync(existed ? probe : path.join(REPO, 'website/.vercel'), {
+        recursive: true,
+        force: true,
+      });
+    }
+  });
+
   it('checks every current page', () => {
     // A guard for the lists above: a new page is checked without a change here.
     expect(CURRENT_DOCS).toContain('docs/architecture.md');

@@ -14,7 +14,8 @@ const SITE_PORT = 3459;
  * don't need a built site.
  *
  * The `diagrams` project renders every Mermaid diagram in the repo's
- * Markdown in a browser. It needs the site's dependencies, not its build.
+ * Markdown in a browser. It reads the site's Mermaid package, and it needs
+ * the build too, because `webServer` starts for every project.
  */
 export default defineConfig({
   testDir: './tests/site',
