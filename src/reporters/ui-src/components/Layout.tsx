@@ -8,8 +8,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen flex flex-col bg-background">
       <div className="flex h-14 items-center justify-between border-b bg-card">
         <div className="max-w-[1600px] mx-auto w-full px-6 flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <Logo size={22} className="text-foreground" />
+          <div className="flex items-center gap-2">
+            <Logo size={24} />
             <span className="text-lg font-bold">MCP Server Tester</span>
           </div>
           <DarkModeToggle />
