@@ -40,6 +40,8 @@ export interface CoworkDesktop {
      * that needs no planner. macOS only.
      */
     restart?(): Promise<void>;
+    /** A final, verified recovery for a failed reset on a desktop we own. */
+    recoverReset?(error: unknown, deadlineAt: number): Promise<boolean>;
     /**
      * Why the session recorder last failed to record the app's sessions, or
      * undefined when its latest attempt succeeded. A desktop that records

@@ -119,10 +119,18 @@ export interface DesktopClientAdapter<Session> {
   /**
    * How long to wait before each retry of a failed reset; none by default.
    * A reset can fail transiently, e.g. an accessibility scan timing out on a
-   * slow desktop (Cowork uses `RESET_RETRY_DELAYS_MS`); only when every
-   * attempt fails does the batch stop submitting.
+   * slow desktop (Cowork uses `RESET_RETRY_DELAYS_MS`).
    */
   readonly resetRetryDelaysMs?: readonly number[];
+  /**
+   * One fallback after the last reset attempt fails. True means the desktop
+   * was verified fresh; false preserves the reset error. Never submits.
+   */
+  recoverReset?(
+    session: Session,
+    index: number,
+    error: unknown
+  ): Promise<boolean>;
   /**
    * After a failed case that leaves the app in an unknown state, before the
    * reset: writes a failure diagnosis into `dir`, an empty directory made for
@@ -393,10 +401,15 @@ export async function openDesktopSession<Session>(
             `this ${adapter.name} platform cannot reset between cases`
           );
         try {
-          await withRetries(
-            () => adapter.reset!(current, index),
-            adapter.resetRetryDelaysMs ?? []
-          );
+          try {
+            await withRetries(
+              () => adapter.reset!(current, index),
+              adapter.resetRetryDelaysMs ?? []
+            );
+          } catch (error) {
+            if (!(await adapter.recoverReset?.(current, index, error)))
+              throw error;
+          }
           continuation = 'continue';
         } catch (error) {
           continuation = 'reset';

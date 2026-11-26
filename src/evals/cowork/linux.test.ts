@@ -20,6 +20,7 @@ import {
   coworkLinux as linuxCoworkPlatform,
   COWORK_MANAGED_ONLY,
   desktopRestartTimeoutMs,
+  ownedResetRecoveryWindowMs,
 } from './linux.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
@@ -959,6 +960,125 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     expect(await readFile(file, 'utf8')).toBe(original);
   });
 
+  const scanFailure = (error: string, action_count = 0) => ({
+    failed: true,
+    value: { status: 'failed', error, action_count, duration_ms: 1 },
+  });
+
+  async function failedReset(error: string, actions?: number) {
+    child.responses.push(scanFailure(error, actions));
+    return linuxCoworkPlatform.reset!(options()).then(
+      () => {
+        throw new Error('expected reset to fail');
+      },
+      (failure: unknown) => failure
+    );
+  }
+
+  it.each([
+    ['the default 5 minutes', { MST_DESKTOP_RESTART_TIMEOUT_S: '' }, 300_000],
+    [
+      'the image limit of 900 seconds',
+      { MST_DESKTOP_RESTART_TIMEOUT_S: '900' },
+      900_000,
+    ],
+  ] as const)(
+    'restarts once after a reset scan timeout (%s) and rechecks settings, readiness and the blank task',
+    async (_label, extraEnv, restartMs) => {
+      const { lifecycle, file, original } = await prepareOwned({
+        ...extraEnv,
+      });
+      const prepared = await lifecycle;
+      const error = await failedReset('accessibility_scan_timeout');
+      child.exec.mockClear();
+      child.payloads.length = 0;
+      child.responses.push(
+        {},
+        {},
+        { value: { status: 'ready', action_count: 1, duration_ms: 1 } }
+      );
+      const before = Date.now();
+      expect(
+        await prepared.recoverReset!(
+          error,
+          before + ownedResetRecoveryWindowMs(extraEnv)
+        )
+      ).toBe(true);
+      expect(
+        child.exec.mock.calls.map(([command, args]) =>
+          command === RESTART ? 'restart' : String(args[2])
+        )
+      ).toEqual(['restart', 'probe', 'reset']);
+      // The restart keeps its own limit. Verification still has its 45s.
+      const timeout = child.exec.mock.calls[0]![2].timeout as number;
+      expect(timeout).toBeGreaterThan(restartMs - 5_000);
+      expect(timeout).toBeLessThanOrEqual(restartMs);
+      expect(before + restartMs + 45_000 - Date.now()).toBeGreaterThan(40_000);
+      expect(child.payloads.filter(Boolean)).toEqual(['{}', '{}']);
+      await prepared.dispose();
+      expect(await readFile(file, 'utf8')).toBe(original);
+    }
+  );
+
+  it.each([
+    ['task_not_stopped', 0],
+    ['accessibility_scan_timeout', 4],
+  ] as const)(
+    'does not restart for an ineligible reset receipt (%s, %d actions)',
+    async (code, actions) => {
+      const { lifecycle } = await prepareOwned();
+      const prepared = await lifecycle;
+      const error = await failedReset(code, actions);
+      child.exec.mockClear();
+      expect(await prepared.recoverReset!(error, Date.now() + 180_000)).toBe(
+        false
+      );
+      expect(child.exec).not.toHaveBeenCalled();
+      await prepared.dispose();
+    }
+  );
+
+  it('does not enable recovery on a caller-owned desktop', async () => {
+    const prepared = await prepare();
+    expect(prepared.recoverReset).toBeUndefined();
+    await prepared.dispose();
+  });
+
+  it.each(['restart', 'probe', 'reset', 'deadline', 'settings'] as const)(
+    'refuses to resume when owned recovery fails at %s',
+    async (stage) => {
+      const { file, lifecycle } = await prepareOwned();
+      const prepared = await lifecycle;
+      const error = await failedReset('accessibility_scan_timeout');
+      child.exec.mockClear();
+      if (stage === 'settings') await writeFile(file, '{}');
+      if (stage === 'restart') child.responses.push({ failed: true });
+      if (stage === 'probe')
+        child.responses.push({}, scanFailure('accessibility_scan_timeout'));
+      if (stage === 'reset')
+        child.responses.push({}, {}, scanFailure('accessibility_scan_timeout'));
+      await expect(
+        prepared.recoverReset!(
+          error,
+          Date.now() + (stage === 'deadline' ? 1000 : 180_000)
+        )
+      ).rejects.toThrow('owned desktop recovery failed');
+      const expected = {
+        restart: ['restart'],
+        probe: ['restart', 'probe'],
+        reset: ['restart', 'probe', 'reset'],
+        deadline: [],
+        settings: [],
+      };
+      expect(
+        child.exec.mock.calls.map(([command, args]) =>
+          command === RESTART ? 'restart' : String(args[2])
+        )
+      ).toEqual(expected[stage]);
+      await prepared.dispose();
+    }
+  );
+
   it("lets Cowork reach public hosts unless the image or the eval names others; the eval's list wins", async () => {
     const egressOf = async (
       base: Record<string, unknown>,
@@ -1599,6 +1719,10 @@ describe('desktopRestartTimeoutMs', () => {
     expect(
       desktopRestartTimeoutMs({ MST_DESKTOP_RESTART_TIMEOUT_S: '900' })
     ).toBe(900_000);
+    expect(ownedResetRecoveryWindowMs({})).toBe(345_000);
+    expect(
+      ownedResetRecoveryWindowMs({ MST_DESKTOP_RESTART_TIMEOUT_S: '900' })
+    ).toBe(945_000);
     for (const value of ['0', '3601', '1.5', 'soon'])
       expect(() =>
         desktopRestartTimeoutMs({ MST_DESKTOP_RESTART_TIMEOUT_S: value })

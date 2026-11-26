@@ -455,9 +455,9 @@ async function restartDesktop(
 /** One run of the restart command: why it failed, or undefined. */
 function runRestartCommand(
   command: string,
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
+  timeout = desktopRestartTimeoutMs(env)
 ): Promise<string | undefined> {
-  const timeout = desktopRestartTimeoutMs(env);
   return new Promise<string | undefined>((resolve) => {
     const child = execFile(
       command,
@@ -558,6 +558,28 @@ function receipt(stdout: string): Receipt | undefined {
 
 type LinuxCoworkMode = 'third-party' | 'first-party';
 
+/** Only an explicit, bounded reset receipt authorizes timeout recovery. */
+class LinuxCoworkResetScanTimeout extends CoworkDriverError {}
+
+const RESET_VERIFICATION_BUDGET_MS = 45_000;
+
+/**
+ * How long an owned-desktop recovery may take: one restart at
+ * `desktopRestartTimeoutMs`, then the checks that the next case can start.
+ * A nested VM can use the whole restart limit (900 seconds in MST's image).
+ */
+export function ownedResetRecoveryWindowMs(
+  env: Record<string, string | undefined>
+): number {
+  return desktopRestartTimeoutMs(env) + RESET_VERIFICATION_BUDGET_MS;
+}
+
+async function resetManagedCowork(options: CoworkDriverOptions): Promise<void> {
+  // Stop, open an empty new-task link, and only for a retained draft try
+  // alternate empty navigation. Never types or sends.
+  await execute('reset', {}, { ...options, maxActions: 3 });
+}
+
 async function execute(
   mode: 'probe' | 'reset' | 'submit' | 'hitl' | 'answer' | 'stop' | 'diagnose',
   payload: object,
@@ -654,11 +676,20 @@ async function execute(
     result.failed ||
     record?.status !== expected ||
     record.action_count > (options.maxActions ?? 24)
-  )
-    throw new CoworkDriverError(
+  ) {
+    const Failure =
+      mode === 'reset' &&
+      driverMode === 'third-party' &&
+      record?.status === 'failed' &&
+      record.errorCode === 'accessibility_scan_timeout' &&
+      record.action_count <= (options.maxActions ?? 24)
+        ? LinuxCoworkResetScanTimeout
+        : CoworkDriverError;
+    throw new Failure(
       `Linux desktop ${mode} failed or its receipt was uncertain (${record?.errorCode ?? 'missing_or_invalid_receipt'}); no retry attempted.`,
       record ? telemetry(started, record.action_count, 'partial') : undefined
     );
+  }
   return record;
 }
 
@@ -1078,9 +1109,53 @@ const coworkLinuxThirdParty: CoworkDesktop = {
       throw error;
     }
     const app = await installedCoworkApp();
-    return { dispose: restore, ...(app ? { app } : {}) };
+    return {
+      dispose: restore,
+      ...(app ? { app } : {}),
+      ...(owned ? { recoverReset } : {}),
+    };
 
-    async function checkAndProbe(): Promise<void> {
+    async function recoverReset(error: unknown, deadlineAt: number) {
+      if (!(error instanceof LinuxCoworkResetScanTimeout)) return false;
+      ownedDesktopSettings.delete(settingsFile);
+      try {
+        // The image restart reapplies this staged file. Do not restart with
+        // unknown settings. The caller passes `ownedResetRecoveryWindowMs`,
+        // and the remainder after this restart is the verification budget.
+        if ((await readSettingsText(settingsFile)) !== ownedText)
+          throw new Error('the staged variant settings changed');
+        const restartEnv = { ...process.env, ...env };
+        const timeout = Math.min(
+          desktopRestartTimeoutMs(restartEnv),
+          deadlineAt - Date.now() - RESET_VERIFICATION_BUDGET_MS
+        );
+        if (timeout <= 0) throw new Error('no time left to restart and verify');
+        process.stderr.write(
+          '[mst:cowork] reset scan timed out; restarting the owned desktop once\n'
+        );
+        // Do not use the preparation helper's command retries here.
+        if (
+          await runRestartCommand(env.MST_DESKTOP_RESTART!, restartEnv, timeout)
+        )
+          throw new Error('the desktop restart command did not succeed');
+        await checkAndProbe(deadlineAt);
+        await resetManagedCowork({ deadlineAt, env });
+        ownedDesktopSettings.set(settingsFile, ownedText!);
+        process.stderr.write(
+          '[mst:cowork] verified the desktop after restart\n'
+        );
+        return true;
+      } catch (cause) {
+        throw new CoworkDriverError(
+          `Cowork reset failed (accessibility_scan_timeout); owned desktop recovery failed: ${cause instanceof Error ? cause.message : 'verification did not succeed'}.`,
+          error.telemetry
+        );
+      }
+    }
+
+    async function checkAndProbe(
+      deadlineAt = Date.now() + 15_000
+    ): Promise<void> {
       try {
         const settings = await readSettings(settingsFile);
         const models = settings.inferenceModels as
@@ -1121,7 +1196,11 @@ const coworkLinuxThirdParty: CoworkDesktop = {
       await execute(
         'probe',
         {},
-        { deadlineAt: Date.now() + 15_000, maxActions: 1, env }
+        {
+          deadlineAt: Math.min(deadlineAt, Date.now() + 15_000),
+          maxActions: 1,
+          env,
+        }
       );
     }
   },
@@ -1133,11 +1212,7 @@ const coworkLinuxThirdParty: CoworkDesktop = {
   async diagnose(options) {
     await diagnoseLinux(options, 'third-party');
   },
-  async reset(options) {
-    // Stop, open an empty new-task link, and only for a retained draft try
-    // alternate empty navigation. Never types or sends.
-    await execute('reset', {}, { ...options, maxActions: 3 });
-  },
+  reset: resetManagedCowork,
   async submit(query, options) {
     const started = Date.now();
     const result = await execute('submit', { prompt: query }, options);
