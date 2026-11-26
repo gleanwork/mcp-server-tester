@@ -1004,11 +1004,14 @@ describe('V2 Cowork client', () => {
       expect(decision).toHaveBeenCalledWith(
         state === 'same'
           ? {
-              id: permission.id,
-              server: 'primary',
-              titles: ['search_files', 'Search files'],
+              status: 'approved',
+              approval: {
+                id: permission.id,
+                server: 'primary',
+                titles: ['search_files', 'Search files'],
+              },
             }
-          : undefined
+          : { status: 'pending' }
       );
       expect(
         mocks.matches.mock.calls.every(

@@ -1345,22 +1345,31 @@ async function handleLinuxHitl(
           'Linux HITL action budget exhausted.',
           telemetry(started, actions, 'partial', counts)
         );
-      const read = sawReadCard ? await verifyRead?.() : undefined;
-      if (read && approvedOnce.has(read.id)) {
-        // Wait for the native response; never click twice on one request.
-        await delay(
-          Math.min(500, Math.max(0, options.deadlineAt - Date.now()))
-        );
-        continue;
-      }
+      const verdict = sawReadCard ? await verifyRead?.() : undefined;
+      const approval =
+        verdict?.status === 'approved' ? verdict.approval : undefined;
+      // The dialog can lead the audit, a catalog probe can fail, or Allow
+      // once can still be showing after the click. Look again. Fail only
+      // when the audit names a call that is not a verified read.
+      const observe =
+        verdict?.status === 'pending' ||
+        (approval !== undefined && approvedOnce.has(approval.id));
       driving = true;
       const result = await execute(
         'hitl',
         {
           approveWriteTools: options.approveWriteTools === true,
-          ...(verifyRead && !sawReadCard ? { inspectReadCard: true } : {}),
-          ...(read
-            ? { readOnlyApproval: { server: read.server, titles: read.titles } }
+          ...(observe ? { observeReadCard: true } : {}),
+          ...(verifyRead && !sawReadCard && !observe
+            ? { inspectReadCard: true }
+            : {}),
+          ...(approval && !observe
+            ? {
+                readOnlyApproval: {
+                  server: approval.server,
+                  titles: approval.titles,
+                },
+              }
             : {}),
         },
         { ...options, maxActions: budget - actions },
@@ -1370,7 +1379,8 @@ async function handleLinuxHitl(
       actions += result.action_count;
       if (result.scanIncomplete) counts.incompleteScans += 1;
       if (result.deniedFolderRequest) counts.folderRequestsDenied += 1;
-      else if (read && result.action_count > 0) approvedOnce.add(read.id);
+      else if (approval && !observe && result.action_count > 0)
+        approvedOnce.add(approval.id);
       sawReadCard = result.readCard === true;
       await delay(Math.min(500, Math.max(0, options.deadlineAt - Date.now())));
     }

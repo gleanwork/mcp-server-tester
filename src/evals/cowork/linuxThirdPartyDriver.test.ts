@@ -826,6 +826,23 @@ describe('hitl', () => {
       { readCard: true, action_count: 0 }
     );
     expect(inspect.actions).toEqual([]);
+    const observe = new FakeUi();
+    observe.snapshot = async () => tree;
+    expect(await run(observe, 'hitl', { observeReadCard: true })).toMatchObject(
+      { readCard: true, action_count: 0 }
+    );
+    expect(observe.actions).toEqual([]);
+    const lingering = new FakeUi();
+    lingering.snapshot = async () => [
+      panel,
+      header,
+      node('cancel', 'button', 'Cancel', 'p'),
+      node('write', 'button', 'Create', 'p'),
+    ];
+    const looked = await run(lingering, 'hitl', { observeReadCard: true });
+    expect(looked.action_count).toBe(0);
+    expect(looked.readCard).toBeUndefined();
+    expect(lingering.actions).toEqual([]);
     expect((await check(tree)).actions).toEqual(['Allow once 3']);
     for (const tree of [
       [panel, header, always],

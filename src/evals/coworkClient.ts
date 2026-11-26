@@ -784,17 +784,17 @@ async function desktopAdapter(
               ? {
                   pendingReadOnlyApproval: async () => {
                     const before = await boundTranscript();
-                    const read = await verifyRead(before);
-                    if (!read) return undefined;
-                    // The prompt may have changed while tools/list was in flight.
+                    const verdict = await verifyRead(before);
+                    if (verdict.status !== 'approved') return verdict;
+                    // The request may have changed while tools/list was in flight.
                     const after = await boundTranscript();
                     return after &&
                       !after.isComplete &&
-                      after.pendingToolPermission?.id === read.id &&
+                      after.pendingToolPermission?.id === verdict.approval.id &&
                       after.pendingToolPermission.tool ===
                         before?.pendingToolPermission?.tool
-                      ? read
-                      : undefined;
+                      ? verdict
+                      : { status: 'pending' };
                   },
                 }
               : {}),

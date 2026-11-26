@@ -56,6 +56,8 @@ export interface ThirdPartyPayload {
   targetModel?: unknown;
   approveWriteTools?: unknown;
   inspectReadCard?: boolean;
+  /** Look for the one-time card again. Never click and never fail closed. */
+  observeReadCard?: boolean;
   readOnlyApproval?: { server: string; titles: readonly string[] };
   questions?: unknown;
 }
@@ -612,6 +614,12 @@ class ThirdPartyDriver {
     if (!found.length) return this.receipt('hitl_checked');
     const once = found.filter((node) => label(node) === 'Allow once');
     const selected = once.length === 1 ? once : found;
+    // The audit may still be catching up, or Allow once may still be
+    // showing after a click. Report the card and leave it alone.
+    if (!approveWrites && payload.observeReadCard === true)
+      return found.length === 1 && once.length === 1
+        ? { ...this.receipt('hitl_checked'), readCard: true }
+        : this.receipt('hitl_checked');
     if (selected.length !== 1)
       throw new DriverFailure('approval_control_ambiguous');
     // A card can appear between the last audit poll and this scan. Ask the

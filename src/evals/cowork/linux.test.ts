@@ -623,8 +623,10 @@ describe('caller-owned Linux Cowork desktop', () => {
     const clicked = {
       value: { status: 'hitl_checked', action_count: 1, duration_ms: 1 },
     };
-    child.responses.push(inspect, clicked, inspect);
-    const pendingReadOnlyApproval = vi.fn().mockResolvedValue(read);
+    child.responses.push(inspect, clicked, inspect, inspect);
+    const pendingReadOnlyApproval = vi
+      .fn()
+      .mockResolvedValue({ status: 'approved', approval: read });
     const isComplete = vi
       .fn()
       .mockResolvedValueOnce(false)
@@ -647,6 +649,72 @@ describe('caller-owned Linux Cowork desktop', () => {
         readOnlyApproval: { server: 'drive', titles: ['Search files'] },
       },
       { approveWriteTools: false, inspectReadCard: true },
+      { approveWriteTools: false, observeReadCard: true },
+    ]);
+  });
+  it('waits when a visible read card is not in the audit yet', async () => {
+    const card = {
+      value: {
+        status: 'hitl_checked',
+        action_count: 0,
+        duration_ms: 1,
+        readCard: true,
+      },
+    };
+    child.responses.push(card, card, card);
+    const pendingReadOnlyApproval = vi
+      .fn()
+      .mockResolvedValue({ status: 'pending' });
+    const result = await linuxCoworkPlatform.handleHitl({
+      ...options(),
+      approveWriteTools: false,
+      pendingReadOnlyApproval,
+      isComplete: vi
+        .fn()
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false)
+        .mockResolvedValue(true),
+    });
+    expect(result.action_count).toBe(0);
+    expect(pendingReadOnlyApproval).toHaveBeenCalledTimes(2);
+    expect(child.payloads.map((s): unknown => JSON.parse(s))).toEqual([
+      { approveWriteTools: false, inspectReadCard: true },
+      { approveWriteTools: false, observeReadCard: true },
+      { approveWriteTools: false, observeReadCard: true },
+    ]);
+  });
+  it('fails a visible card only when the audit names a call that is not a verified read', async () => {
+    child.responses.push(
+      {
+        value: {
+          status: 'hitl_checked',
+          action_count: 0,
+          duration_ms: 1,
+          readCard: true,
+        },
+      },
+      {
+        failed: true,
+        value: {
+          status: 'failed',
+          error: 'approval_requires_explicit_write_policy',
+          action_count: 0,
+          duration_ms: 1,
+        },
+      }
+    );
+    await expect(
+      linuxCoworkPlatform.handleHitl({
+        ...options(),
+        approveWriteTools: false,
+        pendingReadOnlyApproval: async () => ({ status: 'denied' }),
+        isComplete: async () => false,
+      })
+    ).rejects.toThrow('approval_requires_explicit_write_policy');
+    expect(child.payloads.map((s): unknown => JSON.parse(s))).toEqual([
+      { approveWriteTools: false, inspectReadCard: true },
+      { approveWriteTools: false },
     ]);
   });
 

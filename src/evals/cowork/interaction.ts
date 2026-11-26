@@ -1,5 +1,5 @@
 /** Native desktop interaction options, receipts and typed failures. */
-import type { ReadOnlyApproval } from './linuxReadOnlyApproval.js';
+import type { ReadOnlyApprovalVerdict } from './linuxReadOnlyApproval.js';
 
 export interface CoworkDriverOptions {
   deadlineAt: number;
@@ -12,8 +12,11 @@ export interface CoworkDriverOptions {
   appPath?: string;
   /** Linux semantic approvals must not broaden the caller's write policy. */
   approveWriteTools?: boolean;
-  /** Only a catalog-verified pending read from the bound Linux managed session. */
-  pendingReadOnlyApproval?: () => Promise<ReadOnlyApproval | undefined>;
+  /**
+   * Catalog check for a card already on screen. `pending` waits; `denied`
+   * fails the case; `approved` may click Allow once.
+   */
+  pendingReadOnlyApproval?: () => Promise<ReadOnlyApprovalVerdict>;
   /** Bound native session completion, never GUI text or another task. */
   isComplete?: () => Promise<boolean>;
   /**

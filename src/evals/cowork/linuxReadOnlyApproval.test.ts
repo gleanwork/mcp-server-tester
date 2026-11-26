@@ -44,16 +44,24 @@ it('checks the complete catalog at the exact server and reuses a decision only f
     .mockResolvedValue({ tools: [search] });
   const check = verify();
   expect(await check(transcript())).toMatchObject({
-    id: 'request-1',
-    server: 'drive',
-    titles: expect.arrayContaining(['Search files']),
+    status: 'approved',
+    approval: {
+      id: 'request-1',
+      server: 'drive',
+      titles: expect.arrayContaining(['Search files']),
+    },
   });
-  expect(await check(transcript())).toBeDefined();
+  expect(await check(transcript())).toMatchObject({ status: 'approved' });
   expect(listing).toHaveBeenCalledTimes(2);
-  expect(await check(transcript('mcp__drive__delete_file'))).toBeUndefined();
-  expect(await check(transcript(undefined, 'request-2'))).toBeDefined();
-  expect(listing).toHaveBeenCalledTimes(3);
-  expect(closeMCPClient).toHaveBeenCalledTimes(2);
+  // Same request id, different tool: a new decision, not the cached grant.
+  expect(await check(transcript('mcp__drive__delete_file'))).toEqual({
+    status: 'denied',
+  });
+  expect(await check(transcript(undefined, 'request-2'))).toMatchObject({
+    status: 'approved',
+  });
+  expect(listing).toHaveBeenCalledTimes(4);
+  expect(closeMCPClient).toHaveBeenCalledTimes(3);
 });
 it('does not approve a write, unannotated, missing, duplicate or destructive tool, or a colliding card title', async () => {
   for (const tools of [
@@ -65,26 +73,47 @@ it('does not approve a write, unannotated, missing, duplicate or destructive too
     [{ ...search, name: 'different' }],
   ]) {
     listing.mockResolvedValue({ tools });
-    expect(await verify()(transcript())).toBeUndefined();
+    expect(await verify()(transcript())).toEqual({ status: 'denied' });
   }
   listing.mockResolvedValue({
     tools: [search, { name: 'delete_file', title: 'Search files' }],
   });
-  expect((await verify()(transcript()))?.titles).not.toContain('Search files');
+  const colliding = await verify()(transcript());
+  expect(colliding).toMatchObject({ status: 'approved' });
+  if (colliding.status === 'approved')
+    expect(colliding.approval.titles).not.toContain('Search files');
 });
-it('does not act on missing or ambiguous identity, an expired deadline or a failed or incomplete catalog', async () => {
-  expect(await verify()()).toBeUndefined();
-  expect(await verify()({ ...transcript(), isComplete: true })).toBeUndefined();
-  expect(await verify([server, server])(transcript())).toBeUndefined();
-  expect(
-    await verify()(transcript('mcp__other__search_files'))
-  ).toBeUndefined();
-  expect(await verify([server], 0)(transcript())).toBeUndefined();
+it('waits when the audit or catalog is not ready, and retries a failed probe', async () => {
+  expect(await verify()()).toEqual({ status: 'pending' });
+  expect(await verify()({ ...transcript(), isComplete: true })).toEqual({
+    status: 'pending',
+  });
+  expect(await verify([server], 0)(transcript())).toEqual({
+    status: 'pending',
+  });
   expect(openMCPClient).not.toHaveBeenCalled();
+  const check = verify();
   listing.mockRejectedValueOnce(new Error('unavailable'));
-  expect(await verify()(transcript())).toBeUndefined();
-  listing.mockResolvedValue({ tools: [search], nextCursor: 'never ends' });
-  expect(await verify()(transcript())).toBeUndefined();
+  expect(await check(transcript())).toEqual({ status: 'pending' });
+  listing.mockResolvedValueOnce({ tools: [search], nextCursor: 'never ends' });
+  expect(await check(transcript())).toEqual({ status: 'pending' });
+  listing.mockResolvedValue({ tools: [search] });
+  expect(await check(transcript())).toMatchObject({ status: 'approved' });
+  // The failed probe, the unfinished catalog, and the later successful one.
+  expect(listing).toHaveBeenCalledTimes(4);
+});
+it('denies a pending call that is not this server, and remembers that denial', async () => {
+  expect(await verify([server, server])(transcript())).toEqual({
+    status: 'denied',
+  });
+  const check = verify();
+  expect(await check(transcript('mcp__other__search_files'))).toEqual({
+    status: 'denied',
+  });
+  expect(await check(transcript('mcp__other__search_files'))).toEqual({
+    status: 'denied',
+  });
+  expect(openMCPClient).not.toHaveBeenCalled();
 });
 it('respects proxy write overrides and argument-dependent dispatchers even when the upstream calls them reads', async () => {
   for (const flags of [
@@ -104,7 +133,7 @@ it('respects proxy write overrides and argument-dependent dispatchers even when 
         ...flags,
       ],
     };
-    expect(await verify([proxy])(transcript())).toBeUndefined();
+    expect(await verify([proxy])(transcript())).toEqual({ status: 'denied' });
   }
   expect(openMCPClient).not.toHaveBeenCalled();
 });
