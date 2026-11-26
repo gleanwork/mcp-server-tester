@@ -5,7 +5,7 @@ import { checkMcpServers } from '../mcpReadiness.js';
 import type { ClaudeTranscript } from './transcript.js';
 
 /** Expected identity on a one-time managed Desktop permission card. No arguments or credentials. */
-export interface ReadOnlyApproval {
+interface ReadOnlyApproval {
   id: string;
   server: string;
   titles: string[];
