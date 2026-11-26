@@ -24,7 +24,17 @@ import { join } from 'node:path';
 import { isDeepStrictEqual, promisify } from 'node:util';
 import { z } from 'zod';
 import { createCoworkCloudControlClient } from './cloudControlClient.js';
-import { CoworkCloudPreparationSchema } from './cloudControlProtocol.js';
+import {
+  CoworkCloudFileReadSchema,
+  CoworkCloudPreparationSchema,
+} from './cloudControlProtocol.js';
+import {
+  MAX_CLOUD_OUTPUT_BYTES,
+  cloudOutputName,
+  cloudTaskFinished,
+  saveCloudOutputs,
+  type CloudFileRead,
+} from './cloudOutputs.js';
 import type { CoworkDesktop } from './desktop.js';
 import { parseClaudeTranscript } from './transcript.js';
 import { describeError } from '../../utils/describeError.js';
@@ -90,6 +100,10 @@ interface PageResult {
   state?: unknown;
   /** Set only by page preflight, before any permission PATCH is dispatched. */
   permissionWrite?: 'not-sent';
+  /** A session file's bytes, base64. */
+  content?: string;
+  /** Why claude.ai refused a session file. */
+  reason?: string;
 }
 
 /**
@@ -310,7 +324,7 @@ async function settleCloudTaskInBrowser(
  * active organization authorize the request. Plain JavaScript: it is sent as
  * source text.
  */
-const PAGE_PROGRAM = `async ({ action, sessionId, limit, pageLimit, maxPages, patch, expected, identity }) => {
+const PAGE_PROGRAM = `async ({ action, sessionId, limit, pageLimit, maxPages, patch, expected, identity, path, maxBase64 }) => {
   const preflightRejection = (status) => ({status,...(action === 'patch-permissions' ? {permissionWrite:'not-sent'} : {})});
   if (location.origin !== 'https://claude.ai') return preflightRejection('wrong_origin');
   const org = document.cookie.split(/;\\s*/).find((c) => c.startsWith('lastActiveOrg='))?.slice('lastActiveOrg='.length);
@@ -366,6 +380,16 @@ const PAGE_PROGRAM = `async ({ action, sessionId, limit, pageLimit, maxPages, pa
     return {status:200,state:{...state,servers}};
   }
   const base = '/v1/code/sessions/' + encodeURIComponent(sessionId);
+  if (action === 'file') {
+    const response = await fetch(base + '/file?path=' + encodeURIComponent(path), { headers, credentials: 'include', signal: AbortSignal.timeout(60000) });
+    let body = null;
+    try { body = await response.json(); } catch {}
+    const reason = typeof body?.error?.reason === 'string' && /^[a-z_]{1,64}$/.test(body.error.reason) ? body.error.reason : undefined;
+    if (response.status !== 200) return { status: response.status, ...(reason ? { reason } : {}) };
+    if (typeof body?.content !== 'string') return { status: 'malformed' };
+    if (body.content.length > maxBase64) return { status: 'too_large' };
+    return { status: 200, content: body.content };
+  }
   const events = [];
   const seen = new Set();
   let cursor = null;
@@ -535,6 +559,44 @@ export async function fetchCloudEvents(
     );
   requireOk(result, `session ${sessionId}`);
   return result.events ?? [];
+}
+
+/**
+ * One output file of a cloud session, as claude.ai serves it. A path that is
+ * absent, a folder, or too large is an answer; anything else throws.
+ */
+export async function fetchCloudFile(
+  port: number,
+  sessionId: string,
+  path: string
+): Promise<CloudFileRead> {
+  if (cloudOutputName(path) === undefined)
+    throw new Error(`Not a Cowork output file path: ${path}`);
+  const result = await inClaudePage(
+    port,
+    {
+      action: 'file',
+      sessionId,
+      path,
+      maxBase64: Math.ceil((MAX_CLOUD_OUTPUT_BYTES * 4) / 3) + 4,
+    },
+    90_000
+  );
+  if (result.status === 200 && typeof result.content === 'string')
+    return { status: 'saved', content: result.content };
+  if (result.status === 404) return { status: 'missing' };
+  if (
+    result.status === 'too_large' ||
+    result.status === 413 ||
+    result.reason === 'session_file_too_large'
+  )
+    return { status: 'too_large' };
+  if (result.status === 400 && result.reason === 'session_file_not_readable')
+    return { status: 'not_a_file' };
+  requireOk(result, `reading ${path} of session ${sessionId}`);
+  throw new Error(
+    `claude.ai returned no content for ${path} of session ${sessionId}.`
+  );
 }
 
 async function readCloudPermissions(
@@ -732,6 +794,7 @@ function mirrorCloudSessions(options: {
   intervalMs?: number;
   listSessions?: () => Promise<CloudSessionSummary[]>;
   events?: (sessionId: string) => Promise<CloudSessionEvent[]>;
+  file?: (sessionId: string, path: string) => Promise<CloudFileRead>;
 }): {
   stop(): Promise<void>;
   bindSession(sessionId?: string): void;
@@ -782,6 +845,14 @@ function mirrorCloudSessions(options: {
         if (!metadata) continue;
         const id = `local_${session.id}`;
         await mkdir(join(options.dir, id), { recursive: true, mode: 0o700 });
+        // Outputs first: a finished audit is read as the trial's whole
+        // record, so its files must already be beside it.
+        if (cloudTaskFinished(events))
+          await saveCloudOutputs(join(options.dir, id), events, (path) =>
+            options.file
+              ? options.file(session.id, path)
+              : fetchCloudFile(options.port, session.id, path)
+          );
         await writeAtomic(
           join(options.dir, id, 'audit.jsonl'),
           cloudAuditLines(events)
@@ -1122,6 +1193,11 @@ export function coworkClaudeAi(
               )
               .max(10_000)
               .parse(await control.call({ method: 'events', sessionId }));
+          },
+          async file(sessionId, path) {
+            return CoworkCloudFileReadSchema.parse(
+              await control.call({ method: 'file', sessionId, path })
+            );
           },
         });
         const recorder = mirror;

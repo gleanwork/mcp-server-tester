@@ -6,6 +6,7 @@ import {
   type CloudConnectorPlan,
   type verifyCloudConnectorEvents,
 } from './claudeAiConnectors.js';
+import { MAX_CLOUD_OUTPUT_BYTES, cloudOutputName } from './cloudOutputs.js';
 
 export const COWORK_CLOUD_CONTROL_PROTOCOL = 'mst.cowork-cloud-control/v1';
 /** Includes the JSONL newline. Oversized evidence fails rather than truncates. */
@@ -35,6 +36,33 @@ export const CoworkCloudControlRequestSchema = z.discriminatedUnion('method', [
   z.object({ ...header, method: z.literal('restore') }).strict(),
   z.object({ ...header, method: z.literal('listSessions') }).strict(),
   z.object({ ...header, method: z.literal('events'), sessionId }).strict(),
+  // One output file of an observed session (see cloudOutputs.ts).
+  z
+    .object({
+      ...header,
+      method: z.literal('file'),
+      sessionId,
+      path: z
+        .string()
+        .max(512)
+        .refine((path) => cloudOutputName(path) !== undefined, {
+          message: 'Not a Cowork output file path.',
+        }),
+    })
+    .strict(),
+]);
+/** The source's answer to `file`: base64 bytes, or why there are none. */
+export const CoworkCloudFileReadSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('saved'),
+      content: z
+        .string()
+        .max(Math.ceil((MAX_CLOUD_OUTPUT_BYTES * 4) / 3) + 4)
+        .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+    })
+    .strict(),
+  z.object({ status: z.enum(['missing', 'not_a_file', 'too_large']) }).strict(),
 ]);
 export type CoworkCloudControlRequest = z.infer<
   typeof CoworkCloudControlRequestSchema

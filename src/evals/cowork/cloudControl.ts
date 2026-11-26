@@ -13,6 +13,7 @@ import {
   cloudInitialMessage,
   cloudTrialMetadata,
   fetchCloudEvents,
+  fetchCloudFile,
   listCloudSessions,
 } from './claudeAi.js';
 import {
@@ -376,6 +377,12 @@ export async function createCoworkAccountControl(
             'Session is not source-observed or owned by this controller.'
           );
         return fetchCloudEvents(port, request.sessionId);
+      case 'file':
+        if (!readableSessions.has(request.sessionId))
+          throw new Error(
+            'Session is not source-observed or owned by this controller.'
+          );
+        return fetchCloudFile(port, request.sessionId, request.path);
     }
   }
   return {
