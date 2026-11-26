@@ -777,6 +777,91 @@ describe('hitl', () => {
     }
   });
 
+  it('clicks only Allow once inside the matching read-only MCP permission panel', async () => {
+    const node = (
+      id: string,
+      role: string,
+      name: string,
+      parentId?: string
+    ): LinuxUiNode => ({
+      id,
+      role,
+      name,
+      parentId,
+      showing: true,
+      visible: true,
+      enabled: true,
+      selected: false,
+    });
+    const panel = node('p', 'panel', 'Permission request: Search files');
+    const header = node(
+      'h',
+      'button',
+      'Claude wants to use Search files from drive',
+      'p'
+    );
+    const once = node('once', 'button', 'Allow once 3', 'p');
+    const always = node('always', 'button', 'Always allow', 'p');
+    const check = async (nodes: LinuxUiNode[]) => {
+      const ui = new FakeUi();
+      ui.snapshot = async () => nodes;
+      const result = await run(ui, 'hitl', {
+        approveWriteTools: false,
+        readOnlyApproval: { server: 'drive', titles: ['Search files'] },
+      });
+      return { result, actions: ui.actions };
+    };
+    // Desktop repeats the summary outside the panel and nests its actions.
+    const tree = [
+      { ...header, id: 'summary', parentId: undefined },
+      panel,
+      header,
+      node('group', 'group', '', 'p'),
+      always,
+      { ...once, parentId: 'group' },
+    ];
+    const inspect = new FakeUi();
+    inspect.snapshot = async () => tree;
+    expect(await run(inspect, 'hitl', { inspectReadCard: true })).toMatchObject(
+      { readCard: true, action_count: 0 }
+    );
+    expect(inspect.actions).toEqual([]);
+    expect((await check(tree)).actions).toEqual(['Allow once 3']);
+    for (const tree of [
+      [panel, header, always],
+      [panel, header, { ...once, name: 'Allow' }],
+      [panel, header, { ...once, parentId: 'elsewhere' }],
+      [panel, { ...header, role: 'static' }, once],
+      [
+        panel,
+        { ...header, name: 'Claude wants to use Search files from other' },
+        once,
+      ],
+      [{ ...panel, name: 'Permission request: Delete file' }, header, once],
+      [panel, header, once, { ...panel, id: 'p2' }],
+      [panel, header, once, { ...once, id: 'once2' }],
+      [
+        panel,
+        header,
+        once,
+        {
+          ...header,
+          id: 'other',
+          name: 'Claude wants to use Delete file from drive',
+        },
+      ],
+      [panel, { ...header, parentId: 'h' }, once],
+      [
+        panel,
+        header,
+        node('cancel', 'button', 'Cancel', 'p'),
+        node('write', 'button', 'Create', 'p'),
+      ],
+    ]) {
+      expect((await check(tree)).actions).toEqual([]);
+    }
+  });
+
   it('fails closed on ambiguous approvals and ignores a Create without its card', async () => {
     for (const names of [
       ['Cancel', 'Create', 'Run'],

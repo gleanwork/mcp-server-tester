@@ -49,6 +49,69 @@ function toolUseEvent(id: string, name: string, timestamp?: string) {
 }
 
 describe('Claude local-agent transcript parsing', () => {
+  it('exposes only a single unanswered audit request for an outstanding MCP call', async () => {
+    const tool = 'mcp__drive__search_files';
+    const use = toolUseEvent('call', tool);
+    const request = {
+      type: 'system',
+      subtype: 'permission_request',
+      uuid: 'req',
+      tool_name: tool,
+    };
+    const response = {
+      ...request,
+      subtype: 'permission_response',
+      granted: true,
+    };
+    const approved = (events: unknown[]) =>
+      parseNativeEvents(events).then((t) => t.pendingToolPermission);
+    expect(await approved([use, request])).toEqual({ id: 'req', tool });
+    for (const events of [
+      [request],
+      [use, request, response],
+      [use, request, request],
+      [use, request, response, request],
+      [use, { ...request, uuid: 1 }],
+      [use, { ...request, tool_name: [] }],
+      [use, request, toolUseEvent('second', tool)],
+      [
+        use,
+        request,
+        {
+          type: 'user',
+          message: { content: [{ type: 'tool_result', tool_use_id: 'call' }] },
+        },
+      ],
+      [use, request, { ...request, uuid: 'second' }],
+      [use, { ...request, tool_name: 'Bash' }],
+      [use, request, { ...response, uuid: 'unknown' }],
+      [use, request, { type: 'result', result: 'done' }],
+      [
+        use,
+        request,
+        {
+          type: 'user',
+          message: {
+            content: [
+              { type: 'tool_result', tool_use_id: 'call', content: 'done' },
+            ],
+          },
+        },
+      ],
+    ]) {
+      expect(await approved(events)).toBeUndefined();
+    }
+    const parsed = await parseNativeEvents([use, request]);
+    await writeFile(
+      join(parsed.candidate.sessionDir, 'audit.jsonl'),
+      '\n{"type":',
+      { flag: 'a' }
+    );
+    expect(
+      (await parseClaudeTranscript(parsed.candidate)).pendingToolPermission
+    ).toBeUndefined();
+  });
+
   it('reads back a large tool result the transcript only points to', async () => {
     const id = 'toolu_bdrk_01QnnrBzoJ7qWyZbzHvwEouZ';
     const full = '[{"type":"text","text":"# Search Results (16 found)"}]';

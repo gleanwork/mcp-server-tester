@@ -610,6 +610,46 @@ describe('caller-owned Linux Cowork desktop', () => {
       })
     ).rejects.toBeInstanceOf(CoworkHitlBudgetError);
   });
+  it('sends only the verified card identity and clicks once per pending request', async () => {
+    const read = { id: 'request-1', server: 'drive', titles: ['Search files'] };
+    const inspect = {
+      value: {
+        status: 'hitl_checked',
+        action_count: 0,
+        duration_ms: 1,
+        readCard: true,
+      },
+    };
+    const clicked = {
+      value: { status: 'hitl_checked', action_count: 1, duration_ms: 1 },
+    };
+    child.responses.push(inspect, clicked, inspect);
+    const pendingReadOnlyApproval = vi.fn().mockResolvedValue(read);
+    const isComplete = vi
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const result = await linuxCoworkPlatform.handleHitl({
+      ...options(),
+      isComplete,
+      pendingReadOnlyApproval,
+      approveWriteTools: false,
+    });
+    expect(result.action_count).toBe(1);
+    expect(pendingReadOnlyApproval).toHaveBeenCalledTimes(2);
+    expect(child.payloads.map((s): unknown => JSON.parse(s))).toEqual([
+      { approveWriteTools: false, inspectReadCard: true },
+      {
+        approveWriteTools: false,
+        readOnlyApproval: { server: 'drive', titles: ['Search files'] },
+      },
+      { approveWriteTools: false, inspectReadCard: true },
+    ]);
+  });
+
   it("lets reset stop the failed case's task, then open the empty task", async () => {
     child.responses.push({
       value: {

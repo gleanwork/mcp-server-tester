@@ -139,6 +139,8 @@ export interface ClaudeTranscript {
   isError?: boolean;
   isComplete: boolean;
   auditParsed: boolean;
+  /** The only unanswered permission request in this task's complete audit. */
+  pendingToolPermission?: { id: string; tool: string };
   transcriptParsed: boolean;
   usageAvailable: boolean;
   /** Fields explicitly present and valid in every native result, before defaults. */
@@ -196,6 +198,8 @@ interface ClaudeAuditEvent {
   subtype?: string;
   /** Pairs a `permission_request` with its `permission_response`. */
   uuid?: string;
+  /** The qualified tool name in a permission request. */
+  tool_name?: string;
   /** A `permission_response`'s answer. */
   granted?: boolean;
   /** When Cowork's audit log wrote the event. */
@@ -227,6 +231,7 @@ export async function parseClaudeTranscript(
   let rawAudit = '';
   let rawTranscript = '';
   let auditParsed = false;
+  let auditIntact = false;
   let transcriptParsed = false;
 
   try {
@@ -237,6 +242,7 @@ export async function parseClaudeTranscript(
     );
     auditEvents = parsed.events;
     auditParsed = parsed.events.length > 0;
+    auditIntact = parsed.ok;
     parseWarnings.push(...parsed.warnings);
   } catch (err) {
     parseWarnings.push(`Could not read Claude audit log: ${formatError(err)}`);
@@ -357,6 +363,15 @@ export async function parseClaudeTranscript(
     terminalReason: resultEvent?.terminal_reason,
     isError: resultEvent?.is_error === true,
     isComplete: resultEvent !== undefined,
+    ...(auditIntact && !resultEvent
+      ? {
+          pendingToolPermission: pendingToolPermission(
+            auditEventsForRun,
+            toolCalls,
+            combinedEventsForRun
+          ),
+        }
+      : {}),
     auditParsed,
     transcriptParsed,
     usageAvailable: usage !== undefined,
@@ -381,6 +396,49 @@ export async function parseClaudeTranscript(
         : {}),
     },
   };
+}
+
+function pendingToolPermission(
+  events: ClaudeAuditEvent[],
+  calls: LLMToolCall[],
+  combined: ClaudeAuditEvent[]
+) {
+  const seen = new Set<string>();
+  const pending = new Map<string, string>();
+  for (const e of events) {
+    if (e.type !== 'system') continue;
+    if (e.subtype === 'permission_request') {
+      if (
+        typeof e.uuid !== 'string' ||
+        !e.uuid ||
+        typeof e.tool_name !== 'string' ||
+        !e.tool_name ||
+        seen.has(e.uuid)
+      )
+        return undefined;
+      seen.add(e.uuid);
+      pending.set(e.uuid, e.tool_name);
+    } else if (e.subtype === 'permission_response') {
+      if (!e.uuid || !pending.delete(e.uuid)) return undefined;
+    }
+  }
+  if (pending.size !== 1) return undefined;
+  const [id, tool] = [...pending][0]!;
+  const outstanding = calls.filter(
+    (c) => c.source === 'mcp' && c.rawName === tool && c.output === undefined
+  );
+  if (outstanding.length !== 1 || !outstanding[0]!.id) return undefined;
+  // Even a tool_result with no content settles the call.
+  const callId = outstanding[0]!.id;
+  if (
+    combined.some((e) =>
+      contentBlocks(e).some(
+        (b) => b.type === 'tool_result' && b.tool_use_id === callId
+      )
+    )
+  )
+    return undefined;
+  return { id, tool };
 }
 
 function selectEventsForMarker(
