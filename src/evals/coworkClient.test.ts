@@ -40,6 +40,7 @@ import type * as OsModule from 'node:os';
 import type * as ChildProcessModule from 'node:child_process';
 import type * as LinuxCowork from './cowork/linux.js';
 import type * as ReadinessCheck from './readinessCheck.js';
+import * as mcpReadiness from './mcpReadiness.js';
 import type * as ReadinessServer from './cowork/readinessServer.js';
 import { readyStdioServer } from '../../tests/mocks/readyServers.js';
 import type { ReadinessCheckOptions } from './readinessCheck.js';
@@ -886,6 +887,9 @@ describe('V2 Cowork client', () => {
         approveWriteTools: true,
       })
     );
+    expect(mocks.hitl.mock.calls[0]![0]).not.toHaveProperty(
+      'pendingReadOnlyApproval'
+    );
   });
   it('budgets an owned Linux restart for the image limit, then verification', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
@@ -924,6 +928,98 @@ describe('V2 Cowork client', () => {
     expect(remainingMs).toBe(945_000);
     await opened.close();
   });
+  it.each([
+    'same',
+    'replaced',
+    'renamed',
+    'complete',
+    'answered',
+    'missing',
+    'ambiguous',
+  ] as const)(
+    'checks the bound Linux request again after catalog discovery: %s',
+    async (state) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+      const permission = {
+        id: 'request-1',
+        tool: 'mcp__primary__search_files',
+      };
+      const pending = { isComplete: false, pendingToolPermission: permission };
+      const final = {
+        same: [pending],
+        replaced: [
+          {
+            ...pending,
+            pendingToolPermission: { ...permission, id: 'request-2' },
+          },
+        ],
+        renamed: [
+          {
+            ...pending,
+            pendingToolPermission: {
+              ...permission,
+              tool: 'mcp__primary__other',
+            },
+          },
+        ],
+        complete: [{ ...pending, isComplete: true }],
+        answered: [{ isComplete: false }],
+        missing: [],
+        ambiguous: [pending, pending],
+      };
+      mocks.matches.mockResolvedValue([pending]);
+      const probe = vi
+        .spyOn(mcpReadiness, 'checkMcpServers')
+        .mockImplementation(async (_servers, _resolve, _ms, catalog) => {
+          catalog?.('primary', [
+            {
+              name: 'search_files',
+              inputSchema: { type: 'object' },
+              annotations: { readOnlyHint: true },
+            },
+          ]);
+          mocks.matches.mockResolvedValue(final[state]);
+          return [
+            {
+              status: 'connected',
+              label: 'primary',
+              toolCount: 1,
+              elapsedMs: 1,
+            },
+          ];
+        });
+      const decision = vi.fn();
+      linuxPlatform.handleHitl.mockImplementationOnce(
+        async (options: Parameters<CoworkPlatform['handleHitl']>[0]) => {
+          decision(await options.pendingReadOnlyApproval?.());
+          return { status: 'hitl_checked', action_count: 0 };
+        }
+      );
+      await collectClientBatch(
+        COWORK_CLIENT,
+        [requests()[0]!],
+        readOnlyContext
+      );
+      expect(probe).toHaveBeenCalledOnce();
+      expect(decision).toHaveBeenCalledWith(
+        state === 'same'
+          ? {
+              status: 'approved',
+              approval: {
+                id: permission.id,
+                server: 'primary',
+                titles: ['search_files', 'Search files'],
+              },
+            }
+          : { status: 'pending' }
+      );
+      expect(
+        mocks.matches.mock.calls.every(
+          ([arg]) => arg.sessionPath === '/fixture/session-0'
+        )
+      ).toBe(true);
+    }
+  );
   it("records Claude Desktop's own telemetry with each Linux task (telemetry.host)", async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
     let endpoint: string | undefined;

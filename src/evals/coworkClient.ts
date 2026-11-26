@@ -8,6 +8,7 @@ import type {
 } from './evalFrameworkTypes.js';
 import type { CoworkDesktop } from './cowork/desktop.js';
 import { coworkReadinessServer } from './cowork/readinessServer.js';
+import { linuxReadOnlyApprovals } from './cowork/linuxReadOnlyApproval.js';
 import { checksServersAfterPrepare } from './readinessCheck.js';
 import { clientSecretValues, redactClientError } from './clientSecrets.js';
 import {
@@ -745,6 +746,25 @@ async function desktopAdapter(
           // Only third-party mode stages connector defaults without a click-through fallback.
           computerUse.hitl = { status: 'not-attempted' };
         } else {
+          const boundTranscript = async () => {
+            const current = await findMatchingClaudeSessions({
+              ...match,
+              sessionPath,
+            });
+            return current.length === 1 ? current[0] : undefined;
+          };
+          const verifyRead =
+            linux && !firstParty && !coworkSetup.approveWriteTools
+              ? linuxReadOnlyApprovals(
+                  servers,
+                  (s) =>
+                    coworkReadinessServer(s, env, {
+                      plugins,
+                      paths: stdioPaths,
+                    }),
+                  deadlineAt
+                )
+              : undefined;
           const hitl = await platform.handleHitl({
             deadlineAt: deadlineAt,
             maxActions: config.hitlMaxActions,
@@ -753,35 +773,42 @@ async function desktopAdapter(
             ...(session?.appPath ? { appPath: session.appPath } : {}),
             approveWriteTools: coworkSetup.approveWriteTools,
             isComplete: async () => {
-              const current = await findMatchingClaudeSessions({
-                ...match,
-                sessionPath,
-              });
-              if (current.length !== 1)
+              const bound = await boundTranscript();
+              if (!bound)
                 throw new Error(
                   'Bound native session is missing or ambiguous.'
                 );
-              return current[0]!.isComplete;
+              return bound.isComplete;
             },
+            ...(verifyRead
+              ? {
+                  pendingReadOnlyApproval: async () => {
+                    const before = await boundTranscript();
+                    const verdict = await verifyRead(before);
+                    if (verdict.status !== 'approved') return verdict;
+                    // The request may have changed while tools/list was in flight.
+                    const after = await boundTranscript();
+                    return after &&
+                      !after.isComplete &&
+                      after.pendingToolPermission?.id === verdict.approval.id &&
+                      after.pendingToolPermission.tool ===
+                        before?.pendingToolPermission?.tool
+                      ? verdict
+                      : { status: 'pending' };
+                  },
+                }
+              : {}),
             awaitingUser: async () => {
-              const current = await findMatchingClaudeSessions({
-                ...match,
-                sessionPath,
-              });
-              return current.length === 1 && awaitingUserAnswer(current[0]!);
+              const bound = await boundTranscript();
+              return !!bound && awaitingUserAnswer(bound);
             },
             // Linux HITL answers a clarifying question with its first
             // option; the macOS profile turns AskUserQuestion off.
             ...(!mac && coworkSetup.clarifyingQuestions !== 'disabled'
               ? {
                   pendingQuestion: async () => {
-                    const current = await findMatchingClaudeSessions({
-                      ...match,
-                      sessionPath,
-                    });
-                    return current.length === 1
-                      ? pendingUserQuestion(current[0]!)
-                      : undefined;
+                    const bound = await boundTranscript();
+                    return bound ? pendingUserQuestion(bound) : undefined;
                   },
                 }
               : {}),

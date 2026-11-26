@@ -144,6 +144,7 @@ interface Receipt {
   scanIncomplete?: boolean;
   /** HITL denied the task's request for a folder of the user's computer. */
   deniedFolderRequest?: boolean;
+  readCard?: boolean;
   /** The answer pass picked a question's first option, or advanced its page. */
   answered?: boolean;
 }
@@ -547,6 +548,9 @@ function receipt(stdout: string): Receipt | undefined {
           : undefined,
       ...(r.scan === 'incomplete' ? { scanIncomplete: true } : {}),
       ...(r.denied === 'folder_request' ? { deniedFolderRequest: true } : {}),
+      ...(r.readCard === true && r.action_count === 0
+        ? { readCard: true }
+        : {}),
       ...(r.answered === 'option' || r.answered === 'advance'
         ? { answered: true }
         : {}),
@@ -1253,6 +1257,12 @@ async function handleLinuxHitl(
   const budget = options.maxActions ?? 12;
   // Each question HITL has seen (by tool call), and since when.
   const questionsSeen = new Map<string, number>();
+  const approvedOnce = new Set<string>();
+  const verifyRead =
+    driverMode === 'third-party' && !options.approveWriteTools
+      ? options.pendingReadOnlyApproval
+      : undefined;
+  let sawReadCard = false;
   try {
     while (Date.now() < options.deadlineAt) {
       if (await options.isComplete())
@@ -1335,11 +1345,32 @@ async function handleLinuxHitl(
           'Linux HITL action budget exhausted.',
           telemetry(started, actions, 'partial', counts)
         );
+      const verdict = sawReadCard ? await verifyRead?.() : undefined;
+      const approval =
+        verdict?.status === 'approved' ? verdict.approval : undefined;
+      // The dialog can lead the audit, a catalog probe can fail, or Allow
+      // once can still be showing after the click. Look again. Fail only
+      // when the audit names a call that is not a verified read.
+      const observe =
+        verdict?.status === 'pending' ||
+        (approval !== undefined && approvedOnce.has(approval.id));
       driving = true;
       const result = await execute(
         'hitl',
         {
           approveWriteTools: options.approveWriteTools === true,
+          ...(observe ? { observeReadCard: true } : {}),
+          ...(verifyRead && !sawReadCard && !observe
+            ? { inspectReadCard: true }
+            : {}),
+          ...(approval && !observe
+            ? {
+                readOnlyApproval: {
+                  server: approval.server,
+                  titles: approval.titles,
+                },
+              }
+            : {}),
         },
         { ...options, maxActions: budget - actions },
         driverMode
@@ -1348,6 +1379,9 @@ async function handleLinuxHitl(
       actions += result.action_count;
       if (result.scanIncomplete) counts.incompleteScans += 1;
       if (result.deniedFolderRequest) counts.folderRequestsDenied += 1;
+      else if (approval && !observe && result.action_count > 0)
+        approvedOnce.add(approval.id);
+      sawReadCard = result.readCard === true;
       await delay(Math.min(500, Math.max(0, options.deadlineAt - Date.now())));
     }
   } catch (error) {

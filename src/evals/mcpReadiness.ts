@@ -1,4 +1,4 @@
-import type { Client } from '@modelcontextprotocol/client';
+import type { Client, Tool } from '@modelcontextprotocol/client';
 import {
   abandonMCPClient,
   closeMCPClient,
@@ -93,7 +93,8 @@ async function probe(
   started: number,
   resolve: (server: MCPConfig) => MCPConfig,
   timeoutMs: number,
-  deadline: ProbeDeadline
+  deadline: ProbeDeadline,
+  onCatalog?: (label: string, tools: readonly Tool[]) => void
 ): Promise<McpServerReadiness> {
   let client: Client | undefined;
   try {
@@ -134,6 +135,7 @@ async function probe(
         elapsedMs: Date.now() - started,
         error: `too few tools (${tools.tools.length} < ${minTools})`,
       };
+    if (cursor === undefined && !deadline.expired) onCatalog?.(label, listed);
     return {
       label,
       status: 'connected',
@@ -165,7 +167,9 @@ async function probe(
 export async function checkMcpServers(
   servers: MCPConfig[],
   resolve: (server: MCPConfig) => MCPConfig = (server) => server,
-  timeoutMs = MCP_READINESS_TIMEOUT_MS
+  timeoutMs = MCP_READINESS_TIMEOUT_MS,
+  /** Inspect only complete catalogs; never put the tool definitions in results. */
+  onCatalog?: (label: string, tools: readonly Tool[]) => void
 ): Promise<McpServerReadiness[]> {
   return Promise.all(
     servers.map(async (server, index): Promise<McpServerReadiness> => {
@@ -177,7 +181,15 @@ export async function checkMcpServers(
       try {
         // A probe that outlives its time has its client closed at once.
         return await Promise.race([
-          probe(server, label, started, resolve, timeoutMs, deadline),
+          probe(
+            server,
+            label,
+            started,
+            resolve,
+            timeoutMs,
+            deadline,
+            onCatalog
+          ),
           new Promise<McpServerReadiness>((settle) => {
             timer = setTimeout(() => {
               deadline.expire();

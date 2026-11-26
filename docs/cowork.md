@@ -756,8 +756,18 @@ prompt's beginning fails as an infrastructure failure (`failureKind: "input"`):
 its answer says nothing about the case. There is no keyboard fallback or retry after an
 uncertain action. The shared native collector still requires a new exact-prompt
 session. HITL only operates on approval controls while that bound session is pending;
-it never types, creates tasks, or continues onboarding. Unclassified approval prompts
-fail closed unless `coworkSetup.approveWriteTools` explicitly permits approval.
+it never types, creates tasks, or continues onboarding.
+
+With `coworkSetup.approveWriteTools: false`, managed Linux Cowork can click **Allow once**
+for a read-only MCP call. The native audit must have one unanswered permission request
+for an outstanding call, the configured server's complete catalog must mark the tool
+read-only and not destructive, and the permission panel must name the same tool and server.
+A name such as `search_files` is not enough. This path never selects **Always allow** or
+plain **Allow**. If the dialog is up before the audit line is written, or the catalog
+probe fails, MST waits and checks again until the case deadline. A call the audit names
+that is not a verified read still fails the case. After **Allow once**, MST waits while
+that button is still showing. Unclassified prompts still require `coworkSetup.approveWriteTools`.
+
 Claude Desktop's built-in tools ignore managed MCP `toolPolicy` and confirm with an inline
 card whose primary action names the write (`Create`/`Update` for artifacts;
 `Schedule`/`Update`/`Run`/`Delete` for scheduled tasks) beside `Cancel`. The 3p

@@ -3,6 +3,7 @@
  * actions over the native AT-SPI seam. No lifecycle, answer parsing or retry
  * of an action. Account-backed Cowork uses linuxFirstPartyDriver.ts.
  */
+import { permissionHeaderTitle } from './linuxPermissionTitle.js';
 import {
   LinuxUiError,
   type LinuxDriverOperation,
@@ -55,12 +56,18 @@ export interface ThirdPartyPayload {
   prompt?: unknown;
   targetModel?: unknown;
   approveWriteTools?: unknown;
+  inspectReadCard?: boolean;
+  /** Look for the one-time card again. Never click and never fail closed. */
+  observeReadCard?: boolean;
+  readOnlyApproval?: { server: string; titles: readonly string[] };
   questions?: unknown;
 }
 
 export interface ThirdPartyReceipt extends LinuxDriverReceipt {
   stopped?: true;
   question?: 'not_found';
+  /** Saw a possible one-time control; no action taken. */
+  readCard?: true;
   /** The diagnosis files written. */
   files?: string[];
 }
@@ -68,6 +75,58 @@ export interface ThirdPartyReceipt extends LinuxDriverReceipt {
 /** A control's label: its name without a trailing keyboard-shortcut digit. */
 function label(node: LinuxUiNode): string {
   return node.name.replace(/ [0-9]$/, '');
+}
+
+/** Both controls must belong to the same visible permission panel. Text in the
+ * conversation, tool description or arguments cannot identify an approval. */
+function matchesReadCard(
+  nodes: readonly LinuxUiNode[],
+  once: LinuxUiNode,
+  read: NonNullable<ThirdPartyPayload['readOnlyApproval']>
+): boolean {
+  if (
+    label(once) !== 'Allow once' ||
+    typeof read.server !== 'string' ||
+    !Array.isArray(read.titles)
+  )
+    return false;
+  const panels = nodes.filter(
+    (n) =>
+      n.visible &&
+      n.showing &&
+      n.role === 'panel' &&
+      n.name.startsWith('Permission request: ')
+  );
+  if (panels.length !== 1) return false;
+  const panel = panels[0]!;
+  const title = panel.name.slice('Permission request: '.length);
+  if (!read.titles.includes(title)) return false;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const inside = (n: LinuxUiNode) => {
+    const seen = new Set<string>();
+    let parent = n.parentId;
+    while (parent && !seen.has(parent)) {
+      if (parent === panel.id) return true;
+      seen.add(parent);
+      parent = byId.get(parent)?.parentId;
+    }
+    return false;
+  };
+  const headers = nodes.filter(
+    (n) =>
+      n.visible &&
+      n.showing &&
+      n.role === 'button' &&
+      n.name.startsWith('Claude wants to use ') &&
+      inside(n)
+  );
+  return (
+    inside(once) &&
+    headers.length === 1 &&
+    (headers[0]!.name === `Claude wants to use ${title} from ${read.server}` ||
+      headers[0]!.name ===
+        `Claude wants to use ${permissionHeaderTitle(title)} from ${read.server}`)
+  );
 }
 
 function normalized(text: string): string {
@@ -522,7 +581,9 @@ class ThirdPartyDriver {
     return { ...this.receipt('hitl_checked'), answered };
   }
 
-  async hitl(approveWrites: boolean): Promise<ThirdPartyReceipt> {
+  async hitl(payload: ThirdPartyPayload): Promise<ThirdPartyReceipt> {
+    const approveWrites = payload.approveWriteTools === true;
+    const read = payload.readOnlyApproval;
     const names = ['Allow once', 'Allow'];
     if (approveWrites)
       names.push(
@@ -532,8 +593,9 @@ class ThirdPartyDriver {
         'Allow full access'
       );
     let found: LinuxUiNode[];
+    let nodes: readonly LinuxUiNode[];
     try {
-      const nodes = await this.scan();
+      nodes = await this.scan();
       // A headless run has no user folder to grant. Denial grants nothing.
       const folder = controls(nodes, ['Choose folder'], ['button']);
       if (folder.length) {
@@ -555,9 +617,29 @@ class ThirdPartyDriver {
     if (!found.length) return this.receipt('hitl_checked');
     const once = found.filter((node) => label(node) === 'Allow once');
     const selected = once.length === 1 ? once : found;
+    // The audit may still be catching up, or Allow once may still be
+    // showing after a click. Report the card and leave it alone.
+    if (!approveWrites && payload.observeReadCard === true)
+      return found.length === 1 && once.length === 1
+        ? { ...this.receipt('hitl_checked'), readCard: true }
+        : this.receipt('hitl_checked');
     if (selected.length !== 1)
       throw new DriverFailure('approval_control_ambiguous');
-    if (!approveWrites)
+    // A card can appear between the last audit poll and this scan. Ask the
+    // parent to verify it, then rescan before selecting any control.
+    if (
+      !approveWrites &&
+      payload.inspectReadCard === true &&
+      found.length === 1 &&
+      once.length === 1
+    )
+      return { ...this.receipt('hitl_checked'), readCard: true };
+    if (
+      !approveWrites &&
+      (!read ||
+        found.length !== 1 ||
+        !matchesReadCard(nodes, selected[0]!, read))
+    )
       throw new DriverFailure('approval_requires_explicit_write_policy');
     await this.action(() => this.ui.activate(selected[0]!));
     return this.receipt('hitl_checked');
@@ -596,7 +678,7 @@ export async function runThirdPartyLinux(
       case 'submit':
         return await driver.submit(payload);
       case 'hitl':
-        return await driver.hitl(payload.approveWriteTools === true);
+        return await driver.hitl(payload);
       case 'answer':
         return await driver.answer(payload.questions);
       default:

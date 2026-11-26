@@ -777,6 +777,164 @@ describe('hitl', () => {
     }
   });
 
+  it('clicks only Allow once inside the matching read-only MCP permission panel', async () => {
+    const node = (
+      id: string,
+      role: string,
+      name: string,
+      parentId?: string
+    ): LinuxUiNode => ({
+      id,
+      role,
+      name,
+      parentId,
+      showing: true,
+      visible: true,
+      enabled: true,
+      selected: false,
+    });
+    const panel = node('p', 'panel', 'Permission request: Search files');
+    const header = node(
+      'h',
+      'button',
+      'Claude wants to use Search files from drive',
+      'p'
+    );
+    const once = node('once', 'button', 'Allow once 3', 'p');
+    const always = node('always', 'button', 'Always allow', 'p');
+    const check = async (
+      nodes: LinuxUiNode[],
+      readOnlyApproval = { server: 'drive', titles: ['Search files'] }
+    ) => {
+      const ui = new FakeUi();
+      ui.snapshot = async () => nodes;
+      const result = await run(ui, 'hitl', {
+        approveWriteTools: false,
+        readOnlyApproval,
+      });
+      return { result, actions: ui.actions };
+    };
+    // Desktop repeats the summary outside the panel and nests its actions.
+    const tree = [
+      { ...header, id: 'summary', parentId: undefined },
+      panel,
+      header,
+      node('group', 'group', '', 'p'),
+      always,
+      { ...once, parentId: 'group' },
+    ];
+    const inspect = new FakeUi();
+    inspect.snapshot = async () => tree;
+    expect(await run(inspect, 'hitl', { inspectReadCard: true })).toMatchObject(
+      { readCard: true, action_count: 0 }
+    );
+    expect(inspect.actions).toEqual([]);
+    const observe = new FakeUi();
+    observe.snapshot = async () => tree;
+    expect(await run(observe, 'hitl', { observeReadCard: true })).toMatchObject(
+      { readCard: true, action_count: 0 }
+    );
+    expect(observe.actions).toEqual([]);
+    const lingering = new FakeUi();
+    lingering.snapshot = async () => [
+      panel,
+      header,
+      node('cancel', 'button', 'Cancel', 'p'),
+      node('write', 'button', 'Create', 'p'),
+    ];
+    const looked = await run(lingering, 'hitl', { observeReadCard: true });
+    expect(looked.action_count).toBe(0);
+    expect(looked.readCard).toBeUndefined();
+    expect(lingering.actions).toEqual([]);
+    expect((await check(tree)).actions).toEqual(['Allow once 3']);
+    for (const tree of [
+      [panel, header, always],
+      [panel, header, { ...once, name: 'Allow' }],
+      [panel, header, { ...once, parentId: 'elsewhere' }],
+      [panel, { ...header, role: 'static' }, once],
+      [
+        panel,
+        { ...header, name: 'Claude wants to use Search files from other' },
+        once,
+      ],
+      [{ ...panel, name: 'Permission request: Delete file' }, header, once],
+      [panel, header, once, { ...panel, id: 'p2' }],
+      [panel, header, once, { ...once, id: 'once2' }],
+      [
+        panel,
+        header,
+        once,
+        {
+          ...header,
+          id: 'other',
+          name: 'Claude wants to use Delete file from drive',
+        },
+      ],
+      [panel, { ...header, parentId: 'h' }, once],
+      [
+        panel,
+        header,
+        node('cancel', 'button', 'Cancel', 'p'),
+        node('write', 'button', 'Create', 'p'),
+      ],
+    ]) {
+      expect((await check(tree)).actions).toEqual([]);
+    }
+
+    // Calendar's annotations.title matches the panel verbatim. Cowork drops
+    // the final period only in the scoped header, not the outside summary.
+    const title =
+      'Returns the calendars this user owns or has subscribed to (their calendar list).';
+    const calendar = { server: 'gcal', titles: [title] };
+    const calendarPanel = { ...panel, name: `Permission request: ${title}` };
+    const calendarHeader = {
+      ...header,
+      name: `Claude wants to use ${title.slice(0, -1)} from gcal`,
+    };
+    const summary = {
+      ...calendarHeader,
+      id: 'summary',
+      parentId: undefined,
+      name: `Claude wants to use ${title} from gcal`,
+    };
+    expect(
+      (
+        await check(
+          [summary, calendarPanel, calendarHeader, once, always],
+          calendar
+        )
+      ).actions
+    ).toEqual(['Allow once 3']);
+    for (const nodes of [
+      [summary, calendarPanel, once],
+      [calendarPanel, calendarHeader, always],
+      [calendarPanel, calendarHeader, once, { ...once, id: 'another' }],
+      [
+        calendarPanel,
+        {
+          ...calendarHeader,
+          name: `Claude wants to use ${title.slice(0, -1)} from other`,
+        },
+        once,
+      ],
+      [
+        calendarPanel,
+        {
+          ...calendarHeader,
+          name: `Claude wants to use ${title.slice(0, -1)}! from gcal`,
+        },
+        once,
+      ],
+      [
+        { ...calendarPanel, name: `Permission request: ${title.slice(0, -1)}` },
+        calendarHeader,
+        once,
+      ],
+    ]) {
+      expect((await check(nodes, calendar)).actions).toEqual([]);
+    }
+  });
+
   it('fails closed on ambiguous approvals and ignores a Create without its card', async () => {
     for (const names of [
       ['Cancel', 'Create', 'Run'],
