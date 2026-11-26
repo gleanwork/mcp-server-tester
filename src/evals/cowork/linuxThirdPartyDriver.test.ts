@@ -802,12 +802,15 @@ describe('hitl', () => {
     );
     const once = node('once', 'button', 'Allow once 3', 'p');
     const always = node('always', 'button', 'Always allow', 'p');
-    const check = async (nodes: LinuxUiNode[]) => {
+    const check = async (
+      nodes: LinuxUiNode[],
+      readOnlyApproval = { server: 'drive', titles: ['Search files'] }
+    ) => {
       const ui = new FakeUi();
       ui.snapshot = async () => nodes;
       const result = await run(ui, 'hitl', {
         approveWriteTools: false,
-        readOnlyApproval: { server: 'drive', titles: ['Search files'] },
+        readOnlyApproval,
       });
       return { result, actions: ui.actions };
     };
@@ -876,6 +879,59 @@ describe('hitl', () => {
       ],
     ]) {
       expect((await check(tree)).actions).toEqual([]);
+    }
+
+    // Calendar's annotations.title matches the panel verbatim. Cowork drops
+    // the final period only in the scoped header, not the outside summary.
+    const title =
+      'Returns the calendars this user owns or has subscribed to (their calendar list).';
+    const calendar = { server: 'gcal', titles: [title] };
+    const calendarPanel = { ...panel, name: `Permission request: ${title}` };
+    const calendarHeader = {
+      ...header,
+      name: `Claude wants to use ${title.slice(0, -1)} from gcal`,
+    };
+    const summary = {
+      ...calendarHeader,
+      id: 'summary',
+      parentId: undefined,
+      name: `Claude wants to use ${title} from gcal`,
+    };
+    expect(
+      (
+        await check(
+          [summary, calendarPanel, calendarHeader, once, always],
+          calendar
+        )
+      ).actions
+    ).toEqual(['Allow once 3']);
+    for (const nodes of [
+      [summary, calendarPanel, once],
+      [calendarPanel, calendarHeader, always],
+      [calendarPanel, calendarHeader, once, { ...once, id: 'another' }],
+      [
+        calendarPanel,
+        {
+          ...calendarHeader,
+          name: `Claude wants to use ${title.slice(0, -1)} from other`,
+        },
+        once,
+      ],
+      [
+        calendarPanel,
+        {
+          ...calendarHeader,
+          name: `Claude wants to use ${title.slice(0, -1)}! from gcal`,
+        },
+        once,
+      ],
+      [
+        { ...calendarPanel, name: `Permission request: ${title.slice(0, -1)}` },
+        calendarHeader,
+        once,
+      ],
+    ]) {
+      expect((await check(nodes, calendar)).actions).toEqual([]);
     }
   });
 

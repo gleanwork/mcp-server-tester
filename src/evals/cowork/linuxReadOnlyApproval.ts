@@ -2,6 +2,7 @@ import type { Tool } from '@modelcontextprotocol/client';
 import { mcpServerLabel, type MCPConfig } from '../../config/mcpConfig.js';
 import { isReadOnlyTool } from '../../proxy/plannedWrite.js';
 import { checkMcpServers } from '../mcpReadiness.js';
+import { permissionHeaderTitle } from './linuxPermissionTitle.js';
 import type { ClaudeTranscript } from './transcript.js';
 
 /** Expected identity on a one-time managed Desktop permission card. No arguments or credentials. */
@@ -102,9 +103,14 @@ export function linuxReadOnlyApprovals(
         const matching = catalog.filter((t) => t.name === name);
         if (matching.length !== 1 || !isReadOnlyTool(matching[0])) return;
         const ambiguous = new Set(
-          catalog.filter((t) => t.name !== name).flatMap(titles)
+          catalog
+            .filter((t) => t.name !== name)
+            .flatMap(titles)
+            .map(permissionHeaderTitle)
         );
-        allowed = titles(matching[0]!).filter((title) => !ambiguous.has(title));
+        allowed = titles(matching[0]!).filter(
+          (title) => !ambiguous.has(permissionHeaderTitle(title))
+        );
       }
     );
     // An empty complete catalog is a missing tool, not a connection failure.

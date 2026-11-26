@@ -83,6 +83,36 @@ it('does not approve a write, unannotated, missing, duplicate or destructive too
   if (colliding.status === 'approved')
     expect(colliding.approval.titles).not.toContain('Search files');
 });
+it('uses the exact annotation title only when its Cowork header is unambiguous', async () => {
+  const title =
+    'Returns the calendars this user owns or has subscribed to (their calendar list).';
+  const read = {
+    name: 'list_calendars',
+    annotations: { title, readOnlyHint: true },
+  };
+  const calendar = { ...server, label: 'gcal' };
+  const pending = transcript('mcp__gcal__list_calendars');
+  listing.mockResolvedValue({ tools: [read] });
+  expect(await verify([calendar])(pending)).toMatchObject({
+    status: 'approved',
+    approval: {
+      id: 'request-1',
+      server: 'gcal',
+      titles: ['list_calendars', 'List calendars', title],
+    },
+  });
+  listing.mockResolvedValue({
+    tools: [read, { name: 'create_event', title: title.slice(0, -1) }],
+  });
+  expect(await verify([calendar])(pending)).toMatchObject({
+    status: 'approved',
+    approval: { titles: ['list_calendars', 'List calendars'] },
+  });
+  listing.mockResolvedValue({
+    tools: [{ ...read, annotations: { title, readOnlyHint: false } }],
+  });
+  expect(await verify([calendar])(pending)).toEqual({ status: 'denied' });
+});
 it('waits when the audit or catalog is not ready, and retries a failed probe', async () => {
   expect(await verify()()).toEqual({ status: 'pending' });
   expect(await verify()({ ...transcript(), isComplete: true })).toEqual({

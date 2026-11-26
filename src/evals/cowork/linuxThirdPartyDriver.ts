@@ -3,6 +3,7 @@
  * actions over the native AT-SPI seam. No lifecycle, answer parsing or retry
  * of an action. Account-backed Cowork uses linuxFirstPartyDriver.ts.
  */
+import { permissionHeaderTitle } from './linuxPermissionTitle.js';
 import {
   LinuxUiError,
   type LinuxDriverOperation,
@@ -122,7 +123,9 @@ function matchesReadCard(
   return (
     inside(once) &&
     headers.length === 1 &&
-    headers[0]!.name === `Claude wants to use ${title} from ${read.server}`
+    (headers[0]!.name === `Claude wants to use ${title} from ${read.server}` ||
+      headers[0]!.name ===
+        `Claude wants to use ${permissionHeaderTitle(title)} from ${read.server}`)
   );
 }
 
