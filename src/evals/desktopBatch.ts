@@ -634,6 +634,9 @@ async function runSessionBatch(
       ? await checkServersReady(target.servers, {
           ...(target.resolve ? { resolve: target.resolve } : {}),
           ...(target.env ? { env: target.env } : {}),
+          ...(target.requiredReadTools
+            ? { requiredReadTools: target.requiredReadTools }
+            : {}),
           ...(context.readOnly
             ? { readOnly: context.readOnly(target.servers) }
             : {}),

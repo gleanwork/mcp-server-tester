@@ -731,6 +731,31 @@ file as above, and probes. When the variant ends, or if the desktop isn't ready,
 the file goes back to what it was. Without `MST_DESKTOP_OWNED=1`, preparation
 stays read-only.
 
+#### Read permissions on an owned worker
+
+With `coworkSetup.approveWriteTools: false`
+(the default), MST lists the selected servers' tools before starting the variant.
+For a server with verified reads, MST writes exact rules such as
+`toolPolicy: {"lookup": "allow", "save": "ask"}`. It does not add a wildcard
+`ask`: on Linux that can prompt even for an explicitly allowed read. Only tools
+annotated read-only and not destructive qualify. A launch's `--always-write` and
+argument-dispatched tools never qualify. Every other listed name gets `ask`.
+While the grants are installed, MST disables Auto mode, bypass mode and saved
+MCP approvals. New names have no rule and require manual approval; MST does not
+grant it. A server with no verified reads keeps `{"*": "ask"}`.
+Two concurrent calls to the same approved read need no approval clicks. The
+worker refuses an incomplete or ambiguous catalog or a conflicting image policy.
+An HTTP server using only the image's opaque headers helper, or a tool-metadata
+proxy that can rename the underlying tools, stays on `ask`: MST cannot verify
+the same identity and launch rules. Grants are per variant, not account grants.
+When any named reads were granted, cleanup restores the image settings and
+restarts Desktop to remove those grants from the running app as well.
+The grants do not replace vendor access controls, the dry-run proxy, or write checks.
+If Desktop still presents an approval card, MST does not click it; it ends the
+trial as a policy failure and keeps its bound evidence rather than waiting until
+the deadline. A stricter organization policy still applies. Caller-owned and
+first-party desktops do not use this setup.
+
 **In a runner.** A plugin runner (`mst run --runner <namespace>/runner/<name>`)
 can run `cowork` shards on Linux workers in owned-desktop mode. Connector servers
 and variants with tool metadata work there as they do locally: the worker
@@ -1440,7 +1465,7 @@ Claude Desktop:
 - Each stdio eval server is one managed entry named `label` with exactly
   `transport: "stdio"`, the resolved `command`, `args`, and `env`. It has no
   other keys, except `toolPolicy: {"*": "allow"}` with
-  `coworkSetup.approveWriteTools`. Its `env` has exactly the declared keys, so
+  `coworkSetup.approveWriteTools`, or the exact verified read policy on an MST-owned worker. Its `env` has exactly the declared keys, so
   the substituted URL equals `url`, and plugin env such as `ENABLE_HITL: "true"`
   is replaced.
 - Each `blockMcpServers` name is a `policy-only` entry with exactly

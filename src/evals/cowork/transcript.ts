@@ -139,6 +139,8 @@ export interface ClaudeTranscript {
   isError?: boolean;
   isComplete: boolean;
   auditParsed: boolean;
+  /** Names on unanswered native approval requests, for diagnostics only. */
+  pendingPermissionTools?: string[];
   transcriptParsed: boolean;
   usageAvailable: boolean;
   /** Fields explicitly present and valid in every native result, before defaults. */
@@ -196,6 +198,7 @@ interface ClaudeAuditEvent {
   subtype?: string;
   /** Pairs a `permission_request` with its `permission_response`. */
   uuid?: string;
+  tool_name?: string;
   /** A `permission_response`'s answer. */
   granted?: boolean;
   /** When Cowork's audit log wrote the event. */
@@ -227,6 +230,7 @@ export async function parseClaudeTranscript(
   let rawAudit = '';
   let rawTranscript = '';
   let auditParsed = false;
+  let auditIntact = false;
   let transcriptParsed = false;
 
   try {
@@ -237,6 +241,7 @@ export async function parseClaudeTranscript(
     );
     auditEvents = parsed.events;
     auditParsed = parsed.events.length > 0;
+    auditIntact = parsed.ok;
     parseWarnings.push(...parsed.warnings);
   } catch (err) {
     parseWarnings.push(`Could not read Claude audit log: ${formatError(err)}`);
@@ -358,6 +363,9 @@ export async function parseClaudeTranscript(
     isError: resultEvent?.is_error === true,
     isComplete: resultEvent !== undefined,
     auditParsed,
+    ...(!resultEvent && auditIntact
+      ? { pendingPermissionTools: pendingPermissionTools(auditEventsForRun) }
+      : {}),
     transcriptParsed,
     usageAvailable: usage !== undefined,
     knownUsageFields: knownUsageFields(resultEvents),
@@ -381,6 +389,32 @@ export async function parseClaudeTranscript(
         : {}),
     },
   };
+}
+
+/** A permission response identifies a request by UUID, not by the last tool
+ * call. Do not select one if the audit is inconsistent. Never used to grant. */
+function pendingPermissionTools(events: ClaudeAuditEvent[]): string[] {
+  const requests = new Map<string, string>();
+  const answered = new Set<string>();
+  for (const event of events) {
+    if (event.type !== 'system') continue;
+    if (event.subtype === 'permission_request') {
+      if (
+        !event.uuid ||
+        requests.has(event.uuid) ||
+        typeof event.tool_name !== 'string'
+      )
+        return [];
+      requests.set(event.uuid, event.tool_name);
+    } else if (event.subtype === 'permission_response') {
+      if (!event.uuid || !requests.has(event.uuid) || answered.has(event.uuid))
+        return [];
+      answered.add(event.uuid);
+    }
+  }
+  return [...requests]
+    .filter(([id]) => !answered.has(id))
+    .map(([, tool]) => tool);
 }
 
 function selectEventsForMarker(

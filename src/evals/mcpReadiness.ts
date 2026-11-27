@@ -118,6 +118,13 @@ async function probe(
       listed.push(...next.tools);
       cursor = next.nextCursor;
     }
+    if (cursor !== undefined)
+      return {
+        label,
+        status: 'connected',
+        error: 'incomplete tool catalog',
+        elapsedMs: Date.now() - started,
+      };
     const writeTools = listed
       .filter((tool) => !isReadOnlyTool(tool))
       .map((tool) => tool.name);
@@ -125,19 +132,19 @@ async function probe(
     // can still list tools. Fail closed below the declared minimum.
     const minTools =
       resolved.transport === 'stdio' ? resolved.minTools : undefined;
-    if (minTools !== undefined && tools.tools.length < minTools)
+    if (minTools !== undefined && listed.length < minTools)
       return {
         label,
         status: 'failed',
-        toolCount: tools.tools.length,
+        toolCount: listed.length,
         minTools,
         elapsedMs: Date.now() - started,
-        error: `too few tools (${tools.tools.length} < ${minTools})`,
+        error: `too few tools (${listed.length} < ${minTools})`,
       };
     return {
       label,
       status: 'connected',
-      toolCount: tools.tools.length,
+      toolCount: listed.length,
       ...(writeTools.length > 0 ? { writeTools } : {}),
       tools: listed.map((tool) => tool.name),
       elapsedMs: Date.now() - started,

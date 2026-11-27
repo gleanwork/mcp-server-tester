@@ -120,6 +120,9 @@ export class CoworkDriverError extends Error {
   }
 }
 
+/** An owned Linux worker observed an approval card and did not approve it. */
+export class CoworkApprovalRequiredError extends CoworkDriverError {}
+
 export class CoworkHitlBudgetError extends CoworkDriverError {
   override readonly kind = 'hitl-budget-exhausted';
 }
