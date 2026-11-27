@@ -92,6 +92,30 @@ describe('Cowork servers in the readiness check', () => {
     expect(closeMCPClient).toHaveBeenCalledOnce();
   });
 
+  it('counts later pages towards minTools but never trusts a truncated inventory', async () => {
+    const listTools = vi
+      .fn()
+      .mockResolvedValueOnce({
+        tools: [{ name: 'first' }],
+        nextCursor: 'second',
+      })
+      .mockResolvedValueOnce({ tools: [{ name: 'last' }] });
+    vi.mocked(openMCPClient).mockResolvedValue({ listTools } as never);
+    await expect(
+      verify(
+        [{ transport: 'stdio', command: 'server', label: 'docs', minTools: 2 }],
+        {}
+      )
+    ).resolves.toMatchObject({ ready: true, servers: [{ toolCount: 2 }] });
+    listTools.mockResolvedValue({
+      tools: [{ name: 'partial' }],
+      nextCursor: 'never-ends',
+    });
+    await expect(verify([acme()], { TOKEN: 'example' })).resolves.toMatchObject(
+      { ready: false, servers: [{ error: 'incomplete tool catalog' }] }
+    );
+  });
+
   it('fails closed and closes a client after listTools fails', async () => {
     const client = {
       listTools: vi

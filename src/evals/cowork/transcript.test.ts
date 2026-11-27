@@ -49,6 +49,43 @@ function toolUseEvent(id: string, name: string, timestamp?: string) {
 }
 
 describe('Claude local-agent transcript parsing', () => {
+  it('identifies unanswered permission UUIDs, not the last of several simultaneous calls', async () => {
+    const request = (uuid: string, tool_name: string) => ({
+      type: 'system',
+      subtype: 'permission_request',
+      uuid,
+      tool_name,
+    });
+    const answered = {
+      type: 'system',
+      subtype: 'permission_response',
+      uuid: 'first',
+      granted: true,
+    };
+    const events = [
+      toolUseEvent('a', 'mcp__docs__read'),
+      toolUseEvent('b', 'mcp__docs__read'),
+      toolUseEvent('c', 'mcp__mail__search'),
+      request('first', 'mcp__mail__search'),
+      answered,
+      request('second', 'mcp__docs__read'),
+    ];
+    expect((await parseNativeEvents(events)).pendingPermissionTools).toEqual([
+      'mcp__docs__read',
+    ]);
+    expect(
+      (await parseNativeEvents([...events, answered])).pendingPermissionTools
+    ).toEqual([]);
+    expect(
+      (await parseNativeEvents([...events, events.at(-1)]))
+        .pendingPermissionTools
+    ).toEqual([]);
+    expect(
+      (await parseNativeEvents([...events, { type: 'result', result: 'done' }]))
+        .pendingPermissionTools
+    ).toBeUndefined();
+  });
+
   it('reads back a large tool result the transcript only points to', async () => {
     const id = 'toolu_bdrk_01QnnrBzoJ7qWyZbzHvwEouZ';
     const full = '[{"type":"text","text":"# Search Results (16 found)"}]';

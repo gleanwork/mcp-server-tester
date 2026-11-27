@@ -19,7 +19,11 @@ import {
 import { endingOf, isInfrastructure } from './trialEnding.js';
 import { NativeTranscriptError } from './nativeTranscriptError.js';
 import { prepareClientBatch } from './prepareClientBatch.js';
-import { CoworkHitlError } from './cowork/interaction.js';
+import {
+  CoworkApprovalRequiredError,
+  CoworkHitlError,
+  CoworkUserQuestionError,
+} from './cowork/interaction.js';
 import { toCoworkServers } from './coworkSetup/config.js';
 import type { MCPConfig } from '../config/mcpConfig.js';
 import {
@@ -282,6 +286,203 @@ describe('Cowork sessions', () => {
       },
     });
   }
+
+  it.each([
+    [
+      ['mcp__primary__read'],
+      'prompted for the preapproved read mcp__primary__read',
+    ],
+    [['mcp__primary__edit'], 'mcp__primary__edit, which is not preapproved'],
+    [['mcp__other__read'], 'did not identify one configured tool'],
+    [[], 'did not identify one configured tool'],
+  ] as const)(
+    'ends an owned approval refusal immediately and keeps bound native evidence: %j',
+    async (tools, reason) => {
+      vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+      mocks.setup.mockResolvedValue({
+        readPolicies: new Map([['primary', { '*': 'ask', read: 'allow' }]]),
+        dispose: mocks.dispose,
+      });
+      mocks.hitl.mockRejectedValue(
+        new CoworkApprovalRequiredError('driver saw a card')
+      );
+      mocks.matches.mockResolvedValue([
+        {
+          candidate: {
+            metadataPath: '/fixture/session-0',
+            sessionDir: '/fixture/audit',
+            id: 'native',
+          },
+          isComplete: false,
+          pendingPermissionTools: tools,
+          finalAnswer: 'partial progress',
+          toolCalls: ['first', 'second'].map((id) => ({
+            id,
+            rawName: 'mcp__primary__read',
+            source: 'mcp',
+            name: 'read',
+            arguments: { id },
+          })),
+          telemetry: { models: [] },
+        },
+      ]);
+      const session = await client().open!(
+        { config: clientConfig, input: { servers: [server] } },
+        readOnlyContext
+      );
+      try {
+        const outcome = await session.run({
+          caseId: 'refusal',
+          trial: 0,
+          input: { prompt: 'test' },
+        });
+        expect(outcome).toMatchObject({
+          continuation: 'reset',
+          result: {
+            error: expect.stringContaining(reason),
+            finalText: 'partial progress',
+            events: [
+              { id: 'first', name: 'read' },
+              { id: 'second', name: 'read' },
+            ],
+            ending: {
+              kind: 'infrastructure',
+              broke: 'setup',
+              retryable: false,
+            },
+            artifacts: { dir: '/fixture/audit' },
+          },
+        });
+        expect(mocks.transcript).not.toHaveBeenCalled();
+        expect(mocks.submit).toHaveBeenCalledTimes(1);
+      } finally {
+        await session.close();
+      }
+    }
+  );
+
+  it('does not use a permission name or evidence from a different task', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    mocks.setup.mockResolvedValue({
+      readPolicies: new Map([['primary', { '*': 'ask', read: 'allow' }]]),
+      dispose: mocks.dispose,
+    });
+    mocks.hitl.mockRejectedValue(
+      new CoworkApprovalRequiredError('driver saw a card')
+    );
+    mocks.matches.mockResolvedValue([
+      {
+        candidate: { metadataPath: '/fixture/other-task' },
+        isComplete: false,
+        pendingPermissionTools: ['mcp__primary__read'],
+      },
+    ]);
+    const session = await client().open!(
+      { config: clientConfig, input: { servers: [server] } },
+      readOnlyContext
+    );
+    try {
+      const { result } = await session.run({
+        caseId: 'stale-audit',
+        trial: 0,
+        input: { prompt: 'test' },
+      });
+      expect(result.error).toContain('did not identify one configured tool');
+      expect(result.events).toEqual([]);
+      expect(result.artifacts).toBeUndefined();
+      expect(mocks.transcript).not.toHaveBeenCalled();
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('retains the bound question as a user question, not an infrastructure approval failure', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    mocks.hitl.mockRejectedValue(
+      new CoworkUserQuestionError('A person must answer the question.')
+    );
+    mocks.matches.mockResolvedValue([
+      {
+        candidate: {
+          metadataPath: '/fixture/session-0',
+          id: 'native-question',
+        },
+        isComplete: false,
+        toolCalls: [
+          {
+            id: 'question',
+            name: 'AskUserQuestion',
+            source: 'builtin',
+            arguments: {},
+          },
+        ],
+        telemetry: { models: [] },
+      },
+    ]);
+    const session = await client().open!(
+      { config: clientConfig, input: { servers: [server] } },
+      readOnlyContext
+    );
+    try {
+      const { result } = await session.run({
+        caseId: 'question',
+        trial: 0,
+        input: { prompt: 'test' },
+      });
+      expect(result).toMatchObject({
+        error: 'A person must answer the question.',
+        events: [{ id: 'question', name: 'AskUserQuestion' }],
+        telemetry: {
+          nativeSessionId: 'native-question',
+          awaitingUser: 'AskUserQuestion',
+        },
+      });
+      expect(result.ending).not.toMatchObject({
+        kind: 'infrastructure',
+        broke: 'setup',
+      });
+      expect(mocks.transcript).not.toHaveBeenCalled();
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('keeps a native result if an untouched approval card has already resolved', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+    mocks.setup.mockResolvedValue({
+      readPolicies: new Map(),
+      dispose: mocks.dispose,
+    });
+    mocks.hitl.mockRejectedValue(
+      new CoworkApprovalRequiredError('driver saw a card', {
+        accounting: 'partial',
+        duration_ms: 1,
+        action_count: 0,
+        planner: { status: 'not-applicable' },
+        cost: { status: 'not-applicable' },
+      })
+    );
+    mocks.matches
+      .mockResolvedValueOnce([{ isComplete: false }])
+      .mockResolvedValueOnce([
+        { candidate: { metadataPath: '/fixture/session-0' }, isComplete: true },
+      ]);
+    const session = await client().open!(
+      { config: clientConfig, input: { servers: [server] } },
+      readOnlyContext
+    );
+    try {
+      const { result } = await session.run({
+        caseId: 'race',
+        trial: 0,
+        input: { prompt: 'test' },
+      });
+      expect(result.finalText).toBe('answer');
+      expect(result.error).toBeUndefined();
+    } finally {
+      await session.close();
+    }
+  });
 
   it('opens, exposes resolved readiness, runs, diagnoses, resets and closes', async () => {
     const options = { config: clientConfig, input: { servers: [server] } };
@@ -854,6 +1055,10 @@ describe('V2 Cowork client', () => {
     });
     expect(result.every((r) => !r.error)).toBe(true);
     // The dispatch checked the declared servers before starting the proxy.
+    // Setup must not reuse those names to grant the proxy's tool aliases.
+    expect(mocks.setup).toHaveBeenCalledWith(
+      expect.objectContaining({ toolMetadataProxy: true })
+    );
     expect(mocks.readiness).not.toHaveBeenCalled();
     expect(mocks.readinessServer).not.toHaveBeenCalled();
     expect(COWORK_CLIENT.serversPerBatch).toBe(true);

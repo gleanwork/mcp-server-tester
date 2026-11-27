@@ -7,6 +7,7 @@ import type {
   CoworkHitlReceipt,
 } from './interaction.js';
 import type { ClientApp } from '../installedApp.js';
+import type { LinuxReadPolicies } from './linuxReadPolicy.js';
 
 /** The shared batch lifecycle does not choose OS paths or control an application.
  * Implementations must retain the existing bounded, no-resubmission contract. */
@@ -20,6 +21,8 @@ export interface CoworkDesktop {
     plugins?: readonly MarketplacePlugin[];
     /** Caller-owned runtime paths for a prepared Linux desktop. */
     stdioPaths?: ClientStdioPaths;
+    /** The tool-metadata proxy can rename tools and hide launch overrides. */
+    toolMetadataProxy?: boolean;
     /** macOS: run exactly this Claude Desktop version instead of the installed one. */
     appVersion?: string;
     /**
@@ -40,6 +43,8 @@ export interface CoworkDesktop {
      * that needs no planner. macOS only.
      */
     restart?(): Promise<void>;
+    /** Exact prompt-free reads in the managed Linux worker's verified settings. */
+    readPolicies?: LinuxReadPolicies;
     /** A final, verified recovery for a failed reset on a desktop we own. */
     recoverReset?(error: unknown, deadlineAt: number): Promise<boolean>;
     /**

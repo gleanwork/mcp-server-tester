@@ -19,6 +19,10 @@ import { freemem, homedir, loadavg, totalmem, uptime } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkDesktop } from './desktop.js';
+import {
+  linuxReadPolicies,
+  type LinuxReadPolicies,
+} from './linuxReadPolicy.js';
 import { installedDebApp } from '../installedApp.js';
 import { DESKTOP_AUTOMATION_ENV } from '../desktopUi/automation.js';
 import { holdAccessibilityClient } from '../desktopUi/heldAccessibilityClient.js';
@@ -55,6 +59,7 @@ export {
   coworkPluginSettingsMatch,
 } from './managedSettings.js';
 import {
+  CoworkApprovalRequiredError,
   CoworkDriverError,
   CoworkHitlBudgetError,
   CoworkHitlError,
@@ -220,6 +225,7 @@ function coworkLinuxOwnedSettings(
     approveWriteTools?: boolean;
     model?: string;
     helpers?: ReadonlyMap<string, string>;
+    readPolicies?: LinuxReadPolicies;
     /** Desktop's `otlp*` keys (`telemetry.host`), which replace the image's own. */
     telemetry?: Record<string, unknown>;
     /** `coworkSetup.egressAllowedHosts`, over the image's own list. */
@@ -312,7 +318,11 @@ function coworkLinuxOwnedSettings(
         ...(options.disabledBuiltinTools ?? []),
       ]),
     ],
-    managedMcpServers: [...http, ...managed.managedMcpServers],
+    managedMcpServers: [...http, ...managed.managedMcpServers].map((entry) =>
+      entry.transport !== 'policy-only' && options.readPolicies
+        ? { ...entry, toolPolicy: options.readPolicies.get(entry.name) }
+        : entry
+    ),
     // Tool search, as Cowork signed in to claude.ai has it: Desktop leaves
     // it off in gateway mode unless the settings turn it on.
     toolSearchEnabled: options.toolSearch ?? true,
@@ -684,7 +694,16 @@ async function execute(
       record.errorCode === 'accessibility_scan_timeout' &&
       record.action_count <= (options.maxActions ?? 24)
         ? LinuxCoworkResetScanTimeout
-        : CoworkDriverError;
+        : mode === 'hitl' &&
+            driverMode === 'third-party' &&
+            env.MST_DESKTOP_OWNED === '1' &&
+            !options.approveWriteTools &&
+            record?.status === 'failed' &&
+            record.action_count === 0 &&
+            (record.errorCode === 'approval_requires_explicit_write_policy' ||
+              record.errorCode === 'approval_control_ambiguous')
+          ? CoworkApprovalRequiredError
+          : CoworkDriverError;
     throw new Failure(
       `Linux desktop ${mode} failed or its receipt was uncertain (${record?.errorCode ?? 'missing_or_invalid_receipt'}); no retry attempted.`,
       record ? telemetry(started, record.action_count, 'partial') : undefined
@@ -1004,6 +1023,7 @@ const coworkLinuxThirdParty: CoworkDesktop = {
     model,
     plugins = [],
     stdioPaths = {},
+    toolMetadataProxy,
     otlpSettings,
   }) {
     if (
@@ -1025,74 +1045,126 @@ const coworkLinuxThirdParty: CoworkDesktop = {
     let original: string | undefined;
     let ownedText: string | undefined;
     let headerFiles: ServerHeaderFiles | undefined;
+    let readPolicies: LinuxReadPolicies | undefined;
+    const installedSettings =
+      settingsFile === '/run/mst/settings/managed-settings.json'
+        ? '/etc/claude-desktop/managed-settings.json'
+        : settingsFile;
+    let staged = false;
+    let revokeReads = false;
+    let releaseClient: (() => void) | undefined;
+    const restore = async () => {
+      releaseClient?.();
+      try {
+        if (revokeReads) ownedDesktopSettings.delete(settingsFile);
+        if (staged) await writeSettingsText(settingsFile, original ?? '{}\n');
+        // Restoring only the staging file leaves the running Desktop and the
+        // image's installed copy trusting the last variant's tool names.
+        if (revokeReads) {
+          await restartDesktop(env.MST_DESKTOP_RESTART!, {
+            ...process.env,
+            ...env,
+          });
+          if (
+            !coworkJsonEqual(
+              await readSettings(installedSettings),
+              JSON.parse(original ?? '{}')
+            )
+          )
+            throw new Error(
+              'Owned Linux Cowork did not restore its original managed settings. Do not reuse this worker.'
+            );
+        }
+      } finally {
+        await headerFiles?.remove();
+      }
+    };
     if (otlpSettings && !owned)
       throw new Error(
         "telemetry.host on Cowork needs owned-desktop mode (MST_DESKTOP_OWNED=1, MST's Linux image), where MST writes Claude Desktop's settings."
       );
-    if (owned) {
-      const restart = env.MST_DESKTOP_RESTART;
-      if (!restart || !isAbsolute(restart))
-        throw new Error(
-          'Owned-desktop mode (MST_DESKTOP_OWNED=1) needs MST_DESKTOP_RESTART: an absolute path to the command that restarts Claude Desktop.'
-        );
-      original = await readSettingsText(settingsFile);
-      const base = original
-        ? (JSON.parse(original) as Record<string, unknown>)
-        : {};
-      const servers = transportServers(evalConfig.servers, 'Cowork');
-      // MST_COWORK_HELPER_DIR: where the helpers can be executed, when the
-      // staging file's directory is a noexec tmpfs (as Docker mounts one).
-      const headers = join(dirname(settingsFile), 'mcp-headers');
-      const helperDir = env.MST_COWORK_HELPER_DIR ?? headers;
-      if (!isAbsolute(helperDir))
-        throw new Error('MST_COWORK_HELPER_DIR must be an absolute path.');
-      headerFiles = await writeServerHeaders(servers, env, {
-        headers,
-        helpers: helperDir,
-      });
-      ownedText = `${JSON.stringify(
-        coworkLinuxOwnedSettings(base, {
-          servers,
-          plugins,
-          paths: stdioPaths,
-          approveWriteTools: evalConfig.coworkSetup?.approveWriteTools === true,
-          ...(model ? { model } : {}),
-          helpers: headerFiles.helpers,
-          ...(otlpSettings ? { telemetry: otlpSettings } : {}),
-          ...(evalConfig.coworkSetup?.egressAllowedHosts
-            ? { egressAllowedHosts: evalConfig.coworkSetup.egressAllowedHosts }
-            : {}),
-          ...(evalConfig.coworkSetup?.disabledBuiltinTools
-            ? {
-                disabledBuiltinTools:
-                  evalConfig.coworkSetup.disabledBuiltinTools,
-              }
-            : {}),
-          ...(evalConfig.coworkSetup?.toolSearch !== undefined
-            ? { toolSearch: evalConfig.coworkSetup.toolSearch }
-            : {}),
-          ...(evalConfig.coworkSetup?.clarifyingQuestions
-            ? {
-                clarifyingQuestions: evalConfig.coworkSetup.clarifyingQuestions,
-              }
-            : {}),
-        }),
-        null,
-        2
-      )}\n`;
-      await writeSettingsText(settingsFile, ownedText);
-    }
-    // Held from here: every exit below goes through `restore`.
-    const releaseClient = await holdForAutomation(env);
-    // In owned mode the settings go back, whether or not the desktop is ready,
-    // and the servers' credentials are removed.
-    const restore = async () => {
-      releaseClient();
-      if (!owned) return;
-      await writeSettingsText(settingsFile, original ?? '{}\n');
-      await headerFiles?.remove();
-    };
     try {
+      if (owned) {
+        const restart = env.MST_DESKTOP_RESTART;
+        if (!restart || !isAbsolute(restart))
+          throw new Error(
+            'Owned-desktop mode (MST_DESKTOP_OWNED=1) needs MST_DESKTOP_RESTART: an absolute path to the command that restarts Claude Desktop.'
+          );
+        original = await readSettingsText(settingsFile);
+        const base = original
+          ? (JSON.parse(original) as Record<string, unknown>)
+          : {};
+        const servers = transportServers(evalConfig.servers, 'Cowork');
+        // MST_COWORK_HELPER_DIR: where the helpers can be executed, when the
+        // staging file's directory is a noexec tmpfs (as Docker mounts one).
+        const headers = join(dirname(settingsFile), 'mcp-headers');
+        const helperDir = env.MST_COWORK_HELPER_DIR ?? headers;
+        if (!isAbsolute(helperDir))
+          throw new Error('MST_COWORK_HELPER_DIR must be an absolute path.');
+        headerFiles = await writeServerHeaders(servers, env, {
+          headers,
+          helpers: helperDir,
+        });
+        if (!evalConfig.coworkSetup?.approveWriteTools) {
+          await verifyStdioPaths(
+            clientStdioServers(servers, plugins),
+            stdioPaths,
+            env
+          );
+          readPolicies = await linuxReadPolicies(
+            servers,
+            env,
+            { plugins, paths: stdioPaths },
+            base,
+            headerFiles.helpers,
+            toolMetadataProxy
+          );
+        }
+        ownedText = `${JSON.stringify(
+          coworkLinuxOwnedSettings(base, {
+            readPolicies,
+            servers,
+            plugins,
+            paths: stdioPaths,
+            approveWriteTools:
+              evalConfig.coworkSetup?.approveWriteTools === true,
+            ...(model ? { model } : {}),
+            helpers: headerFiles.helpers,
+            ...(otlpSettings ? { telemetry: otlpSettings } : {}),
+            ...(evalConfig.coworkSetup?.egressAllowedHosts
+              ? {
+                  egressAllowedHosts: evalConfig.coworkSetup.egressAllowedHosts,
+                }
+              : {}),
+            ...(evalConfig.coworkSetup?.disabledBuiltinTools
+              ? {
+                  disabledBuiltinTools:
+                    evalConfig.coworkSetup.disabledBuiltinTools,
+                }
+              : {}),
+            ...(evalConfig.coworkSetup?.toolSearch !== undefined
+              ? { toolSearch: evalConfig.coworkSetup.toolSearch }
+              : {}),
+            ...(evalConfig.coworkSetup?.clarifyingQuestions
+              ? {
+                  clarifyingQuestions:
+                    evalConfig.coworkSetup.clarifyingQuestions,
+                }
+              : {}),
+          }),
+          null,
+          2
+        )}\n`;
+        staged = true;
+        await writeSettingsText(settingsFile, ownedText);
+      }
+      releaseClient = await holdForAutomation(env);
+      // A failed restart may already have installed the grants.
+      revokeReads =
+        !!readPolicies &&
+        [...readPolicies.values()].some((policy) =>
+          Object.values(policy).includes('allow')
+        );
       if (owned && ownedDesktopSettings.get(settingsFile) !== ownedText) {
         ownedDesktopSettings.delete(settingsFile);
         await restartDesktop(env.MST_DESKTOP_RESTART!, {
@@ -1105,7 +1177,7 @@ const coworkLinuxThirdParty: CoworkDesktop = {
     } catch (error) {
       // A desktop that isn't ready gets a restart next time.
       ownedDesktopSettings.delete(settingsFile);
-      await restore().catch(() => {});
+      await restore();
       throw error;
     }
     const app = await installedCoworkApp();
@@ -1113,6 +1185,7 @@ const coworkLinuxThirdParty: CoworkDesktop = {
       dispose: restore,
       ...(app ? { app } : {}),
       ...(owned ? { recoverReset } : {}),
+      ...(readPolicies ? { readPolicies } : {}),
     };
 
     async function recoverReset(error: unknown, deadlineAt: number) {
@@ -1157,7 +1230,11 @@ const coworkLinuxThirdParty: CoworkDesktop = {
       deadlineAt = Date.now() + 15_000
     ): Promise<void> {
       try {
-        const settings = await readSettings(settingsFile);
+        // The shipped image installs a separate root-owned file on restart.
+        // Verify the file Desktop consumes, not just MST's staging copy.
+        const settings = await readSettings(
+          readPolicies ? installedSettings : settingsFile
+        );
         const models = settings.inferenceModels as
           | Array<{ name?: string }>
           | undefined;
@@ -1173,16 +1250,18 @@ const coworkLinuxThirdParty: CoworkDesktop = {
         )
           throw new Error('headless');
         const servers = transportServers(evalConfig.servers, 'Cowork');
-        if (
-          !coworkMcpSettingsMatch(settings, {
-            servers,
-            plugins,
-            paths: stdioPaths,
-            approveWriteTools:
-              evalConfig.coworkSetup?.approveWriteTools === true,
-          })
-        )
-          throw new Error('servers');
+        // For our generated grants, verify the entire installed document,
+        // including launch details, credential helpers and policy-only entries.
+        const settingsMatch = readPolicies
+          ? coworkJsonEqual(settings, JSON.parse(ownedText!))
+          : coworkMcpSettingsMatch(settings, {
+              servers,
+              plugins,
+              paths: stdioPaths,
+              approveWriteTools:
+                evalConfig.coworkSetup?.approveWriteTools === true,
+            });
+        if (!settingsMatch) throw new Error('servers');
         await verifyStdioPaths(
           clientStdioServers(servers, plugins),
           stdioPaths,
@@ -1360,6 +1439,11 @@ async function handleLinuxHitl(
       error instanceof CoworkDriverError
         ? (error.telemetry?.action_count ?? 0)
         : 0;
+    if (error instanceof CoworkApprovalRequiredError)
+      throw new CoworkApprovalRequiredError(
+        error.message,
+        telemetry(started, actions, 'partial', counts)
+      );
     // A driver call that failed without a receipt may have acted.
     const unknown =
       driving &&

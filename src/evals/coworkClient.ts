@@ -7,6 +7,7 @@ import type {
   ClientSessionOptions,
 } from './evalFrameworkTypes.js';
 import type { CoworkDesktop } from './cowork/desktop.js';
+import type { LinuxReadPolicies } from './cowork/linuxReadPolicy.js';
 import { coworkReadinessServer } from './cowork/readinessServer.js';
 import { checksServersAfterPrepare } from './readinessCheck.js';
 import { clientSecretValues, redactClientError } from './clientSecrets.js';
@@ -51,6 +52,7 @@ import {
 import { coworkManagedPluginSettings } from './cowork/managedSettings.js';
 import { resolveCoworkSetupConfig } from './coworkSetup/options.js';
 import {
+  CoworkApprovalRequiredError,
   CoworkDriverError,
   CoworkHitlError,
   type CoworkDriverTelemetry,
@@ -464,6 +466,16 @@ async function desktopAdapter(
     });
   }
   const dataDir = platform.dataDirectory(config);
+  const nativeEvents = (transcript: ClaudeTranscript) =>
+    toolCallEvents(
+      coworkOwnToolCalls(
+        transcript.toolCalls,
+        servers,
+        platform.mcpServerNames?.(),
+        platform.mcpServerLabels?.()
+      ),
+      servers
+    );
   // Pass only the selected variant. Setup intentionally rejects multi-variant eval configs.
   const { variants: _variants, ...evalConfig } = context.evalConfig;
   const managedConfig = { ...evalConfig, coworkSetup, servers };
@@ -531,6 +543,9 @@ async function desktopAdapter(
         ...(plugins.length ? { plugins } : {}),
         ...(otlpSettings ? { otlpSettings } : {}),
         ...(stdioServers.length && linux ? { stdioPaths } : {}),
+        ...(linux && requests[0]!.input.checkServers
+          ? { toolMetadataProxy: true }
+          : {}),
       });
       if (session?.stdioPaths) stdioPaths = session.stdioPaths;
       return session;
@@ -821,34 +836,63 @@ async function desktopAdapter(
         )
           awaitingUser = true;
       }
-      if (awaitingUser) {
-        // Waiting on a question nobody can answer: fail now, not at the deadline.
-        // Keep the bound session so the auditor can verify the unanswered
-        // AskUserQuestion from the native transcript (a model outcome, not a
-        // missing-evidence failure).
-        const [pending] = await findMatchingClaudeSessions({
+      const refused =
+        hitlFailure instanceof CoworkApprovalRequiredError
+          ? session?.readPolicies
+          : undefined;
+      if (awaitingUser || refused) {
+        // A visible prompt with no authorized answer must not consume the case
+        // deadline. If the task already finished, keep its normal result.
+        const [candidate] = await findMatchingClaudeSessions({
           ...match,
           sessionPath,
         }).catch(() => []);
-        hostSessions = sessionIdsOf(pending);
-        result = {
-          ...failure(hitlError ?? 'Cowork is waiting for an answer.'),
-          ...(pending
-            ? {
-                toolCalls: pending.toolCalls,
-                telemetry: {
-                  source: 'claude-native',
-                  costScope: 'native-inference-only',
-                  ...pending.telemetry,
-                  nativeSessionId: pending.candidate.id,
-                  ...correlationTelemetry(pending),
-                  awaitingUser: 'AskUserQuestion',
-                },
-              }
-            : {}),
-        };
-        if (platform.reset) continuation = 'reset';
-        return finishCase();
+        const pending =
+          candidate?.candidate.metadataPath === sessionPath
+            ? candidate
+            : undefined;
+        if (awaitingUser || !pending?.isComplete) {
+          const reason = refused
+            ? ownedApprovalReason(refused, pending?.pendingPermissionTools)
+            : (hitlError ?? 'Cowork is waiting for an answer.');
+          hostSessions = sessionIdsOf(pending);
+          result = {
+            ...failure(reason),
+            ...(refused
+              ? { ending: infrastructureEnding('setup', reason, false) }
+              : {}),
+            ...(pending
+              ? {
+                  events: nativeEvents(pending),
+                  ...(refused
+                    ? {
+                        finalText: pending.finalAnswer ?? '',
+                        artifacts: {
+                          dir: pending.candidate.sessionDir,
+                          include: COWORK_SESSION_EVIDENCE,
+                        },
+                      }
+                    : {}),
+                  telemetry: {
+                    source: 'claude-native',
+                    costScope: 'native-inference-only',
+                    ...pending.telemetry,
+                    nativeSessionId: pending.candidate.id,
+                    ...correlationTelemetry(pending),
+                    ...(awaitingUser
+                      ? { awaitingUser: 'AskUserQuestion' }
+                      : {}),
+                  },
+                }
+              : {}),
+          };
+          if (platform.reset) continuation = 'reset';
+          return finishCase();
+        }
+        // A policy receipt means that the driver did not click the approval.
+        hitlUntouched =
+          (hitlFailure as CoworkApprovalRequiredError).telemetry
+            ?.action_count === 0;
       }
       try {
         const remaining = deadlineAt - Date.now();
@@ -925,15 +969,7 @@ async function desktopAdapter(
         hostSessions = sessionIdsOf(transcript);
         const nativeResult: ClientRunResult = {
           finalText: transcript.finalAnswer ?? '',
-          events: toolCallEvents(
-            coworkOwnToolCalls(
-              transcript.toolCalls,
-              servers,
-              platform.mcpServerNames?.(),
-              platform.mcpServerLabels?.()
-            ),
-            servers
-          ),
+          events: nativeEvents(transcript),
           ...(transcript.modelCalls?.length
             ? { modelCalls: transcript.modelCalls }
             : {}),
@@ -1071,15 +1107,7 @@ async function desktopAdapter(
           if (partial?.candidate.metadataPath === sessionPath)
             result = {
               finalText: partial.finalAnswer ?? '',
-              events: toolCallEvents(
-                coworkOwnToolCalls(
-                  partial.toolCalls,
-                  servers,
-                  platform.mcpServerNames?.(),
-                  platform.mcpServerLabels?.()
-                ),
-                servers
-              ),
+              events: nativeEvents(partial),
               ...(partial.modelCalls?.length
                 ? { modelCalls: partial.modelCalls }
                 : {}),
@@ -1113,6 +1141,32 @@ async function desktopAdapter(
       return finishCase();
     },
   };
+}
+
+/** Only name an audited request on a configured server, never a guess from
+ * the last tool call or text on the screen. Do not copy arguments into errors. */
+function ownedApprovalReason(
+  policies: LinuxReadPolicies,
+  pending: string[] = []
+): string {
+  const [tool] = pending;
+  if (
+    pending.length === 1 &&
+    tool &&
+    /^mcp__[A-Za-z0-9._-]{1,256}$/.test(tool)
+  ) {
+    const matches = [...policies].filter(([server]) =>
+      tool.startsWith(`mcp__${server}__`)
+    );
+    if (matches.length === 1) {
+      const [server, policy] = matches[0]!;
+      const name = tool.slice(`mcp__${server}__`.length);
+      if (policy[name] === 'allow')
+        return `Owned Linux Cowork prompted for the preapproved read ${tool}. Check the worker's installed tool policy; no approval was granted.`;
+      return `Owned Linux Cowork requires approval for ${tool}, which is not preapproved. No approval was granted.`;
+    }
+  }
+  return 'Owned Linux Cowork requires approval; the bound audit did not identify one configured tool. No approval was granted.';
 }
 
 /**

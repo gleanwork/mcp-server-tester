@@ -1,3 +1,4 @@
+import { copyFileSync } from 'node:fs';
 import {
   chmod,
   mkdir,
@@ -24,15 +25,39 @@ import {
 } from './linux.js';
 import type { MarketplacePlugin } from '../clientPlugins.js';
 import {
+  CoworkApprovalRequiredError,
   CoworkDriverError,
   CoworkHitlBudgetError,
   CoworkHitlError,
   CoworkUserQuestionError,
 } from './interaction.js';
 import type * as ChildProcess from 'node:child_process';
+import type * as FsPromises from 'node:fs/promises';
 import type { EvalConfig } from '../evalConfig.js';
 import type { MCPConfig } from '../../config/mcpConfig.js';
 
+// Never write system files in a test. Route only the packaged image paths to
+// the test directory when checking the separately installed settings file.
+const imagePaths = vi.hoisted(() => new Map<string, string>());
+vi.mock('node:fs/promises', async (original) => {
+  const fs = await original<typeof FsPromises>();
+  return {
+    ...fs,
+    open: (
+      path: Parameters<typeof fs.open>[0],
+      ...args: [number | string, number?]
+    ) =>
+      fs.open(
+        typeof path === 'string' ? (imagePaths.get(path) ?? path) : path,
+        ...args
+      ),
+  };
+});
+const catalogOpen = vi.hoisted(() => vi.fn());
+vi.mock('../../mcp/clientFactory.js', () => ({
+  openMCPClient: catalogOpen,
+  closeMCPClient: async () => {},
+}));
 const child = vi.hoisted(() => ({
   exec: vi.fn(),
   payloads: [] as string[],
@@ -79,6 +104,14 @@ const settings = {
 };
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'linux-driver-test-'));
+  catalogOpen.mockReset().mockResolvedValue({
+    listTools: async () => ({
+      tools: [
+        { name: 'read_item', annotations: { readOnlyHint: true } },
+        { name: 'edit_item' },
+      ],
+    }),
+  });
   child.exec.mockReset();
   child.payloads.length = 0;
   child.responses.length = 0;
@@ -112,6 +145,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   vi.restoreAllMocks();
+  imagePaths.clear();
   await rm(directory, { recursive: true, force: true });
 });
 
@@ -940,6 +974,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
           transport: 'http',
           url: 'https://example.com/eval',
           headersHelper: '/opt/mst/primary-headers.sh',
+          toolPolicy: { '*': 'ask' },
         },
       ],
       toolSearchEnabled: true,
@@ -959,6 +994,172 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     await prepared.dispose();
     expect(await readFile(file, 'utf8')).toBe(original);
   });
+
+  it('stages exact read grants per variant before submit, rejects a failed catalog before restart, and cleans up', async () => {
+    const file = join(directory, 'settings.json');
+    const headers = join(directory, 'mcp-headers', 'docs.json');
+    const docs = {
+      label: 'docs',
+      transport: 'http' as const,
+      serverUrl: 'https://docs.example/mcp',
+      auth: { accessTokenEnv: 'DOCS_TOKEN' },
+    };
+    await writeFile(file, '{}');
+    const stage = (approveWriteTools = false) =>
+      linuxCoworkPlatform.prepare({
+        evalConfig: {
+          ...evalConfig,
+          servers: [docs],
+          coworkSetup: { approveWriteTools },
+        },
+        env: {
+          ...session,
+          MST_DESKTOP_OWNED: '1',
+          MST_COWORK_SETTINGS_FILE: file,
+          MST_DESKTOP_RESTART: RESTART,
+          DOCS_TOKEN: 'test-only',
+        },
+      });
+    const settings = () =>
+      readFile(file, 'utf8').then(
+        (t): unknown => JSON.parse(t).managedMcpServers[0].toolPolicy
+      );
+    const first = await stage();
+    expect(await settings()).toEqual({ '*': 'ask', read_item: 'allow' });
+    expect(
+      child.exec.mock.calls.filter(([cmd]) => cmd === RESTART)
+    ).toHaveLength(1);
+    await first.dispose();
+    expect(
+      child.exec.mock.calls.filter(([cmd]) => cmd === RESTART)
+    ).toHaveLength(2);
+    expect(await readFile(file, 'utf8')).toBe('{}');
+    catalogOpen.mockResolvedValueOnce({
+      listTools: async () => ({
+        tools: [
+          {
+            name: 'read_item',
+            annotations: { readOnlyHint: true, destructiveHint: true },
+          },
+          { name: 'other', annotations: { readOnlyHint: true } },
+        ],
+      }),
+    });
+    const next = await stage();
+    expect(await settings()).toEqual({ '*': 'ask', other: 'allow' });
+    await next.dispose();
+    const callCount = catalogOpen.mock.calls.length;
+    const optedIn = await stage(true);
+    expect(await settings()).toEqual({ '*': 'allow' });
+    expect(catalogOpen).toHaveBeenCalledTimes(callCount);
+    await optedIn.dispose();
+    child.exec.mockClear();
+    catalogOpen.mockRejectedValueOnce(
+      new Error('private credential; not for diagnostics')
+    );
+    await expect(stage()).rejects.toThrow(
+      'Cannot prepare read permissions: docs did not connect'
+    );
+    expect(await readFile(file, 'utf8')).toBe('{}');
+    await expect(stat(headers)).rejects.toThrow();
+    expect(child.exec).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['http', true],
+    ['stdio', true],
+    ['http', false],
+  ] as const)(
+    'checks the installed %s read policy and verifies rollback (image restores original: %s)',
+    async (transport, restores) => {
+      const staging = join(directory, 'staging.json');
+      const installed = join(directory, 'installed.json');
+      imagePaths.set('/run/mst/settings/managed-settings.json', staging);
+      imagePaths.set('/etc/claude-desktop/managed-settings.json', installed);
+      await writeFile(staging, '{}');
+      const exec = child.exec.getMockImplementation()!;
+      let restarts = 0;
+      child.exec.mockImplementation((...args: unknown[]) => {
+        if (args[0] === RESTART && ++restarts === 2 && restores)
+          copyFileSync(staging, installed);
+        return exec(...args) as unknown;
+      });
+      const s: MCPConfig =
+        transport === 'http'
+          ? { label: 'docs', transport, serverUrl: 'https://docs.example/mcp' }
+          : {
+              label: 'docs',
+              transport,
+              command: 'test-server',
+              args: [],
+              env: {},
+            };
+      const entry =
+        transport === 'http'
+          ? { name: 'docs', transport, url: 'https://docs.example/mcp' }
+          : {
+              name: 'docs',
+              transport,
+              command: 'test-server',
+              args: [],
+              env: {},
+            };
+      const prepareInstalled = () =>
+        linuxCoworkPlatform.prepare({
+          evalConfig: { ...evalConfig, servers: [s] },
+          env: {
+            ...session,
+            MST_DESKTOP_OWNED: '1',
+            MST_DESKTOP_RESTART: RESTART,
+            MST_COWORK_SETTINGS_FILE: '/run/mst/settings/managed-settings.json',
+          },
+        });
+      await writeFile(
+        installed,
+        JSON.stringify({
+          ...COWORK_MANAGED_ONLY,
+          managedMcpServers: [
+            { ...entry, toolPolicy: { '*': 'ask', edit_item: 'allow' } },
+          ],
+        })
+      );
+      await expect(prepareInstalled()).rejects.toThrow(
+        restores ? 'approval policy' : 'Do not reuse this worker'
+      );
+      expect(await readFile(staging, 'utf8')).toBe('{}');
+      expect(restarts).toBe(2);
+      expect(child.exec.mock.calls.every(([cmd]) => cmd === RESTART)).toBe(
+        true
+      );
+    }
+  );
+
+  it.each([
+    'approval_requires_explicit_write_policy',
+    'approval_control_ambiguous',
+  ])(
+    'returns a typed refusal without granting or waiting on the same card: %s',
+    async (code) => {
+      child.responses.push({
+        failed: true,
+        value: {
+          status: 'failed',
+          error: code,
+          action_count: 0,
+          duration_ms: 1,
+        },
+      });
+      await expect(
+        linuxCoworkPlatform.handleHitl({
+          ...options(),
+          env: { ...session, MST_DESKTOP_OWNED: '1' },
+          approveWriteTools: false,
+          isComplete: async () => false,
+        })
+      ).rejects.toBeInstanceOf(CoworkApprovalRequiredError);
+      expect(child.exec).toHaveBeenCalledTimes(1);
+    }
+  );
 
   const scanFailure = (error: string, action_count = 0) => ({
     failed: true,
@@ -1261,6 +1462,18 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
     expect(child.exec).not.toHaveBeenCalled();
   });
 
+  it('rejects a relative helper directory before probing or staging grants', async () => {
+    const { file, original, lifecycle } = await prepareOwned({
+      MST_COWORK_HELPER_DIR: 'relative-helpers',
+    });
+    await expect(lifecycle).rejects.toThrow(
+      'MST_COWORK_HELPER_DIR must be an absolute path.'
+    );
+    expect(await readFile(file, 'utf8')).toBe(original);
+    expect(catalogOpen).not.toHaveBeenCalled();
+    expect(child.exec).not.toHaveBeenCalled();
+  });
+
   it("gives a server with credentials MST's headers helper, never the secret in the settings", async () => {
     const file = join(directory, 'settings.json');
     await writeFile(file, `${JSON.stringify(image, null, 2)}\n`);
@@ -1304,6 +1517,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
         transport: 'http',
         url: 'https://docs.example/mcp',
         headersHelper: helper,
+        toolPolicy: { '*': 'ask', read_item: 'allow' },
       },
     ]);
     const headers = join(directory, 'mcp-headers', 'docs.json');
