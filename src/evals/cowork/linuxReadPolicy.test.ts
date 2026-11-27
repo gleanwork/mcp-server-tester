@@ -39,13 +39,22 @@ describe('managed Linux read policies', () => {
       '--dispatcher=mixed=action',
     ];
     const rules = await from([a, b]);
+    const tickets = {
+      lookup: 'allow',
+      dispatch: 'ask',
+      reclassify: 'ask',
+      forced: 'ask',
+      mixed: 'ask',
+      save: 'ask',
+    };
     expect(Object.fromEntries(rules)).toEqual({
-      docs: { '*': 'ask', archive: 'allow', lookup: 'allow' },
-      tickets: { '*': 'ask', lookup: 'allow' },
+      docs: { archive: 'allow', lookup: 'allow' },
+      tickets,
     });
-    expect(Object.fromEntries(await from([b]))).toEqual({
-      tickets: { '*': 'ask', lookup: 'allow' },
-    });
+    expect(Object.fromEntries(await from([b]))).toEqual({ tickets });
+    // When the server has no grant at all, a default ask is safe.
+    b.args.push('--always-write', 'lookup');
+    expect((await from([b])).get('tickets')).toEqual({ '*': 'ask' });
   });
 
   it('can dispatch two concurrent reads without granting a simulated Desktop a write or an unknown tool', async () => {
@@ -60,10 +69,10 @@ describe('managed Linux read policies', () => {
     const upstream = await openMCPClient(server);
     try {
       const dispatch = vi.spyOn(upstream, 'callTool');
-      // Desktop is the external boundary in this test: exact rules override
-      // its wildcard. Calls that reach the fixture use the real MCP transport.
+      // Exercise rule selection and actual MCP dispatch, not the native UI.
+      // A matching wildcard ask can override an exact read on Linux.
       const desktopCall = async (name: string, id: number) =>
-        (policy[name] ?? policy['*']) === 'allow'
+        policy['*'] !== 'ask' && policy[name] === 'allow'
           ? upstream.callTool({ name, arguments: { id } })
           : 'needs-approval';
       const results = await Promise.all([

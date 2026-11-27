@@ -8,6 +8,14 @@ export type LinuxReadPolicies = ReadonlyMap<
   Record<string, 'ask' | 'allow'>
 >;
 
+/** Only a desktop with named grants needs manual-mode defaults and revocation. */
+export function hasLinuxReadGrants(policies?: LinuxReadPolicies): boolean {
+  return (
+    !!policies &&
+    [...policies.values()].some((p) => Object.values(p).includes('allow'))
+  );
+}
+
 /** A launch can treat an annotated read as a write, or dispatch by argument. */
 function writeOverrides(server: MCPConfig): Set<string> {
   const names = new Set<string>();
@@ -102,8 +110,19 @@ export async function linuxReadPolicies(
         );
       seen.add(name.toLowerCase());
     }
-    for (const name of [...tools].sort())
-      if (!writes.has(name)) policies.get(label)![name] = 'allow';
+    // A matching wildcard ask can override an exact allow in native Cowork,
+    // in either order. Never mix them. Known nonreads still get an explicit
+    // ask; a new name has no grant in the owned desktop's manual mode.
+    if (tools.some((name) => !writes.has(name))) {
+      policies.set(
+        label,
+        Object.fromEntries(
+          [...tools]
+            .sort()
+            .map((name) => [name, writes.has(name) ? 'ask' : 'allow'])
+        )
+      );
+    }
   }
   return policies;
 }

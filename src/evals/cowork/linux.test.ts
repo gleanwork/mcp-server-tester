@@ -1025,7 +1025,12 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
         (t): unknown => JSON.parse(t).managedMcpServers[0].toolPolicy
       );
     const first = await stage();
-    expect(await settings()).toEqual({ '*': 'ask', read_item: 'allow' });
+    expect(await settings()).toEqual({ edit_item: 'ask', read_item: 'allow' });
+    expect(JSON.parse(await readFile(file, 'utf8'))).toMatchObject({
+      autoModeEnabled: false,
+      disableBypassPermissionsMode: true,
+      mcpPersistentAlwaysAllowEnabled: false,
+    });
     expect(
       child.exec.mock.calls.filter(([cmd]) => cmd === RESTART)
     ).toHaveLength(1);
@@ -1046,7 +1051,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
       }),
     });
     const next = await stage();
-    expect(await settings()).toEqual({ '*': 'ask', other: 'allow' });
+    expect(await settings()).toEqual({ read_item: 'ask', other: 'allow' });
     await next.dispose();
     const callCount = catalogOpen.mock.calls.length;
     const optedIn = await stage(true);
@@ -1517,7 +1522,7 @@ describe('owned Linux Cowork desktop (MST_DESKTOP_OWNED=1)', () => {
         transport: 'http',
         url: 'https://docs.example/mcp',
         headersHelper: helper,
-        toolPolicy: { '*': 'ask', read_item: 'allow' },
+        toolPolicy: { edit_item: 'ask', read_item: 'allow' },
       },
     ]);
     const headers = join(directory, 'mcp-headers', 'docs.json');

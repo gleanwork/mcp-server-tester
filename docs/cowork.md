@@ -735,10 +735,14 @@ stays read-only.
 
 With `coworkSetup.approveWriteTools: false`
 (the default), MST lists the selected servers' tools before starting the variant.
-It stages `toolPolicy: {"*": "ask", "<verified read>": "allow"}` for each server:
-only exact tools annotated read-only and not destructive qualify. A launch's
-`--always-write` and argument-dispatched tools never qualify. Writes, unknown
-tools and new names stay visible but require approval; MST does not grant it.
+For a server with verified reads, MST writes exact rules such as
+`toolPolicy: {"lookup": "allow", "save": "ask"}`. It does not add a wildcard
+`ask`: on Linux that can prompt even for an explicitly allowed read. Only tools
+annotated read-only and not destructive qualify. A launch's `--always-write` and
+argument-dispatched tools never qualify. Every other listed name gets `ask`.
+While the grants are installed, MST disables Auto mode, bypass mode and saved
+MCP approvals. New names have no rule and require manual approval; MST does not
+grant it. A server with no verified reads keeps `{"*": "ask"}`.
 Two concurrent calls to the same approved read need no approval clicks. The
 worker refuses an incomplete or ambiguous catalog or a conflicting image policy.
 An HTTP server using only the image's opaque headers helper, or a tool-metadata

@@ -551,9 +551,23 @@ async function desktopAdapter(
       return session;
     },
     // MST's readiness check runs once setup has resolved the stdio paths.
-    readiness() {
+    readiness(session) {
       return {
         servers: readinessServers,
+        ...(session?.readPolicies
+          ? {
+              requiredReadTools: new Map(
+                [...session.readPolicies].map(([label, policy]) => [
+                  label,
+                  new Set(
+                    Object.keys(policy).filter(
+                      (name) => policy[name] === 'allow'
+                    )
+                  ),
+                ])
+              ),
+            }
+          : {}),
         resolve: (server) =>
           coworkReadinessServer(server, env, {
             plugins,

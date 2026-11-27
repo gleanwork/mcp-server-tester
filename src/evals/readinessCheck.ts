@@ -26,6 +26,7 @@ import {
 import type {
   ClientDefinition,
   ClientRunResult,
+  ClientSessionReadiness,
 } from './evalFrameworkTypes.js';
 import {
   checkMcpServers,
@@ -83,7 +84,10 @@ export function readinessRetryDelaysMs(env: Env = {}): readonly number[] {
     });
 }
 
-export interface ReadinessCheckOptions {
+export interface ReadinessCheckOptions extends Pick<
+  ClientSessionReadiness,
+  'requiredReadTools'
+> {
   /** Where `MST_MCP_READINESS_RETRY_S` is read first: the run's environment. */
   env?: Env;
   /**
@@ -179,8 +183,28 @@ export async function checkServersReady(
         : []
     )
   );
+  // A grant belongs to the exact read seen during setup. If its name is now
+  // missing, ambiguous, or no longer a read, send no cases with that grant.
+  const stale = results.find((result) => {
+    const required = options.requiredReadTools?.get(result.label);
+    if (!required?.size || !isMcpServerReady(result)) return false;
+    const names = result.tools ?? [];
+    return [...required].some(
+      (name) =>
+        !names.includes(name) ||
+        result.writeTools?.includes(name) ||
+        names.filter((other) => other.toLowerCase() === name.toLowerCase())
+          .length !== 1
+    );
+  });
   // The tool names are for the check after each trial, not for results.
   for (const result of results) delete result.tools;
+  if (stale)
+    return {
+      ready: false,
+      servers: results,
+      reason: `The catalog for ${stale.label} changed after its read permissions were prepared; no trial was sent.`,
+    };
   const notReady = results.filter((result) => !isMcpServerReady(result));
   const unguarded = results.filter(
     (result) =>

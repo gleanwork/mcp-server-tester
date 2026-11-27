@@ -20,6 +20,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CoworkDesktop } from './desktop.js';
 import {
+  hasLinuxReadGrants,
   linuxReadPolicies,
   type LinuxReadPolicies,
 } from './linuxReadPolicy.js';
@@ -303,6 +304,15 @@ function coworkLinuxOwnedSettings(
     : undefined;
   return {
     ...rest,
+    // With no matching rule, Desktop must ask. Do not let Auto, bypass, or
+    // an old standing grant authorize a tool added after catalog discovery.
+    ...(hasLinuxReadGrants(options.readPolicies)
+      ? {
+          autoModeEnabled: false,
+          disableBypassPermissionsMode: true,
+          mcpPersistentAlwaysAllowEnabled: false,
+        }
+      : {}),
     // Where Cowork's tools (web fetch) and its VM's commands may connect:
     // one list for both, by host, so it can't allow reads only.
     coworkEgressAllowedHosts: [
@@ -1160,11 +1170,7 @@ const coworkLinuxThirdParty: CoworkDesktop = {
       }
       releaseClient = await holdForAutomation(env);
       // A failed restart may already have installed the grants.
-      revokeReads =
-        !!readPolicies &&
-        [...readPolicies.values()].some((policy) =>
-          Object.values(policy).includes('allow')
-        );
+      revokeReads = hasLinuxReadGrants(readPolicies);
       if (owned && ownedDesktopSettings.get(settingsFile) !== ownedText) {
         ownedDesktopSettings.delete(settingsFile);
         await restartDesktop(env.MST_DESKTOP_RESTART!, {

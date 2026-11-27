@@ -435,6 +435,8 @@ export interface ClientSessionReadiness {
   servers: MCPConfig[];
   /** Each server as the app will launch it, including resolved stdio paths. */
   resolve?: (server: MCPConfig) => MCPConfig;
+  /** Grants already installed at app setup; readiness must still see these exact names as reads. */
+  requiredReadTools?: ReadonlyMap<string, ReadonlySet<string>>;
   /** Where MST reads the existing readiness retry setting first. */
   env?: Readonly<Record<string, string | undefined>>;
 }

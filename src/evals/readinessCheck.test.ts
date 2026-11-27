@@ -97,6 +97,33 @@ describe('checkServersReady', () => {
     });
   });
 
+  it.each([
+    ['lookup,other', 'lookup', true],
+    ['other', 'lookup', false],
+    ['lookup', 'save', false],
+    ['lookup,LOOKUP', 'lookup', false],
+  ] as const)(
+    'checks that a grant for %s / %s is still an unambiguous read',
+    async (tools, name, ready) => {
+      const result = await checkServersReady(
+        [
+          {
+            ...readyStdioServer({
+              READINESS_TOOLS: tools,
+              READINESS_WRITE_TOOL: '1',
+            }),
+            label: 'docs',
+          },
+        ],
+        { requiredReadTools: new Map([['docs', new Set([name])]]) }
+      );
+      expect(result.ready).toBe(ready);
+      if (!result.ready)
+        expect(result.reason).toMatch(/changed after its read permissions/);
+      expect(result.servers[0]).not.toHaveProperty('tools');
+    }
+  );
+
   it("refuses a read-only server that lists a tool that isn't read-only", async () => {
     const { sleep, delays } = fakeSleep();
     const docs = {
